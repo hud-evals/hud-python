@@ -1,10 +1,10 @@
 ---
 title: "Best Practices"
-description: "Design effective environments, evals, and grading logic"
+description: "Patterns for good environments, evaluations, grading, and sandboxing"
 icon: "star"
 ---
 
-Building good agent evaluations requires thoughtful design at every layer—the environment, the prompts, and the grading logic. This guide covers patterns that lead to useful, reliable signal.
+Building good agent evaluations requires thoughtful design at every layer—the environment, the prompts, the grading logic, and the sandboxing. This guide covers patterns that lead to useful, reliable signal.
 
 ## Good Environments
 
@@ -58,6 +58,75 @@ HUD sandboxes each eval—containers don't share state. But if your environment 
 **Stateless services** are fine. Multiple agents can hit the same read-only API without interference.
 
 **Stateful services** need care. If 100 agents all hit the same database endpoint that modifies data, they'll step on each other. Use per-eval instances, transaction isolation, or target different records.
+
+## Sandboxing
+
+Agents need isolated state. You can't point an agent at production—it'll make real changes, hit real APIs, affect real users. These patterns keep things safe.
+
+### Database Isolation
+
+**In-memory SQLite** — fastest, resets automatically:
+```python
+import sqlite3
+db = sqlite3.connect(":memory:")  # Fresh per eval
+
+@env.scenario("update-order")
+async def update_order(order_id: str):
+    db.executescript(Path("fixtures/orders.sql").read_text())  # Seed
+    answer = yield f"Update order {order_id} to shipped"
+    row = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+    yield 1.0 if row and row[0] == "shipped" else 0.0
+```
+
+**Transaction rollback** — use your real DB, undo changes:
+```python
+@env.scenario("process-refund")
+async def process_refund(order_id: str):
+    conn = await asyncpg.connect(DATABASE_URL)
+    tx = conn.transaction()
+    await tx.start()
+    try:
+        answer = yield f"Process refund for order {order_id}"
+        yield reward
+    finally:
+        await tx.rollback()  # Always undo
+        await conn.close()
+```
+
+**Fixture seeding** — deterministic starting state:
+```python
+await db.execute("TRUNCATE orders, users CASCADE")
+await db.executemany("INSERT INTO users ...", fixtures["users"])
+```
+
+### Mocking External Services
+
+`env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need:
+
+```python
+env.mock()  # All tools return schema-based fake responses
+env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})
+env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
+```
+
+For stateful mocking (tracking what happened for assertions):
+
+```python
+class MockPaymentService:
+    def __init__(self):
+        self.charges = []
+    
+    async def charge(self, amount: int, card_token: str) -> dict:
+        self.charges.append({"amount": amount, "token": card_token})
+        return {"success": True, "id": f"ch-{len(self.charges)}"}
+
+payments = MockPaymentService()
+
+@env.scenario("checkout")
+async def checkout(cart_total: int):
+    _ = yield f"Complete checkout for ${cart_total}"
+    yield 1.0 if any(c["amount"] == cart_total for c in payments.charges) else 0.0
+```
 
 ## Good Evals
 

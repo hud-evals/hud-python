@@ -53,22 +53,21 @@
             ]
           },
           {
-            "group": "Essentials",
+            "group": "Build Environments",
             "pages": [
-              "quick-links/models",
               "quick-links/environments",
-              "quick-links/deploy",
-              "quick-links/evals"
+              "advanced/testing-environments",
+              "guides/best-practices",
+              "quick-links/deploy"
             ]
           },
           {
-            "group": "Guides",
+            "group": "Run Agents",
             "pages": [
-              "guides/chat",
+              "quick-links/models",
+              "quick-links/training",
               "guides/integrations",
-              "guides/sandboxing",
-              "guides/best-practices",
-              "migration"
+              "guides/chat"
             ]
           },
           {
@@ -82,7 +81,6 @@
           {
             "group": "Advanced",
             "pages": [
-              "advanced/testing-environments",
               "advanced/harbor-convert"
             ]
           },
@@ -105,9 +103,9 @@
               "reference/evals",
               "reference/environments",
               "reference/tools",
-              "reference/mcpserver",
               "reference/agents",
-              "reference/types"
+              "reference/types",
+              "reference/mcpserver"
             ]
           },
           {
@@ -123,7 +121,6 @@
               "reference/cli/analyze",
               "reference/cli/debug",
               "reference/cli/eval",
-              "reference/cli/rft",
               "reference/cli/misc"
             ]
           },

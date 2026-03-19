@@ -1,24 +1,22 @@
 ---
 title: "Environments"
-description: "Turn your code into agent-callable tools. Define how agents are evaluated."
+description: "What environments are, how they work, and how to build one."
 icon: "cube"
 ---
 
-An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. It also defines how agents are *evaluated* through **scenarios**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
+An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools—plus the logic that defines how agents are *evaluated*. When you deploy an environment, you're creating an isolated sandbox that agents can learn from at scale.
 
 ## Why Environments?
 
 Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data.
 
-## Tools
+## Core Concepts
 
-Start with `hud init` to scaffold an environment. Works on existing codebases too:
+An environment has three building blocks:
 
-```bash
-hud init
-```
+### Tools
 
-Every tool is just a function. Decorate it with `@env.tool()` and agents can call it:
+Tools are functions that agents can call. Any Python function becomes a tool with `@env.tool()`:
 
 ```python
 from hud import Environment
@@ -31,83 +29,64 @@ async def search(query: str) -> str:
     return db.search(query)
 ```
 
+Tools are how agents interact with your system. They see the function signature, the docstring, and the return type—just like a developer reads an API reference. Design tools that are self-explanatory and return actionable data.
+
 <Tip>
 Before building custom tools, check if [HUD's pre-built tools](/tools) already provide what you need—computer control, shell execution, file editing, web browsing, and more.
 </Tip>
 
-Got a FastAPI app? One line:
+### Scenarios
 
-```python
-env.connect_fastapi(app)
-```
-
-All your routes become tools.
-
-## Scenarios
-
-To evaluate an agent, you need two things: what to tell it, and how to score what it did. Scenarios capture both with two `yield` statements:
+Scenarios define *what to ask* and *how to score*. Two `yield` statements capture both:
 
 ```python
 @env.scenario("checkout")
 async def checkout_flow(product_name: str):
-    # Yield the prompt, receive the agent's final answer
     answer = yield f"Add '{product_name}' to cart and complete checkout"
     
-    # Score based on environment state and/or the answer
     order_exists = await check_order_status(product_name)
     yield 1.0 if order_exists else 0.0
 ```
 
-The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward.
+The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward. Scenario parameters become the task arguments—create many tasks from one scenario by varying the inputs.
 
-### Scenarios as Subagents
+### Connections
 
-The first yield is more than just a prompt—it's context management mixed with dynamic input from the scenario's parameters. The parameters become a tool spec that other agents can call.
-
-We've found that agents train *much* better within a scenario structure than on standalone random tasks. Scenarios define boundaries: what the agent should focus on, what success looks like, and how to measure it. This structure also makes agents easier to compose—wrap a scenario with `AgentTool` and an orchestrator can call it as a specialized subagent.
-
-See the [Ops Diagnostics Cookbook](/cookbooks/ops-diagnostics) for a complete example of hierarchical agents calling subagent scenarios.
-
-## Iterating on Your Environment
-
-Three ways to develop and test your environment:
-
-### 1. Agent Loop with create_agent
-
-Run a full agent loop locally. This mirrors exactly what happens in remote rollouts:
+You don't have to build everything from scratch. Connect existing infrastructure and it becomes tools automatically:
 
 ```python
-import hud
-from hud import Environment
-from hud.agents import create_agent
-
-env = Environment("my-env")
-
-@env.tool()
-def count_letter(text: str, letter: str) -> int:
-    """Count occurrences of a letter in text."""
-    return text.lower().count(letter.lower())
-
-@env.scenario("count")
-async def count_scenario(sentence: str, letter: str):
-    answer = yield f"How many '{letter}' in '{sentence}'?"
-    correct = str(sentence.lower().count(letter.lower()))
-    yield 1.0 if correct in answer else 0.0
-
-# Create task and run agent in one line
-result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
-print(f"Reward: {result.reward}")
+env.connect_fastapi(app)                                    # FastAPI → tools
+env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
+env.connect_hub("hud-evals/browser")                        # HUD Hub environments
+env.connect_image("my-service:v1")                          # Docker images
 ```
 
-### 2. MCP Server with hud dev
+## Getting Started
 
-Spawn your environment as an MCP server that Cursor, Claude Code, or any MCP client can connect to:
+Scaffold a new environment with `hud init`:
 
 ```bash
-# Python-only (no Docker)
-hud dev env:env
+hud init
+```
 
-# Enable hot-reload for specific paths (Python or Docker mode)
+This creates an `env.py` with a sample tool and scenario you can run immediately. The golden path from there:
+
+1. **Edit `env.py`** — add your tools and scenarios
+2. **`hud dev`** — run as an MCP server, connect from Cursor or Claude Code
+3. **`hud eval`** — create tasks and run evaluations
+4. **`hud deploy`** — deploy to the platform for scale
+
+### hud dev
+
+Spawn your environment as an MCP server that any MCP client can connect to:
+
+```bash
+hud dev env:env
+```
+
+The `env:env` syntax is like uvicorn—`module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server. Add `-w` to watch files for hot-reload:
+
+```bash
 hud dev env:env -w env.py -w tools/
 ```
 
@@ -119,94 +98,33 @@ Then in Cursor's MCP settings:
 }
 ```
 
-Now your coding agent can call your tools directly. Edit watched paths (`-w`), save, and the controller reloads automatically.
+### Running an Agent Programmatically
 
-The `env:env` syntax is like uvicorn—`module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server.
-
-### 3. Custom Agent Loop
-
-Build your own agent loop using the format converters. See [Integrations](/guides/integrations) for OpenAI, Anthropic, LangChain, and more:
+Run a full agent loop locally—this mirrors exactly what happens in remote rollouts:
 
 ```python
-async with hud.eval(task) as ctx:
-    response = await client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": ctx.prompt}],
-        tools=ctx.as_openai_chat_tools()
-    )
-    
-    # Handle tool calls...
-    await ctx.submit(response.choices[0].message.content)
+result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
+print(f"Reward: {result.reward}")
 ```
 
-## Chat: Multi-Turn Conversations
-
-Scenarios can also power multi-turn chat agents. Add `chat=True` and the scenario receives the full conversation history on every turn:
-
-```python
-@env.scenario("assist", chat=True)
-async def assist(messages: list[dict] | None = None):
-    messages = messages or []
-    yield "You are a helpful assistant. Use tools to answer questions."
-    yield 1.0
-```
-
-Create a chat in one line:
-
-```python
-chat = env.chat("assist", model="claude-sonnet-4-5")
-
-r1 = await chat.send("What's the latest?")
-r2 = await chat.send("Tell me more about that")
-```
-
-For web apps and multi-user services, `ChatService` gives each user an independent session:
-
-```python
-from hud.services import ChatService
-
-service = ChatService(env("assist"), model="claude-haiku-4-5")
-
-# Per-user conversations
-await service.send("Hello", session_id="alice")
-await service.send("Different question", session_id="bob")
-```
-
-Chat agents serve over A2A too — any A2A-compatible client can connect.
-
-→ [Full Chat Guide](/guides/chat) · [AgentTool for subagents](/tools/agents)
-
-## Connecting Your Stack
-
-HUD wraps your existing infrastructure:
-
-```python
-env.connect_fastapi(app)                                    # FastAPI → tools
-env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
-env.connect_hub("hud-evals/browser")                        # HUD Hub environments
-env.connect_image("my-service:v1")                          # Docker images
-```
+Or build your own agent loop with format converters. See [Integrations](/guides/integrations) for OpenAI, Anthropic, LangChain, and more.
 
 ## What's Next
 
 <CardGroup cols={2}>
-<Card title="Hosted Running" icon="rocket" href="/quick-links/deploy">
+<Card title="Testing & Evaluation" icon="flask-vial" href="/advanced/testing-environments">
+  Create tasks, run hud eval, test locally
+</Card>
+
+<Card title="Best Practices" icon="star" href="/guides/best-practices">
+  Patterns for good environments, evals, and grading
+</Card>
+
+<Card title="Deploy" icon="rocket" href="/quick-links/deploy">
   Deploy your environment to the platform
 </Card>
 
-<Card title="Sandboxing" icon="shield" href="/guides/sandboxing">
-  Make databases and external services safe for agents
-</Card>
-
-<Card title="Best Practices" icon="check" href="/guides/best-practices">
-  Patterns for reliable environments
-</Card>
-
-<Card title="Integrations" icon="robot" href="/guides/integrations">
-  Connect any agent framework
-</Card>
-
-<Card title="Chat" icon="comments" href="/guides/chat">
-  Multi-turn agents and A2A serving
+<Card title="Pre-built Tools" icon="toolbox" href="/tools">
+  Computer control, shell, filesystem, web browsing, and more
 </Card>
 </CardGroup>
