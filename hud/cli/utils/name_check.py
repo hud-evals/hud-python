@@ -71,8 +71,9 @@ def check_and_fix_env_name(
     console: HUDConsole,
     *,
     auto_fix: bool = False,
+    label: str = "deployed environment name",
 ) -> bool:
-    """Check local Environment("...") references against the platform name.
+    """Check local Environment("...") references against the expected name.
 
     If mismatches are found, shows them and offers to replace.
 
@@ -86,9 +87,7 @@ def check_and_fix_env_name(
     if not mismatched:
         return True
 
-    console.warning(
-        f"Local code references don't match the deployed environment name '{platform_name}':"
-    )
+    console.warning(f"Local code references don't match the {label} '{platform_name}':")
     console.info("")
 
     files_to_fix: dict[Path, list[tuple[str, str]]] = {}

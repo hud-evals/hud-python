@@ -241,7 +241,8 @@ def deploy_environment(
             name = platform_name
 
     hud_console.info(f"Environment name: {name}")
-    check_and_fix_env_name(env_dir, name, hud_console)
+    label = "deployed environment name" if registry_id else "deploy target name"
+    check_and_fix_env_name(env_dir, name, hud_console, label=label)
 
     # Resolve whether to include .env vars
     # When --env flags are explicit, they are the ONLY env vars used (no .env auto-load).

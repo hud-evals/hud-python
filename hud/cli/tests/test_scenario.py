@@ -246,6 +246,35 @@ async def test_multi_check_zero(server_url: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cross_session_with_session_id(server_url: str) -> None:
+    """Setup and grade in separate client connections using session ID persistence."""
+    from fastmcp import Client
+    from fastmcp.client.transports.http import StreamableHttpTransport
+
+    from hud.cli.scenario import _get_session_id_from_client
+
+    # Setup — first connection (no __aexit__ to keep session alive)
+    transport1 = StreamableHttpTransport(server_url)
+    client1 = Client(transport1)
+    await client1.__aenter__()
+    await client1.get_prompt("test-env:add", {"a": "4", "b": "6"})
+    session_id = _get_session_id_from_client(client1)
+    assert session_id is not None
+    # Skip __aexit__ — keeps session alive on server
+
+    # Grade — second connection resuming the session
+    transport2 = StreamableHttpTransport(server_url, headers={"mcp-session-id": session_id})
+    client2 = Client(transport2)
+    async with client2:
+        await client2.call_tool("_hud_submit", {"scenario": "add", "answer": "10"})
+        contents = await client2.read_resource("test-env:add")
+
+    data = json.loads(_resource_text(contents))
+    assert data["reward"] == 1.0
+    assert data["done"] is True
+
+
+@pytest.mark.asyncio
 async def test_grade_without_setup_fails(server_url: str) -> None:
     from fastmcp import Client
 

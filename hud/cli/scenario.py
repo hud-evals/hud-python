@@ -23,7 +23,7 @@ scenario_app = typer.Typer(
 )
 
 DEFAULT_URL = "http://localhost:8080/mcp"
-SESSION_FILE = Path("/tmp/.hud_scenario_session") # noqa
+SESSION_FILE = Path("/tmp/.hud_scenario_session")  # noqa
 
 
 def _save_session_id(session_id: str | None) -> None:
@@ -41,19 +41,21 @@ def _load_session_id() -> str | None:
 async def _client(url: str, session_id: str | None = None) -> Any:
     """Create an MCP client, optionally resuming a session."""
     from fastmcp import Client
+    from fastmcp.client.transports.http import StreamableHttpTransport
 
     headers: dict[str, str] = {}
     if session_id:
         headers["mcp-session-id"] = session_id
 
-    client = Client(url, headers=headers)
+    transport = StreamableHttpTransport(url, headers=headers)
+    client = Client(transport)
     await client.__aenter__()
     return client
 
 
 def _get_session_id_from_client(client: Any) -> str | None:
     """Extract the MCP session ID from the client's transport."""
-    transport = getattr(client, "_transport", None)
+    transport = getattr(client, "transport", None)
     if transport and hasattr(transport, "get_session_id"):
         return transport.get_session_id()
     return None
@@ -101,13 +103,13 @@ def setup_cmd(
 
     async def _run() -> None:
         client = await _client(url)
-        try:
-            result = await client.get_prompt(scenario, _parse_args(args))
-            _save_session_id(_get_session_id_from_client(client))
-            for msg in result.messages:
-                print(msg.content.text if hasattr(msg.content, "text") else msg.content)  # noqa: T201
-        finally:
-            await client.__aexit__(None, None, None)
+        result = await client.get_prompt(scenario, _parse_args(args))
+        _save_session_id(_get_session_id_from_client(client))
+        for msg in result.messages:
+            print(msg.content.text if hasattr(msg.content, "text") else msg.content)  # noqa: T201
+        # Intentionally skip client.__aexit__ — keeps the MCP session alive
+        # on the server so grade can resume it. Process exit closes the TCP
+        # connection without sending a session termination request.
 
     asyncio.run(_run())
 
