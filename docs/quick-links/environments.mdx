@@ -4,11 +4,11 @@ description: "What environments are, how they work, and how to build one."
 icon: "cube"
 ---
 
-An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools—plus the logic that defines how agents are *evaluated*. When you deploy an environment, you're creating an isolated sandbox that agents can learn from at scale.
+An environment is a world that agents interact with. It wraps your APIs, services, and databases as tools that agents can call, and defines scenarios that describe what agents should do and how to score them.
 
 ## Why Environments?
 
-Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data.
+Agents need something to act on. An environment gives them tools to call, state to observe, and goals to achieve. You define the world—what's available, what success looks like—and agents operate within it.
 
 ## Core Concepts
 
@@ -49,17 +49,6 @@ async def checkout_flow(product_name: str):
 ```
 
 The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward. Scenario parameters become the task arguments—create many tasks from one scenario by varying the inputs.
-
-### Connections
-
-You don't have to build everything from scratch. Connect existing infrastructure and it becomes tools automatically:
-
-```python
-env.connect_fastapi(app)                                    # FastAPI → tools
-env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
-env.connect_hub("hud-evals/browser")                        # HUD Hub environments
-env.connect_image("my-service:v1")                          # Docker images
-```
 
 ## Getting Started
 

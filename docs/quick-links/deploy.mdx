@@ -65,16 +65,6 @@ hud deploy --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
 See [hud deploy reference](/reference/cli/deploy) for full details.
 </Accordion>
 
-<Accordion title="Naming">
-Environment name is determined by (in order): `--name` flag, `[tool.hud].name` in pyproject.toml, or the directory name.
-
-```toml
-# pyproject.toml
-[tool.hud]
-name = "My Browser Environment"
-```
-</Accordion>
-
 ## GitHub Auto-Deploy
 
 For teams and CI/CD, connect a GitHub repository. HUD rebuilds automatically when you push:
@@ -98,11 +88,13 @@ This is better for long-term projects because:
 
 Started with `hud deploy` but want GitHub integration later? Just connect the same repo on the platform. HUD links them by environment ID.
 
-Going the other way? Use `hud link` to connect a local directory to an existing platform environment:
+Going the other way? Use `hud sync env` to connect a local directory to an existing platform environment:
 
 ```bash
-hud link --id existing-environment-id
+hud sync env my-env-name
 ```
+
+This links your local directory and verifies your scenarios match the deployed environment.
 
 ## Comparison
 
@@ -115,12 +107,107 @@ hud link --id existing-environment-id
 
 Both methods result in the same deployed environment. Choose based on your workflow.
 
-{/* TODO: Add section on deliverable types — what you end up with after deploying:
-   - Prompt-based task configs (scenario args → task definitions)
-   - MCP image (containerized environment as an MCP server)
-   - Taskset on the platform (benchmark suite)
-   - Trained model checkpoints
-   Discuss with team before writing this section. */}
+## Running Externally
+
+Every HUD image supports scenario operations via `hud scenario`. Setup and grading are shell commands; agents interact with tools via the MCP server at `:8080/mcp`.
+
+<Tip>
+The default Dockerfile CMD uses `--stdio` for the HUD platform. For external use, override the command to start an HTTP server:
+</Tip>
+
+### With Docker
+
+```bash
+# Build and push the image to a registry
+hud build .
+docker tag my-env:latest <your-registry>/my-env:latest
+docker push <your-registry>/my-env:latest
+
+# Start the environment with HTTP server (overrides default stdio CMD)
+docker run -d --name my-env -p 8080:8080 my-image:latest \
+  hud dev env:env --port 8080
+
+# List available scenarios
+docker exec my-env hud scenario list
+
+# Setup a scenario (prints the prompt)
+docker exec my-env hud scenario setup my-env:checkout \
+  --args '{"product_name": "laptop"}'
+
+# Your agent runs against MCP tools at localhost:8080/mcp
+
+# Grade (prints reward as JSON)
+docker exec my-env hud scenario grade my-env:checkout \
+  --answer "Order completed successfully"
+
+# Test graders without an agent (setup + grade in one shot)
+docker exec my-env hud scenario run my-env:count \
+  --args '{"sentence": "strawberry", "letter": "r"}' --answer "3"
+```
+
+### With a Sandbox SDK (Python)
+
+Any platform that can run a Docker image and exec into it works. Here are two options:
+
+<Tabs>
+<Tab title="Daytona">
+[Daytona](https://daytona.io) spins up HUD images as sandboxed workspaces:
+
+```python
+import json
+from daytona import Daytona, CreateSandboxFromImageParams
+
+daytona = Daytona()
+sandbox = daytona.create(CreateSandboxFromImageParams(
+    image="my-image:latest",
+    language="python",
+))
+
+# Setup — returns the prompt
+prompt = sandbox.process.exec(
+    'hud scenario setup my-env:checkout --args \'{"product_name": "laptop"}\''
+).result
+
+# Agent runs against MCP tools at the sandbox
+# ... your agent loop here ...
+
+# Grade
+reward = json.loads(sandbox.process.exec(
+    'hud scenario grade my-env:checkout --answer "Order completed"'
+).result)
+
+daytona.remove(sandbox)
+```
+</Tab>
+
+<Tab title="Modal">
+[Modal](https://modal.com) runs containers serverlessly with GPU support:
+
+```python
+import json
+import modal
+
+image = modal.Image.from_registry("my-image:latest")
+app = modal.App("hud-eval")
+sandbox = modal.Sandbox.create(image=image, app=app)
+
+# Setup
+prompt = sandbox.exec("hud", "scenario", "setup", "my-env:checkout",
+    "--args", '{"product_name": "laptop"}').stdout.read()
+
+# Agent runs against MCP tools
+# ... your agent loop here ...
+
+# Grade
+reward = json.loads(sandbox.exec("hud", "scenario", "grade",
+    "my-env:checkout", "--answer", "Order completed").stdout.read())
+
+sandbox.terminate()
+```
+</Tab>
+</Tabs>
+
+The same pattern works on Kubernetes (`kubectl exec`), E2B, Fly.io, or any platform that runs containers.
 
 ## What's Next
 

@@ -1,254 +1,201 @@
 ---
 title: "Testing & Evaluation"
-description: "Create tasks, run evaluations, and test locally"
+description: "Define tasks, test locally, deploy, sync to platform, run at scale"
 icon: "flask-vial"
 ---
 
-Once you have tools and scenarios, create tasks and run them. Start with `hud eval` to validate your scenarios work end-to-end, then use local testing patterns for faster iteration.
+Define tasks in code, test locally, deploy, sync to the platform, run at scale.
 
-## Tasks and Tasksets
+## Defining Tasks
 
-Tasks are instances of scenarios with specific arguments. Tasksets group related tasks for batch evaluation.
+Tasks are instances of scenarios with specific arguments. Define them in a `tasks.py` file using `scenario.task()`:
 
-1. Go to your environment on [hud.ai/environments](https://hud.ai/environments)
-2. Click the **Scenarios** tab and select a scenario
-3. Fill in the arguments and add to a taskset
+```python
+from env import echo, add
+
+echo_hello = echo.task(message="hello")
+echo_hello.slug = "echo-hello"
+
+echo_goodbye = echo.task(message="goodbye")
+echo_goodbye.slug = "echo-goodbye"
+
+add_simple = add.task(a=2, b=3)
+add_simple.slug = "add-simple"
+
+add_large = add.task(a=999, b=1)
+add_large.slug = "add-large"
+```
+
+Each task binds a scenario to specific arguments. The `slug` is a stable identifier used for syncing and filtering.
+
+## Running Locally
+
+Three modes depending on what you need:
+
+### Pure Python — `hud eval`
+
+For environments that only need Python (no system deps, no databases, no browsers). Everything runs in-process:
+
+```bash
+# Run first task
+hud eval tasks.py
+
+# Run all tasks
+hud eval tasks.py --full
+
+# Run specific tasks by slug
+hud eval tasks.py --task-ids echo-hello,add-simple
+
+# Run with a specific model
+hud eval tasks.py claude --full
+```
+
+Or run a single task programmatically:
+
+```python
+result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
+print(f"Reward: {result.reward}")
+```
+
+This is the fastest iteration loop — no Docker, no server, just Python.
+
+### Interactive — `hud dev`
+
+For fast iteration on a single scenario. Spawn your environment as an MCP server and connect from Cursor, Claude Code, or any MCP client:
+
+```bash
+hud dev env:env -w env.py -w tools/
+```
+
+Then in Cursor's MCP settings:
+
+```json
+{
+  "my-dev-env": { "url": "http://localhost:8765/mcp" }
+}
+```
+
+Your coding agent can call your tools directly. Edit, save, the server hot-reloads. Great for developing and debugging individual scenarios interactively.
+
+### Docker — `hud build` + `connect_image`
+
+For environments that need system dependencies (PostgreSQL, browsers, VNC, GPU libraries). Build the image, then connect to it from a test script:
+
+```bash
+hud build .
+```
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+env.connect_image("my-env:latest")
+
+result = await env("checkout", product="laptop").run("claude-sonnet-4-5")
+```
+
+`connect_image` spins up the container, connects via MCP, and tears it down when done. Your tools run inside the container where the system deps live; your test script runs outside.
+
+Note: `hud eval tasks.py` imports your `env.py` directly (in-process). For Docker environments, write a separate test script that uses `connect_image` as shown above, or use `hud dev` for interactive Docker development:
+
+```bash
+hud dev env:env -w env.py    # builds + runs container, hot-reloads Python
+```
+
+### When to Use What
+
+| Mode | System deps? | Speed | Use case |
+|------|-------------|-------|----------|
+| `hud eval` / `task.run()` | No | Fastest | Pure Python envs, rapid iteration |
+| `hud dev` | Optional | Fast (hot-reload) | Interactive development, single scenario |
+| `hud build` + `connect_image` | Yes | Slower (container) | Databases, browsers, GPU, full integration |
+
+## Deploying
+
+<Warning>
+You must deploy your environment before syncing tasks or running remotely. Deploy first, then sync.
+</Warning>
+
+Deploy your environment to the platform:
+
+```bash
+hud deploy
+```
+
+This builds your Docker image, uploads it, and registers the environment. Your scenarios become available for task creation, and `hud sync` can link your local tasks to a platform taskset.
+
+See [Deploy](/quick-links/deploy) for full details on `hud deploy` and GitHub auto-deploy.
+
+## Syncing to Platform
+
+Once deployed, sync your local tasks to a platform taskset:
+
+```bash
+# First sync — creates the taskset
+hud sync tasks my-taskset
+
+# Re-sync after changes — shows a diff
+hud sync tasks my-taskset
+#   create: add-negative (new)
+#   update: add-simple (args changed)
+#   remote-only: old-task (exists on platform but not locally)
+
+# After first sync, bare `hud sync` reuses stored config
+hud sync
+```
+
+`hud sync` diffs local tasks against the platform by slug. It creates new tasks, updates changed ones, and reports tasks that exist remotely but not locally (without deleting them).
+
+## Managing on Platform
+
+Once synced, your taskset is live on [hud.ai/evalsets](https://hud.ai/evalsets). You can also create and edit tasks through the platform UI — useful for large-scale management, team collaboration, or one-off additions.
 
 <Frame>
   <img src="/src/images/platform-env-scenarios.png" alt="Creating tasks from scenarios" />
 </Frame>
 
-Your scenario might take arguments:
+The platform UI and `hud sync` work together. Edit locally and sync up, or edit on the platform — both are valid. See [Platform Tasksets](/platform/tasksets) for the full guide.
 
-```python
-@env.scenario("checkout")
-async def checkout_flow(product_name: str, apply_coupon: bool = False):
-    yield f"Complete checkout for {product_name}" + (" with coupon" if apply_coupon else "")
-    yield 1.0 if order_confirmed() else 0.0
-```
+## Running at Scale
 
-Create multiple tasks from it—`checkout-laptop`, `checkout-phone-coupon`, `checkout-headphones`. Group them in a taskset and run them all at once. Tasksets become your benchmarks—run them against new model versions to track progress.
-
-See [Platform Tasksets](/platform/tasksets) for the full guide.
-
-## Running with hud eval
-
-`hud eval` is the primary way to run evaluations from the CLI:
+Run your taskset remotely on HUD infrastructure:
 
 ```bash
-# Run a platform taskset with a model
-hud eval "My Tasks" claude --full
+# Run by taskset name
+hud eval my-taskset claude --remote --full
 
-# Run with multiple repeats for variance
-hud eval "My Tasks" claude --full --group-size 5
-
-# Run from a local file, linked to a platform taskset
-hud eval tasks.json claude --full --taskset "My Tasks"
+# Multiple repeats for variance
+hud eval my-taskset claude --remote --full --group-size 5
 ```
 
-### Remote Execution
+Or click **Run Taskset** on the platform UI — select models, group size, max steps, and launch.
 
-Run on HUD infrastructure—no local compute, no local Docker:
-
-```bash
-# Single task (debug mode) — runs first task only
-hud eval tasks.json claude --remote
-
-# Full dataset
-hud eval tasks.json claude --remote --full
-
-# Specific tasks
-hud eval tasks.json claude --remote --task-ids task_1,task_3
-```
-
-Monitor at the job URL printed to the console, or at [hud.ai/jobs](https://hud.ai/jobs).
+Both the agent and environment run remotely. No local compute, no local Docker. Results show up in real-time on the taskset's **Leaderboard** tab. Monitor at [hud.ai/jobs](https://hud.ai/jobs).
 
 See [`hud eval` CLI reference](/reference/cli/eval) for all options.
 
-### Quick Smoke Test
-
-The fastest way to test a deployed environment programmatically is `POST /agent/run` with `sync: true`:
-
-```python
-import httpx
-
-resp = httpx.post(
-    "https://api.hud.ai/agent/run",
-    headers={"Authorization": f"Bearer {HUD_API_KEY}"},
-    json={
-        "env_name": "my-env",
-        "scenario_name": "my-env:count",
-        "scenario_args": {"sentence": "strawberry", "letter": "r"},
-        "model": "gpt-4o-mini",
-        "max_steps": 10,
-        "sync": True,
-        "timeout": 120,
-    },
-    timeout=130,
-)
-result = resp.json()
-print(f"Reward: {result['reward']}, Trace: {result['trace_url']}")
-```
-
-See [REST API](/platform/rest-api) for callbacks (webhook instead of polling) and batch runs.
-
-## Variants
-
-LLM outputs vary from run to run—ask the same question twice and you might get different quality answers. **Variants** let you test different configurations side-by-side:
-
-```python
-import hud
-
-async with hud.eval(task, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}) as ctx:
-    response = await client.chat.completions.create(
-        model=ctx.variants["model"],  # Current variant
-        messages=[{"role": "user", "content": ctx.prompt}]
-    )
-    ctx.reward = 1.0 if "correct" in response.choices[0].message.content else 0.0
-
-for result in ctx.results:
-    print(f"{result.variants}: reward={result.reward}")
-```
-
-Lists expand to all combinations:
-
-```python
-variants = {
-    "model": ["gpt-4o", "claude"],
-    "temperature": [0.0, 0.7],
-}
-# Creates 4 combinations: gpt-4o+0.0, gpt-4o+0.7, claude+0.0, claude+0.7
-```
-
-## Groups
-
-Run each variant multiple times to see the distribution, not just one lucky or unlucky result:
-
-```python
-async with hud.eval(
-    task,
-    variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
-    group=5  # 10 runs total: 2 models × 5 each
-) as ctx:
-    ...
-```
-
-The `hud.eval` manager parallelizes automatically. Total runs = `len(tasks) × len(variant_combinations) × group`.
-
-## Local Testing
-
-For faster iteration before deploying, test locally:
-
-| Environment | `local_test.py` |
-|-------------|-----------------|
-| No Docker | `from env import env` |
-| Docker | `env.connect_url("http://localhost:8765/mcp")` |
-
-Both use the same API after setup:
-
-```python
-async with env:
-    tools = env.as_tools()                              # List available tools
-    result = await env.call_tool("my_tool", arg="val")  # Call a tool
-```
-
-### Mock Mode
-
-`env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need for testing agent logic without hitting real services:
-
-```python
-env.mock()  # All tools return schema-based fake responses
-env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})
-env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
-```
-
-### Testing Scenarios Directly
-
-Scenarios are async generators. `hud.eval()` drives them automatically, but you can test the logic directly:
-
-```python
-async def checkout(user_id: str, amount: int = 100):
-    answer = yield f"Complete checkout for {user_id}, ${amount}"
-    yield 1.0 if "success" in answer.lower() else 0.0
-
-async def test():
-    gen = checkout("alice", 50)
-    prompt = await anext(gen)            # What hud.eval() does at start
-    reward = await gen.asend("Success!") # What hud.eval() does after submit
-    assert reward == 1.0
-```
-
-### Hot-Reload
-
-For Docker environments, `hud dev -w path` reloads Python on save:
-
-```bash
-hud dev -w scenarios -w tools --port 8765
-```
-
-System services (postgres, VNC, browsers) persist across reloads.
-
 ## Debugging
 
-### Build Failures
-
-If the build fails or the container crashes on startup, use `hud debug`:
+Build your image locally first, then debug:
 
 ```bash
+hud build .
 hud debug my-env:latest
 ```
 
-Output shows exactly which phase failed:
+Shows exactly which phase failed:
 
 ```
 ✓ Phase 1: Docker image exists
 ✓ Phase 2: MCP server responds to initialize
 ✗ Phase 3: Tool discovery failed
   → Error: Connection refused on port 8005
-  → Hint: Backend service may not be starting
 ```
-
-You can also debug a directory (builds first) or stop at a specific phase:
 
 ```bash
 hud debug .                    # Build and debug current directory
 hud debug . --max-phase 3      # Stop after phase 3
-hud debug --config mcp.json    # Debug from config file
 ```
-
-### Scenario MCP Protocol Mapping
-
-Each scenario registers **two MCP endpoints**:
-
-| Phase | MCP Type | Endpoint | What it does |
-|-------|----------|----------|--------------|
-| Setup | **Prompt** | `get_prompt("{env}:{scenario}", args)` | Runs code before first `yield`, returns the prompt |
-| Evaluate | **Resource** | `read_resource("{env}:{scenario}")` | Runs code after first `yield`, returns `{"reward": float}` |
-
-If a scenario isn't working, test each phase directly:
-
-```python
-async with env:
-    prompt_result = await env.get_prompt(
-        "myenv:checkout", 
-        {"product": "laptop", "user_id": "alice"}
-    )
-    print(f"Prompt: {prompt_result.messages[0].content}")
-    
-    # ... agent runs here ...
-    
-    await env.submit("checkout", answer="Order completed successfully")
-    resource_result = await env.read_resource("myenv:checkout")
-    print(f"Reward: {resource_result}")  # {"reward": 1.0}
-```
-
-### Common Issues
-
-**`evaluate_tool: NULL` but using v5 scenarios** — v5 scenarios return rewards via `read_resource`, not `evaluate_tool`. Ensure your orchestrator calls `read_resource()` after agent completion.
-
-**`TypeError` with complex args like `list[dict]`** — MCP passes all arguments as strings; SDK deserializes them. Add logging to check `type(arg)` at scenario entry.
-
-**Scenario setup works but evaluate returns no reward** — `submit()` wasn't called before `read_resource()`. Call `await env.submit(scenario_name, answer)` first.
 
 ## See Also
 
@@ -261,11 +208,11 @@ async with env:
   Deploy your environment to the platform
 </Card>
 
-<Card title="hud eval CLI" icon="terminal" href="/reference/cli/eval">
-  Full eval command reference
+<Card title="Advanced Patterns" icon="wrench" href="/advanced/patterns">
+  Mock mode, scenario internals, troubleshooting
 </Card>
 
-<Card title="hud debug CLI" icon="bug" href="/reference/cli/debug">
-  Full debug command reference
+<Card title="Platform Tasksets" icon="list-check" href="/platform/tasksets">
+  Full taskset management guide
 </Card>
 </CardGroup>

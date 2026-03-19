@@ -1,0 +1,140 @@
+---
+title: "hud sync"
+description: "Sync tasks and environments between local code and the HUD platform"
+icon: "arrows-rotate"
+---
+
+`hud sync` manages the connection between your local task definitions and the HUD platform. It has two subcommands and a shorthand mode.
+
+## Commands
+
+### `hud sync tasks`
+
+Push local task definitions to a platform taskset.
+
+```bash
+hud sync tasks <taskset> [source]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `taskset` | From `.hud/config.json` | Taskset name or ID |
+| `source` | `.` (current directory) | Python file, directory, or JSON/JSONL |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--id <uuid>` | Taskset ID directly (skip name resolution) |
+| `--task <slug>` | Only sync one task |
+| `--exclude <slug>` | Exclude a task (repeatable) |
+| `--yes` / `-y` | Skip confirmation (CI mode) |
+| `--dry-run` | Show plan without uploading |
+| `--force` | Upload all tasks regardless of diff |
+
+**Examples:**
+
+```bash
+hud sync tasks my-taskset              # scan cwd, sync to 'my-taskset'
+hud sync tasks my-taskset tasks.py     # from specific Python file
+hud sync tasks my-taskset tasks/       # from directory
+hud sync tasks                         # use stored taskset from .hud/config.json
+hud sync tasks my-taskset --dry-run    # preview without uploading
+hud sync tasks my-taskset --yes        # skip confirmation (CI)
+hud sync tasks my-taskset --force      # upload everything, skip diff
+```
+
+**What it does:**
+
+1. Collects `Task` objects from your source (Python files, directories, or JSON)
+2. Validates all tasks have slugs, scenarios, and no duplicates
+3. Checks that your `Environment("...")` name matches the deployed environment
+4. Fetches existing tasks from the platform taskset
+5. Computes a diff (create / update / unchanged / remote-only)
+6. After confirmation, uploads changes
+
+**Task sources:**
+
+| Source | How it works |
+|--------|-------------|
+| `.py` file | Imports the module, finds all `Task` instances |
+| Directory | Scans for `tasks.py`, `task.py`, or `*/task.py` (SDLC convention) |
+| `.json` / `.jsonl` | Loads task dicts and converts to Task objects |
+
+### `hud sync env`
+
+Link a local directory to a platform environment. Replaces `hud link`.
+
+```bash
+hud sync env [name] [directory]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `name` | Interactive | Environment name or ID |
+| `directory` | `.` | Local directory to link |
+
+**Examples:**
+
+```bash
+hud sync env coding-env           # link cwd to 'coding-env'
+hud sync env coding-env ./my-env  # link specific directory
+hud sync env                      # interactive: pick from your envs
+```
+
+**What it does:**
+
+1. Looks up the environment by name on the platform
+2. Verifies it exists and has a successful build
+3. Writes the registry ID to `.hud/config.json`
+4. Lists registered scenarios
+5. Checks if local tasks reference the correct environment name
+
+### `hud sync` (shorthand)
+
+When run without a subcommand, syncs tasks using the stored taskset ID from `.hud/config.json`.
+
+```bash
+hud sync    # equivalent to: hud sync tasks
+```
+
+## Configuration
+
+`hud sync` stores IDs in `.hud/config.json`:
+
+```json
+{
+  "registryId": "abc123-...",
+  "tasksetId": "def456-..."
+}
+```
+
+- **`registryId`** — set by `hud deploy` or `hud sync env`
+- **`tasksetId`** — set by `hud sync tasks` after first successful sync
+
+Names are resolved at command time and never stored — only stable UUIDs are persisted.
+
+## Environment Name Reconciliation
+
+When you sync tasks, the CLI checks that your local `Environment("...")` name matches the deployed environment name. If they differ:
+
+```
+⚠ Local code references don't match the deployed environment name 'my-env':
+
+  env.py:4
+    env = Environment("old-name")
+    Environment("old-name") -> Environment("my-env")
+
+  Update these references? [y/N]
+```
+
+This prevents scenario name mismatches between local and remote execution.
+
+## Diff Behavior
+
+The sync diff compares tasks by **slug** (stable identifier) and uses a **signature hash** of the scenario short name + args + validation + agent_config.
+
+- Scenario prefix changes (env renames) do **not** trigger updates
+- Only actual content changes (args, validation, agent_config) show as updates
+- Tasks that exist only on the platform are counted but never deleted
+- Possible slug renames are detected and suggested

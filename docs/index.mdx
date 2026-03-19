@@ -4,7 +4,7 @@ description: "Build, evaluate, and train AI agents."
 icon: "book"
 ---
 
-HUD gives you three things: access to every model through one API, a way to turn your code into agent-callable tools, and infrastructure to run evaluations and training at scale.
+HUD is a platform for building RL environments for AI agents. Turn your code into agent-callable tools, define evaluation logic, and run evals or training at scale with the same API.
 
 ## Install
 
@@ -18,34 +18,19 @@ hud set HUD_API_KEY=your-key-here
 
 Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys).
 
-## 1. Models: Any Model, One API
+## Core Concepts
 
-Stop juggling API keys. Point any OpenAI-compatible client at `inference.hud.ai` and use Claude, GPT, Gemini, or Grok. Browse all available models at [hud.ai/models](https://hud.ai/models).
+HUD has four building blocks. Everything else is built on top of them.
 
-```python
-from openai import AsyncOpenAI
-import os
+**Environments** — the world an agent lives in. Packages tools and scenarios into a deployable unit.
 
-client = AsyncOpenAI(
-    base_url="https://inference.hud.ai",
-    api_key=os.environ["HUD_API_KEY"]
-)
+**Tools** — functions agents can call. Decorate with `@env.tool()` and agents see the signature, docstring, and return type.
 
-response = await client.chat.completions.create(
-    model="claude-sonnet-4-5",  # or gpt-4o, gemini-2.5-pro, grok-4-1-fast...
-    messages=[{"role": "user", "content": "Hello!"}]
-)
-```
+**Scenarios** — define how agents are evaluated. An async generator with two yields: first sends a prompt, second scores the result.
 
-Every call is traced. View them at [hud.ai/home](https://hud.ai/home).
+**Tasks** — a scenario with specific arguments. Group tasks into tasksets for benchmarking and training.
 
-→ [More on Models](/quick-links/models)
-
-## 2. Environments: Your Code, Agent-Ready
-
-A production API is one live instance with shared state—you can't run 1,000 parallel tests without them stepping on each other. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Each generates training data.
-
-Turn your code into tools agents can call. Define scenarios that evaluate what agents do:
+Here's the simplest environment in HUD:
 
 ```python
 from hud import Environment
@@ -61,57 +46,47 @@ def search(query: str) -> str:
 async def find_answer(question: str):
     answer = yield f"Find the answer to: {question}"
     yield 1.0 if "correct" in answer.lower() else 0.0
+
+task = env("find-answer", question="What is the capital of France?")
+result = await task.run("claude-sonnet-4-5")
+print(f"Reward: {result.reward}")
 ```
 
-Iterate locally with `hud dev`, then deploy to the platform:
+## The Workflow
 
 ```bash
-hud init          # Scaffold environment
-hud dev env:env -w env.py -w tools/  # Run MCP server with hot-reload on watched paths
-hud deploy        # Deploy to platform → run evals at scale
+hud init my-env              # Scaffold environment
+# Edit env.py                # Add tools and scenarios
+hud dev env:env -w env.py    # Run MCP server with hot-reload
+hud eval tasks.py            # Run evals locally
+hud deploy                   # Deploy to platform, run evals and training at scale
 ```
 
-Once deployed, your environment is live—agents can run against it in parallel, all traced, all generating training data.
+## Run Agents
 
-→ [More on Environments](/quick-links/environments) · [Hosted Running](/quick-links/deploy)
+Use any model through one OpenAI-compatible endpoint at `inference.hud.ai`. Create tasksets from your scenarios, run evaluations across models, and train using RL on your tasksets through integrations with Tinker, OpenAI, and Coreweave.
 
-Environments also power multi-turn chat agents. Add `chat=True` to a scenario and use `env.chat()` to talk to it:
+Browse models at [hud.ai/models](https://hud.ai/models).
 
-```python
-@env.scenario("assist", chat=True)
-async def assist(messages: list[dict] | None = None):
-    yield "You are a helpful assistant with access to tools."
-    yield 1.0
-
-chat = env.chat("assist", model="claude-sonnet-4-5")
-r = await chat.send("What's the status of project X?")
-```
-
-→ [Chat Guide](/guides/chat)
-
-## 3. Tasks & Training: Test and Train
-
-Create tasks from your scenarios on [hud.ai](https://hud.ai). Run evaluations across models and train them through our integrations with Tinker, OpenAI and Coreweave. The same model string works before and after training—just better at your tasks.
-
-→ [More on Tasks & Training](/quick-links/evals)
+→ [Models](/quick-links/models) · [Evaluations & Training](/quick-links/training) · [Integrations](/guides/integrations)
 
 ## Next Steps
 
 <CardGroup cols={2}>
-<Card title="Models" icon="robot" href="/quick-links/models">
-  One endpoint for every model. Native tools.
-</Card>
-
 <Card title="Environments" icon="cube" href="/quick-links/environments">
-  Tools, scenarios, and iteration.
+  Build your first environment
 </Card>
 
-<Card title="Hosted Running" icon="rocket" href="/quick-links/deploy">
-  Push to platform. Run at scale.
+<Card title="Testing & Evaluation" icon="flask-vial" href="/advanced/testing-environments">
+  Define tasks, run evals, sync to platform
 </Card>
 
-<Card title="Tasks & Training" icon="flask-vial" href="/quick-links/evals">
-  Evaluate and train models.
+<Card title="Best Practices" icon="star" href="/guides/best-practices">
+  Patterns for reliable environments and evals
+</Card>
+
+<Card title="Deploy" icon="rocket" href="/quick-links/deploy">
+  Deploy and run at scale
 </Card>
 </CardGroup>
 
@@ -131,4 +106,4 @@ Create tasks from your scenarios on [hud.ai](https://hud.ai). Run evaluations ac
 
 Building agents at scale? We work with teams on custom environments, benchmarks, and training pipelines.
 
-[📅 Book a call](https://cal.com/jay-hud) · [📧 founders@hud.ai](mailto:founders@hud.ai)
+[Book a call](https://cal.com/jay-hud) · [founders@hud.ai](mailto:founders@hud.ai)
