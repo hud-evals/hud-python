@@ -178,6 +178,9 @@
       }
     ]
   },
+  "contextual": {
+    "options": ["copy", "claude", "chatgpt", "perplexity"]
+  },
   "footerSocials": {
     "github": "https://github.com/hud-evals/hud-python",
     "discord": "https://discord.gg/wkjtmHYYjm",
