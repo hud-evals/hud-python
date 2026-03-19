@@ -808,31 +808,11 @@ def sync_env_command(
     except Exception:  # noqa: S110
         pass
 
-    # Post-check: warn if local tasks reference a different env name
+    # Post-check: if local Environment("...") doesn't match, offer to fix
     try:
-        local_tasks = collect_tasks(str(env_dir))
-        if local_tasks:
-            from hud.eval.task import Task
+        from hud.cli.utils.name_check import check_and_fix_env_name
 
-            mismatched = []
-            for t in local_tasks:
-                if not isinstance(t, Task):
-                    continue
-                task_env = getattr(t, "env", None)
-                task_env_name = getattr(task_env, "name", None) if task_env else None
-                if task_env_name and task_env_name != env_name_for_lookup:
-                    mismatched.append((t.slug or "?", task_env_name))
-
-            if mismatched:
-                hud_console.warning("\n  Local tasks reference a different environment name:")
-                for slug, task_env_name in mismatched[:5]:
-                    hud_console.warning(
-                        f"    {slug}: env.name='{task_env_name}' (linked: '{env_name_for_lookup}')"
-                    )
-                hud_console.hint(
-                    "Update Environment('...') in your code to match, or the "
-                    "scenario prefix won't resolve correctly"
-                )
+        check_and_fix_env_name(env_dir, env_name_for_lookup, hud_console)
     except Exception:  # noqa: S110
         pass
 
