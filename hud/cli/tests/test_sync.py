@@ -685,7 +685,7 @@ class TestSlugRenameDetection:
 
         console = HUDConsole()
         # Should not crash; detection is informational
-        _detect_slug_renames([], remote_by_slug, to_create, console)
+        _detect_slug_renames(remote_by_slug, to_create, console)
 
     def test_no_false_positive_different_sig(self) -> None:
         from hud.cli.sync import _compute_signature, _detect_slug_renames
@@ -695,13 +695,13 @@ class TestSlugRenameDetection:
         to_create = [{"slug": "totally-new", "signature": sig}]
         remote_by_slug = {"old-name": {"scenario": "e:s", "args": {"a": 1}}}
 
-        _detect_slug_renames([], remote_by_slug, to_create, HUDConsole())
+        _detect_slug_renames(remote_by_slug, to_create, HUDConsole())
 
     def test_no_crash_empty_inputs(self) -> None:
         from hud.cli.sync import _detect_slug_renames
         from hud.utils.hud_console import HUDConsole
 
-        _detect_slug_renames([], {}, [], HUDConsole())
+        _detect_slug_renames({}, [], HUDConsole())
 
 
 # ===========================================================================

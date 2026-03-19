@@ -260,7 +260,7 @@ def _diff_and_display(
         hud_console.info(f"\n  Create ({len(to_create)}):")
         for spec in sorted(to_create, key=lambda s: s["slug"]):
             hud_console.info(f"    + {spec['slug']}")
-        _detect_slug_renames(local_specs, remote_by_slug, to_create, hud_console)
+        _detect_slug_renames(remote_by_slug, to_create, hud_console)
     if to_update:
         hud_console.info(f"\n  Update ({len(to_update)}):")
         for spec in sorted(to_update, key=lambda s: s["slug"]):
@@ -277,7 +277,6 @@ def _diff_and_display(
 
 
 def _detect_slug_renames(
-    local_specs: list[dict[str, Any]],
     remote_by_slug: dict[str, dict[str, Any]],
     to_create: list[dict[str, Any]],
     hud_console: HUDConsole,
