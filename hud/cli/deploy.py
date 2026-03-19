@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -26,7 +25,6 @@ from hud.cli.utils.validation import validate_environment
 from hud.utils.hud_console import HUDConsole
 
 LOGGER = logging.getLogger(__name__)
-
 
 
 def _peek_env_keys(env_path: Path) -> list[str]:
@@ -238,8 +236,7 @@ def deploy_environment(
         if platform_name:
             if name and name != platform_name:
                 hud_console.warning(
-                    f"--name '{name}' differs from the deployed name "
-                    f"'{platform_name}'."
+                    f"--name '{name}' differs from the deployed name '{platform_name}'."
                 )
             name = platform_name
 

@@ -140,7 +140,7 @@ def main() -> None:
         if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
             console.print(
                 Panel.fit(
-                    "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy evaluation environments",
+                    "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
                     border_style="cyan",
                 )
             )

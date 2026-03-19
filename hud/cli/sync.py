@@ -38,11 +38,12 @@ def _short_scenario_name(name: str) -> str:
 
 def _compute_remote_signature(remote_task: dict[str, Any]) -> str:
     """Compute signature from a remote task dict (from platform API)."""
-    scenario = remote_task.get("scenario") or ""
-    args = remote_task.get("args") if isinstance(remote_task.get("args"), dict) else {}
-    validation = remote_task.get("validation")
-    agent_config = remote_task.get("agent_config")
-    return _compute_signature(scenario, args, validation, agent_config or None)
+    scenario: str = remote_task.get("scenario") or ""
+    raw_args = remote_task.get("args")
+    args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+    validation: list[dict[str, Any]] | None = remote_task.get("validation")
+    agent_config: dict[str, Any] | None = remote_task.get("agent_config") or None
+    return _compute_signature(scenario, args, validation, agent_config)
 
 
 def _compute_signature(

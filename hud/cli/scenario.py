@@ -23,7 +23,7 @@ scenario_app = typer.Typer(
 )
 
 DEFAULT_URL = "http://localhost:8080/mcp"
-SESSION_FILE = Path("/tmp/.hud_scenario_session")
+SESSION_FILE = Path("/tmp/.hud_scenario_session") # noqa
 
 
 def _save_session_id(session_id: str | None) -> None:
