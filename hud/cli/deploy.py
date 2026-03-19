@@ -28,29 +28,6 @@ from hud.utils.hud_console import HUDConsole
 LOGGER = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# .hud/deploy.json helpers
-# ---------------------------------------------------------------------------
-
-
-def _load_deploy_link(env_dir: Path) -> dict[str, Any]:
-    """Load .hud/deploy.json, returning empty dict if missing or invalid."""
-    path = env_dir / ".hud" / "deploy.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _update_deploy_link(env_dir: Path, **fields: Any) -> None:
-    """Merge fields into .hud/deploy.json, preserving existing data."""
-    hud_dir = env_dir / ".hud"
-    hud_dir.mkdir(parents=True, exist_ok=True)
-    data = {**_load_deploy_link(env_dir), **fields}
-    (hud_dir / "deploy.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
-
 
 def _peek_env_keys(env_path: Path) -> list[str]:
     """Return the variable names from a .env file without loading values."""
@@ -245,16 +222,28 @@ def deploy_environment(
         if registry_id:
             hud_console.info(f"Rebuilding existing environment: {registry_id[:8]}...")
 
-    # Determine environment name from --name flag or directory
+    # Determine environment name:
+    # - For rebuilds: resolve the actual name from platform (not --name flag)
+    # - For new deploys: use --name flag or directory name
     if not name:
         name, _name_source = get_environment_name(env_dir, None)
 
+    # For rebuilds, resolve actual name from platform (--name doesn't rename)
+    from hud.cli.utils.api import hud_headers as _headers
+    from hud.cli.utils.name_check import check_and_fix_env_name, resolve_registry_name
+    from hud.settings import settings as _settings
+
+    if registry_id:
+        platform_name = resolve_registry_name(registry_id, _settings.hud_api_url, _headers())
+        if platform_name:
+            if name and name != platform_name:
+                hud_console.warning(
+                    f"--name '{name}' differs from the deployed name "
+                    f"'{platform_name}'."
+                )
+            name = platform_name
+
     hud_console.info(f"Environment name: {name}")
-
-    # Check if local Environment("...") name matches deploy name BEFORE building.
-    # This ensures the Docker image gets the correct name baked in.
-    from hud.cli.utils.name_check import check_and_fix_env_name
-
     check_and_fix_env_name(env_dir, name, hud_console)
 
     # Resolve whether to include .env vars
@@ -494,13 +483,17 @@ async def _deploy_async(
                 conflict = _handle_name_conflict(e, console)
                 if conflict:
                     trigger_payload["registry_id"] = conflict
-                    trigger_response = await client.post(
-                        f"{api_url.rstrip('/')}/builds/trigger-direct",
-                        json=trigger_payload,
-                        headers=headers,
-                    )
-                    trigger_response.raise_for_status()
-                    trigger_data = trigger_response.json()
+                    try:
+                        trigger_response = await client.post(
+                            f"{api_url.rstrip('/')}/builds/trigger-direct",
+                            json=trigger_payload,
+                            headers=headers,
+                        )
+                        trigger_response.raise_for_status()
+                        trigger_data = trigger_response.json()
+                    except Exception as retry_err:
+                        console.error(f"Failed to rebuild: {retry_err}")
+                        return {"success": False}
                 else:
                     return {"success": False}
             else:

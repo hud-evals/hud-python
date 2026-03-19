@@ -110,7 +110,7 @@ def check_and_fix_env_name(
     else:
         try:
             answer = input("  Update these references? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             return False
         do_fix = answer in ("y", "yes")
 

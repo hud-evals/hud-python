@@ -1,13 +1,14 @@
 """CLI proxy for scenario operations against a running MCP server.
 
-Requires an HTTP server running (e.g. hud dev env:env --port 8080).
-Dockerfile.hud should use --port 8080 (not --stdio) to support these commands.
+Persists the MCP session ID to /tmp/.hud_scenario_session so that
+setup and grade can run as separate processes (e.g. docker exec).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -22,14 +23,40 @@ scenario_app = typer.Typer(
 )
 
 DEFAULT_URL = "http://localhost:8080/mcp"
+SESSION_FILE = Path("/tmp/.hud_scenario_session")
 
 
-async def _client(url: str) -> Any:
+def _save_session_id(session_id: str | None) -> None:
+    if session_id:
+        SESSION_FILE.write_text(session_id)
+
+
+def _load_session_id() -> str | None:
+    if SESSION_FILE.exists():
+        sid = SESSION_FILE.read_text().strip()
+        return sid if sid else None
+    return None
+
+
+async def _client(url: str, session_id: str | None = None) -> Any:
+    """Create an MCP client, optionally resuming a session."""
     from fastmcp import Client
 
-    client = Client(url)
+    headers: dict[str, str] = {}
+    if session_id:
+        headers["mcp-session-id"] = session_id
+
+    client = Client(url, headers=headers)
     await client.__aenter__()
     return client
+
+
+def _get_session_id_from_client(client: Any) -> str | None:
+    """Extract the MCP session ID from the client's transport."""
+    transport = getattr(client, "_transport", None)
+    if transport and hasattr(transport, "get_session_id"):
+        return transport.get_session_id()
+    return None
 
 
 def _parse_args(args_json: str | None) -> dict[str, str]:
@@ -76,6 +103,7 @@ def setup_cmd(
         client = await _client(url)
         try:
             result = await client.get_prompt(scenario, _parse_args(args))
+            _save_session_id(_get_session_id_from_client(client))
             for msg in result.messages:
                 print(msg.content.text if hasattr(msg.content, "text") else msg.content)  # noqa: T201
         finally:
@@ -93,7 +121,8 @@ def grade_cmd(
     """Submit answer and grade, print the result."""
 
     async def _run() -> None:
-        client = await _client(url)
+        session_id = _load_session_id()
+        client = await _client(url, session_id=session_id)
         try:
             short_name = scenario.split(":")[-1] if ":" in scenario else scenario
             await client.call_tool("_hud_submit", {"scenario": short_name, "answer": answer})
