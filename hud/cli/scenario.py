@@ -61,6 +61,29 @@ def _get_session_id_from_client(client: Any) -> str | None:
     return None
 
 
+async def _resolve_scenario_name(client: Any, scenario: str) -> str:
+    """Resolve a short scenario name to its full env:scenario prompt ID.
+
+    If scenario already contains ':', returns it as-is.
+    Otherwise, searches available prompts for a match.
+    """
+    if ":" in scenario:
+        return scenario
+
+    prompts = await client.list_prompts()
+    for p in prompts:
+        if ":" in p.name and p.name.split(":", 1)[-1] == scenario:
+            return p.name
+
+    available = [p.name.split(":", 1)[-1] for p in prompts if ":" in p.name]
+    raise typer.Exit(
+        hud_console.error(
+            f"Scenario '{scenario}' not found. Available: {', '.join(available)}"
+        )
+        or 1
+    )
+
+
 def _parse_args(args_json: str | None) -> dict[str, str]:
     if not args_json:
         return {}
@@ -84,9 +107,8 @@ def list_cmd(
             for p in sorted(await client.list_prompts(), key=lambda x: x.name):
                 if ":" not in p.name:
                     continue
-                name = p.name.split(":", 1)[-1]
                 args = ", ".join(a.name for a in (p.arguments or []))
-                print(f"  {name}({args})" if args else f"  {name}")  # noqa: T201
+                print(f"  {p.name}({args})" if args else f"  {p.name}")  # noqa: T201
         finally:
             await client.__aexit__(None, None, None)
 
@@ -95,7 +117,7 @@ def list_cmd(
 
 @scenario_app.command(name="setup")
 def setup_cmd(
-    scenario: str = typer.Argument(..., help="env:scenario or just scenario name"),
+    scenario: str = typer.Argument(..., help="scenario name (auto-resolves env prefix)"),
     args: str | None = typer.Option(None, "--args", "-a", help="JSON args"),
     url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
 ) -> None:
@@ -103,20 +125,18 @@ def setup_cmd(
 
     async def _run() -> None:
         client = await _client(url)
-        result = await client.get_prompt(scenario, _parse_args(args))
+        full_name = await _resolve_scenario_name(client, scenario)
+        result = await client.get_prompt(full_name, _parse_args(args))
         _save_session_id(_get_session_id_from_client(client))
         for msg in result.messages:
             print(msg.content.text if hasattr(msg.content, "text") else msg.content)  # noqa: T201
-        # Intentionally skip client.__aexit__ — keeps the MCP session alive
-        # on the server so grade can resume it. Process exit closes the TCP
-        # connection without sending a session termination request.
 
     asyncio.run(_run())
 
 
 @scenario_app.command(name="grade")
 def grade_cmd(
-    scenario: str = typer.Argument(..., help="env:scenario or just scenario name"),
+    scenario: str = typer.Argument(..., help="scenario name (auto-resolves env prefix)"),
     answer: str = typer.Option("", "--answer", "-A"),
     url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
 ) -> None:
@@ -126,9 +146,10 @@ def grade_cmd(
         session_id = _load_session_id()
         client = await _client(url, session_id=session_id)
         try:
-            short_name = scenario.split(":")[-1] if ":" in scenario else scenario
+            full_name = await _resolve_scenario_name(client, scenario)
+            short_name = full_name.split(":")[-1]
             await client.call_tool("_hud_submit", {"scenario": short_name, "answer": answer})
-            contents = await client.read_resource(scenario)
+            contents = await client.read_resource(full_name)
             first = contents[0] if isinstance(contents, list) else contents
             text = first.text if hasattr(first, "text") else str(first)
             print(json.dumps(json.loads(text), indent=2))  # noqa: T201
@@ -140,7 +161,7 @@ def grade_cmd(
 
 @scenario_app.command(name="run")
 def run_cmd(
-    scenario: str = typer.Argument(..., help="env:scenario or just scenario name"),
+    scenario: str = typer.Argument(..., help="scenario name (auto-resolves env prefix)"),
     args: str | None = typer.Option(None, "--args", "-a", help="JSON args"),
     answer: str = typer.Option("", "--answer", "-A"),
     url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
@@ -150,14 +171,15 @@ def run_cmd(
     async def _run() -> None:
         client = await _client(url)
         try:
-            result = await client.get_prompt(scenario, _parse_args(args))
+            full_name = await _resolve_scenario_name(client, scenario)
+            result = await client.get_prompt(full_name, _parse_args(args))
             for msg in result.messages:
                 prompt = msg.content.text if hasattr(msg.content, "text") else str(msg.content)
                 hud_console.info(f"Prompt: {prompt}")
 
-            short_name = scenario.split(":")[-1] if ":" in scenario else scenario
+            short_name = full_name.split(":")[-1]
             await client.call_tool("_hud_submit", {"scenario": short_name, "answer": answer})
-            contents = await client.read_resource(scenario)
+            contents = await client.read_resource(full_name)
             first = contents[0] if isinstance(contents, list) else contents
             text = first.text if hasattr(first, "text") else str(first)
             print(json.dumps(json.loads(text), indent=2))  # noqa: T201
