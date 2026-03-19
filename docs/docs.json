@@ -49,48 +49,48 @@
             "group": "Get Started",
             "pages": [
               "index",
-              "llm-quickstart"
+              "concepts",
+              "llm-quickstart",
+              "advanced/harbor-convert"
+
             ]
           },
           {
-            "group": "Essentials",
+            "group": "SDK Reference",
+            "pages": [
+              "reference/environments",
+              "reference/tools",
+              "reference/evals",
+              "reference/agents",
+              "reference/mcpserver",
+              "reference/types"
+            ]
+          },
+          {
+            "group": "Building Environments",
+            "pages": [
+              "quick-links/environments",
+              "tools/index",
+              "guides/best-practices",
+              "guides/sandboxing",
+              "quick-links/deploy",
+              "quick-links/evals",
+              "advanced/testing-environments",
+              "platform/publishing-leaderboards"
+            ]
+          },
+          {
+            "group": "Building Agents and Training Models",
             "pages": [
               "quick-links/models",
-              "quick-links/environments",
-              "quick-links/deploy",
-              "quick-links/evals"
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              "guides/chat",
               "guides/integrations",
-              "guides/sandboxing",
-              "guides/best-practices",
-              "migration"
+              "guides/chat",
+              "tools/agents"
             ]
           },
           {
-            "group": "Cookbooks",
+            "group": "Tools Reference",
             "pages": [
-              "cookbooks/codex-coding",
-              "cookbooks/ops-diagnostics",
-              "cookbooks/opencode-agent"
-            ]
-          },
-          {
-            "group": "Advanced",
-            "pages": [
-              "advanced/testing-environments",
-              "advanced/harbor-convert"
-            ]
-          },
-          {
-            "group": "Tools",
-            "pages": [
-              "tools/index",
-              "tools/agents",
               "tools/computer",
               "tools/coding",
               "tools/filesystem",
@@ -100,14 +100,11 @@
             ]
           },
           {
-            "group": "SDK Reference",
+            "group": "Cookbooks",
             "pages": [
-              "reference/evals",
-              "reference/environments",
-              "reference/tools",
-              "reference/mcpserver",
-              "reference/agents",
-              "reference/types"
+              "cookbooks/codex-coding",
+              "cookbooks/ops-diagnostics",
+              "cookbooks/opencode-agent"
             ]
           },
           {
@@ -123,7 +120,6 @@
               "reference/cli/analyze",
               "reference/cli/debug",
               "reference/cli/eval",
-              "reference/cli/rft",
               "reference/cli/misc"
             ]
           },
