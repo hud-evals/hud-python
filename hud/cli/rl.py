@@ -24,15 +24,16 @@ hud_console = HUDConsole()
 # =============================================================================
 
 
-async def _fetch_env_metadata(
-    env_name: str, headers: dict[str, str]
-) -> dict[str, Any] | None:
+async def _fetch_env_metadata(env_name: str, headers: dict[str, str]) -> dict[str, Any] | None:
     """Fetch env metadata from mcp-config endpoint. Returns response dict or None."""
     url = f"{settings.hud_api_url}/environments/{env_name}/mcp-config"
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(url, headers=headers)
-        if resp.status_code != 200:
+        if resp.status_code == 404:
             return None
+        if resp.status_code >= 400:
+            hud_console.error(f"Preflight check failed for '{env_name}': HTTP {resp.status_code}")
+            raise typer.Exit(1)
         return resp.json()
 
 
@@ -44,17 +45,13 @@ def _check_scenarios(
     """Check scenarios against platform data. Warns if surface unavailable."""
     scenarios = env_data.get("scenarios")
     if not isinstance(scenarios, list):
-        hud_console.warning(
-            f"Cannot verify scenarios for '{env_name}' (not exposed by platform)"
-        )
+        hud_console.warning(f"Cannot verify scenarios for '{env_name}' (not exposed by platform)")
         return
 
     remote_names = set(scenarios)
     for scenario in sorted(expected):
         if scenario not in remote_names:
-            hud_console.error(
-                f"Scenario '{scenario}' not found on environment '{env_name}'"
-            )
+            hud_console.error(f"Scenario '{scenario}' not found on environment '{env_name}'")
             hud_console.hint(f"Available: {', '.join(sorted(remote_names))}")
             raise typer.Exit(1)
         display = scenario.removeprefix(f"{env_name}:")

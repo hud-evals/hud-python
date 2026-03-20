@@ -50,20 +50,26 @@ class TestPreflight:
         assert exc_info.value.exit_code == 1
 
     def test_valid_env_and_scenario_passes(self) -> None:
-        http_patch, _ = _mock_http(200, {
-            "mcp_config": {},
-            "registry_id": "abc",
-            "scenarios": ["checkout", "search"],
-        })
+        http_patch, _ = _mock_http(
+            200,
+            {
+                "mcp_config": {},
+                "registry_id": "abc",
+                "scenarios": ["checkout", "search"],
+            },
+        )
         with http_patch:
             asyncio.run(_preflight_validate(_make_tasks("my-env", "checkout")))
 
     def test_scenario_mismatch_exits(self) -> None:
-        http_patch, _ = _mock_http(200, {
-            "mcp_config": {},
-            "registry_id": "abc",
-            "scenarios": ["checkout", "search"],
-        })
+        http_patch, _ = _mock_http(
+            200,
+            {
+                "mcp_config": {},
+                "registry_id": "abc",
+                "scenarios": ["checkout", "search"],
+            },
+        )
         with http_patch, pytest.raises(click.exceptions.Exit) as exc_info:
             asyncio.run(_preflight_validate(_make_tasks("my-env", "nonexistent")))
         assert exc_info.value.exit_code == 1
@@ -73,7 +79,9 @@ class TestPreflight:
         with http_patch:
             asyncio.run(_preflight_validate(_make_tasks("my-env", "checkout")))
         captured = capsys.readouterr()
-        assert "Cannot verify scenarios" in captured.err or "Cannot verify scenarios" in captured.out
+        assert (
+            "Cannot verify scenarios" in captured.err or "Cannot verify scenarios" in captured.out
+        )
 
     def test_no_envs_in_tasks_skips(self, capsys) -> None:
         asyncio.run(_preflight_validate([{"scenario": "test"}]))
@@ -87,10 +95,13 @@ class TestSubmit:
 
     def test_sends_correct_payload(self) -> None:
         tasks = _make_tasks()
-        http_patch, mock_client = _mock_http(200, {
-            "job_id": "job-123",
-            "model": {"id": "model-456"},
-        })
+        http_patch, mock_client = _mock_http(
+            200,
+            {
+                "job_id": "job-123",
+                "model": {"id": "model-456"},
+            },
+        )
         with http_patch:
             asyncio.run(_submit(tasks, "model-id-123", "medium"))
 
