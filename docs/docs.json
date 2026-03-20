@@ -50,27 +50,45 @@
             "pages": [
               "index",
               "concepts",
-              "llm-quickstart",
-              "advanced/harbor-convert"
-
+              "llm-quickstart"
             ]
           },
           {
-            "group": "Build Environments",
+            "group": "Building Environments",
             "pages": [
               "quick-links/environments",
-              "advanced/testing-environments",
+              "tools/index",
               "guides/best-practices",
-              "quick-links/deploy"
+              "quick-links/deploy",
+              "advanced/testing-environments"
             ]
           },
           {
-            "group": "Run Agents",
+            "group": "Running Agents",
             "pages": [
               "quick-links/models",
               "quick-links/training",
               "guides/integrations",
-              "guides/chat"
+              "guides/chat",
+              "tools/agents"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/patterns",
+              "advanced/harbor-convert",
+              "platform/publishing-leaderboards"
+            ]
+          },
+          {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/environments",
+              "reference/tools",
+              "reference/evals",
+              "reference/agents",
+              "reference/types"
             ]
           },
           {
@@ -82,17 +100,6 @@
               "tools/memory",
               "tools/web",
               "tools/grounding"
-            ]
-          },
-          {
-            "group": "SDK Reference",
-            "pages": [
-              "reference/environments",
-              "reference/tools",
-              "reference/evals",
-              "reference/agents",
-              "reference/mcpserver",
-              "reference/types"
             ]
           },
           {
@@ -109,13 +116,14 @@
               "reference/cli/overview",
               "reference/cli/init",
               "reference/cli/dev",
-              "reference/cli/eval",
-              "reference/cli/sync",
               "reference/cli/build",
               "reference/cli/deploy",
+              "reference/cli/link",
+              "reference/cli/push",
               "reference/cli/analyze",
               "reference/cli/debug",
               "reference/cli/eval",
+              "reference/cli/sync",
               "reference/cli/misc"
             ]
           },

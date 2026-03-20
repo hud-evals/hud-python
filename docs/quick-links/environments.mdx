@@ -1,22 +1,24 @@
 ---
 title: "Environments"
-description: "What environments are, how they work, and how to build one."
+description: "Turn your code into agent-callable tools. Define how agents are evaluated."
 icon: "cube"
 ---
 
-An environment is a world that agents interact with. It wraps your APIs, services, and databases as tools that agents can call, and defines scenarios that describe what agents should do and how to score them.
+An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. It also defines how agents are *evaluated* through **scenarios**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
 
 ## Why Environments?
 
-Agents need something to act on. An environment gives them tools to call, state to observe, and goals to achieve. You define the world—what's available, what success looks like—and agents operate within it.
+Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data.
 
-## Core Concepts
+## Tools
 
-An environment has three building blocks:
+Start with `hud init` to scaffold an environment. Works on existing codebases too:
 
-### Tools
+```bash
+hud init
+```
 
-Tools are functions that agents can call. Any Python function becomes a tool with `@env.tool()`:
+Every tool is just a function. Decorate it with `@env.tool()` and agents can call it:
 
 ```python
 from hud import Environment
@@ -29,53 +31,80 @@ async def search(query: str) -> str:
     return db.search(query)
 ```
 
-Tools are how agents interact with your system. They see the function signature, the docstring, and the return type—just like a developer reads an API reference. Design tools that are self-explanatory and return actionable data.
-
 <Tip>
 Before building custom tools, check if [HUD's pre-built tools](/tools) already provide what you need—computer control, shell execution, file editing, web browsing, and more.
 </Tip>
 
-### Scenarios
+Got a FastAPI app? One line:
 
-Scenarios define *what to ask* and *how to score*. Two `yield` statements capture both:
+```python
+env.connect_fastapi(app)
+```
+
+All your routes become tools.
+
+## Scenarios
+
+To evaluate an agent, you need two things: what to tell it, and how to score what it did. Scenarios capture both with two `yield` statements:
 
 ```python
 @env.scenario("checkout")
 async def checkout_flow(product_name: str):
+    # Yield the prompt, receive the agent's final answer
     answer = yield f"Add '{product_name}' to cart and complete checkout"
     
+    # Score based on environment state and/or the answer
     order_exists = await check_order_status(product_name)
     yield 1.0 if order_exists else 0.0
 ```
 
-The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward. Scenario parameters become the task arguments—create many tasks from one scenario by varying the inputs.
+The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward.
 
-## Getting Started
+## Iterating on Your Environment
 
-Scaffold a new environment with `hud init`:
+Three ways to develop and test your environment:
 
-```bash
-hud init
+### 1. Agent Loop with create_agent
+
+Run a full agent loop locally. This mirrors exactly what happens in remote rollouts:
+
+```python
+import hud
+from hud import Environment
+from hud.agents import create_agent
+
+env = Environment("my-env")
+
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
+
+@env.scenario("count")
+async def count_scenario(sentence: str, letter: str):
+    answer = yield f"How many '{letter}' in '{sentence}'?"
+    correct = str(sentence.lower().count(letter.lower()))
+    yield 1.0 if correct in answer else 0.0
+
+# Create task and run agent
+task = env("count", sentence="Strawberry", letter="r")
+agent = create_agent("claude-sonnet-4-5")
+
+async with hud.eval(task) as ctx:
+    result = await agent.run(ctx, max_steps=10)
+
+print(f"Reward: {result.reward}")
 ```
 
-This creates an `env.py` with a sample tool and scenario you can run immediately. The golden path from there:
+### 2. MCP Server with hud dev
 
-1. **Edit `env.py`** — add your tools and scenarios
-2. **`hud dev`** — run as an MCP server, connect from Cursor or Claude Code
-3. **`hud eval`** — create tasks and run evaluations
-4. **`hud deploy`** — deploy to the platform for scale
-
-### hud dev
-
-Spawn your environment as an MCP server that any MCP client can connect to:
+Spawn your environment as an MCP server that Cursor, Claude Code, or any MCP client can connect to:
 
 ```bash
+# Python-only (no Docker)
 hud dev env:env
-```
 
-The `env:env` syntax is like uvicorn—`module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server. Add `-w` to watch files for hot-reload:
-
-```bash
+# Enable hot-reload for specific paths (Python or Docker mode)
 hud dev env:env -w env.py -w tools/
 ```
 
@@ -87,33 +116,42 @@ Then in Cursor's MCP settings:
 }
 ```
 
-### Running an Agent Programmatically
+Now your coding agent can call your tools directly. Edit watched paths (`-w`), save, and the controller reloads automatically.
 
-Run a full agent loop locally—this mirrors exactly what happens in remote rollouts:
+The `env:env` syntax is like uvicorn—`module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server.
+
+### 3. Custom Agent Loop
+
+Build your own agent loop using the format converters. See [Integrations](/guides/integrations) for OpenAI, Anthropic, LangChain, and more:
 
 ```python
-result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
-print(f"Reward: {result.reward}")
+async with hud.eval(task) as ctx:
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": ctx.prompt}],
+        tools=ctx.as_openai_chat_tools()
+    )
+    
+    # Handle tool calls...
+    await ctx.submit(response.choices[0].message.content)
 ```
-
-Or build your own agent loop with format converters. See [Integrations](/guides/integrations) for OpenAI, Anthropic, LangChain, and more.
 
 ## What's Next
 
 <CardGroup cols={2}>
-<Card title="Testing & Evaluation" icon="flask-vial" href="/advanced/testing-environments">
-  Create tasks, run hud eval, test locally
+<Card title="Pre-built Tools" icon="toolbox" href="/tools">
+  Computer control, shell, file editing, web browsing
 </Card>
 
 <Card title="Best Practices" icon="star" href="/guides/best-practices">
-  Patterns for good environments, evals, and grading
+  Patterns for reliable environments, evals, and grading
 </Card>
 
 <Card title="Deploy" icon="rocket" href="/quick-links/deploy">
   Deploy your environment to the platform
 </Card>
 
-<Card title="Pre-built Tools" icon="toolbox" href="/tools">
-  Computer control, shell, filesystem, web browsing, and more
+<Card title="Testing & Evaluation" icon="flask-vial" href="/advanced/testing-environments">
+  Define tasks, test locally, sync to platform
 </Card>
 </CardGroup>
