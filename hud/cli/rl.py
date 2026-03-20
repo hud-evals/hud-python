@@ -145,10 +145,17 @@ def _fetch_models() -> list[dict[str, Any]]:
     url = f"{settings.hud_api_url}/models/"
     headers = hud_headers()
     params = {"team_only": "true", "limit": 200}
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.get(url, headers=headers, params=params)
-        resp.raise_for_status()
-        return resp.json().get("models", [])
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            return resp.json().get("models", [])
+    except httpx.HTTPStatusError as e:
+        hud_console.error(f"Failed to fetch models: {e.response.status_code}")
+        raise typer.Exit(1) from e
+    except httpx.RequestError as e:
+        hud_console.error(f"Connection error fetching models: {e}")
+        raise typer.Exit(1) from e
 
 
 def _select_model_interactive(models: list[dict[str, Any]]) -> dict[str, Any]:
