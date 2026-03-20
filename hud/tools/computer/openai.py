@@ -94,26 +94,6 @@ class OpenAIComputerTool(HudComputerTool):
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
-        # Create instance-level native_specs with display dimensions
-        # GA computer (OpenAI) needs no display dims; preview (Operator) keeps them
-        instance_native_specs = {
-            AgentType.OPENAI: NativeToolSpec(
-                api_type="computer",
-                api_name="computer",
-                role="computer",
-                supported_models=("gpt-5.4*",),
-            ),
-            AgentType.OPERATOR: NativeToolSpec(
-                api_type="computer_use_preview",
-                api_name="computer",
-                role="computer",
-                extra={
-                    "display_width": width,
-                    "display_height": height,
-                },
-            ),
-        }
-
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -124,7 +104,6 @@ class OpenAIComputerTool(HudComputerTool):
             name=name or "openai_computer",
             title=title or "OpenAI Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshots",
-            native_specs=instance_native_specs,
             **kwargs,
         )
         self._suppress_screenshot = False

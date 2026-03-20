@@ -723,21 +723,18 @@ class EvalContext(Environment):
         return False
 
     # =========================================================================
-    # Tool Call Instrumentation
+    # MCP Telemetry Instrumentation
     # =========================================================================
 
-    async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        """Execute a tool with automatic telemetry recording.
+    def _should_instrument(self) -> bool:
+        """Whether local MCP instrumentation should be applied.
 
-        Overrides Environment._execute_tool to record MCP spans for the eval context.
-        Instrumentation is disabled when connected to a remote HUD server (telemetry is
-        recorded server-side in that case).
+        Returns False when telemetry is handled server-side (remote hub or HUD MCP).
         """
-        # Skip instrumentation when connected to a remote hub - telemetry is handled server-side
+        if not self._trace_enabled:
+            return False
         if self._hub_config is not None:
-            return await super()._execute_tool(name, arguments)
-
-        # Skip instrumentation for v4 tasks with HUD MCP config (remote server)
+            return False
         if self._mcp_config is not None:
             from hud.utils.mcp import _is_hud_server
 
@@ -745,17 +742,46 @@ class EvalContext(Environment):
                 if isinstance(server_cfg, dict):
                     url = server_cfg.get("url", "")
                     if url and _is_hud_server(url):
-                        return await super()._execute_tool(name, arguments)
+                        return False
+        return True
 
-        # For local environments, record MCP spans
+    async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+        if not self._should_instrument():
+            return await super()._execute_tool(name, arguments)
         return await self._execute_tool_instrumented(name, arguments)
 
-    @instrument(category="mcp")
+    @instrument(method="tools/call")
     async def _execute_tool_instrumented(
         self, name: str, arguments: dict[str, Any]
     ) -> MCPToolResult:
-        """Instrumented version of _execute_tool for local environments."""
         return await super()._execute_tool(name, arguments)
+
+    async def run_scenario_setup(
+        self,
+        scenario_name: str,
+        args: dict[str, Any],
+        session_id: str | None = None,
+    ) -> str | None:
+        if not self._should_instrument():
+            return await super().run_scenario_setup(scenario_name, args, session_id)
+        return await self._run_setup_instrumented(scenario_name, args)
+
+    @instrument(method="prompts/get")
+    async def _run_setup_instrumented(self, name: str, arguments: dict[str, Any]) -> str | None:
+        return await super().run_scenario_setup(name, arguments)
+
+    async def run_scenario_evaluate(
+        self,
+        scenario_name: str,
+        session_id: str | None = None,
+    ) -> EvaluationResult:
+        if not self._should_instrument():
+            return await super().run_scenario_evaluate(scenario_name, session_id)
+        return await self._run_evaluate_instrumented(scenario_name)
+
+    @instrument(method="resources/read")
+    async def _run_evaluate_instrumented(self, uri: str) -> EvaluationResult:
+        return await super().run_scenario_evaluate(uri)
 
     def __repr__(self) -> str:
         return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"

@@ -50,7 +50,7 @@ class TestLoadTasks:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_tasks("test-org/test-dataset")
+        tasks = load_tasks("test-dataset")
 
         assert len(tasks) == 2
         # Tasks are keyed by ID in dict, order may vary
@@ -61,7 +61,7 @@ class TestLoadTasks:
         # Platform IDs are internal and should not be inferred from dict keys
         assert all(t.id is None for t in tasks)
         mock_client.get.assert_called_once_with(
-            "https://api.hud.ai/tasks/evalset/test-org/test-dataset",
+            "https://api.hud.ai/tasks/evalset/test-dataset",
             headers={"Authorization": "Bearer test_key"},
             params={"all": "true"},
         )
@@ -96,7 +96,7 @@ class TestLoadTasks:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_tasks("test-org/test-dataset")
+        tasks = load_tasks("test-dataset")
 
         assert len(tasks) == 1
         assert tasks[0].scenario == "checkout"
@@ -126,11 +126,11 @@ class TestLoadTasks:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_tasks("test-org/test-dataset")
+        tasks = load_tasks("test-dataset")
 
         assert len(tasks) == 0
         mock_client.get.assert_called_once_with(
-            "https://api.hud.ai/tasks/evalset/test-org/test-dataset",
+            "https://api.hud.ai/tasks/evalset/test-dataset",
             headers={},
             params={"all": "true"},
         )
@@ -198,7 +198,7 @@ class TestLoadTasks:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_tasks("test-org/test-dataset")
+        tasks = load_tasks("test-dataset")
 
         assert len(tasks) == 0
 
@@ -223,7 +223,7 @@ class TestLoadTasks:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_tasks("test-org/test-dataset")
+        tasks = load_tasks("test-dataset")
 
         assert len(tasks) == 1
         assert tasks[0].scenario == "test"
@@ -259,7 +259,7 @@ class TestSaveTasks:
         mock_client_class.return_value = mock_client
 
         taskset_id = save_tasks(
-            "test-org/test-dataset",
+            "test-dataset",
             [
                 Task(
                     env={"name": "test-env"},
@@ -276,6 +276,6 @@ class TestSaveTasks:
         call_args = mock_client.post.call_args
         assert call_args.args[0] == "https://api.hud.ai/tasks/upload"
         payload = call_args.kwargs["json"]
-        assert payload["name"] == "test-org/test-dataset"
+        assert payload["name"] == "test-dataset"
         assert payload["tasks"][0]["slug"] == "checkout-smoke"
         assert "id" not in payload["tasks"][0]

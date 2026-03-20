@@ -141,6 +141,35 @@ class TestConnector:
             assert connector.client is mock_client
 
     @pytest.mark.asyncio
+    async def test_connect_passes_transport_timeout_to_client(self) -> None:
+        """connect() forwards transport timeout to FastMCP client session kwargs."""
+
+        class Transport:
+            _hud_client_timeout = 300
+
+        transport = Transport()
+        connector = Connector(
+            transport=transport,
+            config=ConnectionConfig(),
+            name="test",
+            connection_type=ConnectionType.REMOTE,
+            auth="test-token",
+        )
+
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.is_connected = MagicMock(return_value=True)
+
+        with patch("fastmcp.client.Client", return_value=mock_client) as mock_cls:
+            await connector.connect()
+
+            mock_cls.assert_called_once_with(
+                transport=transport,
+                auth="test-token",
+                timeout=300,
+            )
+
+    @pytest.mark.asyncio
     async def test_disconnect_clears_client(self) -> None:
         """disconnect() closes client and clears state."""
         connector = Connector(

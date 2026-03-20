@@ -90,7 +90,7 @@ class AnthropicComputerTool(HudComputerTool):
                 api_name="computer",
                 beta="computer-use-2025-11-24",
                 role="computer",
-                supported_models=("claude-opus-4-5*", "claude-opus-4-6*", "claude-sonnet-4-6*"),
+                supported_models=("*claude-opus-4-5*", "*claude-opus-4-6*", "*claude-sonnet-4-6*"),
             ),
             NativeToolSpec(
                 api_type="computer_20250124",
@@ -111,6 +111,7 @@ class AnthropicComputerTool(HudComputerTool):
         width: int = computer_settings.ANTHROPIC_COMPUTER_WIDTH,
         height: int = computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
         rescale_images: bool = computer_settings.ANTHROPIC_RESCALE_IMAGES,
+        screenshot_quality: int | None = computer_settings.ANTHROPIC_SCREENSHOT_QUALITY,
         # What the agent sees as the tool's name, title, and description
         name: str | None = None,
         title: str | None = None,
@@ -124,37 +125,12 @@ class AnthropicComputerTool(HudComputerTool):
             width: Width for agent coordinate system (default: 1400)
             height: Height for agent coordinate system (default: 850)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
+            screenshot_quality: JPEG quality (1-95) for screenshots. None keeps lossless PNG.
+                Set via env var ANTHROPIC_SCREENSHOT_QUALITY. Lower values = smaller images.
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
-        # Create instance-level native_specs with display dimensions
-        instance_native_specs: NativeToolSpecs = {
-            AgentType.CLAUDE: [
-                NativeToolSpec(
-                    api_type="computer_20251124",
-                    api_name="computer",
-                    beta="computer-use-2025-11-24",
-                    role="computer",
-                    supported_models=("claude-opus-4-5*", "claude-opus-4-6*", "claude-sonnet-4-6*"),
-                    extra={
-                        "display_width": width,
-                        "display_height": height,
-                    },
-                ),
-                NativeToolSpec(
-                    api_type="computer_20250124",
-                    api_name="computer",
-                    beta="computer-use-2025-01-24",
-                    role="computer",
-                    extra={
-                        "display_width": width,
-                        "display_height": height,
-                    },
-                ),
-            ],
-        }
-
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -165,9 +141,62 @@ class AnthropicComputerTool(HudComputerTool):
             name=name or "anthropic_computer",
             title=title or "Anthropic Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshot",
-            native_specs=instance_native_specs,
             **kwargs,
         )
+        self.screenshot_quality = screenshot_quality
+
+    async def _rescale_screenshot(
+        self, screenshot_base64: str, *, skip_resize: bool = False
+    ) -> str:
+        """Rescale and/or compress a screenshot.
+
+        Resizes when rescale_images=True and dimensions differ (base class behaviour),
+        unless *skip_resize* is True (used for zoom crops that are already sized).
+        Additionally compresses to JPEG when screenshot_quality is set, even when
+        no resize is needed, to reduce context window usage.
+        """
+        if self.screenshot_quality is None:
+            return await super()._rescale_screenshot(screenshot_base64)
+
+        try:
+            import base64
+            from io import BytesIO
+
+            from PIL import Image  # type: ignore[import-not-found]
+
+            image_data = base64.b64decode(screenshot_base64)
+            image = Image.open(BytesIO(image_data))
+
+            if not skip_resize and self.rescale_images and self.needs_scaling:
+                logger.debug(
+                    "Resizing screenshot from %s x %s to %s x %s",
+                    image.width,
+                    image.height,
+                    self.width,
+                    self.height,
+                )
+                image = image.resize((self.width, self.height), Image.Resampling.LANCZOS)
+
+            if image.mode in ("RGBA", "P", "LA"):
+                image = image.convert("RGB")
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=self.screenshot_quality, optimize=True)
+            original_kb = len(screenshot_base64) * 3 / 4 / 1024
+            compressed = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            compressed_kb = len(compressed) * 3 / 4 / 1024
+            logger.info(
+                "Screenshot compression: %.0fKB → %.0fKB (%.1fx reduction, quality=%s)",
+                original_kb,
+                compressed_kb,
+                original_kb / max(compressed_kb, 1),
+                self.screenshot_quality,
+            )
+            return compressed
+        except Exception as e:
+            logger.warning("Failed to compress screenshot: %s", e)
+            if skip_resize:
+                return screenshot_base64
+            return await super()._rescale_screenshot(screenshot_base64)
 
     def to_params(
         self, api_type: str | None = None
@@ -634,15 +663,17 @@ class AnthropicComputerTool(HudComputerTool):
             # Unknown action
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action: {action}"))
 
-        # Zoom returns full-resolution crops -- skip rescaling for zoom
-        if (
-            isinstance(result, ContentResult)
-            and result.base64_image
-            and self.rescale_images
-            and action != "zoom"
-        ):
-            rescaled_image = await self._rescale_screenshot(result.base64_image)
-            result.base64_image = rescaled_image
+        # Rescale / compress the screenshot.
+        # Zoom crops are already sized by the executor, so skip resizing but
+        # still compress to JPEG when screenshot_quality is set.
+        if isinstance(result, ContentResult) and result.base64_image:
+            if action == "zoom":
+                if self.screenshot_quality is not None:
+                    result.base64_image = await self._rescale_screenshot(
+                        result.base64_image, skip_resize=True
+                    )
+            elif self.rescale_images or self.screenshot_quality is not None:
+                result.base64_image = await self._rescale_screenshot(result.base64_image)
 
         # Handle screenshot for actions that need it
         screenshot_actions = {

@@ -49,7 +49,10 @@
             "group": "Get Started",
             "pages": [
               "index",
-              "llm-quickstart"
+              "concepts",
+              "llm-quickstart",
+              "advanced/harbor-convert"
+
             ]
           },
           {
@@ -71,25 +74,8 @@
             ]
           },
           {
-            "group": "Cookbooks",
+            "group": "Tools Reference",
             "pages": [
-              "cookbooks/codex-coding",
-              "cookbooks/ops-diagnostics",
-              "cookbooks/opencode-agent"
-            ]
-          },
-          {
-            "group": "Advanced",
-            "pages": [
-              "advanced/patterns",
-              "advanced/harbor-convert"
-            ]
-          },
-          {
-            "group": "Tools",
-            "pages": [
-              "tools/index",
-              "tools/agents",
               "tools/computer",
               "tools/coding",
               "tools/filesystem",
@@ -99,14 +85,11 @@
             ]
           },
           {
-            "group": "SDK Reference",
+            "group": "Cookbooks",
             "pages": [
-              "reference/evals",
-              "reference/environments",
-              "reference/tools",
-              "reference/agents",
-              "reference/types",
-              "reference/mcpserver"
+              "cookbooks/codex-coding",
+              "cookbooks/ops-diagnostics",
+              "cookbooks/opencode-agent"
             ]
           },
           {
@@ -121,6 +104,7 @@
               "reference/cli/deploy",
               "reference/cli/analyze",
               "reference/cli/debug",
+              "reference/cli/eval",
               "reference/cli/misc"
             ]
           },

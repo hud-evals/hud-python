@@ -46,12 +46,12 @@ class EditTool(BaseTool):
             api_name="str_replace_based_edit_tool",
             role="editor",
             supported_models=(
-                "claude-3-5-sonnet-*",
-                "claude-3-7-sonnet-*",
-                "claude-sonnet-4-*",
-                "claude-opus-4-*",
-                "claude-4-5-sonnet-*",
-                "claude-4-5-opus-*",
+                "*claude-3-5-sonnet-*",
+                "*claude-3-7-sonnet-*",
+                "*claude-sonnet-4-*",
+                "*claude-opus-4-*",
+                "*claude-4-5-sonnet-*",
+                "*claude-4-5-opus-*",
             ),
         ),
     }

@@ -376,7 +376,7 @@ class TestBaseToolNativeSpecs:
         assert tool.meta["native_tools"]["claude"]["api_name"] == "bash"
         # Check that supported_models is included
         assert "supported_models" in tool.meta["native_tools"]["claude"]
-        assert "claude-3-5-sonnet-*" in tool.meta["native_tools"]["claude"]["supported_models"]
+        assert "*claude-3-5-sonnet-*" in tool.meta["native_tools"]["claude"]["supported_models"]
 
     def test_tool_with_instance_native_specs(self) -> None:
         """Test that instance-level native_specs merge with class-level."""

@@ -439,6 +439,22 @@ async def analyze_environment_from_mcp_config(
     await _analyze_with_config(mcp_config, output_format, verbose)
 
 
+def _prepare_mcp_config(mcp_config: dict[str, Any]) -> dict[str, Any]:
+    """Inject ``auth: None`` into URL-based server entries.
+
+    FastMCPClient attempts OAuth discovery on servers that expose a ``url``
+    field.  For local / dev servers this causes hangs or connection errors.
+    Setting ``auth`` to ``None`` disables the discovery probe.
+    """
+    patched: dict[str, Any] = {}
+    for key, value in mcp_config.items():
+        if isinstance(value, dict) and "url" in value and "auth" not in value:
+            patched[key] = {**value, "auth": None}
+        else:
+            patched[key] = value
+    return patched
+
+
 async def _analyze_with_config(
     mcp_config: dict[str, Any], output_format: str, verbose: bool
 ) -> None:
@@ -455,7 +471,8 @@ async def _analyze_with_config(
 
         from hud.cli.utils.mcp import analyze_environment as mcp_analyze
 
-        client = FastMCPClient(transport=mcp_config)
+        config = _prepare_mcp_config(mcp_config)
+        client = FastMCPClient(transport=config)
 
         try:
             await client.__aenter__()

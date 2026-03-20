@@ -211,30 +211,23 @@ class TestBashTool:
         """Test restarting the tool when there's an existing session calls stop()."""
         tool = BashTool()
 
-        # Track calls across instances of our fake session class
-        stop_called = []
-        start_called = []
-
-        class FakeSession:
-            """Fake session that tracks stop/start calls."""
-
-            async def start(self) -> None:
-                start_called.append(True)
-
-            def stop(self) -> None:
-                stop_called.append(True)
-
-        # Set up existing session
-        old_session = FakeSession()
+        # Set up existing session with a mock
+        old_session = MagicMock()
+        old_session.stop = MagicMock()
         tool.session = old_session  # type: ignore[assignment]
 
-        result = await tool(restart=True)
+        # Mock the new session that will be created
+        new_session = MagicMock()
+        new_session.start = AsyncMock()
+
+        with patch("hud.tools.coding.bash.ClaudeBashSession", return_value=new_session):
+            result = await tool(restart=True)
 
         # Verify old session was stopped
-        assert len(stop_called) == 1, "stop() should be called on old session"
+        old_session.stop.assert_called_once()
 
         # Verify new session was started
-        assert len(start_called) == 1, "start() should be called on new session"
+        new_session.start.assert_called_once()
 
         # Verify result
         assert isinstance(result, list)
@@ -242,9 +235,9 @@ class TestBashTool:
         assert isinstance(result[0], TextContent)
         assert result[0].text == "Bash session restarted."
 
-        # Verify new session is a FakeSession (type preserved)
-        assert isinstance(tool.session, FakeSession)
+        # Verify new session replaced the old one
         assert tool.session is not old_session
+        assert tool.session is new_session
 
     @pytest.mark.asyncio
     async def test_call_no_command_error(self):

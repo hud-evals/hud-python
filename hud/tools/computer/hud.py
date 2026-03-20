@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock, TextContent
@@ -16,6 +16,9 @@ from hud.tools.executors.xdo import XDOExecutor
 from hud.tools.types import ContentResult, Coordinate, ToolError
 
 from .settings import computer_settings
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpecs
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,21 @@ class HudComputerTool(BaseTool):
             }
         }
 
+        # Inject display dimensions into class-level native specs so subclasses
+        # only need to define specs once at the class level.
+        display_extra = {"display_width": self.width, "display_height": self.height}
+        native_specs: NativeToolSpecs = {}
+        for agent_type, spec_or_list in self.__class__.native_specs.items():
+            if isinstance(spec_or_list, list):
+                native_specs[agent_type] = [
+                    s.model_copy(update={"extra": {**s.extra, **display_extra}})
+                    for s in spec_or_list
+                ]
+            else:
+                native_specs[agent_type] = spec_or_list.model_copy(
+                    update={"extra": {**spec_or_list.extra, **display_extra}}
+                )
+
         # Initialize base tool with executor as env
         super().__init__(
             env=executor,
@@ -80,6 +98,7 @@ class HudComputerTool(BaseTool):
             title=title or "Computer Control",
             description=description or "Control computer with mouse, keyboard, and screenshots",
             meta=meta,
+            native_specs=native_specs,
             **kwargs,
         )
 

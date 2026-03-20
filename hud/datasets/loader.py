@@ -70,15 +70,15 @@ def _load_from_file(path: Path) -> list[Task]:
     return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
-def resolve_taskset_id(slug: str) -> str:
-    """Resolve a taskset slug/name to its UUID via the HUD API."""
+def resolve_taskset_id(name: str) -> str:
+    """Resolve a taskset name to its UUID via the HUD API."""
     headers = {}
     if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
 
     with httpx.Client() as client:
         response = client.get(
-            f"{settings.hud_api_url}/tasks/evalset/{slug}",
+            f"{settings.hud_api_url}/tasks/evalset/{name}",
             headers=headers,
         )
         response.raise_for_status()
@@ -86,7 +86,7 @@ def resolve_taskset_id(slug: str) -> str:
 
     evalset_id = data.get("evalset_id")
     if not evalset_id:
-        raise ValueError(f"Could not resolve taskset '{slug}' — not found or no access")
+        raise ValueError(f"Could not resolve taskset '{name}' — not found or no access")
     return evalset_id
 
 
@@ -146,14 +146,14 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
 
     Supports multiple sources with auto-detection:
     - Local file path (JSON or JSONL)
-    - HUD API dataset slug (e.g., "hud-evals/SheetBench-50")
+    - HUD API evalset name (e.g., "SheetBench-50")
 
     Automatically detects and converts v4 LegacyTask format to v5 Task.
 
     Args:
         source: Task source. Can be:
             - Path to a local JSON/JSONL file
-            - HUD API dataset slug (e.g., "hud-evals/SheetBench-50")
+            - HUD API evalset name (e.g., "SheetBench-50")
         raw: If True, return raw dicts without validation or env var substitution.
             Useful for preserving template strings like "${HUD_API_KEY}".
 
@@ -193,8 +193,7 @@ def save_tasks(
     Creates or updates a taskset with the given tasks.
 
     Args:
-        name: Taskset name/slug (e.g., "my-evals/benchmark-v1").
-            If no org prefix, uses user's default org.
+        name: Evalset name (e.g., "benchmark-v1").
         tasks: List of Task objects (v5 format) to save.
 
     Returns:
@@ -214,10 +213,10 @@ def save_tasks(
         ]
 
         # Save to HUD API
-        taskset_id = save_tasks("my-evals/benchmark-v1", tasks)
+        taskset_id = save_tasks("benchmark-v1", tasks)
 
         # Later, load them back
-        loaded = load_tasks("my-evals/benchmark-v1")
+        loaded = load_tasks("benchmark-v1")
         ```
 
     Raises:
