@@ -29,7 +29,7 @@ Swap `model="gpt-4o"` for `model="claude-sonnet-4-5"` and you're comparing provi
 
 ## create_agent and Native Tools
 
-`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer_use_preview`; Gemini has `ComputerUse`. These aren't generic function calls—they're provider-specific APIs the model was trained on.
+`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer_use_preview`; Gemini has `ComputerUse`. Each is a provider-specific API the model was trained on.
 
 HUD environments declare `native_specs` that tell agents how to use each tool natively:
 
