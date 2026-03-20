@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import questionary
 import typer
 from rich.table import Table
 
@@ -152,8 +153,6 @@ def _fetch_models() -> list[dict[str, Any]]:
 
 def _select_model_interactive(models: list[dict[str, Any]]) -> dict[str, Any]:
     """Display models and let user pick one."""
-    import questionary
-
     trainable = [
         m
         for m in models
@@ -262,12 +261,9 @@ def rl_run_command(
     hud_console.info(f"Model: {selected_model_id}")
     hud_console.info(f"Reasoning effort: {reasoning_effort}")
 
-    if not yes:
-        import questionary
-
-        if not questionary.confirm("Submit RL training job?", default=True).ask():
-            hud_console.error("Cancelled")
-            raise typer.Exit(0)
+    if not yes and not questionary.confirm("Submit RL training job?", default=True).ask():
+        hud_console.error("Cancelled")
+        raise typer.Exit(0)
 
     # Serialize and submit (async)
     asyncio.run(_submit(tasks, selected_model_id, reasoning_effort))
