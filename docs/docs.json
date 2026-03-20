@@ -85,6 +85,17 @@
             ]
           },
           {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/environments",
+              "reference/tools",
+              "reference/evals",
+              "reference/agents",
+              "reference/mcpserver",
+              "reference/types"
+            ]
+          },
+          {
             "group": "Cookbooks",
             "pages": [
               "cookbooks/codex-coding",

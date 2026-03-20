@@ -148,19 +148,19 @@ async with hud.eval(task) as ctx:
 print(ctx.reward)
 ```
 
-## What You Don't Need Yet
+## Advance topics
 
-HUD has a lot of surface area. Here's what to skip on day one:
+HUD covers a lot of use cases for post training and agent development.
 
-| Skip for now | What it is | When you'll need it |
+| Topic | What it is | When you'll need it |
 |--------------|-----------|-------------------|
+| [Pre-built tools](/tools) | Shell, browser, file editing, etc. | When your tasks need system-level capabilities |
+| [Harbor conversion](/advanced/harbor-convert) | Importing external benchmarks | Migrating existing benchmarks |
+| [REST API](/platform/rest-api) | Programmatic platform access | Custom integrations |
+| [Framework integrations](/guides/integrations) | LangChain, CrewAI, AutoGen, etc. | When using those frameworks |
 | [Chat scenarios](/guides/chat) | Multi-turn conversational agents | Building chat products |
 | [AgentTool](/tools/agents) | Hierarchical sub-agent delegation | Complex multi-agent workflows |
-| [Pre-built tools](/tools) | Shell, browser, file editing, etc. | When your tasks need system-level capabilities |
-| [Framework integrations](/guides/integrations) | LangChain, CrewAI, AutoGen, etc. | When using those frameworks |
-| [Harbor conversion](/advanced/harbor-convert) | Importing external benchmarks | Migrating existing benchmarks |
 | [Slack integration](/platform/slack) | Running agents from Slack | Team workflows |
-| [REST API](/platform/rest-api) | Programmatic platform access | Custom integrations |
 
 Start with: one environment, a few tools, one scenario, run it locally. Everything else builds on that.
 
