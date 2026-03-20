@@ -42,7 +42,7 @@ from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
 from .rft import rft_run_command  # noqa: E402
 from .rft_status import rft_status_typer_command  # noqa: E402
-from .rl import rl_run_command  # noqa: E402
+from .rl import rl_run_command, rl_status_command  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -118,6 +118,7 @@ app.add_typer(rft_app, name="rft")
 # RL subcommand group
 rl_app = typer.Typer(help="🚀 RL training commands\n\nExample: hud rl run my-taskset -m <model-id>")
 rl_app.command("run")(rl_run_command)
+rl_app.command("status")(rl_status_command)
 app.add_typer(rl_app, name="rl")
 
 

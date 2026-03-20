@@ -318,7 +318,59 @@ async def _submit(
         hud_console.success(f"Training job submitted! ID: {job_id}")
         if result_model_id:
             hud_console.info(f"Model ID: {result_model_id}")
-            hud_console.info(f"Check status: hud rft status {result_model_id}")
+            hud_console.info(f"Check status: hud rl status {result_model_id}")
+
+    except httpx.RequestError as e:
+        hud_console.error(f"Connection error: {e}")
+        raise typer.Exit(1) from e
+
+
+# =============================================================================
+# Status command
+# =============================================================================
+
+
+def rl_status_command(
+    model_id: str = typer.Argument(..., help="Model ID or job ID to check status for"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full status details"),
+) -> None:
+    """Check the status of an RL training job."""
+    require_api_key("check RL training status")
+
+    url = f"{settings.hud_rl_url}/training/jobs/{model_id}/raw-status"
+    headers = hud_headers()
+
+    hud_console.info(f"Fetching status for: {model_id}")
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url, headers=headers)
+
+        if resp.status_code >= 400:
+            try:
+                detail = resp.json()
+            except Exception:
+                detail = resp.text
+            hud_console.error(f"Request failed ({resp.status_code}): {detail}")
+            raise typer.Exit(1)
+
+        data = resp.json()
+        status = data.get("status", "Unknown")
+
+        if status.lower() in ("succeeded", "completed"):
+            hud_console.success(f"Status: {status}")
+        elif status.lower() in ("failed", "error", "cancelled"):
+            hud_console.error(f"Status: {status}")
+        else:
+            hud_console.info(f"Status: {status}")
+
+        if data.get("fine_tuned_model"):
+            hud_console.success(f"Fine-tuned model: {data['fine_tuned_model']}")
+
+        if verbose:
+            from hud.cli.utils.viewer import show_json_interactive
+
+            show_json_interactive(data, title="Training Job Status", initial_expanded=True)
 
     except httpx.RequestError as e:
         hud_console.error(f"Connection error: {e}")
