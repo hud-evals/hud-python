@@ -222,7 +222,7 @@ class TestSaveDeployLink:
     """Tests for _save_deploy_link function."""
 
     def test_saves_deploy_link(self, tmp_path: Path) -> None:
-        """Test saving deploy link creates correct file."""
+        """Test saving deploy link creates correct config.json file."""
         from hud.cli.deploy import _save_deploy_link
         from hud.utils.hud_console import HUDConsole
 
@@ -234,14 +234,13 @@ class TestSaveDeployLink:
 
         _save_deploy_link(tmp_path, result, console)
 
-        deploy_link_path = tmp_path / ".hud" / "deploy.json"
-        assert deploy_link_path.exists()
+        config_path = tmp_path / ".hud" / "config.json"
+        assert config_path.exists()
 
-        with open(deploy_link_path) as f:
+        with open(config_path) as f:
             saved = json.load(f)
 
         assert saved["registryId"] == "test-registry-id-12345"
-        assert saved["version"] == "1.0.0"
 
     def test_creates_hud_directory(self, tmp_path: Path) -> None:
         """Test that .hud directory is created if missing."""

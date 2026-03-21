@@ -1,0 +1,74 @@
+---
+title: "Advanced Patterns"
+description: "Mock mode, scenario internals, and troubleshooting"
+icon: "wrench"
+---
+
+## Mock Mode
+
+`env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need for testing agent logic without hitting real services:
+
+```python
+env.mock()
+env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})
+env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
+```
+
+Your agent code stays the same — toggle `env.mock()` for testing.
+
+## Testing Scenarios Directly
+
+Scenarios are async generators. `hud.eval()` drives them automatically, but you can test the grading logic directly:
+
+```python
+async def test():
+    gen = checkout("alice", 50)
+    prompt = await anext(gen)            # setup phase
+    reward = await gen.asend("Success!") # evaluate phase
+    assert reward == 1.0
+```
+
+If your scenario tests pass, `hud.eval()` will behave identically.
+
+## Scenario MCP Protocol Mapping
+
+Each scenario registers two MCP endpoints:
+
+| Phase | MCP Type | Endpoint | What it does |
+|-------|----------|----------|--------------|
+| Setup | **Prompt** | `get_prompt("{env}:{scenario}", args)` | Runs code before first `yield`, returns the prompt |
+| Evaluate | **Resource** | `read_resource("{env}:{scenario}")` | Runs code after first `yield`, returns `{"reward": float}` |
+
+If a scenario isn't working, test each phase directly:
+
+```python
+async with env:
+    prompt_result = await env.get_prompt(
+        "myenv:checkout", 
+        {"product": "laptop", "user_id": "alice"}
+    )
+    print(f"Prompt: {prompt_result.messages[0].content}")
+    
+    await env.submit("checkout", answer="Order completed successfully")
+    resource_result = await env.read_resource("myenv:checkout")
+    print(f"Reward: {resource_result}")  # {"reward": 1.0}
+```
+
+## Useful Environment Properties
+
+```python
+env.is_parallelizable  # True if all connections are remote
+env.connections        # Dict of connection names → connectors
+env.is_connected       # True if in async context
+
+await env.list_resources()  # MCP resources
+await env.list_prompts()    # MCP prompts
+```
+
+## Common Issues
+
+**`evaluate_tool: NULL` but using v5 scenarios** — v5 scenarios return rewards via `read_resource`, not `evaluate_tool`. Ensure your orchestrator calls `read_resource()` after agent completion.
+
+**`TypeError` with complex args like `list[dict]`** — MCP passes all arguments as strings; SDK deserializes them. Add logging to check `type(arg)` at scenario entry.
+
+**Scenario setup works but evaluate returns no reward** — `submit()` wasn't called before `read_resource()`. Call `await env.submit(scenario_name, answer)` first.

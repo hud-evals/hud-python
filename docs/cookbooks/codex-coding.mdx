@@ -19,8 +19,8 @@ This guide shows you how to **build your own Codex** - a 1:1 recreation of [Open
 OpenAI's Codex CLI is a coding agent that uses two native tools: `shell` and `apply_patch`. With HUD, you can:
 
 - **Customize behavior** - Add logging, approval flows, or custom security policies
-- **Full observability** - Get detailed traces of every tool call and model response
-- **Run anywhere** - Local machine, Docker, or HUD Cloud
+- **Traces** - Get detailed trajectories, with every tool call and model response recorded on hud.ai
+- **Local or cloud** - Run on your machine, in Docker, or on HUD Cloud
 - **Evaluate systematically** - Run your Codex against benchmarks and track improvements
 
 ## How It Works
@@ -198,7 +198,7 @@ The `ApplyPatchTool` creates, updates, and deletes files using OpenAI's V4A diff
 }
 ```
 
-## The Magic: Automatic Native Tool Conversion
+## Automatic native tool conversion
 
 Here's what makes your HUD Codex identical to the official Codex CLI. The `OpenAIAgent` automatically detects `shell` and `apply_patch` tools and converts them to OpenAI's native types:
 
@@ -229,7 +229,7 @@ This means:
 2. **Same response format** - Responses include `shell_call` and `apply_patch_call` output types
 3. **Same tool execution** - Your tools receive the exact same parameters Codex would
 
-The result? Your agent behaves identically to OpenAI's Codex CLI.
+Your agent behaves identically to OpenAI's Codex CLI.
 
 ## Complete Example
 
@@ -356,4 +356,4 @@ uv run python examples/06_codex_coding_agent.py --local --verbose
 - [Codex-capable models](https://platform.openai.com/docs/guides/tools-shell#supported-models) - OpenAI models that support native shell and apply_patch tools
 - [Tools Reference](/reference/tools) - Complete tool documentation
 - [OpenAI Agent](/reference/agents#openaiagent) - Agent configuration options
-- [Sandboxing](/guides/sandboxing) - Running agents safely
+- [Best Practices](/guides/best-practices) - Running agents safely

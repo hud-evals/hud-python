@@ -27,7 +27,7 @@ dependencies = [
     "toml>=0.10.2",
     "watchfiles>=0.21.0",
     "questionary==2.1.0",
-    "prompt-toolkit==3.0.51",  # Locked for questionary compatibility
+    "prompt-toolkit==3.0.51", # Locked for questionary compatibility
     "blessed>=1.20.0",
     "scarf-sdk>=0.1.0",
 ]

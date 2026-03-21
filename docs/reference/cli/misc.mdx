@@ -58,6 +58,24 @@ hud models [--json]
 Options:
 - `--json` - Output as JSON
 
+## hud push
+
+Push a locally built Docker image to the HUD registry. This is a lower-level command — most users should use `hud deploy` which handles the full build + push flow.
+
+```bash
+hud push [directory]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `directory` | `.` | Environment directory with `hud.lock.yaml` |
+
+The image must be built first with `hud build`. Push reads the lock file to determine which image to push.
+
+<Note>
+`hud push` is hidden from the main help output. Use `hud deploy` for the standard workflow.
+</Note>
+
 ## hud convert
 
 Convert external task/dataset formats to HUD format.
@@ -70,3 +88,39 @@ Options:
 - `<path>` - Path to source tasks/dataset directory
 - `--from` - Source format (`auto`, `webarena`, `browsergym`, etc.)
 - `--output, -o` - Output path for converted tasks
+
+## hud scenario
+
+Test scenarios against a running MCP server. Requires `hud dev` running in another terminal.
+
+### List scenarios
+
+```bash
+hud scenario list
+hud scenario list --url http://localhost:9000/mcp
+```
+
+### Run setup (get the prompt)
+
+```bash
+hud scenario setup my-env:echo --args '{"message": "hello"}'
+```
+
+### Grade (submit answer + evaluate)
+
+```bash
+hud scenario grade my-env:echo --answer "hello"
+```
+
+### Full run (setup + grade)
+
+```bash
+hud scenario run my-env:echo --args '{"message": "hello"}' --answer "hello"
+# Prompt: Repeat this back exactly: hello
+# {"reward": 1.0, "done": true}
+```
+
+Options:
+- `--url, -u` - Server URL (default: `http://localhost:8080/mcp`)
+- `--args, -a` - JSON string of scenario arguments
+- `--answer, -A` - Answer to submit for grading

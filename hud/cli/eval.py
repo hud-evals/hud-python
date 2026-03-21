@@ -606,12 +606,16 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    # Load tasks — use internal loaders to capture taskset_id from API sources
-    hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
+    # Load tasks — supports Python files/dirs, JSON/JSONL, and API slugs
+    hud_console.info(f"Loading tasks from: {cfg.source}")
     path = Path(cfg.source)
     taskset_id: str | None = None
     try:
-        if path.exists() and path.suffix in {".json", ".jsonl"}:
+        if path.exists() and (path.suffix == ".py" or path.is_dir()):
+            from hud.cli.utils.collect import collect_tasks
+
+            tasks = collect_tasks(cfg.source)
+        elif path.exists() and path.suffix in {".json", ".jsonl"}:
             tasks = _load_from_file(path)
         else:
             tasks, taskset_id = _load_from_api(cfg.source)
