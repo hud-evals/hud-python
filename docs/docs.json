@@ -12,6 +12,7 @@
     "light": "#ffffff",
     "dark": "#5b21b6"
   },
+  "css": "/custom.css",
   "icons": {
     "library": "fontawesome"
   },
