@@ -54,8 +54,15 @@ def list_files(directory: str = ".") -> str:
         List of files as a string
     """
     try:
-        path = Path(directory)
-        files = [f.name for f in path.iterdir() if f.is_file()]
+        # Resolve to absolute path and validate it's within current directory
+        base_path = Path.cwd().resolve()
+        requested_path = (base_path / directory).resolve()
+        
+        # Security: Prevent directory traversal attacks
+        if not str(requested_path).startswith(str(base_path)):
+            return "Error: Access denied - path outside working directory"
+        
+        files = [f.name for f in requested_path.iterdir() if f.is_file()]
         return f"Files in {directory}:\n" + "\n".join(f"- {f}" for f in files)
     except Exception as e:
         return f"Error: {e}"
@@ -72,7 +79,15 @@ def read_file(filepath: str) -> str:
         File contents (limited to first 1000 characters)
     """
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        # Resolve to absolute path and validate it's within current directory
+        base_path = Path.cwd().resolve()
+        requested_path = (base_path / filepath).resolve()
+        
+        # Security: Prevent directory traversal attacks
+        if not str(requested_path).startswith(str(base_path)):
+            return "Error: Access denied - path outside working directory"
+        
+        with open(requested_path, "r", encoding="utf-8") as f:
             content = f.read()
         return content[:1000]  # Limit to prevent token overflow
     except Exception as e:
@@ -190,7 +205,9 @@ async def run_example(model: str = "gpt-4o-mini", verbose: bool = False):
     print("=" * 70)
     print(f"✅ Task completed!")
     print(f"📊 Reward: {result.reward}")
-    print(f"🔢 Tool calls: {result.num_messages - 1}")  # Subtract initial prompt
+    # Count actual tool calls from trace (each TraceStep with category="mcp" is a tool call)
+    tool_calls = len([step for step in result.trace if step.category == "mcp"])
+    print(f"🔢 Tool calls: {tool_calls}")
 
     if result.content:
         print(f"\n📝 Agent's response:")
