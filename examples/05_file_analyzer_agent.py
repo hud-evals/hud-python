@@ -93,11 +93,14 @@ def count_words(text: str) -> str:
     lines = text.split("\n")
     chars = len(text)
 
+    # Calculate average word length (excluding spaces/newlines)
+    avg_word_length = sum(len(word) for word in words) / len(words) if words else 0
+
     return f"""Statistics:
 - Words: {len(words)}
 - Lines: {len(lines)}
 - Characters: {chars}
-- Average word length: {chars / len(words) if words else 0:.1f}
+- Average word length: {avg_word_length:.1f}
 """
 
 
@@ -187,7 +190,7 @@ async def run_example(model: str = "gpt-4o-mini", verbose: bool = False):
     print("=" * 70)
     print(f"✅ Task completed!")
     print(f"📊 Reward: {result.reward}")
-    print(f"🔢 Steps taken: {len(result.trace)}")
+    print(f"🔢 Tool calls: {result.num_messages - 1}")  # Subtract initial prompt
 
     if result.content:
         print(f"\n📝 Agent's response:")
