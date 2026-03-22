@@ -147,11 +147,14 @@ Use the available tools: list_files, read_file, and count_words
     response = yield prompt
 
     # Evaluate: Did the agent mention a word count?
-    response_lower = response.lower()
-    if "word" in response_lower and any(char.isdigit() for char in response):
-        yield 1.0  # Success - mentioned words and a number
+    if not response:
+        yield 0.0  # Failed - no response from agent
     else:
-        yield 0.3  # Partial - didn't complete the task
+        response_lower = response.lower()
+        if "word" in response_lower and any(char.isdigit() for char in response):
+            yield 1.0  # Success - mentioned words and a number
+        else:
+            yield 0.3  # Partial - didn't complete the task
 
 
 # =============================================================================
