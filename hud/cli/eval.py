@@ -621,12 +621,13 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             # Resolve name → UUID first, then fetch by UUID.
             # Avoids ambiguity when multiple evalsets share a name.
             from hud.cli.sync import _fetch_remote_tasks, _resolve_taskset_id
-
             from hud.cli.utils.api import hud_headers
             from hud.settings import settings
 
             resolved_id, _resolved_name = _resolve_taskset_id(
-                cfg.source, settings.hud_api_url, hud_headers(),
+                cfg.source,
+                settings.hud_api_url,
+                hud_headers(),
             )
             if resolved_id:
                 taskset_id = resolved_id
@@ -647,7 +648,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     # --taskset override: associate job with a specific taskset
     if cfg.taskset:
         from hud.cli.sync import _resolve_taskset_id as _resolve_ts
-
         from hud.cli.utils.api import hud_headers as _headers
         from hud.settings import settings as _settings
 
