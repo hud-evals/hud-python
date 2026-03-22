@@ -77,10 +77,17 @@ def _resolve_taskset_id(
     name_or_id: str,
     api_url: str,
     headers: dict[str, str],
+    *,
+    create: bool = True,
 ) -> tuple[str, str]:
-    """Resolve a taskset name to its UUID. Creates the evalset if it doesn't exist.
+    """Resolve a taskset name to its UUID.
 
-    Returns (evalset_id, evalset_name).
+    Args:
+        create: If True (default), creates the evalset if it doesn't exist.
+            Set to False for read-only operations like ``hud eval``.
+
+    Returns (evalset_id, evalset_name). Returns ("", name) if not found
+    and create=False.
     """
     try:
         import uuid as _uuid
@@ -90,15 +97,28 @@ def _resolve_taskset_id(
     except ValueError:
         pass
 
-    response = httpx.post(
-        f"{api_url}/tasks/resolve-evalset",
-        json={"name": name_or_id},
+    if create:
+        response = httpx.post(
+            f"{api_url}/tasks/resolve-evalset",
+            json={"name": name_or_id},
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return str(data.get("evalset_id", "")), str(data.get("name", name_or_id))
+
+    # Read-only: look up by name without creating
+    response = httpx.get(
+        f"{api_url}/tasks/evalset/{parse.quote(name_or_id, safe='')}",
         headers=headers,
         timeout=30.0,
     )
+    if response.status_code == 404:
+        return "", name_or_id
     response.raise_for_status()
     data = response.json()
-    return str(data.get("evalset_id", "")), str(data.get("name", name_or_id))
+    return str(data.get("evalset_id", "")), str(data.get("evalset_name", name_or_id))
 
 
 def _fetch_remote_tasks(

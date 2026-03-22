@@ -628,6 +628,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
                 cfg.source,
                 settings.hud_api_url,
                 hud_headers(),
+                create=False,
             )
             if resolved_id:
                 taskset_id = resolved_id
@@ -652,7 +653,12 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         from hud.settings import settings as _settings
 
         try:
-            taskset_id, _ = _resolve_ts(cfg.taskset, _settings.hud_api_url, _headers())
+            taskset_id, _ = _resolve_ts(
+                cfg.taskset,
+                _settings.hud_api_url,
+                _headers(),
+                create=False,
+            )
         except Exception as e:
             hud_console.error(f"Failed to resolve taskset '{cfg.taskset}': {e}")
             raise typer.Exit(1) from e
