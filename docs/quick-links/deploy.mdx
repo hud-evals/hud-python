@@ -131,18 +131,17 @@ docker run -d --name my-env -p 8080:8080 my-image:latest \
 docker exec my-env hud scenario list
 
 # Setup a scenario (prints the prompt)
-docker exec my-env hud scenario setup my-env:checkout \
-  --args '{"product_name": "laptop"}'
+docker exec my-env hud scenario setup count \
+  --args '{"text": "strawberry", "letter": "r"}'
 
 # Your agent runs against MCP tools at localhost:8080/mcp
 
 # Grade (prints reward as JSON)
-docker exec my-env hud scenario grade my-env:checkout \
-  --answer "Order completed successfully"
+docker exec my-env hud scenario grade count --answer "3"
 
 # Test graders without an agent (setup + grade in one shot)
-docker exec my-env hud scenario run my-env:count \
-  --args '{"sentence": "strawberry", "letter": "r"}' --answer "3"
+docker exec my-env hud scenario run count \
+  --args '{"text": "mississippi", "letter": "s"}' --answer "4"
 ```
 
 ### With a Sandbox SDK (Python)
@@ -165,7 +164,7 @@ sandbox = daytona.create(CreateSandboxFromImageParams(
 
 # Setup — returns the prompt
 prompt = sandbox.process.exec(
-    'hud scenario setup my-env:checkout --args \'{"product_name": "laptop"}\''
+    'hud scenario setup count --args \'{"text": "strawberry", "letter": "r"}\''
 ).result
 
 # Agent runs against MCP tools at the sandbox
@@ -173,10 +172,10 @@ prompt = sandbox.process.exec(
 
 # Grade
 reward = json.loads(sandbox.process.exec(
-    'hud scenario grade my-env:checkout --answer "Order completed"'
+    'hud scenario grade count --answer "3"'
 ).result)
 
-daytona.remove(sandbox)
+daytona.delete(sandbox)
 ```
 </Tab>
 
@@ -192,15 +191,15 @@ app = modal.App("hud-eval")
 sandbox = modal.Sandbox.create(image=image, app=app)
 
 # Setup
-prompt = sandbox.exec("hud", "scenario", "setup", "my-env:checkout",
-    "--args", '{"product_name": "laptop"}').stdout.read()
+prompt = sandbox.exec("hud", "scenario", "setup", "count",
+    "--args", '{"text": "strawberry", "letter": "r"}').stdout.read()
 
 # Agent runs against MCP tools
 # ... your agent loop here ...
 
 # Grade
 reward = json.loads(sandbox.exec("hud", "scenario", "grade",
-    "my-env:checkout", "--answer", "Order completed").stdout.read())
+    "count", "--answer", "3").stdout.read())
 
 sandbox.terminate()
 ```

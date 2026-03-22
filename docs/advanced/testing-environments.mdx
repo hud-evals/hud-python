@@ -11,19 +11,16 @@ Define tasks in code, test locally, deploy, sync to the platform, run at scale.
 Tasks are instances of scenarios with specific arguments. Define them in a `tasks.py` file using `scenario.task()`:
 
 ```python
-from env import echo, add
+from env import count
 
-echo_hello = echo.task(message="hello")
-echo_hello.slug = "echo-hello"
+strawberry_r = count.task(text="strawberry", letter="r")
+strawberry_r.slug = "strawberry-r"
 
-echo_goodbye = echo.task(message="goodbye")
-echo_goodbye.slug = "echo-goodbye"
+mississippi_s = count.task(text="mississippi", letter="s")
+mississippi_s.slug = "mississippi-s"
 
-add_simple = add.task(a=2, b=3)
-add_simple.slug = "add-simple"
-
-add_large = add.task(a=999, b=1)
-add_large.slug = "add-large"
+abracadabra_a = count.task(text="abracadabra", letter="a")
+abracadabra_a.slug = "abracadabra-a"
 ```
 
 Each task binds a scenario to specific arguments. The `slug` is a stable identifier used for syncing and filtering.
