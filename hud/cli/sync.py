@@ -13,6 +13,7 @@ import typer
 
 from hud.cli.utils.api import hud_headers, require_api_key
 from hud.cli.utils.collect import collect_tasks
+from hud.cli.utils.evalset import fetch_remote_tasks, resolve_taskset_id
 from hud.cli.utils.project_config import (
     get_taskset_id,
     load_project_config,
@@ -72,74 +73,6 @@ def _compute_signature(
         separators=(",", ":"),
     )
 
-
-def _resolve_taskset_id(
-    name_or_id: str,
-    api_url: str,
-    headers: dict[str, str],
-    *,
-    create: bool = True,
-) -> tuple[str, str]:
-    """Resolve a taskset name to its UUID.
-
-    Args:
-        create: If True (default), creates the evalset if it doesn't exist.
-            Set to False for read-only operations like ``hud eval``.
-
-    Returns (evalset_id, evalset_name). Returns ("", name) if not found
-    and create=False.
-    """
-    try:
-        import uuid as _uuid
-
-        _uuid.UUID(name_or_id)
-        return name_or_id, name_or_id
-    except ValueError:
-        pass
-
-    if create:
-        response = httpx.post(
-            f"{api_url}/tasks/resolve-evalset",
-            json={"name": name_or_id},
-            headers=headers,
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return str(data.get("evalset_id", "")), str(data.get("name", name_or_id))
-
-    # Read-only: look up by name without creating
-    response = httpx.get(
-        f"{api_url}/tasks/evalset/{parse.quote(name_or_id, safe='')}",
-        headers=headers,
-        timeout=30.0,
-    )
-    if response.status_code == 404:
-        return "", name_or_id
-    response.raise_for_status()
-    data = response.json()
-    return str(data.get("evalset_id", "")), str(data.get("evalset_name", name_or_id))
-
-
-def _fetch_remote_tasks(
-    evalset_id: str,
-    api_url: str,
-    headers: dict[str, str],
-) -> list[dict[str, Any]]:
-    """Fetch remote tasks for an evalset by UUID."""
-    response = httpx.get(
-        f"{api_url}/tasks/evalsets/{evalset_id}/tasks-by-id",
-        headers=headers,
-        timeout=30.0,
-    )
-    if response.status_code == 404:
-        return []
-    response.raise_for_status()
-    data = response.json()
-    tasks_payload = data.get("tasks") or {}
-    if not isinstance(tasks_payload, dict):
-        return []
-    return [entry for entry in tasks_payload.values() if isinstance(entry, dict)]
 
 
 def _build_local_specs(
@@ -415,11 +348,11 @@ def sync_tasks_command(
     # Resolve taskset identity
     resolved_taskset_id = taskset_id or ""
     taskset_display = taskset or ""
+    previously_stored_id = get_taskset_id() or ""
 
     if not resolved_taskset_id and not taskset:
-        stored_id = get_taskset_id()
-        if stored_id:
-            resolved_taskset_id = stored_id
+        if previously_stored_id:
+            resolved_taskset_id = previously_stored_id
             hud_console.info("Using taskset ID from .hud/config.json")
         else:
             hud_console.error(
@@ -430,11 +363,20 @@ def sync_tasks_command(
 
     if taskset and not resolved_taskset_id:
         hud_console.progress_message("Resolving taskset...")
-        resolved_taskset_id, taskset_display = _resolve_taskset_id(
+        resolved_taskset_id, taskset_display, evalset_created = resolve_taskset_id(
             taskset,
             api_url,
             headers,
         )
+        if evalset_created:
+            hud_console.success(f"Created new evalset '{taskset_display}'")
+        else:
+            hud_console.success(f"Found evalset '{taskset_display}'")
+
+        if previously_stored_id and previously_stored_id != resolved_taskset_id:
+            hud_console.warning(
+                f"Switching from previously stored taskset ({previously_stored_id[:8]}...)"
+            )
 
     # Resolve the taskset name from platform (for display + upload)
     if resolved_taskset_id and not taskset_display:
@@ -534,7 +476,7 @@ def sync_tasks_command(
     if resolved_taskset_id:
         hud_console.progress_message("Fetching remote taskset...")
         try:
-            remote_tasks = _fetch_remote_tasks(
+            remote_tasks = fetch_remote_tasks(
                 resolved_taskset_id,
                 api_url,
                 headers,

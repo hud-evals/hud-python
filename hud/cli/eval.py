@@ -618,13 +618,11 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         elif path.exists() and path.suffix in {".json", ".jsonl"}:
             tasks = _load_from_file(path)
         else:
-            # Resolve name → UUID first, then fetch by UUID.
-            # Avoids ambiguity when multiple evalsets share a name.
-            from hud.cli.sync import _fetch_remote_tasks, _resolve_taskset_id
             from hud.cli.utils.api import hud_headers
+            from hud.cli.utils.evalset import fetch_remote_tasks, resolve_taskset_id
             from hud.settings import settings
 
-            resolved_id, _resolved_name = _resolve_taskset_id(
+            resolved_id, _resolved_name, _ = resolve_taskset_id(
                 cfg.source,
                 settings.hud_api_url,
                 hud_headers(),
@@ -632,7 +630,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             )
             if resolved_id:
                 taskset_id = resolved_id
-                raw_tasks = _fetch_remote_tasks(resolved_id, settings.hud_api_url, hud_headers())
+                raw_tasks = fetch_remote_tasks(resolved_id, settings.hud_api_url, hud_headers())
                 from hud.eval.task import Task
 
                 tasks = [Task(**{**t, "args": t.get("args") or {}}) for t in raw_tasks]
@@ -646,17 +644,16 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
-    # --taskset override: associate job with a specific taskset
     if cfg.taskset:
-        from hud.cli.sync import _resolve_taskset_id as _resolve_ts
-        from hud.cli.utils.api import hud_headers as _headers
+        from hud.cli.utils.api import hud_headers as _hud_headers
+        from hud.cli.utils.evalset import resolve_taskset_id as _resolve_ts
         from hud.settings import settings as _settings
 
         try:
-            taskset_id, _ = _resolve_ts(
+            taskset_id, _, _ = _resolve_ts(
                 cfg.taskset,
                 _settings.hud_api_url,
-                _headers(),
+                _hud_headers(),
                 create=False,
             )
         except Exception as e:

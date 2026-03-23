@@ -18,7 +18,6 @@ from hud.utils.hud_console import HUDConsole  # noqa: TC001 — runtime use
 LOGGER = logging.getLogger(__name__)
 
 ENV_NAME_PATTERN = re.compile(r'Environment\(["\']([^"\']+)["\']\)')
-TASK_ENV_NAME_PATTERN = re.compile(r'"name"\s*:\s*"([^"]+)"')
 
 
 def resolve_registry_name(
@@ -49,7 +48,7 @@ def find_env_name_references(
     Returns list of (file_path, line_number, full_line, matched_name).
     """
     results: list[tuple[Path, int, str, str]] = []
-    py_files = list(directory.glob("*.py"))
+    py_files = list(directory.glob("*.py")) + list(directory.glob("*/*.py"))
 
     for py_file in py_files:
         try:
