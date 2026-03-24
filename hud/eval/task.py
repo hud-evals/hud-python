@@ -173,7 +173,7 @@ class Task(BaseModel):
     )
     slug: str | None = Field(
         default=None,
-        max_length=20,
+        max_length=32,
         description="Stable task slug for task filtering and sync workflows.",
     )
     args: dict[str, Any] | None = Field(

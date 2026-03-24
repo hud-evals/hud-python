@@ -6,6 +6,8 @@ icon: "robot"
 
 HUD environments work with any agent framework. The `Environment` class provides format converters for all major providers, and `hud.eval()` handles setup, evaluation, and tracing automatically.
 
+Environments also make agents composable—wrap a scenario with `AgentTool` and an orchestrator can call it as a specialized subagent. See the [Ops Diagnostics Cookbook](/cookbooks/ops-diagnostics) for a complete example of hierarchical agents calling subagent scenarios.
+
 Every example on this page uses the `eval` defined below and the [HUD gateway](/quick-links/models) for inference.
 
 ## The Example Environment

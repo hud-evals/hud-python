@@ -601,20 +601,41 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     from pathlib import Path
 
     from hud.datasets import run_dataset
-    from hud.datasets.loader import _load_from_api, _load_from_file
+    from hud.datasets.loader import _load_from_file
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    # Load tasks — use internal loaders to capture taskset_id from API sources
-    hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
+    # Load tasks — supports Python files/dirs, JSON/JSONL, and API slugs
+    hud_console.info(f"Loading tasks from: {cfg.source}")
     path = Path(cfg.source)
     taskset_id: str | None = None
     try:
-        if path.exists() and path.suffix in {".json", ".jsonl"}:
+        if path.exists() and (path.suffix == ".py" or path.is_dir()):
+            from hud.cli.utils.collect import collect_tasks
+
+            tasks = collect_tasks(cfg.source)
+        elif path.exists() and path.suffix in {".json", ".jsonl"}:
             tasks = _load_from_file(path)
         else:
-            tasks, taskset_id = _load_from_api(cfg.source)
+            from hud.cli.utils.api import hud_headers
+            from hud.cli.utils.evalset import fetch_remote_tasks, resolve_taskset_id
+            from hud.settings import settings
+
+            resolved_id, _resolved_name, _ = resolve_taskset_id(
+                cfg.source,
+                settings.hud_api_url,
+                hud_headers(),
+                create=False,
+            )
+            if resolved_id:
+                taskset_id = resolved_id
+                raw_tasks = fetch_remote_tasks(resolved_id, settings.hud_api_url, hud_headers())
+                from hud.eval.task import Task
+
+                tasks = [Task(**{**t, "args": t.get("args") or {}}) for t in raw_tasks]
+            else:
+                tasks = []
     except Exception as e:
         hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
         raise typer.Exit(1) from e
@@ -623,13 +644,18 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
-    # TODO: --taskset with file source should sync local tasks to the platform taskset
-    # (diff, save, then run). For now it just resolves the slug and associates the job.
     if cfg.taskset:
-        from hud.datasets.loader import resolve_taskset_id
+        from hud.cli.utils.api import hud_headers as _hud_headers
+        from hud.cli.utils.evalset import resolve_taskset_id as _resolve_ts
+        from hud.settings import settings as _settings
 
         try:
-            taskset_id = resolve_taskset_id(cfg.taskset)
+            taskset_id, _, _ = _resolve_ts(
+                cfg.taskset,
+                _settings.hud_api_url,
+                _hud_headers(),
+                create=False,
+            )
         except Exception as e:
             hud_console.error(f"Failed to resolve taskset '{cfg.taskset}': {e}")
             raise typer.Exit(1) from e

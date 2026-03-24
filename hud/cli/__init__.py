@@ -11,7 +11,7 @@ from rich.panel import Panel
 # Create the main Typer app
 app = typer.Typer(
     name="hud",
-    help="🚀 HUD CLI - build, test, and deploy RL environments",
+    help="HUD CLI - build, test, and deploy evaluation environments",
     add_completion=False,
     rich_markup_mode="rich",
     pretty_exceptions_enable=False,
@@ -40,8 +40,8 @@ from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
-from .rft import rft_run_command  # noqa: E402
-from .rft_status import rft_status_typer_command  # noqa: E402
+from .scenario import scenario_app  # noqa: E402
+from .sync import sync_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -50,7 +50,7 @@ app.command(name="debug", context_settings=_EXTRA_ARGS)(debug_command)
 app.command(name="dev", context_settings=_EXTRA_ARGS)(dev_command)
 app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
 app.command(name="deploy")(deploy_command)
-app.command(name="link")(link_command)
+app.command(name="link", hidden=True)(link_command)
 app.command(name="eval")(eval_command)
 app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)
@@ -108,11 +108,11 @@ def version() -> None:
         console.print("HUD CLI version: [cyan]unknown[/cyan]")
 
 
-# RFT subcommand group
-rft_app = typer.Typer(help="🚀 Reinforcement Fine-Tuning (RFT) commands")
-rft_app.command("run")(rft_run_command)
-rft_app.command("status")(rft_status_typer_command)
-app.add_typer(rft_app, name="rft")
+# Scenario subcommand group
+app.add_typer(scenario_app, name="scenario")
+
+# Sync subcommand group
+app.add_typer(sync_app, name="sync")
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ def main() -> None:
         if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
             console.print(
                 Panel.fit(
-                    "[bold cyan]🚀 HUD CLI[/bold cyan]\nBuild, test, and deploy RL environments",
+                    "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
                     border_style="cyan",
                 )
             )
@@ -150,10 +150,8 @@ def main() -> None:
             )
             console.print("  2. Start dev server:        [cyan]hud dev[/cyan]")
             console.print("  3. Deploy to HUD platform:  [cyan]hud deploy[/cyan]")
-            console.print("  4. Run evaluations:         [cyan]hud eval tasks.jsonl[/cyan]")
-            console.print("\n[yellow]Training:[/yellow]")
-            console.print("  [cyan]hud rft run tasks.jsonl[/cyan]      Launch an RFT training job")
-            console.print("  [cyan]hud rft status <model-id>[/cyan]  Check training status\n")
+            console.print("  4. Sync tasks:              [cyan]hud sync tasks my-taskset[/cyan]")
+            console.print("  5. Run evaluations:         [cyan]hud eval tasks.py claude[/cyan]\n")
 
         app()
     except typer.Exit as e:

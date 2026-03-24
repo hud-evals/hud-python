@@ -4,11 +4,14 @@ description: "The four building blocks of HUD: environments, tools, scenarios, a
 icon: "shapes"
 ---
 
-HUD has four core concepts. Everything else in the SDK and platform is built on top of them.
+An RL environment gives an agent a sandboxed workspace, a set of tools, a task to complete, and a reward signal. The reward signal is useful for training better models or understanding the capabilities of current modesl.
+HUD gives developers a standardized way to build, test, and run RL environments. 
+
+HUD environments are built on four main concepts.
 
 ## Environments
 
-An environment is the world an agent lives in. It packages **tools** (what agents can do) and **scenarios** (how agents are evaluated) into a single deployable unit.
+An environment is the harness an agent operates in. It packages **tools** (what agents can do) and **scenarios** (how agents are evaluated) into a single deployable unit.
 
 ```python
 from hud import Environment
@@ -20,72 +23,129 @@ Under the hood, an environment is an [MCP](https://modelcontextprotocol.io) serv
 
 Why not just point agents at a production API or website? Because a production API is one live instance with shared state. You can't run 500 parallel task runs against it without them stepping on each other. Environments solve this: isolated, deterministic, reproducible.
 
-## Tools
+## Scenarios
 
-A tool is a function an agent can call. Decorate any function with `@env.tool()` and it becomes agent-callable:
+A scenario defines how an agent is evaluated. It is an async generator function with **two yields** -- the first yield sends a prompt to the agent, and the second yield returns a reward.
 
-```python
-@env.tool()
-def search(query: str) -> str:
-    """Search the knowledge base."""
-    return db.search(query)
-```
-
-The docstring becomes the tool's description that the agent sees. The type hints become the tool's parameter schema. That's it -- your function is now something any AI model can invoke.
-
-You can also connect existing infrastructure as tools without rewriting anything:
+Here's the simplest possible scenario:
 
 ```python
-env.connect_fastapi(app)                                    # FastAPI routes → tools
-env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
-env.connect_hub("hud-evals/browser")                        # HUD Hub environments → tools
+@env.scenario("count")
+async def count(word: str, letter: str):
+    # ---- PROMPT ----
+    # The first yield sends a prompt to the agent.
+    # The agent receives this prompt, runs its reasoning loop,
+    # and returns its final answer as a string.
+    answer = yield f"How many '{letter}' in '{word}'?"
+
+    # ---- SCORING ----
+    # After the agent responds, we check if the answer is correct.
+    # The second yield returns a reward: 1.0 for correct, 0.0 for wrong.
+    correct = str(word.lower().count(letter.lower()))
+    yield 1.0 if answer and correct in answer else 0.0
 ```
 
-HUD also ships [pre-built tools](/tools) for common capabilities (shell, file editing, computer use, browser automation, web search), but your own `@env.tool()` functions are the starting point.
+Every scenario follows this structure:
 
-## Scenario
+| Section | Where | What it does |
+|---------|-------|--------------|
+| **Setup** *(optional)* | Before the first yield | Seed a database, navigate to a URL, prepare initial state |
+| **Prompt** | The first `yield` | Sends instructions to the agent; receives the agent's answer |
+| **Scoring** | After the first yield, ending with the second `yield` | Checks results and returns a reward between 0.0 and 1.0 |
 
-A scenario defines how an agent is evaluated. It is an async generator with **two yields**:
-
-```python
-@env.scenario("checkout")
-async def checkout(product_name: str):
-    # --- Setup (runs before the agent) ---
-    navigate(url="https://store.example.com")
-
-    # --- First yield: the prompt ---
-    # Sends the prompt to the agent. The agent runs. Its answer comes back.
-    answer = yield f"Add '{product_name}' to cart and complete checkout"
-
-    # --- Second yield: the reward ---
-    # Checks what happened and returns a score (0.0 to 1.0).
-    order_exists = check_order_status(product_name)
-    yield 1.0 if order_exists else 0.0
-```
-
-The three sections are always the same:
-
-| Section | Where | Purpose |
-|---------|-------|---------|
-| **Setup** | Before first yield | Seed state, navigate to starting point |
-| **Prompt** | The first `yield` | Tell the agent what to do |
-| **Scoring** | After first yield, ending with second `yield` | Check results, return reward |
-
-The agent runs between the two yields. It calls tools, reasons, and eventually produces an answer. Your scoring logic then checks the environment state and/or the answer to determine a reward.
+The agent runs between the two yields. It calls tools, reasons, and produces an answer. Your scoring logic then checks the environment state and/or the answer to determine a reward.
 
 Scenarios are **parameterized**. The same scenario with different arguments produces different evaluation tasks:
 
 ```python
-env("checkout", product_name="Laptop")     # one task
-env("checkout", product_name="Headphones") # another task, same scenario
+env("count", word="strawberry", letter="r")  # one task (answer: 3)
+env("count", word="banana", letter="a")      # another task (answer: 3)
+env("count", word="mississippi", letter="s") # another task (answer: 4)
 ```
+
+## Tools
+
+Tools are functions that an agent can call while it's working on a task. You define a tool by decorating a function with `@env.tool()`:
+
+```python
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
+```
+
+The docstring becomes the tool's description that the agent sees. The type hints become the tool's parameter schema. That's it -- your function is now something any AI model can invoke.
+
+### Pre-built Tools
+
+Most real environments don't need custom tools from scratch. HUD ships a library of standard tools you can compose into complex environments.
+
+**Computer use environment** -- give an agent mouse, keyboard, and screenshot control:
+
+```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool, BashTool, EditTool
+
+env = Environment("desktop-agent")
+
+# Add computer control -- the agent can click, type, scroll, and take screenshots.
+# HUD automatically adapts these to each model's native format
+# (Claude's computer_20250124, OpenAI's computer_use_preview, etc.)
+env.add_tool(AnthropicComputerTool())
+
+# Add a shell -- the agent can run bash commands in a persistent session.
+env.add_tool(BashTool())
+
+# Add a file editor -- the agent can view and edit files with str_replace.
+env.add_tool(EditTool())
+```
+
+**Web research environment** -- give an agent browser and search capabilities:
+
+```python
+from hud import Environment
+from hud.tools import PlaywrightTool
+from hud.tools.hosted import WebSearchTool
+from hud.tools.filesystem import ReadTool, GrepTool
+
+env = Environment("web-researcher")
+
+# Add a browser -- the agent can navigate pages, click elements, fill forms.
+env.add_tool(PlaywrightTool())
+
+# Add web search -- Claude's native search, executed server-side by Anthropic.
+env.add_tool(WebSearchTool())
+
+# Add file reading -- the agent can read files and search their contents.
+env.add_tool(ReadTool())
+env.add_tool(GrepTool())
+```
+
+See the full [Tools Reference](/tools/computer) for all available tools (computer, coding, filesystem, memory, web, grounding).
+
+### Connectors
+
+Connectors let you pull external tools into your HUD environment. If you have tools defined somewhere else -- another HUD environment, an external MCP server, or an existing API -- connectors bring them in so your agent can use them alongside your own tools.
+
+```python
+# Connect a FastAPI app -- all its routes become agent-callable tools.
+env.connect_fastapi(app)
+
+# Connect an OpenAPI spec -- the spec's endpoints become tools.
+env.connect_openapi("https://api.example.com/openapi.json")
+
+# Connect another HUD environment -- its tools become available in yours.
+env.connect_hub("hud-evals/browser")
+```
+
+You don't need connectors to get started. They're useful when you want to compose environments or wrap existing services.
 
 ## Tasks
 
 A task is a scenario instantiated with specific arguments. It's what you actually run an agent against:
 
 ```python
-task = env("checkout", product_name="Laptop")
+task = env("count", word="strawberry", letter="r")
 ```
 
 Tasks group into **tasksets** -- batches of related tasks used for benchmarking. Create a taskset, add tasks with different arguments, and run the whole set across models to compare performance.
@@ -107,8 +167,8 @@ flowchart TD
 1. An **Environment** contains **Tools** and **Scenarios**
 2. A **Scenario** + arguments = a **Task**
 3. **Tasks** group into **Tasksets**
-4. Run a taskset → collect **Traces** with rewards
-5. Train a model on successful traces → run again → improve
+4. Run a taskset across models -> collect **Traces** with rewards
+5. Use the traces to compare models, sell training data to labs, or fine-tune your own agent
 
 ## Running an Agent Against a Task
 
@@ -118,24 +178,24 @@ The `hud.eval()` context manager is how you run any agent against a task:
 import hud
 from hud.agents import create_agent
 
-task = env("checkout", product_name="Laptop")
+task = env("count", word="strawberry", letter="r")
 agent = create_agent("claude-sonnet-4-5")
 
 async with hud.eval(task) as ctx:
     result = await agent.run(ctx)
 
-print(f"Reward: {result.reward}")
+print(f"Reward: {result.reward}")  # 1.0 if agent answers "3"
 ```
 
 `create_agent()` is a convenience that picks the right agent class for each model. You can also bring your own agent loop:
 
 ```python
 async with hud.eval(task) as ctx:
-    # ctx.prompt         — the prompt from the scenario's first yield
-    # ctx.call_tool()    — execute a tool call
-    # ctx.submit()       — submit the agent's final answer → triggers scoring
-    # ctx.as_openai_chat_tools()  — tools in OpenAI format
-    # ctx.as_claude_tools()       — tools in Anthropic format
+    # ctx.prompt         -- the prompt from the scenario's first yield
+    # ctx.call_tool()    -- execute a tool call
+    # ctx.submit()       -- submit the agent's final answer, triggers scoring
+    # ctx.as_openai_chat_tools()  -- tools in OpenAI format
+    # ctx.as_claude_tools()       -- tools in Anthropic format
 
     response = await client.chat.completions.create(
         model="gpt-4o",
@@ -148,21 +208,20 @@ async with hud.eval(task) as ctx:
 print(ctx.reward)
 ```
 
-## What You Don't Need Yet
+## Advanced topics
 
-HUD has a lot of surface area. Here's what to skip on day one:
+HUD covers a lot of use cases for building environments at scale and agent development.
 
-| Skip for now | What it is | When you'll need it |
+| Topic | What it is | When you'll need it |
 |--------------|-----------|-------------------|
+| [Harbor conversion](/advanced/harbor-convert) | Importing external benchmarks | Migrating existing benchmarks |
+| [REST API](/platform/rest-api) | Programmatic platform access | Custom integrations |
+| [Framework integrations](/guides/integrations) | LangChain, CrewAI, AutoGen, etc. | When using those frameworks |
 | [Chat scenarios](/guides/chat) | Multi-turn conversational agents | Building chat products |
 | [AgentTool](/tools/agents) | Hierarchical sub-agent delegation | Complex multi-agent workflows |
-| [Pre-built tools](/tools) | Shell, browser, file editing, etc. | When your tasks need system-level capabilities |
-| [Framework integrations](/guides/integrations) | LangChain, CrewAI, AutoGen, etc. | When using those frameworks |
-| [Harbor conversion](/advanced/harbor-convert) | Importing external benchmarks | Migrating existing benchmarks |
 | [Slack integration](/platform/slack) | Running agents from Slack | Team workflows |
-| [REST API](/platform/rest-api) | Programmatic platform access | Custom integrations |
 
-Start with: one environment, a few tools, one scenario, run it locally. Everything else builds on that.
+Start with: one environment, one scenario, a few out of the box tools, run it locally. Everything else builds on that.
 
 ## Next Steps
 
@@ -179,7 +238,7 @@ Start with: one environment, a few tools, one scenario, run it locally. Everythi
   Patterns for reliable environments and evals
 </Card>
 
-<Card title="Tasks & Training" icon="flask-vial" href="/quick-links/evals">
+<Card title="Tasks & Training" icon="flask-vial" href="/quick-links/training">
   Run evaluations and train models
 </Card>
 </CardGroup>

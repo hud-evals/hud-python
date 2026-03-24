@@ -12,6 +12,7 @@
     "light": "#ffffff",
     "dark": "#5b21b6"
   },
+  "css": "/custom.css",
   "icons": {
     "library": "fontawesome"
   },
@@ -50,9 +51,35 @@
             "pages": [
               "index",
               "concepts",
-              "llm-quickstart",
-              "advanced/harbor-convert"
-
+              "llm-quickstart"
+            ]
+          },
+          {
+            "group": "Building Environments",
+            "pages": [
+              "quick-links/environments",
+              "tools/index",
+              "guides/best-practices",
+              "quick-links/deploy",
+              "advanced/testing-environments"
+            ]
+          },
+          {
+            "group": "Running Agents",
+            "pages": [
+              "quick-links/models",
+              "quick-links/training",
+              "guides/integrations",
+              "guides/chat",
+              "tools/agents"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/patterns",
+              "advanced/harbor-convert",
+              "platform/publishing-leaderboards"
             ]
           },
           {
@@ -62,30 +89,7 @@
               "reference/tools",
               "reference/evals",
               "reference/agents",
-              "reference/mcpserver",
               "reference/types"
-            ]
-          },
-          {
-            "group": "Building Environments",
-            "pages": [
-              "quick-links/environments",
-              "tools/index",
-              "guides/best-practices",
-              "guides/sandboxing",
-              "quick-links/deploy",
-              "quick-links/evals",
-              "advanced/testing-environments",
-              "platform/publishing-leaderboards"
-            ]
-          },
-          {
-            "group": "Building Agents and Training Models",
-            "pages": [
-              "quick-links/models",
-              "guides/integrations",
-              "guides/chat",
-              "tools/agents"
             ]
           },
           {
@@ -120,6 +124,7 @@
               "reference/cli/analyze",
               "reference/cli/debug",
               "reference/cli/eval",
+              "reference/cli/sync",
               "reference/cli/misc"
             ]
           },
@@ -168,6 +173,18 @@
             "group": "How We Use HUD on HUD",
             "pages": [
               "platform/internal/trace-analysis"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "icon": "clock-rotate-left",
+        "groups": [
+          {
+            "group": "Changelog",
+            "pages": [
+              "changelog"
             ]
           }
         ]

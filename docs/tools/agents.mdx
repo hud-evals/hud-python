@@ -7,6 +7,12 @@ icon: "users"
 
 `AgentTool` lets one agent delegate tasks to another. An orchestrator agent calls specialized sub-agents as tools—each with its own environment, model, and evaluation.
 
+## Scenarios as Sub-Agent Specs
+
+Scenarios are natural sub-agent boundaries. Each scenario defines what the agent should focus on, what success looks like, and how to measure it. The scenario's parameters become a tool spec that other agents can call—wrap a scenario with `AgentTool` and an orchestrator can invoke it as a specialized sub-agent.
+
+Agents train much better within a scenario structure than on standalone random tasks. Scenarios provide the boundaries that make agents composable.
+
 ## Why Sub-Agents?
 
 Complex tasks often break into specialized subtasks:
