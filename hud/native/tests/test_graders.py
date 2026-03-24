@@ -146,9 +146,7 @@ class TestScenarioIntegration:
         @env.scenario("bash-graded")
         async def bash_graded_scenario():
             yield "Run the verification"
-            yield Grade.from_subscores(
-                [BashGrader.grade(weight=1.0, command="echo verified")]
-            )
+            yield Grade.from_subscores([BashGrader.grade(weight=1.0, command="echo verified")])
 
         prompt = await env.run_scenario_setup("bash-graded", {})
         assert prompt == "Run the verification"
