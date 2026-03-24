@@ -31,11 +31,12 @@ class Grade:
 
     @staticmethod
     def from_subscores(subscores: list[SubScore]) -> EvaluationResult:
-        """Combine subscores into a clipped reward and ready-to-yield result.
+        """Combine subscores into a weighted reward and ready-to-yield result.
 
         Positive weights are normalized to sum to ``1.0`` so the returned
         ``EvaluationResult`` lines up with the SDK's subscore semantics.
-        Negative weights are preserved as penalties.
+        Negative weights are preserved as penalties, including when they drive
+        the final reward below zero.
         """
 
         if not subscores:
@@ -49,16 +50,28 @@ class Grade:
         for item in subscores:
             name_counts[item.name] = name_counts.get(item.name, 0) + 1
 
+        reserved_names = {item.name for item in subscores}
         name_usage: dict[str, int] = {}
+        used_names: set[str] = set()
         normalized_subscores: list[SubScore] = []
         metadata: dict[str, Any] = {}
 
         for item in subscores:
-            if name_counts[item.name] == 1:
+            if name_counts[item.name] == 1 and item.name not in used_names:
                 final_name = item.name
             else:
-                name_usage[item.name] = name_usage.get(item.name, 0) + 1
-                final_name = f"{item.name}-{name_usage[item.name]}"
+                suffix = name_usage.get(item.name, 0)
+                while True:
+                    suffix += 1
+                    candidate = f"{item.name}-{suffix}"
+                    if candidate in used_names:
+                        continue
+                    if candidate in reserved_names:
+                        continue
+                    name_usage[item.name] = suffix
+                    final_name = candidate
+                    break
+            used_names.add(final_name)
 
             normalized_weight = (
                 item.weight / positive_weight_sum if item.weight > 0 else item.weight
@@ -74,12 +87,7 @@ class Grade:
             if item.metadata is not None:
                 metadata[final_name] = item.metadata
 
-        reward = float(
-            min(
-                max(sum(item.value * item.weight for item in normalized_subscores), 0.0),
-                1.0,
-            )
-        )
+        reward = float(sum(item.value * item.weight for item in normalized_subscores))
 
         return EvaluationResult(
             reward=reward,

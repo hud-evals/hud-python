@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from hud.environment import Environment
@@ -52,6 +54,24 @@ class TestGrade:
         assert result.subscores is not None
         assert [subscore.name for subscore in result.subscores] == ["same-1", "same-2"]
 
+    def test_from_subscores_duplicate_names_avoid_existing_suffix_collisions(self) -> None:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = Grade.from_subscores(
+                [
+                    SubScore(name="x-1", value=1.0, weight=0.3),
+                    SubScore(name="x", value=1.0, weight=0.4),
+                    SubScore(name="x", value=0.0, weight=0.6),
+                ]
+            )
+
+        assert result.subscores is not None
+        assert [subscore.name for subscore in result.subscores] == ["x-1", "x-2", "x-3"]
+        assert set(result.info) == set()
+        assert not [
+            warning for warning in caught if "Duplicate subscore names" in str(warning.message)
+        ]
+
     def test_from_subscores_propagates_metadata(self) -> None:
         metadata = {"stdout": "ok"}
         result = Grade.from_subscores(
@@ -60,6 +80,21 @@ class TestGrade:
         assert result.info["grader"] == metadata
         assert result.subscores is not None
         assert result.subscores[0].metadata == metadata
+
+    def test_from_subscores_preserves_negative_reward_without_validator_warning(self) -> None:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = Grade.from_subscores(
+                [
+                    SubScore(name="correct", value=0.0, weight=1.0),
+                    SubScore(name="penalty", value=1.0, weight=-0.2),
+                ]
+            )
+
+        assert result.reward == pytest.approx(-0.2)
+        assert not [
+            warning for warning in caught if "Subscores don't match reward" in str(warning.message)
+        ]
 
 
 class TestGrader:
