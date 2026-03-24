@@ -4,13 +4,23 @@ description: "Build, evaluate, and train AI agents."
 icon: "book"
 ---
 
-HUD is a platform for building RL environments for AI agents. It gives you three things:
+HUD is a platform for building RL environments for AI agents.
 
-1. **Environment SDK** — Create a harness with agent-callable tools. Define evaluation logic with scenarios that yield a prompt and a reward.
+An RL environment is an isolated sandbox where an agent can take actions (via tools), complete a task, and receive a reward signal. Running agents through these environments produces **traces** -- full recordings of what the agent did, what tools it called, and how it scored. These traces are useful for model evaluations and reinforcement learning training signal. 
+
+People use HUD for:
+
+- **Evaluating model performance.** Build a taskset, run it across models, compare scores. Find out which model handles your use case before you commit to one.
+- **Building RL Environments.** Create frontier grade post-training data for different capabilities such as coding, computer use, tool use, deep research and more. 
+- **Training specialized agents.** Use reinforcement fine-tuning (RFT) to produce a model that's better at your specific tasks.
+
+The platform gives you three pieces:
+
+1. **Environment SDK** — Define agent-callable tools and evaluation logic. Each environment spins up fresh and isolated for every run.
 2. **Eval & Training Platform** — Run evaluations at scale on [hud.ai](https://hud.ai). Collect traces. Train models on successful runs.
-3. **Model Gateway** — One OpenAI-compatible endpoint at `inference.hud.ai` for every model: Claude, GPT, Gemini, Grok. One API key, swap the model string.
+3. **Model Gateway** — One OpenAI-compatible endpoint at `inference.hud.ai` for Claude, GPT, Gemini, Grok, and more.
 
-New to HUD? Read [Core Concepts](/concepts) first — it defines the four building blocks (environments, tools, scenarios, tasks) and how they fit together.
+Read [Core Concepts](/concepts) before getting started!
 
 ## Install
 
@@ -45,7 +55,7 @@ async def count(word: str, letter: str):
 
 The scenario has two yields: the first sends a prompt to the agent and receives its answer. The second scores the result as a reward. [Learn more about scenarios](/concepts#scenario).
 
-### The Canonical Workflow
+### Example Workflow
 
 ```bash
 hud init my-env       # Scaffold environment

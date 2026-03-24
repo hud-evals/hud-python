@@ -4,7 +4,10 @@ description: "The four building blocks of HUD: environments, tools, scenarios, a
 icon: "shapes"
 ---
 
-HUD has four core concepts. Everything else in the SDK and platform is built on top of them.
+An RL environment gives an agent a sandboxed workspace, a set of tools, a task to complete, and a reward signal. The reward signal is useful for training better models or understanding the capabilities of current modesl.
+HUD gives developers a standardized way to build, test, and run RL environments. 
+
+HUD environments are built on four main concepts.
 
 ## Environments
 
@@ -164,8 +167,8 @@ flowchart TD
 1. An **Environment** contains **Tools** and **Scenarios**
 2. A **Scenario** + arguments = a **Task**
 3. **Tasks** group into **Tasksets**
-4. Run a taskset -> collect **Traces** with rewards
-5. Train a model on calibrated Tasksets -> run again -> improve
+4. Run a taskset across models -> collect **Traces** with rewards
+5. Use the traces to compare models, sell training data to labs, or fine-tune your own agent
 
 ## Running an Agent Against a Task
 
