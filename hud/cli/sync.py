@@ -74,7 +74,6 @@ def _compute_signature(
     )
 
 
-
 def _build_local_specs(
     tasks: list[Any],
     hud_console: HUDConsole,

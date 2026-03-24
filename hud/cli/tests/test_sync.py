@@ -1020,28 +1020,28 @@ class TestEnvironmentNameResolution:
 class TestTasksetResolution:
     def test_T1_name_resolves_to_id(self) -> None:
         """T1: Taskset name resolves to UUID via POST resolve-evalset."""
-        from hud.cli.sync import _resolve_taskset_id
+        from hud.cli.utils.evalset import resolve_taskset_id
 
         resp = _mock_response(200, {"evalset_id": "uuid-123", "name": "my-taskset"})
         with patch("httpx.post", return_value=resp):
-            ts_id, ts_name = _resolve_taskset_id("my-taskset", "https://api.hud.ai", {})
+            ts_id, ts_name, _ = resolve_taskset_id("my-taskset", "https://api.hud.ai", {})
         assert ts_id == "uuid-123"
         assert ts_name == "my-taskset"
 
     def test_T1_creates_new_taskset(self) -> None:
         """T1: New taskset name creates it and returns UUID."""
-        from hud.cli.sync import _resolve_taskset_id
+        from hud.cli.utils.evalset import resolve_taskset_id
 
         resp = _mock_response(200, {"evalset_id": "new-uuid", "name": "new-ts", "created": True})
         with patch("httpx.post", return_value=resp):
-            ts_id, _ts_name = _resolve_taskset_id("new-ts", "https://api.hud.ai", {})
+            ts_id, _ts_name, _ = resolve_taskset_id("new-ts", "https://api.hud.ai", {})
         assert ts_id == "new-uuid"
 
     def test_uuid_passed_directly(self) -> None:
         """UUID input skips API resolution."""
-        from hud.cli.sync import _resolve_taskset_id
+        from hud.cli.utils.evalset import resolve_taskset_id
 
-        ts_id, _ts_name = _resolve_taskset_id(
+        ts_id, _ts_name, _ = resolve_taskset_id(
             "550e8400-e29b-41d4-a716-446655440000",
             "https://api.hud.ai",
             {},
@@ -1056,7 +1056,7 @@ class TestTasksetResolution:
 
 class TestFetchRemoteTasks:
     def test_fetch_existing_taskset(self) -> None:
-        from hud.cli.sync import _fetch_remote_tasks
+        from hud.cli.utils.evalset import fetch_remote_tasks
 
         resp = _mock_response(
             200,
@@ -1070,20 +1070,20 @@ class TestFetchRemoteTasks:
             },
         )
         with patch("httpx.get", return_value=resp):
-            tasks = _fetch_remote_tasks("ts-123", "https://api.hud.ai", {})
+            tasks = fetch_remote_tasks("ts-123", "https://api.hud.ai", {})
         assert len(tasks) == 2
 
     def test_E4_fetch_nonexistent_taskset(self) -> None:
         """Taskset doesn't exist → empty results."""
-        from hud.cli.sync import _fetch_remote_tasks
+        from hud.cli.utils.evalset import fetch_remote_tasks
 
         resp = _mock_response(404)
         with patch("httpx.get", return_value=resp):
-            tasks = _fetch_remote_tasks("gone-uuid", "https://api.hud.ai", {})
+            tasks = fetch_remote_tasks("gone-uuid", "https://api.hud.ai", {})
         assert tasks == []
 
     def test_fetch_empty_taskset(self) -> None:
-        from hud.cli.sync import _fetch_remote_tasks
+        from hud.cli.utils.evalset import fetch_remote_tasks
 
         resp = _mock_response(
             200,
@@ -1094,7 +1094,7 @@ class TestFetchRemoteTasks:
             },
         )
         with patch("httpx.get", return_value=resp):
-            tasks = _fetch_remote_tasks("ts-empty", "https://api.hud.ai", {})
+            tasks = fetch_remote_tasks("ts-empty", "https://api.hud.ai", {})
         assert tasks == []
 
 
@@ -1109,10 +1109,10 @@ class TestFullSyncFlow:
         from hud.cli.sync import (
             _build_local_specs,
             _diff_and_display,
-            _fetch_remote_tasks,
             _upload_tasks,
         )
         from hud.cli.utils.collect import collect_tasks
+        from hud.cli.utils.evalset import fetch_remote_tasks
         from hud.utils.hud_console import HUDConsole
 
         tasks = collect_tasks(str(project_dir / "tasks.py"))
@@ -1120,7 +1120,7 @@ class TestFullSyncFlow:
 
         not_found = _mock_response(404)
         with patch("httpx.get", return_value=not_found):
-            remote = _fetch_remote_tasks("new-ts-uuid", "https://api.hud.ai", {})
+            remote = fetch_remote_tasks("new-ts-uuid", "https://api.hud.ai", {})
 
         to_upload = _diff_and_display(specs, remote, "new-ts", "", False, HUDConsole())
         assert len(to_upload) == 2
