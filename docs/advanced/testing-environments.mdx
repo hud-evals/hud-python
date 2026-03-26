@@ -171,6 +171,26 @@ Both the agent and environment run remotely. No local compute, no local Docker. 
 
 See [`hud eval` CLI reference](/reference/cli/eval) for all options.
 
+## Iterating
+
+Once deployed and synced, use this to decide what to re-run:
+
+| What you changed | Deploy? | Sync? | Notes |
+|---|---|---|---|
+| Task prompt or args | No | Yes | `hud sync tasks --task <slug>` |
+| Added/removed a task | No | Yes | Existing remote tasks are never deleted |
+| Grading logic, tools, `env.py` | Yes | No | Test locally first with `hud dev` |
+| Dockerfile or system deps | Yes | No | Use `--no-cache` if layer caching causes stale state |
+
+The fastest cycle when developing a single task:
+
+1. Edit scenario/grading locally
+2. `hud build && hud dev my_task` — verify it works
+3. Deploy only if env code changed: `hud deploy`
+4. Sync only if tasks changed: `hud sync tasks --task <slug>`
+5. `hud eval "My Taskset" claude --remote --task-ids my_task`
+6. Check the trace, repeat
+
 ## Debugging
 
 Build your image locally first, then debug:
@@ -194,6 +214,14 @@ hud debug .                    # Build and debug current directory
 hud debug . --max-phase 3      # Stop after phase 3
 ```
 
+### Debugging Zero Scores
+
+When a task scores 0.0 remotely but works locally:
+
+1. **Trace** — Did the agent attempt the task or get stuck? If it never acted, the issue is the prompt or model, not grading.
+2. **Logs** — Check the [LOGS and DEBUG tabs](/platform/environments#debugging-traces) for container errors, missing deps, or grader failures.
+3. **Grade locally** — If it passes locally but fails remotely, the deployed environment diverged. Verify your latest build version matches `.hud/deploy.json`.
+
 ## See Also
 
 <CardGroup cols={2}>
@@ -203,10 +231,6 @@ hud debug . --max-phase 3      # Stop after phase 3
 
 <Card title="Deploy" icon="rocket" href="/quick-links/deploy">
   Deploy your environment to the platform
-</Card>
-
-<Card title="Advanced Patterns" icon="wrench" href="/advanced/patterns">
-  Mock mode, scenario internals, troubleshooting
 </Card>
 
 <Card title="Platform Tasksets" icon="list-check" href="/platform/tasksets">

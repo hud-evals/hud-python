@@ -137,6 +137,67 @@ async def checkout(product: str):
 
 At minimum, verify two cases: unchanged state → 0.0, correct completion → 1.0. For grading logic you'll reuse across many evals, write unit tests. Load a known state snapshot, verify the grade matches what you expect.
 
+## Writing Tasks
+
+Tasks bind scenarios to specific arguments. A well-structured `tasks.py` makes syncing, filtering, and iterating straightforward.
+
+### Slug Naming
+
+Every task needs a unique `slug` — this is the stable identifier used for syncing, filtering with `--task-ids`, and matching across local/remote:
+
+```python
+from env import checkout
+
+laptop = checkout.task(product="laptop")
+laptop.slug = "checkout-laptop"
+
+phone = checkout.task(product="phone")
+phone.slug = "checkout-phone"
+```
+
+Use descriptive, kebab-case slugs. Renaming a slug creates a new task on the platform (the old one remains).
+
+### Structuring Task Files
+
+For small sets, a single `tasks.py` works. For larger sets, use one file per subdirectory:
+
+```
+my-env/
+├── env.py
+├── tasks/
+│   ├── checkout/task.py      # checkout tasks
+│   └── search/task.py        # search tasks
+```
+
+`hud sync` discovers tasks automatically — see [how tasks are discovered](/reference/cli/sync#how-tasks-are-discovered).
+
+### Validation
+
+Add validation sequences to tasks so you can verify grading works without a live agent:
+
+```python
+task = checkout.task(product="laptop")
+task.slug = "checkout-laptop"
+task.validation = [
+    ("add_to_cart", {"product": "laptop"}),
+    ("complete_checkout", {}),
+]
+```
+
+Validation runs the tool calls in order and checks that the grader returns the expected reward. This catches grading regressions before you burn remote compute.
+
+### Prompt Overrides
+
+Override the scenario's default prompt per-task when you need variation:
+
+```python
+task = checkout.task(product="laptop")
+task.slug = "checkout-laptop-vague"
+task.prompt = "Buy a computer"  # vaguer than the scenario default
+```
+
+This is useful for testing different difficulty levels with the same underlying scenario.
+
 ## Finding the Right Difficulty
 
 A good eval set has range—target 20-30% average success rate. You want high variance: some runs should grade 0.0, others 1.0. If every run grades the same, there's no signal to learn from. Having both positive and negative examples on the same eval is what makes improvement possible.
