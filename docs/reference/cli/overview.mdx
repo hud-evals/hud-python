@@ -15,12 +15,12 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
   - `hud build` — Local build for validation
 </Card>
 
-<Card title="Run & Evaluate" icon="play" color="#0891b2">
-  **Target-based commands** for using environments and agents:
-  - `hud analyze` — Inspect capabilities (fast/live)
-  - `hud debug` — 5‑phase compliance test
+<Card title="Sync & Evaluate" icon="play" color="#0891b2">
+  **Task management and agent execution:**
+  - `hud sync tasks` — Sync local tasks to platform
+  - `hud sync env` — Link to a platform environment
   - `hud eval` — Run agents on tasks/datasets
-  - `hud rft` — Fine-tune models (BETA, invite-only)
+  - `hud scenario` — Test scenarios on a running server
 </Card>
 </CardGroup>
 
@@ -50,23 +50,30 @@ hud --version
 |---------|-------|-------------|---------|
 | `hud init` | Directory | Create new environment | `hud init my-env` |
 | `hud deploy` | Directory | Build remotely & deploy to platform | `hud deploy .` |
-| `hud link` | Directory | Link to existing environment | `hud link --id abc123` |
+| `hud sync env` | Name | Link to existing environment | `hud sync env my-env` |
+
+### Sync & Manage Tasks
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud sync tasks` | Taskset + source | Sync local tasks to platform | `hud sync tasks my-taskset` |
+| `hud sync` | (stored config) | Sync using .hud/config.json | `hud sync` |
 
 ### Local Development
 | Command | Input | Description | Example |
 |---------|-------|-------------|---------|
 | `hud dev` | Directory | Development server (`--watch` for hot-reload) | `hud dev . -w controller` |
 | `hud build` | Directory | Build image locally (for validation) | `hud build . --tag v1.0` |
+| `hud scenario` | Server URL | Test scenarios on running server | `hud scenario list` |
 
-### Running Workflow
+### Run & Evaluate
 | Command | Input | Description | Example |
 |---------|-------|-------------|---------|
+| `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.py claude` |
 | `hud analyze` | Image or config | Inspect tools & capabilities | `hud analyze org/env` |
 | `hud debug` | Image/dir/config | 5‑phase compliance test | `hud debug my-env:latest` |
-| `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.json claude` |
 | `hud rft` | Tasks file | Fine-tune models (BETA, invite-only) | `hud rft run tasks.json` |
 
-### Registry & Management
+### Other
 | Command | Description | Example |
 |---------|-------------|---------|
 | `hud push` | Push built image to registry | `hud push .` |

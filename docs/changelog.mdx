@@ -1,0 +1,146 @@
+---
+title: "Changelog"
+description: "Product updates and release notes for HUD SDK and Platform."
+---
+
+<Update label="March 16, 2026" description="v0.5.29 – v0.5.33">
+## A2A Chat, Citations, GPT-5 & CLI Sync
+
+- **A2A chat orchestrator** — agent-to-agent communication for multi-agent workflows with input handling and follow-up turns
+- **`hud sync tasks`** — new CLI command to sync task definitions from Python files or directories to the platform
+- **`hud sync env`** — new CLI command replacing `hud link`, syncing local environment configs with collision detection
+- **`hud eval` accepts Python files** — run evaluations directly from `.py` files and directories containing `Task` objects
+- **Chat class** — new `Chat` abstraction in the SDK for managing multi-turn agent conversations
+- **GPT-5 support** — `ResponseAgent` defaults to `gpt-5`, with ToolSearch tool support
+- **Citations** — citation support for Claude, Gemini, and OpenAI responses in chat and agent traces
+- **JPEG compression for screenshots** — reduces token usage for Anthropic computer use with configurable quality
+- **Interactive deploy collision handling** — `hud deploy` now prompts when environment names collide instead of silently overwriting
+- **Configurable bash timeout** — computer tool bash sessions support custom timeout values (previously hardcoded)
+
+### Platform
+
+- **Click & scroll coordinate overlays** — computer use traces render click coordinates and scroll actions directly on screenshots
+- **Trace-level QA workflows** — run QA workflows across all tasks from the trace table, with screenshot input and per-task status tracking
+- **Evalset environment filtering** — filter results by environment version, with earliest-version-only toggle
+- **EvaluationResult info viewer** — inspect the full `info` field of evaluation results directly in the UI
+- **Individual user spend** — usage page now shows per-user spend alongside team totals
+- **Inline job renaming** — rename jobs directly from the jobs page
+- **Resizable task name column** — longer task slugs visible with a resizable column and higher character limit
+- **Vendor portal** — new vendor-facing site for RFP intake and bid management
+- **Modal integration** — run environments on Modal compute infrastructure
+- **Resources section** — new `/resources` page with published articles
+</Update>
+
+<Update label="February 16, 2026" description="v0.5.18 – v0.5.28">
+## Opus 4.6 Computer Use, Streaming & Deploy Improvements
+
+- **Opus 4.6 computer tool** — native support for Claude Opus 4.6 computer use with zoom and screenshot gating
+- **Fine-grained tool streaming** — opt-in streaming for individual tool results during agent execution
+- **`hud deploy` build args & secrets** — pass build arguments and secrets to environment container builds
+- **`allowed_tools` in `@env.scenario`** — scope tool access per evaluation scenario via the decorator
+- **Retry logic for MCP errors** — automatic retry with backoff for 5xx errors from `mcp.hud.ai`
+- **Checkpoint configs** — configure checkpoint behavior for long-running evaluations
+- **Subagent instrumentation** — telemetry now captures subagent spans for nested agent workflows
+
+### Platform
+
+- **Billing refactor** — auto top-up, redesigned billing page, and per-key pricing for HUD-managed API keys
+- **Trace viewer enhancements** — strip review mode, inline run switching, file attachment display
+- **System prompt in trace viewer** — system prompt visible (collapsed by default) in the trace sidebar
+- **Trace comments** — add and edit comments on individual traces, visible as a dedicated column in taskset view
+- **Training jobs dashboard** — dedicated section for RL training jobs with detail pages
+- **Native binarization toggle** — pass/fail binarization for taskset evaluations, built into the platform
+- **Column ordering** — reorder columns in the taskset table view
+- **Model & environment sorting** — sort taskset results by model, environment, and environment version
+</Update>
+
+<Update label="January 12, 2026" description="v0.5.5 – v0.5.17">
+## CLI Refinements & Leaderboard Redesign
+
+- **Build args for `hud deploy`** — pass custom build arguments to environment container builds
+- **Subagent telemetry** — telemetry instrumentation for subagent spans within nested workflows
+- **Server output validation** — runtime validation of MCP server responses
+- **Wildcard tools** — environments can expose `*` to allow all tools without explicit registration
+- **CLI mode distinction** — `hud build` and `hud analyze` distinguish between HTTP and stdio modes
+
+### Platform
+
+- **Leaderboard redesign** — redesigned leaderboards with publishing flow, public visibility, and embedding support
+- **Slack bot** — Slack integration for job notifications and external integration provider support
+- **Trace compact view** — compact trace view with column reorder, inline comments, and truncated task names
+- **BYOK API keys** — bring-your-own-key support with `use_hud_key` option for user-managed API keys
+- **Per-key pricing** — individual pricing tiers for HUD-managed API keys
+- **Jobs page improvements** — compact job list view, stats section updates
+</Update>
+
+<Update label="December 17, 2025" description="v0.5.0 – v0.5.4">
+## v0.5.0: MCP-First Architecture
+
+- **Environments decoupled** — environment definitions moved to separate repos, enabling independent versioning and community contributions
+- **Unified scenario/tool/prompt/resource handling** — single abstraction layer for MCP servers and client-side tools, with caching and hot-reload
+- **New telemetry** — OpenTelemetry-based instrumentation with trace IDs, subagent spans, and structured logging
+- **Scenario decorator** — `@env.scenario` for defining evaluation scenarios with typed configuration
+- **Anthropic RFT beta** — initial support for reinforcement fine-tuning via the Anthropic API
+
+### Platform
+
+- **Inference API usage tracking** — track inference API usage on the usage page
+- **HUD-managed API keys** — platform-side API key management with `set api_key` support
+</Update>
+
+<Update label="October 1, 2025" description="v0.4.49 – v0.4.74">
+## Bedrock, Gemini & Expanded Model Support
+
+- **AWS Bedrock** — `hud-python[bedrock]` extra for running Claude agents via AWS Bedrock
+- **Gemini CUA** — Gemini computer use agent support with checkpoint management
+- **Qwen computer tool** — QwenComputerTool for Qwen-series models
+- **MCP server support** — use HUD environments as MCP servers, integrating with any MCP-compatible client
+- **Telemetry tracing** — structured telemetry for agent runs with trace export
+
+### Platform
+
+- **Text trace viewer** — view text-only agent traces with dedicated viewer
+- **Leaderboard embeds** — embed leaderboards in external pages
+- **Versioned models** — unified evalsets and leaderboards with versioned model support
+- **Usage tracking & billing** — Stripe integration, subscription management, and usage analytics
+</Update>
+
+<Update label="August 23, 2025" description="v0.3.0 – v0.4.48">
+## CLI & Claude Agent
+
+- **`hud` CLI** — full CLI for the development lifecycle: `init`, `dev`, `build`, `deploy`, `eval`, `analyze`, `debug`
+- **Claude agent with prompt caching** — built-in Claude agent with Anthropic prompt caching for reduced latency and cost
+- **Pre-filtered tools** — agents receive only the tools relevant to their current scenario
+- **User-provided system prompts** — custom system prompts for tasksets and individual tasks
+
+### Platform
+
+- **Trace viewer** — full trace exploration UI with step-by-step replay of agent actions and screenshots
+- **Leaderboards & scorecards** — evalset leaderboards with scorecard breakdowns
+- **Jobs & runs display** — view agent runs with step-by-step screenshots and action metadata
+- **Public trace sharing** — publish and share individual traces publicly
+</Update>
+
+<Update label="April 18, 2025" description="v0.1.5 – v0.2.0">
+## Environment Controllers & Docker Support
+
+- **Client-side environment management** — local Docker-based environment execution with copy-to/from support
+- **Claude adapter** — built-in adapter for Anthropic Claude computer use and Operator
+- **Gymnasium wrapper** — `gym.make()` compatibility for RL-style agent training loops
+- **Evaluator framework** — pluggable evaluators with structured logging and result export
+
+### Platform
+
+- **Platform launch** — dashboard at hud.ai with authentication and evalset browsing
+- **API keys management** — create and manage API keys from the dashboard
+- **Profile & team pages** — user profiles with team membership and settings
+</Update>
+
+<Update label="March 3, 2025" description="v0.1.0">
+## Initial Release
+
+- **Open-source SDK** — `pip install hud-python` for AI agent evaluation and RL environments
+- **Core primitives** — environments, tasks, evaluators, and runs as first-class objects
+- **Computer use actions** — keyboard, mouse, scroll, keyup/keydown, and hold-key actions for desktop environments
+- **Mintlify docs** — documentation site at docs.hud.ai
+</Update>

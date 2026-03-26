@@ -39,41 +39,19 @@ def get_environment_name(
     """Resolve environment name with source tracking.
 
     Checks in order:
-    1. Explicit override
-    2. [tool.hud].name in pyproject.toml
-    3. Directory name (sanitized)
+    1. Explicit --name override
+    2. Directory name (normalized)
 
-    All names are normalized to match SDK's Environment class normalization,
-    ensuring scenario prefixes are consistent between local and deployed envs.
+    pyproject.toml is intentionally NOT used as a name source to avoid
+    surprising coupling between the Python project name and the deployed
+    environment name.
 
     Returns:
-        Tuple of (normalized_name, source) where source is "override", "config", or "auto"
+        Tuple of (normalized_name, source) where source is "override" or "auto"
     """
     if name_override:
         return normalize_environment_name(name_override), "override"
 
-    # Check pyproject.toml for [tool.hud].name
-    pyproject_path = Path(directory) / "pyproject.toml"
-    if pyproject_path.exists():
-        try:
-            with open(pyproject_path) as f:
-                config = toml.load(f)
-            hud_config = config.get("tool", {}).get("hud", {})
-            # Check for explicit name first
-            if hud_config.get("name"):
-                return normalize_environment_name(hud_config["name"]), "config"
-            # Fall back to image name (without tag)
-            if hud_config.get("image"):
-                image = hud_config["image"]
-                name = image.split(":")[0] if ":" in image else image
-                # Remove org prefix if present
-                if "/" in name:
-                    name = name.split("/")[-1]
-                return normalize_environment_name(name), "config"
-        except Exception:  # noqa: S110
-            pass
-
-    # Auto-generate from directory name
     dir_path = Path(directory).resolve()
     dir_name = dir_path.name
     if not dir_name or dir_name == ".":

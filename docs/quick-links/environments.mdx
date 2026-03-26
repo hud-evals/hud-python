@@ -60,14 +60,6 @@ async def checkout_flow(product_name: str):
 
 The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward.
 
-### Scenarios as Subagents
-
-The first yield is more than just a prompt—it's context management mixed with dynamic input from the scenario's parameters. The parameters become a tool spec that other agents can call.
-
-We've found that agents train *much* better within a scenario structure than on standalone random tasks. Scenarios define boundaries: what the agent should focus on, what success looks like, and how to measure it. This structure also makes agents easier to compose—wrap a scenario with `AgentTool` and an orchestrator can call it as a specialized subagent.
-
-See the [Ops Diagnostics Cookbook](/cookbooks/ops-diagnostics) for a complete example of hierarchical agents calling subagent scenarios.
-
 ## Iterating on Your Environment
 
 Three ways to develop and test your environment:
@@ -94,8 +86,13 @@ async def count_scenario(sentence: str, letter: str):
     correct = str(sentence.lower().count(letter.lower()))
     yield 1.0 if correct in answer else 0.0
 
-# Create task and run agent in one line
-result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
+# Create task and run agent
+task = env("count", sentence="Strawberry", letter="r")
+agent = create_agent("claude-sonnet-4-5")
+
+async with hud.eval(task) as ctx:
+    result = await agent.run(ctx, max_steps=10)
+
 print(f"Reward: {result.reward}")
 ```
 
@@ -139,74 +136,22 @@ async with hud.eval(task) as ctx:
     await ctx.submit(response.choices[0].message.content)
 ```
 
-## Chat: Multi-Turn Conversations
-
-Scenarios can also power multi-turn chat agents. Add `chat=True` and the scenario receives the full conversation history on every turn:
-
-```python
-@env.scenario("assist", chat=True)
-async def assist(messages: list[dict] | None = None):
-    messages = messages or []
-    yield "You are a helpful assistant. Use tools to answer questions."
-    yield 1.0
-```
-
-Create a chat in one line:
-
-```python
-chat = env.chat("assist", model="claude-sonnet-4-5")
-
-r1 = await chat.send("What's the latest?")
-r2 = await chat.send("Tell me more about that")
-```
-
-For web apps and multi-user services, `ChatService` gives each user an independent session:
-
-```python
-from hud.services import ChatService
-
-service = ChatService(env("assist"), model="claude-haiku-4-5")
-
-# Per-user conversations
-await service.send("Hello", session_id="alice")
-await service.send("Different question", session_id="bob")
-```
-
-Chat agents serve over A2A too — any A2A-compatible client can connect.
-
-→ [Full Chat Guide](/guides/chat) · [AgentTool for subagents](/tools/agents)
-
-## Connecting Your Stack
-
-HUD wraps your existing infrastructure:
-
-```python
-env.connect_fastapi(app)                                    # FastAPI → tools
-env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
-env.connect_hub("hud-evals/browser")                        # HUD Hub environments
-env.connect_image("my-service:v1")                          # Docker images
-```
-
 ## What's Next
 
 <CardGroup cols={2}>
-<Card title="Hosted Running" icon="rocket" href="/quick-links/deploy">
+<Card title="Pre-built Tools" icon="toolbox" href="/tools">
+  Computer control, shell, file editing, web browsing
+</Card>
+
+<Card title="Best Practices" icon="star" href="/guides/best-practices">
+  Patterns for reliable environments, evals, and grading
+</Card>
+
+<Card title="Deploy" icon="rocket" href="/quick-links/deploy">
   Deploy your environment to the platform
 </Card>
 
-<Card title="Sandboxing" icon="shield" href="/guides/sandboxing">
-  Make databases and external services safe for agents
-</Card>
-
-<Card title="Best Practices" icon="check" href="/guides/best-practices">
-  Patterns for reliable environments
-</Card>
-
-<Card title="Integrations" icon="robot" href="/guides/integrations">
-  Connect any agent framework
-</Card>
-
-<Card title="Chat" icon="comments" href="/guides/chat">
-  Multi-turn agents and A2A serving
+<Card title="Testing & Evaluation" icon="flask-vial" href="/advanced/testing-environments">
+  Define tasks, test locally, sync to platform
 </Card>
 </CardGroup>
