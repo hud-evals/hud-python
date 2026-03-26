@@ -29,7 +29,7 @@ Swap `model="gpt-4o"` for `model="claude-sonnet-4-5"` and you're comparing provi
 
 ## create_agent and Native Tools
 
-`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer_use_preview`; Gemini has `ComputerUse`. These aren't generic function calls—they're provider-specific APIs the model was trained on.
+`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer_use_preview`; Gemini has `ComputerUse`. Each is a provider-specific API the model was trained on.
 
 HUD environments declare `native_specs` that tell agents how to use each tool natively:
 
@@ -51,7 +51,7 @@ The same environment works with Claude Code, Codex, Operator, Gemini CUA—each 
 
 ## Trained Models
 
-Fork a base model on [hud.ai/models](https://hud.ai/models) to get your model ID. Then train it on your tasks (see [Tasks & Training](/quick-links/evals)), and evaluate at any time:
+Fork a base model on [hud.ai/models](https://hud.ai/models) to get your model ID. Then train it on your tasks (see [Tasks & Training](/quick-links/training)), and evaluate at any time:
 
 ```python
 from hud.agents import create_agent

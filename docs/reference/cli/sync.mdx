@@ -1,0 +1,159 @@
+---
+title: "hud sync"
+description: "Push local task definitions to the HUD platform for team evaluation and CI"
+icon: "arrows-rotate"
+---
+
+After deploying an environment and defining tasks locally, `hud sync` pushes those tasks to the platform. This makes them available for team members, leaderboards, and QA pipelines.
+
+## Typical workflow
+
+```bash
+hud deploy                           # deploy environment to platform
+hud sync tasks my-taskset            # push local tasks to 'my-taskset'
+hud eval my-taskset claude --full    # run evals against the synced tasks
+```
+
+On repeat runs, the CLI remembers your taskset:
+
+```bash
+# edit tasks locally, then:
+hud sync tasks                       # re-syncs to the same taskset
+```
+
+The sync is additive and diff-aware. It compares local tasks against what exists on the platform by slug, only uploads what changed, and never deletes remote tasks.
+
+---
+
+## `hud sync tasks`
+
+```bash
+hud sync tasks <taskset> [source]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `taskset` | From `.hud/config.json` | Taskset name or ID |
+| `source` | `.` (current directory) | Python file, directory, or JSON/JSONL |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--task <slug>` | Only sync one task |
+| `--exclude <slug>` | Exclude a task (repeatable) |
+| `--yes` / `-y` | Skip confirmation (CI mode) |
+| `--dry-run` | Show plan without uploading |
+| `--force` | Upload all tasks, skip diff |
+| `--id <uuid>` | Taskset UUID directly (skip name resolution) |
+
+**Examples:**
+
+```bash
+hud sync tasks my-taskset              # scan cwd, sync to 'my-taskset'
+hud sync tasks my-taskset tasks/       # sync from a specific directory
+hud sync tasks                         # re-sync using stored taskset
+hud sync tasks my-taskset --dry-run    # preview without uploading
+hud sync tasks my-taskset --yes        # skip confirmation (for CI)
+```
+
+The first time you sync to a name, the platform creates the taskset and the CLI stores its ID in `.hud/config.json`. Subsequent `hud sync tasks` (without a name) re-syncs to the same taskset. Passing a different name switches the target and updates the stored ID.
+
+### How tasks are discovered
+
+When pointing at a `.py` file, the CLI imports it and finds all `Task` instances. For `.json` or `.jsonl` files, it loads task dicts directly.
+
+When pointing at a directory (the default), the CLI scans in this order:
+
+1. `tasks.py` or `task.py` in the root
+2. `*/task.py` in immediate subdirectories (one task file per subdirectory)
+3. Any other `.py` file in the root (skipping `env.py`, `conftest.py`, `setup.py`, `__init__.py`, `__main__.py`)
+
+The first group that finds tasks wins -- later groups are not scanned.
+
+### What happens during sync
+
+1. Collects `Task` objects from your source
+2. Validates slugs, scenarios, and checks for duplicates
+3. Verifies your `Environment("...")` name matches the deployed environment
+4. Fetches the remote taskset and computes a diff
+5. Shows a plan (create / update / unchanged) and asks for confirmation
+6. Uploads changes
+
+### Diff behavior
+
+Tasks are matched by **slug**. The CLI computes a signature from each task's scenario name, args, validation, and agent_config. Only tasks whose signature changed are uploaded.
+
+Renaming your environment (the prefix before `:` in scenario names) does not trigger updates. If you rename a slug, the CLI detects possible renames by matching signatures and suggests them.
+
+Tasks that exist on the platform but not locally are left alone.
+
+---
+
+## `hud sync env`
+
+Link a local directory to an existing platform environment. Use this when the environment was deployed separately (e.g., via GitHub integration) and you want to sync tasks against it.
+
+```bash
+hud sync env [name] [directory]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `name` | Interactive picker | Environment name or ID |
+| `directory` | `.` | Local directory to link |
+
+```bash
+hud sync env coding-env              # link cwd to 'coding-env'
+hud sync env                         # interactive: pick from your envs
+```
+
+This stores the environment's registry ID in `.hud/config.json`, lists its registered scenarios, and checks that local `Environment("...")` references match the deployed name.
+
+If you deploy with `hud deploy`, you don't need `hud sync env` -- the registry ID is stored automatically.
+
+---
+
+## `hud sync` (shorthand)
+
+Running `hud sync` without a subcommand re-syncs tasks using the stored configuration:
+
+```bash
+hud sync    # equivalent to: hud sync tasks
+```
+
+Requires a previous `hud sync tasks <name>` to have stored a taskset ID.
+
+---
+
+## Configuration
+
+`hud sync` stores IDs in `.hud/config.json`:
+
+```json
+{
+  "registryId": "abc123-...",
+  "tasksetId": "def456-..."
+}
+```
+
+- **`registryId`** -- set by `hud deploy` or `hud sync env`
+- **`tasksetId`** -- set by `hud sync tasks` after first successful sync
+
+Only UUIDs are stored. Names are resolved at command time.
+
+## Environment name reconciliation
+
+When syncing tasks, the CLI checks that your local `Environment("...")` name matches the deployed environment. If they differ, it offers to update your source files:
+
+```
+⚠ Local code references don't match the deployed environment name 'my-env':
+
+  env.py:4
+    env = Environment("old-name")
+    Environment("old-name") -> Environment("my-env")
+
+  Update these references? [y/N]
+```
+
+This prevents scenario name mismatches between local and remote execution.

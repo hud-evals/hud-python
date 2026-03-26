@@ -297,13 +297,12 @@ def init_command(
 ) -> None:
     """🚀 Initialize a HUD environment.
 
-    [not dim]• Empty directory: Choose a preset interactively
-    • Existing project: Add Dockerfile.hud and hud.py
+    [not dim]Choose a preset interactively and create a new directory.
 
     Use --preset to skip selection and download a specific template.
 
     Examples:
-        hud init                    # Auto-detect mode
+        hud init                    # Choose a preset interactively
         hud init my-env             # Initialize with custom name
         hud init --preset browser   # Download browser preset[/not dim]
 

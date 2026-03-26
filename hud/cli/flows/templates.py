@@ -11,8 +11,8 @@ COPY pyproject.toml uv.lock* ./
 RUN pip install uv && uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 COPY . .
 
-# Most of the time this command should not change, except if you change your env path
-# or launch some other service before running the environment
+# Default: stdio for HUD platform. Override at runtime for external use:
+#   docker run my-image hud dev env:env --port 8080
 CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--stdio"]
 """
 

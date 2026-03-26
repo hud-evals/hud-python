@@ -12,6 +12,7 @@
     "light": "#ffffff",
     "dark": "#5b21b6"
   },
+  "css": "/custom.css",
   "icons": {
     "library": "fontawesome"
   },
@@ -49,48 +50,51 @@
             "group": "Get Started",
             "pages": [
               "index",
+              "concepts",
               "llm-quickstart"
             ]
           },
           {
-            "group": "Essentials",
+            "group": "Building Environments",
+            "pages": [
+              "quick-links/environments",
+              "tools/index",
+              "guides/best-practices",
+              "quick-links/deploy",
+              "advanced/testing-environments"
+            ]
+          },
+          {
+            "group": "Running Agents",
             "pages": [
               "quick-links/models",
-              "quick-links/environments",
-              "quick-links/deploy",
-              "quick-links/evals"
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              "guides/chat",
+              "quick-links/training",
               "guides/integrations",
-              "guides/sandboxing",
-              "guides/best-practices",
-              "migration"
-            ]
-          },
-          {
-            "group": "Cookbooks",
-            "pages": [
-              "cookbooks/codex-coding",
-              "cookbooks/ops-diagnostics",
-              "cookbooks/opencode-agent"
+              "guides/chat",
+              "tools/agents"
             ]
           },
           {
             "group": "Advanced",
             "pages": [
-              "advanced/testing-environments",
-              "advanced/harbor-convert"
+              "advanced/patterns",
+              "advanced/harbor-convert",
+              "platform/publishing-leaderboards"
             ]
           },
           {
-            "group": "Tools",
+            "group": "SDK Reference",
             "pages": [
-              "tools/index",
-              "tools/agents",
+              "reference/environments",
+              "reference/tools",
+              "reference/evals",
+              "reference/agents",
+              "reference/types"
+            ]
+          },
+          {
+            "group": "Tools Reference",
+            "pages": [
               "tools/computer",
               "tools/coding",
               "tools/filesystem",
@@ -100,14 +104,11 @@
             ]
           },
           {
-            "group": "SDK Reference",
+            "group": "Cookbooks",
             "pages": [
-              "reference/evals",
-              "reference/environments",
-              "reference/tools",
-              "reference/mcpserver",
-              "reference/agents",
-              "reference/types"
+              "cookbooks/codex-coding",
+              "cookbooks/ops-diagnostics",
+              "cookbooks/opencode-agent"
             ]
           },
           {
@@ -123,7 +124,7 @@
               "reference/cli/analyze",
               "reference/cli/debug",
               "reference/cli/eval",
-              "reference/cli/rft",
+              "reference/cli/sync",
               "reference/cli/misc"
             ]
           },
@@ -175,8 +176,23 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Changelog",
+        "icon": "clock-rotate-left",
+        "groups": [
+          {
+            "group": "Changelog",
+            "pages": [
+              "changelog"
+            ]
+          }
+        ]
       }
     ]
+  },
+  "contextual": {
+    "options": ["copy", "claude", "chatgpt", "perplexity"]
   },
   "footerSocials": {
     "github": "https://github.com/hud-evals/hud-python",
