@@ -160,7 +160,8 @@
             "group": "Guides",
             "pages": [
               "platform/publishing-leaderboards",
-              "platform/subagent"
+              "platform/subagent",
+              "platform/file-tracking"
             ]
           },
           {

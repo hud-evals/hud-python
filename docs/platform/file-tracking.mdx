@@ -1,0 +1,68 @@
+---
+title: "File Tracking & Code Viewer"
+description: "View file changes made during a trace in a full code viewer with syntax highlighting and diffs."
+icon: "code-compare"
+---
+
+View file changes made during a trace in a full code viewer with syntax highlighting and diffs, directly in the trace page.
+
+**Prerequisites**: An environment with **File Tracking** enabled, and at least one completed trace on that environment.
+
+## Enabling File Tracking
+
+File tracking is off by default. To turn it on:
+
+1. Go to your environment's settings page (`Environments > [your environment] > Settings`).
+2. Toggle **File Tracking** to **Enabled**.
+
+Once enabled, all future traces on that environment capture filesystem changes.
+
+## Configuration
+
+After enabling, you can optionally configure what gets tracked.
+
+| Setting | Default | Description |
+|---|---|---|
+| Tracked Paths | `/home`, `/root`, `/workspace`, `/app` | Directories monitored for changes (can vary by environment) |
+| Exclude Patterns | `node_modules/`, `.venv/`, `__pycache__/`, `*.pyc`, `.cache/`, `.npm/`, `.git/objects/`, `.git/logs/`, `*.so`, `*.o`, `*.a` | Glob patterns for files and folders to skip |
+
+Add or remove paths and patterns directly on the settings page using the **+** button next to each section.
+
+## Using the Code Tab
+
+Once file tracking is enabled and a trace has completed:
+
+1. Open a trace
+2. In the environment pane, click the **Code** tab (next to Environment, Logs, and Debug)
+
+If file tracking wasn't enabled when the trace ran, the Code tab appears grayed out with a tooltip: *"Enable file tracking on the environment settings page to see file changes."*
+
+## What You'll See
+
+The Code tab has two panels:
+
+- **File tree** (left) — A collapsible directory tree of all files the agent touched. Each file shows a badge indicating its change type: **M** (modified), **A** (added), or **D** (deleted). Folders containing changes show a colored dot.
+
+- **Code viewer** (right) — A syntax-highlighted view of the selected file. Modified files show a side-by-side diff (before on the left, after on the right). Added and deleted files show a single pane.
+
+**Step navigation**: Use the prev/next buttons above the code viewer to scrub through changes at each step of the trace. The step position syncs with the trace timeline, so you can see exactly what the agent changed and when.
+
+Syntax highlighting is supported for many languages including Python, TypeScript, JavaScript, Go, Rust, and Java.
+
+## Notes
+
+- Larger files may be lazy-loaded when you click them (the tree loads instantly regardless of project size).
+- Binary files are detected and skipped.
+- File tracking adds minimal overhead — a sidecar uploads a compressed file snapshot at the end of the session, and diffs are rendered in the viewer from trace steps.
+
+## See Also
+
+<CardGroup cols={2}>
+<Card title="Environments" icon="cube" href="/platform/environments">
+  Deploy and manage environments
+</Card>
+
+<Card title="Debugging Traces" icon="bug" href="/platform/environments#debugging-traces">
+  DEBUG and LOGS tabs for trace investigation
+</Card>
+</CardGroup>
