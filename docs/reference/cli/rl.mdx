@@ -1,0 +1,128 @@
+---
+title: "hud rl"
+description: "Submit and monitor RL training jobs"
+icon: "dumbbell"
+---
+
+The `hud rl` command group submits tasks for reinforcement learning training and checks job status.
+
+<Note>
+RL training requires a trainable model. Fork one from **Explore** at [hud.ai/models](https://hud.ai/models), then use its model ID here.
+</Note>
+
+## `hud rl run`
+
+Submit a set of tasks for RL training with preflight validation.
+
+```bash
+hud rl run <source> [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="source" type="string">
+  Task source: a local file (JSON/JSONL) or a remote taskset name on the platform.
+</ParamField>
+
+### Options
+
+<ParamField path="--model-id, -m" type="string">
+  Model ID to train. If omitted, an interactive model selector appears.
+</ParamField>
+
+<ParamField path="--reasoning-effort" type="string" default="medium">
+  Reasoning effort level: `low`, `medium`, or `high`.
+</ParamField>
+
+<ParamField path="--yes, -y" type="boolean" default="false">
+  Auto-accept all prompts (useful for CI).
+</ParamField>
+
+### What happens
+
+1. **Model selection** — picks the model to train (interactive or via `--model-id`)
+2. **Task loading** — loads tasks from a local file or platform taskset
+3. **Preflight validation** — checks that all referenced environments exist and scenarios match
+4. **Submission** — sends the training job to the RL service
+
+### Examples
+
+```bash
+# Interactive model selection
+hud rl run my-taskset
+
+# Specify model directly
+hud rl run my-taskset -m mdl_abc123
+
+# From a local file
+hud rl run tasks.json -m mdl_abc123
+
+# Skip confirmation (CI mode)
+hud rl run my-taskset -m mdl_abc123 -y
+
+# High reasoning effort
+hud rl run my-taskset -m mdl_abc123 --reasoning-effort high
+```
+
+---
+
+## `hud rl status`
+
+Check the status of an RL training job.
+
+```bash
+hud rl status <model_id> [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="model_id" type="string">
+  Model ID or job ID to check status for.
+</ParamField>
+
+### Options
+
+<ParamField path="--verbose, -v" type="boolean" default="false">
+  Show full status details in an interactive JSON viewer.
+</ParamField>
+
+### Examples
+
+```bash
+# Check training status
+hud rl status mdl_abc123
+
+# Verbose output with full details
+hud rl status mdl_abc123 -v
+```
+
+---
+
+## Typical Workflow
+
+```bash
+# 1. Deploy your environment
+hud deploy
+
+# 2. Sync tasks to the platform
+hud sync tasks my-taskset
+
+# 3. Run evals to generate baseline traces
+hud eval my-taskset claude --full
+
+# 4. Submit for RL training
+hud rl run my-taskset -m mdl_abc123
+
+# 5. Check progress
+hud rl status mdl_abc123
+
+# 6. Evaluate the trained model
+hud eval my-taskset -m mdl_abc123 --full
+```
+
+## See Also
+
+- [Evaluations & Training](/quick-links/training) — Platform training workflow
+- [`hud eval`](/reference/cli/eval) — Run evaluations
+- [`hud sync`](/reference/cli/sync) — Sync tasks to the platform
+- [Platform Models](/platform/models) — Model management and checkpoints

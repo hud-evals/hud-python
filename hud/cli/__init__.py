@@ -40,6 +40,7 @@ from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
+from .rl import rl_run_command, rl_status_command  # noqa: E402
 from .scenario import scenario_app  # noqa: E402
 from .sync import sync_app  # noqa: E402
 
@@ -113,6 +114,12 @@ app.add_typer(scenario_app, name="scenario")
 
 # Sync subcommand group
 app.add_typer(sync_app, name="sync")
+
+# RL subcommand group
+rl_app = typer.Typer(help="🚀 RL training commands\n\nExample: hud rl run my-taskset -m <model-id>")
+rl_app.command("run")(rl_run_command)
+rl_app.command("status")(rl_status_command)
+app.add_typer(rl_app, name="rl")
 
 
 # ---------------------------------------------------------------------------
