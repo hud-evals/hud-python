@@ -124,6 +124,7 @@
               "reference/cli/analyze",
               "reference/cli/debug",
               "reference/cli/eval",
+              "reference/cli/rl",
               "reference/cli/sync",
               "reference/cli/misc"
             ]
