@@ -29,6 +29,7 @@ import pydantic_core
 
 from hud.telemetry.exporter import queue_span
 from hud.types import MCPToolResult, TraceStep
+from hud.utils.serialization import json_safe_value
 
 
 def _get_trace_id() -> str | None:
@@ -75,11 +76,7 @@ def _serialize_value(value: Any, max_items: int = 10) -> Any:
     elif isinstance(value, dict) and len(value) > max_items:
         value = dict(list(value.items())[:max_items])
 
-    try:
-        json_bytes = pydantic_core.to_json(value, fallback=str)
-        return json.loads(json_bytes)
-    except Exception:
-        return f"<{type(value).__name__}>"
+    return json_safe_value(value)
 
 
 def _now_iso() -> str:

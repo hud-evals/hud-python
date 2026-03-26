@@ -2,28 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 from typing import Any
 
 from hud.tools.types import EvaluationResult, SubScore
+from hud.utils.serialization import json_safe_dict
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["BashGrader", "Grade", "Grader"]
-
-
-def _safe_params(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Return a JSON-safe copy of grader parameters for metadata storage."""
-    result: dict[str, Any] = {}
-    for key, value in kwargs.items():
-        try:
-            json.dumps(value)
-            result[key] = value
-        except (TypeError, ValueError):
-            result[key] = f"<{type(value).__name__}: not serializable>"
-    return result
 
 
 class Grade:
@@ -117,7 +105,7 @@ class Grader:
             name=name or cls.name,
             weight=weight,
             value=float(score),
-            metadata={**metadata, "_parameters": _safe_params(kwargs)},
+            metadata={**metadata, "_parameters": json_safe_dict(kwargs)},
         )
 
     @classmethod

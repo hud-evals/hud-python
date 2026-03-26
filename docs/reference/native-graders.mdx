@@ -1,0 +1,118 @@
+---
+title: "Native Graders"
+description: "SDK reference for reusable first-party evaluation helpers in hud.native"
+icon: "scale-balanced"
+---
+
+`hud.native` includes reusable grader helpers for scenarios that want structured scoring without hand-building `EvaluationResult` objects each time.
+
+## Quick Example
+
+```python
+from hud import Environment
+from hud.native import BashGrader, Grade
+
+env = Environment("coding-env")
+
+@env.scenario("fix-tests")
+async def fix_tests():
+    yield "Make the checkout tests pass"
+
+    yield Grade.from_subscores(
+        [
+            BashGrader.grade(
+                weight=1.0,
+                command="pytest tests/test_checkout.py -q",
+                timeout=120,
+            )
+        ]
+    )
+```
+
+`Grade.from_subscores(...)` returns a normal `EvaluationResult`, so the result can be yielded directly from a scenario.
+
+## Grade
+
+`Grade.from_subscores(subscores)` combines `SubScore` values into a single `EvaluationResult`.
+
+Behavior:
+
+- Positive weights are normalized to sum to `1.0`
+- Negative weights are preserved as penalties
+- Duplicate subscore names are de-duplicated
+- Per-subscore metadata is copied into `EvaluationResult.info`
+
+```python
+from hud.native import Grade
+from hud.tools.types import SubScore
+
+result = Grade.from_subscores(
+    [
+        SubScore(name="tests", value=1.0, weight=0.8),
+        SubScore(name="style", value=0.5, weight=0.2),
+    ]
+)
+```
+
+## Grader
+
+`Grader` is the base class for reusable scoring helpers. Subclasses implement `compute_score(...)`, and `grade(...)` packages the result as a `SubScore`.
+
+```python
+from hud.native import Grader
+
+class MyGrader(Grader):
+    name = "MyGrader"
+
+    @classmethod
+    def compute_score(cls, passed: bool) -> float:
+        return 1.0 if passed else 0.0
+
+subscore = MyGrader.grade(weight=1.0, passed=True)
+```
+
+`grade(...)` also records JSON-safe copies of the grader parameters in subscore metadata under `_parameters`.
+
+## BashGrader
+
+`BashGrader` runs a command with `/bin/bash -lc` and scores it by exit code.
+
+```python
+from hud.native import BashGrader
+
+subscore = BashGrader.grade(
+    weight=1.0,
+    command="pytest tests/test_checkout.py -q",
+    timeout=120,
+)
+```
+
+Behavior:
+
+- exit code `0` -> score `1.0`
+- non-zero exit code -> score `0.0`
+- timeout -> score `0.0` with timeout metadata
+- metadata includes `stdout`, `stderr`, and `exit_code`
+
+## Combinators
+
+`Grader.any(...)` and `Grader.all(...)` combine multiple subscores into a single summary subscore.
+
+```python
+from hud.native import BashGrader, Grader
+
+tests = BashGrader.grade(weight=0.5, command="pytest -q")
+lint = BashGrader.grade(weight=0.5, command="ruff check .")
+
+any_passes = Grader.any(weight=1.0, subscores=[tests, lint])
+all_pass = Grader.all(weight=1.0, subscores=[tests, lint])
+```
+
+- `any(...)` uses the maximum input score
+- `all(...)` uses the minimum input score
+
+## See Also
+
+- [Environments](/reference/environments)
+- [Evals](/reference/evals)
+- [Types](/reference/types)
