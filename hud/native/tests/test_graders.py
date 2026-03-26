@@ -129,6 +129,22 @@ class TestGraderCombinators:
         assert combined.name == "BaseGrader_any"
         assert combined.value == 1.0
 
+    def test_any_preserves_metadata_for_duplicate_named_subscores(self) -> None:
+        combined = Grader.any(
+            weight=1.0,
+            subscores=[
+                SubScore(name="BashGrader", value=1.0, weight=0.5, metadata={"exit_code": 0}),
+                SubScore(name="BashGrader", value=0.0, weight=0.5, metadata={"exit_code": 1}),
+            ],
+        )
+        assert combined.metadata == {
+            "subscores": ["BashGrader-1", "BashGrader-2"],
+            "subscore_metadata": {
+                "BashGrader-1": {"exit_code": 0},
+                "BashGrader-2": {"exit_code": 1},
+            },
+        }
+
     def test_all_picks_min(self) -> None:
         combined = Grader.all(
             weight=1.0,
@@ -139,6 +155,22 @@ class TestGraderCombinators:
         )
         assert combined.name == "BaseGrader_all"
         assert combined.value == 0.0
+
+    def test_all_preserves_metadata_for_duplicate_named_subscores(self) -> None:
+        combined = Grader.all(
+            weight=1.0,
+            subscores=[
+                SubScore(name="BashGrader", value=1.0, weight=0.5, metadata={"exit_code": 0}),
+                SubScore(name="BashGrader", value=0.0, weight=0.5, metadata={"exit_code": 1}),
+            ],
+        )
+        assert combined.metadata == {
+            "subscores": ["BashGrader-1", "BashGrader-2"],
+            "subscore_metadata": {
+                "BashGrader-1": {"exit_code": 0},
+                "BashGrader-2": {"exit_code": 1},
+            },
+        }
 
 
 class TestBashGrader:

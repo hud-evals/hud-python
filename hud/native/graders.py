@@ -14,6 +14,38 @@ logger = logging.getLogger(__name__)
 __all__ = ["BashGrader", "Grade", "Grader"]
 
 
+def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
+    """Return stable, unique names for a sequence of subscores."""
+    name_counts: dict[str, int] = {}
+    for item in subscores:
+        name_counts[item.name] = name_counts.get(item.name, 0) + 1
+
+    reserved_names = {item.name for item in subscores}
+    name_usage: dict[str, int] = {}
+    used_names: set[str] = set()
+    final_names: list[str] = []
+
+    for item in subscores:
+        if name_counts[item.name] == 1 and item.name not in used_names:
+            final_name = item.name
+        else:
+            suffix = name_usage.get(item.name, 0)
+            while True:
+                suffix += 1
+                candidate = f"{item.name}-{suffix}"
+                if candidate in used_names:
+                    continue
+                if candidate in reserved_names:
+                    continue
+                name_usage[item.name] = suffix
+                final_name = candidate
+                break
+        used_names.add(final_name)
+        final_names.append(final_name)
+
+    return final_names
+
+
 class Grade:
     """Factory for building ``EvaluationResult`` objects from ``SubScore`` items."""
 
@@ -34,33 +66,10 @@ class Grade:
         if positive_weight_sum <= 0:
             raise ValueError("subscores must include at least one positive weight")
 
-        name_counts: dict[str, int] = {}
-        for item in subscores:
-            name_counts[item.name] = name_counts.get(item.name, 0) + 1
-
-        reserved_names = {item.name for item in subscores}
-        name_usage: dict[str, int] = {}
-        used_names: set[str] = set()
         normalized_subscores: list[SubScore] = []
         metadata: dict[str, Any] = {}
 
-        for item in subscores:
-            if name_counts[item.name] == 1 and item.name not in used_names:
-                final_name = item.name
-            else:
-                suffix = name_usage.get(item.name, 0)
-                while True:
-                    suffix += 1
-                    candidate = f"{item.name}-{suffix}"
-                    if candidate in used_names:
-                        continue
-                    if candidate in reserved_names:
-                        continue
-                    name_usage[item.name] = suffix
-                    final_name = candidate
-                    break
-            used_names.add(final_name)
-
+        for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
             normalized_weight = (
                 item.weight / positive_weight_sum if item.weight > 0 else item.weight
             )
@@ -119,15 +128,16 @@ class Grader:
         if not subscores:
             raise ValueError("subscores must not be empty")
 
+        unique_names = _dedupe_subscore_names(subscores)
         return SubScore(
             name=f"{cls.name}_any",
             value=max(subscore.value for subscore in subscores),
             weight=weight,
             metadata={
-                "subscores": [subscore.name for subscore in subscores],
+                "subscores": unique_names,
                 "subscore_metadata": {
-                    subscore.name: subscore.metadata
-                    for subscore in subscores
+                    unique_name: subscore.metadata
+                    for unique_name, subscore in zip(unique_names, subscores, strict=True)
                     if subscore.metadata is not None
                 },
             },
@@ -139,15 +149,16 @@ class Grader:
         if not subscores:
             raise ValueError("subscores must not be empty")
 
+        unique_names = _dedupe_subscore_names(subscores)
         return SubScore(
             name=f"{cls.name}_all",
             value=min(subscore.value for subscore in subscores),
             weight=weight,
             metadata={
-                "subscores": [subscore.name for subscore in subscores],
+                "subscores": unique_names,
                 "subscore_metadata": {
-                    subscore.name: subscore.metadata
-                    for subscore in subscores
+                    unique_name: subscore.metadata
+                    for unique_name, subscore in zip(unique_names, subscores, strict=True)
                     if subscore.metadata is not None
                 },
             },
