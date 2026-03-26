@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -241,15 +240,11 @@ def rl_run_command(
         hud_console.success(f"Model: {selected_model.get('name')} ({selected_model_id})")
 
     # Load tasks (sync)
-    from hud.datasets.loader import _load_from_api, _load_from_file
+    from hud.datasets.loader import load_tasks
 
     hud_console.info(f"Loading tasks from: {source}…")
-    path = Path(source)
     try:
-        if path.exists() and path.suffix in {".json", ".jsonl"}:
-            tasks = _load_from_file(path)
-        else:
-            tasks, _taskset_id = _load_from_api(source)
+        tasks = load_tasks(source)
     except Exception as e:
         hud_console.error(f"Failed to load tasks: {e}")
         raise typer.Exit(1) from e
