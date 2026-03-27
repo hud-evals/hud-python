@@ -26,11 +26,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from mcp.types import ContentBlock  # noqa: TC002
+
 from hud.tools.base import BaseTool
 
 if TYPE_CHECKING:
-    from mcp.types import ContentBlock
-
     from hud.tools.native_types import NativeToolSpecs
 
 LOGGER = logging.getLogger(__name__)

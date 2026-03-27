@@ -14,13 +14,11 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from mcp.types import TextContent
+from mcp.types import ContentBlock, TextContent
 
 from hud.tools.memory.base import BaseSessionMemoryTool, MemoryEntry
 
 if TYPE_CHECKING:
-    from mcp.types import ContentBlock
-
     from hud.tools.native_types import NativeToolSpecs
 
 LOGGER = logging.getLogger(__name__)

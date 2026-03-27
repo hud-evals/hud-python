@@ -636,7 +636,7 @@ def sync_env_command(
 
         hud_console.info("")
         try:
-            selection = input("Select environment number (or paste full ID): ").strip()
+            selection = input("Select environment number (or paste full name): ").strip()
         except (EOFError, KeyboardInterrupt):
             hud_console.info("\nAborted.")
             raise typer.Exit(0) from None
@@ -652,9 +652,9 @@ def sync_env_command(
                 hud_console.error("Invalid selection")
                 raise typer.Exit(1)
         except ValueError:
-            registry_id = selection
-            env_display = registry_id[:8] + "..."
-    else:
+            name = selection
+
+    if name:
         # Resolve name to registry ID
         hud_console.progress_message(f"Looking up '{name}'...")
 
