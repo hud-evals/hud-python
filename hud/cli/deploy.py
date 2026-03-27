@@ -259,7 +259,7 @@ def deploy_environment(
     # .env is always loaded as the base layer unless --no-env is passed.
     # --env flags override/supplement specific values on top of .env.
     # --env-file replaces .env entirely (not merged).
-    skip_dotenv = no_env
+    skip_dotenv = no_env or bool(env_file)
 
     if not skip_dotenv:
         dotenv_path = env_dir / ".env"
