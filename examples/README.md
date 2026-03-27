@@ -43,6 +43,28 @@ uv run python examples/02_opencode_agent.py --plan --task "How does auth work?"
 
 > Requires `HUD_API_KEY`. Works with any model via `--model`.
 
+## Beginner Examples
+
+### 05_file_analyzer_agent.py
+A beginner-friendly example that demonstrates core HUD SDK concepts. The agent can list files, read their contents, and analyze text statistics. Perfect for understanding:
+- How to create environments with custom tools
+- How to define evaluation scenarios
+- How agents automatically use tools
+- How to compare different models
+
+```bash
+# Run with default model (gpt-4o-mini)
+uv run python examples/05_file_analyzer_agent.py
+
+# Run with a specific model
+uv run python examples/05_file_analyzer_agent.py --model gpt-4o
+
+# Enable verbose output
+uv run python examples/05_file_analyzer_agent.py --verbose
+```
+
+> Requires `HUD_API_KEY`. Great starting point for new users!
+
 ## Key Concepts
 
 ### Using hud.eval()
