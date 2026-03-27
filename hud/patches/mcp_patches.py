@@ -108,7 +108,7 @@ def patch_streamable_http_error_handling() -> None:
 
             async def handle_request_async(ctx: RequestContext, is_resumption: bool) -> None:
                 msg = ctx.session_message.message
-                # Per-attempt timeout comes from transport's sse_read_timeout (840s).
+                # Per-attempt HTTP timeout comes from the transport's configured HTTP client.
                 # client_timeout caps total wall-clock retry duration for this request.
                 configured_timeout = float(settings.client_timeout)
                 default_timeout = float(settings.__class__.model_fields["client_timeout"].default)
