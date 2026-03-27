@@ -107,12 +107,23 @@ def collect_environment_variables(
     """
     env_vars: dict[str, str] = {}
 
-    if not skip_dotenv:
-        env_path = Path(env_file) if env_file else directory / ".env"
+    if env_file:
+        env_path = Path(env_file)
         if env_path.exists():
             console.info(f"Loading environment variables from {env_path}")
             try:
                 contents = env_path.read_text(encoding="utf-8")
+                env_vars = parse_env_file(contents)
+            except Exception as e:
+                console.warning(f"Failed to parse env file: {e}")
+        else:
+            console.warning(f"Env file not found: {env_path}")
+    elif not skip_dotenv:
+        dotenv_path = directory / ".env"
+        if dotenv_path.exists():
+            console.info(f"Loading environment variables from {dotenv_path}")
+            try:
+                contents = dotenv_path.read_text(encoding="utf-8")
                 env_vars = parse_env_file(contents)
             except Exception as e:
                 console.warning(f"Failed to parse env file: {e}")
@@ -245,10 +256,10 @@ def deploy_environment(
     check_and_fix_env_name(env_dir, name, hud_console, label=label)
 
     # Resolve whether to include .env vars
-    # When --env flags are explicit, they are the ONLY env vars used (no .env auto-load).
-    # When no --env flags, use saved syncEnv preference or prompt.
-    has_explicit_env = bool(env) or bool(env_file)
-    skip_dotenv = no_env or has_explicit_env
+    # .env is always loaded as the base layer unless --no-env is passed.
+    # --env flags override/supplement specific values on top of .env.
+    # --env-file replaces .env entirely (not merged).
+    skip_dotenv = no_env or bool(env_file)
 
     if not skip_dotenv:
         dotenv_path = env_dir / ".env"
@@ -284,6 +295,13 @@ def deploy_environment(
     env_vars = collect_environment_variables(
         env_dir, env, env_file, hud_console, skip_dotenv=skip_dotenv
     )
+    if env and not skip_dotenv and not env_file and env_vars:
+        dotenv_path = env_dir / ".env"
+        if dotenv_path.exists():
+            hud_console.dim_info(
+                "Env merge:",
+                ".env + --env flags (--env values take priority)",
+            )
     if env_vars and verbose:
         hud_console.info(f"Environment variables: {', '.join(env_vars.keys())}")
 

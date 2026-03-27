@@ -16,13 +16,12 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     from pathlib import Path
 
+from mcp.types import ContentBlock  # noqa: TC002
+
 from hud.tools.memory.base import BaseFileMemoryTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
-
-if TYPE_CHECKING:
-    from mcp.types import ContentBlock
 
 LOGGER = logging.getLogger(__name__)
 
