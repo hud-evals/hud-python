@@ -136,6 +136,7 @@ def _build_transport(
         "url": url,
         "headers": server_config.get("headers"),
         "auth": server_config.get("auth"),
+        "httpx_client_factory": server_config.get("httpx_client_factory"),
     }
 
     if transport_type == "sse":

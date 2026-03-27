@@ -295,3 +295,31 @@ class TestRemoteConnectorMixin:
         assert isinstance(transport, SSETransport)
         assert transport.sse_read_timeout is not None
         assert transport.sse_read_timeout.total_seconds() == 300
+
+    def test_connect_mcp_sse_transport_preserves_httpx_client_factory(self) -> None:
+        """SSE transports should keep a caller-provided httpx client factory."""
+        from fastmcp.client.transports import SSETransport
+
+        from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
+
+        class TestEnv(MCPConfigConnectorMixin):
+            def __init__(self) -> None:
+                self._connections: dict[str, Connector] = {}
+
+        def client_factory(**_: Any) -> Any:
+            return None
+
+        env = TestEnv()
+        env.connect_mcp(
+            {
+                "browser": {
+                    "url": "https://mcp.hud.ai/browser",
+                    "transport": "sse",
+                    "httpx_client_factory": client_factory,
+                }
+            }
+        )
+
+        transport = env._connections["browser"]._transport
+        assert isinstance(transport, SSETransport)
+        assert transport.httpx_client_factory is client_factory
