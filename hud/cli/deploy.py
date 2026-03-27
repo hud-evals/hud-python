@@ -258,7 +258,7 @@ def deploy_environment(
     # Resolve whether to include .env vars
     # .env is always loaded as the base layer unless --no-env is passed.
     # --env flags override/supplement specific values on top of .env.
-    has_explicit_env = bool(env) or bool(env_file)
+    # --env-file replaces .env entirely (not merged).
     skip_dotenv = no_env
 
     if not skip_dotenv:
@@ -295,12 +295,12 @@ def deploy_environment(
     env_vars = collect_environment_variables(
         env_dir, env, env_file, hud_console, skip_dotenv=skip_dotenv
     )
-    if has_explicit_env and not skip_dotenv and env_vars:
+    if env and not skip_dotenv and not env_file and env_vars:
         dotenv_path = env_dir / ".env"
         if dotenv_path.exists():
             hud_console.dim_info(
                 "Env merge:",
-                ".env + --env/--env-file (explicit flags take priority)",
+                ".env + --env flags (--env values take priority)",
             )
     if env_vars and verbose:
         hud_console.info(f"Environment variables: {', '.join(env_vars.keys())}")
