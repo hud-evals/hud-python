@@ -107,12 +107,23 @@ def collect_environment_variables(
     """
     env_vars: dict[str, str] = {}
 
-    if not skip_dotenv:
-        env_path = Path(env_file) if env_file else directory / ".env"
+    if env_file:
+        env_path = Path(env_file)
         if env_path.exists():
             console.info(f"Loading environment variables from {env_path}")
             try:
                 contents = env_path.read_text(encoding="utf-8")
+                env_vars = parse_env_file(contents)
+            except Exception as e:
+                console.warning(f"Failed to parse env file: {e}")
+        else:
+            console.warning(f"Env file not found: {env_path}")
+    elif not skip_dotenv:
+        dotenv_path = directory / ".env"
+        if dotenv_path.exists():
+            console.info(f"Loading environment variables from {dotenv_path}")
+            try:
+                contents = dotenv_path.read_text(encoding="utf-8")
                 env_vars = parse_env_file(contents)
             except Exception as e:
                 console.warning(f"Failed to parse env file: {e}")
