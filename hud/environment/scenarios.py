@@ -1119,8 +1119,6 @@ class ScenarioMixin:
                     )
             if enable_citations:
                 scenario_meta["enable_citations"] = True
-            if chat:
-                scenario_meta["chat"] = True
 
             prompt = FunctionPrompt(
                 name=scenario_id,
