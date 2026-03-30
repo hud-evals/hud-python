@@ -206,8 +206,6 @@ def _display_usage_example(
 
     first = prompts[0]
     scenario_name = first.get("name", "default")
-    # scenario_name is typically "env-name:scenario-name"
-    short_name = scenario_name.split(":")[-1] if ":" in scenario_name else scenario_name
 
     args = first.get("arguments", [])
     example_args: dict[str, str] = {}
@@ -217,7 +215,7 @@ def _display_usage_example(
             example_args[arg_name] = "..."
 
     task_example: dict[str, Any] = {
-        "scenario": short_name,
+        "scenario": scenario_name,
         "env": {"name": env_name},
     }
     if example_args:
