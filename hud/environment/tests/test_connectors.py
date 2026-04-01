@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import patch
 
@@ -208,6 +209,7 @@ class TestRemoteConnectorMixin:
 
     def test_connect_mcp_streamable_transport_uses_client_timeout(self) -> None:
         """Streamable HTTP uses FastMCP client timeout instead of deprecated transport arg."""
+        import httpx
         from fastmcp.client.transports import StreamableHttpTransport
 
         from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
@@ -226,6 +228,52 @@ class TestRemoteConnectorMixin:
         assert isinstance(transport, StreamableHttpTransport)
         assert transport.sse_read_timeout is None
         assert getattr(transport, "_hud_client_timeout", None) == 300
+
+        httpx_client_factory = transport.httpx_client_factory
+        assert httpx_client_factory is not None
+        http_client = httpx_client_factory(
+            headers=transport.headers,
+            auth=transport.auth,
+            timeout=httpx.Timeout(30.0, read=300.0),
+        )
+        try:
+            assert http_client.timeout.read == 300.0
+        finally:
+            asyncio.run(http_client.aclose())
+
+    def test_connect_mcp_streamable_transport_separates_http_and_client_timeouts(self) -> None:
+        """Streamable HTTP caps per-attempt HTTP reads while preserving the session timeout."""
+        import httpx
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
+        from hud.settings import Settings
+
+        class TestEnv(MCPConfigConnectorMixin):
+            def __init__(self) -> None:
+                self._connections: dict[str, Connector] = {}
+
+        env = TestEnv()
+        with patch("hud.settings.settings", spec=Settings) as mock_settings:
+            mock_settings.client_timeout = 1860
+            env.connect_mcp({"browser": {"url": "https://mcp.hud.ai/browser"}})
+
+        transport = env._connections["browser"]._transport
+        assert isinstance(transport, StreamableHttpTransport)
+        assert getattr(transport, "_hud_client_timeout", None) == 1860.0
+
+        httpx_client_factory = transport.httpx_client_factory
+        assert httpx_client_factory is not None
+        http_client = httpx_client_factory(
+            headers=transport.headers,
+            auth=transport.auth,
+            timeout=httpx.Timeout(30.0, read=1860.0),
+        )
+        try:
+            assert http_client.timeout.read == 840.0
+            assert http_client.timeout.connect == 30.0
+        finally:
+            asyncio.run(http_client.aclose())
 
     def test_connect_mcp_sse_transport_keeps_sse_timeout(self) -> None:
         """SSE transports should continue to receive sse_read_timeout directly."""
@@ -247,3 +295,31 @@ class TestRemoteConnectorMixin:
         assert isinstance(transport, SSETransport)
         assert transport.sse_read_timeout is not None
         assert transport.sse_read_timeout.total_seconds() == 300
+
+    def test_connect_mcp_sse_transport_preserves_httpx_client_factory(self) -> None:
+        """SSE transports should keep a caller-provided httpx client factory."""
+        from fastmcp.client.transports import SSETransport
+
+        from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
+
+        class TestEnv(MCPConfigConnectorMixin):
+            def __init__(self) -> None:
+                self._connections: dict[str, Connector] = {}
+
+        def client_factory(**_: Any) -> Any:
+            return None
+
+        env = TestEnv()
+        env.connect_mcp(
+            {
+                "browser": {
+                    "url": "https://mcp.hud.ai/browser",
+                    "transport": "sse",
+                    "httpx_client_factory": client_factory,
+                }
+            }
+        )
+
+        transport = env._connections["browser"]._transport
+        assert isinstance(transport, SSETransport)
+        assert transport.httpx_client_factory is client_factory

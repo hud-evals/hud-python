@@ -1,13 +1,10 @@
-"""Tests for hud.native.graders helpers."""
+"""Tests for hud.native.graders answer-comparison helpers."""
 
 from __future__ import annotations
-
-import asyncio
 
 import pytest
 
 from hud.native.graders import (
-    checklist,
     contains,
     contains_all,
     contains_any,
@@ -16,7 +13,6 @@ from hud.native.graders import (
     normalize,
     numeric_match,
 )
-from hud.tools.types import ScenarioResult
 
 
 class TestNormalize:
@@ -159,93 +155,53 @@ class TestF1Score:
         assert f1_score("The PARIS!", "paris") == pytest.approx(1.0)
 
 
-class TestChecklist:
-    async def test_all_pass(self) -> None:
-        result = await checklist(
-            ("step1", True),
-            ("step2", True),
-        )
-        assert isinstance(result, ScenarioResult)
-        assert result.reward == pytest.approx(1.0)
-        assert result.subscores is not None
-        assert len(result.subscores) == 2
+class TestGradeGather:
+    async def test_gather_sync_subscores(self) -> None:
+        from hud.native.graders import Grade
+        from hud.tools.types import SubScore
 
-    async def test_partial_pass(self) -> None:
-        result = await checklist(
-            ("step1", True),
-            ("step2", False),
+        result = await Grade.gather(
+            SubScore(name="a", value=1.0, weight=0.5),
+            SubScore(name="b", value=0.0, weight=0.5),
         )
         assert result.reward == pytest.approx(0.5)
 
-    async def test_all_fail(self) -> None:
-        result = await checklist(
-            ("step1", False),
-            ("step2", False),
-        )
-        assert result.reward == pytest.approx(0.0)
+    async def test_gather_with_awaitables(self) -> None:
+        import asyncio
 
-    async def test_custom_weights(self) -> None:
-        result = await checklist(
-            ("cart", True),
-            ("order", False),
-            weights=[0.3, 0.7],
-        )
-        assert result.reward == pytest.approx(0.3)
+        from hud.native.graders import Grade
+        from hud.tools.types import SubScore
 
-    async def test_weight_count_mismatch(self) -> None:
-        with pytest.raises(ValueError, match="must match"):
-            await checklist(
-                ("a", True),
-                ("b", True),
-                weights=[0.5],
-            )
-
-    async def test_no_checks(self) -> None:
-        result = await checklist()
-        assert result.reward == 0.0
-
-    async def test_content_describes_results(self) -> None:
-        result = await checklist(
-            ("login", True),
-            ("checkout", False),
-        )
-        assert result.content is not None
-        assert "login" in result.content
-        assert "checkout" in result.content
-
-    async def test_single_check(self) -> None:
-        result = await checklist(("only_check", True))
-        assert result.reward == pytest.approx(1.0)
-
-    async def test_parallel_coroutines(self) -> None:
         order: list[str] = []
 
-        async def check_a() -> bool:
+        async def slow_check_a() -> SubScore:
             order.append("a_start")
             await asyncio.sleep(0.05)
             order.append("a_end")
-            return True
+            return SubScore(name="a", value=1.0, weight=0.5)
 
-        async def check_b() -> bool:
+        async def slow_check_b() -> SubScore:
             order.append("b_start")
             await asyncio.sleep(0.05)
             order.append("b_end")
-            return False
+            return SubScore(name="b", value=0.0, weight=0.5)
 
-        result = await checklist(
-            ("a", check_a()),
-            ("b", check_b()),
-        )
+        result = await Grade.gather(slow_check_a(), slow_check_b())
         assert result.reward == pytest.approx(0.5)
-        # Both should start before either finishes (parallel)
         assert order.index("b_start") < order.index("a_end")
 
-    async def test_mixed_bool_and_coroutine(self) -> None:
-        async def async_check() -> bool:
-            return True
+    async def test_gather_mixed(self) -> None:
+        import asyncio
 
-        result = await checklist(
-            ("sync", False),
-            ("async", async_check()),
+        from hud.native.graders import Grade
+        from hud.tools.types import SubScore
+
+        async def async_score() -> SubScore:
+            await asyncio.sleep(0.01)
+            return SubScore(name="async", value=1.0, weight=0.5)
+
+        result = await Grade.gather(
+            SubScore(name="sync", value=0.0, weight=0.5),
+            async_score(),
         )
         assert result.reward == pytest.approx(0.5)

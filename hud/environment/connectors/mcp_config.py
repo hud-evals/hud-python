@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+import httpx
+
 from hud.environment.connectors.base import BaseConnectorMixin
 
 if TYPE_CHECKING:
@@ -60,11 +62,10 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
 
         transport: Any = config
         if not is_local and "url" in server_config:
-            request_timeout = 840
             timeout = (
-                min(request_timeout, settings.client_timeout)
+                float(settings.client_timeout)
                 if settings.client_timeout > 0
-                else min(request_timeout, settings.__class__.model_fields["client_timeout"].default)
+                else float(settings.__class__.model_fields["client_timeout"].default)
             )
             transport = _build_transport(server_config, timeout=timeout)
 
@@ -120,7 +121,11 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         return self
 
 
-def _build_transport(server_config: dict[str, Any], *, timeout: float | None = None) -> Any:
+def _build_transport(
+    server_config: dict[str, Any],
+    *,
+    timeout: float | None = None,
+) -> Any:
     from fastmcp.client.transports import SSETransport, StreamableHttpTransport
     from fastmcp.mcp_config import infer_transport_type_from_url
 
@@ -140,9 +145,47 @@ def _build_transport(server_config: dict[str, Any], *, timeout: float | None = N
             sse_read_timeout=transport_timeout,
         )
 
+    http_timeout = min(840.0, transport_timeout) if transport_timeout is not None else None
+
+    if http_timeout is not None or server_config.get("httpx_client_factory") is not None:
+        transport_kwargs["httpx_client_factory"] = _build_httpx_client_factory(
+            cast("Any", server_config.get("httpx_client_factory")),
+            http_timeout=http_timeout,
+        )
+
     transport = StreamableHttpTransport(**transport_kwargs)
-    if transport_timeout is not None:
-        # FastMCP 3.x wants streamable HTTP timeouts on the client/session,
-        # not on the transport constructor.
-        cast("Any", transport)._hud_client_timeout = transport_timeout
+    if timeout is not None:
+        cast("Any", transport)._hud_client_timeout = timeout
     return transport
+
+
+def _build_httpx_client_factory(
+    base_factory: Any,
+    *,
+    http_timeout: float | None,
+) -> Any:
+    def factory(**kwargs: Any) -> httpx.AsyncClient:
+        timeout = cast("httpx.Timeout | None", kwargs.get("timeout"))
+        if http_timeout is None:
+            kwargs["timeout"] = timeout
+        elif timeout is None:
+            kwargs["timeout"] = httpx.Timeout(30.0, read=http_timeout)
+        else:
+            kwargs["timeout"] = httpx.Timeout(
+                timeout.connect if timeout.connect is not None else 30.0,
+                read=http_timeout,
+                write=timeout.write if timeout.write is not None else 30.0,
+                pool=timeout.pool if timeout.pool is not None else 30.0,
+            )
+
+        if base_factory is not None:
+            return cast("httpx.AsyncClient", base_factory(**kwargs))
+
+        return httpx.AsyncClient(
+            headers=cast("dict[str, str] | None", kwargs.get("headers")),
+            timeout=cast("httpx.Timeout | None", kwargs.get("timeout")),
+            auth=cast("httpx.Auth | None", kwargs.get("auth")),
+            follow_redirects=True,
+        )
+
+    return factory

@@ -1,44 +1,408 @@
-"""Reusable grading helpers for scenario evaluate phases.
+"""Native graders for HUD evaluation.
 
-These helpers reduce boilerplate in the second yield of scenarios.
-Each returns a float (0.0-1.0) or a ScenarioResult with subscores
-for more detailed evaluation breakdowns.
+All graders are async. ``Grade.gather`` runs them in parallel and
+combines the results into an ``EvaluationResult`` you can yield
+directly from a scenario.
 
-Usage in a scenario::
+Usage::
 
-    from hud.native.graders import exact_match, contains_any, checklist
+    from hud.native.graders import BashGrader, Grade, LLMJudgeGrader
+    from hud.native.graders import exact_match, contains
+    from hud.tools.types import SubScore
 
+    # Simple one-liner
+    yield exact_match(answer, "France")
 
-    @env.scenario("lookup")
-    async def lookup(city: str):
-        answer = yield f"What country is {city} in?"
-        yield exact_match(answer, "France")
-
-
-    @env.scenario("find-brands")
-    async def find_brands():
-        answer = yield "Name three Japanese car brands"
-        yield contains_any(answer, ["toyota", "honda", "nissan", "mazda", "subaru"])
-
-
-    @env.scenario("checkout")
-    async def checkout(product: str):
-        answer = yield f"Add {product} to cart and checkout"
-        yield await checklist(
-            ("in_cart", product_in_cart(product)),
-            ("ordered", order_completed(product)),
-            weights=[0.3, 0.7],
-        )
+    # Composed — all graders run in parallel
+    yield await Grade.gather(
+        BashGrader.grade(weight=0.5, command="pytest -q"),
+        LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Correct"]),
+        SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
+    )
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from collections import Counter
-from collections.abc import Awaitable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from hud.tools.types import ScenarioResult, SubScore
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
+from hud.tools.types import EvaluationResult, SubScore
+from hud.utils.serialization import json_safe_dict
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Grade — the combiner
+# =============================================================================
+
+
+def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
+    """Return stable, unique names for a sequence of subscores."""
+    name_counts: dict[str, int] = {}
+    for item in subscores:
+        name_counts[item.name] = name_counts.get(item.name, 0) + 1
+
+    reserved_names = {item.name for item in subscores}
+    name_usage: dict[str, int] = {}
+    used_names: set[str] = set()
+    final_names: list[str] = []
+
+    for item in subscores:
+        if name_counts[item.name] == 1 and item.name not in used_names:
+            final_name = item.name
+        else:
+            suffix = name_usage.get(item.name, 0)
+            while True:
+                suffix += 1
+                candidate = f"{item.name}-{suffix}"
+                if candidate in used_names:
+                    continue
+                if candidate in reserved_names:
+                    continue
+                name_usage[item.name] = suffix
+                final_name = candidate
+                break
+        used_names.add(final_name)
+        final_names.append(final_name)
+
+    return final_names
+
+
+class Grade:
+    """Combine ``SubScore`` items into a yieldable ``EvaluationResult``."""
+
+    @staticmethod
+    def from_subscores(subscores: list[SubScore]) -> EvaluationResult:
+        """Combine already-resolved subscores into a weighted result.
+
+        Positive weights are normalized to sum to ``1.0``.
+        Negative weights are preserved as penalties.
+        """
+        if not subscores:
+            raise ValueError("subscores must not be empty")
+
+        positive_weight_sum = sum(item.weight for item in subscores if item.weight > 0)
+        if positive_weight_sum <= 0:
+            raise ValueError("subscores must include at least one positive weight")
+
+        normalized_subscores: list[SubScore] = []
+        metadata: dict[str, Any] = {}
+
+        for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
+            normalized_weight = (
+                item.weight / positive_weight_sum if item.weight > 0 else item.weight
+            )
+            normalized_subscores.append(
+                SubScore(
+                    name=final_name,
+                    weight=normalized_weight,
+                    value=item.value,
+                    metadata=item.metadata,
+                )
+            )
+            if item.metadata is not None:
+                metadata[final_name] = item.metadata
+
+        reward = float(sum(item.value * item.weight for item in normalized_subscores))
+
+        return EvaluationResult(
+            reward=reward,
+            done=True,
+            subscores=normalized_subscores,
+            info=metadata,
+        )
+
+    @staticmethod
+    async def gather(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
+        """Resolve subscores and grader coroutines in parallel, then combine.
+
+        Accepts a mix of:
+        - ``SubScore`` objects (used immediately)
+        - Awaitables returning ``SubScore`` (e.g. ``Grader.grade()``)
+
+        All awaitables run concurrently via ``asyncio.gather``.
+
+        Example::
+
+            yield await Grade.gather(
+                BashGrader.grade(weight=0.3, command="pytest -q"),
+                LLMJudgeGrader.grade(weight=0.4, answer=answer, criteria=[...]),
+                SubScore(name="answer", value=exact_match(answer, "42"), weight=0.3),
+            )
+        """
+        from collections.abc import Awaitable as _Awaitable
+
+        resolved: list[SubScore] = []
+        pending: list[tuple[int, _Awaitable[SubScore]]] = []
+
+        for item in items:
+            if isinstance(item, SubScore):
+                resolved.append(item)
+            elif isinstance(item, _Awaitable):
+                pending.append((len(resolved), item))
+                resolved.append(SubScore(name="__placeholder__", value=0.0, weight=0.0))
+            else:
+                raise TypeError(
+                    f"Expected SubScore or Awaitable[SubScore], "
+                    f"got {type(item).__name__}"
+                )
+
+        if pending:
+            results = await asyncio.gather(*(aw for _, aw in pending))
+            for (slot, _), result in zip(pending, results, strict=True):
+                resolved[slot] = result
+
+        return Grade.from_subscores(resolved)
+
+
+# =============================================================================
+# Grader — async base class
+# =============================================================================
+
+
+class Grader:
+    """Async base class for reusable graders.
+
+    Subclasses implement ``compute_score`` (async). The ``grade`` classmethod
+    calls it, wraps the result as a ``SubScore``, and records parameters
+    in metadata for reproducibility.
+    """
+
+    name: str = "BaseGrader"
+
+    @classmethod
+    async def grade(cls, weight: float, name: str | None = None, **kwargs: Any) -> SubScore:
+        """Run the grader and package the result as a ``SubScore``."""
+        result = await cls.compute_score(**kwargs)
+
+        if isinstance(result, tuple):
+            score, metadata = result
+        else:
+            score = result
+            metadata = {}
+
+        return SubScore(
+            name=name or cls.name,
+            weight=weight,
+            value=float(score),
+            metadata={**metadata, "_parameters": json_safe_dict(kwargs)},
+        )
+
+    @classmethod
+    async def compute_score(cls, **kwargs: Any) -> float | tuple[float, dict[str, Any]]:
+        """Compute a score between ``0.0`` and ``1.0``.
+
+        Return a float, or ``(float, metadata_dict)`` to attach extra info.
+        """
+        raise NotImplementedError("Subclasses must implement compute_score")
+
+    @classmethod
+    def any(cls, weight: float, subscores: list[SubScore]) -> SubScore:
+        """Subscore that passes if any input passes (max)."""
+        if not subscores:
+            raise ValueError("subscores must not be empty")
+
+        unique_names = _dedupe_subscore_names(subscores)
+        return SubScore(
+            name=f"{cls.name}_any",
+            value=max(subscore.value for subscore in subscores),
+            weight=weight,
+            metadata={
+                "subscores": unique_names,
+                "subscore_metadata": {
+                    unique_name: subscore.metadata
+                    for unique_name, subscore in zip(unique_names, subscores, strict=True)
+                    if subscore.metadata is not None
+                },
+            },
+        )
+
+    @classmethod
+    def all(cls, weight: float, subscores: list[SubScore]) -> SubScore:
+        """Subscore that passes only if all inputs pass (min)."""
+        if not subscores:
+            raise ValueError("subscores must not be empty")
+
+        unique_names = _dedupe_subscore_names(subscores)
+        return SubScore(
+            name=f"{cls.name}_all",
+            value=min(subscore.value for subscore in subscores),
+            weight=weight,
+            metadata={
+                "subscores": unique_names,
+                "subscore_metadata": {
+                    unique_name: subscore.metadata
+                    for unique_name, subscore in zip(unique_names, subscores, strict=True)
+                    if subscore.metadata is not None
+                },
+            },
+        )
+
+
+# =============================================================================
+# BashGrader — async subprocess
+# =============================================================================
+
+
+class BashGrader(Grader):
+    """Run a shell command and score by exit code. Fully async."""
+
+    name = "BashGrader"
+
+    @classmethod
+    async def compute_score(
+        cls,
+        command: str,
+        cwd: str | None = None,
+        timeout_seconds: int = 60,
+        **kwargs: Any,
+    ) -> tuple[float, dict[str, Any]]:
+        """Run ``command`` via ``bash -lc`` and return score + metadata."""
+        del kwargs
+        logger.info(
+            "Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout_seconds
+        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/bash", "-lc", command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
+            stdout = stdout_bytes.decode(errors="replace")
+            stderr = stderr_bytes.decode(errors="replace")
+            returncode = proc.returncode or 0
+        except TimeoutError:
+            proc.kill()
+            return (
+                0.0,
+                {
+                    "exit_code": None,
+                    "stdout": "",
+                    "stderr": "",
+                    "timed_out": True,
+                    "timeout": timeout_seconds,
+                },
+            )
+        except FileNotFoundError:
+            return (
+                0.0,
+                {
+                    "exit_code": None,
+                    "stdout": "",
+                    "stderr": "/bin/bash not found",
+                    "timed_out": False,
+                },
+            )
+
+        score = 1.0 if returncode == 0 else 0.0
+        return (score, {"exit_code": returncode, "stdout": stdout, "stderr": stderr})
+
+
+# =============================================================================
+# LLMJudgeGrader — rubric-based LLM evaluation
+# =============================================================================
+
+
+class LLMJudgeGrader(Grader):
+    """Grade an answer against rubric criteria using an LLM judge.
+
+    Requires the ``rubric`` package (``pip install rubric``).
+    Uses the HUD inference gateway by default.
+
+    Example::
+
+        yield await Grade.gather(
+            BashGrader.grade(weight=0.4, command="pytest -q"),
+            LLMJudgeGrader.grade(
+                weight=0.6,
+                answer=answer,
+                criteria=["Correct", ("Well-reasoned", 2.0)],
+                question=prompt,
+            ),
+        )
+    """
+
+    name = "LLMJudgeGrader"
+
+    @classmethod
+    async def compute_score(
+        cls,
+        answer: str | Any = "",
+        criteria: list[str | tuple[str, float]] | None = None,
+        question: str = "",
+        model: str = "claude-haiku-4-5",
+        **kwargs: Any,
+    ) -> tuple[float, dict[str, Any]]:
+        """Evaluate answer against criteria via LLM."""
+        del kwargs
+        try:
+            from rubric import Criterion, Rubric
+            from rubric.autograders import PerCriterionGrader
+        except ImportError:
+            raise ImportError(
+                "LLMJudgeGrader requires the 'rubric' package. "
+                "Install with: pip install rubric"
+            ) from None
+
+        import os
+
+        from openai import AsyncOpenAI
+
+        parsed: list[Criterion] = []
+        for c in criteria or []:
+            if isinstance(c, tuple):
+                req, w = c
+                parsed.append(Criterion(requirement=req, weight=w))
+            else:
+                parsed.append(Criterion(requirement=c, weight=1.0))
+
+        if not parsed:
+            return (0.0, {"error": "no criteria provided"})
+
+        api_key = os.environ.get("HUD_API_KEY", "")
+        client = AsyncOpenAI(base_url="https://inference.hud.ai", api_key=api_key)
+
+        async def _generate(system_prompt: str, user_prompt: str) -> str:
+            response = await client.chat.completions.create(
+                model=model,
+                max_tokens=1024,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            return response.choices[0].message.content or ""
+
+        rubric_obj = Rubric(parsed)
+        autograder = PerCriterionGrader(generate_fn=_generate)
+        result = await rubric_obj.grade(
+            query=question,
+            to_grade=str(answer),
+            autograder=autograder,
+        )
+
+        verdicts = {
+            item.requirement[:80]: {
+                "verdict": item.verdict,
+                "reason": getattr(item, "reason", None),
+                "weight": item.weight,
+            }
+            for item in result.report
+        }
+
+        return (float(result.score), {"criteria": verdicts, "model": model})
+
 
 # =============================================================================
 # Text normalization
@@ -68,7 +432,7 @@ def normalize(text: str | Any) -> str:
 
 
 # =============================================================================
-# Simple comparisons
+# Answer comparisons (return float for use as SubScore.value)
 # =============================================================================
 
 
@@ -78,17 +442,7 @@ def exact_match(
     *,
     normalize_text: bool = True,
 ) -> float:
-    """1.0 if answer matches expected after normalization, 0.0 otherwise.
-
-    By default normalizes both sides (lowercase, strip punctuation and
-    articles). Set ``normalize_text=False`` for a raw comparison that
-    still strips whitespace and lowercases.
-
-    Args:
-        answer: The agent's answer (coerced to str if needed).
-        expected: The expected string.
-        normalize_text: Apply full normalization (default True).
-    """
+    """1.0 if answer matches expected after normalization, 0.0 otherwise."""
     if normalize_text:
         return 1.0 if normalize(answer) == normalize(expected) else 0.0
 
@@ -151,11 +505,7 @@ def numeric_match(
     *,
     tolerance: float = 0.0,
 ) -> float:
-    """1.0 if the first number in the answer matches expected (within tolerance).
-
-    Extracts the first numeric value from the answer string. Handles
-    integers, decimals, and negative numbers.
-    """
+    """1.0 if the first number in the answer matches expected (within tolerance)."""
     a = str(answer) if not isinstance(answer, str) else answer
     match = re.search(r"-?\d+\.?\d*", a)
     if not match:
@@ -186,11 +536,7 @@ def f1_score(
     """Token-level F1 between answer and reference.
 
     Normalizes both texts, tokenizes into words, then computes
-    precision, recall, and their harmonic mean. Returns 0.0 if
-    either text is empty after normalization.
-
-    Useful for free-form answers that are "mostly right" but may
-    include extra or missing words compared to the reference.
+    precision, recall, and their harmonic mean.
 
     Example::
 
@@ -215,209 +561,16 @@ def f1_score(
     return 2 * precision * recall / (precision + recall)
 
 
-# =============================================================================
-# Multi-criterion grading
-# =============================================================================
-
-
-async def checklist(
-    *checks: tuple[str, bool | Awaitable[bool]],
-    weights: list[float] | None = None,
-) -> ScenarioResult:
-    """Score based on multiple checks, run in parallel when async.
-
-    Each check is a ``(name, value)`` tuple where ``value`` is either a
-    bool or an awaitable that returns a bool.  Awaitables (coroutines,
-    tasks, futures) are gathered concurrently via ``asyncio.gather``,
-    so long-running checks like DB queries or API calls execute in
-    parallel instead of sequentially.
-
-    Returns a ScenarioResult with subscores. Without explicit weights,
-    all checks are weighted equally.
-
-    Args:
-        *checks: Tuples of ``(name, passed_or_coroutine)``.
-        weights: Optional list of weights (should sum to ~1.0).
-            Must match the number of checks if provided.
-
-    Example::
-
-        yield await checklist(
-            ("cart_updated", product_in_cart(product)),  # coroutine
-            ("order_placed", order_completed(product)),  # coroutine
-            ("has_answer", bool(answer)),  # plain bool
-            weights=[0.3, 0.5, 0.2],
-        )
-    """
-    import asyncio
-
-    n = len(checks)
-    if n == 0:
-        return ScenarioResult(reward=0.0, done=True, content="No checks provided")
-
-    if weights is not None:
-        if len(weights) != n:
-            raise ValueError(
-                f"Number of weights ({len(weights)}) must match number of checks ({n})"
-            )
-        w = weights
-    else:
-        w = [1.0 / n] * n
-
-    names: list[str] = []
-    awaitables: list[tuple[int, Awaitable[bool]]] = []
-    resolved: dict[int, bool] = {}
-
-    for i, (name, value) in enumerate(checks):
-        names.append(name)
-        if isinstance(value, Awaitable):
-            awaitables.append((i, value))
-        else:
-            resolved[i] = bool(value)
-
-    if awaitables:
-        results = await asyncio.gather(*(aw for _, aw in awaitables))
-        for (i, _), result in zip(awaitables, results, strict=True):
-            resolved[i] = bool(result)
-
-    subscores = [
-        SubScore(name=names[i], weight=w[i], value=1.0 if resolved[i] else 0.0) for i in range(n)
-    ]
-
-    reward = sum(s.value * s.weight for s in subscores)
-
-    passed_names = [names[i] for i in range(n) if resolved[i]]
-    failed_names = [names[i] for i in range(n) if not resolved[i]]
-    parts: list[str] = []
-    if passed_names:
-        parts.append("Passed: " + ", ".join(passed_names))
-    if failed_names:
-        parts.append("Failed: " + ", ".join(failed_names))
-    content = "; ".join(parts)
-
-    return ScenarioResult(
-        reward=reward,
-        done=True,
-        content=content,
-        subscores=subscores,
-    )
-
-
-# =============================================================================
-# LLM-as-judge
-# =============================================================================
-
-
-async def llm_judge(
-    answer: str | Any,
-    *criteria: str | tuple[str, float],
-    question: str = "",
-    model: str = "claude-haiku-4-5",
-) -> ScenarioResult:
-    """Grade an answer against rubric criteria using an LLM judge.
-
-    Each criterion is evaluated independently. The LLM decides pass/fail
-    for each, and the final score is the weighted average. Requires the
-    ``rubric`` package (``pip install rubric``).
-
-    Uses the HUD inference gateway by default (``inference.hud.ai``).
-    Requires ``HUD_API_KEY`` to be set.
-
-    Args:
-        answer: The agent's answer to grade.
-        *criteria: Rubric criteria. Each is either a plain string
-            (weight=1) or a ``(requirement, weight)`` tuple.
-        question: The original question/prompt (provides context to the judge).
-        model: Model to use for judging.
-
-    Example::
-
-        yield await llm_judge(
-            answer,
-            "Mentions at least 3 specific data points",
-            ("Cites primary sources", 2.0),
-            "Conclusion follows from evidence",
-            question=prompt,
-        )
-    """
-    try:
-        from rubric import Criterion, Rubric
-        from rubric.autograders import PerCriterionGrader
-    except ImportError:
-        raise ImportError(
-            "llm_judge requires the 'rubric' package. Install with: pip install rubric"
-        ) from None
-
-    import os
-
-    from openai import AsyncOpenAI
-
-    parsed_criteria: list[Criterion] = []
-    for c in criteria:
-        if isinstance(c, tuple):
-            req, weight = c
-            parsed_criteria.append(Criterion(requirement=req, weight=weight))
-        else:
-            parsed_criteria.append(Criterion(requirement=c, weight=1.0))
-
-    if not parsed_criteria:
-        return ScenarioResult(reward=0.0, done=True, content="No criteria provided")
-
-    api_key = os.environ.get("HUD_API_KEY", "")
-    client = AsyncOpenAI(
-        base_url="https://inference.hud.ai",
-        api_key=api_key,
-    )
-
-    async def _generate(system_prompt: str, user_prompt: str) -> str:
-        response = await client.chat.completions.create(
-            model=model,
-            max_tokens=1024,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return response.choices[0].message.content or ""
-
-    rubric_obj = Rubric(parsed_criteria)
-    grader = PerCriterionGrader(generate_fn=_generate)
-    result = await rubric_obj.grade(
-        query=question,
-        to_grade=str(answer),
-        autograder=grader,
-    )
-
-    subscores = [
-        SubScore(
-            name=item.requirement[:50],
-            weight=item.weight / sum(abs(c.weight) for c in parsed_criteria),
-            value=1.0 if item.verdict else 0.0,
-        )
-        for item in result.report
-    ]
-
-    report_lines = [
-        f"{'PASS' if item.verdict else 'FAIL'} {item.requirement}" for item in result.report
-    ]
-    content = "\n".join(report_lines)
-
-    return ScenarioResult(
-        reward=result.score,
-        done=True,
-        content=content,
-        subscores=subscores if subscores else None,
-    )
-
-
 __all__ = [
-    "checklist",
+    "BashGrader",
+    "Grade",
+    "Grader",
+    "LLMJudgeGrader",
     "contains",
     "contains_all",
     "contains_any",
     "exact_match",
     "f1_score",
-    "llm_judge",
     "normalize",
     "numeric_match",
 ]
