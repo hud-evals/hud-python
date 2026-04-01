@@ -200,8 +200,10 @@ def _collect_from_directory(directory: Path) -> list[Any]:
 
     # Priority 2: **/task.py in subdirectories (recursive SDLC pattern)
     for task_file in sorted(directory.rglob("task.py")):
-        subdir = task_file.parent
-        if any(part.startswith((".", "_")) for part in subdir.relative_to(directory).parts):
+        if task_file.parent == directory:
+            continue
+        rel_parts = task_file.parent.relative_to(directory).parts
+        if any(part.startswith((".", "_")) for part in rel_parts):
             continue
         try:
             result = _import_tasks_from_module(task_file, extra_sys_paths=extra_paths)
