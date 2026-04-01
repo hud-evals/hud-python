@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """Native graders for HUD evaluation.
 
 All graders are async. ``Grade.gather`` runs them in parallel and
@@ -32,29 +31,16 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
-=======
-"""Generic graders for native HUD evaluation."""
-
-from __future__ import annotations
-
-import logging
-import subprocess
-from typing import Any
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
 
 from hud.tools.types import EvaluationResult, SubScore
 from hud.utils.serialization import json_safe_dict
 
 logger = logging.getLogger(__name__)
 
-<<<<<<< HEAD
 
 # =============================================================================
 # Grade — the combiner
 # =============================================================================
-=======
-__all__ = ["BashGrader", "Grade", "Grader"]
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
 
 
 def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
@@ -90,7 +76,6 @@ def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
 
 
 class Grade:
-<<<<<<< HEAD
     """Combine ``SubScore`` items into a yieldable ``EvaluationResult``."""
 
     @staticmethod
@@ -100,20 +85,6 @@ class Grade:
         Positive weights are normalized to sum to ``1.0``.
         Negative weights are preserved as penalties.
         """
-=======
-    """Factory for building ``EvaluationResult`` objects from ``SubScore`` items."""
-
-    @staticmethod
-    def from_subscores(subscores: list[SubScore]) -> EvaluationResult:
-        """Combine subscores into a weighted reward and ready-to-yield result.
-
-        Positive weights are normalized to sum to ``1.0`` so the returned
-        ``EvaluationResult`` lines up with the SDK's subscore semantics.
-        Negative weights are preserved as penalties, including when they drive
-        the final reward below zero.
-        """
-
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
         if not subscores:
             raise ValueError("subscores must not be empty")
 
@@ -148,7 +119,6 @@ class Grade:
             info=metadata,
         )
 
-<<<<<<< HEAD
     @staticmethod
     async def gather(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
         """Resolve subscores and grader coroutines in parallel, then combine.
@@ -180,8 +150,7 @@ class Grade:
                 resolved.append(SubScore(name="__placeholder__", value=0.0, weight=0.0))
             else:
                 raise TypeError(
-                    f"Expected SubScore or Awaitable[SubScore], "
-                    f"got {type(item).__name__}"
+                    f"Expected SubScore or Awaitable[SubScore], got {type(item).__name__}"
                 )
 
         if pending:
@@ -204,24 +173,13 @@ class Grader:
     calls it, wraps the result as a ``SubScore``, and records parameters
     in metadata for reproducibility.
     """
-=======
-
-class Grader:
-    """Base class for reusable graders that emit ``SubScore`` objects."""
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
 
     name: str = "BaseGrader"
 
     @classmethod
-<<<<<<< HEAD
     async def grade(cls, weight: float, name: str | None = None, **kwargs: Any) -> SubScore:
         """Run the grader and package the result as a ``SubScore``."""
         result = await cls.compute_score(**kwargs)
-=======
-    def grade(cls, weight: float, name: str | None = None, **kwargs: Any) -> SubScore:
-        """Run the grader and package the result as a ``SubScore``."""
-        result = cls.compute_score(**kwargs)
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
 
         if isinstance(result, tuple):
             score, metadata = result
@@ -237,25 +195,16 @@ class Grader:
         )
 
     @classmethod
-<<<<<<< HEAD
     async def compute_score(cls, **kwargs: Any) -> float | tuple[float, dict[str, Any]]:
         """Compute a score between ``0.0`` and ``1.0``.
 
         Return a float, or ``(float, metadata_dict)`` to attach extra info.
         """
-=======
-    def compute_score(cls, *args: Any, **kwargs: Any) -> float | tuple[float, dict[str, Any]]:
-        """Compute a score between ``0.0`` and ``1.0``."""
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
         raise NotImplementedError("Subclasses must implement compute_score")
 
     @classmethod
     def any(cls, weight: float, subscores: list[SubScore]) -> SubScore:
-<<<<<<< HEAD
         """Subscore that passes if any input passes (max)."""
-=======
-        """Return a subscore that passes if any input subscore passes."""
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
         if not subscores:
             raise ValueError("subscores must not be empty")
 
@@ -276,11 +225,7 @@ class Grader:
 
     @classmethod
     def all(cls, weight: float, subscores: list[SubScore]) -> SubScore:
-<<<<<<< HEAD
         """Subscore that passes only if all inputs pass (min)."""
-=======
-        """Return a subscore that passes only if all input subscores pass."""
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
         if not subscores:
             raise ValueError("subscores must not be empty")
 
@@ -300,7 +245,6 @@ class Grader:
         )
 
 
-<<<<<<< HEAD
 # =============================================================================
 # BashGrader — async subprocess
 # =============================================================================
@@ -308,15 +252,10 @@ class Grader:
 
 class BashGrader(Grader):
     """Run a shell command and score by exit code. Fully async."""
-=======
-class BashGrader(Grader):
-    """Run a shell command and score it by exit code."""
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
 
     name = "BashGrader"
 
     @classmethod
-<<<<<<< HEAD
     async def compute_score(
         cls,
         command: str,
@@ -331,7 +270,9 @@ class BashGrader(Grader):
         )
         try:
             proc = await asyncio.create_subprocess_exec(
-                "/bin/bash", "-lc", command,
+                "/bin/bash",
+                "-lc",
+                command,
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -344,42 +285,10 @@ class BashGrader(Grader):
             returncode = proc.returncode or 0
         except TimeoutError:
             proc.kill()
-=======
-    def compute_score(
-        cls,
-        command: str,
-        cwd: str | None = None,
-        timeout: int = 60,
-        **kwargs: Any,
-    ) -> tuple[float, dict[str, Any]]:
-        """Run ``command`` via ``bash -lc`` and return score plus execution metadata."""
-        del kwargs
-        logger.info("Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout)
-        try:
-            result = subprocess.run(
-                ["/bin/bash", "-lc", command],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            stdout = (
-                (exc.stdout or b"").decode(errors="replace")
-                if isinstance(exc.stdout, bytes)
-                else (exc.stdout or "")
-            )
-            stderr = (
-                (exc.stderr or b"").decode(errors="replace")
-                if isinstance(exc.stderr, bytes)
-                else (exc.stderr or "")
-            )
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
             return (
                 0.0,
                 {
                     "exit_code": None,
-<<<<<<< HEAD
                     "stdout": "",
                     "stderr": "",
                     "timed_out": True,
@@ -443,8 +352,7 @@ class LLMJudgeGrader(Grader):
             from rubric.autograders import PerCriterionGrader
         except ImportError:
             raise ImportError(
-                "LLMJudgeGrader requires the 'rubric' package. "
-                "Install with: pip install rubric"
+                "LLMJudgeGrader requires the 'rubric' package. Install with: pip install rubric"
             ) from None
 
         import os
@@ -666,21 +574,3 @@ __all__ = [
     "normalize",
     "numeric_match",
 ]
-=======
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "timed_out": True,
-                    "timeout": timeout,
-                },
-            )
-
-        score = 1.0 if result.returncode == 0 else 0.0
-        return (
-            score,
-            {
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            },
-        )
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20

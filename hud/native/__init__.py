@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """Native environments and utilities bundled with the HUD SDK.
 
 Includes:
@@ -11,10 +10,3 @@ Includes:
 from hud.native.graders import BashGrader, Grade, Grader, LLMJudgeGrader
 
 __all__ = ["BashGrader", "Grade", "Grader", "LLMJudgeGrader"]
-=======
-"""Native environments and helpers bundled with the HUD SDK."""
-
-from hud.native.graders import BashGrader, Grade, Grader
-
-__all__ = ["BashGrader", "Grade", "Grader"]
->>>>>>> 3bae301c628a4de571c2531d1815203ff104de20
