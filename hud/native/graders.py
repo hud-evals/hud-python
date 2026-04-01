@@ -255,15 +255,19 @@ class BashGrader(Grader):
 
     name = "BashGrader"
 
+    default_timeout: int = 600
+
     @classmethod
     async def compute_score(
         cls,
         command: str,
         cwd: str | None = None,
-        timeout_seconds: int = 60,
+        timeout_seconds: int | None = None,
         **kwargs: Any,
     ) -> tuple[float, dict[str, Any]]:
         """Run ``command`` via ``bash -lc`` and return score + metadata."""
+        if timeout_seconds is None:
+            timeout_seconds = cls.default_timeout
         del kwargs
         logger.info(
             "Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout_seconds
@@ -285,6 +289,7 @@ class BashGrader(Grader):
             returncode = proc.returncode or 0
         except TimeoutError:
             proc.kill()
+            await proc.wait()
             return (
                 0.0,
                 {
