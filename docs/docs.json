@@ -87,6 +87,7 @@
             "pages": [
               "reference/environments",
               "reference/tools",
+              "reference/native-graders",
               "reference/evals",
               "reference/agents",
               "reference/types"
