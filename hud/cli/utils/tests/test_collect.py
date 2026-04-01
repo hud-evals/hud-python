@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 import textwrap
-from pathlib import Path
+from pathlib import Path  # noqa: TC003
 
 
 def _write(path: Path, content: str) -> Path:
