@@ -43,9 +43,11 @@ from __future__ import annotations
 
 import fnmatch
 import logging
-from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 from hud.tools.types import ToolError
 
