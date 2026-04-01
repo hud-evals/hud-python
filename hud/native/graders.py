@@ -8,15 +8,18 @@ Usage in a scenario::
 
     from hud.native.graders import exact_match, contains_any, checklist
 
+
     @env.scenario("lookup")
     async def lookup(city: str):
         answer = yield f"What country is {city} in?"
         yield exact_match(answer, "France")
 
+
     @env.scenario("find-brands")
     async def find_brands():
         answer = yield "Name three Japanese car brands"
         yield contains_any(answer, ["toyota", "honda", "nissan", "mazda", "subaru"])
+
 
     @env.scenario("checkout")
     async def checkout(product: str):
@@ -36,7 +39,6 @@ from collections.abc import Awaitable
 from typing import Any
 
 from hud.tools.types import ScenarioResult, SubScore
-
 
 # =============================================================================
 # Text normalization
@@ -145,7 +147,7 @@ def contains_all(
 
 def numeric_match(
     answer: str | Any,
-    expected: float | int,
+    expected: float,
     *,
     tolerance: float = 0.0,
 ) -> float:
@@ -241,9 +243,9 @@ async def checklist(
     Example::
 
         yield await checklist(
-            ("cart_updated", product_in_cart(product)),   # coroutine
-            ("order_placed", order_completed(product)),   # coroutine
-            ("has_answer", bool(answer)),                 # plain bool
+            ("cart_updated", product_in_cart(product)),  # coroutine
+            ("order_placed", order_completed(product)),  # coroutine
+            ("has_answer", bool(answer)),  # plain bool
             weights=[0.3, 0.5, 0.2],
         )
     """
@@ -256,7 +258,7 @@ async def checklist(
     if weights is not None:
         if len(weights) != n:
             raise ValueError(
-                "Number of weights (%d) must match number of checks (%d)" % (len(weights), n)
+                f"Number of weights ({len(weights)}) must match number of checks ({n})"
             )
         w = weights
     else:
@@ -279,8 +281,7 @@ async def checklist(
             resolved[i] = bool(result)
 
     subscores = [
-        SubScore(name=names[i], weight=w[i], value=1.0 if resolved[i] else 0.0)
-        for i in range(n)
+        SubScore(name=names[i], weight=w[i], value=1.0 if resolved[i] else 0.0) for i in range(n)
     ]
 
     reward = sum(s.value * s.weight for s in subscores)
@@ -397,8 +398,7 @@ async def llm_judge(
     ]
 
     report_lines = [
-        "%s %s" % ("PASS" if item.verdict else "FAIL", item.requirement)
-        for item in result.report
+        f"{'PASS' if item.verdict else 'FAIL'} {item.requirement}" for item in result.report
     ]
     content = "\n".join(report_lines)
 

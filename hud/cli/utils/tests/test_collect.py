@@ -679,7 +679,9 @@ class TestMLTemplatePattern:
 
 
 class TestFindProjectRootEdgeCases:
-    def test_returns_none_when_no_markers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_none_when_no_markers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """No project markers anywhere in the hierarchy -> None."""
         from hud.cli.utils.collect import _find_project_root
 
