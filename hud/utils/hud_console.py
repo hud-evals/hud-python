@@ -621,6 +621,91 @@ class HUDConsole:
         """Print an important note with asterism symbol."""
         self.symbol(Symbols.ITEM, message, GOLD, stderr)
 
+    # ------------------------------------------------------------------
+    # Agent-facing display methods
+    # ------------------------------------------------------------------
+
+    def format_tool_discovery(
+        self,
+        tools: list[Any],
+        native_tools: list[tuple[Any, Any]] | None = None,
+        skipped: list[tuple[Any, str]] | None = None,
+        stderr: bool = True,
+    ) -> None:
+        """Display a table of discovered tools on agent initialization.
+
+        Args:
+            tools: All available MCP tools
+            native_tools: List of (tool, NativeToolSpec) for native tools
+            skipped: List of (tool, reason) for skipped tools
+            stderr: Output to stderr (default True)
+        """
+        console = self._stderr_console if stderr else self._stdout_console
+
+        native_names = {t.name for t, _ in (native_tools or [])}
+        native_map = {t.name: s for t, s in (native_tools or [])}
+
+        table = Table(
+            show_header=True,
+            box=None,
+            padding=(0, 1),
+            title=f"[{GOLD}]Discovered {len(tools)} tools[/{GOLD}]",
+            title_style="",
+        )
+        table.add_column("Tool", style=TEXT, no_wrap=True)
+        table.add_column("Native", style=DIM)
+
+        for tool in tools:
+            name = tool.name if hasattr(tool, "name") else str(tool)
+            if name in native_names:
+                spec = native_map[name]
+                api_type = getattr(spec, "api_type", "")
+                table.add_row(name, f"[{GREEN}]{api_type}[/{GREEN}]")
+            else:
+                table.add_row(name, f"[{DIM}]-[/{DIM}]")
+
+        console.print(table)
+
+        if skipped:
+            for tool, reason in skipped:
+                name = tool.name if hasattr(tool, "name") else str(tool)
+                console.print(f"  [{DIM}]⊘ {escape(name)}: {escape(reason)}[/{DIM}]")
+
+    def format_step(
+        self,
+        step: int,
+        max_steps: int,
+        tool_calls: list[Any],
+        tool_results: list[Any],
+        elapsed: float | None = None,
+        stderr: bool = True,
+    ) -> None:
+        """Display a compact step summary after tool execution.
+
+        Args:
+            step: Current step number
+            max_steps: Maximum steps (-1 for unlimited)
+            tool_calls: List of MCPToolCall objects
+            tool_results: List of MCPToolResult objects
+            elapsed: Step duration in seconds
+            stderr: Output to stderr (default True)
+        """
+        console = self._stderr_console if stderr else self._stdout_console
+
+        step_label = f"Step {step}"
+        if max_steps != -1:
+            step_label += f"/{max_steps}"
+        if elapsed is not None:
+            step_label += f" [{elapsed:.1f}s]"
+
+        console.print(f"\n[bold {GOLD}]{step_label}[/bold {GOLD}]")
+
+        for call, result in zip(tool_calls, tool_results, strict=False):
+            call_str = str(call) if hasattr(call, "__rich__") else repr(call)
+            result_str = str(result) if hasattr(result, "__rich__") else repr(result)
+            console.print(f"  {call_str}")
+            console.print(f"  {result_str}")
+
 
 # Global design instance for convenience
 class _ProgressContext:

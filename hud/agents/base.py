@@ -336,12 +336,15 @@ class MCPAgent(ABC):
                 f"Available tools: {sorted(available_tool_names)}"
             )
 
-        self.console.debug(
-            f"Discovered {len(self._available_tools)} tools from environment: "
-            f"{', '.join([t.name for t in self._available_tools])}"
+        self._categorized_tools = self.categorize_tools()
+
+        # Show tool discovery table (visible at INFO level)
+        self.console.format_tool_discovery(
+            tools=self._available_tools,
+            native_tools=self._categorized_tools.native + self._categorized_tools.hosted,
+            skipped=self._categorized_tools.skipped,
         )
 
-        self._categorized_tools = self.categorize_tools()
         for tool, reason in self._categorized_tools.skipped:
             logger.debug("Skipping tool %s: %s", tool.name, reason)
 
@@ -574,17 +577,13 @@ class MCPAgent(ABC):
                     tool_messages = await self.format_tool_results(tool_calls, tool_results)
                     messages.extend(tool_messages)
 
-                    # Compact step completion display
-                    step_info = f"\n[bold]Step {step_count}"
-                    if max_steps != -1:
-                        step_info += f"/{max_steps}"
-                    step_info += "[/bold]"
-
-                    # Show tool calls and results in compact format
-                    for call, result in zip(tool_calls, tool_results, strict=False):
-                        step_info += f"\n{call}\n{result}"
-
-                    self.console.info_log(step_info)
+                    if logger.isEnabledFor(logging.INFO):
+                        self.console.format_step(
+                            step=step_count,
+                            max_steps=max_steps,
+                            tool_calls=tool_calls,
+                            tool_results=tool_results,
+                        )
 
                 except Exception as e:
                     self.console.error_log(f"Step failed: {e}")
