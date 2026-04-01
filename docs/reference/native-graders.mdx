@@ -6,11 +6,13 @@ icon: "scale-balanced"
 
 `hud.native` includes reusable grader helpers for scenarios that want structured scoring without hand-building `EvaluationResult` objects each time.
 
+All graders are **async**. `Grade.gather` runs them in parallel and combines the results into an `EvaluationResult` you can yield directly from a scenario.
+
 ## Quick Example
 
 ```python
 from hud import Environment
-from hud.native import BashGrader, Grade
+from hud.native import BashGrader, Grade, exact_match
 
 env = Environment("coding-env")
 
@@ -18,24 +20,19 @@ env = Environment("coding-env")
 async def fix_tests():
     yield "Make the checkout tests pass"
 
-    yield Grade.from_subscores(
-        [
-            BashGrader.grade(
-                weight=1.0,
-                command="pytest tests/test_checkout.py -q",
-                timeout=120,
-            )
-        ]
+    yield await Grade.gather(
+        BashGrader.grade(weight=0.7, command="pytest tests/test_checkout.py -q"),
+        BashGrader.grade(weight=0.3, command="ruff check ."),
     )
 ```
 
-`Grade.from_subscores(...)` returns a normal `EvaluationResult`, so the result can be yielded directly from a scenario.
-
 ## Grade
 
-`Grade.from_subscores(subscores)` combines `SubScore` values into a single `EvaluationResult`.
+`Grade` combines `SubScore` values into a single `EvaluationResult`.
 
-Behavior:
+### `Grade.from_subscores(subscores)`
+
+Combines already-resolved subscores into a weighted result.
 
 - Positive weights are normalized to sum to `1.0`
 - Negative weights are preserved as penalties
@@ -54,9 +51,24 @@ result = Grade.from_subscores(
 )
 ```
 
+### `Grade.gather(*items)`
+
+Resolves subscores and grader coroutines **in parallel**, then combines them. Accepts a mix of `SubScore` objects and awaitables (e.g. `Grader.grade()`).
+
+```python
+from hud.native import BashGrader, Grade, LLMJudgeGrader, exact_match
+from hud.tools.types import SubScore
+
+result = await Grade.gather(
+    BashGrader.grade(weight=0.4, command="pytest -q"),
+    LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Correct"]),
+    SubScore(name="format", value=exact_match(answer, "42"), weight=0.3),
+)
+```
+
 ## Grader
 
-`Grader` is the base class for reusable scoring helpers. Subclasses implement `compute_score(...)`, and `grade(...)` packages the result as a `SubScore`.
+`Grader` is the async base class for reusable scoring helpers. Subclasses implement `compute_score(...)` (async), and `grade(...)` packages the result as a `SubScore`.
 
 ```python
 from hud.native import Grader
@@ -65,51 +77,169 @@ class MyGrader(Grader):
     name = "MyGrader"
 
     @classmethod
-    def compute_score(cls, passed: bool) -> float:
+    async def compute_score(cls, passed: bool) -> float:
         return 1.0 if passed else 0.0
 
-subscore = MyGrader.grade(weight=1.0, passed=True)
+subscore = await MyGrader.grade(weight=1.0, passed=True)
 ```
 
-`grade(...)` also records JSON-safe copies of the grader parameters in subscore metadata under `_parameters`.
+`grade(...)` records JSON-safe copies of the grader parameters in subscore metadata under `_parameters`.
 
-## BashGrader
-
-`BashGrader` runs a command with `/bin/bash -lc` and scores it by exit code.
-
-```python
-from hud.native import BashGrader
-
-subscore = BashGrader.grade(
-    weight=1.0,
-    command="pytest tests/test_checkout.py -q",
-    timeout=120,
-)
-```
-
-Behavior:
-
-- exit code `0` -> score `1.0`
-- non-zero exit code -> score `0.0`
-- timeout -> score `0.0` with timeout metadata
-- metadata includes `stdout`, `stderr`, and `exit_code`
-
-## Combinators
+### Combinators
 
 `Grader.any(...)` and `Grader.all(...)` combine multiple subscores into a single summary subscore.
 
 ```python
 from hud.native import BashGrader, Grader
 
-tests = BashGrader.grade(weight=0.5, command="pytest -q")
-lint = BashGrader.grade(weight=0.5, command="ruff check .")
+tests = await BashGrader.grade(weight=0.5, command="pytest -q")
+lint = await BashGrader.grade(weight=0.5, command="ruff check .")
 
-any_passes = Grader.any(weight=1.0, subscores=[tests, lint])
-all_pass = Grader.all(weight=1.0, subscores=[tests, lint])
+any_passes = Grader.any(weight=1.0, subscores=[tests, lint])  # max
+all_pass = Grader.all(weight=1.0, subscores=[tests, lint])     # min
 ```
 
 - `any(...)` uses the maximum input score
 - `all(...)` uses the minimum input score
+
+## BashGrader
+
+Runs a shell command via `/bin/bash -lc` and scores by exit code. Fully async.
+
+```python
+from hud.native import BashGrader
+
+subscore = await BashGrader.grade(
+    weight=1.0,
+    command="pytest tests/test_checkout.py -q",
+    timeout_seconds=120,
+)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `command` | `str` | required | Shell command to run |
+| `cwd` | `str \| None` | `None` | Working directory |
+| `timeout_seconds` | `int \| None` | `600` | Timeout in seconds |
+
+Scoring:
+
+- exit code `0` &rarr; `1.0`
+- non-zero exit code &rarr; `0.0`
+- timeout &rarr; `0.0` with timeout metadata
+
+Metadata includes `stdout`, `stderr`, and `exit_code`.
+
+## LLMJudgeGrader
+
+Grade an answer against rubric criteria using an LLM judge. Requires the `rubric` package (`pip install rubric`). Uses the HUD inference gateway by default.
+
+```python
+from hud.native import LLMJudgeGrader, Grade
+
+result = await Grade.gather(
+    LLMJudgeGrader.grade(
+        weight=1.0,
+        answer=agent_answer,
+        criteria=["Correct", ("Well-reasoned", 2.0)],
+        question=prompt,
+    ),
+)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `answer` | `str` | `""` | The answer to evaluate |
+| `criteria` | `list[str \| tuple[str, float]]` | `None` | Rubric criteria; tuples set custom weight |
+| `question` | `str` | `""` | The original question/prompt for context |
+| `model` | `str` | `"claude-haiku-4-5"` | LLM model for judging |
+
+Criteria can be simple strings (weight `1.0`) or `(requirement, weight)` tuples.
+
+Metadata includes per-criterion verdicts, reasons, and the model used.
+
+## Answer Comparisons
+
+These functions return `float` (`1.0` or `0.0`) for direct use as `SubScore.value`.
+
+### `exact_match(answer, expected, *, normalize_text=True)`
+
+`1.0` if answer matches expected after normalization, `0.0` otherwise.
+
+```python
+from hud.native import exact_match
+
+exact_match("The answer is 42!", "42")  # 1.0
+exact_match("43", "42")                # 0.0
+```
+
+### `contains(answer, substring, *, case_sensitive=False)`
+
+`1.0` if answer contains substring, `0.0` otherwise.
+
+```python
+from hud.native import contains
+
+contains("The capital of France is Paris", "paris")  # 1.0
+```
+
+### `contains_any(answer, substrings, *, case_sensitive=False)`
+
+`1.0` if answer contains at least one of the substrings.
+
+```python
+from hud.native import contains_any
+
+contains_any("I chose option B", ["option a", "option b"])  # 1.0
+```
+
+### `contains_all(answer, substrings, *, case_sensitive=False)`
+
+`1.0` if answer contains all substrings.
+
+```python
+from hud.native import contains_all
+
+contains_all("Paris, France", ["paris", "france"])  # 1.0
+contains_all("Paris", ["paris", "france"])           # 0.0
+```
+
+### `numeric_match(answer, expected, *, tolerance=0.0)`
+
+Extracts the first number from the answer and checks if it matches expected within tolerance.
+
+```python
+from hud.native import numeric_match
+
+numeric_match("The answer is 3.14", 3.14)                # 1.0
+numeric_match("About 3.1 meters", 3.14, tolerance=0.05)  # 1.0
+numeric_match("No number here", 42)                       # 0.0
+```
+
+## Token Metrics
+
+### `f1_score(answer, reference)`
+
+Token-level F1 between answer and reference. Normalizes both texts, tokenizes into words, then computes precision, recall, and their harmonic mean.
+
+```python
+from hud.native import f1_score
+
+f1_score("Paris", "Paris")                            # 1.0
+f1_score("The capital is Paris, France", "Paris")      # 0.4
+```
+
+## Utilities
+
+### `normalize(text)`
+
+Lowercase, strip punctuation and articles. Useful as a building block before comparing answers.
+
+```python
+from hud.native import normalize
+
+normalize("  The Answer is: 42! ")  # "answer is 42"
+```
 
 ## See Also
 
