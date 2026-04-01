@@ -286,7 +286,7 @@ class BashGrader(Grader):
             )
             stdout = stdout_bytes.decode(errors="replace")
             stderr = stderr_bytes.decode(errors="replace")
-            returncode = proc.returncode or 0
+            returncode = proc.returncode if proc.returncode is not None else 1
         except TimeoutError:
             proc.kill()
             await proc.wait()
