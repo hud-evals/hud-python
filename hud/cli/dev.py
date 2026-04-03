@@ -959,7 +959,7 @@ def run_docker_dev_server(
 def dev_command(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Module path or extra Docker args (when using --docker)",
+        help="Module path. Docker flags go after --",
     ),
     docker: bool = typer.Option(
         False,
@@ -1020,8 +1020,15 @@ def dev_command(
         Terminal 1: hud dev -w 'tools env.py' --port 8000
         Terminal 2: python local_test.py  # Uses connect_url()[/not dim]
     """
-    module = params[0] if params and not docker else None
-    docker_args = params if docker else []
+    if params and "--" in params:
+        sep_idx = params.index("--")
+        hud_params = params[:sep_idx]
+        docker_args = params[sep_idx + 1 :]
+    else:
+        hud_params = params or []
+        docker_args = []
+
+    module = hud_params[0] if hud_params and not docker else None
     watch_paths = watch if watch else None
 
     run_mcp_dev_server(

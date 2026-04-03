@@ -656,25 +656,30 @@ def build_docker_image(
     build_args: dict[str, str] | None = None,
     platform: str | None = None,
     secrets: list[str] | None = None,
-    remote_cache: str | None = None,
+    docker_args: list[str] | None = None,
 ) -> bool:
-    """Build a Docker image from a directory."""
+    """Build a Docker image from a directory.
+
+    Wraps ``docker build`` (or ``docker buildx build`` when Docker-specific
+    flags are passed via *docker_args*).  Any flags that Docker understands
+    (``--cache-from``, ``--push``, ``--load``, etc.) belong in *docker_args*
+    and are appended to the command as-is.
+    """
     hud_console = HUDConsole()
     build_args = build_args or {}
     secrets = secrets or []
+    docker_args = docker_args or []
 
-    # Check if Dockerfile exists (prefer Dockerfile.hud)
     dockerfile = find_dockerfile(directory)
     if dockerfile is None:
         hud_console.error(f"No Dockerfile found in {directory}")
         hud_console.info("Expected: Dockerfile.hud or Dockerfile")
         return False
 
-    # Build command - use buildx when remote cache is enabled
+    needs_buildx = any(a.startswith("--cache") or a in ("--push", "--load") for a in docker_args)
     effective_platform = platform if platform is not None else "linux/amd64"
-    cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
+    cmd = ["docker", "buildx", "build"] if needs_buildx else ["docker", "build"]
 
-    # Specify dockerfile explicitly if not the default name
     if dockerfile.name != "Dockerfile":
         cmd.extend(["-f", str(dockerfile)])
 
@@ -684,64 +689,24 @@ def build_docker_image(
     if no_cache:
         cmd.append("--no-cache")
 
-    # Add remote cache support for ECR
-    if remote_cache:
-        try:
-            # Validate ECR repo name
-            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
-                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
-                hud_console.info(
-                    "ECR repo names must contain only lowercase letters, numbers, hyphens, underscores, and forward slashes"  # noqa: E501
-                )
-                return False
+    # Passthrough: cache, push, and any other Docker-native flags
+    cmd.extend(docker_args)
 
-            # Get required environment variables
-            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
-            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    # Auto-add --load for buildx when caller didn't specify an output mode
+    if needs_buildx and "--push" not in docker_args and "--load" not in docker_args:
+        cmd.append("--load")
 
-            if not aws_account_id:
-                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
-                return False
-
-            # ECR cache image reference
-            cache_image = (
-                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
-            )
-
-            # Add cache arguments with proper ECR format
-            cmd.extend(
-                [
-                    "--cache-from",
-                    f"type=registry,ref={cache_image}",
-                    "--cache-to",
-                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
-                    "--load",  # Load image to local Docker after build
-                ]
-            )
-
-            hud_console.success(f"Remote cache configured: {cache_image}")
-
-        except typer.Exit:
-            raise
-        except Exception as e:
-            hud_console.error(f"Remote cache setup error: {e}")
-            return False
-
-    # Add build args
     for key, value in build_args.items():
         cmd.extend(["--build-arg", f"{key}={value}"])
 
-    # Add secrets
     for secret in secrets:
         cmd.extend(["--secret", secret])
 
     cmd.append(str(directory))
 
-    # Always show build output
     hud_console.info(f"Running: {' '.join(cmd)}")
 
     try:
-        # Use Docker's native output formatting - no capture, let Docker handle display
         env = os.environ.copy()
         if secrets:
             env["DOCKER_BUILDKIT"] = "1"
@@ -760,8 +725,8 @@ def build_environment(
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
     secrets: list[str] | None = None,
-    remote_cache: str | None = None,
     build_args: dict[str, str] | None = None,
+    docker_args: list[str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     hud_console = HUDConsole()
@@ -822,26 +787,58 @@ def build_environment(
         # No tag provided - we'll add version later
         image_tag = None
 
-    # Build temporary image first
-    temp_tag = f"hud-build-temp:{int(time.time())}"
+    # Compute version before building (needed for image tags when --push is used)
+    existing_version = get_existing_version(lock_path)
+    if existing_version:
+        new_version = increment_version(existing_version)
+        hud_console.info(f"Incrementing version: {existing_version} → {new_version}")
+    else:
+        new_version = "0.1.0"
+        hud_console.info(f"Setting initial version: {new_version}")
 
-    hud_console.progress_message(f"Building Docker image: {temp_tag}")
+    # Detect --push in docker passthrough args
+    pushing = "--push" in (docker_args or [])
+
+    # Set up build tags
+    if pushing:
+        if not tag:
+            hud_console.error("--push requires --tag with a registry-qualified image name")
+            raise typer.Exit(1)
+        build_tag = tag
+        hud_console.progress_message("Building and pushing Docker image...")
+    else:
+        build_tag = f"hud-build-temp:{int(time.time())}"
+        hud_console.progress_message(f"Building Docker image: {build_tag}")
 
     # Build the image (env vars are for runtime, not build time)
     if not build_docker_image(
         env_dir,
-        temp_tag,
+        build_tag,
         no_cache,
         verbose,
         build_args=build_args or None,
         platform=platform,
         secrets=secrets,
-        remote_cache=remote_cache,
+        docker_args=docker_args,
     ):
         hud_console.error("Docker build failed")
         raise typer.Exit(1)
 
-    hud_console.success(f"Built temporary image: {temp_tag}")
+    # Get image locally for analysis
+    if pushing:
+        hud_console.success(f"Pushed image: {build_tag}")
+        hud_console.progress_message("Pulling image for analysis...")
+        pull_result = subprocess.run(
+            ["docker", "pull", build_tag],  # noqa: S607
+            check=False,
+        )
+        if pull_result.returncode != 0:
+            hud_console.error(f"Failed to pull image: {build_tag}")
+            raise typer.Exit(1)
+        analysis_image = build_tag
+    else:
+        analysis_image = build_tag
+        hud_console.success(f"Built temporary image: {build_tag}")
 
     # Analyze the environment (merge folder .env if present)
     hud_console.progress_message("Analyzing MCP environment...")
@@ -859,13 +856,13 @@ def build_environment(
         merged_env_for_analysis = {**env_from_file, **(env_vars or {})}
 
         analysis = loop.run_until_complete(
-            analyze_mcp_environment(temp_tag, verbose, merged_env_for_analysis)
+            analyze_mcp_environment(analysis_image, verbose, merged_env_for_analysis)
         )
     except Exception as e:
         hud_console.error(f"Failed to analyze MCP environment: {e}")
         hud_console.info("")
         hud_console.info("To debug this issue, run:")
-        hud_console.command_example(f"hud debug {temp_tag}")
+        hud_console.command_example(f"hud debug {analysis_image}")
         hud_console.info("")
         raise typer.Exit(1) from e
     finally:
@@ -913,25 +910,12 @@ def build_environment(
     if secret_vars:
         display_secrets_warning(secret_vars)
 
-    # Check for existing version and increment
-    lock_path = env_dir / "hud.lock.yaml"
-    existing_version = get_existing_version(lock_path)
-
-    if existing_version:
-        # Increment existing version
-        new_version = increment_version(existing_version)
-        hud_console.info(f"Incrementing version: {existing_version} → {new_version}")
-    else:
-        # Start with 0.1.0 for new environments
-        new_version = "0.1.0"
-        hud_console.info(f"Setting initial version: {new_version}")
-
     # Determine base name for image references
     if image_tag:
         base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
 
     # Collect runtime metadata and compute base image/platform
-    runtime_info = collect_runtime_metadata(temp_tag, verbose=verbose)
+    runtime_info = collect_runtime_metadata(analysis_image, verbose=verbose)
     base_image = parse_base_image(dockerfile_path)
     effective_platform = platform if platform is not None else "linux/amd64"
 
@@ -1054,129 +1038,101 @@ def build_environment(
     lock_hash = hashlib.sha256(lock_content_str.encode()).hexdigest()
     lock_size = len(lock_content_str)
 
-    # Rebuild with label containing lock file hash
-    hud_console.progress_message("Rebuilding with lock file metadata...")
-
-    # Build final image with label (uses cache from first build)
-    # Create tags: versioned and latest (and custom tag if provided)
     version_tag = f"{base_name}:{new_version}"
     latest_tag = f"{base_name}:latest"
 
-    # Build command - use buildx when remote cache is enabled
-    label_cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
-
-    # Specify dockerfile explicitly if not the default name
-    if dockerfile_path and dockerfile_path.name != "Dockerfile":
-        label_cmd.extend(["-f", str(dockerfile_path)])
-
-    # Use same defaulting for the second build step
-    label_platform = platform if platform is not None else "linux/amd64"
-    if label_platform:
-        label_cmd.extend(["--platform", label_platform])
-
-    # Add remote cache support for final build
-    if remote_cache:
-        try:
-            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
-                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
-                raise typer.Exit(1)
-
-            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
-            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-
-            if not aws_account_id:
-                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
-                raise typer.Exit(1)
-
-            cache_image = (
-                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
-            )
-
-            label_cmd.extend(
-                [
-                    "--cache-from",
-                    f"type=registry,ref={cache_image}",
-                    "--cache-to",
-                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
-                    "--load",  # Load image to local Docker after build
-                ]
-            )
-        except typer.Exit:
-            raise
-        except Exception as e:
-            hud_console.error(f"Remote cache setup error: {e}")
-            raise typer.Exit(1) from e
-
-    label_cmd.extend(
-        [
-            "--label",
-            f"org.hud.manifest.head={lock_hash}:{lock_size}",
-            "--label",
-            f"org.hud.version={new_version}",
-            "-t",
-            version_tag,  # Always tag with new version
-            "-t",
-            latest_tag,  # Always tag with latest
-        ]
-    )
-
-    # Add custom tag if user provided one
-    if image_tag and image_tag not in [version_tag, latest_tag]:
-        label_cmd.extend(["-t", image_tag])
-
-    # Add build args to final image build (same as initial build)
-    for key, value in build_args.items():
-        label_cmd.extend(["--build-arg", f"{key}={value}"])
-
-    # Add secrets to final image build (same as initial build)
-    for secret in secrets or []:
-        label_cmd.extend(["--secret", secret])
-
-    label_cmd.append(str(env_dir))
-
-    # Run rebuild using Docker's native output formatting
-    env = os.environ.copy()
-    if secrets:
-        env["DOCKER_BUILDKIT"] = "1"
-    if verbose:
-        # Show Docker's native output when verbose
-        result = subprocess.run(label_cmd, check=False, env=env)
-    else:
-        # Capture output for error reporting, but don't show unless it fails
-        result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
-
-    if result.returncode != 0:
-        hud_console.error("Failed to rebuild with label")
-        if not verbose and result.stderr:
-            hud_console.info("Error output:")
-            hud_console.info(str(result.stderr))
-        if not verbose:
-            hud_console.info("")
-            hud_console.info("Run with --verbose to see full build output:")
-            hud_console.command_example("hud build --verbose")
-        raise typer.Exit(1)
-
-    hud_console.success("Built final image with lock file metadata")
-
-    # NOW get the image ID after the final build
-    image_id = get_docker_image_id(version_tag)
-    if image_id:
-        # Store full reference with digest
-        if image_id.startswith("sha256:"):
-            lock_content["images"]["full"] = f"{version_tag}@{image_id}"
+    if pushing:
+        # Image already pushed — get digest from pulled image
+        image_id = get_docker_image_id(analysis_image)
+        if image_id:
+            if image_id.startswith("sha256:"):
+                lock_content["images"]["full"] = f"{analysis_image}@{image_id}"
+            else:
+                lock_content["images"]["full"] = f"{analysis_image}@sha256:{image_id}"
+            with open(lock_path, "w") as f:
+                yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
+            hud_console.success("Updated lock file with image digest")
         else:
-            lock_content["images"]["full"] = f"{version_tag}@sha256:{image_id}"
-
-        # Update the lock file with the full image reference
-        with open(lock_path, "w") as f:
-            yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
-
-        hud_console.success("Updated lock file with image digest")
+            hud_console.warning("Could not retrieve image digest")
+        subprocess.run(["docker", "rmi", "-f", analysis_image], capture_output=True)  # noqa: S607
     else:
-        hud_console.warning("Could not retrieve image digest")
+        # Rebuild with label containing lock file hash
+        hud_console.progress_message("Rebuilding with lock file metadata...")
 
-    # Remove temp image after we're done
-    subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S607
+        # Reuse cache flags from docker_args for the label rebuild, but never --push
+        label_docker_args = [a for a in (docker_args or []) if a != "--push"]
+        needs_buildx = any(a.startswith("--cache") or a == "--load" for a in label_docker_args)
+        label_cmd = ["docker", "buildx", "build"] if needs_buildx else ["docker", "build"]
+
+        if dockerfile_path and dockerfile_path.name != "Dockerfile":
+            label_cmd.extend(["-f", str(dockerfile_path)])
+
+        label_platform = platform if platform is not None else "linux/amd64"
+        if label_platform:
+            label_cmd.extend(["--platform", label_platform])
+
+        label_cmd.extend(label_docker_args)
+        if needs_buildx and "--load" not in label_docker_args:
+            label_cmd.append("--load")
+
+        label_cmd.extend(
+            [
+                "--label",
+                f"org.hud.manifest.head={lock_hash}:{lock_size}",
+                "--label",
+                f"org.hud.version={new_version}",
+                "-t",
+                version_tag,
+                "-t",
+                latest_tag,
+            ]
+        )
+
+        if image_tag and image_tag not in [version_tag, latest_tag]:
+            label_cmd.extend(["-t", image_tag])
+
+        for key, value in build_args.items():
+            label_cmd.extend(["--build-arg", f"{key}={value}"])
+
+        for secret in secrets or []:
+            label_cmd.extend(["--secret", secret])
+
+        label_cmd.append(str(env_dir))
+
+        env = os.environ.copy()
+        if secrets:
+            env["DOCKER_BUILDKIT"] = "1"
+        if verbose:
+            result = subprocess.run(label_cmd, check=False, env=env)
+        else:
+            result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
+
+        if result.returncode != 0:
+            hud_console.error("Failed to rebuild with label")
+            if not verbose and result.stderr:
+                hud_console.info("Error output:")
+                hud_console.info(str(result.stderr))
+            if not verbose:
+                hud_console.info("")
+                hud_console.info("Run with --verbose to see full build output:")
+                hud_console.command_example("hud build --verbose")
+            raise typer.Exit(1)
+
+        hud_console.success("Built final image with lock file metadata")
+
+        image_id = get_docker_image_id(version_tag)
+        if image_id:
+            if image_id.startswith("sha256:"):
+                lock_content["images"]["full"] = f"{version_tag}@{image_id}"
+            else:
+                lock_content["images"]["full"] = f"{version_tag}@sha256:{image_id}"
+            with open(lock_path, "w") as f:
+                yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
+            hud_console.success("Updated lock file with image digest")
+        else:
+            hud_console.warning("Could not retrieve image digest")
+
+        subprocess.run(["docker", "rmi", "-f", build_tag], capture_output=True)  # noqa: S607
 
     # Update tasks.json files with new version
     hud_console.progress_message("Updating task files with new version...")
@@ -1238,9 +1194,6 @@ def build_command(
         "--secret",
         help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
     ),
-    remote_cache: str | None = typer.Option(
-        None, "--remote-cache", help="Enable remote cache using Amazon ECR with specified repo name"
-    ),
 ) -> None:
     """🏗️ Build a HUD environment and generate lock file.
 
@@ -1249,22 +1202,33 @@ def build_command(
     - Analyzes the MCP server to extract metadata
     - Generates a hud.lock.yaml file for reproducibility
 
+    Docker flags (--cache-from, --push, etc.) can be passed after --.
+
     Examples:
         hud build                    # Build current directory
         hud build environments/text_2048 -e API_KEY=secret
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
         hud build . --no-cache       # Force rebuild
-        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
         hud build . --build-arg NODE_ENV=production  # Pass Docker build args
-        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.
-        hud build . --secret id=MY_KEY,src=./my_key.txt  # Pass build secret from file.[/not dim]
-    """  # noqa: E501
+        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets
+        hud build . -- --push        # Push to registry after build[/not dim]
+    """
     if params:
-        directory = params[0]
-        extra_args = params[1:] if len(params) > 1 else []
+        # Split at -- separator: everything after goes to Docker as passthrough
+        if "--" in params:
+            sep_idx = params.index("--")
+            hud_params = params[:sep_idx]
+            docker_args: list[str] | None = params[sep_idx + 1 :] or None
+        else:
+            hud_params = params
+            docker_args = None
+
+        directory = hud_params[0] if hud_params else "."
+        extra_args = hud_params[1:] if len(hud_params) > 1 else []
     else:
         directory = "."
         extra_args = []
+        docker_args = None
 
     from hud.cli.utils.args import split_docker_passthrough
 
@@ -1278,6 +1242,6 @@ def build_command(
         env_vars or None,
         platform,
         secrets,
-        remote_cache,
-        build_args or None,
+        build_args=build_args or None,
+        docker_args=docker_args,
     )
