@@ -23,7 +23,7 @@ console = Console()
 def debug_command(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Docker image or environment directory. Docker flags go after --",
+        help="Docker image or environment directory, followed by optional Docker args",
     ),
     config: Path | None = typer.Option(  # noqa: B008
         None,
@@ -51,14 +51,14 @@ def debug_command(
 ) -> None:
     """🐛 Debug MCP environment - test initialization, tools, and readiness.
 
-    [not dim]Docker flags (e.g. -e, -p, -v) go after --.
+    [not dim]Extra arguments after the image/directory are passed to Docker.
 
     Examples:
         hud debug .                              # Debug current directory
         hud debug environments/browser           # Debug specific directory
         hud debug . --build                      # Build then debug
         hud debug hud-text-2048:latest          # Debug Docker image
-        hud debug my-image -- -e API_KEY=xxx     # Pass env to Docker
+        hud debug my-image -e API_KEY=xxx        # Pass env to Docker
         hud debug --config mcp-config.json
         hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
@@ -82,19 +82,8 @@ def debug_command(
         server_config = mcp_config[server_name]
         command = [server_config["command"], *server_config.get("args", [])]
     elif params:
-        if "--" in params:
-            sep_idx = params.index("--")
-            hud_params = params[:sep_idx]
-            docker_args = params[sep_idx + 1 :]
-        else:
-            hud_params = params
-            docker_args = []
-
-        if not hud_params:
-            console.print("[red]Error: Must specify a directory or Docker image before --[/red]")
-            raise typer.Exit(1)
-
-        first_param = hud_params[0]
+        first_param = params[0]
+        docker_args = params[1:] if len(params) > 1 else []
 
         p = Path(first_param)
         if is_environment_directory(p):

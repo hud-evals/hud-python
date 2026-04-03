@@ -1211,28 +1211,18 @@ def build_command(
         hud build . --no-cache       # Force rebuild
         hud build . --build-arg NODE_ENV=production  # Pass Docker build args
         hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets
-        hud build . -- --push        # Push to registry after build[/not dim]
+        hud build . --push                         # Push to registry after build[/not dim]
     """
     if params:
-        # Split at -- separator: everything after goes to Docker as passthrough
-        if "--" in params:
-            sep_idx = params.index("--")
-            hud_params = params[:sep_idx]
-            docker_args: list[str] | None = params[sep_idx + 1 :] or None
-        else:
-            hud_params = params
-            docker_args = None
-
-        directory = hud_params[0] if hud_params else "."
-        extra_args = hud_params[1:] if len(hud_params) > 1 else []
+        directory = params[0]
+        extra_args = params[1:] if len(params) > 1 else []
     else:
         directory = "."
         extra_args = []
-        docker_args = None
 
     from hud.cli.utils.args import split_docker_passthrough
 
-    env_vars, build_args, _ = split_docker_passthrough(extra_args)
+    env_vars, build_args, docker_args = split_docker_passthrough(extra_args)
 
     build_environment(
         directory,
@@ -1243,5 +1233,5 @@ def build_command(
         platform,
         secrets,
         build_args=build_args or None,
-        docker_args=docker_args,
+        docker_args=docker_args or None,
     )
