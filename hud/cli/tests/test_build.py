@@ -607,7 +607,6 @@ class TestBuildEnvironment:
     """Test the main build_environment function."""
 
     @mock.patch("hud.cli.build.build_docker_image")
-    @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
@@ -616,7 +615,6 @@ class TestBuildEnvironment:
         mock_run,
         mock_get_id,
         mock_analyze,
-        mock_collect_runtime,
         mock_build_docker,
         tmp_path,
     ):
@@ -651,12 +649,6 @@ ENV API_KEY
             ],
         }
         mock_get_id.return_value = "sha256:abc123"
-        mock_collect_runtime.return_value = {
-            "python": "3.11.6",
-            "cuda": None,
-            "cudnn": None,
-            "pytorch": None,
-        }
 
         # Mock final rebuild
         mock_result = mock.Mock()
@@ -683,11 +675,10 @@ ENV API_KEY
         assert lock_data["build"]["baseImage"] == "python:3.11"
         assert lock_data["build"]["platform"] == "linux/amd64"
         assert lock_data["environment"]["toolCount"] == 2
-        assert lock_data["environment"]["runtime"]["python"] == "3.11.6"
+        assert "runtime" not in lock_data["environment"]
         assert len(lock_data["tools"]) == 2
 
     @mock.patch("hud.cli.build.build_docker_image")
-    @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
@@ -696,7 +687,6 @@ ENV API_KEY
         mock_run,
         mock_get_id,
         mock_analyze,
-        mock_collect_runtime,
         mock_build_docker,
         tmp_path,
     ):
@@ -728,12 +718,6 @@ FROM python:3.11
             ],
         }
         mock_get_id.return_value = "sha256:fff111"
-        mock_collect_runtime.return_value = {
-            "python": "3.11.6",
-            "cuda": None,
-            "cudnn": None,
-            "pytorch": None,
-        }
 
         mock_result = mock.Mock()
         mock_result.returncode = 0

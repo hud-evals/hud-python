@@ -372,92 +372,6 @@ def display_secrets_warning(secret_vars: list[str]) -> None:
     hud_console.print("")
 
 
-def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, str | None]:
-    """Probe container to capture Python/CUDA/cuDNN/PyTorch versions.
-
-    Runs a tiny Python snippet inside the built image using docker run.
-    """
-    hud_console = HUDConsole()
-
-    runtime_script = (
-        "import json, platform\n"
-        "info = {'python': platform.python_version()}\n"
-        "try:\n"
-        "    import torch\n"
-        "    info['pytorch'] = getattr(torch, '__version__', None)\n"
-        "    cuda_version = None\n"
-        "    try:\n"
-        "        cuda_version = getattr(getattr(torch, 'version', None), 'cuda', None)\n"
-        "    except Exception:\n"
-        "        cuda_version = None\n"
-        "    if cuda_version:\n"
-        "        info['cuda'] = cuda_version\n"
-        "    try:\n"
-        "        cudnn_version = torch.backends.cudnn.version()\n"
-        "    except Exception:\n"
-        "        cudnn_version = None\n"
-        "    if cudnn_version:\n"
-        "        info['cudnn'] = str(cudnn_version)\n"
-        "except Exception:\n"
-        "    pass\n"
-        "info.setdefault('pytorch', None)\n"
-        "info.setdefault('cuda', None)\n"
-        "info.setdefault('cudnn', None)\n"
-        "print(json.dumps(info))\n"
-    )
-
-    for binary in ("python", "python3"):
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            image,
-            binary,
-            "-c",
-            runtime_script,
-        ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        except FileNotFoundError:
-            return {}
-
-        if result.returncode != 0:
-            if verbose:
-                hud_console.debug(
-                    f"Runtime probe failed with {binary}: {result.stderr.strip() or 'no stderr'}"
-                )
-            continue
-
-        output = (result.stdout or "").strip()
-        if not output:
-            return {}
-
-        try:
-            data = json.loads(output.splitlines()[-1])
-        except json.JSONDecodeError:
-            if verbose:
-                hud_console.debug(
-                    "Runtime probe returned non-JSON output; skipping metadata capture"
-                )
-            return {}
-
-        if not isinstance(data, dict):
-            if verbose:
-                hud_console.debug(
-                    "Runtime probe returned JSON that is not an object; skipping metadata capture"
-                )
-            return {}
-
-        return {
-            "python": data.get("python"),
-            "cuda": data.get("cuda"),
-            "cudnn": data.get("cudnn"),
-            "pytorch": data.get("pytorch"),
-        }
-
-    return {}
-
-
 async def analyze_mcp_environment(
     image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
 ) -> dict[str, Any]:
@@ -914,8 +828,7 @@ def build_environment(
     if image_tag:
         base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
 
-    # Collect runtime metadata and compute base image/platform
-    runtime_info = collect_runtime_metadata(analysis_image, verbose=verbose)
+    # Collect base image/platform metadata for the lock file
     base_image = parse_base_image(dockerfile_path)
     effective_platform = platform if platform is not None else "linux/amd64"
 
@@ -943,8 +856,6 @@ def build_environment(
         },
     }
 
-    if runtime_info:
-        lock_content["environment"]["runtime"] = runtime_info
     internal_count = int(analysis.get("internalToolCount", 0) or 0)
     lock_content["environment"]["internalToolCount"] = internal_count
 
