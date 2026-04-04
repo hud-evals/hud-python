@@ -166,6 +166,14 @@
             ]
           },
           {
+            "group": "Agents",
+            "pages": [
+              "platform/workflows/automations",
+              "platform/workflows/index",
+              "platform/workflows/chats"
+            ]
+          },
+          {
             "group": "Integrations",
             "pages": [
               "platform/rest-api",
