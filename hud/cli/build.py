@@ -10,18 +10,21 @@ import os
 import re
 import subprocess
 import time
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
-import yaml
 
 from hud.cli.utils.environment import find_dockerfile
-from hud.cli.utils.source_hash import compute_source_hash, list_source_files
+from hud.cli.utils.lockfile import (
+    build_lock_data,
+    dump_lock_data,
+)
 from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
-from hud.version import __version__ as hud_version
+
+if TYPE_CHECKING:
+    from hud.cli.utils.analysis import BuildAnalysis
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -372,9 +375,17 @@ def display_secrets_warning(secret_vars: list[str]) -> None:
     hud_console.print("")
 
 
+def _has_build_output_arg(docker_args: list[str]) -> bool:
+    """Return True when *docker_args* already choose a build output mode."""
+    return any(
+        arg in ("--push", "--load", "--output", "-o") or arg.startswith(("--output=", "-o="))
+        for arg in docker_args
+    )
+
+
 async def analyze_mcp_environment(
     image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
-) -> dict[str, Any]:
+) -> BuildAnalysis:
     """Analyze an MCP environment to extract metadata.
 
     Supports both stdio (default) and HTTP transport.  The transport is
@@ -382,27 +393,28 @@ async def analyze_mcp_environment(
     """
     from fastmcp import Client as FastMCPClient
 
+    from hud.cli.utils.analysis import analyze_environment
     from hud.cli.utils.docker import (
         DEFAULT_HTTP_PORT,
         build_env_flags,
         detect_transport,
         stop_container,
     )
-    from hud.cli.utils.mcp import analyze_environment
 
     hud_console = HUDConsole()
     env_vars = env_vars or {}
     transport_mode, container_port = detect_transport(image)
     is_http = transport_mode == "http"
     container_name: str | None = None
+    server_url: str | None = None
     initialized = False
     client: Any = None
 
     try:
         # --- transport-specific setup ---
         if is_http:
+            from hud.cli.utils.analysis import wait_for_http_server
             from hud.cli.utils.logging import find_free_port
-            from hud.cli.utils.mcp import wait_for_http_server
 
             port = container_port or DEFAULT_HTTP_PORT
             host_port = find_free_port(port)
@@ -468,6 +480,7 @@ async def analyze_mcp_environment(
             hud_console.info("Initializing MCP client...")
 
         if is_http:
+            assert server_url is not None
             await wait_for_http_server(  # type: ignore[possibly-undefined]
                 server_url, timeout_seconds=60.0
             )
@@ -478,8 +491,12 @@ async def analyze_mcp_environment(
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
-        full_analysis = await analyze_environment(client, verbose, server_name=server_name)
-        return _build_analysis_result(full_analysis, initialize_ms)
+        return await analyze_environment(
+            client,
+            verbose,
+            server_name=server_name,
+            initialize_ms=initialize_ms,
+        )
     except TimeoutError:
         from hud.shared.exceptions import HudException
 
@@ -507,61 +524,6 @@ async def analyze_mcp_environment(
             stop_container(container_name)
 
 
-def _build_analysis_result(full_analysis: dict[str, Any], initialize_ms: int) -> dict[str, Any]:
-    """Normalize the raw analysis dict into the build-lock result format."""
-    tools_list = full_analysis.get("tools", [])
-    hub_map = full_analysis.get("hub_tools", {}) or full_analysis.get("hubTools", {})
-
-    normalized_tools: list[dict[str, Any]] = []
-    internal_total = 0
-    for t in tools_list:
-        if hasattr(t, "name"):
-            name = getattr(t, "name", None)
-            description = getattr(t, "description", None)
-            input_schema = getattr(t, "inputSchema", None)
-            existing_internal = getattr(t, "internalTools", None)
-        else:
-            name = t.get("name")
-            description = t.get("description")
-            input_schema = t.get("inputSchema") or t.get("input_schema")
-            existing_internal = t.get("internalTools") or t.get("internal_tools")
-
-        tool_entry: dict[str, Any] = {"name": name}
-        if description:
-            tool_entry["description"] = description
-        if input_schema:
-            tool_entry["inputSchema"] = input_schema
-
-        merged_internal: list[str] = []
-        if isinstance(existing_internal, list):
-            merged_internal.extend([str(x) for x in existing_internal])
-        if isinstance(hub_map, dict) and name in hub_map and isinstance(hub_map[name], list):
-            merged_internal.extend([str(x) for x in hub_map[name]])
-        if merged_internal:
-            merged_internal = list(dict.fromkeys(merged_internal))
-            tool_entry["internalTools"] = merged_internal
-            internal_total += len(merged_internal)
-
-        normalized_tools.append(tool_entry)
-
-    result: dict[str, Any] = {
-        "initializeMs": initialize_ms,
-        "toolCount": len(tools_list),
-        "internalToolCount": internal_total,
-        "tools": normalized_tools,
-        "success": True,
-    }
-    if hub_map:
-        result["hub_tools"] = hub_map
-    if full_analysis.get("prompts"):
-        result["prompts"] = full_analysis["prompts"]
-    if full_analysis.get("resources"):
-        result["resources"] = full_analysis["resources"]
-    if "scenarios" in full_analysis:
-        result["scenarios"] = full_analysis["scenarios"]
-    return result
-
-
 def build_docker_image(
     directory: Path,
     tag: str,
@@ -574,10 +536,11 @@ def build_docker_image(
 ) -> bool:
     """Build a Docker image from a directory.
 
-    Wraps ``docker build`` (or ``docker buildx build`` when Docker-specific
-    flags are passed via *docker_args*).  Any flags that Docker understands
+    Wraps ``docker buildx build``. Any flags that Docker understands
     (``--cache-from``, ``--push``, ``--load``, etc.) belong in *docker_args*
-    and are appended to the command as-is.
+    and are appended to the command as-is. Unless the caller explicitly picks
+    an output mode, the result is loaded into the host daemon for local
+    analysis/debugging.
     """
     hud_console = HUDConsole()
     build_args = build_args or {}
@@ -590,9 +553,8 @@ def build_docker_image(
         hud_console.info("Expected: Dockerfile.hud or Dockerfile")
         return False
 
-    needs_buildx = any(a.startswith("--cache") or a in ("--push", "--load") for a in docker_args)
     effective_platform = platform if platform is not None else "linux/amd64"
-    cmd = ["docker", "buildx", "build"] if needs_buildx else ["docker", "build"]
+    cmd = ["docker", "buildx", "build"]
 
     if dockerfile.name != "Dockerfile":
         cmd.extend(["-f", str(dockerfile)])
@@ -606,8 +568,9 @@ def build_docker_image(
     # Passthrough: cache, push, and any other Docker-native flags
     cmd.extend(docker_args)
 
-    # Auto-add --load for buildx when caller didn't specify an output mode
-    if needs_buildx and "--push" not in docker_args and "--load" not in docker_args:
+    # Local hud build expects a daemon-loaded image unless the caller explicitly
+    # selects another buildx output mode such as --push/--output.
+    if not _has_build_output_arg(docker_args):
         cmd.append("--load")
 
     for key, value in build_args.items():
@@ -798,7 +761,7 @@ def build_environment(
 
     # Extract environment variables from Dockerfile
     dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"
-    required_env, optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
+    required_env, _optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
 
     # Show env vars detected from .env file
     if env_from_file:
@@ -828,124 +791,30 @@ def build_environment(
     if image_tag:
         base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
 
-    # Collect base image/platform metadata for the lock file
-    base_image = parse_base_image(dockerfile_path)
     effective_platform = platform if platform is not None else "linux/amd64"
 
-    # Create lock file content with images subsection at top
-    lock_content = {
-        "version": "1.3",  # Lock file format version
-        "images": {
-            "local": f"{base_name}:{new_version}",  # Local tag with version
-            "full": None,  # Will be set with digest after build
-            "pushed": None,  # Will be set by hud push
-        },
-        "build": {
-            "generatedAt": datetime.now(UTC).isoformat() + "Z",
-            "hudVersion": hud_version,
-            "directory": str(env_dir.name),
-            "version": new_version,
-            # Fast source fingerprint for change detection
-            "sourceHash": compute_source_hash(env_dir),
-            "baseImage": base_image,
-            "platform": effective_platform,
-        },
-        "environment": {
-            "initializeMs": analysis["initializeMs"],
-            "toolCount": analysis["toolCount"],
-        },
-    }
-
-    internal_count = int(analysis.get("internalToolCount", 0) or 0)
-    lock_content["environment"]["internalToolCount"] = internal_count
-
-    # Add environment variables section if any exist
-    # Include env vars from .env file as well
     env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
-
-    # Check if we have any env vars to document
-    has_env_vars = bool(required_env or optional_env or env_vars or env_vars_from_file)
-
-    if has_env_vars:
-        lock_content["environment"]["variables"] = {}
-
-        # Add note about editing environment variables
-        lock_content["environment"]["variables"]["_note"] = (
-            "You can edit this section to add or modify environment variables. "
-            "Provided variables will be used when running the environment."
-        )
-
-        # Combine all required variables: from Dockerfile, .env file, and provided vars
-        all_required = set(required_env)
-
-        # Add all env vars from .env file to required
-        all_required.update(env_vars_from_file)
-
-        # Add all provided env vars to required
-        if env_vars:
-            all_required.update(env_vars.keys())
-
-        # Remove any that are optional - they stay in optional
-        all_required = all_required - set(optional_env)
-
-        if all_required:
-            lock_content["environment"]["variables"]["required"] = sorted(list(all_required))
-        if optional_env:
-            lock_content["environment"]["variables"]["optional"] = optional_env
-
-    # Add tools with full schemas for RL config generation
-    if analysis["tools"]:
-        tools_serialized: list[dict[str, Any]] = []
-        for tool in analysis["tools"]:
-            entry: dict[str, Any] = {
-                "name": tool["name"],
-                # Preserve legacy shape: always include description/inputSchema
-                "description": tool.get("description", ""),
-                "inputSchema": tool.get("inputSchema", {}),
-            }
-            if tool.get("internalTools"):
-                entry["internalTools"] = tool.get("internalTools")
-            tools_serialized.append(entry)
-        lock_content["tools"] = tools_serialized
-
-    # Add hub tools if present (analyze_environment returns hub_tools with snake_case)
-    hub_tools = analysis.get("hub_tools") or analysis.get("hubTools")
-    if hub_tools:
-        lock_content["hubTools"] = hub_tools
-
-    # Add prompts if present
-    prompts = analysis.get("prompts")
-    if prompts:
-        lock_content["prompts"] = prompts
-
-    # Add resources if present
-    resources = analysis.get("resources")
-    if resources:
-        lock_content["resources"] = resources
-
-    # Add scenarios if present
-    if "scenarios" in analysis:
-        lock_content["scenarios"] = analysis["scenarios"]
+    lock_content = build_lock_data(
+        source_dir=env_dir,
+        analysis=analysis,
+        version=new_version,
+        image_name=base_name,
+        full_image_ref=None,
+        pushed_image_ref=None,
+        env_vars=env_vars or None,
+        additional_required_env_vars=env_vars_from_file,
+        platform=effective_platform,
+    )
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
     with open(lock_path, "w") as f:
-        yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
-
-    # Also write the file list we hashed for transparency (non-essential)
-    with contextlib.suppress(Exception):
-        files = [
-            str(p.resolve().relative_to(env_dir)).replace("\\", "/")
-            for p in list_source_files(env_dir)
-        ]
-        lock_content["build"]["sourceFiles"] = files
-        with open(lock_path, "w") as f:
-            yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
+        f.write(dump_lock_data(lock_content))
 
     hud_console.success("Created lock file: hud.lock.yaml")
 
     # Calculate lock file hash
-    lock_content_str = yaml.dump(lock_content, default_flow_style=False, sort_keys=True)
+    lock_content_str = dump_lock_data(lock_content, sort_keys=True)
     lock_hash = hashlib.sha256(lock_content_str.encode()).hexdigest()
     lock_size = len(lock_content_str)
 
@@ -961,7 +830,7 @@ def build_environment(
             else:
                 lock_content["images"]["full"] = f"{analysis_image}@sha256:{image_id}"
             with open(lock_path, "w") as f:
-                yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
+                f.write(dump_lock_data(lock_content))
             hud_console.success("Updated lock file with image digest")
         else:
             hud_console.warning("Could not retrieve image digest")
@@ -970,10 +839,9 @@ def build_environment(
         # Rebuild with label containing lock file hash
         hud_console.progress_message("Rebuilding with lock file metadata...")
 
-        # Reuse cache flags from docker_args for the label rebuild, but never --push
+        # Reuse Docker flags for the label rebuild, but never --push.
         label_docker_args = [a for a in (docker_args or []) if a != "--push"]
-        needs_buildx = any(a.startswith("--cache") or a == "--load" for a in label_docker_args)
-        label_cmd = ["docker", "buildx", "build"] if needs_buildx else ["docker", "build"]
+        label_cmd = ["docker", "buildx", "build"]
 
         if dockerfile_path and dockerfile_path.name != "Dockerfile":
             label_cmd.extend(["-f", str(dockerfile_path)])
@@ -983,7 +851,7 @@ def build_environment(
             label_cmd.extend(["--platform", label_platform])
 
         label_cmd.extend(label_docker_args)
-        if needs_buildx and "--load" not in label_docker_args:
+        if not _has_build_output_arg(label_docker_args):
             label_cmd.append("--load")
 
         label_cmd.extend(
@@ -1038,7 +906,7 @@ def build_environment(
             else:
                 lock_content["images"]["full"] = f"{version_tag}@sha256:{image_id}"
             with open(lock_path, "w") as f:
-                yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
+                f.write(dump_lock_data(lock_content))
             hud_console.success("Updated lock file with image digest")
         else:
             hud_console.warning("Could not retrieve image digest")
