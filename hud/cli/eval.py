@@ -619,7 +619,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             tasks = _load_from_file(path)
         else:
             from hud.cli.utils.api import hud_headers
-            from hud.cli.utils.evalset import fetch_remote_tasks, resolve_taskset_id
+            from hud.cli.utils.taskset import fetch_remote_tasks, resolve_taskset_id
             from hud.settings import settings
 
             resolved_id, _resolved_name, _ = resolve_taskset_id(
@@ -646,7 +646,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     if cfg.taskset:
         from hud.cli.utils.api import hud_headers as _hud_headers
-        from hud.cli.utils.evalset import resolve_taskset_id as _resolve_ts
+        from hud.cli.utils.taskset import resolve_taskset_id as _resolve_ts
         from hud.settings import settings as _settings
 
         try:
