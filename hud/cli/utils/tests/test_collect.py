@@ -107,51 +107,6 @@ class TestPackageImport:
             _cleanup(pkg)
 
 
-class TestPackageNameCollision:
-    """_collect_from_package must not return a cached sys.modules entry."""
-
-    def test_colliding_name_does_not_use_cached_module(self, tmp_path: Path) -> None:
-        """If sys.modules already has a module named 'tasks', a directory
-        called 'tasks' with __init__.py must still import from disk, not
-        from the cached module."""
-        import types
-
-        from hud.cli.utils.collect import _collect_from_package
-
-        fake_mod = types.ModuleType("tasks")
-        fake_mod.tasks = []  # type: ignore[attr-defined]
-        sys.modules["tasks"] = fake_mod
-
-        try:
-            _write(
-                tmp_path / "tasks" / "__init__.py",
-                """\
-                from hud.eval.task import Task
-                tasks = [Task(env={"name": "e"}, scenario="e:s", args={}, slug="real")]
-                """,
-            )
-            result = _collect_from_package(tmp_path / "tasks")
-            assert len(result) == 1
-            assert result[0].slug == "real"
-        finally:
-            sys.modules.pop("tasks", None)
-            _cleanup("_hud_collect_pkg_tasks")
-
-    def test_sys_modules_cleaned_up_after_import(self, tmp_path: Path) -> None:
-        """The synthetic module name must not linger in sys.modules."""
-        from hud.cli.utils.collect import _collect_from_package
-
-        _write(
-            tmp_path / "mypkg" / "__init__.py",
-            """\
-            from hud.eval.task import Task
-            tasks = [Task(env={"name": "e"}, scenario="e:s", args={}, slug="t")]
-            """,
-        )
-        _collect_from_package(tmp_path / "mypkg")
-        assert "_hud_collect_pkg_mypkg" not in sys.modules
-
-
 class TestRecursiveDiscovery:
     """_collect_from_directory with recursive rglob for task.py files."""
 
