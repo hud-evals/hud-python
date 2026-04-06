@@ -92,8 +92,17 @@ def _collect_from_package(directory: Path) -> list[Any]:
     """
     from hud.eval.task import Task
 
-    pkg_name = directory.name
+    pkg_name = f"_hud_collect_pkg_{directory.name}"
+    init_path = directory / "__init__.py"
     parent_dir = str(directory.parent)
+
+    spec = importlib.util.spec_from_file_location(
+        pkg_name,
+        init_path,
+        submodule_search_locations=[str(directory)],
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot import package '{directory.name}': failed to create module spec")
 
     inserted = False
     if parent_dir not in sys.path:
@@ -101,13 +110,18 @@ def _collect_from_package(directory: Path) -> list[Any]:
         inserted = True
 
     try:
-        module = importlib.import_module(pkg_name)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[pkg_name] = module
+        spec.loader.exec_module(module)
     except Exception as e:
-        raise ImportError(f"Failed to import package '{pkg_name}': {type(e).__name__}: {e}") from e
+        raise ImportError(
+            f"Failed to import package '{directory.name}': {type(e).__name__}: {e}"
+        ) from e
     finally:
         if inserted:
             with contextlib.suppress(ValueError):
                 sys.path.remove(parent_dir)
+        sys.modules.pop(pkg_name, None)
 
     found: list[Task] = []
 
