@@ -1020,7 +1020,7 @@ class TestEnvironmentNameResolution:
 class TestTasksetResolution:
     def test_T1_name_resolves_to_id(self) -> None:
         """T1: Taskset name resolves to UUID via POST resolve-evalset."""
-        from hud.cli.utils.evalset import resolve_taskset_id
+        from hud.cli.utils.taskset import resolve_taskset_id
 
         resp = _mock_response(200, {"evalset_id": "uuid-123", "name": "my-taskset"})
         with patch("httpx.post", return_value=resp):
@@ -1030,7 +1030,7 @@ class TestTasksetResolution:
 
     def test_T1_creates_new_taskset(self) -> None:
         """T1: New taskset name creates it and returns UUID."""
-        from hud.cli.utils.evalset import resolve_taskset_id
+        from hud.cli.utils.taskset import resolve_taskset_id
 
         resp = _mock_response(200, {"evalset_id": "new-uuid", "name": "new-ts", "created": True})
         with patch("httpx.post", return_value=resp):
@@ -1039,7 +1039,7 @@ class TestTasksetResolution:
 
     def test_uuid_passed_directly(self) -> None:
         """UUID input skips API resolution."""
-        from hud.cli.utils.evalset import resolve_taskset_id
+        from hud.cli.utils.taskset import resolve_taskset_id
 
         ts_id, _ts_name, _ = resolve_taskset_id(
             "550e8400-e29b-41d4-a716-446655440000",
@@ -1056,7 +1056,7 @@ class TestTasksetResolution:
 
 class TestFetchRemoteTasks:
     def test_fetch_existing_taskset(self) -> None:
-        from hud.cli.utils.evalset import fetch_remote_tasks
+        from hud.cli.utils.taskset import fetch_remote_tasks
 
         resp = _mock_response(
             200,
@@ -1075,7 +1075,7 @@ class TestFetchRemoteTasks:
 
     def test_E4_fetch_nonexistent_taskset(self) -> None:
         """Taskset doesn't exist → empty results."""
-        from hud.cli.utils.evalset import fetch_remote_tasks
+        from hud.cli.utils.taskset import fetch_remote_tasks
 
         resp = _mock_response(404)
         with patch("httpx.get", return_value=resp):
@@ -1083,7 +1083,7 @@ class TestFetchRemoteTasks:
         assert tasks == []
 
     def test_fetch_empty_taskset(self) -> None:
-        from hud.cli.utils.evalset import fetch_remote_tasks
+        from hud.cli.utils.taskset import fetch_remote_tasks
 
         resp = _mock_response(
             200,
@@ -1112,7 +1112,7 @@ class TestFullSyncFlow:
             _upload_tasks,
         )
         from hud.cli.utils.collect import collect_tasks
-        from hud.cli.utils.evalset import fetch_remote_tasks
+        from hud.cli.utils.taskset import fetch_remote_tasks
         from hud.utils.hud_console import HUDConsole
 
         tasks = collect_tasks(str(project_dir / "tasks.py"))
