@@ -383,6 +383,18 @@ def _has_build_output_arg(docker_args: list[str]) -> bool:
     )
 
 
+def _has_non_daemon_output(docker_args: list[str]) -> bool:
+    """Return True when *docker_args* route build output away from the local daemon.
+
+    Detects ``--output``/``-o`` without an accompanying ``--load``, meaning
+    the built image won't be available for local analysis.
+    """
+    has_custom = any(
+        arg in ("--output", "-o") or arg.startswith(("--output=", "-o=")) for arg in docker_args
+    )
+    return has_custom and "--load" not in docker_args
+
+
 async def analyze_mcp_environment(
     image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
 ) -> BuildAnalysis:
@@ -714,6 +726,13 @@ def build_environment(
             raise typer.Exit(1)
         analysis_image = build_tag
     else:
+        if _has_non_daemon_output(docker_args or []):
+            hud_console.error(
+                "A custom --output was specified without --load; "
+                "the image is not available in the local Docker daemon for analysis."
+            )
+            hud_console.info("Add --load alongside your --output flag, or use --push instead.")
+            raise typer.Exit(1)
         analysis_image = build_tag
         hud_console.success(f"Built temporary image: {build_tag}")
 
@@ -800,10 +819,11 @@ def build_environment(
         version=new_version,
         image_name=base_name,
         full_image_ref=None,
-        pushed_image_ref=None,
+        pushed_image_ref=build_tag if pushing else None,
         env_vars=env_vars or None,
         additional_required_env_vars=env_vars_from_file,
         platform=effective_platform,
+        local_image_ref=build_tag if pushing else None,
     )
 
     # Write lock file
@@ -915,8 +935,15 @@ def build_environment(
 
     # Update tasks.json files with new version
     hud_console.progress_message("Updating task files with new version...")
+    if pushing:
+        # Use the tag portion from the user's push tag so task references match
+        # what was actually pushed (e.g. "v1.0" from "registry.com/image:v1.0").
+        _lc, _ls = build_tag.rfind(":"), build_tag.rfind("/")
+        effective_version = build_tag[_lc + 1 :] if _lc > _ls else new_version
+    else:
+        effective_version = new_version
     updated_task_files = update_tasks_json_versions(
-        env_dir, base_name, existing_version, new_version
+        env_dir, base_name, existing_version, effective_version
     )
 
     if updated_task_files:
@@ -927,27 +954,30 @@ def build_environment(
     # Print summary
     hud_console.section_title("Build Complete")
 
-    # Show the version tag as primary since that's what will be pushed
-    hud_console.status_item("Built image", version_tag, primary=True)
-
-    # Show additional tags
-    additional_tags = [latest_tag]
-    if image_tag and image_tag not in [version_tag, latest_tag]:
-        additional_tags.append(image_tag)
-    hud_console.status_item("Also tagged", ", ".join(additional_tags))
+    if pushing:
+        hud_console.status_item("Pushed image", build_tag, primary=True)
+    else:
+        hud_console.status_item("Built image", version_tag, primary=True)
+        additional_tags = [latest_tag]
+        if image_tag and image_tag not in [version_tag, latest_tag]:
+            additional_tags.append(image_tag)
+        hud_console.status_item("Also tagged", ", ".join(additional_tags))
 
     hud_console.status_item("Version", new_version)
     hud_console.status_item("Lock file", "hud.lock.yaml")
     hud_console.status_item("Tools found", str(analysis["toolCount"]))
 
-    # Show the digest info separately if we have it
     if image_id:
         hud_console.dim_info("\nImage digest", image_id)
 
     hud_console.section_title("Next Steps")
-    hud_console.info("Test locally:")
-    hud_console.command_example("hud dev", "Hot-reload development")
-    hud_console.command_example(f"hud debug {version_tag}", "Test MCP compliance")
+    if pushing:
+        hud_console.info("Test the pushed image:")
+        hud_console.command_example(f"hud debug {build_tag}", "Test MCP compliance")
+    else:
+        hud_console.info("Test locally:")
+        hud_console.command_example("hud dev", "Hot-reload development")
+        hud_console.command_example(f"hud debug {version_tag}", "Test MCP compliance")
     hud_console.info("")
     hud_console.info("Deploy to platform:")
     hud_console.command_example("hud deploy", "Build remotely and deploy")
