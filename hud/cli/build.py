@@ -688,6 +688,14 @@ def build_environment(
     # Detect --push in docker passthrough args
     pushing = "--push" in (docker_args or [])
 
+    if not pushing and _has_non_daemon_output(docker_args or []):
+        hud_console.error(
+            "A custom --output was specified without --load; "
+            "the image would not be available in the local Docker daemon for analysis."
+        )
+        hud_console.info("Add --load alongside your --output flag, or use --push instead.")
+        raise typer.Exit(1)
+
     # Set up build tags
     if pushing:
         if not tag:
@@ -726,13 +734,6 @@ def build_environment(
             raise typer.Exit(1)
         analysis_image = build_tag
     else:
-        if _has_non_daemon_output(docker_args or []):
-            hud_console.error(
-                "A custom --output was specified without --load; "
-                "the image is not available in the local Docker daemon for analysis."
-            )
-            hud_console.info("Add --load alongside your --output flag, or use --push instead.")
-            raise typer.Exit(1)
         analysis_image = build_tag
         hud_console.success(f"Built temporary image: {build_tag}")
 
