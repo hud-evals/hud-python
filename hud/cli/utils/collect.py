@@ -187,11 +187,14 @@ def _collect_from_directory(
     found: list[Task] = []
     skip_names = {"env", "conftest", "setup", "__init__", "__main__"}
 
-    def _record_failure(rel_path: str, error: ImportError) -> None:
+    def _record_failure(rel_path: str, error: Exception) -> None:
         LOGGER.warning("Failed to import %s: %s", rel_path, error)
         if failures is not None:
             cause = error.__cause__
-            short = f"{type(cause).__name__}: {cause}" if cause else str(error)
+            if cause:
+                short = f"{type(cause).__name__}: {cause}"
+            else:
+                short = f"{type(error).__name__}: {error}"
             failures.append((rel_path, short))
 
     # Priority 0: directory is a Python package — use package imports
@@ -218,7 +221,7 @@ def _collect_from_directory(
                 if result:
                     LOGGER.info("Collected %d task(s) from %s", len(result), candidate.name)
                     found.extend(result)
-            except ImportError as e:
+            except Exception as e:
                 _record_failure(candidate.name, e)
     if found:
         return found
@@ -236,7 +239,7 @@ def _collect_from_directory(
                 rel = task_file.relative_to(directory)
                 LOGGER.info("Collected %d task(s) from %s", len(result), rel)
                 found.extend(result)
-        except ImportError as e:
+        except Exception as e:
             rel = str(task_file.relative_to(directory))
             _record_failure(rel, e)
     if found:
@@ -251,7 +254,7 @@ def _collect_from_directory(
             if result:
                 LOGGER.info("Collected %d task(s) from %s", len(result), py_file.name)
                 found.extend(result)
-        except ImportError as e:
+        except Exception as e:
             LOGGER.debug("Skipping %s: %s", py_file.name, e)
 
     return found
