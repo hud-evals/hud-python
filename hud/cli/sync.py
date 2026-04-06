@@ -44,7 +44,8 @@ def _compute_remote_signature(remote_task: dict[str, Any]) -> str:
     args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
     validation: list[dict[str, Any]] | None = remote_task.get("validation")
     agent_config: dict[str, Any] | None = remote_task.get("agent_config") or None
-    return _compute_signature(scenario, args, validation, agent_config)
+    columns: dict[str, Any] | None = remote_task.get("column_values") or None
+    return _compute_signature(scenario, args, validation, agent_config, columns)
 
 
 def _compute_signature(
@@ -52,6 +53,7 @@ def _compute_signature(
     args: dict[str, Any],
     validation: list[dict[str, Any]] | None,
     agent_config: dict[str, Any] | None,
+    columns: dict[str, Any] | None = None,
 ) -> str:
     """Compute a deterministic signature for diff comparison.
 
@@ -66,6 +68,8 @@ def _compute_signature(
         sig_data["validation"] = validation
     if agent_config:
         sig_data["agent_config"] = agent_config
+    if columns:
+        sig_data["columns"] = columns
     return f"{short}|" + json.dumps(
         sig_data,
         sort_keys=True,
@@ -129,6 +133,10 @@ def _build_local_specs(
         if env_name:
             env_config["name"] = env_name
 
+        columns_dict: dict[str, Any] | None = None
+        if hasattr(task, "columns") and task.columns:
+            columns_dict = dict(task.columns)
+
         specs.append(
             {
                 "slug": slug,
@@ -137,11 +145,13 @@ def _build_local_specs(
                 "validation": validation_list,
                 "agent_config": agent_config_dict,
                 "env": env_config,
+                "columns": columns_dict,
                 "signature": _compute_signature(
                     scenario_name,
                     args_dict,
                     validation_list,
                     agent_config_dict,
+                    columns_dict,
                 ),
             }
         )
@@ -247,14 +257,70 @@ def _detect_slug_renames(
                 break
 
 
+def _infer_column_type(values: list[Any]) -> str:
+    """Infer a column type from observed values across tasks.
+
+    Returns one of: "text", "number", "single-select", "multi-select".
+    Heuristic: if all non-None values are numeric -> "number";
+    if any value is a list -> "multi-select";
+    otherwise -> "text".
+    """
+    non_none = [v for v in values if v is not None]
+    if not non_none:
+        return "text"
+    if any(isinstance(v, list) for v in non_none):
+        return "multi-select"
+    if all(isinstance(v, (int, float)) for v in non_none):
+        return "number"
+    return "text"
+
+
+def _build_column_definitions(
+    all_specs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]] | None:
+    """Auto-infer evalset column definitions from all local task column values.
+
+    Scans column values across every spec (not just to_upload) so that
+    definitions reflect the full taskset even on partial uploads.
+    """
+    values_by_col: dict[str, list[Any]] = {}
+    for spec in all_specs:
+        cols = spec.get("columns")
+        if not cols:
+            continue
+        for col_name, col_val in cols.items():
+            values_by_col.setdefault(col_name, []).append(col_val)
+
+    if not values_by_col:
+        return None
+
+    definitions: dict[str, dict[str, Any]] = {}
+    for col_name, vals in values_by_col.items():
+        col_type = _infer_column_type(vals)
+        col_def: dict[str, Any] = {"type": col_type}
+        if col_type == "single-select":
+            col_def["options"] = sorted({str(v) for v in vals if v is not None})
+        elif col_type == "multi-select":
+            all_opts: set[str] = set()
+            for v in vals:
+                if isinstance(v, list):
+                    all_opts.update(v)
+                elif v is not None:
+                    all_opts.add(str(v))
+            col_def["options"] = sorted(all_opts)
+        definitions[col_name] = col_def
+    return definitions
+
+
 def _upload_tasks(
     to_upload: list[dict[str, Any]],
     taskset_name: str,
     api_url: str,
     headers: dict[str, str],
+    column_definitions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """POST tasks to /tasks/upload and return the response."""
-    payload = {
+    payload: dict[str, Any] = {
         "name": taskset_name,
         "tasks": [
             {
@@ -266,10 +332,13 @@ def _upload_tasks(
                     {"validation": spec["validation"]} if spec.get("validation") is not None else {}
                 ),
                 **({"agent_config": spec["agent_config"]} if spec.get("agent_config") else {}),
+                **({"column_values": spec["columns"]} if spec.get("columns") else {}),
             }
             for spec in to_upload
         ],
     }
+    if column_definitions:
+        payload["columns"] = column_definitions
 
     response = httpx.post(
         f"{api_url}/tasks/upload",
@@ -524,10 +593,13 @@ def sync_tasks_command(
             hud_console.info("  Aborted.")
             return
 
+    # Infer column definitions from ALL local specs (not just to_upload)
+    column_definitions = _build_column_definitions(local_specs)
+
     # Upload (platform validates envs + scenarios inline)
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = _upload_tasks(to_upload, taskset_name, api_url, headers)
+        result = _upload_tasks(to_upload, taskset_name, api_url, headers, column_definitions)
     except httpx.HTTPStatusError as e:
         detail = ""
         import contextlib
