@@ -167,7 +167,11 @@ def _find_project_root(directory: Path) -> str | None:
     return None
 
 
-def _collect_from_directory(directory: Path) -> list[Any]:
+def _collect_from_directory(
+    directory: Path,
+    *,
+    failures: list[tuple[str, str]] | None = None,
+) -> list[Any]:
     """Walk a directory and collect Task objects from Python files.
 
     Checks in this order:
@@ -182,6 +186,13 @@ def _collect_from_directory(directory: Path) -> list[Any]:
 
     found: list[Task] = []
     skip_names = {"env", "conftest", "setup", "__init__", "__main__"}
+
+    def _record_failure(rel_path: str, error: ImportError) -> None:
+        LOGGER.warning("Failed to import %s: %s", rel_path, error)
+        if failures is not None:
+            cause = error.__cause__
+            short = f"{type(cause).__name__}: {cause}" if cause else str(error)
+            failures.append((rel_path, short))
 
     # Priority 0: directory is a Python package — use package imports
     if (directory / "__init__.py").is_file():
@@ -207,8 +218,8 @@ def _collect_from_directory(directory: Path) -> list[Any]:
                 if result:
                     LOGGER.info("Collected %d task(s) from %s", len(result), candidate.name)
                     found.extend(result)
-            except ImportError:
-                LOGGER.warning("Failed to import %s, skipping", candidate.name)
+            except ImportError as e:
+                _record_failure(candidate.name, e)
     if found:
         return found
 
@@ -226,8 +237,8 @@ def _collect_from_directory(directory: Path) -> list[Any]:
                 LOGGER.info("Collected %d task(s) from %s", len(result), rel)
                 found.extend(result)
         except ImportError as e:
-            rel = task_file.relative_to(directory)
-            LOGGER.warning("Failed to import %s: %s", rel, e)
+            rel = str(task_file.relative_to(directory))
+            _record_failure(rel, e)
     if found:
         return found
 
@@ -246,7 +257,11 @@ def _collect_from_directory(directory: Path) -> list[Any]:
     return found
 
 
-def collect_tasks(source: str) -> list[Any]:
+def collect_tasks(
+    source: str,
+    *,
+    failures: list[tuple[str, str]] | None = None,
+) -> list[Any]:
     """Collect Task objects from a source path.
 
     Supports:
@@ -255,6 +270,7 @@ def collect_tasks(source: str) -> list[Any]:
     - JSON/JSONL file: loads task dicts and converts to Task objects
 
     Returns an empty list if no tasks are found (caller should error).
+    If *failures* is provided, import errors are appended as ``(path, error)`` tuples.
     """
     path = Path(source).resolve()
 
@@ -268,6 +284,6 @@ def collect_tasks(source: str) -> list[Any]:
                 f"Unsupported file type: {path.suffix} (expected .py, .json, or .jsonl)"
             )
     elif path.is_dir():
-        return _collect_from_directory(path)
+        return _collect_from_directory(path, failures=failures)
     else:
         raise FileNotFoundError(f"Source not found: {source}")

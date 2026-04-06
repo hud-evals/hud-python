@@ -1,4 +1,4 @@
-"""Shared evalset resolution utilities used by ``hud sync`` and ``hud eval``."""
+"""Shared taskset resolution utilities used by ``hud sync`` and ``hud eval``."""
 
 from __future__ import annotations
 
@@ -21,10 +21,10 @@ def resolve_taskset_id(
     """Resolve a taskset name to its UUID.
 
     Args:
-        create: If True (default), creates the evalset if it doesn't exist.
+        create: If True (default), creates the taskset if it doesn't exist.
             Set to False for read-only operations like ``hud eval``.
 
-    Returns (evalset_id, evalset_name, created).
+    Returns (taskset_id, taskset_name, created).
     Returns ("", name, False) if not found and create=False.
     """
     try:
@@ -63,13 +63,13 @@ def resolve_taskset_id(
 
 
 def fetch_remote_tasks(
-    evalset_id: str,
+    taskset_id: str,
     api_url: str,
     headers: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """Fetch remote tasks for an evalset by UUID."""
+    """Fetch remote tasks for a taskset by UUID."""
     response = httpx.get(
-        f"{api_url}/tasks/evalsets/{evalset_id}/tasks-by-id",
+        f"{api_url}/tasks/evalsets/{taskset_id}/tasks-by-id",
         headers=headers,
         timeout=30.0,
     )

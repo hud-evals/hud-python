@@ -13,12 +13,12 @@ import typer
 
 from hud.cli.utils.api import hud_headers, require_api_key
 from hud.cli.utils.collect import collect_tasks
-from hud.cli.utils.evalset import fetch_remote_tasks, resolve_taskset_id
 from hud.cli.utils.project_config import (
     get_taskset_id,
     load_project_config,
     save_project_config,
 )
+from hud.cli.utils.taskset import fetch_remote_tasks, resolve_taskset_id
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
@@ -174,6 +174,9 @@ def _diff_and_display(
     taskset_id: str,
     taskset_exists: bool,
     hud_console: HUDConsole,
+    *,
+    collection_failures: list[tuple[str, str]] | None = None,
+    switching_from: str | None = None,
 ) -> list[dict[str, Any]]:
     """Diff local vs remote, display plan, return tasks to upload."""
     remote_by_slug: dict[str, dict[str, Any]] = {}
@@ -207,6 +210,13 @@ def _diff_and_display(
 
     if not taskset_exists:
         hud_console.info("  Taskset will be created")
+    if switching_from:
+        hud_console.warning(f"  Switching from previously stored taskset ({switching_from[:8]}...)")
+
+    if collection_failures:
+        hud_console.info(f"\n  Skipped ({len(collection_failures)}):")
+        for rel_path, error in collection_failures:
+            hud_console.info(f"    ! {rel_path}: {error}")
 
     if to_create:
         hud_console.info(f"\n  Create ({len(to_create)}):")
@@ -362,20 +372,16 @@ def sync_tasks_command(
 
     if taskset and not resolved_taskset_id:
         hud_console.progress_message("Resolving taskset...")
-        resolved_taskset_id, taskset_display, evalset_created = resolve_taskset_id(
+        resolved_taskset_id, taskset_display, _ = resolve_taskset_id(
             taskset,
             api_url,
             headers,
+            create=False,
         )
-        if evalset_created:
-            hud_console.success(f"Created new evalset '{taskset_display}'")
+        if resolved_taskset_id:
+            hud_console.success(f"Found taskset '{taskset_display}'")
         else:
-            hud_console.success(f"Found evalset '{taskset_display}'")
-
-        if previously_stored_id and previously_stored_id != resolved_taskset_id:
-            hud_console.warning(
-                f"Switching from previously stored taskset ({previously_stored_id[:8]}...)"
-            )
+            taskset_display = taskset
 
     # Resolve the taskset name from platform (for display + upload)
     if resolved_taskset_id and not taskset_display:
@@ -414,9 +420,10 @@ def sync_tasks_command(
             pass
 
     # Collect local tasks
+    collection_failures: list[tuple[str, str]] = []
     hud_console.progress_message(f"Collecting tasks from {source}...")
     try:
-        raw_tasks = collect_tasks(source)
+        raw_tasks = collect_tasks(source, failures=collection_failures)
     except (ImportError, FileNotFoundError, ValueError) as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from e
@@ -451,7 +458,8 @@ def sync_tasks_command(
                 fixed = check_and_fix_env_name(source_dir, platform_env_name, hud_console)
                 if fixed:
                     hud_console.progress_message("Re-collecting tasks after name fix...")
-                    raw_tasks = collect_tasks(source)
+                    collection_failures = []
+                    raw_tasks = collect_tasks(source, failures=collection_failures)
                     local_specs = _build_local_specs(raw_tasks, hud_console)
 
     # Apply filters
@@ -467,7 +475,7 @@ def sync_tasks_command(
             hud_console.error("No tasks left after exclusions")
             raise typer.Exit(1)
 
-    # Fetch remote state (always by UUID — resolve-evalset already created it if needed)
+    # Fetch remote state (skip if taskset doesn't exist yet)
     taskset_exists = bool(resolved_taskset_id)
     taskset_name = taskset_display
     remote_tasks: list[dict[str, Any]] = []
@@ -490,6 +498,12 @@ def sync_tasks_command(
     if not taskset_name and taskset:
         taskset_name = taskset
 
+    switching_from = (
+        previously_stored_id
+        if previously_stored_id and previously_stored_id != resolved_taskset_id
+        else None
+    )
+
     # Force mode: skip diff, upload everything
     if force:
         to_upload = local_specs
@@ -502,6 +516,8 @@ def sync_tasks_command(
             resolved_taskset_id,
             taskset_exists,
             hud_console,
+            collection_failures=collection_failures,
+            switching_from=switching_from,
         )
 
     if not to_upload:
