@@ -1,0 +1,54 @@
+---
+title: "Automations"
+description: "Run scenarios repeatably with pre-filled arguments — configure once, execute on demand"
+icon: "play"
+---
+
+Automations are pre-configured scenario runs. You pair a scenario with a model and optionally pre-fill arguments, then run it whenever you need. Each run produces a traced result.
+
+A scenario qualifies as an automation when all its arguments are user-provided — no platform-injected args like `trace_id` or `hud_api_key`.
+
+## How to Use
+
+### From the Platform
+
+1. Go to the **Agents** page
+2. Click **New Agent** and select **Automation**
+3. Select an environment → scenario → model
+4. Pre-fill any arguments you want baked in — leave required args blank for a partial automation that prompts at runtime
+5. Your automation appears under **Your Automations** on the agents page
+6. Click it to view config, run it, or see run history
+
+### From the Environments Page
+
+1. Open any environment and load a scenario
+2. The "Make Automation" button lets you jump to the agents page to create one
+
+## Building a Scenario for Automations
+
+Any scenario without `trace_id`/`hud_api_key` args is automatically classified as an automation:
+
+```python
+from hud import Environment
+
+env = Environment(name="my-env")
+
+@env.scenario("generate_report")
+async def generate_report(
+    topic: str,
+    format: str = "markdown",
+    max_length: int = 1000,
+) -> Any:
+    """Generate a report on the given topic."""
+    prompt = f"Write a {format} report about {topic} (max {max_length} words)."
+    response = yield prompt
+    yield 1.0 if response else 0.0
+```
+
+When you create an automation from this scenario, you can pre-fill `topic` and `format` so each run just executes with those defaults. Arguments you don't configure at creation time won't appear in the saved config — they'll be asked at runtime instead.
+
+## See Also
+
+- [QA Workflows](/platform/workflows) — Automated trace analysis
+- [Chat Agents](/platform/workflows/chats) — Multi-turn conversational agents
+- [Environments](/platform/environments) — Where scenarios live

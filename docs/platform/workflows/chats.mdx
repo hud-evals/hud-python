@@ -1,0 +1,82 @@
+---
+title: "Chat Agents"
+description: "Multi-turn conversational agents served over A2A — pair a scenario's tools with a model"
+icon: "comments"
+---
+
+Chat agents are multi-turn conversational agents. Each chat pairs a scenario's tools with a model and is served over the [A2A protocol](https://github.com/google/a2a). You can chat with them directly on the platform or connect them to other systems via the A2A endpoint.
+
+A scenario qualifies as a chat when it declares `chat=True` or its first argument is an array type (conversation history).
+
+## How to Use
+
+### From the Agents Page
+
+1. Go to the **Agents** page
+2. Click **New Agent** and select **Chat Agent**
+3. Select a chat scenario and model
+4. Your chat agent appears under **Your Chat Agents**
+5. Click it to open the detail dialog — the right side has an embedded chat where you can try it out directly, with conversation tabs at the top
+
+### From the Environments Page
+
+1. Open any environment and load a chat scenario
+2. The "Make Chat Agent" button lets you jump to the agents page
+
+## Building a Chat Scenario
+
+Use `chat=True` on the scenario decorator:
+
+```python
+from hud import Environment
+
+env = Environment(name="my-env")
+
+@env.scenario("assistant", chat=True)
+async def assistant(
+    messages: list[dict] | None = None,
+    system_prompt: str = "You are a helpful assistant.",
+) -> Any:
+    """Multi-turn conversation with tools."""
+    prompt_messages = [system_prompt]
+    if messages:
+        prompt_messages.extend(messages)
+
+    response = yield prompt_messages
+    yield 1.0 if response else 0.0
+```
+
+The `messages` array contains the conversation history. The platform manages this automatically — each turn appends to the history and passes the full context.
+
+## A2A Integration
+
+Every chat agent exposes an A2A endpoint:
+
+```
+GET  /agents/{agent_id}/.well-known/agent-card.json
+POST /agents/{agent_id}/chat
+```
+
+You can connect chat agents to other A2A-compatible systems, use them as sub-agents, or serve them as standalone endpoints. The A2A connection info is available from the detail dialog.
+
+## SDK Usage
+
+```python
+from hud import Environment
+from hud.services import Chat
+
+env = Environment("my-env")
+chat = env.chat("assistant", model="claude-sonnet-4-6")
+
+r1 = await chat.send("Hello!")
+r2 = await chat.send("Tell me more about that.")
+
+# Serve as A2A endpoint
+chat.serve(port=9999)
+```
+
+## See Also
+
+- [Automations](/platform/workflows/automations) — Run scenarios repeatably
+- [QA Workflows](/platform/workflows) — Automated trace analysis
+- [A2A Integration](/guides/mcp-to-a2a) — Connecting agents via A2A
