@@ -44,7 +44,7 @@ class TestAnalyzeEnvironment:
         mock_analysis = {
             "metadata": {"servers": ["test"], "initialized": True},
             "tools": [{"name": "tool1", "description": "Test tool"}],
-            "hub_tools": {},
+            "hubTools": {},
             "resources": [],
             "telemetry": {},
         }
@@ -52,7 +52,7 @@ class TestAnalyzeEnvironment:
         with (
             patch("fastmcp.Client") as MockClient,
             patch(
-                "hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock
+                "hud.cli.utils.analysis.analyze_environment", new_callable=AsyncMock
             ) as mock_mcp_analyze,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
@@ -116,7 +116,7 @@ class TestAnalyzeEnvironment:
         mock_analysis = {
             "metadata": {"servers": ["test"], "initialized": True},
             "tools": [],
-            "hub_tools": {},
+            "hubTools": {},
             "resources": [],
             "telemetry": {},
             "verbose": False,
@@ -126,7 +126,7 @@ class TestAnalyzeEnvironment:
             with (
                 patch("fastmcp.Client") as MockClient,
                 patch(
-                    "hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock
+                    "hud.cli.utils.analysis.analyze_environment", new_callable=AsyncMock
                 ) as mock_mcp_analyze,
                 patch("hud.cli.analyze.console") as mock_console,
                 patch("hud.cli.analyze.display_interactive") as mock_interactive,
@@ -166,7 +166,7 @@ class TestAnalyzeWithConfig:
         mock_analysis = {
             "metadata": {"servers": ["server"], "initialized": True},
             "tools": [],
-            "hub_tools": {},
+            "hubTools": {},
             "resources": [],
             "telemetry": {},
         }
@@ -174,7 +174,7 @@ class TestAnalyzeWithConfig:
         with (
             patch("fastmcp.Client") as MockClient,
             patch(
-                "hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock
+                "hud.cli.utils.analysis.analyze_environment", new_callable=AsyncMock
             ) as mock_mcp_analyze,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
@@ -255,7 +255,7 @@ class TestDisplayFunctions:
         analysis = {
             "metadata": {"servers": ["test"], "initialized": True},
             "tools": [{"name": "tool1", "description": "Test tool"}],
-            "hub_tools": {"hub1": ["func1", "func2"]},
+            "hubTools": {"hub1": ["func1", "func2"]},
             "resources": [{"uri": "file:///test", "name": "Test", "description": "Resource"}],
             "telemetry": {"status": "running", "live_url": "http://test"},
         }
@@ -276,7 +276,7 @@ class TestDisplayFunctions:
                 {"name": "tool1", "description": "Tool 1"},
                 {"name": "setup", "description": "Hub tool"},
             ],
-            "hub_tools": {"setup": ["init", "config"]},
+            "hubTools": {"setup": ["init", "config"]},
             "resources": [{"uri": "telemetry://live", "name": "Telemetry"}],
             "telemetry": {"status": "active"},
         }

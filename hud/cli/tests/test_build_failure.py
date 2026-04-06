@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@patch("hud.cli.build.compute_source_hash", return_value="deadbeef")
+@patch("hud.cli.utils.lockfile.compute_source_hash", return_value="deadbeef")
 @patch(
     "hud.cli.build.analyze_mcp_environment",
     return_value={"initializeMs": 10, "toolCount": 0, "tools": []},
@@ -29,7 +29,7 @@ def test_build_label_rebuild_failure(_bd, _an, _hash, tmp_path: Path, monkeypatc
 
     def run_side_effect(cmd, *a, **k):
         # Return 0 for first docker build, 1 for label build
-        if isinstance(cmd, list) and cmd[:2] == ["docker", "build"] and "--label" in cmd:
+        if isinstance(cmd, list) and cmd[:3] == ["docker", "buildx", "build"] and "--label" in cmd:
             return types.SimpleNamespace(returncode=1, stderr="boom")
         return types.SimpleNamespace(returncode=0, stdout="")
 

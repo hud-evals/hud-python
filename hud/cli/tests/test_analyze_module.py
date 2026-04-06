@@ -30,7 +30,7 @@ def test_parse_docker_command():
 
 
 @pytest.mark.asyncio
-@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("hud.cli.utils.analysis.analyze_environment")
 @patch("fastmcp.Client")
 @patch("hud.cli.analyze.console")
 async def test_analyze_environment_success_json(mock_console, MockClient, mock_mcp_analyze):
@@ -97,7 +97,7 @@ def test_display_markdown_both_paths(capsys):
     assert "MCP Environment Analysis" in captured.out
 
 
-@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("hud.cli.utils.analysis.analyze_environment")
 @patch("fastmcp.Client")
 async def test_analyze_environment_from_config(MockClient, mock_mcp_analyze, tmp_path: Path):
     client = MagicMock()
@@ -113,7 +113,7 @@ async def test_analyze_environment_from_config(MockClient, mock_mcp_analyze, tmp
     assert client.__aenter__.awaited and client.close.awaited
 
 
-@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("hud.cli.utils.analysis.analyze_environment")
 @patch("fastmcp.Client")
 async def test_analyze_environment_from_mcp_config(MockClient, mock_mcp_analyze):
     client = MagicMock()
@@ -128,7 +128,7 @@ async def test_analyze_environment_from_mcp_config(MockClient, mock_mcp_analyze)
     assert client.__aenter__.awaited and client.close.awaited
 
 
-@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("hud.cli.utils.analysis.analyze_environment")
 @patch("fastmcp.Client")
 async def test_analyze_environment_from_mcp_config_http(MockClient, mock_mcp_analyze):
     """HTTP transport (hud dev) should inject auth=None to skip OAuth discovery."""

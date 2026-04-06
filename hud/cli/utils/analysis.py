@@ -1,4 +1,4 @@
-"""MCP utilities for CLI commands."""
+"""Live MCP analysis helpers for CLI commands."""
 
 from __future__ import annotations
 
@@ -6,12 +6,31 @@ import asyncio
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from fastmcp import Client
 
 logger = logging.getLogger(__name__)
+
+
+class BuildAnalysis(TypedDict):
+    """Shared live MCP analysis payload for build and inspect flows."""
+
+    initializeMs: int
+    toolCount: int
+    internalToolCount: int
+    tools: list[dict[str, Any]]
+    prompts: list[dict[str, Any]]
+    resources: list[dict[str, Any]]
+    scenarios: list[dict[str, Any]]
+    success: bool
+    hubTools: dict[str, list[str]]
+    metadata: dict[str, Any]
+    telemetry: NotRequired[dict[str, Any]]
+    verbose: NotRequired[bool]
 
 
 async def wait_for_http_server(
@@ -35,40 +54,54 @@ async def wait_for_http_server(
 
 
 async def analyze_environment(
-    client: Client, verbose: bool = False, server_name: str | None = None
-) -> dict[str, Any]:
-    """Analyze an MCP environment via a connected client.
+    client: Client,
+    verbose: bool = False,
+    server_name: str | None = None,
+    initialize_ms: int = 0,
+) -> BuildAnalysis:
+    """Analyze an MCP environment into the shared build-ready shape.
 
     Args:
         client: An initialized fastmcp.Client
         verbose: Enable verbose logging
         server_name: Optional server name for display
+        initialize_ms: Time spent initializing the MCP client
 
     Returns:
-        Dictionary containing tools, hub_tools, resources, prompts, scenarios, telemetry
+        Build-ready analysis payload plus optional display metadata
     """
     servers = [server_name] if server_name else []
-    analysis: dict[str, Any] = {
+    hub_tools: dict[str, list[str]] = {}
+    analysis: BuildAnalysis = {
+        "initializeMs": initialize_ms,
+        "toolCount": 0,
+        "internalToolCount": 0,
         "tools": [],
-        "hub_tools": {},
+        "hubTools": hub_tools,
         "resources": [],
         "prompts": [],
         "scenarios": [],
+        "success": True,
         "verbose": verbose,
         "metadata": {"initialized": True, "servers": servers},
     }
 
-    # Get all tools with schemas
+    # Get all tools with schemas, merging hub subtools into each dispatcher.
     tools = await client.list_tools()
+    normalized_tools: list[dict[str, Any]] = []
+    internal_total = 0
     for tool in tools:
-        tool_info = {
+        tool_info: dict[str, Any] = {
             "name": tool.name,
             "description": tool.description,
             "inputSchema": tool.inputSchema,
         }
-        analysis["tools"].append(tool_info)
-
-        # Check if this is a hub tool (like setup, evaluate)
+        merged_internal: list[str] = []
+        existing_internal = getattr(tool, "internalTools", None) or getattr(
+            tool, "internal_tools", None
+        )
+        if isinstance(existing_internal, list):
+            merged_internal.extend([str(item) for item in existing_internal])
         if (
             tool.description
             and "internal" in tool.description.lower()
@@ -76,7 +109,16 @@ async def analyze_environment(
         ):
             hub_functions = await _get_hub_tools(client, tool.name, verbose)
             if hub_functions:
-                analysis["hub_tools"][tool.name] = hub_functions
+                hub_tools[tool.name] = hub_functions
+                merged_internal.extend(hub_functions)
+        if merged_internal:
+            deduped_internal = list(dict.fromkeys(merged_internal))
+            tool_info["internalTools"] = deduped_internal
+            internal_total += len(deduped_internal)
+        normalized_tools.append(tool_info)
+    analysis["tools"] = normalized_tools
+    analysis["toolCount"] = len(normalized_tools)
+    analysis["internalToolCount"] = internal_total
 
     # Get all resources
     try:
@@ -156,7 +198,7 @@ async def _get_hub_tools(client: Client, hub_name: str, verbose: bool) -> list[s
     return []
 
 
-def _derive_scenarios(analysis: dict[str, Any]) -> list[dict[str, Any]]:
+def _derive_scenarios(analysis: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Derive scenarios from prompt/resource pairs."""
     scenarios_by_id: dict[str, dict[str, Any]] = {}
 
