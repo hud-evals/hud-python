@@ -146,8 +146,11 @@ class ClaudeAgent(MCPAgent):
             else:
                 raise ValueError(
                     "No API key found for Claude.\n"
-                    "  • Set HUD_API_KEY to use HUD Gateway (add your Anthropic key at hud.ai/project/secrets for BYOK)\n"
-                    "  • Or set ANTHROPIC_API_KEY for direct access"
+                    "  • Set HUD_API_KEY to use HUD Gateway"
+                    " (add your Anthropic key at"
+                    " hud.ai/project/secrets for BYOK)\n"
+                    "  • Or set ANTHROPIC_API_KEY for direct"
+                    " access"
                 )
 
         self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = model_client

@@ -120,8 +120,11 @@ class OpenAIAgent(MCPAgent):
             else:
                 raise ValueError(
                     "No API key found for OpenAI.\n"
-                    "  • Set HUD_API_KEY to use HUD Gateway (add your OpenAI key at hud.ai/project/secrets for BYOK)\n"
-                    "  • Or set OPENAI_API_KEY for direct access"
+                    "  • Set HUD_API_KEY to use HUD Gateway"
+                    " (add your OpenAI key at"
+                    " hud.ai/project/secrets for BYOK)\n"
+                    "  • Or set OPENAI_API_KEY for direct"
+                    " access"
                 )
 
         self.openai_client: AsyncOpenAI = model_client

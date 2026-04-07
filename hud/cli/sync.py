@@ -392,7 +392,9 @@ def _export_remote_tasks(
         sorted_col_keys = sorted(all_col_keys)
 
         fieldnames = [
-            "slug", "scenario", "env",
+            "slug",
+            "scenario",
+            "env",
             *[f"arg:{k}" for k in sorted_arg_keys],
             *[f"col:{k}" for k in sorted_col_keys],
         ]

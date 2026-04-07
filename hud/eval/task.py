@@ -462,4 +462,7 @@ class Task(BaseModel):
             scenario=self.scenario,
             args=self.args.copy() if self.args is not None else None,
             validation=self.validation.copy() if self.validation else None,
+            columns=self.columns.copy() if self.columns else {},
+            agent_config=self.agent_config.copy() if self.agent_config else None,
+            metadata=self.metadata.copy(),
         )
