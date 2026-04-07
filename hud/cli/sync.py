@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from pathlib import Path
@@ -44,7 +45,8 @@ def _compute_remote_signature(remote_task: dict[str, Any]) -> str:
     args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
     validation: list[dict[str, Any]] | None = remote_task.get("validation")
     agent_config: dict[str, Any] | None = remote_task.get("agent_config") or None
-    return _compute_signature(scenario, args, validation, agent_config)
+    columns: dict[str, Any] | None = remote_task.get("column_values") or None
+    return _compute_signature(scenario, args, validation, agent_config, columns)
 
 
 def _compute_signature(
@@ -52,6 +54,7 @@ def _compute_signature(
     args: dict[str, Any],
     validation: list[dict[str, Any]] | None,
     agent_config: dict[str, Any] | None,
+    columns: dict[str, Any] | None = None,
 ) -> str:
     """Compute a deterministic signature for diff comparison.
 
@@ -66,6 +69,8 @@ def _compute_signature(
         sig_data["validation"] = validation
     if agent_config:
         sig_data["agent_config"] = agent_config
+    if columns:
+        sig_data["columns"] = columns
     return f"{short}|" + json.dumps(
         sig_data,
         sort_keys=True,
@@ -129,6 +134,10 @@ def _build_local_specs(
         if env_name:
             env_config["name"] = env_name
 
+        columns_dict: dict[str, Any] | None = None
+        if hasattr(task, "columns") and task.columns:
+            columns_dict = dict(task.columns)
+
         specs.append(
             {
                 "slug": slug,
@@ -137,11 +146,13 @@ def _build_local_specs(
                 "validation": validation_list,
                 "agent_config": agent_config_dict,
                 "env": env_config,
+                "columns": columns_dict,
                 "signature": _compute_signature(
                     scenario_name,
                     args_dict,
                     validation_list,
                     agent_config_dict,
+                    columns_dict,
                 ),
             }
         )
@@ -257,14 +268,70 @@ def _detect_slug_renames(
                 break
 
 
+def _infer_column_type(values: list[Any]) -> str:
+    """Infer a column type from observed values across tasks.
+
+    Returns one of: "text", "number", "single-select", "multi-select".
+    Heuristic: if all non-None values are numeric -> "number";
+    if any value is a list -> "multi-select";
+    otherwise -> "text".
+    """
+    non_none = [v for v in values if v is not None]
+    if not non_none:
+        return "text"
+    if any(isinstance(v, list) for v in non_none):
+        return "multi-select"
+    if all(isinstance(v, (int, float)) for v in non_none):
+        return "number"
+    return "text"
+
+
+def _build_column_definitions(
+    all_specs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]] | None:
+    """Auto-infer evalset column definitions from all local task column values.
+
+    Scans column values across every spec (not just to_upload) so that
+    definitions reflect the full taskset even on partial uploads.
+    """
+    values_by_col: dict[str, list[Any]] = {}
+    for spec in all_specs:
+        cols = spec.get("columns")
+        if not cols:
+            continue
+        for col_name, col_val in cols.items():
+            values_by_col.setdefault(col_name, []).append(col_val)
+
+    if not values_by_col:
+        return None
+
+    definitions: dict[str, dict[str, Any]] = {}
+    for col_name, vals in values_by_col.items():
+        col_type = _infer_column_type(vals)
+        col_def: dict[str, Any] = {"type": col_type}
+        if col_type == "single-select":
+            col_def["options"] = sorted({str(v) for v in vals if v is not None})
+        elif col_type == "multi-select":
+            all_opts: set[str] = set()
+            for v in vals:
+                if isinstance(v, list):
+                    all_opts.update(v)
+                elif v is not None:
+                    all_opts.add(str(v))
+            col_def["options"] = sorted(all_opts)
+        definitions[col_name] = col_def
+    return definitions
+
+
 def _upload_tasks(
     to_upload: list[dict[str, Any]],
     taskset_name: str,
     api_url: str,
     headers: dict[str, str],
+    column_definitions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """POST tasks to /tasks/upload and return the response."""
-    payload = {
+    payload: dict[str, Any] = {
         "name": taskset_name,
         "tasks": [
             {
@@ -276,10 +343,13 @@ def _upload_tasks(
                     {"validation": spec["validation"]} if spec.get("validation") is not None else {}
                 ),
                 **({"agent_config": spec["agent_config"]} if spec.get("agent_config") else {}),
+                **({"column_values": spec["columns"]} if spec.get("columns") else {}),
             }
             for spec in to_upload
         ],
     }
+    if column_definitions:
+        payload["columns"] = column_definitions
 
     response = httpx.post(
         f"{api_url}/tasks/upload",
@@ -289,6 +359,87 @@ def _upload_tasks(
     )
     response.raise_for_status()
     return response.json()
+
+
+def _export_remote_tasks(
+    taskset_id: str,
+    taskset_display: str,
+    output_path: str,
+    api_url: str,
+    headers: dict[str, str],
+    hud_console: HUDConsole,
+) -> None:
+    """Fetch remote tasks and export to JSON or CSV."""
+    from hud.cli.utils.evalset import fetch_remote_tasks
+
+    hud_console.progress_message("Fetching remote tasks...")
+    remote_tasks = fetch_remote_tasks(taskset_id, api_url, headers)
+
+    if not remote_tasks:
+        hud_console.warning("No tasks found in taskset")
+        return
+
+    out = Path(output_path)
+    suffix = out.suffix.lower()
+
+    if suffix == ".json":
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(remote_tasks, f, indent=2, default=str)
+
+    elif suffix == ".csv":
+        # Flatten tasks: spread args as arg:key and column_values as col:key
+        all_arg_keys: set[str] = set()
+        all_col_keys: set[str] = set()
+        for t in remote_tasks:
+            args = t.get("args")
+            if isinstance(args, dict):
+                all_arg_keys.update(args.keys())
+            cols = t.get("column_values")
+            if isinstance(cols, dict):
+                all_col_keys.update(cols.keys())
+
+        sorted_arg_keys = sorted(all_arg_keys)
+        sorted_col_keys = sorted(all_col_keys)
+
+        fieldnames = [
+            "slug",
+            "scenario",
+            "env",
+            *[f"arg:{k}" for k in sorted_arg_keys],
+            *[f"col:{k}" for k in sorted_col_keys],
+        ]
+
+        with open(out, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for t in remote_tasks:
+                row: dict[str, Any] = {
+                    "slug": t.get("slug") or t.get("external_id") or "",
+                    "scenario": t.get("scenario") or "",
+                    "env": "",
+                }
+                env_data = t.get("env")
+                if isinstance(env_data, dict):
+                    row["env"] = env_data.get("name") or ""
+
+                args = t.get("args")
+                if isinstance(args, dict):
+                    for k in sorted_arg_keys:
+                        val = args.get(k)
+                        row[f"arg:{k}"] = json.dumps(val) if isinstance(val, (dict, list)) else val
+
+                cols = t.get("column_values")
+                if isinstance(cols, dict):
+                    for k in sorted_col_keys:
+                        val = cols.get(k)
+                        row[f"col:{k}"] = json.dumps(val) if isinstance(val, list) else val
+
+                writer.writerow(row)
+    else:
+        hud_console.error(f"Unsupported export format: {suffix}. Use .json or .csv")
+        raise typer.Exit(1)
+
+    hud_console.success(f"Exported {len(remote_tasks)} tasks to {out}")
 
 
 @sync_app.command("tasks")
@@ -332,6 +483,11 @@ def sync_tasks_command(
         "--force",
         help="Upload all tasks regardless of diff (skip signature comparison)",
     ),
+    export: str | None = typer.Option(
+        None,
+        "--export",
+        help="Export remote tasks to a file instead of syncing. Supports .json and .csv",
+    ),
 ) -> None:
     """Sync local task definitions to a platform taskset.
 
@@ -344,7 +500,9 @@ def sync_tasks_command(
         hud sync tasks my-taskset tasks/       # from directory
         hud sync tasks                         # use stored taskset ID from .hud/config.json
         hud sync tasks my-taskset --dry-run    # preview without uploading
-        hud sync tasks my-taskset --yes        # skip confirmation (CI)[/not dim]
+        hud sync tasks my-taskset --yes        # skip confirmation (CI)
+        hud sync tasks my-taskset --export tasks.csv   # export to CSV
+        hud sync tasks my-taskset --export tasks.json  # export to JSON[/not dim]
     """
     hud_console = HUDConsole()
     hud_console.header("Sync Tasks", icon="")
@@ -397,6 +555,13 @@ def sync_tasks_command(
                 taskset_display = resolved_taskset_id[:8]
         except Exception:
             taskset_display = resolved_taskset_id[:8]
+
+    # Export mode: fetch remote tasks and write to file, then exit
+    if export:
+        _export_remote_tasks(
+            resolved_taskset_id, taskset_display, export, api_url, headers, hud_console
+        )
+        return
 
     # Phase 2: Check stored registryId is still valid (if present)
     config = load_project_config()
@@ -540,10 +705,13 @@ def sync_tasks_command(
             hud_console.info("  Aborted.")
             return
 
+    # Infer column definitions from ALL local specs (not just to_upload)
+    column_definitions = _build_column_definitions(local_specs)
+
     # Upload (platform validates envs + scenarios inline)
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = _upload_tasks(to_upload, taskset_name, api_url, headers)
+        result = _upload_tasks(to_upload, taskset_name, api_url, headers, column_definitions)
     except httpx.HTTPStatusError as e:
         detail = ""
         import contextlib

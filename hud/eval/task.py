@@ -186,6 +186,12 @@ class Task(BaseModel):
     # Accepts TaskAgentConfig or dict (auto-converted via validator)
     agent_config: TaskAgentConfig | dict[str, Any] | None = None
 
+    # Custom column values - synced to the platform evalset table
+    columns: dict[str, str | float | list[str] | None] = Field(
+        default_factory=dict,
+        description="Per-task column values synced to the evalset's custom columns.",
+    )
+
     # Task metadata - for tracking/filtering, not used by agent
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -456,4 +462,7 @@ class Task(BaseModel):
             scenario=self.scenario,
             args=self.args.copy() if self.args is not None else None,
             validation=self.validation.copy() if self.validation else None,
+            columns=self.columns.copy() if self.columns else {},
+            agent_config=self.agent_config.copy() if self.agent_config else None,
+            metadata=self.metadata.copy(),
         )

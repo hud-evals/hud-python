@@ -7,7 +7,7 @@ icon: "flask-vial"
 Run agents against your tasksets, analyze the results, and train models on successful traces.
 
 <Warning>
-Before running evaluations, you need a deployed environment and a taskset with tasks. See [Environments](/quick-links/environments) and [Deploy](/quick-links/deploy).
+Before running evaluations, you need a deployed environment and a taskset with tasks. See [Scaffolding](/building/scaffolding) and [Deploy & Go Remote](/building/running-at-scale).
 </Warning>
 
 ## Running Evaluations
@@ -71,6 +71,8 @@ See [`hud eval` CLI reference](/reference/cli/eval) for all options.
 
 ## The Loop
 
+Scenarios are the atomic skills your agent must get right. If your agent can't reliably pass a scenario, that's a gap to close — through prompting, fine-tuning, or tool design.
+
 Deploy your environment, create tasks, run evaluations, train on successful traces, use the trained model. Repeat.
 
 ```mermaid
@@ -107,7 +109,7 @@ Every evaluation generates traces. Every training run creates a better model. Ag
   Make your benchmarks public
 </Card>
 
-<Card title="Best Practices" icon="star" href="/guides/best-practices">
-  Design effective environments and evals
+<Card title="Environments as Data" icon="chart-line" href="/building/environments-as-data">
+  Design for useful training signal
 </Card>
 </CardGroup>

@@ -20,7 +20,7 @@ The platform gives you three pieces:
 2. **Eval & Training Platform** — Run evaluations at scale on [hud.ai](https://hud.ai). Collect traces. Train models on successful runs.
 3. **Model Gateway** — One OpenAI-compatible endpoint at `inference.hud.ai` for Claude, GPT, Gemini, Grok, and more.
 
-Read [Core Concepts](/concepts) before getting started!
+Read [Scaffolding](/building/scaffolding) to get started!
 
 ## Install
 
@@ -36,7 +36,7 @@ Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys).
 
 ## 1. Environments: Define Your Agent's Harness
 
-An [environment](/concepts#environments) wraps your code as [tools](/concepts#tools) agents can call, and defines [scenarios](/concepts#scenario) that evaluate what agents do. Each environment spins up fresh and isolated for every evaluation — no shared state, fully reproducible.
+An [environment](/building/scaffolding) wraps your code as tools agents can call, and defines scenarios that evaluate what agents do. Each environment spins up fresh and isolated for every evaluation — no shared state, fully reproducible.
 
 ```python
 from hud import Environment
@@ -53,7 +53,7 @@ async def count(word: str, letter: str):
     yield 1.0 if answer and correct in answer else 0.0
 ```
 
-The scenario has two yields: the first sends a prompt to the agent and receives its answer. The second scores the result as a reward. [Learn more about scenarios](/concepts#scenario).
+The scenario has two yields: the first sends a prompt to the agent and receives its answer. The second scores the result as a reward. [Learn more about scenarios](/building/scaffolding#scenarios).
 
 ### Example Workflow
 
@@ -65,11 +65,11 @@ hud eval tasks.json claude  # Run an eval locally
 hud deploy                  # Deploy to platform → run at scale
 ```
 
-→ [More on Environments](/quick-links/environments) · [Deploy to Platform](/quick-links/deploy)
+→ [More on Environments](/building/scaffolding) · [Deploy to Platform](/building/running-at-scale)
 
 ## 2. Tasks & Training: Evaluate and Train
 
-A [task](/concepts#tasks) is a scenario with specific arguments. Group tasks into tasksets and run them across models. Train models on successful traces to produce a model that's better at your specific use case.
+A [task](/building/tasks-and-evaluation) is a scenario with specific arguments. Group tasks into tasksets and run them across models. Train models on successful traces to produce a model that's better at your specific use case.
 
 ```python
 import hud
@@ -114,20 +114,20 @@ Every call is traced. View them at [hud.ai/home](https://hud.ai/home).
 ## Next Steps
 
 <CardGroup cols={2}>
-<Card title="Core Concepts" icon="shapes" href="/concepts">
-  Environments, tools, scenarios, tasks — defined in one place.
+<Card title="Scaffolding" icon="hammer" href="/building/scaffolding">
+  Create environments, define tools and scenarios.
 </Card>
 
-<Card title="Environments" icon="cube" href="/quick-links/environments">
-  Tools, scenarios, and iteration.
+<Card title="Tasks & Evaluation" icon="flask-vial" href="/building/tasks-and-evaluation">
+  Define tasks, test locally, iterate.
 </Card>
 
-<Card title="Tasks & Training" icon="flask-vial" href="/quick-links/training">
-  Evaluate and train models.
+<Card title="Deploy & Go Remote" icon="rocket" href="/building/running-at-scale">
+  Deploy and run evaluations at scale.
 </Card>
 
-<Card title="Best Practices" icon="star" href="/guides/best-practices">
-  Patterns for reliable environments and evals.
+<Card title="Environments as Data" icon="chart-line" href="/building/environments-as-data">
+  Design for useful training signal.
 </Card>
 </CardGroup>
 

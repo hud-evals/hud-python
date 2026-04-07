@@ -46,6 +46,7 @@ hud sync tasks <taskset> [source]
 | `--dry-run` | Show plan without uploading |
 | `--force` | Upload all tasks, skip diff |
 | `--id <uuid>` | Taskset UUID directly (skip name resolution) |
+| `--export <path>` | Export remote tasks to a file instead of syncing (`.json` or `.csv`) |
 
 **Examples:**
 
@@ -55,6 +56,8 @@ hud sync tasks my-taskset tasks/       # sync from a specific directory
 hud sync tasks                         # re-sync using stored taskset
 hud sync tasks my-taskset --dry-run    # preview without uploading
 hud sync tasks my-taskset --yes        # skip confirmation (for CI)
+hud sync tasks my-taskset --export tasks.csv   # export to CSV
+hud sync tasks my-taskset --export tasks.json  # export to JSON
 ```
 
 The first time you sync to a name, the platform creates the taskset and the CLI stores its ID in `.hud/config.json`. Subsequent `hud sync tasks` (without a name) re-syncs to the same taskset. Passing a different name switches the target and updates the stored ID.
@@ -82,11 +85,38 @@ The first group that finds tasks wins -- later groups are not scanned.
 
 ### Diff behavior
 
-Tasks are matched by **slug**. The CLI computes a signature from each task's scenario name, args, validation, and agent_config. Only tasks whose signature changed are uploaded.
+Tasks are matched by **slug**. The CLI computes a signature from each task's scenario name, args, validation, agent_config, and custom column values. Only tasks whose signature changed are uploaded.
 
 Renaming your environment (the prefix before `:` in scenario names) does not trigger updates. If you rename a slug, the CLI detects possible renames by matching signatures and suggests them.
 
 Tasks that exist on the platform but not locally are left alone.
+
+### Custom columns
+
+Tasks can define custom column values that sync to the evalset table on the platform:
+
+```python
+task = count.task(word="strawberry", letter="r")
+task.slug = "strawberry-r"
+task.columns = {"difficulty": "easy", "category": "spelling"}
+```
+
+When syncing, the CLI auto-infers column type definitions (`text`, `number`, `multi-select`) from the values across all tasks and merges them into the evalset's column schema. Columns already defined on the platform are preserved -- sync only adds new columns and expands select options.
+
+### Exporting tasks
+
+Pull remote tasks to a local file:
+
+```bash
+hud sync tasks my-taskset --export tasks.json
+hud sync tasks my-taskset --export tasks.csv
+```
+
+CSV format flattens scenario args and column values into prefixed headers:
+
+| slug | scenario | env | arg:word | arg:letter | col:difficulty |
+|------|----------|-----|----------|------------|----------------|
+| strawberry-r | count | my-env | strawberry | r | easy |
 
 ---
 
