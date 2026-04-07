@@ -57,11 +57,10 @@
           {
             "group": "Building Environments",
             "pages": [
-              "quick-links/environments",
-              "tools/index",
-              "guides/best-practices",
-              "quick-links/deploy",
-              "advanced/testing-environments"
+              "building/scaffolding",
+              "building/tasks-and-evaluation",
+              "building/running-at-scale",
+              "building/environments-as-data"
             ]
           },
           {

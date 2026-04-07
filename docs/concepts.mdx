@@ -1,31 +1,18 @@
 ---
 title: "Core Concepts"
-description: "The four building blocks of HUD: environments, tools, scenarios, and tasks."
+description: "Scenarios, environments, tools, and tasks — the building blocks of HUD."
 icon: "shapes"
 ---
 
-An RL environment gives an agent a sandboxed workspace, a set of tools, a task to complete, and a reward signal. The reward signal is useful for training better models or understanding the capabilities of current models.
-HUD gives developers a standardized way to build, test, and run RL environments. 
+HUD gives you a standardized way to build, test, and run RL environments for AI agents. An RL environment gives an agent a sandboxed workspace, tools, a task, and a reward signal.
 
-HUD environments are built on four main concepts.
-
-## Environments
-
-An environment is the harness an agent operates in. It packages **tools** (what agents can do) and **scenarios** (how agents are evaluated) into a single deployable unit.
-
-```python
-from hud import Environment
-
-env = Environment("my-env")
-```
-
-Under the hood, an environment is an [MCP](https://modelcontextprotocol.io) server. When you deploy it, HUD spins up a fresh, isolated instance for every evaluation -- no shared state, no interference between parallel runs.
-
-Why not just point agents at a production API or website? Because a production API is one live instance with shared state. You can't run 500 parallel task runs against it without them stepping on each other. Environments solve this: isolated, deterministic, reproducible.
+Everything starts with a **scenario** — the evaluation you write in your IDE. Everything else flows from it.
 
 ## Scenarios
 
-A scenario defines how an agent is evaluated. It is an async generator function with **two yields** -- the first yield sends a prompt to the agent, and the second yield returns a reward.
+A scenario is the core of HUD. It defines *what you ask the agent to do* and *how you score the result*. This is where you spend your creative energy — writing prompts, designing scoring logic, deciding what success looks like.
+
+A scenario is an async generator function with **two yields** — the first yield sends a prompt to the agent, and the second yield returns a reward.
 
 Here's the simplest possible scenario:
 
@@ -58,10 +45,12 @@ The agent runs between the two yields. It calls tools, reasons, and produces an 
 Scenarios are **parameterized**. The same scenario with different arguments produces different evaluation tasks:
 
 ```python
-env("count", word="strawberry", letter="r")  # one task (answer: 3)
-env("count", word="banana", letter="a")      # another task (answer: 3)
-env("count", word="mississippi", letter="s") # another task (answer: 4)
+count.task(word="strawberry", letter="r")  # one task (answer: 3)
+count.task(word="banana", letter="a")      # another task (answer: 3)
+count.task(word="mississippi", letter="s") # another task (answer: 4)
 ```
+
+Scenarios are the inflection point of HUD. Everything upstream (environments, tools) exists to support them. Everything downstream (tasks, tasksets, traces, training) flows from them. You write scenarios in your IDE — that's where the creative work lives.
 
 ## Tools
 
@@ -140,12 +129,27 @@ env.connect_hub("hud-evals/browser")
 
 You don't need connectors to get started. They're useful when you want to compose environments or wrap existing services.
 
+## Environments
+
+An environment is the deployment wrapper that packages your tools and scenarios into a single deployable unit. Under the hood, it's an [MCP](https://modelcontextprotocol.io) server.
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+```
+
+When you deploy an environment, HUD spins up a fresh, isolated instance for every evaluation — no shared state, no interference between parallel runs. This is why you can run 500 parallel evaluations without them stepping on each other.
+
+You don't need to think about environments much when you're writing scenarios and iterating locally. They become important when you deploy to the platform and run at scale.
+
 ## Tasks
 
 A task is a scenario instantiated with specific arguments. It's what you actually run an agent against:
 
 ```python
-task = env("count", word="strawberry", letter="r")
+task = count.task(word="strawberry", letter="r")
+task.slug = "strawberry-r"
 ```
 
 Tasks group into **tasksets** -- batches of related tasks used for benchmarking. Create a taskset, add tasks with different arguments, and run the whole set across models to compare performance.
@@ -154,9 +158,10 @@ Tasks group into **tasksets** -- batches of related tasks used for benchmarking.
 
 ```mermaid
 flowchart TD
-    Env["Environment"] --> Tools["Tools"]
-    Env --> Scenarios["Scenarios"]
-    Scenarios --> Tasks["Tasks"]
+    Scenarios["Scenarios (IDE)"] --> Tasks["Tasks"]
+    Tools["Tools"] --> Scenarios
+    Env["Environment"] --> Tools
+    Env --> Scenarios
     Tasks --> Tasksets["Tasksets"]
     Tasksets --> Evals["Run Evaluations"]
     Evals --> Traces["Traces + Rewards"]
@@ -164,11 +169,12 @@ flowchart TD
     Training --> Evals
 ```
 
-1. An **Environment** contains **Tools** and **Scenarios**
-2. A **Scenario** + arguments = a **Task**
-3. **Tasks** group into **Tasksets**
-4. Run a taskset across models -> collect **Traces** with rewards
-5. Use the traces to compare models, sell training data to labs, or fine-tune your own agent
+1. You write **Scenarios** in your IDE — the prompt, scoring logic, and arguments
+2. **Tools** give agents capabilities; **Environments** package tools + scenarios for deployment
+3. A **Scenario** + specific arguments = a **Task**
+4. **Tasks** group into **Tasksets** for benchmarking
+5. Run a taskset across models -> collect **Traces** with rewards
+6. Use the traces to compare models, sell training data to labs, or fine-tune your own agent
 
 ## Running an Agent Against a Task
 
@@ -178,7 +184,7 @@ The `hud.eval()` context manager is how you run any agent against a task:
 import hud
 from hud.agents import create_agent
 
-task = env("count", word="strawberry", letter="r")
+task = count.task(word="strawberry", letter="r")
 agent = create_agent("claude-sonnet-4-5")
 
 async with hud.eval(task) as ctx:

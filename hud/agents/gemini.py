@@ -94,8 +94,9 @@ class GeminiAgent(MCPAgent):
                         raise ValueError(f"Gemini API key is invalid: {e}") from e
             else:
                 raise ValueError(
-                    "No API key found. Set HUD_API_KEY for HUD gateway, "
-                    "or GEMINI_API_KEY for direct Gemini access."
+                    "No API key found for Gemini.\n"
+                    "  • Set HUD_API_KEY to use HUD Gateway (add your Gemini key at hud.ai/project/secrets for BYOK)\n"
+                    "  • Or set GEMINI_API_KEY for direct access"
                 )
 
         self.gemini_client: genai.Client = model_client

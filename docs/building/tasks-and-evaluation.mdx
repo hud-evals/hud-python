@@ -1,0 +1,259 @@
+---
+title: "Tasks & Evaluation"
+description: "Define tasks, test locally, iterate, sync to the platform."
+icon: "flask-vial"
+---
+
+You have an environment with tools and scenarios. Now turn scenarios into runnable tasks, test them locally, and iterate.
+
+## The Sample Environment
+
+Here's the complete environment we'll use throughout this page — a tool and a scenario in a single `env.py`:
+
+```python
+from hud import Environment
+
+env = Environment("letter-counter")
+
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
+
+@env.scenario("count")
+async def count(word: str, letter: str):
+    answer = yield f"How many '{letter}' in '{word}'?"
+
+    correct = str(word.lower().count(letter.lower()))
+    yield 1.0 if answer and correct in answer else 0.0
+```
+
+One tool, one scenario. The agent gets a counting question, can optionally call the `count_letter` tool, and gets scored on whether it answers correctly. Everything below builds on this.
+
+## Defining Tasks
+
+A task is a scenario instantiated with specific arguments. Define them in a `tasks.py` file using `scenario.task()`. Each task needs a unique `slug` — a stable, kebab-case identifier used for syncing, filtering with `--task-ids`, and matching across local/remote:
+
+```python
+from env import count
+
+strawberry_r = count.task(word="strawberry", letter="r")
+strawberry_r.slug = "strawberry-r"
+
+mississippi_s = count.task(word="mississippi", letter="s")
+mississippi_s.slug = "mississippi-s"
+
+abracadabra_a = count.task(word="abracadabra", letter="a")
+abracadabra_a.slug = "abracadabra-a"
+```
+
+Tasks group into **tasksets** — batches of related tasks used for benchmarking. Create a taskset, add tasks with different arguments, and run the whole set across models to compare performance.
+
+<Tip>
+Renaming a slug creates a new task on the platform (the old one remains). Choose slugs carefully.
+</Tip>
+
+### Columns
+
+Tasks can carry custom metadata via columns. Columns show up as filterable fields on the platform and as prefixed headers in CSV exports (`col:category`, `col:complexity`, etc.):
+
+```python
+strawberry_r = count.task(word="strawberry", letter="r")
+strawberry_r.slug = "strawberry-r"
+strawberry_r.columns = {
+    "category": "repeated-letters",
+    "complexity": "multi-occurrence",
+    "source": "curated",
+}
+
+mississippi_s = count.task(word="mississippi", letter="s")
+mississippi_s.slug = "mississippi-s"
+mississippi_s.columns = {
+    "category": "repeated-letters",
+    "complexity": "high-frequency",
+    "source": "curated",
+}
+```
+
+When syncing, the CLI auto-infers column types (`text`, `number`, `multi-select`) from the values across all tasks and merges them into the taskset's column schema. Columns already defined on the platform are preserved — sync only adds new columns and expands select options.
+
+### Structuring Task Files
+
+For small sets, a single `tasks.py` works. For larger sets, organize tasks into a `tasks/` directory with one file per category:
+
+```
+my-env/
+├── env.py
+├── tasks/
+│   ├── spelling.py       # spelling-focused tasks
+│   ├── counting.py       # counting tasks
+│   └── edge_cases.py     # edge case tasks
+```
+
+Both `hud eval` and `hud sync` can point at the `tasks/` directory and will discover all task files automatically. See [how tasks are discovered](/reference/cli/sync#how-tasks-are-discovered) for the full resolution order and advanced patterns.
+
+For validation sequences and prompt overrides, see the [hud sync reference](/reference/cli/sync).
+
+## Running Locally
+
+### Quick Run — `task.run()`
+
+The simplest way to run a single task. One line:
+
+```python
+result = await count.task(word="strawberry", letter="r").run("claude-sonnet-4-5")
+print(f"Reward: {result.reward}")
+```
+
+This creates the task, runs the agent, scores the result, and returns everything. Use this for quick iteration on a single scenario.
+
+### Batch Eval — `hud eval`
+
+For running all your tasks at once. Everything runs in-process — no Docker, no server, just Python:
+
+```bash
+# Run first task
+hud eval tasks.py
+
+# Run all tasks
+hud eval tasks.py --full
+
+# Run specific tasks by slug
+hud eval tasks.py --task-ids strawberry-r,abracadabra-a
+
+# Run with a specific model
+hud eval tasks.py claude --full
+
+# Run from a tasks directory
+hud eval tasks/ claude --full
+
+# Run each task 3 times for variance estimation
+hud eval tasks/ claude --full --group-size 3
+```
+
+`hud eval` prints a reward distribution summary after each run so you can see how the taskset is performing at a glance:
+
+```
+  Task                 Runs   Rewards            Mean
+  ──────────────────────────────────────────────────────
+  strawberry-r            3   1.0  1.0  0.0      0.67
+  mississippi-s           3   0.0  0.0  0.0      0.00
+  abracadabra-a           3   1.0  1.0  1.0      1.00
+  ──────────────────────────────────────────────────────
+  Total: 3 tasks × 3 runs | Mean: 0.56 | Pass: 5/9 (56%)
+```
+
+This is the fastest iteration loop for pure Python environments (no system deps, no databases, no browsers).
+
+### Interactive — `hud dev`
+
+Spawn your environment as an MCP server and connect from Cursor, Claude Code, or any MCP client:
+
+```bash
+# Python-only (no Docker)
+hud dev env:env
+
+# Enable hot-reload for specific paths
+hud dev env:env -w env.py -w tools/
+```
+
+Then in Cursor's MCP settings:
+
+```json
+{
+  "my-dev-env": { "url": "http://localhost:8765/mcp" }
+}
+```
+
+Your coding agent can call your tools directly. Edit watched paths (`-w`), save, and the controller reloads automatically. Great for developing and debugging individual scenarios interactively.
+
+The `env:env` syntax is like uvicorn — `module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server.
+
+If you have a `Dockerfile` in your project root, `hud dev` automatically detects it and runs in Docker mode — building the image and starting the container with hot-reload on watched paths.
+
+### Docker — `hud build` + `connect_image`
+
+For environments that need system dependencies (PostgreSQL, browsers, VNC, GPU libraries). Build the image, then connect to it from a test script:
+
+```bash
+hud build .
+```
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+env.connect_image("my-env:latest")
+
+result = await env("checkout", product="laptop").run("claude-sonnet-4-5")
+```
+
+`connect_image` spins up the container, connects via MCP, and tears it down when done. Your tools run inside the container where the system deps live; your test script runs outside.
+
+Note: `hud eval tasks.py` imports your `env.py` directly (in-process). For Docker environments, write a separate test script that uses `connect_image` as shown above, or use `hud dev` for interactive Docker development:
+
+```bash
+hud dev env:env -w env.py    # detects Dockerfile, builds + runs container, hot-reloads Python
+```
+
+#### Debugging Docker Builds
+
+When something goes wrong with your container, use `hud debug`:
+
+```bash
+hud build .
+hud debug my-env:latest
+```
+
+Shows exactly which phase failed:
+
+```
+✓ Phase 1: Docker image exists
+✓ Phase 2: MCP server responds to initialize
+✗ Phase 3: Tool discovery failed
+  → Error: Connection refused on port 8005
+```
+
+### Custom Agent Loop
+
+Build your own agent loop using the format converters. See [Integrations](/guides/integrations) for OpenAI, Anthropic, LangChain, and more:
+
+```python
+import hud
+
+task = count.task(word="strawberry", letter="r")
+
+async with hud.eval(task) as ctx:
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": ctx.prompt}],
+        tools=ctx.as_openai_chat_tools()
+    )
+    
+    # Handle tool calls...
+    await ctx.submit(response.choices[0].message.content)
+
+print(ctx.reward)
+```
+
+### When to Use What
+
+| Mode | System deps? | Speed | Use case |
+|------|-------------|-------|----------|
+| `task.run()` | No | Fastest | Single task, quick iteration |
+| `hud eval` | No | Fastest | Batch eval, pure Python envs |
+| `hud dev` | Optional | Fast (hot-reload) | Interactive development, single scenario |
+| `hud build` + `connect_image` | Yes | Slower (container) | Databases, browsers, GPU, full integration |
+| Custom agent loop | No | Varies | When you need full control |
+
+## What's Next
+
+<CardGroup cols={2}>
+<Card title="Deploy & Go Remote" icon="rocket" href="/building/running-at-scale">
+  Deploy your environment, sync to platform, run evaluations remotely
+</Card>
+
+<Card title="Environments as Data" icon="chart-line" href="/building/environments-as-data">
+  Design environments that produce useful training signal
+</Card>
+</CardGroup>

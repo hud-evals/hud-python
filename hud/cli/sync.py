@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from pathlib import Path
@@ -350,6 +351,85 @@ def _upload_tasks(
     return response.json()
 
 
+def _export_remote_tasks(
+    taskset_id: str,
+    taskset_display: str,
+    output_path: str,
+    api_url: str,
+    headers: dict[str, str],
+    hud_console: HUDConsole,
+) -> None:
+    """Fetch remote tasks and export to JSON or CSV."""
+    from hud.cli.utils.evalset import fetch_remote_tasks
+
+    hud_console.progress_message("Fetching remote tasks...")
+    remote_tasks = fetch_remote_tasks(taskset_id, api_url, headers)
+
+    if not remote_tasks:
+        hud_console.warning("No tasks found in taskset")
+        return
+
+    out = Path(output_path)
+    suffix = out.suffix.lower()
+
+    if suffix == ".json":
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(remote_tasks, f, indent=2, default=str)
+
+    elif suffix == ".csv":
+        # Flatten tasks: spread args as arg:key and column_values as col:key
+        all_arg_keys: set[str] = set()
+        all_col_keys: set[str] = set()
+        for t in remote_tasks:
+            args = t.get("args")
+            if isinstance(args, dict):
+                all_arg_keys.update(args.keys())
+            cols = t.get("column_values")
+            if isinstance(cols, dict):
+                all_col_keys.update(cols.keys())
+
+        sorted_arg_keys = sorted(all_arg_keys)
+        sorted_col_keys = sorted(all_col_keys)
+
+        fieldnames = [
+            "slug", "scenario", "env",
+            *[f"arg:{k}" for k in sorted_arg_keys],
+            *[f"col:{k}" for k in sorted_col_keys],
+        ]
+
+        with open(out, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for t in remote_tasks:
+                row: dict[str, Any] = {
+                    "slug": t.get("slug") or t.get("external_id") or "",
+                    "scenario": t.get("scenario") or "",
+                    "env": "",
+                }
+                env_data = t.get("env")
+                if isinstance(env_data, dict):
+                    row["env"] = env_data.get("name") or ""
+
+                args = t.get("args")
+                if isinstance(args, dict):
+                    for k in sorted_arg_keys:
+                        val = args.get(k)
+                        row[f"arg:{k}"] = json.dumps(val) if isinstance(val, (dict, list)) else val
+
+                cols = t.get("column_values")
+                if isinstance(cols, dict):
+                    for k in sorted_col_keys:
+                        val = cols.get(k)
+                        row[f"col:{k}"] = json.dumps(val) if isinstance(val, list) else val
+
+                writer.writerow(row)
+    else:
+        hud_console.error(f"Unsupported export format: {suffix}. Use .json or .csv")
+        raise typer.Exit(1)
+
+    hud_console.success(f"Exported {len(remote_tasks)} tasks to {out}")
+
+
 @sync_app.command("tasks")
 def sync_tasks_command(
     taskset: str | None = typer.Argument(
@@ -391,6 +471,11 @@ def sync_tasks_command(
         "--force",
         help="Upload all tasks regardless of diff (skip signature comparison)",
     ),
+    export: str | None = typer.Option(
+        None,
+        "--export",
+        help="Export remote tasks to a file instead of syncing. Supports .json and .csv",
+    ),
 ) -> None:
     """Sync local task definitions to a platform taskset.
 
@@ -403,7 +488,9 @@ def sync_tasks_command(
         hud sync tasks my-taskset tasks/       # from directory
         hud sync tasks                         # use stored taskset ID from .hud/config.json
         hud sync tasks my-taskset --dry-run    # preview without uploading
-        hud sync tasks my-taskset --yes        # skip confirmation (CI)[/not dim]
+        hud sync tasks my-taskset --yes        # skip confirmation (CI)
+        hud sync tasks my-taskset --export tasks.csv   # export to CSV
+        hud sync tasks my-taskset --export tasks.json  # export to JSON[/not dim]
     """
     hud_console = HUDConsole()
     hud_console.header("Sync Tasks", icon="")
@@ -460,6 +547,13 @@ def sync_tasks_command(
                 taskset_display = resolved_taskset_id[:8]
         except Exception:
             taskset_display = resolved_taskset_id[:8]
+
+    # Export mode: fetch remote tasks and write to file, then exit
+    if export:
+        _export_remote_tasks(
+            resolved_taskset_id, taskset_display, export, api_url, headers, hud_console
+        )
+        return
 
     # Phase 2: Check stored registryId is still valid (if present)
     config = load_project_config()

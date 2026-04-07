@@ -1,10 +1,53 @@
 ---
 title: "Advanced Patterns"
-description: "Mock mode, scenario internals, and troubleshooting"
+description: "Sandboxing, mocking, scenario internals, and troubleshooting"
 icon: "wrench"
 ---
 
-## Mock Mode
+## Sandboxing
+
+Agents need isolated state. You can't point an agent at production — it'll make real changes, hit real APIs, affect real users. These patterns keep things safe.
+
+### Database Isolation
+
+**In-memory SQLite** — fastest, resets automatically:
+
+```python
+import sqlite3
+db = sqlite3.connect(":memory:")
+
+@env.scenario("update-order")
+async def update_order(order_id: str):
+    db.executescript(Path("fixtures/orders.sql").read_text())
+    answer = yield f"Update order {order_id} to shipped"
+    row = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+    yield 1.0 if row and row[0] == "shipped" else 0.0
+```
+
+**Transaction rollback** — use your real DB, undo changes:
+
+```python
+@env.scenario("process-refund")
+async def process_refund(order_id: str):
+    conn = await asyncpg.connect(DATABASE_URL)
+    tx = conn.transaction()
+    await tx.start()
+    try:
+        answer = yield f"Process refund for order {order_id}"
+        yield reward
+    finally:
+        await tx.rollback()
+        await conn.close()
+```
+
+**Fixture seeding** — deterministic starting state:
+
+```python
+await db.execute("TRUNCATE orders, users CASCADE")
+await db.executemany("INSERT INTO users ...", fixtures["users"])
+```
+
+### Mocking External Services
 
 `env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need for testing agent logic without hitting real services:
 
@@ -15,6 +58,25 @@ env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
 ```
 
 Your agent code stays the same — toggle `env.mock()` for testing.
+
+For stateful mocking (tracking what happened for assertions):
+
+```python
+class MockPaymentService:
+    def __init__(self):
+        self.charges = []
+    
+    async def charge(self, amount: int, card_token: str) -> dict:
+        self.charges.append({"amount": amount, "token": card_token})
+        return {"success": True, "id": f"ch-{len(self.charges)}"}
+
+payments = MockPaymentService()
+
+@env.scenario("checkout")
+async def checkout(cart_total: int):
+    _ = yield f"Complete checkout for ${cart_total}"
+    yield 1.0 if any(c["amount"] == cart_total for c in payments.charges) else 0.0
+```
 
 ## Testing Scenarios Directly
 

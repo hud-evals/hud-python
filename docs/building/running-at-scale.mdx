@@ -1,0 +1,353 @@
+---
+title: "Deploy & Go Remote"
+description: "Deploy your environment, sync tasks, and run evaluations at scale on HUD infrastructure."
+icon: "rocket"
+---
+
+You've built an environment, written scenarios, defined tasks, and tested locally. Now run the same tasks at scale on HUD infrastructure — hundreds of parallel runs, no local compute.
+
+## Prerequisites
+
+You need:
+- A working environment (`env.py` with tools and scenarios)
+- Tasks that pass locally (`hud eval tasks/ claude`)
+- `HUD_API_KEY` set (`hud set HUD_API_KEY=your-key`)
+
+## Step 1: Deploy
+
+<Warning>
+You must deploy your environment before syncing tasks or running remotely. Deploy first, then sync.
+</Warning>
+
+### hud deploy
+
+The simplest path. One command builds and deploys your environment directly to HUD:
+
+```bash
+hud deploy
+```
+
+This:
+1. Packages your build context (respects `.dockerignore`)
+2. Uploads to HUD's build service
+3. Builds remotely via AWS CodeBuild
+4. Streams logs in real-time
+5. Links this directory to the deployed environment
+
+Once complete, your environment appears on the platform:
+
+<Frame>
+  <img src="/src/images/platform-environments.png" alt="Deployed environment on the platform" />
+</Frame>
+
+See your environment's tools, scenarios, and builds at [hud.ai/environments](https://hud.ai/environments). For full details on managing environments through the platform UI, see [Platform Environments](/platform/environments).
+
+Takes 2-5 minutes the first time; subsequent deploys are faster due to layer caching.
+
+<Tip>
+If your environment is pure Python (no system deps), this step is still required for remote execution — the platform needs a container image to spin up isolated instances.
+</Tip>
+
+### Rebuilding
+
+Run `hud deploy` again in the same directory. HUD reads `.hud/deploy.json` to find your existing environment and builds a new version:
+
+```bash
+hud deploy  # v0.1.0
+# make changes...
+hud deploy  # v0.1.1
+```
+
+### Configuration
+
+<Accordion title="Environment Variables, Build Args & Secrets">
+
+Three flags for different purposes:
+
+| Flag | When | Use For |
+|------|------|---------|
+| `--env` / `-e` | Runtime | API keys, config |
+| `--build-arg` | Build time | Repo URLs, build modes |
+| `--secret` | Build time (not stored in image) | Private repo tokens |
+
+```bash
+# Runtime env vars (encrypted, injected when container runs)
+hud deploy -e API_KEY=secret
+
+# Build args (for Dockerfile ARG directives)
+hud deploy --build-arg REPO_URL=https://github.com/org/repo
+
+# Build secrets (for private repos, not baked into image)
+hud deploy --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
+```
+
+See [hud deploy reference](/reference/cli/deploy) for full details.
+</Accordion>
+
+### GitHub Auto-Deploy
+
+For teams and CI/CD, connect a GitHub repository. HUD rebuilds automatically when you push:
+
+1. Go to [hud.ai](https://hud.ai) → **New** → **Environment**
+2. Click **Connect GitHub** and install the HUD GitHub App
+3. Select your repository and branch
+4. Push changes—rebuilds happen automatically
+
+<Frame>
+  <img src="/src/images/remote-builds/select-repo.png" alt="Connecting a GitHub repository" />
+</Frame>
+
+This is better for long-term projects because:
+- **CI/CD integration**: Rebuilds on every push to your branch
+- **Team collaboration**: Anyone with repo access can trigger deploys
+- **Version history**: See which commit each build came from
+- **Rollback**: Deploy previous commits if needed
+
+## Step 2: Sync Tasks
+
+Push your local task definitions to a platform taskset:
+
+```bash
+# Sync from a tasks.py file
+hud sync tasks my-taskset
+
+# Sync from a tasks/ directory (spelling.py, counting.py, etc.)
+hud sync tasks my-taskset tasks/
+
+# Re-sync after changes — shows a diff
+hud sync tasks
+#   create: add-negative (new)
+#   update: add-simple (args changed)
+#   remote-only: old-task (exists on platform but not locally)
+```
+
+This creates a taskset called "my-taskset" on the platform, uploads your tasks, and stores the taskset ID locally in `.hud/config.json`. On subsequent runs, `hud sync tasks` re-syncs to the same taskset.
+
+The sync is diff-aware — it diffs local tasks against the platform by slug. It creates new tasks, updates changed ones, and reports tasks that exist remotely but not locally (without deleting them). Any custom columns you defined on tasks sync automatically. Version control and task history are managed on the platform — you always have a record of what changed.
+
+See the [hud sync reference](/reference/cli/sync) for full details on task discovery, diff behavior, and options.
+
+## Step 3: Run Remotely
+
+```bash
+hud eval my-taskset claude --remote --full
+```
+
+Both the agent and environment run on HUD infrastructure. No local compute, no local Docker. Results stream to the platform in real-time.
+
+| Flag | What it does |
+|------|-------------|
+| `--remote` | Run on HUD infrastructure instead of locally |
+| `--full` | Run all tasks (without this, only the first task runs) |
+| `--group-size 3` | Run each task 3 times (for variance estimation) |
+
+Monitor progress at [hud.ai/jobs](https://hud.ai/jobs). View results on your taskset's Leaderboard tab.
+
+Or click **Run Taskset** on the platform UI — select models, group size, max steps, and launch.
+
+<Frame>
+  <img src="/src/images/platform-leaderboards-run.png" alt="Run taskset configuration modal" />
+</Frame>
+
+Both the agent and environment run remotely. Results show up in real-time on the taskset's **Leaderboard** tab—rankings, success rates, and model comparisons.
+
+<Frame>
+  <img src="/src/images/platform-tasksets.png" alt="Tasksets and leaderboards" />
+</Frame>
+
+See [`hud eval` CLI reference](/reference/cli/eval) for all options.
+
+## Working on the Platform
+
+Once your taskset is live, the platform becomes your primary interface for managing evaluations, inspecting results, and iterating.
+
+### Taskset Management
+
+Your taskset is at [hud.ai/evalsets](https://hud.ai/evalsets). You can create and edit tasks through the platform UI — useful for large-scale management, team collaboration, or one-off additions.
+
+<Frame>
+  <img src="/src/images/platform-env-scenarios.png" alt="Creating tasks from scenarios" />
+</Frame>
+
+The platform UI and `hud sync` work together. Edit locally and sync up, or edit on the platform — both are valid. See [Platform Tasksets](/platform/tasksets) for the full guide.
+
+### Inspecting Traces
+
+After a run completes, click any task row in the Leaderboard to open the **Trace Viewer**. The trace shows:
+
+- **Conversation** — The full message history between the agent and environment
+- **Tool calls** — Every tool invocation with arguments and results
+- **Reward** — The final score and any subscore breakdown
+- **LOGS tab** — Container stdout/stderr from the environment
+- **DEBUG tab** — Orchestrator and worker logs for infrastructure issues
+
+Use traces to understand *why* an agent scored the way it did. If it got stuck, the conversation shows where. If it failed silently, the logs show container errors.
+
+### Iterating
+
+Once you have results, the iteration cycle is fast:
+
+| What changed | What to do |
+|---|---|
+| Task args or columns | `hud sync tasks` |
+| Added/removed tasks | `hud sync tasks` |
+| Grading logic or tools | `hud deploy` then re-run |
+| Dockerfile or system deps | `hud deploy --no-cache` then re-run |
+| Just want to re-run | `hud eval my-taskset claude --remote --full` |
+
+The fastest cycle when developing a single task:
+
+1. Edit scenario/grading locally
+2. `task.run("claude-sonnet-4-5")` — verify it works
+3. Deploy only if env code changed: `hud deploy`
+4. Sync only if tasks changed: `hud sync tasks --task <slug>`
+5. `hud eval "My Taskset" claude --remote --task-ids my_task`
+6. Check the trace, repeat
+
+### Debugging Zero Scores
+
+When a task scores 0.0 remotely but works locally:
+
+1. **Trace** — Did the agent attempt the task or get stuck? If it never acted, the issue is the prompt or model, not grading.
+2. **Logs** — Check the LOGS and DEBUG tabs for container errors, missing deps, or grader failures.
+3. **Grade locally** — If it passes locally but fails remotely, the deployed environment diverged. Verify your latest build version matches `.hud/deploy.json`.
+
+### QA Workflows
+
+After running evaluations, use QA workflows to automatically analyze traces — detect grading errors, classify failures, and flag reward hacking. Attach a QA workflow as a column on your taskset and every completed trace is analyzed automatically.
+
+HUD ships four standard QA workflows:
+
+| Workflow | What it detects |
+|----------|----------------|
+| **False Negative** | Agent succeeded but grader scored it wrong |
+| **False Positive** | Agent got credit without genuinely solving |
+| **Failure Analysis** | Root cause classification (10 categories) |
+| **Reward Hacking** | Agent gamed the evaluation mechanism |
+
+To add a QA column: open your taskset → **Add Column → QA Workflow** → pick a workflow. You can also build custom QA workflows — see [QA Workflows](/platform/workflows) for the full guide.
+
+<Note>
+Remote runs use the HUD Gateway for model access. Store your provider API keys at [hud.ai/project/api-keys](https://hud.ai/project/api-keys) (BYOK, lower credit cost) or use HUD Credits with pooled keys. Either way, you only need `HUD_API_KEY` — no provider-specific keys required.
+</Note>
+
+## Running Externally
+
+Every HUD image supports scenario operations via `hud scenario`. Setup and grading are shell commands; agents interact with tools via the MCP server at `:8080/mcp`. This is the same interface used by [Harbor-compatible benchmarks](/advanced/harbor-convert) — converting an existing benchmark to HUD format produces exactly this structure.
+
+<Tip>
+The default Dockerfile CMD uses `--stdio` for the HUD platform. For external use, override the command to start an HTTP server:
+</Tip>
+
+### With Docker
+
+```bash
+# Build and push the image to a registry
+hud build .
+docker tag my-env:latest <your-registry>/my-env:latest
+docker push <your-registry>/my-env:latest
+
+# Start the environment with HTTP server (overrides default stdio CMD)
+docker run -d --name my-env -p 8080:8080 my-image:latest \
+  hud dev env:env --port 8080
+
+# List available scenarios
+docker exec my-env hud scenario list
+
+# Setup a scenario (prints the prompt)
+docker exec my-env hud scenario setup count \
+  --args '{"text": "strawberry", "letter": "r"}'
+
+# Your agent runs against MCP tools at localhost:8080/mcp
+
+# Grade (prints reward as JSON)
+docker exec my-env hud scenario grade count --answer "3"
+
+# Test graders without an agent (setup + grade in one shot)
+docker exec my-env hud scenario run count \
+  --args '{"text": "mississippi", "letter": "s"}' --answer "4"
+```
+
+### With a Sandbox SDK (Python)
+
+Any platform that can run a Docker image and exec into it works. Here are two options:
+
+<Tabs>
+<Tab title="Daytona">
+[Daytona](https://daytona.io) spins up HUD images as sandboxed workspaces:
+
+```python
+import json
+from daytona import Daytona, CreateSandboxFromImageParams
+
+daytona = Daytona()
+sandbox = daytona.create(CreateSandboxFromImageParams(
+    image="my-image:latest",
+    language="python",
+))
+
+# Setup — returns the prompt
+prompt = sandbox.process.exec(
+    'hud scenario setup count --args \'{"text": "strawberry", "letter": "r"}\''
+).result
+
+# Agent runs against MCP tools at the sandbox
+# ... your agent loop here ...
+
+# Grade
+reward = json.loads(sandbox.process.exec(
+    'hud scenario grade count --answer "3"'
+).result)
+
+daytona.delete(sandbox)
+```
+</Tab>
+
+<Tab title="Modal">
+[Modal](https://modal.com) runs containers serverlessly with GPU support:
+
+```python
+import json
+import modal
+
+image = modal.Image.from_registry("my-image:latest")
+app = modal.App("hud-eval")
+sandbox = modal.Sandbox.create(image=image, app=app)
+
+# Setup
+prompt = sandbox.exec("hud", "scenario", "setup", "count",
+    "--args", '{"text": "strawberry", "letter": "r"}').stdout.read()
+
+# Agent runs against MCP tools
+# ... your agent loop here ...
+
+# Grade
+reward = json.loads(sandbox.exec("hud", "scenario", "grade",
+    "count", "--answer", "3").stdout.read())
+
+sandbox.terminate()
+```
+</Tab>
+</Tabs>
+
+The same pattern works on Kubernetes (`kubectl exec`), E2B, Fly.io, or any platform that runs containers.
+
+## What's Next
+
+<CardGroup cols={2}>
+<Card title="Environments as Data" icon="chart-line" href="/building/environments-as-data">
+  Design environments that produce useful training signal
+</Card>
+
+<Card title="Platform Tasksets" icon="list-check" href="/platform/tasksets">
+  Full taskset management guide
+</Card>
+
+<Card title="Sync Reference" icon="arrows-rotate" href="/reference/cli/sync">
+  Task sync details and diff behavior
+</Card>
+
+<Card title="hud eval Reference" icon="robot" href="/reference/cli/eval">
+  All eval CLI options
+</Card>
+</CardGroup>
