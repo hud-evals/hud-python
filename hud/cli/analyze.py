@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path  # noqa: TC003
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.console import Console
@@ -15,6 +16,9 @@ from rich.table import Table
 from rich.tree import Tree
 
 from hud.utils.hud_console import HUDConsole
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 console = Console()
 hud_console = HUDConsole()
@@ -112,19 +116,26 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
 
         from fastmcp import Client as FastMCPClient
 
-        from hud.cli.utils.mcp import analyze_environment as mcp_analyze
+        from hud.cli.utils.analysis import analyze_environment as mcp_analyze
 
         client = FastMCPClient(transport=mcp_config)
         # Extract server name for display (first key in mcp_config)
         server_name = next(iter(mcp_config.keys()), None)
 
         try:
+            start_time = time.time()
             await client.__aenter__()
+            initialize_ms = int((time.time() - start_time) * 1000)
             progress.update(task, description="[green]✓ Client initialized[/green]")
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await mcp_analyze(client, verbose, server_name=server_name)
+            analysis = await mcp_analyze(
+                client,
+                verbose,
+                server_name=server_name,
+                initialize_ms=initialize_ms,
+            )
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:
@@ -154,7 +165,7 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
         display_interactive(analysis)
 
 
-def display_interactive(analysis: dict) -> None:
+def display_interactive(analysis: Mapping[str, Any]) -> None:
     """Display analysis results in interactive format."""
     # Server metadata
     hud_console.section_title("📊 Environment Overview")
@@ -201,13 +212,13 @@ def display_interactive(analysis: dict) -> None:
     hud_console.section_title("🔧 Available Tools")
     tools_tree = Tree("[bold bright_white]Tools[/bold bright_white]")
 
-    # Check if we have hub_tools info (live analysis) or not (metadata-only)
-    if "hub_tools" in analysis:
+    # Check if we have hubTools info (live analysis) or not (metadata-only)
+    if "hubTools" in analysis:
         # Live analysis format - separate regular and hub tools
         # Regular tools
         regular_tools = tools_tree.add("[bright_white]Regular Tools[/bright_white]")
         for tool in analysis["tools"]:
-            if tool["name"] not in analysis["hub_tools"]:
+            if tool["name"] not in analysis["hubTools"]:
                 tool_node = regular_tools.add(f"[bright_white]{tool['name']}[/bright_white]")
                 if tool["description"]:
                     tool_node.add(f"[bright_black]{tool['description']}[/bright_black]")
@@ -219,9 +230,9 @@ def display_interactive(analysis: dict) -> None:
                     tool_node.add(syntax)
 
         # Hub tools
-        if analysis["hub_tools"]:
+        if analysis["hubTools"]:
             hub_tools = tools_tree.add("[bright_white]Hub Tools[/bright_white]")
-            for hub_name, functions in analysis["hub_tools"].items():
+            for hub_name, functions in analysis["hubTools"].items():
                 hub_node = hub_tools.add(f"[rgb(181,137,0)]{hub_name}[/rgb(181,137,0)]")
                 for func in functions:
                     hub_node.add(f"[bright_white]{func}[/bright_white]")
@@ -314,7 +325,7 @@ def display_interactive(analysis: dict) -> None:
         console.print(env_table)
 
 
-def display_markdown(analysis: dict) -> None:
+def display_markdown(analysis: Mapping[str, Any]) -> None:
     """Display analysis results in markdown format."""
     md = []
     md.append("# MCP Environment Analysis\n")
@@ -344,19 +355,19 @@ def display_markdown(analysis: dict) -> None:
     # Tools
     md.append("## Available Tools\n")
 
-    # Check if we have hub_tools info (live analysis) or not (metadata-only)
-    if "hub_tools" in analysis:
+    # Check if we have hubTools info (live analysis) or not (metadata-only)
+    if "hubTools" in analysis:
         # Regular tools
         md.append("### Regular Tools")
         for tool in analysis["tools"]:
-            if tool["name"] not in analysis["hub_tools"]:
+            if tool["name"] not in analysis["hubTools"]:
                 md.extend([f"- **{tool['name']}**: {tool.get('description', 'No description')}"])
         md.append("")
 
         # Hub tools
-        if analysis["hub_tools"]:
+        if analysis["hubTools"]:
             md.append("### Hub Tools")
-            for hub_name, functions in analysis["hub_tools"].items():
+            for hub_name, functions in analysis["hubTools"].items():
                 md.extend([f"- **{hub_name}**"])
                 for func in functions:
                     md.extend([f"  - {func}"])
@@ -469,18 +480,26 @@ async def _analyze_with_config(
 
         from fastmcp import Client as FastMCPClient
 
-        from hud.cli.utils.mcp import analyze_environment as mcp_analyze
+        from hud.cli.utils.analysis import analyze_environment as mcp_analyze
 
         config = _prepare_mcp_config(mcp_config)
         client = FastMCPClient(transport=config)
+        server_name = next(iter(config.keys()), None)
 
         try:
+            start_time = time.time()
             await client.__aenter__()
+            initialize_ms = int((time.time() - start_time) * 1000)
             progress.update(task, description="[green]✓ Client initialized[/green]")
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await mcp_analyze(client, verbose)
+            analysis = await mcp_analyze(
+                client,
+                verbose,
+                server_name=server_name,
+                initialize_ms=initialize_ms,
+            )
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:

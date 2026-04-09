@@ -46,7 +46,7 @@ def _handle_name_conflict(
     error: Any,
     console: HUDConsole,
 ) -> str | None:
-    """Handle a 409 name conflict from trigger-direct. Returns registry_id to rebuild, or None."""
+    """Handle a 409 name conflict from build trigger. Returns registry_id or None."""
     try:
         detail = error.response.json().get("detail", {})
     except Exception:
@@ -474,6 +474,7 @@ async def _deploy_async(
 
         try:
             trigger_payload = {
+                "source": "direct",
                 "build_id": build_id,
                 "name": name,
                 "no_cache": no_cache,
@@ -488,7 +489,7 @@ async def _deploy_async(
                 trigger_payload["build_secrets"] = build_secrets
 
             trigger_response = await client.post(
-                f"{api_url.rstrip('/')}/builds/trigger-direct",
+                f"{api_url.rstrip('/')}/builds/trigger",
                 json=trigger_payload,
                 headers=headers,
             )
@@ -501,7 +502,7 @@ async def _deploy_async(
                     trigger_payload["registry_id"] = conflict
                     try:
                         trigger_response = await client.post(
-                            f"{api_url.rstrip('/')}/builds/trigger-direct",
+                            f"{api_url.rstrip('/')}/builds/trigger",
                             json=trigger_payload,
                             headers=headers,
                         )

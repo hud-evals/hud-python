@@ -61,12 +61,12 @@ class TestIncrementVersion:
     def test_increment_minor(self):
         """Test incrementing minor version."""
         assert increment_version("1.2.3", "minor") == "1.3.0"
-        assert increment_version("0.5.34", "minor") == "0.6.0"
+        assert increment_version("0.5.35", "minor") == "0.6.0"
 
     def test_increment_major(self):
         """Test incrementing major version."""
         assert increment_version("1.2.3", "major") == "2.0.0"
-        assert increment_version("0.5.34", "major") == "1.0.0"
+        assert increment_version("0.5.35", "major") == "1.0.0"
 
     def test_increment_with_v_prefix(self):
         """Test incrementing version with v prefix."""
@@ -208,7 +208,7 @@ class TestAnalyzeMcpEnvironment:
     """Test analyzing MCP environment."""
 
     @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("stdio", None))
-    @mock.patch("hud.cli.utils.mcp.analyze_environment")
+    @mock.patch("hud.cli.utils.analysis.analyze_environment")
     @mock.patch("fastmcp.Client")
     async def test_analyze_success(self, mock_client_class, mock_mcp_analyze, _mock_detect):
         """Test successful environment analysis."""
@@ -221,10 +221,16 @@ class TestAnalyzeMcpEnvironment:
 
         # Mock analyze_environment return value
         mock_mcp_analyze.return_value = {
+            "initializeMs": 123,
+            "toolCount": 1,
+            "internalToolCount": 0,
+            "success": True,
             "metadata": {"servers": ["local"], "initialized": True},
             "tools": [{"name": "test_tool", "description": "Test tool"}],
-            "hub_tools": {},
+            "hubTools": {},
+            "prompts": [],
             "resources": [],
+            "scenarios": [],
             "telemetry": {},
         }
 
@@ -253,7 +259,7 @@ class TestAnalyzeMcpEnvironment:
             await analyze_mcp_environment("test:latest")
 
     @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("stdio", None))
-    @mock.patch("hud.cli.utils.mcp.analyze_environment")
+    @mock.patch("hud.cli.utils.analysis.analyze_environment")
     @mock.patch("fastmcp.Client")
     async def test_analyze_verbose_mode(self, mock_client_class, mock_mcp_analyze, _mock_detect):
         """Test analysis in verbose mode."""
@@ -263,10 +269,16 @@ class TestAnalyzeMcpEnvironment:
         mock_client.close = mock.AsyncMock()
         mock_client_class.return_value = mock_client
         mock_mcp_analyze.return_value = {
+            "initializeMs": 123,
+            "toolCount": 0,
+            "internalToolCount": 0,
+            "success": True,
             "metadata": {"servers": ["local"], "initialized": True},
             "tools": [],
-            "hub_tools": {},
+            "hubTools": {},
+            "prompts": [],
             "resources": [],
+            "scenarios": [],
             "telemetry": {},
         }
 
@@ -444,10 +456,10 @@ class TestAnalyzeMcpHttp:
     """Test HTTP-mode analysis in analyze_mcp_environment."""
 
     @mock.patch("hud.cli.utils.docker.stop_container")
-    @mock.patch("hud.cli.utils.mcp.wait_for_http_server", new_callable=mock.AsyncMock)
+    @mock.patch("hud.cli.utils.analysis.wait_for_http_server", new_callable=mock.AsyncMock)
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
-    @mock.patch("hud.cli.utils.mcp.analyze_environment")
+    @mock.patch("hud.cli.utils.analysis.analyze_environment")
     @mock.patch("fastmcp.Client")
     async def test_http_analysis_success(
         self,
@@ -470,9 +482,15 @@ class TestAnalyzeMcpHttp:
         mock_subprocess.return_value = mock_proc
 
         mock_mcp_analyze.return_value = {
+            "initializeMs": 456,
+            "toolCount": 1,
+            "internalToolCount": 0,
+            "success": True,
             "tools": [{"name": "tool1", "description": "A tool"}],
-            "hub_tools": {},
+            "hubTools": {},
+            "prompts": [],
             "resources": [],
+            "scenarios": [],
         }
 
         result = await analyze_mcp_environment("http-img:latest")
@@ -515,7 +533,7 @@ class TestAnalyzeMcpHttp:
         _mock_stop.assert_called_once()
 
     @mock.patch("hud.cli.utils.docker.stop_container")
-    @mock.patch("hud.cli.utils.mcp.wait_for_http_server", new_callable=mock.AsyncMock)
+    @mock.patch("hud.cli.utils.analysis.wait_for_http_server", new_callable=mock.AsyncMock)
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
     async def test_http_server_timeout(self, _mock_detect, mock_subprocess, mock_wait, _mock_stop):
@@ -566,6 +584,9 @@ class TestBuildDockerImage:
 
         result = build_docker_image(tmp_path, "test:latest")
         assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:3] == ["docker", "buildx", "build"]
+        assert "--load" in call_args
 
     @mock.patch("subprocess.run")
     def test_build_failure(self, mock_run, tmp_path):
@@ -602,12 +623,49 @@ class TestBuildDockerImage:
         call_args = mock_run.call_args[0][0]
         assert "--no-cache" in call_args
 
+    @mock.patch("subprocess.run")
+    def test_build_with_push_does_not_add_load(self, mock_run, tmp_path):
+        """Pushed builds should stay on the push output mode."""
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.write_text("FROM python:3.11")
+
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        build_docker_image(tmp_path, "registry.example/test:latest", docker_args=["--push"])
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:3] == ["docker", "buildx", "build"]
+        assert "--push" in call_args
+        assert "--load" not in call_args
+
+    @mock.patch("subprocess.run")
+    def test_build_with_explicit_output_does_not_add_load(self, mock_run, tmp_path):
+        """Explicit buildx outputs should not be combined with auto --load."""
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.write_text("FROM python:3.11")
+
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        build_docker_image(
+            tmp_path,
+            "test:latest",
+            docker_args=["--output", "type=oci,dest=out.tar"],
+        )
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:3] == ["docker", "buildx", "build"]
+        assert "--output" in call_args
+        assert "--load" not in call_args
+
 
 class TestBuildEnvironment:
     """Test the main build_environment function."""
 
     @mock.patch("hud.cli.build.build_docker_image")
-    @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
@@ -616,7 +674,6 @@ class TestBuildEnvironment:
         mock_run,
         mock_get_id,
         mock_analyze,
-        mock_collect_runtime,
         mock_build_docker,
         tmp_path,
     ):
@@ -651,12 +708,6 @@ ENV API_KEY
             ],
         }
         mock_get_id.return_value = "sha256:abc123"
-        mock_collect_runtime.return_value = {
-            "python": "3.11.6",
-            "cuda": None,
-            "cudnn": None,
-            "pytorch": None,
-        }
 
         # Mock final rebuild
         mock_result = mock.Mock()
@@ -683,11 +734,10 @@ ENV API_KEY
         assert lock_data["build"]["baseImage"] == "python:3.11"
         assert lock_data["build"]["platform"] == "linux/amd64"
         assert lock_data["environment"]["toolCount"] == 2
-        assert lock_data["environment"]["runtime"]["python"] == "3.11.6"
+        assert "runtime" not in lock_data["environment"]
         assert len(lock_data["tools"]) == 2
 
     @mock.patch("hud.cli.build.build_docker_image")
-    @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
@@ -696,7 +746,6 @@ ENV API_KEY
         mock_run,
         mock_get_id,
         mock_analyze,
-        mock_collect_runtime,
         mock_build_docker,
         tmp_path,
     ):
@@ -728,12 +777,6 @@ FROM python:3.11
             ],
         }
         mock_get_id.return_value = "sha256:fff111"
-        mock_collect_runtime.return_value = {
-            "python": "3.11.6",
-            "cuda": None,
-            "cudnn": None,
-            "pytorch": None,
-        }
 
         mock_result = mock.Mock()
         mock_result.returncode = 0

@@ -10,18 +10,21 @@ import os
 import re
 import subprocess
 import time
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
-import yaml
 
 from hud.cli.utils.environment import find_dockerfile
-from hud.cli.utils.source_hash import compute_source_hash, list_source_files
+from hud.cli.utils.lockfile import (
+    build_lock_data,
+    dump_lock_data,
+)
 from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
-from hud.version import __version__ as hud_version
+
+if TYPE_CHECKING:
+    from hud.cli.utils.analysis import BuildAnalysis
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -372,95 +375,29 @@ def display_secrets_warning(secret_vars: list[str]) -> None:
     hud_console.print("")
 
 
-def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, str | None]:
-    """Probe container to capture Python/CUDA/cuDNN/PyTorch versions.
-
-    Runs a tiny Python snippet inside the built image using docker run.
-    """
-    hud_console = HUDConsole()
-
-    runtime_script = (
-        "import json, platform\n"
-        "info = {'python': platform.python_version()}\n"
-        "try:\n"
-        "    import torch\n"
-        "    info['pytorch'] = getattr(torch, '__version__', None)\n"
-        "    cuda_version = None\n"
-        "    try:\n"
-        "        cuda_version = getattr(getattr(torch, 'version', None), 'cuda', None)\n"
-        "    except Exception:\n"
-        "        cuda_version = None\n"
-        "    if cuda_version:\n"
-        "        info['cuda'] = cuda_version\n"
-        "    try:\n"
-        "        cudnn_version = torch.backends.cudnn.version()\n"
-        "    except Exception:\n"
-        "        cudnn_version = None\n"
-        "    if cudnn_version:\n"
-        "        info['cudnn'] = str(cudnn_version)\n"
-        "except Exception:\n"
-        "    pass\n"
-        "info.setdefault('pytorch', None)\n"
-        "info.setdefault('cuda', None)\n"
-        "info.setdefault('cudnn', None)\n"
-        "print(json.dumps(info))\n"
+def _has_build_output_arg(docker_args: list[str]) -> bool:
+    """Return True when *docker_args* already choose a build output mode."""
+    return any(
+        arg in ("--push", "--load", "--output", "-o") or arg.startswith(("--output=", "-o="))
+        for arg in docker_args
     )
 
-    for binary in ("python", "python3"):
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            image,
-            binary,
-            "-c",
-            runtime_script,
-        ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        except FileNotFoundError:
-            return {}
 
-        if result.returncode != 0:
-            if verbose:
-                hud_console.debug(
-                    f"Runtime probe failed with {binary}: {result.stderr.strip() or 'no stderr'}"
-                )
-            continue
+def _has_non_daemon_output(docker_args: list[str]) -> bool:
+    """Return True when *docker_args* route build output away from the local daemon.
 
-        output = (result.stdout or "").strip()
-        if not output:
-            return {}
-
-        try:
-            data = json.loads(output.splitlines()[-1])
-        except json.JSONDecodeError:
-            if verbose:
-                hud_console.debug(
-                    "Runtime probe returned non-JSON output; skipping metadata capture"
-                )
-            return {}
-
-        if not isinstance(data, dict):
-            if verbose:
-                hud_console.debug(
-                    "Runtime probe returned JSON that is not an object; skipping metadata capture"
-                )
-            return {}
-
-        return {
-            "python": data.get("python"),
-            "cuda": data.get("cuda"),
-            "cudnn": data.get("cudnn"),
-            "pytorch": data.get("pytorch"),
-        }
-
-    return {}
+    Detects ``--output``/``-o`` without an accompanying ``--load``, meaning
+    the built image won't be available for local analysis.
+    """
+    has_custom = any(
+        arg in ("--output", "-o") or arg.startswith(("--output=", "-o=")) for arg in docker_args
+    )
+    return has_custom and "--load" not in docker_args
 
 
 async def analyze_mcp_environment(
     image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
-) -> dict[str, Any]:
+) -> BuildAnalysis:
     """Analyze an MCP environment to extract metadata.
 
     Supports both stdio (default) and HTTP transport.  The transport is
@@ -468,27 +405,28 @@ async def analyze_mcp_environment(
     """
     from fastmcp import Client as FastMCPClient
 
+    from hud.cli.utils.analysis import analyze_environment
     from hud.cli.utils.docker import (
         DEFAULT_HTTP_PORT,
         build_env_flags,
         detect_transport,
         stop_container,
     )
-    from hud.cli.utils.mcp import analyze_environment
 
     hud_console = HUDConsole()
     env_vars = env_vars or {}
     transport_mode, container_port = detect_transport(image)
     is_http = transport_mode == "http"
     container_name: str | None = None
+    server_url: str | None = None
     initialized = False
     client: Any = None
 
     try:
         # --- transport-specific setup ---
         if is_http:
+            from hud.cli.utils.analysis import wait_for_http_server
             from hud.cli.utils.logging import find_free_port
-            from hud.cli.utils.mcp import wait_for_http_server
 
             port = container_port or DEFAULT_HTTP_PORT
             host_port = find_free_port(port)
@@ -554,6 +492,7 @@ async def analyze_mcp_environment(
             hud_console.info("Initializing MCP client...")
 
         if is_http:
+            assert server_url is not None
             await wait_for_http_server(  # type: ignore[possibly-undefined]
                 server_url, timeout_seconds=60.0
             )
@@ -564,8 +503,12 @@ async def analyze_mcp_environment(
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
-        full_analysis = await analyze_environment(client, verbose, server_name=server_name)
-        return _build_analysis_result(full_analysis, initialize_ms)
+        return await analyze_environment(
+            client,
+            verbose,
+            server_name=server_name,
+            initialize_ms=initialize_ms,
+        )
     except TimeoutError:
         from hud.shared.exceptions import HudException
 
@@ -593,61 +536,6 @@ async def analyze_mcp_environment(
             stop_container(container_name)
 
 
-def _build_analysis_result(full_analysis: dict[str, Any], initialize_ms: int) -> dict[str, Any]:
-    """Normalize the raw analysis dict into the build-lock result format."""
-    tools_list = full_analysis.get("tools", [])
-    hub_map = full_analysis.get("hub_tools", {}) or full_analysis.get("hubTools", {})
-
-    normalized_tools: list[dict[str, Any]] = []
-    internal_total = 0
-    for t in tools_list:
-        if hasattr(t, "name"):
-            name = getattr(t, "name", None)
-            description = getattr(t, "description", None)
-            input_schema = getattr(t, "inputSchema", None)
-            existing_internal = getattr(t, "internalTools", None)
-        else:
-            name = t.get("name")
-            description = t.get("description")
-            input_schema = t.get("inputSchema") or t.get("input_schema")
-            existing_internal = t.get("internalTools") or t.get("internal_tools")
-
-        tool_entry: dict[str, Any] = {"name": name}
-        if description:
-            tool_entry["description"] = description
-        if input_schema:
-            tool_entry["inputSchema"] = input_schema
-
-        merged_internal: list[str] = []
-        if isinstance(existing_internal, list):
-            merged_internal.extend([str(x) for x in existing_internal])
-        if isinstance(hub_map, dict) and name in hub_map and isinstance(hub_map[name], list):
-            merged_internal.extend([str(x) for x in hub_map[name]])
-        if merged_internal:
-            merged_internal = list(dict.fromkeys(merged_internal))
-            tool_entry["internalTools"] = merged_internal
-            internal_total += len(merged_internal)
-
-        normalized_tools.append(tool_entry)
-
-    result: dict[str, Any] = {
-        "initializeMs": initialize_ms,
-        "toolCount": len(tools_list),
-        "internalToolCount": internal_total,
-        "tools": normalized_tools,
-        "success": True,
-    }
-    if hub_map:
-        result["hub_tools"] = hub_map
-    if full_analysis.get("prompts"):
-        result["prompts"] = full_analysis["prompts"]
-    if full_analysis.get("resources"):
-        result["resources"] = full_analysis["resources"]
-    if "scenarios" in full_analysis:
-        result["scenarios"] = full_analysis["scenarios"]
-    return result
-
-
 def build_docker_image(
     directory: Path,
     tag: str,
@@ -656,25 +544,30 @@ def build_docker_image(
     build_args: dict[str, str] | None = None,
     platform: str | None = None,
     secrets: list[str] | None = None,
-    remote_cache: str | None = None,
+    docker_args: list[str] | None = None,
 ) -> bool:
-    """Build a Docker image from a directory."""
+    """Build a Docker image from a directory.
+
+    Wraps ``docker buildx build``. Any flags that Docker understands
+    (``--cache-from``, ``--push``, ``--load``, etc.) belong in *docker_args*
+    and are appended to the command as-is. Unless the caller explicitly picks
+    an output mode, the result is loaded into the host daemon for local
+    analysis/debugging.
+    """
     hud_console = HUDConsole()
     build_args = build_args or {}
     secrets = secrets or []
+    docker_args = docker_args or []
 
-    # Check if Dockerfile exists (prefer Dockerfile.hud)
     dockerfile = find_dockerfile(directory)
     if dockerfile is None:
         hud_console.error(f"No Dockerfile found in {directory}")
         hud_console.info("Expected: Dockerfile.hud or Dockerfile")
         return False
 
-    # Build command - use buildx when remote cache is enabled
     effective_platform = platform if platform is not None else "linux/amd64"
-    cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
+    cmd = ["docker", "buildx", "build"]
 
-    # Specify dockerfile explicitly if not the default name
     if dockerfile.name != "Dockerfile":
         cmd.extend(["-f", str(dockerfile)])
 
@@ -684,64 +577,25 @@ def build_docker_image(
     if no_cache:
         cmd.append("--no-cache")
 
-    # Add remote cache support for ECR
-    if remote_cache:
-        try:
-            # Validate ECR repo name
-            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
-                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
-                hud_console.info(
-                    "ECR repo names must contain only lowercase letters, numbers, hyphens, underscores, and forward slashes"  # noqa: E501
-                )
-                return False
+    # Passthrough: cache, push, and any other Docker-native flags
+    cmd.extend(docker_args)
 
-            # Get required environment variables
-            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
-            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    # Local hud build expects a daemon-loaded image unless the caller explicitly
+    # selects another buildx output mode such as --push/--output.
+    if not _has_build_output_arg(docker_args):
+        cmd.append("--load")
 
-            if not aws_account_id:
-                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
-                return False
-
-            # ECR cache image reference
-            cache_image = (
-                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
-            )
-
-            # Add cache arguments with proper ECR format
-            cmd.extend(
-                [
-                    "--cache-from",
-                    f"type=registry,ref={cache_image}",
-                    "--cache-to",
-                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
-                    "--load",  # Load image to local Docker after build
-                ]
-            )
-
-            hud_console.success(f"Remote cache configured: {cache_image}")
-
-        except typer.Exit:
-            raise
-        except Exception as e:
-            hud_console.error(f"Remote cache setup error: {e}")
-            return False
-
-    # Add build args
     for key, value in build_args.items():
         cmd.extend(["--build-arg", f"{key}={value}"])
 
-    # Add secrets
     for secret in secrets:
         cmd.extend(["--secret", secret])
 
     cmd.append(str(directory))
 
-    # Always show build output
     hud_console.info(f"Running: {' '.join(cmd)}")
 
     try:
-        # Use Docker's native output formatting - no capture, let Docker handle display
         env = os.environ.copy()
         if secrets:
             env["DOCKER_BUILDKIT"] = "1"
@@ -760,8 +614,8 @@ def build_environment(
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
     secrets: list[str] | None = None,
-    remote_cache: str | None = None,
     build_args: dict[str, str] | None = None,
+    docker_args: list[str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     hud_console = HUDConsole()
@@ -822,26 +676,66 @@ def build_environment(
         # No tag provided - we'll add version later
         image_tag = None
 
-    # Build temporary image first
-    temp_tag = f"hud-build-temp:{int(time.time())}"
+    # Compute version before building (needed for image tags when --push is used)
+    existing_version = get_existing_version(lock_path)
+    if existing_version:
+        new_version = increment_version(existing_version)
+        hud_console.info(f"Incrementing version: {existing_version} → {new_version}")
+    else:
+        new_version = "0.1.0"
+        hud_console.info(f"Setting initial version: {new_version}")
 
-    hud_console.progress_message(f"Building Docker image: {temp_tag}")
+    # Detect --push in docker passthrough args
+    pushing = "--push" in (docker_args or [])
+
+    if not pushing and _has_non_daemon_output(docker_args or []):
+        hud_console.error(
+            "A custom --output was specified without --load; "
+            "the image would not be available in the local Docker daemon for analysis."
+        )
+        hud_console.info("Add --load alongside your --output flag, or use --push instead.")
+        raise typer.Exit(1)
+
+    # Set up build tags
+    if pushing:
+        if not tag:
+            hud_console.error("--push requires --tag with a registry-qualified image name")
+            raise typer.Exit(1)
+        build_tag = tag
+        hud_console.progress_message("Building and pushing Docker image...")
+    else:
+        build_tag = f"hud-build-temp:{int(time.time())}"
+        hud_console.progress_message(f"Building Docker image: {build_tag}")
 
     # Build the image (env vars are for runtime, not build time)
     if not build_docker_image(
         env_dir,
-        temp_tag,
+        build_tag,
         no_cache,
         verbose,
         build_args=build_args or None,
         platform=platform,
         secrets=secrets,
-        remote_cache=remote_cache,
+        docker_args=docker_args,
     ):
         hud_console.error("Docker build failed")
         raise typer.Exit(1)
 
-    hud_console.success(f"Built temporary image: {temp_tag}")
+    # Get image locally for analysis
+    if pushing:
+        hud_console.success(f"Pushed image: {build_tag}")
+        hud_console.progress_message("Pulling image for analysis...")
+        pull_result = subprocess.run(
+            ["docker", "pull", build_tag],  # noqa: S607
+            check=False,
+        )
+        if pull_result.returncode != 0:
+            hud_console.error(f"Failed to pull image: {build_tag}")
+            raise typer.Exit(1)
+        analysis_image = build_tag
+    else:
+        analysis_image = build_tag
+        hud_console.success(f"Built temporary image: {build_tag}")
 
     # Analyze the environment (merge folder .env if present)
     hud_console.progress_message("Analyzing MCP environment...")
@@ -859,13 +753,13 @@ def build_environment(
         merged_env_for_analysis = {**env_from_file, **(env_vars or {})}
 
         analysis = loop.run_until_complete(
-            analyze_mcp_environment(temp_tag, verbose, merged_env_for_analysis)
+            analyze_mcp_environment(analysis_image, verbose, merged_env_for_analysis)
         )
     except Exception as e:
         hud_console.error(f"Failed to analyze MCP environment: {e}")
         hud_console.info("")
         hud_console.info("To debug this issue, run:")
-        hud_console.command_example(f"hud debug {temp_tag}")
+        hud_console.command_example(f"hud debug {analysis_image}")
         hud_console.info("")
         raise typer.Exit(1) from e
     finally:
@@ -887,7 +781,7 @@ def build_environment(
 
     # Extract environment variables from Dockerfile
     dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"
-    required_env, optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
+    required_env, _optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
 
     # Show env vars detected from .env file
     if env_from_file:
@@ -913,275 +807,144 @@ def build_environment(
     if secret_vars:
         display_secrets_warning(secret_vars)
 
-    # Check for existing version and increment
-    lock_path = env_dir / "hud.lock.yaml"
-    existing_version = get_existing_version(lock_path)
-
-    if existing_version:
-        # Increment existing version
-        new_version = increment_version(existing_version)
-        hud_console.info(f"Incrementing version: {existing_version} → {new_version}")
-    else:
-        # Start with 0.1.0 for new environments
-        new_version = "0.1.0"
-        hud_console.info(f"Setting initial version: {new_version}")
-
     # Determine base name for image references
     if image_tag:
         base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
 
-    # Collect runtime metadata and compute base image/platform
-    runtime_info = collect_runtime_metadata(temp_tag, verbose=verbose)
-    base_image = parse_base_image(dockerfile_path)
     effective_platform = platform if platform is not None else "linux/amd64"
 
-    # Create lock file content with images subsection at top
-    lock_content = {
-        "version": "1.3",  # Lock file format version
-        "images": {
-            "local": f"{base_name}:{new_version}",  # Local tag with version
-            "full": None,  # Will be set with digest after build
-            "pushed": None,  # Will be set by hud push
-        },
-        "build": {
-            "generatedAt": datetime.now(UTC).isoformat() + "Z",
-            "hudVersion": hud_version,
-            "directory": str(env_dir.name),
-            "version": new_version,
-            # Fast source fingerprint for change detection
-            "sourceHash": compute_source_hash(env_dir),
-            "baseImage": base_image,
-            "platform": effective_platform,
-        },
-        "environment": {
-            "initializeMs": analysis["initializeMs"],
-            "toolCount": analysis["toolCount"],
-        },
-    }
-
-    if runtime_info:
-        lock_content["environment"]["runtime"] = runtime_info
-    internal_count = int(analysis.get("internalToolCount", 0) or 0)
-    lock_content["environment"]["internalToolCount"] = internal_count
-
-    # Add environment variables section if any exist
-    # Include env vars from .env file as well
     env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
-
-    # Check if we have any env vars to document
-    has_env_vars = bool(required_env or optional_env or env_vars or env_vars_from_file)
-
-    if has_env_vars:
-        lock_content["environment"]["variables"] = {}
-
-        # Add note about editing environment variables
-        lock_content["environment"]["variables"]["_note"] = (
-            "You can edit this section to add or modify environment variables. "
-            "Provided variables will be used when running the environment."
-        )
-
-        # Combine all required variables: from Dockerfile, .env file, and provided vars
-        all_required = set(required_env)
-
-        # Add all env vars from .env file to required
-        all_required.update(env_vars_from_file)
-
-        # Add all provided env vars to required
-        if env_vars:
-            all_required.update(env_vars.keys())
-
-        # Remove any that are optional - they stay in optional
-        all_required = all_required - set(optional_env)
-
-        if all_required:
-            lock_content["environment"]["variables"]["required"] = sorted(list(all_required))
-        if optional_env:
-            lock_content["environment"]["variables"]["optional"] = optional_env
-
-    # Add tools with full schemas for RL config generation
-    if analysis["tools"]:
-        tools_serialized: list[dict[str, Any]] = []
-        for tool in analysis["tools"]:
-            entry: dict[str, Any] = {
-                "name": tool["name"],
-                # Preserve legacy shape: always include description/inputSchema
-                "description": tool.get("description", ""),
-                "inputSchema": tool.get("inputSchema", {}),
-            }
-            if tool.get("internalTools"):
-                entry["internalTools"] = tool.get("internalTools")
-            tools_serialized.append(entry)
-        lock_content["tools"] = tools_serialized
-
-    # Add hub tools if present (analyze_environment returns hub_tools with snake_case)
-    hub_tools = analysis.get("hub_tools") or analysis.get("hubTools")
-    if hub_tools:
-        lock_content["hubTools"] = hub_tools
-
-    # Add prompts if present
-    prompts = analysis.get("prompts")
-    if prompts:
-        lock_content["prompts"] = prompts
-
-    # Add resources if present
-    resources = analysis.get("resources")
-    if resources:
-        lock_content["resources"] = resources
-
-    # Add scenarios if present
-    if "scenarios" in analysis:
-        lock_content["scenarios"] = analysis["scenarios"]
+    lock_content = build_lock_data(
+        source_dir=env_dir,
+        analysis=analysis,
+        version=new_version,
+        image_name=base_name,
+        full_image_ref=None,
+        pushed_image_ref=build_tag if pushing else None,
+        env_vars=env_vars or None,
+        additional_required_env_vars=env_vars_from_file,
+        platform=effective_platform,
+        local_image_ref=build_tag if pushing else None,
+    )
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
     with open(lock_path, "w") as f:
-        yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
-
-    # Also write the file list we hashed for transparency (non-essential)
-    with contextlib.suppress(Exception):
-        files = [
-            str(p.resolve().relative_to(env_dir)).replace("\\", "/")
-            for p in list_source_files(env_dir)
-        ]
-        lock_content["build"]["sourceFiles"] = files
-        with open(lock_path, "w") as f:
-            yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
+        f.write(dump_lock_data(lock_content))
 
     hud_console.success("Created lock file: hud.lock.yaml")
 
     # Calculate lock file hash
-    lock_content_str = yaml.dump(lock_content, default_flow_style=False, sort_keys=True)
+    lock_content_str = dump_lock_data(lock_content, sort_keys=True)
     lock_hash = hashlib.sha256(lock_content_str.encode()).hexdigest()
     lock_size = len(lock_content_str)
 
-    # Rebuild with label containing lock file hash
-    hud_console.progress_message("Rebuilding with lock file metadata...")
-
-    # Build final image with label (uses cache from first build)
-    # Create tags: versioned and latest (and custom tag if provided)
     version_tag = f"{base_name}:{new_version}"
     latest_tag = f"{base_name}:latest"
 
-    # Build command - use buildx when remote cache is enabled
-    label_cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
-
-    # Specify dockerfile explicitly if not the default name
-    if dockerfile_path and dockerfile_path.name != "Dockerfile":
-        label_cmd.extend(["-f", str(dockerfile_path)])
-
-    # Use same defaulting for the second build step
-    label_platform = platform if platform is not None else "linux/amd64"
-    if label_platform:
-        label_cmd.extend(["--platform", label_platform])
-
-    # Add remote cache support for final build
-    if remote_cache:
-        try:
-            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
-                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
-                raise typer.Exit(1)
-
-            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
-            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-
-            if not aws_account_id:
-                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
-                raise typer.Exit(1)
-
-            cache_image = (
-                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
-            )
-
-            label_cmd.extend(
-                [
-                    "--cache-from",
-                    f"type=registry,ref={cache_image}",
-                    "--cache-to",
-                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
-                    "--load",  # Load image to local Docker after build
-                ]
-            )
-        except typer.Exit:
-            raise
-        except Exception as e:
-            hud_console.error(f"Remote cache setup error: {e}")
-            raise typer.Exit(1) from e
-
-    label_cmd.extend(
-        [
-            "--label",
-            f"org.hud.manifest.head={lock_hash}:{lock_size}",
-            "--label",
-            f"org.hud.version={new_version}",
-            "-t",
-            version_tag,  # Always tag with new version
-            "-t",
-            latest_tag,  # Always tag with latest
-        ]
-    )
-
-    # Add custom tag if user provided one
-    if image_tag and image_tag not in [version_tag, latest_tag]:
-        label_cmd.extend(["-t", image_tag])
-
-    # Add build args to final image build (same as initial build)
-    for key, value in build_args.items():
-        label_cmd.extend(["--build-arg", f"{key}={value}"])
-
-    # Add secrets to final image build (same as initial build)
-    for secret in secrets or []:
-        label_cmd.extend(["--secret", secret])
-
-    label_cmd.append(str(env_dir))
-
-    # Run rebuild using Docker's native output formatting
-    env = os.environ.copy()
-    if secrets:
-        env["DOCKER_BUILDKIT"] = "1"
-    if verbose:
-        # Show Docker's native output when verbose
-        result = subprocess.run(label_cmd, check=False, env=env)
-    else:
-        # Capture output for error reporting, but don't show unless it fails
-        result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
-
-    if result.returncode != 0:
-        hud_console.error("Failed to rebuild with label")
-        if not verbose and result.stderr:
-            hud_console.info("Error output:")
-            hud_console.info(str(result.stderr))
-        if not verbose:
-            hud_console.info("")
-            hud_console.info("Run with --verbose to see full build output:")
-            hud_console.command_example("hud build --verbose")
-        raise typer.Exit(1)
-
-    hud_console.success("Built final image with lock file metadata")
-
-    # NOW get the image ID after the final build
-    image_id = get_docker_image_id(version_tag)
-    if image_id:
-        # Store full reference with digest
-        if image_id.startswith("sha256:"):
-            lock_content["images"]["full"] = f"{version_tag}@{image_id}"
+    if pushing:
+        # Image already pushed — get digest from pulled image
+        image_id = get_docker_image_id(analysis_image)
+        if image_id:
+            if image_id.startswith("sha256:"):
+                lock_content["images"]["full"] = f"{analysis_image}@{image_id}"
+            else:
+                lock_content["images"]["full"] = f"{analysis_image}@sha256:{image_id}"
+            with open(lock_path, "w") as f:
+                f.write(dump_lock_data(lock_content))
+            hud_console.success("Updated lock file with image digest")
         else:
-            lock_content["images"]["full"] = f"{version_tag}@sha256:{image_id}"
-
-        # Update the lock file with the full image reference
-        with open(lock_path, "w") as f:
-            yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
-
-        hud_console.success("Updated lock file with image digest")
+            hud_console.warning("Could not retrieve image digest")
+        subprocess.run(["docker", "rmi", "-f", analysis_image], capture_output=True)  # noqa: S607
     else:
-        hud_console.warning("Could not retrieve image digest")
+        # Rebuild with label containing lock file hash
+        hud_console.progress_message("Rebuilding with lock file metadata...")
 
-    # Remove temp image after we're done
-    subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S607
+        # Reuse Docker flags for the label rebuild, but never --push.
+        label_docker_args = [a for a in (docker_args or []) if a != "--push"]
+        label_cmd = ["docker", "buildx", "build"]
+
+        if dockerfile_path and dockerfile_path.name != "Dockerfile":
+            label_cmd.extend(["-f", str(dockerfile_path)])
+
+        label_platform = platform if platform is not None else "linux/amd64"
+        if label_platform:
+            label_cmd.extend(["--platform", label_platform])
+
+        label_cmd.extend(label_docker_args)
+        if not _has_build_output_arg(label_docker_args):
+            label_cmd.append("--load")
+
+        label_cmd.extend(
+            [
+                "--label",
+                f"org.hud.manifest.head={lock_hash}:{lock_size}",
+                "--label",
+                f"org.hud.version={new_version}",
+                "-t",
+                version_tag,
+                "-t",
+                latest_tag,
+            ]
+        )
+
+        if image_tag and image_tag not in [version_tag, latest_tag]:
+            label_cmd.extend(["-t", image_tag])
+
+        for key, value in build_args.items():
+            label_cmd.extend(["--build-arg", f"{key}={value}"])
+
+        for secret in secrets or []:
+            label_cmd.extend(["--secret", secret])
+
+        label_cmd.append(str(env_dir))
+
+        env = os.environ.copy()
+        if secrets:
+            env["DOCKER_BUILDKIT"] = "1"
+        if verbose:
+            result = subprocess.run(label_cmd, check=False, env=env)
+        else:
+            result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
+
+        if result.returncode != 0:
+            hud_console.error("Failed to rebuild with label")
+            if not verbose and result.stderr:
+                hud_console.info("Error output:")
+                hud_console.info(str(result.stderr))
+            if not verbose:
+                hud_console.info("")
+                hud_console.info("Run with --verbose to see full build output:")
+                hud_console.command_example("hud build --verbose")
+            raise typer.Exit(1)
+
+        hud_console.success("Built final image with lock file metadata")
+
+        image_id = get_docker_image_id(version_tag)
+        if image_id:
+            if image_id.startswith("sha256:"):
+                lock_content["images"]["full"] = f"{version_tag}@{image_id}"
+            else:
+                lock_content["images"]["full"] = f"{version_tag}@sha256:{image_id}"
+            with open(lock_path, "w") as f:
+                f.write(dump_lock_data(lock_content))
+            hud_console.success("Updated lock file with image digest")
+        else:
+            hud_console.warning("Could not retrieve image digest")
+
+        subprocess.run(["docker", "rmi", "-f", build_tag], capture_output=True)  # noqa: S607
 
     # Update tasks.json files with new version
     hud_console.progress_message("Updating task files with new version...")
+    if pushing:
+        # Use the tag portion from the user's push tag so task references match
+        # what was actually pushed (e.g. "v1.0" from "registry.com/image:v1.0").
+        _lc, _ls = build_tag.rfind(":"), build_tag.rfind("/")
+        effective_version = build_tag[_lc + 1 :] if _lc > _ls else new_version
+    else:
+        effective_version = new_version
     updated_task_files = update_tasks_json_versions(
-        env_dir, base_name, existing_version, new_version
+        env_dir, base_name, existing_version, effective_version
     )
 
     if updated_task_files:
@@ -1192,27 +955,30 @@ def build_environment(
     # Print summary
     hud_console.section_title("Build Complete")
 
-    # Show the version tag as primary since that's what will be pushed
-    hud_console.status_item("Built image", version_tag, primary=True)
-
-    # Show additional tags
-    additional_tags = [latest_tag]
-    if image_tag and image_tag not in [version_tag, latest_tag]:
-        additional_tags.append(image_tag)
-    hud_console.status_item("Also tagged", ", ".join(additional_tags))
+    if pushing:
+        hud_console.status_item("Pushed image", build_tag, primary=True)
+    else:
+        hud_console.status_item("Built image", version_tag, primary=True)
+        additional_tags = [latest_tag]
+        if image_tag and image_tag not in [version_tag, latest_tag]:
+            additional_tags.append(image_tag)
+        hud_console.status_item("Also tagged", ", ".join(additional_tags))
 
     hud_console.status_item("Version", new_version)
     hud_console.status_item("Lock file", "hud.lock.yaml")
     hud_console.status_item("Tools found", str(analysis["toolCount"]))
 
-    # Show the digest info separately if we have it
     if image_id:
         hud_console.dim_info("\nImage digest", image_id)
 
     hud_console.section_title("Next Steps")
-    hud_console.info("Test locally:")
-    hud_console.command_example("hud dev", "Hot-reload development")
-    hud_console.command_example(f"hud debug {version_tag}", "Test MCP compliance")
+    if pushing:
+        hud_console.info("Test the pushed image:")
+        hud_console.command_example(f"hud debug {build_tag}", "Test MCP compliance")
+    else:
+        hud_console.info("Test locally:")
+        hud_console.command_example("hud dev", "Hot-reload development")
+        hud_console.command_example(f"hud debug {version_tag}", "Test MCP compliance")
     hud_console.info("")
     hud_console.info("Deploy to platform:")
     hud_console.command_example("hud deploy", "Build remotely and deploy")
@@ -1238,9 +1004,6 @@ def build_command(
         "--secret",
         help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
     ),
-    remote_cache: str | None = typer.Option(
-        None, "--remote-cache", help="Enable remote cache using Amazon ECR with specified repo name"
-    ),
 ) -> None:
     """🏗️ Build a HUD environment and generate lock file.
 
@@ -1249,16 +1012,17 @@ def build_command(
     - Analyzes the MCP server to extract metadata
     - Generates a hud.lock.yaml file for reproducibility
 
+    Docker flags (--cache-from, --push, etc.) can be passed after --.
+
     Examples:
         hud build                    # Build current directory
         hud build environments/text_2048 -e API_KEY=secret
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
         hud build . --no-cache       # Force rebuild
-        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
         hud build . --build-arg NODE_ENV=production  # Pass Docker build args
-        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.
-        hud build . --secret id=MY_KEY,src=./my_key.txt  # Pass build secret from file.[/not dim]
-    """  # noqa: E501
+        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets
+        hud build . --push                         # Push to registry after build[/not dim]
+    """
     if params:
         directory = params[0]
         extra_args = params[1:] if len(params) > 1 else []
@@ -1268,7 +1032,7 @@ def build_command(
 
     from hud.cli.utils.args import split_docker_passthrough
 
-    env_vars, build_args, _ = split_docker_passthrough(extra_args)
+    env_vars, build_args, docker_args = split_docker_passthrough(extra_args)
 
     build_environment(
         directory,
@@ -1278,6 +1042,6 @@ def build_command(
         env_vars or None,
         platform,
         secrets,
-        remote_cache,
-        build_args or None,
+        build_args=build_args or None,
+        docker_args=docker_args or None,
     )

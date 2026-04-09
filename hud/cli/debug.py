@@ -23,7 +23,7 @@ console = Console()
 def debug_command(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Docker image, environment directory, or config file followed by optional Docker arguments",  # noqa: E501
+        help="Docker image or environment directory, followed by optional Docker args",
     ),
     config: Path | None = typer.Option(  # noqa: B008
         None,
@@ -51,12 +51,14 @@ def debug_command(
 ) -> None:
     """🐛 Debug MCP environment - test initialization, tools, and readiness.
 
-    [not dim]Examples:
+    [not dim]Extra arguments after the image/directory are passed to Docker.
+
+    Examples:
         hud debug .                              # Debug current directory
         hud debug environments/browser           # Debug specific directory
         hud debug . --build                      # Build then debug
         hud debug hud-text-2048:latest          # Debug Docker image
-        hud debug my-mcp-server:v1 -e API_KEY=xxx
+        hud debug my-image -e API_KEY=xxx        # Pass env to Docker
         hud debug --config mcp-config.json
         hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
