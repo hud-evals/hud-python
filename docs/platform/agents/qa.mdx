@@ -1,19 +1,19 @@
 ---
-title: "QA Workflows"
+title: "QA Agents"
 description: "Automated trace and task analysis — detect false negatives, false positives, reward hacking, and classify failures"
 icon: "flask-vial"
 ---
 
-QA Workflows are analysis agents that run automatically on your traces. They use environments like [trace-explorer](https://github.com/hud-evals/hud-trace-explorer) to fetch trace data, inspect it with coding tools, and return structured verdicts.
+QA Agents are analysis agents that run automatically on your traces. They use environments like [trace-explorer](https://github.com/hud-evals/hud-trace-explorer) to fetch trace data, inspect it with coding tools, and return structured verdicts.
 
-A scenario qualifies as a QA workflow when it declares both a platform key arg (`hud_api_key`) and an entity arg (`trace_id` for per-trace, `task_id` for per-task). The platform fills these at runtime — you configure the analysis prompt and attach the workflow to a taskset column.
+A scenario qualifies as a QA agent when it declares both a platform key arg (`hud_api_key`) and an entity arg (`trace_id` for per-trace, `task_id` for per-task). The platform fills these at runtime — you configure the analysis prompt and attach the agent to a taskset column.
 
-## Standard QA Workflows
+## Standard QA Agents
 
-Four pre-built workflows are available out of the box. These appear under the **Standard QA Workflows** section on the Agents page and can be attached to any taskset with one click.
+Four pre-built QA agents are available out of the box. These appear under the **Standard QA Workflows** section on the Agents page and can be attached to any taskset with one click.
 
-| Workflow | What it detects | Output |
-|----------|----------------|--------|
+| Agent | What it detects | Output |
+|-------|----------------|--------|
 | **False Negative** | Agent succeeded but grader scored it wrong | `is_false_negative`, `reasoning`, `confidence` |
 | **False Positive** | Agent got credit without genuinely solving | `is_false_positive`, `reasoning`, `confidence` |
 | **Failure Analysis** | Root cause classification (10 categories) | `failure_category`, `root_cause`, `failed_criteria` |
@@ -24,20 +24,20 @@ Four pre-built workflows are available out of the box. These appear under the **
 ### From the Agents Page
 
 1. Go to the **Agents** page
-2. Under **Standard QA Workflows**, click a recommended workflow to view it
+2. Under **Standard QA Workflows**, click a recommended agent to view it
 3. Click **Add as Column** to attach it to any taskset
 4. Every completed trace is automatically analyzed
-5. To create your own, click **New Agent** → **QA Workflow**, select a workflow scenario, configure the analysis prompt, and choose a model. It appears under **Your QA Workflows**.
+5. To create your own, click **New Agent** → **QA Workflow**, select a scenario, configure the analysis prompt, and choose a model. It appears under **Your QA Workflows**.
 
 ### From a Taskset
 
 1. Open any taskset → **Add Column → QA Workflow**
-2. Pick a recommended workflow or one you've created
+2. Pick a recommended agent or one you've created
 3. Results appear as columns in your trace grid
 
 ## Building Your Own
 
-A QA workflow is just a scenario with `trace_id` + `hud_api_key` arguments. Use `prepare_qa_context` from trace-explorer for the common setup:
+A QA agent is just a scenario with `trace_id` + `hud_api_key` arguments. Use `prepare_qa_context` from trace-explorer for the common setup:
 
 ```python
 from pydantic import BaseModel, Field
@@ -74,10 +74,10 @@ async def my_analysis(
         yield 1.0
 ```
 
-The `ground_truth` parameter lets you build eval datasets for the workflow itself.
+The `ground_truth` parameter lets you build eval datasets for the agent itself.
 
 ## See Also
 
-- [Automations](/platform/workflows/automations) — Run scenarios repeatably with pre-filled arguments
-- [Chat Agents](/platform/workflows/chats) — Multi-turn conversational agents
+- [Automations](/platform/agents/automations) — Run scenarios repeatably with pre-filled arguments
+- [Chat Agents](/platform/agents/chats) — Multi-turn conversational agents
 - [Source Code](https://github.com/hud-evals/hud-trace-explorer) — Fork and customize
