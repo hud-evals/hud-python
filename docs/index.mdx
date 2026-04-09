@@ -28,11 +28,11 @@ Read [Scaffolding](/building/scaffolding) to get started!
 # Install CLI
 uv tool install hud-python --python 3.12
 
-# Set your API key
-hud set HUD_API_KEY=your-key-here
+# Login
+hud login
 ```
 
-Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys).
+`hud login` opens your browser, authenticates with [hud.ai](https://hud.ai), and stores your API key in `~/.hud/.env`. You can also set the key manually with `hud set HUD_API_KEY=your-key-here`.
 
 ## 1. Environments: Define Your Agent's Harness
 
@@ -58,7 +58,8 @@ The scenario has two yields: the first sends a prompt to the agent and receives 
 ### Example Workflow
 
 ```bash
-hud init my-env       # Scaffold environment
+hud login                   # Authenticate (one-time)
+hud init my-env             # Scaffold environment
 cd my-env
 hud dev env:env -w env.py   # Run MCP server locally with hot-reload on watched paths
 hud eval tasks.json claude  # Run an eval locally
