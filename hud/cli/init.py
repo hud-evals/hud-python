@@ -12,6 +12,8 @@ import httpx
 import questionary
 import typer
 
+from hud.cli.utils.api import hud_headers
+from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
 # Presets mapping to public GitHub repositories under hud-evals org
@@ -86,34 +88,57 @@ def _replace_placeholders(target_dir: Path, env_name: str) -> list[str]:
     return modified_files
 
 
-def _prompt_for_preset() -> str | None:
+def _fetch_available_templates() -> tuple[list[dict], list[dict]]:
+    """Fetch available templates from the HUD API.
+
+    Returns (public_templates, private_templates). Falls back to empty
+    private list if the API is unreachable or the user has no API key.
+    """
+    if not settings.api_key:
+        return [], []
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(
+                f"{settings.hud_api_url}/templates/available",
+                headers=hud_headers(),
+            )
+            if resp.status_code != 200:
+                return [], []
+            data = resp.json()
+            return data.get("public_templates", []), data.get("private_templates", [])
+    except Exception:
+        return [], []
+
+
+def _prompt_for_preset() -> tuple[str, bool] | None:
     """Ask the user to choose a preset when not provided.
 
-    Returns None if the user cancels the selection.
+    Returns (preset_id, is_private) or None if the user cancels.
     """
+    # Fetch private templates from API
+    _, private_templates = _fetch_available_templates()
+
     try:
-        choices = [
-            {"name": "blank", "message": "blank"},
-            {"name": "browser", "message": "browser"},
-            {"name": "deep-research", "message": "deep-research"},
-            {"name": "rubrics", "message": "rubrics"},
-            {"name": "verilog-coding-template", "message": "verilog-coding-template"},
-            {"name": "data-science-template", "message": "data-science-template"},
-        ]
-        display_choices = [c["message"] for c in choices]
+        choices: list[questionary.Choice] = []
+        for key in PRESET_MAP:
+            choices.append(questionary.Choice(title=key, value=(key, False)))
+
+        for t in private_templates:
+            label = t["id"]
+            choices.append(questionary.Choice(title=label, value=(t["id"], True)))
+
         selected = questionary.select(
-            "Choose a preset", choices=display_choices, default=display_choices[0]
+            "Choose a preset",
+            choices=choices,
         ).ask()
         if not selected:
             return None  # User cancelled
-        for c in choices:
-            if c["message"] == selected:
-                return c["name"]
-        return "blank"
+        return selected
     except KeyboardInterrupt:
         return None  # User pressed Ctrl+C
     except Exception:
-        return "blank"
+        return ("blank", False)
 
 
 def _download_tarball_repo(
@@ -142,6 +167,32 @@ def _download_tarball_repo(
                 tmp_file.write(chunk)
         tmp_path = Path(tmp_file.name)
 
+    _extract_tarball(tmp_path, dest_dir, files_created)
+
+
+def _download_private_template(template_id: str, dest_dir: Path, files_created: list[str]) -> None:
+    """Download a private template tarball from the HUD API."""
+    url = f"{settings.hud_api_url}/templates/private/{template_id}/download"
+
+    with (
+        tempfile.NamedTemporaryFile(delete=False) as tmp_file,
+        httpx.Client(timeout=120) as client,
+        client.stream("GET", url, headers=hud_headers()) as resp,
+    ):
+        if resp.status_code == 403:
+            raise RuntimeError("Access denied: your team does not have access to this template.")
+        if resp.status_code != 200:
+            raise RuntimeError(f"Failed to download private template (HTTP {resp.status_code})")
+        for chunk in resp.iter_bytes():
+            if chunk:
+                tmp_file.write(chunk)
+        tmp_path = Path(tmp_file.name)
+
+    _extract_tarball(tmp_path, dest_dir, files_created)
+
+
+def _extract_tarball(tmp_path: Path, dest_dir: Path, files_created: list[str]) -> None:
+    """Extract a tarball into dest_dir, stripping the top-level directory."""
     try:
         with tarfile.open(tmp_path, mode="r:gz") as tar:
             members = tar.getmembers()
@@ -191,15 +242,23 @@ def create_environment(
 
     hud_console = HUDConsole()
 
+    is_private = False
+
     # Choose preset
     if preset:
         preset_normalized = preset.strip().lower()
+        # Check if the preset matches a private template
+        _, private_templates = _fetch_available_templates()
+        for t in private_templates:
+            if t["id"] == preset_normalized:
+                is_private = True
+                break
     else:
         preset_result = _prompt_for_preset()
         if preset_result is None:
             # User cancelled the selection
             raise typer.Exit(0)
-        preset_normalized = preset_result
+        preset_normalized, is_private = preset_result
 
     # If no name is provided, use the preset name as the environment name
     if name is None:
@@ -209,7 +268,7 @@ def create_environment(
     # Always create a new directory based on the name
     target_dir = Path.cwd() / name if directory == "." else Path(directory) / name
 
-    if preset_normalized not in PRESET_MAP:
+    if not is_private and preset_normalized not in PRESET_MAP:
         available = ", ".join(sorted(PRESET_MAP.keys()))
         hud_console.warning(
             f"Unknown preset '{preset_normalized}', defaulting to 'blank' (available: {available})"
@@ -225,32 +284,45 @@ def create_environment(
         else:
             hud_console.warning(f"Overwriting existing files in {target_dir}")
 
-    # Download preset from GitHub
-    repo_name = PRESET_MAP[preset_normalized]
-    if repo_name is None:
-        hud_console.error("Internal error: preset mapping missing repo name")
-        raise typer.Exit(1)
-
     hud_console.header(f"Initializing HUD Environment: {name} (preset: {preset_normalized})")
-    hud_console.section_title("Downloading template from GitHub")
-    source_url = f"https://github.com/{GITHUB_OWNER}/{repo_name}"
-    hud_console.info("Source: " + source_url)
-
     target_dir.mkdir(parents=True, exist_ok=True)
 
     started = time.time()
     files_created_dl: list[str] = []
-    try:
-        _download_tarball_repo(
-            owner=GITHUB_OWNER,
-            repo=repo_name,
-            ref=GITHUB_BRANCH,
-            dest_dir=target_dir,
-            files_created=files_created_dl,
-        )
-    except Exception as e:
-        hud_console.error(f"Failed to download preset '{preset_normalized}': {e}")
-        raise typer.Exit(1) from None
+
+    if is_private:
+        hud_console.section_title("Downloading private template from HUD")
+        try:
+            _download_private_template(
+                template_id=preset_normalized,
+                dest_dir=target_dir,
+                files_created=files_created_dl,
+            )
+        except Exception as e:
+            hud_console.error(f"Failed to download private template '{preset_normalized}': {e}")
+            raise typer.Exit(1) from None
+    else:
+        # Download preset from GitHub
+        repo_name = PRESET_MAP[preset_normalized]
+        if repo_name is None:
+            hud_console.error("Internal error: preset mapping missing repo name")
+            raise typer.Exit(1)
+
+        hud_console.section_title("Downloading template from GitHub")
+        source_url = f"https://github.com/{GITHUB_OWNER}/{repo_name}"
+        hud_console.info("Source: " + source_url)
+
+        try:
+            _download_tarball_repo(
+                owner=GITHUB_OWNER,
+                repo=repo_name,
+                ref=GITHUB_BRANCH,
+                dest_dir=target_dir,
+                files_created=files_created_dl,
+            )
+        except Exception as e:
+            hud_console.error(f"Failed to download preset '{preset_normalized}': {e}")
+            raise typer.Exit(1) from None
 
     duration_ms = int((time.time() - started) * 1000)
     hud_console.success(
@@ -258,7 +330,7 @@ def create_environment(
     )
 
     # Replace placeholders in template files (only for blank preset)
-    if preset_normalized == "blank":
+    if preset_normalized == "blank" and not is_private:
         hud_console.section_title("Customizing template files")
         modified_files = _replace_placeholders(target_dir, name)
         if modified_files:
