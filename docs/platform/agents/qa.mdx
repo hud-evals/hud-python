@@ -21,6 +21,19 @@ Four pre-built QA agents are available out of the box. These appear under the **
 
 ## How to Use
 
+### From the Task Detail Panel
+
+The primary way to work with QA agents is through the task detail panel. Click any task row in a taskset to open the slide-out panel, then navigate to the **Traces** tab:
+
+1. At the top of the Traces tab, a toolbar shows all attached QA agents as compact pills alongside an **Add QA Agent** button
+2. Click **Add QA Agent** to attach a new agent — pick a recommended agent or one you've created
+3. Each agent pill has a play button that opens a popover with two options:
+   - **Run for this task** — Analyze only the traces on the current task
+   - **Run for all tasks (N)** — Analyze traces across the entire taskset
+4. Results appear inline below each trace, showing the agent name, verdict, and reasoning
+5. Agents that have been added but haven't run yet still appear below traces with a **Run** button
+6. Analysis states (queued, analyzing) update live — no need to refresh
+
 ### From the Agents Page
 
 1. Go to the **Agents** page
@@ -28,12 +41,6 @@ Four pre-built QA agents are available out of the box. These appear under the **
 3. Click **Add as Column** to attach it to any taskset
 4. Every completed trace is automatically analyzed
 5. To create your own, click **New Agent** → **QA Workflow**, select a scenario, configure the analysis prompt, and choose a model. It appears under **Your QA Workflows**.
-
-### From a Taskset
-
-1. Open any taskset → **Add Column → QA Workflow**
-2. Pick a recommended agent or one you've created
-3. Results appear as columns in your trace grid
 
 ## Building Your Own
 
