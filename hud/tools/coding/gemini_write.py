@@ -16,7 +16,7 @@ from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
 
-from .utils import write_file_sync
+from .utils import resolve_path_safely, write_file_sync
 
 
 class GeminiWriteTool(BaseTool):
@@ -54,11 +54,8 @@ class GeminiWriteTool(BaseTool):
         self._base_directory = str(Path(base_directory).resolve())
 
     def _resolve_path(self, file_path: str) -> Path:
-        """Resolve file path relative to base directory."""
-        path = Path(file_path)
-        if path.is_absolute():
-            return path
-        return Path(self._base_directory) / path
+        """Resolve file path relative to base directory with containment check."""
+        return resolve_path_safely(file_path, Path(self._base_directory))
 
     async def __call__(
         self,

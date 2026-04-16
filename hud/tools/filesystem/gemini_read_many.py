@@ -86,8 +86,6 @@ class GeminiReadManyTool(BaseFilesystemTool):
 
             # Glob pattern
             base = self._base_path
-            if recursive and "**" not in pattern:
-                pattern = f"**/{pattern}"
 
             for match in base.glob(pattern):
                 if not match.is_file():

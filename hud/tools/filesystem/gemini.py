@@ -4,15 +4,17 @@ These tools match the interface and output format of Gemini CLI:
 https://github.com/google-gemini/gemini-cli
 
 Key differences from OpenCode-style tools:
-- read_file: Uses offset/limit (0-based), different truncation message
-- search_file_content: Named differently, grouped output by file
-- glob: Adds case_sensitive, respect_git_ignore options, absolute paths
-- list_directory: Uses dir_path, ignore[] params, DIR/file output format
+- read_file: Uses start_line/end_line (1-based inclusive)
+- grep_search: Case-insensitive by default, grouped output by file
+- glob: Case-insensitive by default, sorted by recency, includes dot files
+- list_directory: Uses dir_path, ignore[] params, [DIR]/size output format
 """
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
@@ -36,13 +38,13 @@ from hud.types import AgentType
 class GeminiReadTool(BaseReadTool):
     """Gemini CLI-style file reading tool.
 
-    Reads file contents with offset/limit pagination (0-based).
+    Reads file contents with start_line/end_line (1-based, inclusive).
     Matches Gemini CLI's read_file tool interface.
 
     Parameters:
         file_path: Path to the file to read (required)
-        offset: 0-based line number to start reading from (optional)
-        limit: Maximum number of lines to read (optional)
+        start_line: 1-based line number to start reading from (optional)
+        end_line: 1-based line number to stop reading at, inclusive (optional)
 
     Output includes truncation warnings with pagination hints.
     """
@@ -145,7 +147,7 @@ class GeminiReadTool(BaseReadTool):
 
         # Convert 1-based start_line/end_line to 0-based offset/limit
         offset = (start_line - 1) if start_line is not None else 0
-        limit = (end_line - offset) if (start_line is not None and end_line is not None) else None
+        limit = (end_line - offset) if end_line is not None else None
 
         result = self.read_with_pagination(path, offset=offset, limit=limit)
         output = self.format_output(result, file_path)
@@ -269,7 +271,8 @@ class GeminiSearchTool(BaseSearchTool):
         Returns:
             List of TextContent with matching lines grouped by file
         """
-        regex = self.compile_pattern(pattern)
+        # Gemini CLI uses case-insensitive search by default
+        regex = self.compile_pattern(pattern, case_insensitive=True)
         search_path = self.resolve_path(dir_path or ".")
 
         if not search_path.exists():
@@ -283,9 +286,15 @@ class GeminiSearchTool(BaseSearchTool):
             except re.error as e:
                 raise ToolError(f"Invalid exclude_pattern regex: {e}") from None
 
-        # Use per-call max if provided
+        effective_max = total_max_matches if total_max_matches is not None else self._max_results
+        needs_post_filter = exclude_regex is not None or max_matches_per_file is not None
+
+        # When post-filters are active, remove the scan cap so filtered-out
+        # matches don't prevent valid later matches from being found.
         orig_max = self._max_results
-        if total_max_matches is not None:
+        if needs_post_filter:
+            self._max_results = self._max_files  # scan all files
+        elif total_max_matches is not None:
             self._max_results = total_max_matches
 
         try:
@@ -307,6 +316,9 @@ class GeminiSearchTool(BaseSearchTool):
                     filtered.append(m)
                     file_counts[m.path] = count + 1
             matches = filtered
+
+        # Cap at the effective maximum after all filtering
+        matches = matches[:effective_max]
 
         output = self.format_output(matches, pattern, names_only=names_only)
 
@@ -367,8 +379,15 @@ class GeminiGlobTool(BaseGlobTool):
 
         truncated = len(matches) >= self._max_results
 
-        # Sort alphabetically (Gemini CLI behavior, not by mtime)
-        sorted_matches = sorted(matches, key=lambda x: str(x[0]))
+        # Sort by recency: files modified within 24h first (newest to oldest),
+        # then older files alphabetically (matches Gemini CLI behavior)
+        now = time.time()
+        day_ago = now - 86400
+        recent = [(m, mt) for m, mt in matches if mt >= day_ago]
+        older = [(m, mt) for m, mt in matches if mt < day_ago]
+        recent.sort(key=lambda x: x[1], reverse=True)
+        older.sort(key=lambda x: str(x[0]))
+        sorted_matches = recent + older
 
         # Return absolute paths (Gemini CLI format)
         abs_paths = [str(m.resolve()) for m, _mtime in sorted_matches]
@@ -383,7 +402,7 @@ class GeminiGlobTool(BaseGlobTool):
         self,
         pattern: str,
         dir_path: str | None = None,
-        case_sensitive: bool = True,
+        case_sensitive: bool = False,
         respect_git_ignore: bool = True,
         respect_gemini_ignore: bool = True,
     ) -> list[TextContent]:
@@ -406,7 +425,13 @@ class GeminiGlobTool(BaseGlobTool):
         if not base.is_dir():
             raise ToolError(f"Not a directory: {dir_path or '.'}")
 
-        matches = self.find_files(base, pattern, include_ignored=not respect_git_ignore)
+        matches = self.find_files(
+            base,
+            pattern,
+            include_ignored=not respect_git_ignore,
+            include_hidden=True,  # Gemini CLI uses dot: true
+            case_sensitive=case_sensitive,
+        )
         output = self.format_output(matches, pattern)
 
         return ContentResult(output=output).to_text_blocks()
@@ -470,15 +495,18 @@ class GeminiListTool(BaseListTool):
 
         truncated = len(entries) >= self._max_entries
 
-        # Format as DIR/filename (Gemini CLI format)
+        # Format as [DIR]/filename with size (Gemini CLI format)
         lines = []
         for name, is_dir in entries:
-            # Extract just the name (not full relative path)
             simple_name = name.rstrip("/").split("/")[-1]
             if is_dir:
-                lines.append(f"DIR  {simple_name}")
+                lines.append(f"[DIR] {simple_name}")
             else:
-                lines.append(f"     {simple_name}")
+                try:
+                    size = os.path.getsize(directory / simple_name)
+                    lines.append(f"{simple_name} ({size} bytes)")
+                except OSError:
+                    lines.append(simple_name)
 
         output = "\n".join(lines)
 

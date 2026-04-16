@@ -127,6 +127,22 @@ class TestGeminiReadTool:
         assert "line 50" in text
 
     @pytest.mark.asyncio
+    async def test_read_with_end_line_only(self, workspace: Path) -> None:
+        """Test reading with only end_line (first N lines)."""
+        tool = GeminiReadTool(base_path=str(workspace))
+        result = await tool(
+            file_path=str(workspace / "long.txt"),
+            end_line=3,
+        )
+
+        assert isinstance(result[0], TextContent)
+        text = result[0].text
+        assert "line 1" in text
+        assert "line 3" in text
+        # Should not contain line 4+
+        assert "line 4\n" not in text
+
+    @pytest.mark.asyncio
     async def test_read_empty_path_error(self, workspace: Path) -> None:
         """Test empty path raises error."""
         from hud.tools.types import ToolError
