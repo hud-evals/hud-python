@@ -66,7 +66,7 @@ If every run scores the same — all 0.0 or all 1.0 — there's no contrast and 
 | **Varied** — scenario params let you calibrate difficulty without rewriting the scenario | Hardcoded prompt with one difficulty level | Scenario takes a `detail_level` param: `"step-by-step"` vs `"high-level"` |
 | **Partial credit** — grader breaks the task into 2–4 sub-checks | Binary 0.0 or 1.0 with no breakdown | Weighted sub-checks: cart added (0.3) + order completed (0.7) |
 
-These principles also reflect how tasks are reviewed during [QA on the platform](/platform/workflows) — false negatives often come from non-observable state, false positives from prompts that aren't specific enough.
+These principles also reflect how tasks are reviewed during [QA on the platform](/platform/agents/qa) — false negatives often come from non-observable state, false positives from prompts that aren't specific enough.
 
 ## Good Environments
 
@@ -90,7 +90,7 @@ def create_user(name: str) -> dict:
     return {"id": user_id, "name": name, "created": True}
 ```
 
-This is the most common source of [false negatives](/platform/workflows) in QA — the agent did the right thing but the grader couldn't observe it.
+This is the most common source of [false negatives](/platform/agents/qa) in QA — the agent did the right thing but the grader couldn't observe it.
 
 ### Deterministic Setup
 
@@ -129,7 +129,7 @@ An eval combines a prompt (the first `yield`) with grading logic (everything aft
 
 ### Be Specific
 
-Ambiguous prompts lead to ambiguous grading — and are the most common source of [false positives](/platform/workflows) in QA. Say exactly what you want:
+Ambiguous prompts lead to ambiguous grading — and are the most common source of [false positives](/platform/agents/qa) in QA. Say exactly what you want:
 
 ```
 Bad:  "Fix the data issue"
@@ -154,7 +154,7 @@ Good: "Rewrite the query to use an index on the email column and verify it runs 
 
 Create different versions of the same task with more or less explicit instructions — step-by-step guidance vs. high-level goals. This gives you natural difficulty range across the taskset, which directly produces the contrast training needs.
 
-If you've observed agents struggling with specific failure modes, incorporate those into new tasks. [Failure Analysis](/platform/workflows) QA workflows can help identify common failure categories to target.
+If you've observed agents struggling with specific failure modes, incorporate those into new tasks. [Failure Analysis](/platform/agents/qa) QA agents can help identify common failure categories to target.
 
 ## Good Graders
 
@@ -213,7 +213,7 @@ At minimum, verify two cases: unchanged state → 0.0, correct completion → 1.
   Model training and checkpoints
 </Card>
 
-<Card title="QA Workflows" icon="flask-vial" href="/platform/workflows">
+<Card title="QA Agents" icon="flask-vial" href="/platform/agents/qa">
   Automated trace and task analysis
 </Card>
 
