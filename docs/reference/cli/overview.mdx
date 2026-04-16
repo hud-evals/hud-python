@@ -29,19 +29,21 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
 <CodeGroup>
 ```bash uv (Recommended)
 uv tool install hud-python@latest --python 3.12
-hud --version
+hud login
 ```
 
 ```bash pip
 pip install hud-python
-python -m hud.cli --help
+hud login
 ```
 
 ```bash pipx
 pipx install hud-python
-hud --version
+hud login
 ```
 </CodeGroup>
+
+`hud login` opens your browser to authenticate with [hud.ai](https://hud.ai) and saves your API key automatically. Use `hud login --quiet` to print the URL instead of opening a browser.
 
 ## Commands
 
@@ -82,7 +84,8 @@ hud --version
 ### Utilities
 | Command | Description | Example |
 |---------|-------------|---------|
-| `hud set` | Persist API keys to ~/.hud/.env | `hud set HUD_API_KEY=...` |
+| `hud login` | Authenticate via browser (saves API key) | `hud login` |
+| `hud set` | Persist config values to ~/.hud/.env | `hud set HUD_API_KEY=...` |
 | `hud models` | List available inference models | `hud models --json` |
 | `hud convert` | Convert external task formats to HUD | `hud convert ./tasks --from harbor` |
 | `hud version` | Show CLI version | `hud version` |

@@ -1,0 +1,90 @@
+---
+title: "QA Agents"
+description: "Automated trace and task analysis — detect false negatives, false positives, reward hacking, and classify failures"
+icon: "flask-vial"
+---
+
+QA Agents are analysis agents that run automatically on your traces. They use environments like [trace-explorer](https://github.com/hud-evals/hud-trace-explorer) to fetch trace data, inspect it with coding tools, and return structured verdicts.
+
+A scenario qualifies as a QA agent when it declares both a platform key arg (`hud_api_key`) and an entity arg (`trace_id` for per-trace, `task_id` for per-task). The platform fills these at runtime — you configure the analysis prompt and attach the agent to a taskset column.
+
+## Standard QA Agents
+
+Four pre-built QA agents are available out of the box. These appear under the **Standard QA Workflows** section on the Agents page and can be attached to any taskset with one click.
+
+| Agent | What it detects | Output |
+|-------|----------------|--------|
+| **False Negative** | Agent succeeded but grader scored it wrong | `is_false_negative`, `reasoning`, `confidence` |
+| **False Positive** | Agent got credit without genuinely solving | `is_false_positive`, `reasoning`, `confidence` |
+| **Failure Analysis** | Root cause classification (10 categories) | `failure_category`, `root_cause`, `failed_criteria` |
+| **Reward Hacking** | Agent gamed the evaluation mechanism | `is_reward_hacking`, `hacking_strategy`, `severity` |
+
+## How to Use
+
+### From the Task Detail Panel
+
+The primary way to work with QA agents is through the task detail panel. Click any task row in a taskset to open the slide-out panel, then navigate to the **Traces** tab:
+
+1. At the top of the Traces tab, a toolbar shows all attached QA agents as compact pills alongside an **Add QA Agent** button
+2. Click **Add QA Agent** to attach a new agent — pick a recommended agent or one you've created
+3. Each agent pill has a play button that opens a popover with two options:
+   - **Run for this task** — Analyze only the traces on the current task
+   - **Run for all tasks (N)** — Analyze traces across the entire taskset
+4. Results appear inline below each trace, showing the agent name, verdict, and reasoning
+5. Agents that have been added but haven't run yet still appear below traces with a **Run** button
+6. Analysis states (queued, analyzing) update live — no need to refresh
+
+### From the Agents Page
+
+1. Go to the **Agents** page
+2. Under **Standard QA Workflows**, click a recommended agent to view it
+3. Click **Add as Column** to attach it to any taskset
+4. Every completed trace is automatically analyzed
+5. To create your own, click **New Agent** → **QA Workflow**, select a scenario, configure the analysis prompt, and choose a model. It appears under **Your QA Workflows**.
+
+## Building Your Own
+
+A QA agent is just a scenario with `trace_id` + `hud_api_key` arguments. Use `prepare_qa_context` from trace-explorer for the common setup:
+
+```python
+from pydantic import BaseModel, Field
+from env import env
+from qa_common import prepare_qa_context
+
+class MyResult(BaseModel):
+    verdict: str = Field(description="Your analysis verdict")
+    confidence: float = Field(ge=0.0, le=1.0)
+
+@env.scenario("my_analysis", returns=MyResult)
+async def my_analysis(
+    trace_id: str,
+    hud_api_key: str,
+    query: str = "",
+    ground_truth: str | None = None,
+) -> Any:
+    _, _, context = await prepare_qa_context(
+        trace_id, hud_api_key, "My analysis"
+    )
+
+    prompt = f"""Your analysis instructions here.
+
+{context}
+
+## Focus
+{query or "Default analysis question."}"""
+
+    response: MyResult = yield prompt
+
+    if ground_truth is not None:
+        yield 1.0 if response.verdict == ground_truth else 0.0
+    else:
+        yield 1.0
+```
+
+The `ground_truth` parameter lets you build eval datasets for the agent itself.
+
+## See Also
+
+- [Automations](/platform/agents/automations) — Run scenarios repeatably with pre-filled arguments
+- [Chat Agents](/platform/agents/chats) — Multi-turn conversational agents
+- [Source Code](https://github.com/hud-evals/hud-trace-explorer) — Fork and customize

@@ -6,7 +6,7 @@ icon: "comments"
 
 Chat agents are multi-turn conversational agents. Each chat pairs a scenario's tools with a model and is served over the [A2A protocol](https://github.com/google/a2a). You can chat with them directly on the platform or connect them to other systems via the A2A endpoint.
 
-A scenario qualifies as a chat when it declares `chat=True` or its first argument is an array type (conversation history).
+A scenario qualifies as a chat when it declares `chat=True` in the scenario decorator.
 
 ## How to Use
 
@@ -77,6 +77,6 @@ chat.serve(port=9999)
 
 ## See Also
 
-- [Automations](/platform/workflows/automations) — Run scenarios repeatably
-- [QA Workflows](/platform/workflows) — Automated trace analysis
+- [Automations](/platform/agents/automations) — Run scenarios repeatably
+- [QA Agents](/platform/agents/qa) — Automated trace analysis
 - [A2A Integration](/guides/mcp-to-a2a) — Connecting agents via A2A
