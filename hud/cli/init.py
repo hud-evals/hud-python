@@ -242,11 +242,14 @@ def create_environment(
 
     # Choose preset
     if preset:
-        preset_normalized = preset.strip().lower()
-        # Check if the preset matches a private template
+        preset_stripped = preset.strip()
+        preset_normalized = preset_stripped.lower()
+        # Check if the preset matches a private template (case-insensitive)
         _, private_templates = _fetch_available_templates()
         for t in private_templates:
-            if t["id"] == preset_normalized:
+            if t["id"].lower() == preset_normalized:
+                # Preserve the original API ID for case-sensitive downstream use
+                preset_normalized = t["id"]
                 is_private = True
                 break
     else:
