@@ -777,7 +777,9 @@ class TestColumnInference:
         defs = _build_column_definitions(specs)
         assert defs is not None
         assert defs["difficulty"]["type"] == "text"
+        assert defs["difficulty"]["scope"] == "task"
         assert defs["score"]["type"] == "number"
+        assert defs["score"]["scope"] == "task"
 
     def test_build_column_definitions_empty(self) -> None:
         from hud.cli.sync import _build_column_definitions
@@ -795,6 +797,7 @@ class TestColumnInference:
         defs = _build_column_definitions(specs)
         assert defs is not None
         assert defs["tags"]["type"] == "multi-select"
+        assert defs["tags"]["scope"] == "task"
         assert set(defs["tags"]["options"]) == {"a", "b", "c"}
 
 
