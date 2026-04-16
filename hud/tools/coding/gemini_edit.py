@@ -23,9 +23,6 @@ from .utils import (
     write_file_sync,
 )
 
-# Delimiters that get split into separate tokens for regex matching
-_DELIMITERS = set("():[]{}><= ")
-
 
 def _escape_regex(s: str) -> str:
     """Escape regex special characters."""

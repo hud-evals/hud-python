@@ -205,6 +205,7 @@ class GeminiSearchTool(BaseSearchTool):
         matches: list[FileMatch],
         pattern: str,
         names_only: bool = False,
+        truncated: bool = False,
     ) -> str:
         """Format output in Gemini CLI style (grouped by file).
 
@@ -212,14 +213,13 @@ class GeminiSearchTool(BaseSearchTool):
             matches: List of FileMatch objects
             pattern: Original search pattern
             names_only: If true, return only file paths
+            truncated: Whether results were capped
 
         Returns:
             Formatted output grouped by file
         """
         if not matches:
             return f"No matches found for pattern: {pattern}"
-
-        truncated = len(matches) >= self._max_results
 
         # Group by file
         file_matches: dict[str, list[FileMatch]] = {}
@@ -318,9 +318,12 @@ class GeminiSearchTool(BaseSearchTool):
             matches = filtered
 
         # Cap at the effective maximum after all filtering
+        was_truncated = len(matches) > effective_max
         matches = matches[:effective_max]
 
-        output = self.format_output(matches, pattern, names_only=names_only)
+        output = self.format_output(
+            matches, pattern, names_only=names_only, truncated=was_truncated
+        )
 
         return ContentResult(output=output).to_text_blocks()
 

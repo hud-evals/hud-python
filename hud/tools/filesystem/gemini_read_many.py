@@ -84,10 +84,13 @@ class GeminiReadManyTool(BaseFilesystemTool):
                     files.append(resolved)
                 continue
 
-            # Glob pattern
+            # Glob pattern -- strip recursive ** when recursive=False
             base = self._base_path
+            effective_pattern = pattern
+            if not recursive and "**" in effective_pattern:
+                effective_pattern = effective_pattern.replace("**/", "").replace("**", "*")
 
-            for match in base.glob(pattern):
+            for match in base.glob(effective_pattern):
                 if not match.is_file():
                     continue
                 if match in seen:
