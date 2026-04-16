@@ -99,19 +99,48 @@ class TestGeminiReadTool:
         assert "line 1" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_read_with_pagination(self, workspace: Path) -> None:
-        """Test reading with offset and limit."""
+    async def test_read_with_start_end_line(self, workspace: Path) -> None:
+        """Test reading with start_line and end_line (1-based, inclusive)."""
         tool = GeminiReadTool(base_path=str(workspace))
         result = await tool(
             file_path=str(workspace / "long.txt"),
-            offset=10,
-            limit=5,
+            start_line=11,
+            end_line=15,
         )
 
         assert isinstance(result[0], TextContent)
         text = result[0].text
         assert "IMPORTANT" in text  # Truncation warning
         assert "line 11" in text
+
+    @pytest.mark.asyncio
+    async def test_read_with_start_line_only(self, workspace: Path) -> None:
+        """Test reading from a start_line without end_line."""
+        tool = GeminiReadTool(base_path=str(workspace), max_lines=5)
+        result = await tool(
+            file_path=str(workspace / "long.txt"),
+            start_line=50,
+        )
+
+        assert isinstance(result[0], TextContent)
+        text = result[0].text
+        assert "line 50" in text
+
+    @pytest.mark.asyncio
+    async def test_read_with_end_line_only(self, workspace: Path) -> None:
+        """Test reading with only end_line (first N lines)."""
+        tool = GeminiReadTool(base_path=str(workspace))
+        result = await tool(
+            file_path=str(workspace / "long.txt"),
+            end_line=3,
+        )
+
+        assert isinstance(result[0], TextContent)
+        text = result[0].text
+        assert "line 1" in text
+        assert "line 3" in text
+        # Should not contain line 4+
+        assert "line 4\n" not in text
 
     @pytest.mark.asyncio
     async def test_read_empty_path_error(self, workspace: Path) -> None:
@@ -123,10 +152,19 @@ class TestGeminiReadTool:
             await tool(file_path="")
 
     @pytest.mark.asyncio
-    async def test_read_negative_offset_error(self, workspace: Path) -> None:
-        """Test negative offset raises error."""
+    async def test_read_invalid_start_line_error(self, workspace: Path) -> None:
+        """Test start_line < 1 raises error."""
         from hud.tools.types import ToolError
 
         tool = GeminiReadTool(base_path=str(workspace))
-        with pytest.raises(ToolError, match="non-negative"):
-            await tool(file_path=str(workspace / "test.txt"), offset=-1)
+        with pytest.raises(ToolError, match="start_line must be >= 1"):
+            await tool(file_path=str(workspace / "test.txt"), start_line=0)
+
+    @pytest.mark.asyncio
+    async def test_read_end_before_start_error(self, workspace: Path) -> None:
+        """Test end_line < start_line raises error."""
+        from hud.tools.types import ToolError
+
+        tool = GeminiReadTool(base_path=str(workspace))
+        with pytest.raises(ToolError, match="end_line must be >= start_line"):
+            await tool(file_path=str(workspace / "test.txt"), start_line=5, end_line=2)

@@ -56,6 +56,7 @@ from hud.tools.filesystem.gemini import (
     GeminiReadTool,
     GeminiSearchTool,
 )
+from hud.tools.filesystem.gemini_read_many import GeminiReadManyTool
 
 # OpenCode-style tools (default)
 from hud.tools.filesystem.glob import GlobTool
@@ -72,6 +73,7 @@ __all__ = [
     "FileMatch",
     "GeminiGlobTool",
     "GeminiListTool",
+    "GeminiReadManyTool",
     "GeminiReadTool",
     "GeminiSearchTool",
     "GlobTool",

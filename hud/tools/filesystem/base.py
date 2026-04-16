@@ -383,11 +383,12 @@ class BaseSearchTool(BaseFilesystemTool):
         self._max_results = max_results
         self._max_files = max_files
 
-    def compile_pattern(self, pattern: str) -> re.Pattern[str]:
+    def compile_pattern(self, pattern: str, case_insensitive: bool = False) -> re.Pattern[str]:
         """Compile a regex pattern.
 
         Args:
             pattern: Regex pattern string
+            case_insensitive: Whether to compile with IGNORECASE flag
 
         Returns:
             Compiled regex pattern
@@ -399,7 +400,8 @@ class BaseSearchTool(BaseFilesystemTool):
             raise ToolError("pattern is required")
 
         try:
-            return re.compile(pattern)
+            flags = re.IGNORECASE if case_insensitive else 0
+            return re.compile(pattern, flags)
         except re.error as e:
             raise ToolError(f"Invalid regex pattern: {e}") from None
 
@@ -446,7 +448,7 @@ class BaseSearchTool(BaseFilesystemTool):
 
             for i, line in enumerate(content.split("\n"), 1):
                 if regex.search(line):
-                    line_text = self.truncate_line(line.strip())
+                    line_text = self.truncate_line(line.rstrip())
                     matches.append(
                         FileMatch(
                             path=rel_path,
@@ -509,6 +511,8 @@ class BaseGlobTool(BaseFilesystemTool):
         directory: Path,
         pattern: str,
         include_ignored: bool = False,
+        include_hidden: bool = False,
+        case_sensitive: bool = True,
     ) -> list[tuple[Path, float]]:
         """Find files matching a glob pattern.
 
@@ -516,6 +520,8 @@ class BaseGlobTool(BaseFilesystemTool):
             directory: Directory to search
             pattern: Glob pattern
             include_ignored: Whether to include ignored directories
+            include_hidden: Whether to include hidden/dot files
+            case_sensitive: Whether matching is case-sensitive
 
         Returns:
             List of (path, mtime) tuples
@@ -526,8 +532,18 @@ class BaseGlobTool(BaseFilesystemTool):
         matches: list[tuple[Path, float]] = []
 
         try:
+            # Case-insensitive: convert pattern to match any case
+            if not case_sensitive:
+                ci_pattern = ""
+                for c in pattern:
+                    if c.isalpha():
+                        ci_pattern += f"[{c.lower()}{c.upper()}]"
+                    else:
+                        ci_pattern += c
+                pattern = ci_pattern
+
             for match in directory.glob(pattern):
-                if self.is_hidden(match):
+                if not include_hidden and self.is_hidden(match):
                     continue
 
                 if not include_ignored and self.is_ignored_dir(match):

@@ -10,6 +10,7 @@ import pytest
 
 from hud.tools.coding.gemini_edit import GeminiEditTool
 from hud.tools.coding.gemini_shell import GeminiShellTool
+from hud.tools.coding.gemini_write import GeminiWriteTool
 from hud.tools.types import ToolError
 
 
@@ -152,22 +153,20 @@ class TestGeminiEditTool:
                 )
 
     @pytest.mark.asyncio
-    async def test_call_multiple_occurrences_no_expected(self) -> None:
-        """Test call with multiple occurrences without expected_replacements replaces first only."""
+    async def test_call_multiple_occurrences_no_allow_multiple(self) -> None:
+        """Test call with multiple occurrences without allow_multiple raises error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "test.txt"
             test_file.write_text("hello hello hello")
 
             tool = GeminiEditTool(base_directory=tmpdir)
-            # Without expected_replacements, it replaces only the first occurrence
-            result = await tool(
-                file_path="test.txt",
-                instruction="test edit",
-                old_string="hello",
-                new_string="world",
-            )
-            assert test_file.read_text() == "world hello hello"
-            assert "1 replacements" in result[0].text  # type: ignore[union-attr]
+            with pytest.raises(ToolError, match="Multiple occurrences"):
+                await tool(
+                    file_path="test.txt",
+                    instruction="test edit",
+                    old_string="hello",
+                    new_string="world",
+                )
 
     @pytest.mark.asyncio
     async def test_call_successful_edit(self) -> None:
@@ -193,8 +192,8 @@ class TestGeminiEditTool:
             assert "Successfully modified" in result[0].text  # type: ignore[union-attr]
 
     @pytest.mark.asyncio
-    async def test_call_multiple_replacements(self) -> None:
-        """Test multiple replacements with expected_replacements."""
+    async def test_call_allow_multiple(self) -> None:
+        """Test replacing all occurrences with allow_multiple=True."""
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "test.txt"
             test_file.write_text("hello hello hello")
@@ -205,10 +204,9 @@ class TestGeminiEditTool:
                 instruction="Replace all hello with world",
                 old_string="hello",
                 new_string="world",
-                expected_replacements=3,
+                allow_multiple=True,
             )
 
-            # Verify file was modified
             assert test_file.read_text() == "world world world"
 
     @pytest.mark.asyncio
@@ -229,3 +227,68 @@ class TestGeminiEditTool:
             # Check history was saved
             assert len(tool._file_history[test_file]) == 1
             assert tool._file_history[test_file][0] == "original content"
+
+
+class TestGeminiWriteTool:
+    """Tests for GeminiWriteTool."""
+
+    def test_init(self) -> None:
+        """Test initialization."""
+        tool = GeminiWriteTool()
+        assert tool.name == "write_file"
+
+    def test_init_with_base_directory(self) -> None:
+        """Test initialization with custom base directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = GeminiWriteTool(base_directory=tmpdir)
+            assert tool._base_directory == str(Path(tmpdir).resolve())
+
+    @pytest.mark.asyncio
+    async def test_write_new_file(self) -> None:
+        """Test writing a new file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = GeminiWriteTool(base_directory=tmpdir)
+            result = await tool(file_path="new.txt", content="hello world")
+
+            written = (Path(tmpdir) / "new.txt").read_text()
+            assert written == "hello world"
+            assert "Created" in result[0].text  # type: ignore[union-attr]
+
+    @pytest.mark.asyncio
+    async def test_overwrite_file(self) -> None:
+        """Test overwriting an existing file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "existing.txt"
+            existing.write_text("old content")
+
+            tool = GeminiWriteTool(base_directory=tmpdir)
+            result = await tool(file_path="existing.txt", content="new content")
+
+            assert existing.read_text() == "new content"
+            assert "Overwrote" in result[0].text  # type: ignore[union-attr]
+
+    @pytest.mark.asyncio
+    async def test_create_parent_dirs(self) -> None:
+        """Test that parent directories are created."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = GeminiWriteTool(base_directory=tmpdir)
+            await tool(file_path="sub/deep/file.txt", content="nested")
+
+            assert (Path(tmpdir) / "sub" / "deep" / "file.txt").read_text() == "nested"
+
+    @pytest.mark.asyncio
+    async def test_empty_file_path_error(self) -> None:
+        """Test empty file_path raises error."""
+        tool = GeminiWriteTool()
+        with pytest.raises(ToolError, match="non-empty"):
+            await tool(file_path="", content="content")
+
+    @pytest.mark.asyncio
+    async def test_write_to_directory_error(self) -> None:
+        """Test writing to a directory path raises error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = GeminiWriteTool(base_directory=tmpdir)
+            subdir = Path(tmpdir) / "adir"
+            subdir.mkdir()
+            with pytest.raises(ToolError, match="directory"):
+                await tool(file_path="adir", content="content")
