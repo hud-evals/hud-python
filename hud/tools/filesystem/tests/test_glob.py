@@ -98,3 +98,12 @@ class TestGeminiGlobTool:
         lines = [line for line in text.strip().split("\n") if line and not line.startswith("(")]
         # Should be sorted alphabetically
         assert lines == sorted(lines)
+
+    @pytest.mark.asyncio
+    async def test_glob_respect_gemini_ignore_param(self, workspace: Path) -> None:
+        """Test that respect_gemini_ignore param is accepted."""
+        tool = GeminiGlobTool(base_path=str(workspace))
+        result = await tool(pattern="**/*.py", respect_gemini_ignore=True)
+
+        text = result[0].text
+        assert "main.py" in text

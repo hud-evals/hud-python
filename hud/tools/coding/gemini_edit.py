@@ -76,7 +76,7 @@ class GeminiEditTool(BaseTool):
         instruction: Semantic description of the change (required)
         old_string: Exact literal text to replace (required)
         new_string: Exact literal text to replace with (required)
-        expected_replacements: Number of replacements expected (default: 1)
+        allow_multiple: If true, replace all occurrences (default: false)
 
     Error messages match Gemini CLI format for consistency.
 
@@ -126,7 +126,7 @@ class GeminiEditTool(BaseTool):
         instruction: str,
         old_string: str,
         new_string: str,
-        expected_replacements: int = 1,
+        allow_multiple: bool = False,
     ) -> list[ContentBlock]:
         """Edit a file by replacing text.
 
@@ -140,7 +140,7 @@ class GeminiEditTool(BaseTool):
             instruction: Clear description of the change purpose
             old_string: Exact literal text to replace
             new_string: Exact literal text to replace with
-            expected_replacements: Number of replacements expected (default: 1)
+            allow_multiple: If true, replace all occurrences (default: false)
 
         Returns:
             List of ContentBlocks with Gemini CLI-style result
@@ -153,13 +153,10 @@ class GeminiEditTool(BaseTool):
             raise ToolError("The 'old_string' parameter is required.")
         if new_string is None:
             raise ToolError("The 'new_string' parameter is required.")
-        if expected_replacements < 1:
-            raise ToolError("expected_replacements must be >= 1")
 
         path = self._resolve_path(file_path)
 
         if not path.exists():
-            # Match Gemini CLI error format
             raise ToolError(f"File not found: {file_path}")
         if path.is_dir():
             raise ToolError(f"Path is a directory: {file_path}")
@@ -179,24 +176,35 @@ class GeminiEditTool(BaseTool):
         match_strategy = "exact"
 
         if occurrences > 0:
-            if occurrences == expected_replacements:
+            if allow_multiple:
                 new_content = file_content.replace(old_string_norm, new_string_norm)
-            elif occurrences == 1 and expected_replacements == 1:
+            elif occurrences == 1:
                 new_content = file_content.replace(old_string_norm, new_string_norm, 1)
+            else:
+                raise ToolError(
+                    f"Multiple occurrences ({occurrences}) found for old_string in {file_path}. "
+                    "Use allow_multiple: true to replace all, or provide more context "
+                    "to match a single occurrence."
+                )
 
         # Strategy 2: Flexible matching (whitespace-insensitive)
         if new_content is None:
             flex_content, flex_occurrences = _flexible_match(
                 file_content, old_string_norm, new_string_norm
             )
-            if flex_occurrences == expected_replacements:
-                new_content = flex_content
-                occurrences = flex_occurrences
-                match_strategy = "flexible"
+            if flex_occurrences > 0:
+                if allow_multiple or flex_occurrences == 1:
+                    new_content = flex_content
+                    occurrences = flex_occurrences
+                    match_strategy = "flexible"
+                else:
+                    raise ToolError(
+                        f"Multiple occurrences ({flex_occurrences}) found for old_string "
+                        f"in {file_path}. Use allow_multiple: true to replace all."
+                    )
 
         # Strategy 3: Regex-based flexible matching (for single replacements)
-        if new_content is None and expected_replacements == 1:
-            # Build flexible regex pattern
+        if new_content is None and not allow_multiple:
             tokens = old_string_norm.split()
             if tokens:
                 escaped_tokens = [_escape_regex(t) for t in tokens]
@@ -213,19 +221,10 @@ class GeminiEditTool(BaseTool):
 
         # Handle no match found
         if new_content is None or occurrences == 0:
-            # Match Gemini CLI error format
             raise ToolError(
                 f"Failed to edit, 0 occurrences found for old_string in {file_path}. "
                 "Ensure you're not escaping content incorrectly and check whitespace, "
                 "indentation, and context. Use read_file tool to verify."
-            )
-
-        # Handle occurrence count mismatch
-        if occurrences != expected_replacements:
-            occurrence_term = "occurrence" if expected_replacements == 1 else "occurrences"
-            raise ToolError(
-                f"Failed to edit, Expected {expected_replacements} {occurrence_term} "
-                f"but found {occurrences} for old_string in file: {file_path}"
             )
 
         # Check if old_string equals new_string

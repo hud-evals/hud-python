@@ -12,6 +12,7 @@ Key differences from OpenCode-style tools:
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
@@ -68,8 +69,8 @@ class GeminiReadTool(BaseReadTool):
             title="ReadFile",
             description=(
                 "Reads and returns the content of a specified file. If the file is large, "
-                "the content will be truncated. Use 'offset' and 'limit' parameters to "
-                "paginate through large files."
+                "the content will be truncated. Use 'start_line' and 'end_line' parameters "
+                "to read specific line ranges."
             ),
         )
 
@@ -92,13 +93,13 @@ class GeminiReadTool(BaseReadTool):
         is_partial = (result.start_offset > 0) or has_more or result.truncated_by_bytes
 
         if is_partial:
-            next_offset = lines_shown_end
+            next_start = lines_shown_end + 1
             return (
                 f"IMPORTANT: The file content has been truncated.\n"
                 f"Status: Showing lines {lines_shown_start}-{lines_shown_end} "
                 f"of {result.total_lines} total lines.\n"
-                f"Action: To read more, use 'offset' and 'limit' parameters. "
-                f"Example: offset: {next_offset}.\n\n"
+                f"Action: To read more, use 'start_line' and 'end_line' parameters. "
+                f"Example: start_line: {next_start}.\n\n"
                 f"--- FILE CONTENT (truncated) ---\n{file_content}"
             )
         else:
@@ -107,15 +108,15 @@ class GeminiReadTool(BaseReadTool):
     async def __call__(
         self,
         file_path: str,
-        offset: int | None = None,
-        limit: int | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> list[TextContent | ImageContent]:
-        """Read file contents with optional pagination.
+        """Read file contents with optional line range.
 
         Args:
             file_path: Path to the file to read
-            offset: 0-based line number to start reading from
-            limit: Maximum number of lines to read
+            start_line: 1-based line number to start reading from
+            end_line: 1-based line number to stop reading at (inclusive)
 
         Returns:
             List of TextContent (or ImageContent for images) with file contents
@@ -130,17 +131,23 @@ class GeminiReadTool(BaseReadTool):
         if path.is_dir():
             raise ToolError(f"Path is a directory, not a file: {file_path}")
 
-        if offset is not None and offset < 0:
-            raise ToolError("Offset must be a non-negative number")
-        if limit is not None and limit <= 0:
-            raise ToolError("Limit must be a positive number")
+        if start_line is not None and start_line < 1:
+            raise ToolError("start_line must be >= 1")
+        if end_line is not None and end_line < 1:
+            raise ToolError("end_line must be >= 1")
+        if start_line is not None and end_line is not None and end_line < start_line:
+            raise ToolError("end_line must be >= start_line")
 
         # Handle images
         if self.is_image(path):
             result = self.read_image(path)
             return result.to_content_blocks()  # type: ignore[return-value]
 
-        result = self.read_with_pagination(path, offset=offset or 0, limit=limit)
+        # Convert 1-based start_line/end_line to 0-based offset/limit
+        offset = (start_line - 1) if start_line is not None else 0
+        limit = (end_line - offset) if (start_line is not None and end_line is not None) else None
+
+        result = self.read_with_pagination(path, offset=offset, limit=limit)
         output = self.format_output(result, file_path)
 
         return list(ContentResult(output=output).to_text_blocks())
@@ -150,12 +157,16 @@ class GeminiSearchTool(BaseSearchTool):
     """Gemini CLI-style file content search tool.
 
     Searches file contents using regex patterns.
-    Matches Gemini CLI's search_file_content tool interface.
+    Matches Gemini CLI's grep_search tool interface.
 
     Parameters:
         pattern: Regex pattern to search for (required)
         dir_path: Directory to search in (optional, defaults to project root)
-        include: Glob pattern to filter files (e.g., "*.py")
+        include_pattern: Glob pattern to filter files (e.g., "*.py")
+        exclude_pattern: Regex pattern to exclude from results
+        names_only: If true, return only file paths without line content
+        max_matches_per_file: Maximum matches per file
+        total_max_matches: Maximum total matches (default: 100)
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -179,20 +190,26 @@ class GeminiSearchTool(BaseSearchTool):
             base_path=base_path,
             max_results=max_results,
             max_files=max_files,
-            name="search_file_content",
-            title="Search",
+            name="grep_search",
+            title="SearchText",
             description=(
-                "Search file contents using a regex pattern. "
-                "Returns matching lines grouped by file with line numbers."
+                "Searches for a regular expression pattern within file contents. "
+                "Returns matching lines grouped by file with line numbers. Max 100 matches."
             ),
         )
 
-    def format_output(self, matches: list[FileMatch], pattern: str) -> str:
+    def format_output(
+        self,
+        matches: list[FileMatch],
+        pattern: str,
+        names_only: bool = False,
+    ) -> str:
         """Format output in Gemini CLI style (grouped by file).
 
         Args:
             matches: List of FileMatch objects
             pattern: Original search pattern
+            names_only: If true, return only file paths
 
         Returns:
             Formatted output grouped by file
@@ -208,6 +225,12 @@ class GeminiSearchTool(BaseSearchTool):
             if match.path not in file_matches:
                 file_matches[match.path] = []
             file_matches[match.path].append(match)
+
+        if names_only:
+            lines = list(file_matches.keys())
+            if truncated:
+                lines.append("\n(Results are truncated. Consider using a more specific pattern.)")
+            return "\n".join(lines)
 
         lines = [f"Found {len(matches)} matches in {len(file_matches)} files"]
         lines.append("")
@@ -226,14 +249,22 @@ class GeminiSearchTool(BaseSearchTool):
         self,
         pattern: str,
         dir_path: str | None = None,
-        include: str | None = None,
+        include_pattern: str | None = None,
+        exclude_pattern: str | None = None,
+        names_only: bool = False,
+        max_matches_per_file: int | None = None,
+        total_max_matches: int | None = None,
     ) -> list[TextContent]:
         """Search file contents for a pattern.
 
         Args:
             pattern: Regex pattern to search for
             dir_path: Directory to search in (defaults to base path)
-            include: Glob pattern to filter files (e.g., "*.py")
+            include_pattern: Glob pattern to filter which files are searched
+            exclude_pattern: Regex pattern to exclude from results
+            names_only: If true, return only file paths
+            max_matches_per_file: Maximum matches per file
+            total_max_matches: Maximum total matches (overrides default 100)
 
         Returns:
             List of TextContent with matching lines grouped by file
@@ -244,8 +275,40 @@ class GeminiSearchTool(BaseSearchTool):
         if not search_path.exists():
             raise ToolError(f"Directory not found: {dir_path or '.'}")
 
-        matches = self.search_files(search_path, regex, include)
-        output = self.format_output(matches, pattern)
+        # Validate exclude_pattern if provided
+        exclude_regex = None
+        if exclude_pattern:
+            try:
+                exclude_regex = re.compile(exclude_pattern)
+            except re.error as e:
+                raise ToolError(f"Invalid exclude_pattern regex: {e}") from None
+
+        # Use per-call max if provided
+        orig_max = self._max_results
+        if total_max_matches is not None:
+            self._max_results = total_max_matches
+
+        try:
+            matches = self.search_files(search_path, regex, include_pattern)
+        finally:
+            self._max_results = orig_max
+
+        # Apply exclude_pattern filter
+        if exclude_regex:
+            matches = [m for m in matches if not exclude_regex.search(m.line_text)]
+
+        # Apply max_matches_per_file limit
+        if max_matches_per_file is not None:
+            file_counts: dict[str, int] = {}
+            filtered: list[FileMatch] = []
+            for m in matches:
+                count = file_counts.get(m.path, 0)
+                if count < max_matches_per_file:
+                    filtered.append(m)
+                    file_counts[m.path] = count + 1
+            matches = filtered
+
+        output = self.format_output(matches, pattern, names_only=names_only)
 
         return ContentResult(output=output).to_text_blocks()
 
@@ -322,6 +385,7 @@ class GeminiGlobTool(BaseGlobTool):
         dir_path: str | None = None,
         case_sensitive: bool = True,
         respect_git_ignore: bool = True,
+        respect_gemini_ignore: bool = True,
     ) -> list[TextContent]:
         """Find files matching a glob pattern.
 
@@ -330,6 +394,7 @@ class GeminiGlobTool(BaseGlobTool):
             dir_path: Directory to search in (defaults to base path)
             case_sensitive: Whether matching is case-sensitive
             respect_git_ignore: Whether to respect .gitignore
+            respect_gemini_ignore: Whether to respect .geminiignore (accepted, not yet implemented)
 
         Returns:
             List of TextContent with matching file paths

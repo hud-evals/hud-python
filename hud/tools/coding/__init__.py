@@ -23,6 +23,7 @@ from hud.tools.coding.bash import BashTool, ClaudeBashSession, _BashSession
 from hud.tools.coding.edit import Command, EditTool
 from hud.tools.coding.gemini_edit import GeminiEditTool
 from hud.tools.coding.gemini_shell import GeminiShellOutput, GeminiShellTool
+from hud.tools.coding.gemini_write import GeminiWriteTool
 from hud.tools.coding.session import BashSession, ShellCallOutcome, ShellCommandOutput
 from hud.tools.coding.shell import ShellResult, ShellTool
 from hud.tools.coding.utils import (
@@ -49,6 +50,7 @@ __all__ = [
     "GeminiEditTool",
     "GeminiShellOutput",
     "GeminiShellTool",
+    "GeminiWriteTool",
     "ShellCallOutcome",
     "ShellCommandOutput",
     "ShellResult",

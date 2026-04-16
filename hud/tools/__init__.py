@@ -43,6 +43,7 @@ if TYPE_CHECKING:
         EditTool,
         GeminiEditTool,
         GeminiShellTool,
+        GeminiWriteTool,
         ShellTool,
     )
     from .computer import (
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
         QwenComputerTool,
     )
     from .filesystem import (
+        GeminiReadManyTool,
         GlobTool,
         GrepTool,
         ListTool,
@@ -74,7 +76,9 @@ __all__ = [
     "GeminiComputerTool",
     "GeminiEditTool",
     "GeminiMemoryTool",
+    "GeminiReadManyTool",
     "GeminiShellTool",
+    "GeminiWriteTool",
     "GlobTool",
     "GoogleSearchTool",
     "GrepTool",
@@ -121,6 +125,7 @@ def __getattr__(name: str) -> Any:
         "ApplyPatchTool",
         "GeminiShellTool",
         "GeminiEditTool",
+        "GeminiWriteTool",
     ):
         from . import coding
 
@@ -132,6 +137,7 @@ def __getattr__(name: str) -> Any:
         "GrepTool",
         "GlobTool",
         "ListTool",
+        "GeminiReadManyTool",
     ):
         from . import filesystem
 
