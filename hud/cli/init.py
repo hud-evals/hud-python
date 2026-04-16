@@ -120,13 +120,9 @@ def _prompt_for_preset() -> tuple[str, bool] | None:
     _, private_templates = _fetch_available_templates()
 
     try:
-        choices: list[questionary.Choice] = []
-        for key in PRESET_MAP:
-            choices.append(questionary.Choice(title=key, value=(key, False)))
-
-        for t in private_templates:
-            label = t["id"]
-            choices.append(questionary.Choice(title=label, value=(t["id"], True)))
+        choices = [questionary.Choice(title=key, value=(key, False)) for key in PRESET_MAP] + [
+            questionary.Choice(title=t["id"], value=(t["id"], True)) for t in private_templates
+        ]
 
         selected = questionary.select(
             "Choose a preset",
