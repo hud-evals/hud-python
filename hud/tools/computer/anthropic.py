@@ -90,7 +90,12 @@ class AnthropicComputerTool(HudComputerTool):
                 api_name="computer",
                 beta="computer-use-2025-11-24",
                 role="computer",
-                supported_models=("*claude-opus-4-5*", "*claude-opus-4-6*", "*claude-sonnet-4-6*", "claude-opus-4-7*"),
+                supported_models=(
+                    "*claude-opus-4-5*",
+                    "*claude-opus-4-6*",
+                    "*claude-sonnet-4-6*",
+                    "claude-opus-4-7*",
+                ),
             ),
             NativeToolSpec(
                 api_type="computer_20250124",
