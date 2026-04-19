@@ -370,7 +370,7 @@ def _export_remote_tasks(
     hud_console: HUDConsole,
 ) -> None:
     """Fetch remote tasks and export to JSON or CSV."""
-    from hud.cli.utils.evalset import fetch_remote_tasks
+    from hud.cli.utils.evalset import fetch_remote_tasks  # type: ignore[import-not-found]
 
     hud_console.progress_message("Fetching remote tasks...")
     remote_tasks = fetch_remote_tasks(taskset_id, api_url, headers)

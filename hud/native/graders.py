@@ -378,7 +378,7 @@ class LLMJudgeGrader(Grader):
         api_key = os.environ.get("HUD_API_KEY", "")
         client = AsyncOpenAI(base_url="https://inference.hud.ai", api_key=api_key)
 
-        async def _generate(system_prompt: str, user_prompt: str) -> str:
+        async def _generate(system_prompt: str, user_prompt: str, **kwargs: Any) -> str:
             response = await client.chat.completions.create(
                 model=model,
                 max_tokens=1024,
@@ -403,7 +403,7 @@ class LLMJudgeGrader(Grader):
                 "reason": getattr(item, "reason", None),
                 "weight": item.weight,
             }
-            for item in result.report
+            for item in (result.report or [])
         }
 
         return (float(result.score), {"criteria": verdicts, "model": model})
