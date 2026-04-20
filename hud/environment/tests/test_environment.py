@@ -755,9 +755,9 @@ class TestMCPServerToolExclusion:
         is tested thoroughly in test_scenarios.py::TestScenarioToolExclusion.
         This test verifies the MCP server path wires up session lookup correctly.
         """
-        import mcp.types as mcp_types
         from types import SimpleNamespace
 
+        import mcp.types as mcp_types
         from mcp.server.lowlevel.server import request_ctx
 
         from hud.environment import Environment
