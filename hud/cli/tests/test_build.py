@@ -61,7 +61,7 @@ class TestIncrementVersion:
     def test_increment_minor(self):
         """Test incrementing minor version."""
         assert increment_version("1.2.3", "minor") == "1.3.0"
-        assert increment_version("0.5.38", "minor") == "0.6.0"
+        assert increment_version("0.5.39", "minor") == "0.6.0"
 
     def test_increment_major(self):
         """Test incrementing major version."""

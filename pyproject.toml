@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.5.38"
+version = "0.5.39"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -18,7 +18,7 @@ dependencies = [
     "mcp>=1.24.0,<2.0",
     "fastmcp==3.0.2",
     # A2A protocol
-    "a2a-sdk>=0.3.24",
+    "a2a-sdk==0.3.26",
     # For all inference agents
     "openai>=2.26.0",
     # CLI dependencies
