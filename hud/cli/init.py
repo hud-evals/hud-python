@@ -24,6 +24,8 @@ PRESET_MAP: dict[str, str | None] = {
     "blank": "hud-blank",
     "deep-research": "hud-deepresearch",
     "browser": "hud-browser",
+    "remote-browser": "hud-remote-browser",
+    "coding": "coding-template",
     "rubrics": "hud-rubrics",
     "verilog-coding-template": "verilog-coding-template",
     "data-science-template": "data-science-template",
