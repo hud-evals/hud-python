@@ -131,10 +131,14 @@ class TestCLICommands:
 
     def test_version_import_error(self) -> None:
         """Test version command when version unavailable."""
+        import re
+
+        ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
         with patch.dict("sys.modules", {"hud": None}):
             result = runner.invoke(app, ["version"])
             assert result.exit_code == 0
-            assert "HUD CLI version: unknown" in result.output
+            clean_output = ansi_escape.sub("", result.output)
+            assert "HUD CLI version: unknown" in clean_output
 
     def test_mcp_command(self) -> None:
         """Test mcp server command."""

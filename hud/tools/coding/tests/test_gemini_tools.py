@@ -86,7 +86,8 @@ class TestGeminiEditTool:
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = GeminiEditTool(base_directory=tmpdir)
             result = tool._resolve_path("test.txt")
-            assert result == Path(tmpdir) / "test.txt"
+            expected = Path(tmpdir).resolve() / "test.txt"
+            assert result == expected
 
     def test_resolve_path_absolute(self) -> None:
         """Test path resolution with absolute path."""
@@ -213,7 +214,7 @@ class TestGeminiEditTool:
     async def test_file_history_saved(self) -> None:
         """Test that file history is saved for potential undo."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            test_file = Path(tmpdir) / "test.txt"
+            test_file = Path(tmpdir).resolve() / "test.txt"
             test_file.write_text("original content")
 
             tool = GeminiEditTool(base_directory=tmpdir)
