@@ -140,6 +140,17 @@ async def test_glm_computer_click_reports_agent_coordinates():
     )
 
 
+def test_normalized_coordinate_max_stays_in_display_bounds():
+    comp = GLMComputerTool()
+
+    x, y = comp._scale_coordinates(999, 999)
+
+    assert x is not None
+    assert y is not None
+    assert int(x) <= comp.environment_width - 1
+    assert int(y) <= comp.environment_height - 1
+
+
 class TestHudComputerToolExtended:
     """Extended tests for HudComputerTool covering edge cases and platform logic."""
 

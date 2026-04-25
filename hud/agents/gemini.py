@@ -12,7 +12,6 @@ from google.genai import types as genai_types
 from hud.settings import settings
 from hud.tools.computer.gemini import (
     PREDEFINED_COMPUTER_USE_FUNCTIONS,
-    SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
     normalize_gemini_computer_use_args,
 )
 from hud.tools.computer.settings import computer_settings
@@ -68,7 +67,6 @@ class GeminiAgent(MCPAgent):
                 api_type="computer_use",
                 api_name="gemini_computer",
                 role="computer",
-                supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
             )
 
         return None
@@ -325,6 +323,13 @@ class GeminiAgent(MCPAgent):
 
         func_name = part.function_call.name or ""
         raw_args = dict(part.function_call.args) if part.function_call.args else {}
+        mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name)
+
+        if mcp_tool_name:
+            return MCPToolCall(
+                name=mcp_tool_name,
+                arguments=raw_args,
+            )
 
         if self._computer_tool_name and func_name in PREDEFINED_COMPUTER_USE_FUNCTIONS:
             return MCPToolCall(
@@ -333,9 +338,8 @@ class GeminiAgent(MCPAgent):
                 gemini_name=func_name,  # type: ignore[arg-type]
             )
 
-        mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name, func_name)
         return MCPToolCall(
-            name=mcp_tool_name,
+            name=func_name,
             arguments=raw_args,
         )
 
@@ -507,10 +511,14 @@ class GeminiAgent(MCPAgent):
         match spec.api_type:
             case "computer_use":
                 self._computer_tool_name = tool.name
+                excluded_functions = [
+                    *self.excluded_predefined_functions,
+                    *self._colliding_predefined_function_names(tool.name),
+                ]
                 return genai_types.Tool(
                     computer_use=genai_types.ComputerUse(
                         environment=genai_types.Environment.ENVIRONMENT_BROWSER,
-                        excluded_predefined_functions=self.excluded_predefined_functions,
+                        excluded_predefined_functions=excluded_functions,
                     )
                 )
             case _:
@@ -521,6 +529,18 @@ class GeminiAgent(MCPAgent):
                     tool.name,
                 )
                 return self._to_gemini_tool(tool)
+
+    def _colliding_predefined_function_names(self, computer_tool_name: str) -> list[str]:
+        """Exclude predefined computer actions shadowed by generic MCP tools."""
+        if not self._available_tools:
+            return []
+
+        generic_names = {
+            tool.name
+            for tool in self._available_tools
+            if tool.name != computer_tool_name and not self.resolve_native_spec(tool)
+        }
+        return sorted(set(PREDEFINED_COMPUTER_USE_FUNCTIONS) & generic_names)
 
     def _remove_old_screenshots(self, messages: list[genai_types.Content]) -> None:
         """Drop older Gemini Computer Use screenshots to keep context growth bounded."""

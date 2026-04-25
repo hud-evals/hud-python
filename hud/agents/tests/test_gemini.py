@@ -402,6 +402,55 @@ class TestGeminiAgent:
         assert computer_tool.computer_use is not None
         assert computer_tool.computer_use.excluded_predefined_functions == ["drag_and_drop"]
 
+    @pytest.mark.asyncio
+    async def test_computer_use_excludes_colliding_generic_tool_names(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Generic tools named like predefined actions should not be hijacked."""
+        computer_tool = types.Tool(
+            name="gemini_computer",
+            description="Control computer with mouse, keyboard, and screenshots",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        computer_tool.meta = {
+            "native_tools": {
+                "gemini": {
+                    "api_type": "computer_use",
+                    "api_name": "gemini_computer",
+                    "role": "computer",
+                    "supported_models": ["gemini-3-flash-preview"],
+                }
+            }
+        }
+        navigate_tool = types.Tool(
+            name="navigate",
+            description="A non-computer navigation helper",
+            inputSchema={"type": "object", "properties": {"url": {"type": "string"}}},
+        )
+        ctx = MockEvalContext(tools=[computer_tool, navigate_tool])
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            model="gemini-3-flash-preview",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        computer_use_tool = next(
+            tool for tool in agent.gemini_tools if getattr(tool, "computer_use", None) is not None
+        )
+        computer_use = getattr(computer_use_tool, "computer_use", None)
+        assert computer_use is not None
+        assert "navigate" in (computer_use.excluded_predefined_functions or [])
+        function_call = MagicMock()
+        function_call.name = "navigate"
+        function_call.args = {"url": "https://example.com"}
+        tool_call = agent._extract_tool_call(MagicMock(function_call=function_call))
+        assert tool_call is not None
+        assert tool_call.name == "navigate"
+        assert tool_call.arguments == {"url": "https://example.com"}
+
     def test_regular_agent_routes_computer_use_function_call(
         self, mock_gemini_client: MagicMock
     ) -> None:

@@ -259,7 +259,7 @@ class HudComputerTool(BaseTool):
             return round(numeric)
 
         target = self.width if axis == "x" else self.height
-        scaled = numeric / self.coordinate_space * target
+        scaled = numeric / self.coordinate_space * (target - 1)
         return AgentCoordinate(round(scaled), int(numeric))
 
     def _scale_distance(self, value: float | None, axis: Literal["x", "y"]) -> int | None:
