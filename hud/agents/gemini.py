@@ -114,6 +114,8 @@ class GeminiAgent(MCPAgent):
         self.top_p = self.config.top_p
         self.top_k = self.config.top_k
         self.max_output_tokens = self.config.max_output_tokens
+        self.thinking_level = self.config.thinking_level
+        self.include_thoughts = self.config.include_thoughts
         self.hud_console = HUDConsole(logger=logger)
 
         # Track mapping from Gemini tool names to MCP tool names
@@ -167,6 +169,13 @@ class GeminiAgent(MCPAgent):
         if citations_enabled and not self._has_google_search_tool():
             tools = [*list(tools), genai_types.Tool(google_search=genai_types.GoogleSearch())]
 
+        thinking_config = None
+        if self.thinking_level is not None or self.include_thoughts:
+            thinking_config = genai_types.ThinkingConfig(
+                thinking_level=self.thinking_level,
+                include_thoughts=self.include_thoughts,
+            )
+
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
             temperature=self.temperature,
@@ -175,6 +184,7 @@ class GeminiAgent(MCPAgent):
             max_output_tokens=self.max_output_tokens,
             tools=tools,
             system_instruction=self.system_prompt,
+            thinking_config=thinking_config,
         )
 
         # Use async API to avoid blocking the event loop

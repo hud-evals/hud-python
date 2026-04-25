@@ -65,6 +65,8 @@ class GeminiConfig(BaseAgentConfig):
     max_output_tokens: int = 8192
     validate_api_key: bool = True
     excluded_predefined_functions: list[str] = Field(default_factory=list)
+    thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+    include_thoughts: bool = True
 
 
 class GeminiCreateParams(BaseCreateParams, GeminiConfig):
