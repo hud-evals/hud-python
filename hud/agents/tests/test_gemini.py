@@ -299,9 +299,7 @@ class TestGeminiAgent:
             assert response.reasoning == "Let me reason through this..."
 
     @pytest.mark.asyncio
-    async def test_get_response_passes_thinking_config(
-        self, mock_gemini_client: MagicMock
-    ) -> None:
+    async def test_get_response_passes_thinking_config(self, mock_gemini_client: MagicMock) -> None:
         """Gemini 3 thinking options should be passed to GenerateContentConfig."""
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = GeminiAgent.create(

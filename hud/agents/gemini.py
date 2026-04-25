@@ -171,8 +171,13 @@ class GeminiAgent(MCPAgent):
 
         thinking_config = None
         if self.thinking_level is not None or self.include_thoughts:
+            thinking_level = (
+                genai_types.ThinkingLevel(self.thinking_level.upper())
+                if self.thinking_level is not None
+                else None
+            )
             thinking_config = genai_types.ThinkingConfig(
-                thinking_level=self.thinking_level,
+                thinking_level=thinking_level,
                 include_thoughts=self.include_thoughts,
             )
 
@@ -218,8 +223,7 @@ class GeminiAgent(MCPAgent):
                 detail_parts.append(f"{attr}={value_repr}")
             details = "; ".join(detail_parts) if detail_parts else "no response metadata"
             raise RuntimeError(
-                f"Gemini response returned no candidates for model {self.config.model}. "
-                f"{details}"
+                f"Gemini response returned no candidates for model {self.config.model}. {details}"
             )
 
         candidate = response.candidates[0]
