@@ -189,6 +189,7 @@ Use this tool to interact with the computer via GLM's PC action space.
             width=width,
             height=height,
             rescale_images=rescale_images,
+            coordinate_space=GLM_COORDINATE_SPACE,
             name=name or "glm_computer",
             title=title or "GLM Computer Tool",
             description=custom_description,
@@ -226,17 +227,6 @@ Use this tool to interact with the computer via GLM's PC action space.
                     return None
 
         return None
-
-    def _scale_coord(self, coord: int, is_x: bool = True) -> int:
-        """Scale coordinate from GLM's 0-999 space to actual screen pixels.
-
-        Maps [0, 999] -> [0, dimension-1] so the max coordinate lands on the
-        last valid pixel index rather than going out of bounds.
-        """
-        if is_x:
-            return int(coord * (self.environment_width - 1) / GLM_COORDINATE_SPACE)
-        else:
-            return int(coord * (self.environment_height - 1) / GLM_COORDINATE_SPACE)
 
     def _parse_keys(self, keys: str | list[str] | None) -> list[str]:
         """Parse key input to list of keys."""
@@ -381,8 +371,7 @@ Use this tool to interact with the computer via GLM's PC action space.
         screen_end_y: int | None = None
 
         if start_coords:
-            screen_x = self._scale_coord(start_coords[0], is_x=True)
-            screen_y = self._scale_coord(start_coords[1], is_x=False)
+            screen_x, screen_y = self._scale_coordinates(start_coords[0], start_coords[1])
             logger.debug(
                 "Scaled start: [%s,%s] -> (%s,%s)",
                 start_coords[0],
@@ -392,8 +381,7 @@ Use this tool to interact with the computer via GLM's PC action space.
             )
 
         if end_coords:
-            screen_end_x = self._scale_coord(end_coords[0], is_x=True)
-            screen_end_y = self._scale_coord(end_coords[1], is_x=False)
+            screen_end_x, screen_end_y = self._scale_coordinates(end_coords[0], end_coords[1])
 
         result: ContentResult | None = None
 

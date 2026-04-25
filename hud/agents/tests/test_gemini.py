@@ -272,6 +272,44 @@ class TestGeminiAgent:
             assert response.reasoning == "Let me reason through this..."
 
     @pytest.mark.asyncio
+    async def test_get_response_passes_thinking_config(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Gemini 3 thinking options should be passed to GenerateContentConfig."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                model_client=mock_gemini_client,
+                model="gemini-3-flash-preview",
+                validate_api_key=False,
+                thinking_level="high",
+                include_thoughts=True,
+            )
+            agent.gemini_tools = []
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_candidate = MagicMock()
+            text_part = MagicMock()
+            text_part.text = "Answer"
+            text_part.function_call = None
+            text_part.thought = False
+            mock_candidate.content = MagicMock()
+            mock_candidate.content.parts = [text_part]
+            mock_response.candidates = [mock_candidate]
+
+            mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Hi")])
+            ]
+            await agent.get_response(messages)
+
+            config = mock_gemini_client.aio.models.generate_content.call_args.kwargs["config"]
+            assert config.thinking_config is not None
+            assert config.thinking_config.include_thoughts is True
+            assert config.thinking_config.thinking_level.value == "HIGH"
+
+    @pytest.mark.asyncio
     async def test_convert_tools_for_gemini(self, mock_gemini_client: MagicMock) -> None:
         """Test converting MCP tools to Gemini format."""
         tools = [

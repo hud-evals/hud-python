@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock, TextContent
@@ -23,6 +23,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class AgentCoordinate(int):
+    """Carry both execution and model-visible coordinate values."""
+
+    agent_value: int
+
+    def __new__(cls, value: int, agent_value: int) -> Self:
+        obj = int.__new__(cls, value)
+        obj.agent_value = agent_value
+        return obj
+
+    def __format__(self, format_spec: str) -> str:
+        return format(self.agent_value, format_spec)
+
+    def __str__(self) -> str:
+        return str(int(self))
+
+    def __repr__(self) -> str:
+        return repr(self.agent_value)
+
+
 class HudComputerTool(BaseTool):
     """
     A tool that allows the agent to control the computer.
@@ -39,6 +59,7 @@ class HudComputerTool(BaseTool):
         width: int | None = computer_settings.HUD_COMPUTER_WIDTH,
         height: int | None = computer_settings.HUD_COMPUTER_HEIGHT,
         rescale_images: bool = computer_settings.HUD_RESCALE_IMAGES,
+        coordinate_space: int | None = None,
         # What the agent sees as the tool's name, title, and description
         name: str | None = None,
         title: str | None = None,
@@ -58,6 +79,7 @@ class HudComputerTool(BaseTool):
             width: Target width for rescaling (None = use environment width)
             height: Target height for rescaling (None = use environment height)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
+            coordinate_space: Optional normalized model coordinate max (e.g. 1000 for Gemini).
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
@@ -111,6 +133,7 @@ class HudComputerTool(BaseTool):
         # Defined per subclass (e.g., Anthropic, OpenAI)
         # In case you need your agent to receive pre-formatted screenshots, set env variable True
         self.rescale_images = rescale_images
+        self.coordinate_space = coordinate_space
 
         logger.debug(
             "Agent Screen Width: %s, Agent Screen Height: %s",
@@ -197,12 +220,57 @@ class HudComputerTool(BaseTool):
 
     def _scale_coordinates(self, x: int | None, y: int | None) -> tuple[int | None, int | None]:
         """Scale coordinates from target space to screen space."""
+        if not isinstance(x, int | float):
+            x = None
+        if not isinstance(y, int | float):
+            y = None
+
+        x = self._to_tool_coordinate(x, "x")
+        y = self._to_tool_coordinate(y, "y")
+
+        agent_x = getattr(x, "agent_value", x)
+        agent_y = getattr(y, "agent_value", y)
         if x is not None and self.scale_x != 1.0:
             x = int(x / self.scale_x)
         if y is not None and self.scale_y != 1.0:
             y = int(y / self.scale_y)
 
+        if x is not None and agent_x is not None:
+            x = AgentCoordinate(x, int(agent_x))
+        if y is not None and agent_y is not None:
+            y = AgentCoordinate(y, int(agent_y))
+
         return x, y
+
+    def _to_tool_coordinate(
+        self,
+        value: float | str | None,
+        axis: Literal["x", "y"],
+    ) -> int | None:
+        """Convert model coordinates into this tool's pixel coordinate space."""
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+
+        if self.coordinate_space is None or not 0 <= numeric <= self.coordinate_space:
+            return round(numeric)
+
+        target = self.width if axis == "x" else self.height
+        scaled = numeric / self.coordinate_space * target
+        return AgentCoordinate(round(scaled), int(numeric))
+
+    def _scale_distance(self, value: float | None, axis: Literal["x", "y"]) -> int | None:
+        """Scale an agent-space or normalized distance into display pixels."""
+        agent_value = self._to_tool_coordinate(value, axis)
+        if agent_value is None:
+            return None
+        scale = self.scale_x if axis == "x" else self.scale_y
+        if scale != 1.0:
+            return round(agent_value / scale)
+        return int(agent_value)
 
     def _scale_path(self, path: list[tuple[int, int]]) -> list[tuple[int, int]]:
         """Scale a path from target space to screen space."""
