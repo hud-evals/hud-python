@@ -204,8 +204,23 @@ class GeminiAgent(MCPAgent):
         collected_tool_calls: list[MCPToolCall] = []
 
         if not response.candidates:
-            self.hud_console.warning("Response has no candidates")
-            return result
+            detail_parts = []
+            for attr in ("prompt_feedback", "usage_metadata"):
+                value = getattr(response, attr, None)
+                if value is None:
+                    continue
+                if hasattr(value, "model_dump_json"):
+                    value_repr = value.model_dump_json()
+                elif hasattr(value, "model_dump"):
+                    value_repr = repr(value.model_dump())
+                else:
+                    value_repr = repr(value)
+                detail_parts.append(f"{attr}={value_repr}")
+            details = "; ".join(detail_parts) if detail_parts else "no response metadata"
+            raise RuntimeError(
+                f"Gemini response returned no candidates for model {self.config.model}. "
+                f"{details}"
+            )
 
         candidate = response.candidates[0]
 

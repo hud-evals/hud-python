@@ -230,6 +230,33 @@ class TestGeminiAgent:
             assert response.done is True
 
     @pytest.mark.asyncio
+    async def test_get_response_raises_on_no_candidates(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """A no-candidate Gemini response should fail loudly, not submit an empty answer."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                model_client=mock_gemini_client,
+                model="gemini-3-flash-preview",
+                validate_api_key=False,
+            )
+            agent.gemini_tools = []
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_response.candidates = []
+            mock_response.prompt_feedback = "blocked"
+            mock_response.usage_metadata = None
+            mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Status?")])
+            ]
+
+            with pytest.raises(RuntimeError, match="returned no candidates"):
+                await agent.get_response(messages)
+
+    @pytest.mark.asyncio
     async def test_get_response_with_thinking(self, mock_gemini_client: MagicMock) -> None:
         """Test getting response with thinking content."""
         with patch("hud.settings.settings.telemetry_enabled", False):
