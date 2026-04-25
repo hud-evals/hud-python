@@ -75,15 +75,21 @@ class TestScaleCoord:
         x, y = glm_tool._scale_coordinates(999, 999)
         assert x is not None
         assert y is not None
-        assert int(x) == int(round(999 * glm_tool.width / GLM_COORDINATE_SPACE) / glm_tool.scale_x)
-        assert int(y) == int(round(999 * glm_tool.height / GLM_COORDINATE_SPACE) / glm_tool.scale_y)
-        assert int(x) <= glm_tool.environment_width
-        assert int(y) <= glm_tool.environment_height
+        expected_x = int(
+            round(999 * (glm_tool.width - 1) / GLM_COORDINATE_SPACE) / glm_tool.scale_x
+        )
+        expected_y = int(
+            round(999 * (glm_tool.height - 1) / GLM_COORDINATE_SPACE) / glm_tool.scale_y
+        )
+        assert int(x) == expected_x
+        assert int(y) == expected_y
+        assert int(x) <= glm_tool.environment_width - 1
+        assert int(y) <= glm_tool.environment_height - 1
 
     def test_midpoint(self, glm_tool: GLMComputerTool) -> None:
         x, _ = glm_tool._scale_coordinates(500, 0)
         assert x is not None
-        expected = int(round(500 * glm_tool.width / GLM_COORDINATE_SPACE) / glm_tool.scale_x)
+        expected = int(round(500 * (glm_tool.width - 1) / GLM_COORDINATE_SPACE) / glm_tool.scale_x)
         assert int(x) == expected
 
 
