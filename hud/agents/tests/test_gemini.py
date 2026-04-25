@@ -298,6 +298,118 @@ class TestGeminiAgent:
         assert gemini_tool.function_declarations is not None
         assert gemini_tool.function_declarations[0].name == "my_tool"
 
+    @pytest.mark.asyncio
+    async def test_regular_agent_uses_native_computer_use(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """GeminiAgent should register GeminiComputerTool as native Computer Use."""
+        computer_tool = types.Tool(
+            name="gemini_computer",
+            description="Control computer with mouse, keyboard, and screenshots",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        computer_tool.meta = {
+            "native_tools": {
+                "gemini": {
+                    "api_type": "computer_use",
+                    "api_name": "gemini_computer",
+                    "role": "computer",
+                    "supported_models": ["gemini-3-flash-preview"],
+                }
+            }
+        }
+        tools = [
+            computer_tool,
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            model="gemini-3-flash-preview",
+            validate_api_key=False,
+            excluded_predefined_functions=["drag_and_drop"],
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent._computer_tool_name == "gemini_computer"
+        assert len(agent.gemini_tools) == 1
+        computer_tool = agent.gemini_tools[0]
+        assert isinstance(computer_tool, genai_types.Tool)
+        assert computer_tool.computer_use is not None
+        assert computer_tool.computer_use.excluded_predefined_functions == ["drag_and_drop"]
+
+    def test_regular_agent_routes_computer_use_function_call(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Gemini Computer Use calls should route to the MCP computer tool."""
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+        agent._computer_tool_name = "gemini_computer"
+
+        function_call = MagicMock()
+        function_call.name = "click_at"
+        function_call.args = {"x": 500, "y": 250, "safety_decision": {"decision": "allowed"}}
+        part = MagicMock(function_call=function_call)
+
+        tool_call = agent._extract_tool_call(part)
+
+        assert tool_call is not None
+        assert tool_call.name == "gemini_computer"
+        assert tool_call.arguments == {
+            "action": "click_at",
+            "safety_decision": {"decision": "allowed"},
+            "x": 500,
+            "y": 250,
+        }
+        assert getattr(tool_call, "gemini_name") == "click_at"
+
+    @pytest.mark.asyncio
+    async def test_regular_agent_formats_computer_use_results(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """GeminiAgent should return URL and screenshot parts for native computer use."""
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+        agent._computer_tool_name = "gemini_computer"
+        screenshot = base64.b64encode(b"png bytes").decode()
+        tool_calls = [
+            MCPToolCall(
+                name="gemini_computer",
+                arguments={"action": "click_at", "safety_decision": {"decision": "allowed"}},
+                gemini_name="click_at",  # type: ignore[arg-type]
+            )
+        ]
+        tool_results = [
+            MCPToolResult(
+                content=[
+                    types.TextContent(type="text", text="__URL__:https://example.com"),
+                    types.ImageContent(type="image", data=screenshot, mimeType="image/png"),
+                ],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        parts = messages[0].parts
+        assert parts is not None
+        function_response = parts[0].function_response
+        assert function_response is not None
+        assert function_response.name == "click_at"
+        response = function_response.response
+        assert response is not None
+        assert response["url"] == "https://example.com"
+        assert response["safety_acknowledgement"] is True
+        assert function_response.parts is not None
+        inline_data = function_response.parts[0].inline_data
+        assert inline_data is not None
+        assert inline_data.mime_type == "image/png"
+
 
 class TestGeminiToolConversion:
     """Tests for tool conversion to Gemini format."""

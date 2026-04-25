@@ -16,9 +16,76 @@ from .hud import HudComputerTool
 from .settings import computer_settings
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from hud.tools.executors.base import BaseExecutor
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
+    "gemini-2.5-computer-use-preview-10-2025",
+    "gemini-3-flash-preview",
+)
+
+PREDEFINED_COMPUTER_USE_FUNCTIONS = [
+    "open_web_browser",
+    "click_at",
+    "hover_at",
+    "type_text_at",
+    "scroll_document",
+    "scroll_at",
+    "wait_5_seconds",
+    "go_back",
+    "go_forward",
+    "search",
+    "navigate",
+    "key_combination",
+    "drag_and_drop",
+]
+
+
+def normalize_gemini_computer_use_args(action: str, raw_args: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize Gemini Computer Use function-call args to GeminiComputerTool kwargs."""
+    normalized_args: dict[str, Any] = {"action": action}
+
+    coord = raw_args.get("coordinate") or raw_args.get("coordinates")
+    if isinstance(coord, list | tuple) and len(coord) >= 2:
+        try:
+            normalized_args["x"] = int(coord[0])
+            normalized_args["y"] = int(coord[1])
+        except (TypeError, ValueError):
+            pass
+
+    dest = (
+        raw_args.get("destination")
+        or raw_args.get("destination_coordinate")
+        or raw_args.get("destinationCoordinate")
+    )
+    if isinstance(dest, list | tuple) and len(dest) >= 2:
+        try:
+            normalized_args["destination_x"] = int(dest[0])
+            normalized_args["destination_y"] = int(dest[1])
+        except (TypeError, ValueError):
+            pass
+
+    for key in (
+        "text",
+        "press_enter",
+        "clear_before_typing",
+        "safety_decision",
+        "direction",
+        "magnitude",
+        "url",
+        "keys",
+        "x",
+        "y",
+        "destination_x",
+        "destination_y",
+    ):
+        if key in raw_args:
+            normalized_args[key] = raw_args[key]
+
+    return normalized_args
 
 
 ACTION_FIELD = Field(..., description="Gemini Computer Use action to perform")
@@ -54,11 +121,13 @@ class GeminiComputerTool(HudComputerTool):
             api_type="computer_use",
             api_name="gemini_computer",
             role="computer",  # Mutually exclusive with other computer tools when native
+            supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
         ),
         AgentType.GEMINI_CUA: NativeToolSpec(
             api_type="computer_use",
             api_name="gemini_computer",
             role="computer",  # Mutually exclusive with other computer tools when native
+            supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
         ),
     }
 

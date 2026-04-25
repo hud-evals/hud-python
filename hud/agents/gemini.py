@@ -10,6 +10,12 @@ from google import genai
 from google.genai import types as genai_types
 
 from hud.settings import settings
+from hud.tools.computer.gemini import (
+    PREDEFINED_COMPUTER_USE_FUNCTIONS,
+    SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
+    normalize_gemini_computer_use_args,
+)
+from hud.tools.computer.settings import computer_settings
 from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
@@ -62,6 +68,7 @@ class GeminiAgent(MCPAgent):
                 api_type="computer_use",
                 api_name="gemini_computer",
                 role="computer",
+                supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
             )
 
         return None
@@ -111,6 +118,11 @@ class GeminiAgent(MCPAgent):
 
         # Track mapping from Gemini tool names to MCP tool names
         self._gemini_to_mcp_tool_map: dict[str, str] = {}
+        self._computer_tool_name: str | None = None
+        self.excluded_predefined_functions = list(self.config.excluded_predefined_functions)
+        self.max_recent_turn_with_screenshots = (
+            computer_settings.GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS
+        )
         self.gemini_tools: genai_types.ToolListUnion = []
 
     def _on_tools_ready(self) -> None:
@@ -146,6 +158,7 @@ class GeminiAgent(MCPAgent):
 
     async def get_response(self, messages: list[genai_types.Content]) -> InferenceResult:
         """Get response from Gemini including any tool calls."""
+        self._remove_old_screenshots(messages)
         tools = self.gemini_tools
 
         citations_enabled = bool(
@@ -282,9 +295,16 @@ class GeminiAgent(MCPAgent):
             return None
 
         func_name = part.function_call.name or ""
-        mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name, func_name)
         raw_args = dict(part.function_call.args) if part.function_call.args else {}
 
+        if self._computer_tool_name and func_name in PREDEFINED_COMPUTER_USE_FUNCTIONS:
+            return MCPToolCall(
+                name=self._computer_tool_name,
+                arguments=normalize_gemini_computer_use_args(func_name, raw_args),
+                gemini_name=func_name,  # type: ignore[arg-type]
+            )
+
+        mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name, func_name)
         return MCPToolCall(
             name=mcp_tool_name,
             arguments=raw_args,
@@ -303,18 +323,47 @@ class GeminiAgent(MCPAgent):
 
             # Convert MCP tool results to Gemini format
             response_dict: dict[str, Any] = {}
+            is_computer_call = (
+                self._computer_tool_name is not None and tool_call.name == self._computer_tool_name
+            )
 
             if result.isError:
                 # Extract error message from content
                 error_msg = "Tool execution failed"
                 for content in result.content:
                     if isinstance(content, types.TextContent):
+                        if content.text.startswith("__URL__:"):
+                            continue
                         error_msg = content.text
                         break
                 response_dict["error"] = error_msg
+                if is_computer_call:
+                    response_dict["url"] = self._extract_url(result) or "about:blank"
             else:
                 # Process success content
                 response_dict["success"] = True
+
+            screenshot_parts: list[genai_types.FunctionResponsePart] = []
+            if is_computer_call:
+                url = self._extract_url(result)
+                for content in result.content:
+                    if isinstance(content, types.ImageContent):
+                        import base64
+
+                        image_bytes = base64.b64decode(content.data)
+                        screenshot_parts.append(
+                            genai_types.FunctionResponsePart(
+                                inline_data=genai_types.FunctionResponseBlob(
+                                    mime_type=content.mimeType or "image/png",
+                                    data=image_bytes,
+                                )
+                            )
+                        )
+
+                response_dict["url"] = url or "about:blank"
+                if tool_call.arguments and tool_call.arguments.get("safety_decision"):
+                    response_dict["safety_acknowledgement"] = True
+            else:
                 # Add text content to response
                 for content in result.content:
                     if isinstance(content, types.TextContent):
@@ -325,6 +374,7 @@ class GeminiAgent(MCPAgent):
             function_response = genai_types.FunctionResponse(
                 name=gemini_name,
                 response=response_dict,
+                parts=screenshot_parts if screenshot_parts else None,
             )
             function_responses.append(function_response)
 
@@ -335,6 +385,13 @@ class GeminiAgent(MCPAgent):
                 parts=[genai_types.Part(function_response=fr) for fr in function_responses],
             )
         ]
+
+    @staticmethod
+    def _extract_url(result: MCPToolResult) -> str | None:
+        for content in result.content:
+            if isinstance(content, types.TextContent) and content.text.startswith("__URL__:"):
+                return content.text.replace("__URL__:", "", 1)
+        return None
 
     def _map_role(self, role: str) -> str:
         """Gemini uses 'model' instead of 'assistant' for non-user turns."""
@@ -356,6 +413,7 @@ class GeminiAgent(MCPAgent):
         Uses shared categorize_tools() for role-based exclusion.
         """
         self._gemini_to_mcp_tool_map = {}
+        self._computer_tool_name = None
         self.gemini_tools = []
 
         categorized = self._categorized_tools
@@ -417,12 +475,15 @@ class GeminiAgent(MCPAgent):
         Returns:
             Gemini-specific tool or None if not supported
         """
-        # Currently Gemini native tools are similar to function tools
-        # This method exists for future expansion (e.g., computer_use native support)
         match spec.api_type:
             case "computer_use":
-                # Gemini computer use is still a function tool
-                return self._to_gemini_tool(tool)
+                self._computer_tool_name = tool.name
+                return genai_types.Tool(
+                    computer_use=genai_types.ComputerUse(
+                        environment=genai_types.Environment.ENVIRONMENT_BROWSER,
+                        excluded_predefined_functions=self.excluded_predefined_functions,
+                    )
+                )
             case _:
                 # Unknown native type - try as function tool
                 logger.debug(
@@ -431,6 +492,37 @@ class GeminiAgent(MCPAgent):
                     tool.name,
                 )
                 return self._to_gemini_tool(tool)
+
+    def _remove_old_screenshots(self, messages: list[genai_types.Content]) -> None:
+        """Drop older Gemini Computer Use screenshots to keep context growth bounded."""
+        if self._computer_tool_name is None:
+            return
+
+        turn_with_screenshots_found = 0
+        for content in reversed(messages):
+            if content.role != "user" or not content.parts:
+                continue
+
+            has_screenshot = any(
+                part.function_response
+                and part.function_response.parts
+                and part.function_response.name in PREDEFINED_COMPUTER_USE_FUNCTIONS
+                for part in content.parts
+            )
+            if not has_screenshot:
+                continue
+
+            turn_with_screenshots_found += 1
+            if turn_with_screenshots_found <= self.max_recent_turn_with_screenshots:
+                continue
+
+            for part in content.parts:
+                if (
+                    part.function_response
+                    and part.function_response.parts
+                    and part.function_response.name in PREDEFINED_COMPUTER_USE_FUNCTIONS
+                ):
+                    part.function_response.parts = None
 
     def _to_gemini_tool(self, tool: types.Tool) -> genai_types.Tool | None:
         """Convert a single MCP tool to Gemini function tool format.
