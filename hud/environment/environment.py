@@ -195,6 +195,58 @@ class Environment(
     # Core Methods
     # =========================================================================
 
+    def _filtered_tools_for_session(self, session: Any) -> list[mcp_types.Tool]:
+        """Apply scenario-level tool filtering for a given session.
+
+        Filters in order:
+        1. exclude_sources: remove tools from excluded connections
+        2. exclude_tools: remove tools matching fnmatch patterns
+        3. allowed_tools: rescue specific tools back from exclusions
+
+        Does NOT apply agent-level filtering (_agent_include/_agent_exclude).
+
+        Args:
+            session: The ScenarioSession to filter for, or None (no filtering).
+
+        Returns:
+            List of tools visible under the session's exclusions.
+        """
+        import fnmatch
+
+        tools = self._router.tools
+
+        if not session:
+            return tools
+
+        excluded_sources = set(session.exclude_sources) if session.exclude_sources else None
+        excluded_patterns = session.exclude_tools
+
+        if excluded_sources or excluded_patterns:
+            filtered = []
+            for tool in tools:
+                if excluded_sources:
+                    source = self._router._tool_routing.get(tool.name, "")
+                    if source in excluded_sources:
+                        continue
+                if excluded_patterns and any(
+                    fnmatch.fnmatch(tool.name, pat) for pat in excluded_patterns
+                ):
+                    continue
+                filtered.append(tool)
+            tools = filtered
+
+        # Rescue: add back tools matching allowed_tools patterns
+        allowed_patterns = session.allowed_tools
+        if allowed_patterns:
+            visible_names = {t.name for t in tools}
+            for tool in self._router.tools:
+                if tool.name not in visible_names and any(
+                    fnmatch.fnmatch(tool.name, pat) for pat in allowed_patterns
+                ):
+                    tools.append(tool)
+
+        return tools
+
     def as_tools(self) -> list[mcp_types.Tool]:
         """Return tools in MCP format (base format).
 
@@ -207,37 +259,7 @@ class Environment(
         """
         import fnmatch
 
-        tools = self._router.tools
-
-        # Scenario-level exclusion (from @env.scenario(exclude_tools/exclude_sources))
-        session = self._active_session
-        if session:
-            excluded_sources = set(session.exclude_sources) if session.exclude_sources else None
-            excluded_patterns = session.exclude_tools
-
-            if excluded_sources or excluded_patterns:
-                filtered = []
-                for tool in tools:
-                    if excluded_sources:
-                        source = self._router._tool_routing.get(tool.name, "")
-                        if source in excluded_sources:
-                            continue
-                    if excluded_patterns and any(
-                        fnmatch.fnmatch(tool.name, pat) for pat in excluded_patterns
-                    ):
-                        continue
-                    filtered.append(tool)
-                tools = filtered
-
-            # Rescue: add back tools matching allowed_tools patterns
-            allowed_patterns = session.allowed_tools
-            if allowed_patterns:
-                visible_names = {t.name for t in tools}
-                for tool in self._router.tools:
-                    if tool.name not in visible_names and any(
-                        fnmatch.fnmatch(tool.name, pat) for pat in allowed_patterns
-                    ):
-                        tools.append(tool)
+        tools = self._filtered_tools_for_session(self._active_session)
 
         # Apply agent-level filtering (from v4 allowed_tools/disallowed_tools)
         if self._agent_include is not None or self._agent_exclude is not None:
@@ -628,10 +650,16 @@ class Environment(
             return mcp_types.ReadResourceResult(contents=contents)
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
-        """Return all tools including those from connectors."""
+        """Return tools filtered by the active scenario session (if any).
+
+        When an MCP client has an active scenario session (set via get_prompt),
+        applies scenario-level tool exclusions so the agent only sees permitted tools.
+        """
         if not self._tool_routing_built:
             await self._build_tool_routing()
-        return self._router.tools
+        session_id = _safe_session_id(None)
+        session = self._get_session(session_id)
+        return self._filtered_tools_for_session(session)
 
     async def _env_list_prompts(self) -> list[mcp_types.Prompt]:
         """Return all prompts including those from connectors."""
@@ -648,6 +676,17 @@ class Environment(
     ) -> list[Any]:
         """Route tool calls through our router (handles both local and connector tools)."""
         args = dict(arguments or {})
+
+        # Enforce scenario-level tool exclusions for MCP clients.
+        # Internal tools (underscore prefix, e.g. _hud_submit) are always allowed
+        # as they are infrastructure tools, not agent-facing.
+        if not name.startswith("_"):
+            session_id = _safe_session_id(None)
+            session = self._get_session(session_id)
+            if session:
+                allowed_names = {t.name for t in self._filtered_tools_for_session(session)}
+                if name not in allowed_names:
+                    raise ValueError(f"Tool '{name}' is not available in the current scenario.")
 
         # Extract trace context propagated via MCP request (meta or arguments)
         trace_id = args.pop("_hud_trace_id", None)
