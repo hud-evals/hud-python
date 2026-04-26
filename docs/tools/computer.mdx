@@ -12,7 +12,7 @@ Computer tools let agents interact with GUIs—click, type, scroll, drag, screen
 |------|-------|-------------------|
 | `AnthropicComputerTool` | Claude | 1280×720 |
 | `OpenAIComputerTool` | OpenAI / Operator | 1920×1080 |
-| `GeminiComputerTool` | Gemini | 1280×720 |
+| `GeminiComputerTool` | Gemini | 1440×900 |
 | `GLMComputerTool` | GLM-V | 1024×768 |
 | `HudComputerTool` | Any (function calling) | 1280×720 |
 
@@ -81,6 +81,24 @@ await computer(type="scroll", x=500, y=300, scroll_x=0, scroll_y=-100)
 # Drag
 await computer(type="drag", path=[{"x": 100, "y": 100}, {"x": 300, "y": 300}])
 ```
+
+## GeminiComputerTool
+
+For `GeminiAgent` with Gemini's native Computer Use models. Uses normalized
+0–999 coordinates and returns screenshots plus URL metadata in Gemini
+`FunctionResponse` parts.
+
+```python
+from hud.agents.gemini import GeminiAgent
+from hud.tools import GeminiComputerTool
+
+agent = GeminiAgent.create(model="gemini-3-flash-preview")
+env.add_tool(GeminiComputerTool())
+```
+
+**Supported native models**: `gemini-2.5-computer-use-preview-10-2025`, `gemini-3-flash-preview`
+
+**Actions**: `open_web_browser`, `click_at`, `hover_at`, `type_text_at`, `scroll_document`, `scroll_at`, `wait_5_seconds`, `go_back`, `go_forward`, `search`, `navigate`, `key_combination`, `drag_and_drop`
 
 ## GLMComputerTool
 

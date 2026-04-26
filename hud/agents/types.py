@@ -64,6 +64,9 @@ class GeminiConfig(BaseAgentConfig):
     top_k: int = 40
     max_output_tokens: int = 8192
     validate_api_key: bool = True
+    excluded_predefined_functions: list[str] = Field(default_factory=list)
+    thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+    include_thoughts: bool = True
 
 
 class GeminiCreateParams(BaseCreateParams, GeminiConfig):
@@ -79,7 +82,6 @@ class GeminiCUAConfig(GeminiConfig):
     model: str = Field(
         default="gemini-2.5-computer-use-preview-10-2025", validation_alias=_model_alias
     )
-    excluded_predefined_functions: list[str] = Field(default_factory=list)
 
 
 class GeminiCUACreateParams(BaseCreateParams, GeminiCUAConfig):

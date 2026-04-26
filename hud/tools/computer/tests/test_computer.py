@@ -6,8 +6,11 @@ import pytest
 from mcp.types import ImageContent, TextContent
 
 from hud.tools.computer.anthropic import AnthropicComputerTool
+from hud.tools.computer.gemini import GeminiComputerTool
+from hud.tools.computer.glm import GLMComputerTool
 from hud.tools.computer.hud import HudComputerTool
 from hud.tools.computer.openai import OpenAIComputerTool
+from hud.tools.computer.qwen import QwenComputerTool
 from hud.tools.executors.base import BaseExecutor
 from hud.tools.types import Coordinate
 
@@ -24,11 +27,12 @@ async def test_hud_computer_screenshot():
 
 @pytest.mark.asyncio
 async def test_hud_computer_click_simulation():
-    comp = HudComputerTool()
+    comp = HudComputerTool(executor=BaseExecutor())
     blocks = await comp(action="click", x=10, y=10)
     # Should return text confirming execution or screenshot block
     assert blocks
     assert len(blocks) > 0
+    assert any("(10, 10)" in content.text for content in blocks if isinstance(content, TextContent))
 
 
 @pytest.mark.asyncio
@@ -47,6 +51,16 @@ async def test_anthropic_computer_screenshot():
     assert blocks is not None
     assert len(blocks) > 0
     assert all(isinstance(b, (ImageContent | TextContent)) for b in blocks)
+
+
+@pytest.mark.asyncio
+async def test_gemini_computer_click_reports_agent_coordinates():
+    comp = GeminiComputerTool()
+    blocks = await comp(action="click_at", x=214, y=420)
+
+    assert any(
+        "(214, 420)" in content.text for content in blocks if isinstance(content, TextContent)
+    )
 
 
 @pytest.mark.asyncio
@@ -93,6 +107,48 @@ async def test_openai_computer_click():
     comp = OpenAIComputerTool()
     blocks = await comp(type="click", x=5, y=5)
     assert blocks
+    assert any("(5, 5)" in content.text for content in blocks if isinstance(content, TextContent))
+
+
+@pytest.mark.asyncio
+async def test_anthropic_computer_click_reports_agent_coordinates():
+    comp = AnthropicComputerTool()
+    blocks = await comp(action="left_click", coordinate=[123, 456], text=None)
+
+    assert any(
+        "(123, 456)" in content.text for content in blocks if isinstance(content, TextContent)
+    )
+
+
+@pytest.mark.asyncio
+async def test_qwen_computer_click_reports_agent_coordinates():
+    comp = QwenComputerTool()
+    blocks = await comp(action="left_click", coordinate=[123, 456])
+
+    assert any(
+        "(123, 456)" in content.text for content in blocks if isinstance(content, TextContent)
+    )
+
+
+@pytest.mark.asyncio
+async def test_glm_computer_click_reports_agent_coordinates():
+    comp = GLMComputerTool()
+    blocks = await comp(action="left_click", start_box="[123,456]")
+
+    assert any(
+        "(123, 456)" in content.text for content in blocks if isinstance(content, TextContent)
+    )
+
+
+def test_normalized_coordinate_max_stays_in_display_bounds():
+    comp = GLMComputerTool()
+
+    x, y = comp._scale_coordinates(999, 999)
+
+    assert x is not None
+    assert y is not None
+    assert int(x) <= comp.environment_width - 1
+    assert int(y) <= comp.environment_height - 1
 
 
 class TestHudComputerToolExtended:
@@ -113,7 +169,7 @@ class TestHudComputerToolExtended:
         result = await tool(action="click", x=100, y=200)
         assert result
         assert any(
-            "[SIMULATED]" in content.text for content in result if isinstance(content, TextContent)
+            "(100, 200)" in content.text for content in result if isinstance(content, TextContent)
         )
 
     @pytest.mark.asyncio

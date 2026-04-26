@@ -16,9 +16,76 @@ from .hud import HudComputerTool
 from .settings import computer_settings
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from hud.tools.executors.base import BaseExecutor
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
+    "gemini-2.5-computer-use-preview-10-2025",
+    "gemini-3-flash-preview",
+)
+
+PREDEFINED_COMPUTER_USE_FUNCTIONS = [
+    "open_web_browser",
+    "click_at",
+    "hover_at",
+    "type_text_at",
+    "scroll_document",
+    "scroll_at",
+    "wait_5_seconds",
+    "go_back",
+    "go_forward",
+    "search",
+    "navigate",
+    "key_combination",
+    "drag_and_drop",
+]
+
+
+def normalize_gemini_computer_use_args(action: str, raw_args: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize Gemini Computer Use function-call args to GeminiComputerTool kwargs."""
+    normalized_args: dict[str, Any] = {"action": action}
+
+    coord = raw_args.get("coordinate") or raw_args.get("coordinates")
+    if isinstance(coord, list | tuple) and len(coord) >= 2:
+        try:
+            normalized_args["x"] = int(coord[0])
+            normalized_args["y"] = int(coord[1])
+        except (TypeError, ValueError):
+            pass
+
+    dest = (
+        raw_args.get("destination")
+        or raw_args.get("destination_coordinate")
+        or raw_args.get("destinationCoordinate")
+    )
+    if isinstance(dest, list | tuple) and len(dest) >= 2:
+        try:
+            normalized_args["destination_x"] = int(dest[0])
+            normalized_args["destination_y"] = int(dest[1])
+        except (TypeError, ValueError):
+            pass
+
+    for key in (
+        "text",
+        "press_enter",
+        "clear_before_typing",
+        "safety_decision",
+        "direction",
+        "magnitude",
+        "url",
+        "keys",
+        "x",
+        "y",
+        "destination_x",
+        "destination_y",
+    ):
+        if key in raw_args:
+            normalized_args[key] = raw_args[key]
+
+    return normalized_args
 
 
 ACTION_FIELD = Field(..., description="Gemini Computer Use action to perform")
@@ -54,11 +121,13 @@ class GeminiComputerTool(HudComputerTool):
             api_type="computer_use",
             api_name="gemini_computer",
             role="computer",  # Mutually exclusive with other computer tools when native
+            supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
         ),
         AgentType.GEMINI_CUA: NativeToolSpec(
             api_type="computer_use",
             api_name="gemini_computer",
             role="computer",  # Mutually exclusive with other computer tools when native
+            supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
         ),
     }
 
@@ -92,6 +161,7 @@ class GeminiComputerTool(HudComputerTool):
             width=width,
             height=height,
             rescale_images=rescale_images,
+            coordinate_space=1000,
             name=name or "gemini_computer",
             title=title or "Gemini Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshots",
@@ -142,37 +212,6 @@ class GeminiComputerTool(HudComputerTool):
             result.url = requested_url or result.url or "about:blank"
             return result.to_content_blocks()
 
-        # Scale coordinates helper
-        def _scale(xv: int | None, yv: int | None) -> tuple[int | None, int | None]:
-            return self._scale_coordinates(xv, yv)
-
-        # Gemini emits coordinates/magnitudes in a 0-1000 normalized space.
-        def _denormalize(value: float | None, axis: Literal["x", "y"]) -> int | None:
-            if value is None:
-                return None
-            try:
-                numeric = float(value)
-            except (TypeError, ValueError):
-                try:
-                    return int(value)  # type: ignore[arg-type]
-                except (TypeError, ValueError):
-                    return None
-
-            # Treat values within the normalized range (including defaults like 800).
-            if 0 <= numeric <= 1000:
-                target = self.width if axis == "x" else self.height
-                numeric = numeric / 1000 * target
-
-            return round(numeric)
-
-        def _scale_distance(value: int | None, axis: Literal["x", "y"]) -> int | None:
-            if value is None:
-                return None
-            scale = self.scale_x if axis == "x" else self.scale_y
-            if scale != 1.0:
-                return round(value / scale)
-            return value
-
         # Map actions
         if action == "open_web_browser":
             screenshot = await self.executor.screenshot()
@@ -185,18 +224,14 @@ class GeminiComputerTool(HudComputerTool):
         elif action == "click_at":
             if x is None or y is None:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="x and y are required"))
-            dx = _denormalize(x, "x")
-            dy = _denormalize(y, "y")
-            sx, sy = _scale(dx, dy)
+            sx, sy = self._scale_coordinates(x, y)
             result = await self.executor.click(x=sx, y=sy)
             return await _finalize(result)
 
         elif action == "hover_at":
             if x is None or y is None:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="x and y are required"))
-            dx = _denormalize(x, "x")
-            dy = _denormalize(y, "y")
-            sx, sy = _scale(dx, dy)
+            sx, sy = self._scale_coordinates(x, y)
             result = await self.executor.move(x=sx, y=sy)
             return await _finalize(result)
 
@@ -206,9 +241,7 @@ class GeminiComputerTool(HudComputerTool):
             if text is None:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required"))
 
-            dx = _denormalize(x, "x")
-            dy = _denormalize(y, "y")
-            sx, sy = _scale(dx, dy)
+            sx, sy = self._scale_coordinates(x, y)
 
             # Focus the field
             await self.executor.move(x=sx, y=sy, take_screenshot=False)
@@ -233,37 +266,21 @@ class GeminiComputerTool(HudComputerTool):
             mag = magnitude if magnitude is not None else 800
             # Convert to environment units while preserving sign
             if direction in ("down", "up"):
-                distance = _denormalize(mag, "y")
+                distance = self._scale_distance(mag, "y")
                 if distance is None:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS, message="Unable to determine scroll magnitude"
-                        )
-                    )
-                distance = _scale_distance(distance, "y")
-                if distance is None:
-                    raise McpError(
-                        ErrorData(
-                            code=INVALID_PARAMS,
-                            message="Unable to determine scroll magnitude",
                         )
                     )
                 scroll_y = distance if direction == "down" else -distance
                 scroll_x = None
             elif direction in ("right", "left"):
-                distance = _denormalize(mag, "x")
+                distance = self._scale_distance(mag, "x")
                 if distance is None:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS, message="Unable to determine scroll magnitude"
-                        )
-                    )
-                distance = _scale_distance(distance, "x")
-                if distance is None:
-                    raise McpError(
-                        ErrorData(
-                            code=INVALID_PARAMS,
-                            message="Unable to determine scroll magnitude",
                         )
                     )
                 scroll_x = distance if direction == "right" else -distance
@@ -281,41 +298,23 @@ class GeminiComputerTool(HudComputerTool):
             if x is None or y is None:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="x and y are required"))
             mag = magnitude if magnitude is not None else 800
-            dx = _denormalize(x, "x")
-            dy = _denormalize(y, "y")
-            sx, sy = _scale(dx, dy)
+            sx, sy = self._scale_coordinates(x, y)
             if direction in ("down", "up"):
-                distance = _denormalize(mag, "y")
+                distance = self._scale_distance(mag, "y")
                 if distance is None:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS, message="Unable to determine scroll magnitude"
-                        )
-                    )
-                distance = _scale_distance(distance, "y")
-                if distance is None:
-                    raise McpError(
-                        ErrorData(
-                            code=INVALID_PARAMS,
-                            message="Unable to determine scroll magnitude",
                         )
                     )
                 scroll_y = distance if direction == "down" else -distance
                 scroll_x = None
             elif direction in ("right", "left"):
-                distance = _denormalize(mag, "x")
+                distance = self._scale_distance(mag, "x")
                 if distance is None:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS, message="Unable to determine scroll magnitude"
-                        )
-                    )
-                distance = _scale_distance(distance, "x")
-                if distance is None:
-                    raise McpError(
-                        ErrorData(
-                            code=INVALID_PARAMS,
-                            message="Unable to determine scroll magnitude",
                         )
                     )
                 scroll_x = distance if direction == "right" else -distance
@@ -382,21 +381,7 @@ class GeminiComputerTool(HudComputerTool):
                         message="x, y, destination_x, and destination_y are required",
                     )
                 )
-            sx_norm = _denormalize(x, "x")
-            sy_norm = _denormalize(y, "y")
-            dx_norm = _denormalize(destination_x, "x")
-            dy_norm = _denormalize(destination_y, "y")
-            sx, sy = _scale(sx_norm, sy_norm)
-            dx_scaled, dy_scaled = _scale(dx_norm, dy_norm)
-            # Build a two-point path
-            path = []  # type: list[tuple[int, int]]
-            if (
-                sx is not None
-                and sy is not None
-                and dx_scaled is not None
-                and dy_scaled is not None
-            ):
-                path = [(sx, sy), (dx_scaled, dy_scaled)]
+            path = self._scale_path([(x, y), (destination_x, destination_y)])
             result = await self.executor.drag(path=path)
             return await _finalize(result)
 
