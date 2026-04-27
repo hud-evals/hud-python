@@ -32,6 +32,7 @@ from .analyze import analyze_command  # noqa: E402
 from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
 from .convert import convert_command  # noqa: E402
+from .export import export_app  # noqa: E402
 from .debug import debug_command  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
 from .dev import dev_command  # noqa: E402
@@ -116,6 +117,9 @@ app.add_typer(scenario_app, name="scenario")
 
 # Sync subcommand group
 app.add_typer(sync_app, name="sync")
+
+# Export subcommand group (HUD → Harbor / ...)
+app.add_typer(export_app, name="export")
 
 # RL subcommand group
 rl_app = typer.Typer(help="🚀 RL training commands\n\nExample: hud rl run my-taskset -m <model-id>")
