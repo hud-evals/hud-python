@@ -968,4 +968,9 @@ def find_content(result: MCPToolResult) -> str | None:
                             return value
                 except json.JSONDecodeError:
                     pass
+                if not isinstance(json_content,dict):
+                    continue
+                for key, value in json_content.items():
+                    if key in accept_keys:
+                        return value
     return ""
