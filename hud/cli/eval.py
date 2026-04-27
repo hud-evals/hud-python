@@ -101,10 +101,6 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # auto_respond = true
 # gateway = false  # Route LLM API calls through HUD Gateway
 
-[agent]
-# allowed_tools = ["computer", "playwright"]
-# disallowed_tools = []
-
 [claude]
 # model = "claude-sonnet-4-5"
 # max_tokens = 16384
@@ -164,9 +160,6 @@ class EvalConfig(BaseModel):
         "gateway",
         "taskset",
     }
-    # Fields loaded from [agent] section
-    _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
-
     # Eval settings
     source: str | None = None
     agent_type: AgentType | None = None
@@ -183,10 +176,6 @@ class EvalConfig(BaseModel):
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
     taskset: str | None = None  # Taskset name to associate job with
-
-    # Base agent config (these merge with task's agent_config)
-    allowed_tools: list[str] | None = None
-    disallowed_tools: list[str] | None = None
 
     agent_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -264,11 +253,6 @@ class EvalConfig(BaseModel):
             raise ValueError("agent_type must be set before calling get_agent_kwargs()")
 
         kwargs: dict[str, Any] = {}
-
-        if self.allowed_tools:
-            kwargs["allowed_tools"] = self.allowed_tools
-        if self.disallowed_tools:
-            kwargs["disallowed_tools"] = self.disallowed_tools
 
         # Apply agent-specific config
         agent_key = self.agent_type.value
@@ -370,7 +354,6 @@ class EvalConfig(BaseModel):
 
         # Extract sections
         eval_section = toml_data.get("eval", {})
-        agent_section = toml_data.get("agent", {})
 
         # Build config data
         data: dict[str, Any] = {}
@@ -381,11 +364,6 @@ class EvalConfig(BaseModel):
         for key in cls._EVAL_FIELDS:
             if key in eval_section:
                 data[key] = eval_section[key]
-
-        # Agent base config
-        for key in cls._AGENT_FIELDS:
-            if key in agent_section:
-                data[key] = agent_section[key]
 
         # Agent-specific configs (claude, openai, gemini, etc.)
         agent_config: dict[str, Any] = {}
@@ -404,8 +382,6 @@ class EvalConfig(BaseModel):
         self,
         agent: str | None = None,
         config: list[str] | None = None,
-        allowed_tools: str | None = None,
-        disallowed_tools: str | None = None,
         task_ids: str | None = None,
         **cli_args: Any,
     ) -> EvalConfig:
@@ -415,13 +391,6 @@ class EvalConfig(BaseModel):
         if agent is not None:
             overrides["agent_type"] = agent
 
-        # Parse comma-separated lists
-        if allowed_tools is not None:
-            overrides["allowed_tools"] = [t.strip() for t in allowed_tools.split(",") if t.strip()]
-        if disallowed_tools is not None:
-            overrides["disallowed_tools"] = [
-                t.strip() for t in disallowed_tools.split(",") if t.strip()
-            ]
         if task_ids is not None:
             overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
 
@@ -539,12 +508,6 @@ class EvalConfig(BaseModel):
         if self.gateway:
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
 
-        # Tool filters (only if set)
-        if self.allowed_tools:
-            table.add_row("allowed_tools", ", ".join(self.allowed_tools))
-        if self.disallowed_tools:
-            table.add_row("disallowed_tools", ", ".join(self.disallowed_tools))
-
         # Agent config section
         if self.agent_type:
             table.add_row("", "")
@@ -558,12 +521,7 @@ class EvalConfig(BaseModel):
                 "model_name",
                 "validate_api_key",
                 "model_config",
-                "allowed_tools",
-                "disallowed_tools",
                 "system_prompt",
-                "response_tool_name",
-                "append_setup_output",
-                "initial_screenshot",
             }
 
             sensitive_fields = {"api_key", "api_secret", "token", "password", "secret"}
@@ -753,10 +711,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     if len(tasks) == 1 and cfg.group_size == 1:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
-        # Get prompt from args (v4 tasks) or show scenario name
-        prompt = tasks[0].args.get("prompt") if tasks[0].args else tasks[0].scenario
-        if prompt:
-            hud_console.info(f"Prompt: {prompt}")
+        if tasks[0].scenario:
+            hud_console.info(f"Scenario: {tasks[0].scenario}")
     else:
         hud_console.info(
             f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
@@ -791,7 +747,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",  # noqa: E501
+        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible",
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(
@@ -807,13 +763,6 @@ def eval_command(
         None,
         "--from-json",
         help="Load full eval configuration from a JSON file (e.g. exported from a HUD job).",
-    ),
-    # Task-overridable settings
-    allowed_tools: str | None = typer.Option(
-        None, "--allowed-tools", help="Comma-separated allowed tools"
-    ),
-    disallowed_tools: str | None = typer.Option(
-        None, "--disallowed-tools", help="Comma-separated disallowed tools"
     ),
     # Eval settings
     max_concurrent: int | None = typer.Option(
@@ -877,8 +826,6 @@ def eval_command(
         full=full,
         max_concurrent=max_concurrent,
         max_steps=max_steps,
-        allowed_tools=allowed_tools,
-        disallowed_tools=disallowed_tools,
         task_ids=task_ids,
         verbose=verbose,
         very_verbose=very_verbose,

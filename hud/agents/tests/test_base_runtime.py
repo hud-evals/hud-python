@@ -7,7 +7,7 @@ from typing import Any
 import mcp.types as types
 import pytest
 
-from hud.agents.base import BaseCreateParams, MCPAgent, find_content, find_reward, text_to_blocks
+from hud.agents.base import BaseCreateParams, MCPAgent, text_to_blocks
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
@@ -37,10 +37,7 @@ class MockEvalContext(EvalContext):
         self.reward: float | None = None
         self._call_tool_handler: Any = None
 
-        # Environment attributes
         self._router = ToolRouter()
-        self._agent_include: list[str] | None = None
-        self._agent_exclude: list[str] | None = None
 
         # EvalContext attributes
         self._task = None
@@ -95,7 +92,7 @@ class DummyAgent(MCPAgent):
     @classmethod
     def agent_type(cls) -> AgentType:
         """Return the AgentType for the dummy agent."""
-        return AgentType.INTEGRATION_TEST
+        return AgentType.OPENAI
 
     def __init__(self, **kwargs: Any) -> None:
         params = DummyCreateParams(**kwargs)
@@ -114,20 +111,6 @@ class DummyAgent(MCPAgent):
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[Any]:
         return [types.TextContent(text="tools", type="text")]
-
-
-def test_find_reward_and_content_extractors() -> None:
-    """Test reward and content extraction from tool results."""
-    # Structured content
-    r = MCPToolResult(
-        content=text_to_blocks("{}"), isError=False, structuredContent={"reward": 0.7}
-    )
-    assert find_reward(r) == 0.7
-
-    # Text JSON
-    r2 = MCPToolResult(content=text_to_blocks('{"score": 0.5, "content": "hi"}'), isError=False)
-    assert find_reward(r2) == 0.5
-    assert find_content(r2) == "hi"
 
 
 def test_get_available_tools_before_run_raises() -> None:

@@ -1,23 +1,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import uuid
 from enum import Enum
 from typing import Any, Literal
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from hud.settings import settings
-from hud.utils.env import resolve_env_vars as _resolve_env_vars
-from hud.utils.tool_shorthand import normalize_to_tool_call_dict
-
-logger = logging.getLogger(__name__)
-
-# Guard to ensure we only log missing HUD_API_KEY once
-_missing_api_key_error_logged: bool = False
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentType(str, Enum):
@@ -27,7 +17,6 @@ class AgentType(str, Enum):
     GEMINI = "gemini"
     GEMINI_CUA = "gemini_cua"
     OPENAI_COMPATIBLE = "openai_compatible"
-    INTEGRATION_TEST = "integration_test"
 
     @property
     def cls(self) -> type:
@@ -55,10 +44,6 @@ class AgentType(str, Enum):
             from hud.agents.openai_chat import OpenAIChatAgent
 
             return OpenAIChatAgent
-        elif self == AgentType.INTEGRATION_TEST:
-            from hud.agents.misc.integration_test_agent import IntegrationTestRunner
-
-            return IntegrationTestRunner
         else:
             raise ValueError(f"Unsupported agent type: {self}")
 
@@ -81,7 +66,6 @@ class AgentType(str, Enum):
             AgentType.GEMINI: GeminiConfig,
             AgentType.GEMINI_CUA: GeminiCUAConfig,
             AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
-            AgentType.INTEGRATION_TEST: BaseAgentConfig,
         }
         if self not in mapping:
             raise ValueError(f"Unsupported agent type for config: {self}")
@@ -89,172 +73,11 @@ class AgentType(str, Enum):
 
 
 class BaseAgentConfig(BaseModel):
-    """Agent configuration for LLM-specific settings.
-
-    Note: allowed_tools, disallowed_tools, response_tool_name, append_setup_output,
-    and initial_screenshot are kept for backwards compatibility with v4 task configs
-    but are no longer applied at the agent level. These should be configured on the
-    Environment/Task instead.
-    """
+    """Agent configuration for LLM-specific settings."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
 
-    # LLM-specific setting
     system_prompt: str | None = None
-
-    # Deprecated: kept for backwards compat with v4 task configs
-    # allowed_tools/disallowed_tools are applied at Environment level
-    # append_setup_output is applied by EvalContext -> agent
-    # response_tool_name and initial_screenshot are parsed but NOT implemented
-    allowed_tools: list[str] | None = None
-    disallowed_tools: list[str] | None = None
-    response_tool_name: str | None = None  # Not implemented
-    append_setup_output: bool = False
-    append_setup_tool: bool = False  # Alias for append_setup_output
-    initial_screenshot: bool = False  # Not implemented
-
-
-class LegacyTask(BaseModel):
-    """
-    DEPRECATED: Use Task from env() instead.
-
-    A task configuration that can be used to create a task.
-
-    The mcp_config field supports environment variable substitution using
-    template placeholders in the format ${VAR_NAME} or ${VAR_NAME:default_value}.
-
-    .. deprecated:: 0.5.0
-        LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0
-        (no earlier than March 1st, 2026).
-
-        Use one of these migration paths:
-
-        1. Quick conversion: ``Task.from_v4(legacy_task)`` converts LegacyTask to Task
-        2. Full migration: Use ``@env.scenario()`` with setup code before first yield
-           and evaluate code after first yield
-
-        See https://docs.hud.ai/migration for the full migration guide.
-
-    Example (deprecated):
-        mcp_config: {
-            "hud": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
-                "headers": {
-                    "Authorization": "Bearer ${HUD_API_KEY}",
-                    "Mcp-Image": "your-mcp-image"
-                }
-            }
-        }
-    """
-
-    id: str | None = None
-    prompt: str
-    mcp_config: dict[str, Any]
-    setup_tool: MCPToolCall | list[MCPToolCall] | None = None
-    evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
-    integration_test_tool: MCPToolCall | list[MCPToolCall] | None = None
-    agent_config: BaseAgentConfig | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    def __init__(self, **data: Any) -> None:
-        """Initialize LegacyTask with deprecation warning."""
-        import warnings
-
-        warnings.warn(
-            "LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0 "
-            "(no earlier than March 1st, 2026). "
-            "Use Task.from_v4() for quick conversion, or migrate to @env.scenario(). "
-            "See https://docs.hud.ai/migration for details.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(**data)
-
-    @field_validator("mcp_config", "metadata", mode="before")
-    @classmethod
-    def parse_json_strings(cls, v: Any) -> Any:
-        """Parse JSON strings into dictionaries."""
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
-
-                raise HudConfigError(f"Invalid JSON string: {e}") from e
-        return v
-
-    @field_validator("agent_config", mode="before")
-    @classmethod
-    def parse_agent_config(cls, v: Any) -> BaseAgentConfig | None:
-        """Parse agent_config into BaseAgentConfig."""
-        if v is None:
-            return None
-        if isinstance(v, BaseAgentConfig):
-            return v
-        if isinstance(v, str):
-            try:
-                v = json.loads(v)
-            except json.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
-
-                raise HudConfigError(f"Invalid JSON string for agent_config: {e}") from e
-        if isinstance(v, dict):
-            return BaseAgentConfig(**v)
-        return v
-
-    @field_validator("setup_tool", "evaluate_tool", "integration_test_tool", mode="before")
-    @classmethod
-    def convert_dict_to_tool_call(cls, v: Any, info: Any) -> Any:
-        """Convert dict (with shorthands) to MCPToolCall instance.
-
-        Supports nested forms by walking to the deepest tool name and its arguments.
-        Examples:
-        - {"name": "navigate", "arguments": {...}} -> name=navigate
-        - {"navigate": {...}} -> name=navigate
-        - {"setup": {"navigate": {...}}} -> name=navigate
-        - {"name": "setup", "arguments": {"name": "navigate", "arguments": {...}}}
-          -> name=navigate
-        - Lists are normalized element-wise
-        """
-        if v is None:
-            return None
-
-        # Parse JSON string if needed
-        if isinstance(v, str):
-            try:
-                v = json.loads(v)
-            except json.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
-
-                raise HudConfigError(f"Invalid JSON string: {e}") from e
-
-        normalized = normalize_to_tool_call_dict(v)
-
-        if isinstance(normalized, dict):
-            return MCPToolCall(**normalized)
-        if isinstance(normalized, list):
-            return [MCPToolCall(**item) if isinstance(item, dict) else item for item in normalized]
-        return v
-
-    @field_validator("mcp_config", mode="before")
-    @classmethod
-    def resolve_env_vars(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """
-        Automatically resolve environment variables in mcp_config.
-
-        Supports ${VAR_NAME} syntax with variable substitution from
-        system environment variables and settings (including HUD_API_KEY, etc.)
-
-        Missing variables resolve to empty strings.
-        """
-        # Warn once if HUD_API_KEY is not set
-        if not settings.api_key:
-            global _missing_api_key_error_logged
-            if not _missing_api_key_error_logged:
-                logger.error("HUD_API_KEY is not set, tracing and remote training will not work")
-                _missing_api_key_error_logged = True
-
-        return _resolve_env_vars(v)
 
 
 class MCPToolCall(CallToolRequestParams):
@@ -456,7 +279,7 @@ class Trace(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
 
     # Metadata
-    task: LegacyTask | None = Field(default=None)
+    task: Task | None = Field(default=None)
 
     # Trace
     trace: list[TraceStep] = Field(default_factory=list)
@@ -476,15 +299,17 @@ class Trace(BaseModel):
 # Re-export Task for backwards compatibility (after module defs to avoid circular import)
 from hud.eval.task import Task  # noqa: E402
 
-# Type alias for functions that accept v5 Task, v4 LegacyTask, or raw dicts
-TaskInput = Task | LegacyTask | dict[str, Any]
+# Resolve Trace.task's forward reference now that Task is available.
+Trace.model_rebuild()
+
+# Type alias for functions that accept v5 Task objects or raw v5 task dicts.
+TaskInput = Task | dict[str, Any]
 
 __all__ = [
     "AgentResponse",
     "AgentType",
     "HudSpan",
     "InferenceResult",
-    "LegacyTask",
     "MCPToolCall",
     "MCPToolResult",
     "Task",

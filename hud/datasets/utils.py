@@ -32,7 +32,7 @@ class SingleTaskRequest(BaseModel):
     """Request to run a single task remotely - mirrors run_single_task() args."""
 
     task: dict[str, Any] = Field(
-        description="Task definition (v4 LegacyTask or v5 Task format).",
+        description="Task definition in v5 Task format.",
     )
     agent_type: AgentType = Field(description="Agent type to execute the task.")
     agent_params: dict[str, Any] = Field(
@@ -54,21 +54,26 @@ class SingleTaskRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_task(self) -> SingleTaskRequest:
-        """Validate task is either v4 LegacyTask or v5 Task format."""
-        from hud.eval.utils import is_v4_format, validate_v4_task
+        """Validate task is v5 Task format."""
+        legacy_fields = {
+            "prompt",
+            "mcp_config",
+            "setup_tool",
+            "evaluate_tool",
+            "integration_test_tool",
+        }
+        present = legacy_fields.intersection(self.task)
+        if present:
+            raise ValueError(
+                "v4 task fields are no longer supported: "
+                f"{', '.join(sorted(present))}. "
+                "Use v5 tasks with env, scenario, args, and validation."
+            )
 
-        # v4 format: looks like v4 (prompt + mcp_config)?
-        if is_v4_format(self.task):
-            # Validate completeness (requires evaluate_tool too)
-            validate_v4_task(self.task)
-            return self
+        if "env" not in self.task:
+            raise ValueError("Task must have 'env' (v5 Task format)")
 
-        # v5 format: env required
-        if "env" in self.task:
-            return self
-
-        # Neither v4 nor v5
-        raise ValueError("Task must have 'env' (v5) or 'prompt'+'mcp_config'+'evaluate_tool' (v4)")
+        return self
 
     @field_validator("job_id")
     @classmethod
@@ -127,7 +132,7 @@ async def submit_rollouts(
     Returns the list of trace_ids for tracking.
 
     Args:
-        tasks: List of tasks (v5 Task, v4 LegacyTask, or dicts)
+        tasks: List of v5 Task objects or dicts
         job_id: HUD job ID for telemetry grouping
         agent_type: Agent type to use for execution
         agent_params: Parameters passed to agent.create()
@@ -136,39 +141,18 @@ async def submit_rollouts(
         batch_size: Number of rollouts per API batch request
         metadata: Additional metadata for each rollout
     """
-    from hud.eval.utils import is_v4_format
-
     if not settings.api_key:
         raise ValueError("HUD_API_KEY is required for remote execution")
 
     # Convert to dicts once for uniform processing
     task_dicts = _normalize_tasks(tasks)
 
-    # Validate v4 tasks have remote-compatible mcp_config (URL-based, not command-based)
-    for i, td in enumerate(task_dicts):
-        if not is_v4_format(td):
-            continue  # v5 tasks use env config, no mcp_config to check
-        mcp_config = td.get("mcp_config") or {}
-        for server_name, server_cfg in mcp_config.items():
-            is_local = (
-                isinstance(server_cfg, dict)
-                and "command" in server_cfg
-                and not server_cfg.get("url")
-            )
-            if is_local:
-                task_label = td.get("slug") or td.get("id") or i
-                raise ValueError(
-                    f"Remote execution requires URL-based mcp_config. "
-                    f"Task {task_label} uses local Docker config for '{server_name}'. "
-                    "Convert to remote with: hud convert <tasks_file>"
-                )
-
     # Build single task requests
     requests: list[SingleTaskRequest] = []
     for task_idx, td in enumerate(task_dicts):
         base_task_id = td.get("slug") or td.get("id") or f"task_{task_idx}"
         base_task_id = str(base_task_id)
-        trace_name = td.get("prompt") or td.get("scenario") or base_task_id
+        trace_name = td.get("scenario") or base_task_id
 
         for rollout_idx in range(group_size):
             task_id = f"{base_task_id}_r{rollout_idx}" if group_size > 1 else base_task_id

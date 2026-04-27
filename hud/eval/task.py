@@ -25,7 +25,6 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, cast
 
@@ -35,7 +34,6 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
-    model_serializer,
     model_validator,
 )
 
@@ -48,52 +46,19 @@ if TYPE_CHECKING:
 
 __all__ = ["Task", "TaskAgentConfig", "build_eval_name"]
 
-logger = logging.getLogger(__name__)
-
 
 class TaskAgentConfig(BaseModel):
     """Agent configuration for a Task.
 
     Contains settings that should be passed to the agent when running this task.
-
-    Note: allowed_tools/disallowed_tools are handled at the Environment level
-    (via env.include()/env.exclude() for v5, or extracted by build_env_from_v4() for v4).
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     system_prompt: str | None = Field(
         default=None,
         description="Custom system prompt to pass to the agent",
     )
-
-    # Agent behavior settings (from v4 agent_config, applied by EvalContext)
-    append_setup_output: bool = Field(
-        default=False,
-        description="Append setup tool output to the agent's initial prompt",
-    )
-    append_setup_tool: bool = Field(
-        default=False,
-        description="Alias for append_setup_output (backwards compat)",
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def warn_extra_fields(cls, data: Any) -> Any:
-        """Warn about extra fields that will be ignored."""
-        if isinstance(data, dict):
-            known_fields = {
-                "system_prompt",
-                "append_setup_output",
-                "append_setup_tool",
-            }
-            extra = set(data.keys()) - known_fields
-            if extra:
-                logger.warning(
-                    "Deprecated or unknown fields in agent_config will be ignored: %s",
-                    ", ".join(sorted(extra)),
-                )
-        return data
 
 
 def build_eval_name(scenario: str | None, args: dict[str, Any] | None) -> str:
@@ -152,14 +117,7 @@ class Task(BaseModel):
         task = Task(env=env, scenario="checkout", args={"user_id": "alice"})
         ```
 
-    Migration from v4:
-        Use Task.from_v4() to convert LegacyTask objects:
-
-        ```python
-        task = Task.from_v4(legacy_task)
-        # or
-        task = Task.from_v4({"prompt": "...", "mcp_config": {...}, ...})
-        ```
+    Legacy v4 task dictionaries with ``prompt``/``mcp_config`` are no longer accepted.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -213,24 +171,25 @@ class Task(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def detect_v4_format(cls, data: Any) -> Any:
-        """Auto-detect v4 LegacyTask format and convert to v5 Task format.
-
-        If the input dict is a valid v4 format (has prompt, mcp_config, evaluate_tool),
-        it's converted using build_env_from_v4().
-
-        This allows Task(**v4_dict) to work seamlessly.
-        """
-        from hud.eval.utils import build_env_from_v4, is_v4_format, validate_v4_task
-
+    def reject_legacy_fields(cls, data: Any) -> Any:
+        """Reject legacy v4 task fields instead of silently ignoring them."""
         if not isinstance(data, dict):
             return data
 
-        if is_v4_format(data):
-            # Validate completeness before conversion
-            validate_v4_task(data)
-            # build_env_from_v4 returns a dict with all Task fields
-            return build_env_from_v4(data)
+        legacy_fields = {
+            "prompt",
+            "mcp_config",
+            "setup_tool",
+            "evaluate_tool",
+            "integration_test_tool",
+        }
+        present = legacy_fields.intersection(data)
+        if present:
+            raise ValueError(
+                "v4 task fields are no longer supported: "
+                f"{', '.join(sorted(present))}. "
+                "Use v5 tasks with env, scenario, args, and validation."
+            )
 
         return data
 
@@ -294,88 +253,6 @@ class Task(BaseModel):
         if env is None:
             return None
         return env.to_config()
-
-    @model_serializer(mode="wrap")
-    def _serialize_task(
-        self,
-        handler: Any,  # SerializerFunctionWrapHandler
-    ) -> dict[str, Any]:
-        """Custom serializer for v4 format flattening.
-
-        For v5 tasks: uses default serialization (env field handled by field_serializer)
-        For v4 tasks: flattens {"prompt": ..., "mcp_config": ..., "evaluate_tool": ...}
-        """
-        # Get default serialization (env is already converted by field_serializer)
-        data = handler(self)
-
-        # Check if this is a v4 task (env config has mcp_config)
-        env_config = data.get("env")
-        if env_config and isinstance(env_config, dict) and "mcp_config" in env_config:
-            # v4 format - flatten into top-level dict
-            result = env_config.copy()
-
-            # Map validation → integration_test_tool
-            if self.validation:
-                result["integration_test_tool"] = [
-                    {"name": v.name, "arguments": v.arguments or {}} for v in self.validation
-                ]
-
-            # Preserve agent_config
-            agent_config: dict[str, Any] = {}
-            if data.get("agent_config"):
-                agent_config.update(data["agent_config"])
-            # Restore tool filters from Environment (they were extracted during v4 conversion)
-            if self.env is not None:
-                if getattr(self.env, "_agent_include", None) is not None:
-                    agent_config["allowed_tools"] = self.env._agent_include
-                elif "allowed_tools" not in agent_config:
-                    # ["*"] was converted to None, restore it for serialization
-                    agent_config["allowed_tools"] = ["*"]
-                if getattr(self.env, "_agent_exclude", None) is not None:
-                    agent_config["disallowed_tools"] = self.env._agent_exclude
-            if agent_config:
-                result["agent_config"] = agent_config
-
-            # Preserve metadata
-            if data.get("metadata"):
-                result["metadata"] = data["metadata"]
-
-            # Preserve id
-            if data.get("id"):
-                result["id"] = data["id"]
-            # Preserve slug
-            if data.get("slug"):
-                result["slug"] = data["slug"]
-
-            return result
-
-        return data
-
-    @classmethod
-    def from_v4(cls, source: Any) -> Task:
-        """Convert v4 LegacyTask format to v5 Task.
-
-        This is a convenience wrapper. You can also use Task(**dict) directly
-        since the model validator auto-detects v4 format.
-
-        Args:
-            source: LegacyTask, dict, or JSON string with v4 fields
-
-        Returns:
-            Task configured for v4 behavior
-        """
-        import json as json_module
-
-        # JSON string → dict
-        if isinstance(source, str):
-            source = json_module.loads(source)
-
-        # LegacyTask → dict (import only when needed)
-        if hasattr(source, "model_dump"):
-            source = source.model_dump()
-
-        # Model validator handles v4 detection and conversion
-        return cls(**source)
 
     async def run(
         self,

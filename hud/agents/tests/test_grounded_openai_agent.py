@@ -77,7 +77,6 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
         grounder_config=grounder_cfg,
         openai_client=fake_openai,
         model="gpt-4o-mini",
-        initial_screenshot=False,
     )
 
     # Inject a dummy grounded tool to observe args without full initialization
@@ -130,7 +129,6 @@ async def test_get_response_with_reasoning() -> None:
             grounder_config=grounder_cfg,
             openai_client=fake_openai,
             model="gpt-4o-mini",
-            initial_screenshot=False,
         )
 
         mock_response = MagicMock()

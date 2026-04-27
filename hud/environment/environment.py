@@ -158,26 +158,12 @@ class Environment(
         self._resource_routing_built = False
         self._in_context = False
 
-        # Tool call queues - run after connections established
-        self._setup_calls: list[tuple[str, dict[str, Any]]] = []
-        self._evaluate_calls: list[tuple[str, dict[str, Any]]] = []
-        self._integration_test_calls: list[tuple[str, dict[str, Any]]] = []
-        # Store setup tool results for append_setup_output feature
-        self._setup_results: list[MCPToolResult] = []
-
         # Default prompt (EvalContext has per-run prompt)
         self.prompt: str | None = None
 
         # Serialization support
-        # _hub_config: set by connect_hub() for v5 format {"name": "hub", "include": [...]}
-        # _mcp_config: set by connect_mcp_config() for v4 format {"server_name": {...}}
+        # _hub_config: set by connect_hub() for serializable task configs.
         self._hub_config: dict[str, Any] | None = None
-        self._mcp_config: dict[str, dict[str, Any]] | None = None
-
-        # Agent-level tool filtering (applied in as_tools(), not at connection level)
-        # This allows Environment to call all tools while limiting agent visibility
-        self._agent_include: list[str] | None = None
-        self._agent_exclude: list[str] | None = None
 
         # Stable session identifier for multi-turn reuse (set by Chat).
         # When set, Connector.copy() reuses this as Environment-Id instead
@@ -198,10 +184,9 @@ class Environment(
     def as_tools(self) -> list[mcp_types.Tool]:
         """Return tools in MCP format (base format).
 
-        Applies scenario-level and agent-level filtering in order:
+        Applies scenario-level filtering in order:
         1. Scenario-level: exclude_sources and exclude_tools remove tools
         2. Scenario-level: allowed_tools rescues specific tools back from exclusions
-        3. Agent-level: _agent_include/_agent_exclude (fnmatch)
 
         Supports fnmatch-style wildcards (e.g., "*setup*", "browser_*").
         """
@@ -238,23 +223,6 @@ class Environment(
                         fnmatch.fnmatch(tool.name, pat) for pat in allowed_patterns
                     ):
                         tools.append(tool)
-
-        # Apply agent-level filtering (from v4 allowed_tools/disallowed_tools)
-        if self._agent_include is not None or self._agent_exclude is not None:
-            filtered = []
-            for tool in tools:
-                # Include filter: None means include all, check if matches any pattern
-                if self._agent_include is not None and not any(
-                    fnmatch.fnmatch(tool.name, pattern) for pattern in self._agent_include
-                ):
-                    continue
-                # Exclude filter: skip if tool matches any exclude pattern
-                if self._agent_exclude is not None and any(
-                    fnmatch.fnmatch(tool.name, pattern) for pattern in self._agent_exclude
-                ):
-                    continue
-                filtered.append(tool)
-            return filtered
 
         return tools
 
@@ -358,38 +326,8 @@ class Environment(
 
         return await asyncio.gather(*[self.call_tool(c) for c in tool_calls])
 
-    # =========================================================================
-    # Lifecycle Configuration
-    # =========================================================================
-
-    def setup_tool(self, call: Any, /, **kwargs: Any) -> Environment:
-        """Add a tool call to execute after connections are established."""
-        from hud.environment.utils import parse_tool_call
-
-        if isinstance(call, str) and kwargs:
-            self._setup_calls.append((call, kwargs))
-        else:
-            parsed, _ = parse_tool_call(call)
-            self._setup_calls.append((parsed.name, parsed.arguments or {}))
-        return self
-
-    def evaluate_tool(self, call: Any, /, **kwargs: Any) -> Environment:
-        """Add a tool call to execute before disconnecting."""
-        from hud.environment.utils import parse_tool_call
-
-        if isinstance(call, str) and kwargs:
-            self._evaluate_calls.append((call, kwargs))
-        else:
-            parsed, _ = parse_tool_call(call)
-            self._evaluate_calls.append((parsed.name, parsed.arguments or {}))
-        return self
-
-    # =========================================================================
-    # Context Manager
-    # =========================================================================
-
     async def __aenter__(self) -> Self:
-        """Connect all connectors, build routing, run setup tools."""
+        """Connect all connectors and build routing."""
         self._in_context = True
 
         # Connect to all servers and fetch tools/prompts/resources in parallel
@@ -421,26 +359,6 @@ class Environment(
 
         await self._build_routing()
 
-        # Setup tool calls (after connections) - abort if any setup tool fails
-        # Store results for append_setup_output feature
-        self._setup_results = []
-        for name, args in self._setup_calls:
-            result = await self._execute_tool(name, args)
-            self._setup_results.append(result)
-            if result.isError:
-                # Extract error message from result content
-                error_msg = "Setup tool failed"
-                if result.content:
-                    for block in result.content:
-                        if isinstance(block, mcp_types.TextContent):
-                            error_msg = block.text
-                            break
-                # Clean up connections before raising (since __aexit__ won't be called)
-                for conn in self._connections.values():
-                    if conn.is_connected:
-                        await conn.disconnect()
-                raise RuntimeError(f"Setup tool '{name}' failed: {error_msg}")
-
         return self
 
     async def __aexit__(
@@ -449,25 +367,7 @@ class Environment(
         exc_val: BaseException | None,
         exc_tb: types.TracebackType | None,
     ) -> None:
-        """Run evaluate tools, exit queue, then disconnect."""
-        from hud.agents.base import find_reward
-
-        # Evaluate tool calls and collect rewards
-        rewards: list[float] = []
-        for name, args in self._evaluate_calls:
-            try:
-                result = await self._execute_tool(name, args)
-                rewards.append(find_reward(result))
-            except Exception as e:
-                logger.warning("Evaluate tool %s failed: %s", name, e)
-                # Record 0.0 for failed evaluate tools so they affect the average
-                rewards.append(0.0)
-
-        # Store average reward from evaluate tools
-        self._evaluate_reward: float | None = None
-        if rewards:
-            self._evaluate_reward = sum(rewards) / len(rewards)
-
+        """Disconnect all connectors and clear routing state."""
         self._in_context = False
         if self._connections:
             await asyncio.gather(*[c.disconnect() for c in self._connections.values()])
@@ -913,8 +813,7 @@ class Environment(
     def is_serializable(self) -> bool:
         """True if environment can be serialized (no local tools/scenarios).
 
-        For v5 format: requires hub config from connect_hub()
-        For v4 format: requires mcp_config, prompt, AND evaluate_tool
+        Serializable task configs require hub config from connect_hub().
         """
         # Check for local tools (registered via @env.tool)
         if self._router._local_tool_names:
@@ -922,20 +821,12 @@ class Environment(
         # Check for local scenarios (registered via @env.scenario)
         if getattr(self, "_scenarios", {}):
             return False
-        # v5 hub format
-        if self._hub_config is not None:
-            return True
-        # v4 format requires mcp_config + prompt + evaluate_tool
-        if self._mcp_config is not None:
-            return bool(self.prompt and self._evaluate_calls)
-        return False
+        return self._hub_config is not None
 
     def to_config(self) -> dict[str, Any]:
         """Serialize environment config for remote submission.
 
-        Returns the config in either v5 format (hub-based) or v4 format (legacy).
-        For v4 format, automatically includes prompt, setup_tool, and evaluate_tool
-        from the Environment's state.
+        Returns the hub-based config used by v5 task serialization.
 
         Returns:
             dict: Serializable config
@@ -945,13 +836,8 @@ class Environment(
 
         Example:
             ```python
-            # v5 hub-based
             env = Environment("my").connect_hub("browser", include=["navigate"])
             env.to_config()  # {"name": "browser", "include": ["navigate"]}
-
-            # v4 legacy (from Task.from_v4())
-            task = Task.from_v4(legacy_task)
-            task.env.to_config()  # {"prompt": "...", "mcp_config": {...}, ...}
             ```
         """
         if self._router._local_tool_names:
@@ -969,40 +855,11 @@ class Environment(
                 "define scenarios on the remote environment."
             )
 
-        # v5 hub-based format
         if self._hub_config is not None:
             return self._hub_config.copy()
 
-        # v4 legacy format - requires mcp_config, prompt, AND evaluate_tool
-        if self._mcp_config is not None:
-            # Validate required fields for v4 format
-            if not self.prompt:
-                raise ValueError(
-                    "Cannot serialize v4 Environment without prompt. "
-                    "Set env.prompt before serializing."
-                )
-            if not self._evaluate_calls:
-                raise ValueError(
-                    "Cannot serialize v4 Environment without evaluate_tool. "
-                    "Use env.evaluate_tool() to define evaluation criteria."
-                )
-
-            config: dict[str, Any] = {
-                "prompt": self.prompt,
-                "mcp_config": self._mcp_config,
-                "evaluate_tool": [
-                    {"name": name, "arguments": args} for name, args in self._evaluate_calls
-                ],
-            }
-            if self._setup_calls:
-                config["setup_tool"] = [
-                    {"name": name, "arguments": args} for name, args in self._setup_calls
-                ]
-            return config
-
         raise ValueError(
-            "Cannot serialize Environment without config. "
-            "Use connect_hub() for v5 tasks or connect_mcp_config() for legacy tasks."
+            "Cannot serialize Environment without config. Use connect_hub() for serializable tasks."
         )
 
     def __repr__(self) -> str:
@@ -1076,7 +933,7 @@ class Environment(
         Returns a Task that can be passed to hud.eval() for orchestration.
 
         Args:
-            scenario: Scenario name to run (from @env.scenario). Optional for v4 legacy.
+            scenario: Scenario name to run (from @env.scenario).
             **args: Arguments for the scenario
 
         Returns:

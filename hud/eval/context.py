@@ -176,9 +176,6 @@ class EvalContext(Environment):
         self.scenario_returns_schema: dict[str, Any] | None = None
         self.scenario_enable_citations: bool = False
 
-        # Agent config overrides from task (applied by agent when running)
-        self.append_setup_output: bool = False  # Whether to append setup tool output to prompt
-
         # Error tracking
         self.error: BaseException | None = None
 
@@ -257,13 +254,6 @@ class EvalContext(Environment):
             for name, connector in env._connections.items()
         }
 
-        # Note: Auth is injected at request time by httpx/aiohttp hooks in hud.eval.instrument
-        # using the contextvar set in __aenter__ (supports api_key passed to hud.eval())
-        ctx._setup_calls = env._setup_calls.copy()
-        ctx._evaluate_calls = env._evaluate_calls.copy()
-        ctx._integration_test_calls = getattr(env, "_integration_test_calls", []).copy()
-        ctx._setup_results = getattr(env, "_setup_results", []).copy()
-
         # Copy scenarios (definitions) by reference - they don't change
         ctx._scenarios = getattr(env, "_scenarios", {})
         ctx._scenario_output_config = getattr(env, "_scenario_output_config", {})
@@ -288,10 +278,6 @@ class EvalContext(Environment):
         if env.prompt:
             ctx.prompt = env.prompt
 
-        # Copy agent-level tool filters (allowed_tools/disallowed_tools)
-        ctx._agent_include = getattr(env, "_agent_include", None)
-        ctx._agent_exclude = getattr(env, "_agent_exclude", None)
-
         # Copy router's conflict resolution strategy
         ctx._router.conflict_resolution = env._router.conflict_resolution
 
@@ -302,9 +288,6 @@ class EvalContext(Environment):
 
         # Copy hub config (needed to detect remote hub for telemetry)
         ctx._hub_config = getattr(env, "_hub_config", None)
-
-        # Copy mcp config (needed to detect remote HUD MCP for telemetry)
-        ctx._mcp_config = getattr(env, "_mcp_config", None)
 
         return ctx
 
@@ -371,12 +354,6 @@ class EvalContext(Environment):
             quiet=quiet,
         )
 
-        # v5 validation overrides any environment-level integration calls.
-        if task.validation is not None:
-            ctx._integration_test_calls = [
-                (call.name, call.arguments or {}) for call in task.validation
-            ]
-
         # Store task info for scenario execution
         ctx._task = task
 
@@ -386,20 +363,9 @@ class EvalContext(Environment):
             if isinstance(agent_config, dict):
                 if agent_config.get("system_prompt"):
                     ctx.system_prompt = agent_config["system_prompt"]
-                if agent_config.get("append_setup_output"):
-                    ctx.append_setup_output = agent_config["append_setup_output"]
-                # Also check append_setup_tool alias
-                if agent_config.get("append_setup_tool"):
-                    ctx.append_setup_output = agent_config["append_setup_tool"]
             else:
-                # It's a BaseAgentConfig or TaskAgentConfig object
                 if getattr(agent_config, "system_prompt", None):
                     ctx.system_prompt = agent_config.system_prompt
-                if getattr(agent_config, "append_setup_output", False):
-                    ctx.append_setup_output = agent_config.append_setup_output
-                # Also check append_setup_tool alias
-                if getattr(agent_config, "append_setup_tool", False):
-                    ctx.append_setup_output = True
 
         return ctx
 
@@ -500,33 +466,6 @@ class EvalContext(Environment):
         """True if a scenario is running and can accept submissions."""
         return self._task is not None and self._task.scenario is not None
 
-    @property
-    def setup_output(self) -> str | None:
-        """Get setup tool output as formatted string for prepending to agent context.
-
-        Returns None if no setup tools were executed or all results were empty.
-        Used by agents when append_setup_output is enabled.
-        """
-        import mcp.types as mcp_types
-
-        setup_results = getattr(self, "_setup_results", [])
-        if not setup_results:
-            return None
-
-        output_parts: list[str] = []
-        for result in setup_results:
-            if result.content:
-                output_parts.extend(
-                    block.text
-                    for block in result.content
-                    if isinstance(block, mcp_types.TextContent)
-                )
-
-        if not output_parts:
-            return None
-
-        return "\n".join(output_parts)
-
     # =========================================================================
     # Backend Integration
     # =========================================================================
@@ -542,9 +481,7 @@ class EvalContext(Environment):
             job_id=self.job_id,
             group_id=self.group_id,
             variants=self.variants if self.variants else None,
-            # Only send task_version_id for v5 tasks (those with scenarios).
-            # v4 tasks have client-side IDs that shouldn't be sent to backend.
-            task_version_id=self._task.id if self._task and self._task.scenario else None,
+            task_version_id=self._task.id if self._task else None,
             metadata=self.metadata if self.metadata else None,
         )
 
@@ -699,12 +636,8 @@ class EvalContext(Environment):
         if self._trace_enabled:
             flush(self.trace_id)
 
-        # Disconnect environment (parent class) - also runs evaluate tools
+        # Disconnect environment (parent class)
         await super().__aexit__(exc_type, exc_val, exc_tb)
-
-        # Set reward from evaluate tools if not already set
-        if self.reward is None and hasattr(self, "_evaluate_reward"):
-            self.reward = self._evaluate_reward
 
         # Reset context vars
         if self._token is not None:
@@ -735,14 +668,15 @@ class EvalContext(Environment):
             return False
         if self._hub_config is not None:
             return False
-        if self._mcp_config is not None:
-            from hud.utils.mcp import _is_hud_server
+        from hud.utils.mcp import _is_hud_server
 
-            for server_cfg in self._mcp_config.values():
-                if isinstance(server_cfg, dict):
-                    url = server_cfg.get("url", "")
-                    if url and _is_hud_server(url):
-                        return False
+        for connector in self._connections.values():
+            transport = connector._transport
+            url = getattr(transport, "url", None)
+            if isinstance(transport, dict):
+                url = transport.get("url")
+            if isinstance(url, str) and _is_hud_server(url):
+                return False
         return True
 
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:

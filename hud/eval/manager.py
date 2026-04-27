@@ -112,7 +112,7 @@ async def run_eval(
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
-    Creates an EvalContext for evaluation using Task objects (or deprecated LegacyTask).
+    Creates an EvalContext for evaluation using Task objects.
     For loading tasks from datasets, use load_tasks() first.
 
     Args:
@@ -120,8 +120,6 @@ async def run_eval(
             - None: Create blank eval context
             - Task: Single Task object (from env() or load_tasks())
             - list[Task]: List of Task objects
-            - LegacyTask: Single LegacyTask object (deprecated, use Task.from_v4())
-            - list[LegacyTask]: List of LegacyTask objects (deprecated)
         name: Optional name for the eval (used in trace)
         variants: A/B test configuration (dict with list values expanded)
         group: Runs per variant for statistical significance
@@ -177,7 +175,6 @@ async def run_eval(
         ```
     """
     from hud.eval.task import Task
-    from hud.types import LegacyTask
 
     if group <= 0:
         raise ValueError("group must be >= 1")
@@ -195,14 +192,6 @@ async def run_eval(
         elif isinstance(source, list) and source and isinstance(source[0], Task):
             # List of Task objects
             tasks = source  # type: ignore[assignment]
-        elif isinstance(source, LegacyTask) or (
-            isinstance(source, list) and source and isinstance(source[0], LegacyTask)
-        ):
-            # LegacyTask no longer accepted - user must convert first
-            raise TypeError(
-                "LegacyTask is no longer accepted by hud.eval(). "
-                "Convert first with Task.from_v4(legacy_task), or use load_tasks()."
-            )
         elif isinstance(source, str):
             # String slugs no longer supported - use load_dataset()
             raise TypeError(
@@ -215,6 +204,11 @@ async def run_eval(
                 "String slugs are no longer supported in hud.eval(). "
                 "Use load_tasks() first, then pass the tasks list."
             )
+        elif isinstance(source, list):
+            if source:
+                raise TypeError("hud.eval() source lists must contain Task objects")
+        else:
+            raise TypeError("hud.eval() source must be a Task, list[Task], or None")
 
     # Calculate total evaluations
     # Each task gets (variants x group) runs; no tasks = single blank eval

@@ -430,15 +430,7 @@ class MCPAgent(ABC):
                 initial_messages = await self._build_conversation_messages(conversation)
             else:
                 # Single-turn: single user message from prompt
-                append_setup = getattr(ctx, "append_setup_output", False) or getattr(
-                    self.config, "append_setup_output", False
-                )
-                initial_prompt = ctx.prompt
-                if append_setup:
-                    setup_output = getattr(ctx, "setup_output", None)
-                    if setup_output:
-                        initial_prompt = f"{initial_prompt}\n\n{setup_output}"
-                initial_messages = await self.format_message(initial_prompt)
+                initial_messages = await self.format_message(ctx.prompt)
 
             result = await self._run_context(initial_messages, max_steps=max_steps)
 
@@ -609,8 +601,6 @@ class MCPAgent(ABC):
             is_error = False
 
         # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
-        # Note: For v4 tasks with evaluate_tool, reward is set in __aexit__ after this returns,
-        # so callers should prefer ctx.reward over Trace.reward for the final result.
         reward = 0.0
         if self.ctx is not None:
             ctx_reward = getattr(self.ctx, "reward", None)
@@ -888,84 +878,3 @@ def _format_error_result(error_message: str) -> MCPToolResult:
 
 def text_to_blocks(text: str) -> list[types.ContentBlock]:
     return [types.TextContent(text=text, type="text")]
-
-
-def find_reward(result: MCPToolResult) -> float:
-    """Find the reward in the result.
-
-    Agent accepts "reward", "grade", "score", or weighted subscores
-
-    If isError is True, return 0.0 (error results should not contribute positive reward).
-    If not found, return 0.0
-    """
-    # Error results should return 0.0 - don't extract reward from error responses
-    if result.isError:
-        logger.warning("Evaluate tool returned error, using reward=0.0")
-        return 0.0
-
-    accept_keys = ["reward", "grade", "score"]
-
-    # Check for direct reward/grade/score keys
-    for key in accept_keys:
-        if isinstance(result.structuredContent, dict) and key in result.structuredContent:
-            return result.structuredContent[key]
-
-    # Check for subscores and weights format
-    if (
-        isinstance(result.structuredContent, dict)
-        and "subscores" in result.structuredContent
-        and "weights" in result.structuredContent
-    ):
-        subscores = result.structuredContent["subscores"]
-        weights = result.structuredContent["weights"]
-        if isinstance(subscores, dict) and isinstance(weights, dict):
-            try:
-                # Multiply each subscore by its corresponding weight and sum
-                reward = sum(
-                    float(subscores[key]) * float(weights.get(key, 0.0))
-                    for key in subscores
-                    if key in weights
-                )
-                return reward
-            except (ValueError, TypeError) as e:
-                logger.error("Failed to parse subscores/weights: %s", e)
-                return 0.0
-
-    # Check for reward in JSON text content
-    if isinstance(result.content, list):
-        for content in result.content:
-            if isinstance(content, types.TextContent):
-                try:
-                    json_content = json.loads(content.text)
-                    for key, value in json_content.items():
-                        if key in accept_keys:
-                            return value
-                except json.JSONDecodeError:
-                    pass
-
-    logger.error("Couldn't parse reward from result: %s", str(result.structuredContent))
-    return 0.0
-
-
-def find_content(result: MCPToolResult) -> str | None:
-    """Find the content in the result.
-
-    Agent accepts "content", "text", "message", or "logs"
-
-    If not found, return 0.0
-    """
-    accept_keys = ["content", "text", "message", "logs"]
-    for key in accept_keys:
-        if isinstance(result.structuredContent, dict) and key in result.structuredContent:
-            return result.structuredContent[key]
-    if isinstance(result.content, list):
-        for content in result.content:
-            if isinstance(content, types.TextContent):
-                try:
-                    json_content = json.loads(content.text)
-                    for key, value in json_content.items():
-                        if key in accept_keys:
-                            return value
-                except json.JSONDecodeError:
-                    pass
-    return ""

@@ -7,8 +7,6 @@ Key functions:
 - save_tasks(): Save tasks to the HUD API
 - run_dataset(): Run an agent on a dataset of tasks
 - submit_rollouts(): Submit tasks for remote execution
-
-Supports both v4 (LegacyTask) and v5 (Task) formats with automatic conversion.
 """
 
 from __future__ import annotations

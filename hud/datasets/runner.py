@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import hud
-from hud.types import AgentType, LegacyTask, TaskInput, Trace
+from hud.types import AgentType, TaskInput, Trace
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -71,7 +71,7 @@ async def run_dataset(
     Args:
         tasks: Tasks to run. Can be:
             - A source string (file path, API slug) - loaded via load_tasks()
-            - A single TaskInput (Task, LegacyTask, or dict)
+            - A single TaskInput (Task or v5 task dict)
             - A list of TaskInput objects
         agent_type: Agent type (e.g., "claude", "openai", AgentType.CLAUDE).
         agent_params: Parameters to pass to agent.create().
@@ -117,12 +117,11 @@ async def run_dataset(
         task_list = load_tasks(tasks)
     elif isinstance(tasks, Task):
         task_list = [tasks]
-    elif isinstance(tasks, LegacyTask | dict):
-        # Single LegacyTask or dict - convert to Task
-        task_list = [Task.from_v4(tasks)]
+    elif isinstance(tasks, dict):
+        task_list = [Task(**tasks)]
     else:
         # Sequence of TaskInput - convert each to Task
-        task_list = [t if isinstance(t, Task) else Task.from_v4(t) for t in tasks]
+        task_list = [t if isinstance(t, Task) else Task(**t) for t in tasks]
 
     if not task_list:
         raise ValueError("No tasks to run")
@@ -147,7 +146,7 @@ async def run_dataset(
         # Create agent using AgentType.cls.create()
         agent = agent_type.cls.create(**final_agent_params)
         await agent.run(ctx, max_steps=max_steps)
-        # Reward is computed by EvalContext.__aexit__ from evaluate tools
+        # Reward is computed by EvalContext.__aexit__ from the scenario evaluate phase.
 
     # For parallel execution, results are collected via ctx.results
     if hasattr(ctx, "results") and ctx.results:
@@ -178,7 +177,7 @@ async def run_single_task(
     trace/job/group IDs. Used by remote execution workers.
 
     Args:
-        task: Task object to run. Use Task.from_v4() or load_tasks() to create.
+        task: Task object to run. Use load_tasks() to create tasks from a source.
         agent_type: AgentType enum specifying the agent to use.
         agent_params: Parameters passed to agent.create(). Should include
             pre-configured model_client for inference gateway usage.
@@ -203,8 +202,7 @@ async def run_single_task(
         from hud.types import AgentType
         from openai import AsyncOpenAI
 
-        # Create task (from v4 dict or directly)
-        task = Task.from_v4({"prompt": "...", "mcp_config": {...}, "evaluate_tool": {...}})
+        task = Task(env={"name": "browser"}, scenario="checkout", args={"user": "alice"})
 
         # Configure agent with inference gateway
         agent_params = {
@@ -255,7 +253,7 @@ async def run_single_task(
             ctx.metadata.update(metadata)
 
         result = await agent.run(ctx, max_steps=max_steps)
-        # Reward is computed by EvalContext.__aexit__ from evaluate tools
+        # Reward is computed by EvalContext.__aexit__ from the scenario evaluate phase.
 
     # Propagate reward from EvalContext (set in __aexit__) to returned Trace
     if ctx.reward is not None:

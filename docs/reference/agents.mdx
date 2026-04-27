@@ -49,12 +49,7 @@ Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP clie
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `allowed_tools` | `list[str]` | Tool patterns to expose to the model | `None` (all) |
-| `disallowed_tools` | `list[str]` | Tool patterns to hide from the model | `None` |
 | `system_prompt` | `str` | Custom system prompt | `None` |
-| `append_setup_output` | `bool` | Include setup output in first turn | `True` |
-| `initial_screenshot` | `bool` | Include screenshot in initial context | `True` |
-| `response_tool_name` | `str` | Lifecycle tool for submitting responses | `None` |
 
 **Key Methods:**
 
