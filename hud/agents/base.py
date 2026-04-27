@@ -937,11 +937,13 @@ def find_reward(result: MCPToolResult) -> float:
             if isinstance(content, types.TextContent):
                 try:
                     json_content = json.loads(content.text)
-                    for key, value in json_content.items():
-                        if key in accept_keys:
-                            return value
                 except json.JSONDecodeError:
-                    pass
+                    continue
+                if not isinstance(json_content, dict):
+                    continue
+                for key, value in json_content.items():
+                    if key in accept_keys:
+                        return value
 
     logger.error("Couldn't parse reward from result: %s", str(result.structuredContent))
     return 0.0
@@ -963,12 +965,9 @@ def find_content(result: MCPToolResult) -> str | None:
             if isinstance(content, types.TextContent):
                 try:
                     json_content = json.loads(content.text)
-                    for key, value in json_content.items():
-                        if key in accept_keys:
-                            return value
                 except json.JSONDecodeError:
-                    pass
-                if not isinstance(json_content,dict):
+                    continue
+                if not isinstance(json_content, dict):
                     continue
                 for key, value in json_content.items():
                     if key in accept_keys:
