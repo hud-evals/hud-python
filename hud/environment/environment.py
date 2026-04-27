@@ -684,6 +684,8 @@ class Environment(
             session_id = _safe_session_id(None)
             session = self._get_session(session_id)
             if session:
+                if not self._tool_routing_built:
+                    await self._build_tool_routing()
                 allowed_names = {t.name for t in self._filtered_tools_for_session(session)}
                 if name not in allowed_names:
                     raise ValueError(f"Tool '{name}' is not available in the current scenario.")
