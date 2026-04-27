@@ -83,7 +83,12 @@ class TestGrepTool:
 
 
 class TestGeminiSearchTool:
-    """Tests for Gemini CLI-style GeminiSearchTool."""
+    """Tests for Gemini CLI-style GeminiSearchTool (grep_search)."""
+
+    def test_tool_name(self) -> None:
+        """Test that tool name is grep_search."""
+        tool = GeminiSearchTool(base_path=".")
+        assert tool.name == "grep_search"
 
     @pytest.mark.asyncio
     async def test_search_simple_pattern(self, workspace: Path) -> None:
@@ -112,3 +117,44 @@ class TestGeminiSearchTool:
         result = await tool(pattern="nonexistent_pattern_xyz")
 
         assert "No matches found" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_search_with_include_pattern(self, workspace: Path) -> None:
+        """Test searching with include_pattern filter."""
+        tool = GeminiSearchTool(base_path=str(workspace))
+        result = await tool(pattern="Hello", include_pattern="*.py")
+
+        text = result[0].text
+        assert "example.py" in text
+        assert "app.js" not in text
+
+    @pytest.mark.asyncio
+    async def test_search_with_exclude_pattern(self, workspace: Path) -> None:
+        """Test searching with exclude_pattern."""
+        tool = GeminiSearchTool(base_path=str(workspace))
+        result = await tool(pattern="TODO", exclude_pattern="later")
+
+        text = result[0].text
+        assert "fix this" in text
+        assert "later" not in text
+
+    @pytest.mark.asyncio
+    async def test_search_names_only(self, workspace: Path) -> None:
+        """Test names_only returns only file paths."""
+        tool = GeminiSearchTool(base_path=str(workspace))
+        result = await tool(pattern="TODO", names_only=True)
+
+        text = result[0].text
+        assert "notes.txt" in text
+        # Should not contain "Line" or "Found" prefix
+        assert "Line" not in text
+        assert "Found" not in text
+
+    @pytest.mark.asyncio
+    async def test_search_total_max_matches(self, workspace: Path) -> None:
+        """Test total_max_matches limits results."""
+        tool = GeminiSearchTool(base_path=str(workspace))
+        result = await tool(pattern="TODO", total_max_matches=1)
+
+        text = result[0].text
+        assert "Found 1 match" in text

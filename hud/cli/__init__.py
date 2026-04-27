@@ -38,6 +38,7 @@ from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
 from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
+from .login import login_command  # noqa: E402
 from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
 from .rl import rl_run_command, rl_status_command  # noqa: E402
@@ -52,6 +53,7 @@ app.command(name="dev", context_settings=_EXTRA_ARGS)(dev_command)
 app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
 app.command(name="deploy")(deploy_command)
 app.command(name="link", hidden=True)(link_command)
+app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)
 app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)

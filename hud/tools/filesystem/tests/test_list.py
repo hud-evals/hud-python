@@ -103,7 +103,7 @@ class TestGeminiListTool:
         result = await tool(dir_path=str(workspace))
 
         text = result[0].text
-        assert "DIR  src" in text or "DIR  docs" in text
+        assert "[DIR] src" in text or "[DIR] docs" in text
 
     @pytest.mark.asyncio
     async def test_list_empty_path_error(self, workspace: Path) -> None:

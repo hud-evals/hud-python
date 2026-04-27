@@ -52,10 +52,6 @@ Once you have a taskset, add tasks in two ways:
 3. Paste a JSON array of task configurations
 4. The modal validates your tasks before upload
 
-<Frame>
-  <img src="/src/images/platform-taskset-upload.png" alt="Upload tasks modal" />
-</Frame>
-
 ## Taskset Details
 
 Click on a taskset to see its detail page:
@@ -70,39 +66,73 @@ Shows aggregated results for this taskset:
 
 ### Tasks Tab
 
-Lists all tasks in the taskset:
+Lists all tasks in the taskset in a data grid. Each row shows:
 
-- **Grid/List view** — Toggle between compact and detailed views
-- **Filters** — By status, tags, scenario
-- **Bulk actions** — Select multiple tasks to run or delete
-- **Task details** — Click to see configuration
+- **Task name** — Click to open the task detail panel
+- **Progress** — Clickable progress pips for review stages
+- **Tr (Traces)** — Trace count; click to open the detail panel directly to the Traces tab
+- **Reward** — Average reward score
+- **Distribution** — Mini histogram of reward values
+- **Updated** — Relative timestamp
+- **Custom columns** — Data columns and QA agent result columns
 
-Each task shows:
-- Scenario name and arguments
-- Run history (success/fail indicators)
-- Tags for organization
+Clicking on the progress, reward, distribution, or updated columns also opens the task detail panel.
 
-### Agents Tab
+Use the **Add Column** button in the table header to add data columns. To add QA agent columns, use the task detail panel's Traces tab instead.
 
-Compare agent performance across all tasks:
+## Task Detail Panel
 
-- **Agent matrix** — Side-by-side comparison
-- **Per-task breakdown** — See where agents succeed or fail
-- **Drill down** — Click to view specific runs
+Click any task row to open a slide-out panel on the right. The panel has four tabs: **Task**, **Traces**, **Comments**, and **History**. Each tab is accessible via URL (`?panel_tab=task`, etc.) so you can link directly to a specific view.
 
-### Jobs Tab
+### Task Tab
 
-Background jobs for this taskset:
+The top of the panel shows:
 
-- **Batch runs** — Evaluation jobs in progress
-- **Status** — Queued, running, completed
-- **Results** — Click to see outcomes
+- **Task name** with a play-on-hover icon to run the task
+- **Progress pips** — interactive, labeled stages (e.g. "ready", "verified") that you can toggle by clicking
+- **Scores** — reward value with a histogram and x-axis to the right
 
-### Settings Tab
+Below that:
 
-Configure your taskset:
+- **Environment badge** — links to the environment page
+- **Scenario arguments** — editable inline. Simple strings shorter than 30 characters render as single-line inputs; longer strings use a textarea. JSON objects and arrays use a JSON editor. Changes save immediately and create a new task version.
+- **Custom columns** — editable task-level data columns appear under a **COLUMNS** heading (hidden if none exist)
 
-- **Name** — Edit the display name
+### Traces Tab
+
+Shows all traces for this task, capped at the configured pass@K value. The tab badge displays `x/K` where `x` is the number of traces with a reward entry.
+
+**QA Agent toolbar** at the top of the tab:
+- Each attached QA agent appears as a compact pill with a play button
+- Click the play button for options: **Run for this task** or **Run for all tasks (N)**
+- **Add QA Agent** button to attach new agents
+
+**Each trace row** displays:
+- **Version label** (`v1`, `v2`, etc.) — older versions show an amber warning badge
+- **Model name** — the agent/model used
+- **Reward** — evaluation score
+- **Wallclock time**, **steps**, and **tokens** — compact metrics next to the trace name
+- **QA analysis results** — collapsible rows below each trace showing verdicts from attached agents; agents without results show a **Run** button
+
+Analysis states (queued, analyzing, complete) update live via polling.
+
+### Comments Tab
+
+A unified activity feed that combines:
+
+- **Comments** — post messages with Enter to send, Shift+Enter for new lines
+- **Task update history** — when scenario arguments change or versions are created
+- **Progress status changes** — every progress update (completion/un-completion) is recorded
+
+Activity entries include the user who made the change and timestamps. Real-time updates are delivered via SSE streaming.
+
+### History Tab
+
+Shows a version-by-version diff of task changes:
+
+- **Summary** — which arguments changed between versions, who made the change
+- **Word-level diffs** — GitHub-style collapsible diff view showing exactly what was added, removed, or modified in each argument
+- Optimized for large inputs with performance guards and fallback rendering for very long values
 
 ## Running a Taskset
 
@@ -144,11 +174,19 @@ Tasks are defined with:
 ## Next Steps
 
 <CardGroup cols={2}>
+<Card title="QA Agents" icon="flask-vial" href="/platform/agents/qa">
+  Attach automated analysis to your traces
+</Card>
+
 <Card title="Publishing Leaderboards" icon="trophy" href="/platform/publishing-leaderboards">
   Run evaluations and publish public benchmarks
 </Card>
 
 <Card title="Environments" icon="cube" href="/platform/environments">
   Create environments with scenarios
+</Card>
+
+<Card title="Automations" icon="play" href="/platform/agents/automations">
+  Run scenarios repeatably with pre-filled arguments
 </Card>
 </CardGroup>

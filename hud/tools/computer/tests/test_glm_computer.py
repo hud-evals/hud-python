@@ -67,23 +67,30 @@ class TestScaleCoord:
     """Test coordinate scaling from 0-999 to screen pixels."""
 
     def test_origin(self, glm_tool: GLMComputerTool) -> None:
-        assert glm_tool._scale_coord(0, is_x=True) == 0
-        assert glm_tool._scale_coord(0, is_x=False) == 0
+        x, y = glm_tool._scale_coordinates(0, 0)
+        assert x == 0
+        assert y == 0
 
     def test_max_coord(self, glm_tool: GLMComputerTool) -> None:
-        # 999 should map to dimension-1 (last valid pixel index)
-        x = glm_tool._scale_coord(999, is_x=True)
-        y = glm_tool._scale_coord(999, is_x=False)
-        assert x == int(999 * (glm_tool.environment_width - 1) / GLM_COORDINATE_SPACE)
-        assert y == int(999 * (glm_tool.environment_height - 1) / GLM_COORDINATE_SPACE)
-        # Must never exceed dimension-1
-        assert x <= glm_tool.environment_width - 1
-        assert y <= glm_tool.environment_height - 1
+        x, y = glm_tool._scale_coordinates(999, 999)
+        assert x is not None
+        assert y is not None
+        expected_x = int(
+            round(999 * (glm_tool.width - 1) / GLM_COORDINATE_SPACE) / glm_tool.scale_x
+        )
+        expected_y = int(
+            round(999 * (glm_tool.height - 1) / GLM_COORDINATE_SPACE) / glm_tool.scale_y
+        )
+        assert int(x) == expected_x
+        assert int(y) == expected_y
+        assert int(x) <= glm_tool.environment_width - 1
+        assert int(y) <= glm_tool.environment_height - 1
 
     def test_midpoint(self, glm_tool: GLMComputerTool) -> None:
-        x = glm_tool._scale_coord(500, is_x=True)
-        expected = int(500 * (glm_tool.environment_width - 1) / GLM_COORDINATE_SPACE)
-        assert x == expected
+        x, _ = glm_tool._scale_coordinates(500, 0)
+        assert x is not None
+        expected = int(round(500 * (glm_tool.width - 1) / GLM_COORDINATE_SPACE) / glm_tool.scale_x)
+        assert int(x) == expected
 
 
 # ---------------------------------------------------------------------------

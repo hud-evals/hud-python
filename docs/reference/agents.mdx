@@ -211,6 +211,8 @@ Requires the `gemini_computer` tool to be available in the environment. The agen
 |-----------|------|-------------|---------|
 | `model` | `str` | Gemini CUA model | `"gemini-2.5-computer-use-preview-10-2025"` |
 | `excluded_predefined_functions` | `list[str]` | Predefined Gemini actions to disable | `[]` |
+| `thinking_level` | `"minimal" \| "low" \| "medium" \| "high" \| None` | Gemini 3 thinking level passed through `ThinkingConfig` | `None` |
+| `include_thoughts` | `bool` | Request visible thought parts when supported by the model/API | `false` |
 
 Inherits all `GeminiAgent` parameters.
 

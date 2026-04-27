@@ -230,6 +230,33 @@ class TestGeminiAgent:
             assert response.done is True
 
     @pytest.mark.asyncio
+    async def test_get_response_raises_on_no_candidates(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """A no-candidate Gemini response should fail loudly, not submit an empty answer."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                model_client=mock_gemini_client,
+                model="gemini-3-flash-preview",
+                validate_api_key=False,
+            )
+            agent.gemini_tools = []
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_response.candidates = []
+            mock_response.prompt_feedback = "blocked"
+            mock_response.usage_metadata = None
+            mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Status?")])
+            ]
+
+            with pytest.raises(RuntimeError, match="returned no candidates"):
+                await agent.get_response(messages)
+
+    @pytest.mark.asyncio
     async def test_get_response_with_thinking(self, mock_gemini_client: MagicMock) -> None:
         """Test getting response with thinking content."""
         with patch("hud.settings.settings.telemetry_enabled", False):
@@ -272,6 +299,42 @@ class TestGeminiAgent:
             assert response.reasoning == "Let me reason through this..."
 
     @pytest.mark.asyncio
+    async def test_get_response_passes_thinking_config(self, mock_gemini_client: MagicMock) -> None:
+        """Gemini 3 thinking options should be passed to GenerateContentConfig."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                model_client=mock_gemini_client,
+                model="gemini-3-flash-preview",
+                validate_api_key=False,
+                thinking_level="high",
+                include_thoughts=True,
+            )
+            agent.gemini_tools = []
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_candidate = MagicMock()
+            text_part = MagicMock()
+            text_part.text = "Answer"
+            text_part.function_call = None
+            text_part.thought = False
+            mock_candidate.content = MagicMock()
+            mock_candidate.content.parts = [text_part]
+            mock_response.candidates = [mock_candidate]
+
+            mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Hi")])
+            ]
+            await agent.get_response(messages)
+
+            config = mock_gemini_client.aio.models.generate_content.call_args.kwargs["config"]
+            assert config.thinking_config is not None
+            assert config.thinking_config.include_thoughts is True
+            assert config.thinking_config.thinking_level.value == "HIGH"
+
+    @pytest.mark.asyncio
     async def test_convert_tools_for_gemini(self, mock_gemini_client: MagicMock) -> None:
         """Test converting MCP tools to Gemini format."""
         tools = [
@@ -297,6 +360,167 @@ class TestGeminiAgent:
         assert isinstance(gemini_tool, genai_types.Tool)
         assert gemini_tool.function_declarations is not None
         assert gemini_tool.function_declarations[0].name == "my_tool"
+
+    @pytest.mark.asyncio
+    async def test_regular_agent_uses_native_computer_use(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """GeminiAgent should register GeminiComputerTool as native Computer Use."""
+        computer_tool = types.Tool(
+            name="gemini_computer",
+            description="Control computer with mouse, keyboard, and screenshots",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        computer_tool.meta = {
+            "native_tools": {
+                "gemini": {
+                    "api_type": "computer_use",
+                    "api_name": "gemini_computer",
+                    "role": "computer",
+                    "supported_models": ["gemini-3-flash-preview"],
+                }
+            }
+        }
+        tools = [
+            computer_tool,
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            model="gemini-3-flash-preview",
+            validate_api_key=False,
+            excluded_predefined_functions=["drag_and_drop"],
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent._computer_tool_name == "gemini_computer"
+        assert len(agent.gemini_tools) == 1
+        computer_tool = agent.gemini_tools[0]
+        assert isinstance(computer_tool, genai_types.Tool)
+        assert computer_tool.computer_use is not None
+        assert computer_tool.computer_use.excluded_predefined_functions == ["drag_and_drop"]
+
+    @pytest.mark.asyncio
+    async def test_computer_use_excludes_colliding_generic_tool_names(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Generic tools named like predefined actions should not be hijacked."""
+        computer_tool = types.Tool(
+            name="gemini_computer",
+            description="Control computer with mouse, keyboard, and screenshots",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        computer_tool.meta = {
+            "native_tools": {
+                "gemini": {
+                    "api_type": "computer_use",
+                    "api_name": "gemini_computer",
+                    "role": "computer",
+                    "supported_models": ["gemini-3-flash-preview"],
+                }
+            }
+        }
+        navigate_tool = types.Tool(
+            name="navigate",
+            description="A non-computer navigation helper",
+            inputSchema={"type": "object", "properties": {"url": {"type": "string"}}},
+        )
+        ctx = MockEvalContext(tools=[computer_tool, navigate_tool])
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            model="gemini-3-flash-preview",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        computer_use_tool = next(
+            tool for tool in agent.gemini_tools if getattr(tool, "computer_use", None) is not None
+        )
+        computer_use = getattr(computer_use_tool, "computer_use", None)
+        assert computer_use is not None
+        assert "navigate" in (computer_use.excluded_predefined_functions or [])
+        function_call = MagicMock()
+        function_call.name = "navigate"
+        function_call.args = {"url": "https://example.com"}
+        tool_call = agent._extract_tool_call(MagicMock(function_call=function_call))
+        assert tool_call is not None
+        assert tool_call.name == "navigate"
+        assert tool_call.arguments == {"url": "https://example.com"}
+
+    def test_regular_agent_routes_computer_use_function_call(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Gemini Computer Use calls should route to the MCP computer tool."""
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+        agent._computer_tool_name = "gemini_computer"
+
+        function_call = MagicMock()
+        function_call.name = "click_at"
+        function_call.args = {"x": 500, "y": 250, "safety_decision": {"decision": "allowed"}}
+        part = MagicMock(function_call=function_call)
+
+        tool_call = agent._extract_tool_call(part)
+
+        assert tool_call is not None
+        assert tool_call.name == "gemini_computer"
+        assert tool_call.arguments == {
+            "action": "click_at",
+            "safety_decision": {"decision": "allowed"},
+            "x": 500,
+            "y": 250,
+        }
+        assert getattr(tool_call, "gemini_name") == "click_at"
+
+    @pytest.mark.asyncio
+    async def test_regular_agent_formats_computer_use_results(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """GeminiAgent should return URL and screenshot parts for native computer use."""
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+        agent._computer_tool_name = "gemini_computer"
+        screenshot = base64.b64encode(b"png bytes").decode()
+        tool_calls = [
+            MCPToolCall(
+                name="gemini_computer",
+                arguments={"action": "click_at", "safety_decision": {"decision": "allowed"}},
+                gemini_name="click_at",  # type: ignore[arg-type]
+            )
+        ]
+        tool_results = [
+            MCPToolResult(
+                content=[
+                    types.TextContent(type="text", text="__URL__:https://example.com"),
+                    types.ImageContent(type="image", data=screenshot, mimeType="image/png"),
+                ],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        parts = messages[0].parts
+        assert parts is not None
+        function_response = parts[0].function_response
+        assert function_response is not None
+        assert function_response.name == "click_at"
+        response = function_response.response
+        assert response is not None
+        assert response["url"] == "https://example.com"
+        assert response["safety_acknowledgement"] is True
+        assert function_response.parts is not None
+        inline_data = function_response.parts[0].inline_data
+        assert inline_data is not None
+        assert inline_data.mime_type == "image/png"
 
 
 class TestGeminiToolConversion:

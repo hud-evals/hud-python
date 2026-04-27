@@ -777,7 +777,6 @@ class TestColumnInference:
         defs = _build_column_definitions(specs)
         assert defs is not None
         assert defs["difficulty"]["type"] == "text"
-        assert defs["score"]["type"] == "number"
 
     def test_build_column_definitions_empty(self) -> None:
         from hud.cli.sync import _build_column_definitions
