@@ -266,19 +266,19 @@ class HudRequestError(HudException):
 
         # Try to get detailed error info from JSON if available
         response_json = None
+        message = f"Request failed with status {status_code}"
         try:
-            response_json = response.json()
+            parsed = response.json()
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            response_json = parsed
             detail = response_json.get("detail")
             if detail:
                 message = f"Request failed: {detail}"
-            else:
-                # If no detail field but we have JSON, include a summary
-                message = f"Request failed with status {status_code}"
-                if len(response_json) <= 5:  # If it's a small object, include it in the message
-                    message += f" - JSON response: {response_json}"
-        except Exception:
-            # Fallback to simple message if JSON parsing fails
-            message = f"Request failed with status {status_code}"
+            elif len(response_json) <= 5:
+                # Small object — include it in the message
+                message += f" - JSON response: {response_json}"
 
         # Add context if provided
         if context:
