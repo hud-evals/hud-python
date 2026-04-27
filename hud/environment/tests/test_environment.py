@@ -740,3 +740,254 @@ class TestEnvironmentToolFiltering:
         assert "browser_navigate" in tool_names
         assert "browser_setup" not in tool_names  # Excluded by *setup*
         assert "file_read" not in tool_names  # Not included by browser_*
+
+
+class TestMCPServerToolExclusion:
+    """Tests that scenario exclude_tools/exclude_sources/allowed_tools
+    are enforced on the MCP server path (_env_list_tools, _env_call_tool).
+    """
+
+    @pytest.mark.asyncio
+    async def test_env_list_tools_applies_scenario_filtering(self) -> None:
+        """_env_list_tools resolves the MCP session and applies scenario filtering.
+
+        The filtering logic itself (exclude_tools, exclude_sources, allowed_tools)
+        is tested thoroughly in test_scenarios.py::TestScenarioToolExclusion.
+        This test verifies the MCP server path wires up session lookup correctly.
+        """
+        from types import SimpleNamespace
+
+        import mcp.types as mcp_types
+        from mcp.server.lowlevel.server import request_ctx
+
+        from hud.environment import Environment
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def browser_screenshot() -> str:
+            """Screenshot."""
+            return "img"
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="remote-hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+        connector._tools_cache = [
+            mcp_types.Tool(name="remote_a", inputSchema={"type": "object"}),
+        ]
+        env._connections["remote-hub"] = connector
+
+        @env.scenario(
+            "filtered",
+            exclude_tools=["browser_*"],
+            exclude_sources=["remote-hub"],
+            allowed_tools=["browser_navigate"],
+        )
+        async def filtered():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "test-session"}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            await env._env_get_prompt("test-env:filtered", {})
+            tools = await env._env_list_tools()
+        finally:
+            request_ctx.reset(token)
+
+        tool_names = [t.name for t in tools]
+        assert "bash" in tool_names
+        assert "browser_navigate" in tool_names  # Rescued by allowed_tools
+        assert "browser_screenshot" not in tool_names  # Excluded by pattern
+        assert "remote_a" not in tool_names  # Excluded by source
+
+    @pytest.mark.asyncio
+    async def test_env_call_tool_rejects_excluded_tool(self) -> None:
+        """_env_call_tool raises ValueError for excluded tools."""
+        from types import SimpleNamespace
+
+        from mcp.server.lowlevel.server import request_ctx
+
+        from hud.environment import Environment
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        @env.scenario("headless", exclude_tools=["browser_*"])
+        async def headless():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "test-session-4"}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            await env._env_get_prompt("test-env:headless", {})
+            with pytest.raises(ValueError, match="not available"):
+                await env._env_call_tool("browser_navigate", {"url": "http://example.com"})
+        finally:
+            request_ctx.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_env_call_tool_allows_non_excluded_tool(self) -> None:
+        """_env_call_tool succeeds for non-excluded tools."""
+        from types import SimpleNamespace
+
+        from mcp.server.lowlevel.server import request_ctx
+
+        from hud.environment import Environment
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        @env.scenario("headless", exclude_tools=["browser_*"])
+        async def headless():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "test-session-5"}, scope={}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            await env._env_get_prompt("test-env:headless", {})
+            # Should not raise - bash is not excluded
+            result = await env._env_call_tool("bash", {"cmd": "echo hi"})
+            assert result is not None
+        finally:
+            request_ctx.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_env_call_tool_allows_internal_tools(self) -> None:
+        """_env_call_tool always allows underscore-prefixed internal tools."""
+        from types import SimpleNamespace
+
+        from mcp.server.lowlevel.server import request_ctx
+
+        from hud.environment import Environment
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.scenario("headless", exclude_tools=["*"])
+        async def headless():
+            answer = yield "Do it"
+            yield 1.0 if answer == "ok" else 0.0
+
+        await env._build_routing()
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "test-session-6"}, scope={}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            await env._env_get_prompt("test-env:headless", {})
+            # _hud_submit should always work even with exclude_tools=["*"]
+            result = await env._env_call_tool(
+                "_hud_submit", {"scenario": "headless", "answer": "ok"}
+            )
+            assert result is not None
+        finally:
+            request_ctx.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_env_list_tools_no_session_returns_all(self) -> None:
+        """_env_list_tools returns all tools when no scenario session is active."""
+        from hud.environment import Environment
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        @env.scenario("headless", exclude_tools=["browser_*"])
+        async def headless():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+
+        # No scenario setup, no request_ctx - should return all tools
+        tools = await env._env_list_tools()
+        tool_names = [t.name for t in tools]
+        assert "browser_navigate" in tool_names
+        assert "bash" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_env_call_tool_no_session_allows_all(self) -> None:
+        """_env_call_tool allows any tool when no scenario session is active."""
+        from hud.environment import Environment
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.scenario("headless", exclude_tools=["browser_*"])
+        async def headless():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+
+        # No scenario setup - should allow any tool
+        result = await env._env_call_tool("browser_navigate", {"url": "http://example.com"})
+        assert result is not None
