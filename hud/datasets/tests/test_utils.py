@@ -15,7 +15,7 @@ from hud.datasets.utils import (
     submit_rollouts,
 )
 from hud.eval.display import display_results
-from hud.types import AgentType, LegacyTask, Trace
+from hud.types import AgentType, Trace
 
 
 class TestSingleTaskRequest:
@@ -39,7 +39,7 @@ class TestSingleTaskRequest:
         """Test that empty job_id is rejected."""
         with pytest.raises(ValueError, match="job_id must be a non-empty string"):
             SingleTaskRequest(
-                task={"prompt": "test", "mcp_config": {}},
+                task={"env": {"name": "browser"}, "scenario": "checkout"},
                 agent_type=AgentType.CLAUDE,
                 job_id="",
                 task_id="task-1",
@@ -47,7 +47,7 @@ class TestSingleTaskRequest:
             )
 
     def test_invalid_task_rejected(self):
-        """Test that invalid task payload is rejected (neither v4 nor v5)."""
+        """Test that invalid task payload is rejected."""
         with pytest.raises(ValueError, match="Task must have 'env'"):
             SingleTaskRequest(
                 task={"invalid_field": "test"},  # Missing required fields
@@ -57,37 +57,20 @@ class TestSingleTaskRequest:
                 trace_name="Test",
             )
 
-    def test_incomplete_v4_task_rejected(self):
-        """Test that incomplete v4 task (missing evaluate_tool) is rejected."""
-        # When prompt + mcp_config is present but evaluate_tool is missing,
-        # it's detected as v4 format but fails validation
-        with pytest.raises(ValueError, match="v4 task missing required fields"):
+    def test_v4_task_fields_rejected(self):
+        """Test that legacy v4 task fields are rejected."""
+        with pytest.raises(ValueError, match="v4 task fields are no longer supported"):
             SingleTaskRequest(
                 task={
-                    "prompt": "test",
-                    "mcp_config": {"server": {"url": "http://localhost"}},
-                    # Missing evaluate_tool
+                    "env": {"name": "browser"},
+                    "prompt": "Do the task",
+                    "mcp_config": {"server": {}},
                 },
                 agent_type=AgentType.CLAUDE,
                 job_id="job-123",
                 task_id="task-1",
                 trace_name="Test",
             )
-
-    def test_valid_v4_task_accepted(self):
-        """Test that complete v4 task is accepted."""
-        request = SingleTaskRequest(
-            task={
-                "prompt": "test",
-                "mcp_config": {"server": {"url": "http://localhost"}},
-                "evaluate_tool": {"name": "check", "arguments": {}},
-            },
-            agent_type=AgentType.CLAUDE,
-            job_id="job-123",
-            task_id="task-1",
-            trace_name="Test",
-        )
-        assert request.task_id == "task-1"
 
     def test_valid_v5_task_accepted(self):
         """Test that v5 task with env is accepted."""
@@ -203,9 +186,11 @@ class TestDisplayResults:
 
     def test_display_with_traces(self):
         """Test displaying single-run trace results."""
+        from hud.eval.task import Task
+
         tasks = [
-            LegacyTask(id="t1", prompt="Test task 1", mcp_config={}),
-            LegacyTask(id="t2", prompt="Test task 2", mcp_config={}),
+            Task(id="t1", env={"name": "browser"}, scenario="checkout", args={}),
+            Task(id="t2", env={"name": "browser"}, scenario="search", args={}),
         ]
         results = [
             Trace(reward=0.9, done=True),
@@ -217,8 +202,10 @@ class TestDisplayResults:
 
     def test_display_with_group_stats(self):
         """Test displaying group statistics."""
+        from hud.eval.task import Task
+
         tasks = [
-            LegacyTask(id="t1", prompt="Test task 1", mcp_config={}),
+            Task(id="t1", env={"name": "browser"}, scenario="checkout", args={}),
         ]
         results = [
             {
@@ -239,7 +226,9 @@ class TestDisplayResults:
 
     def test_display_empty_results(self):
         """Test displaying when no valid results."""
-        tasks = [LegacyTask(prompt="Test", mcp_config={})]
+        from hud.eval.task import Task
+
+        tasks = [Task(env={"name": "browser"}, scenario="checkout", args={})]
         results: list[Trace | None] = [None]
 
         # Should not raise

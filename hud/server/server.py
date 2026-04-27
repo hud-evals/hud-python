@@ -19,7 +19,6 @@ from starlette.responses import JSONResponse, Response
 from hud.datasets import run_dataset
 from hud.eval.task import Task
 from hud.server.low_level import LowLevelServerWithInit
-from hud.types import LegacyTask
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -791,9 +790,7 @@ class MCPServer(FastMCP):
                     try:
                         agent_type = AgentType(eval_request.agent.lower())
                     except ValueError:
-                        valid_agents = [
-                            a.value for a in AgentType if a != AgentType.INTEGRATION_TEST
-                        ]
+                        valid_agents = [a.value for a in AgentType]
                         return JSONResponse(
                             {
                                 "error": f"Invalid agent type: {eval_request.agent}",
@@ -802,11 +799,16 @@ class MCPServer(FastMCP):
                             status_code=400,
                         )
 
-                    # Add MCP config to each task and validate basic structure
-                    task_objects: list[LegacyTask] = []
-                    for task_data in eval_request.tasks:
-                        task_data["mcp_config"] = docker_config
-                        task_objects.append(LegacyTask.model_validate(task_data))
+                    # Run v5 tasks against the current Docker MCP environment.
+                    from hud.environment import Environment
+
+                    task_objects: list[Task] = []
+                    try:
+                        for task_data in eval_request.tasks:
+                            env = Environment("dev").connect_mcp_config(docker_config)
+                            task_objects.append(Task.model_validate({**task_data, "env": env}))
+                    except Exception as e:
+                        return JSONResponse({"error": f"Invalid task: {e!s}"}, status_code=400)
 
                     agent_params: dict[str, Any] = {}
                     if eval_request.model:
@@ -815,7 +817,7 @@ class MCPServer(FastMCP):
                     # Fire and forget - launch evaluation in background
                     async def run_eval_background() -> None:
                         await run_dataset(
-                            [Task.from_v4(task) for task in task_objects],
+                            task_objects,
                             agent_type=agent_type,
                             agent_params=agent_params,
                             max_steps=eval_request.max_steps,

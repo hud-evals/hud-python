@@ -30,8 +30,6 @@ class MockEvalContext(EvalContext):
 
         # Environment attributes
         self._router = ToolRouter()
-        self._agent_include: list[str] | None = None
-        self._agent_exclude: list[str] | None = None
 
         # EvalContext attributes
         self._task = None

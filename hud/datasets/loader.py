@@ -2,7 +2,7 @@
 
 Unified interface for loading evaluation tasks from:
 - HUD API (v5 format)
-- Local JSON/JSONL files (v4 LegacyTask format, auto-converted)
+- Local JSON/JSONL files (v5 Task format)
 """
 
 from __future__ import annotations
@@ -148,8 +148,6 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
     - Local file path (JSON or JSONL)
     - HUD API evalset name (e.g., "SheetBench-50")
 
-    Automatically detects and converts v4 LegacyTask format to v5 Task.
-
     Args:
         source: Task source. Can be:
             - Path to a local JSON/JSONL file
@@ -230,8 +228,7 @@ def save_tasks(
     for i, task in enumerate(tasks):
         if not hasattr(task, "scenario"):
             raise TypeError(
-                f"Task at index {i} is missing 'scenario' - only v5 Task objects can be saved. "
-                "Use Task.from_v4(legacy_task) to convert from LegacyTask."
+                f"Task at index {i} is missing 'scenario' - only v5 Task objects can be saved."
             )
 
     # Convert tasks to dicts (Task is a Pydantic model).

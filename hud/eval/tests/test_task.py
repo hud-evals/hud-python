@@ -37,91 +37,6 @@ class TestTaskSerialization:
         # Should be identical
         assert data == data2
 
-    def test_v4_task_roundtrip(self) -> None:
-        """v4 Task serializes (flattens) and deserializes correctly."""
-        v4_dict = {
-            "prompt": "Go to google.com and search for cats",
-            "mcp_config": {
-                "browser": {"url": "http://localhost:8080"},
-            },
-            "evaluate_tool": {"name": "check_url", "arguments": {"contains": "google"}},
-            "setup_tool": {"name": "navigate", "arguments": {"url": "about:blank"}},
-            "id": "v4-task-1",
-            "agent_config": {"system_prompt": "You are a helpful assistant"},
-            "metadata": {"category": "navigation"},
-        }
-
-        # Create Task from v4 dict
-        task = Task.from_v4(v4_dict)
-
-        # Serialize (should flatten to v4 format)
-        data = task.model_dump(mode="json")
-
-        # Should have v4 format (flat, not nested env)
-        assert "prompt" in data
-        assert "mcp_config" in data
-        assert "evaluate_tool" in data
-        assert data["prompt"] == "Go to google.com and search for cats"
-        assert data["id"] == "v4-task-1"
-
-        # Recreate from serialized data
-        task2 = Task(**data)
-
-        # Serialize again
-        data2 = task2.model_dump(mode="json")
-
-        # Should be identical
-        assert data == data2
-
-    def test_v4_preserves_agent_config(self) -> None:
-        """v4 Task preserves agent_config through roundtrip."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {"system_prompt": "Custom system prompt"},
-        }
-
-        task = Task.from_v4(v4_dict)
-        data = task.model_dump(mode="json")
-
-        # agent_config should preserve system_prompt and restore tool filters
-        agent_config = data.get("agent_config")
-        assert agent_config is not None
-        assert agent_config["system_prompt"] == "Custom system prompt"
-        # allowed_tools defaults to ["*"] when not specified (restored during serialization)
-        assert agent_config["allowed_tools"] == ["*"]
-        # These have default False values from TaskAgentConfig
-        assert agent_config["append_setup_output"] is False
-        assert agent_config["append_setup_tool"] is False
-
-        # Roundtrip
-        task2 = Task(**data)
-        assert task2.agent_config is not None
-        assert isinstance(task2.agent_config, TaskAgentConfig)
-        assert task2.agent_config.system_prompt == "Custom system prompt"
-        # Tool filters should be on Environment after roundtrip
-        assert task2.env is not None
-        assert task2.env._agent_include is None  # ["*"] → None
-
-    def test_v4_preserves_metadata(self) -> None:
-        """v4 Task preserves metadata through roundtrip."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "metadata": {"key1": "value1", "key2": 42},
-        }
-
-        task = Task.from_v4(v4_dict)
-        data = task.model_dump(mode="json")
-
-        assert data.get("metadata") == {"key1": "value1", "key2": 42}
-
-        # Roundtrip
-        task2 = Task(**data)
-        assert task2.metadata == {"key1": "value1", "key2": 42}
-
 
 class TestTaskValidation:
     """Tests for Task validation."""
@@ -132,16 +47,14 @@ class TestTaskValidation:
         assert task.env is None
         assert task.scenario == "test"
 
-    def test_v4_requires_evaluate_tool(self) -> None:
-        """v4 Task requires evaluate_tool for validation."""
-        from hud.eval.utils import validate_v4_task
-
-        with pytest.raises(ValueError, match="evaluate_tool"):
-            validate_v4_task(
+    def test_rejects_v4_task_fields(self) -> None:
+        """Task rejects legacy v4 task dictionaries."""
+        with pytest.raises(ValueError, match="v4 task fields are no longer supported"):
+            Task.model_validate(
                 {
                     "prompt": "test",
                     "mcp_config": {"server": {}},
-                    # Missing evaluate_tool
+                    "evaluate_tool": {"name": "check", "arguments": {}},
                 }
             )
 
@@ -154,6 +67,14 @@ class TestTaskValidation:
 
         assert isinstance(task.agent_config, TaskAgentConfig)
         assert task.agent_config.system_prompt == "Hello"
+
+    def test_agent_config_rejects_legacy_fields(self) -> None:
+        """agent_config rejects removed v4 compatibility fields."""
+        with pytest.raises(ValueError, match="append_setup_output"):
+            Task(
+                env={"name": "browser"},
+                agent_config={"append_setup_output": True},
+            )
 
 
 class TestValidationAnnotation:
@@ -210,138 +131,3 @@ class TestValidationAnnotation:
         assert restored.validation[0].annotation == "Step 1"
         assert restored.validation[0].name == "click"
         assert restored.validation[0].arguments == {"x": 1}
-
-
-class TestV4AgentConfigToolFilters:
-    """Tests for v4 agent_config.allowed_tools and disallowed_tools processing."""
-
-    def test_v4_extracts_allowed_tools(self) -> None:
-        """v4 allowed_tools is extracted and stored on Environment."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["browser_*", "file_read"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        assert task.env._agent_include == ["browser_*", "file_read"]
-
-    def test_v4_extracts_disallowed_tools(self) -> None:
-        """v4 disallowed_tools is extracted and stored on Environment."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "disallowed_tools": ["*setup*", "*evaluate*", "checkout_branch"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        assert task.env._agent_exclude == ["*setup*", "*evaluate*", "checkout_branch"]
-
-    def test_v4_wildcard_star_allowed_converts_to_none(self) -> None:
-        """v4 allowed_tools=['*'] converts to None (meaning include all)."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        # ["*"] should be converted to None
-        assert task.env._agent_include is None
-
-    def test_v4_both_allowed_and_disallowed(self) -> None:
-        """v4 supports both allowed_tools and disallowed_tools together."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-                "disallowed_tools": ["*setup*", "*evaluate*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        assert task.env._agent_include is None  # ["*"] → None
-        assert task.env._agent_exclude == ["*setup*", "*evaluate*"]
-
-    @pytest.mark.asyncio
-    async def test_v4_tool_filters_applied_in_as_tools(self) -> None:
-        """v4 tool filters are applied when calling env.as_tools()."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-                "disallowed_tools": ["*setup*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-        env = task.env
-        assert env is not None
-
-        # Add local tools to test filtering
-        @env.tool()
-        def my_setup_tool() -> str:
-            """Should be filtered out."""
-            return "setup"
-
-        @env.tool()
-        def run_query() -> str:
-            """Should be visible."""
-            return "query"
-
-        await env._build_routing()
-
-        tools = env.as_tools()
-        tool_names = [t.name for t in tools]
-
-        assert "my_setup_tool" not in tool_names
-        assert "run_query" in tool_names
-
-    def test_v4_tool_filters_preserved_in_serialization(self) -> None:
-        """v4 tool filters are preserved when serializing for remote execution."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-                "disallowed_tools": ["*setup*", "*evaluate*", "*grade*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        # Serialize (this is what gets sent to remote execution)
-        data = task.model_dump(mode="json")
-
-        # agent_config must include the tool filters for remote execution
-        assert "agent_config" in data
-        assert data["agent_config"]["allowed_tools"] == ["*"]
-        assert data["agent_config"]["disallowed_tools"] == ["*setup*", "*evaluate*", "*grade*"]
-
-        # Verify roundtrip works (remote worker will deserialize this)
-        task2 = Task(**data)
-        assert task2.env is not None
-        assert task2.env._agent_include is None  # ["*"] → None
-        assert task2.env._agent_exclude == ["*setup*", "*evaluate*", "*grade*"]

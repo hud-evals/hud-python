@@ -32,7 +32,7 @@ class MockMCPAgent(MCPAgent):
     @classmethod
     def agent_type(cls) -> AgentType:
         """Return the AgentType for the mock agent."""
-        return AgentType.INTEGRATION_TEST
+        return AgentType.OPENAI
 
     def __init__(self, **kwargs: Any) -> None:
         params = MockCreateParams(**kwargs)
@@ -70,8 +70,6 @@ class MockEvalContext(EvalContext):
 
         # Environment attributes
         self._router = ToolRouter()
-        self._agent_include: list[str] | None = None
-        self._agent_exclude: list[str] | None = None
 
         # EvalContext attributes
         self._task = None
