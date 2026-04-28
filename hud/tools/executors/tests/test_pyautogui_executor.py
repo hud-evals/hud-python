@@ -116,15 +116,22 @@ class TestPyAutoGUIExecutor:
         """Test drag when pyautogui is available."""
         executor = PyAutoGUIExecutor()
 
-        with patch("pyautogui.dragTo") as mock_drag:
+        with (
+            patch("pyautogui.moveTo") as mock_move,
+            patch("pyautogui.mouseDown") as mock_down,
+            patch("pyautogui.mouseUp") as mock_up,
+        ):
             # drag expects a path (list of coordinate tuples)
             path = [(100, 100), (300, 400)]
             result = await executor.drag(path)
 
             assert isinstance(result, ContentResult)
             assert result.output and "Dragged" in result.output
-            # Implementation uses dragTo to move to each point
-            mock_drag.assert_called()
+            # Implementation holds the button and moves through interpolated points.
+            mock_move.assert_any_call(100, 100)
+            assert mock_move.call_count > len(path)
+            mock_down.assert_called_once_with(button="left")
+            mock_up.assert_called_once_with(button="left")
 
     @pytest.mark.asyncio
     async def test_wait(self):

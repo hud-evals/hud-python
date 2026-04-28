@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+GEMINI_DRAG_INSET = 25
+DISPLAY_DRAG_INSET_PIXELS = 20
+
 SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
     "gemini-2.5-computer-use-preview-10-2025",
     "gemini-3-flash-preview",
@@ -167,6 +170,30 @@ class GeminiComputerTool(HudComputerTool):
             description=description or "Control computer with mouse, keyboard, and screenshots",
             **kwargs,
         )
+
+    def _inset_drag_coordinate(self, value: int) -> int:
+        """Keep Gemini normalized drag endpoints away from display edges."""
+        if (
+            self.coordinate_space is None
+            or not isinstance(value, int | float)
+            or not 0 <= value <= self.coordinate_space
+        ):
+            return value
+
+        max_value = max(self.coordinate_space - GEMINI_DRAG_INSET, GEMINI_DRAG_INSET)
+        return min(max(value, GEMINI_DRAG_INSET), max_value)
+
+    def _inset_scaled_drag_path(self, path: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        """Keep scaled drag points inside the display so they do not hit OS/window edges."""
+        max_x = max(self.environment_width - 1 - DISPLAY_DRAG_INSET_PIXELS, 0)
+        max_y = max(self.environment_height - 1 - DISPLAY_DRAG_INSET_PIXELS, 0)
+        return [
+            (
+                min(max(int(x), DISPLAY_DRAG_INSET_PIXELS), max_x),
+                min(max(int(y), DISPLAY_DRAG_INSET_PIXELS), max_y),
+            )
+            for x, y in path
+        ]
 
     async def __call__(
         self,
@@ -381,7 +408,16 @@ class GeminiComputerTool(HudComputerTool):
                         message="x, y, destination_x, and destination_y are required",
                     )
                 )
-            path = self._scale_path([(x, y), (destination_x, destination_y)])
+            path = self._scale_path(
+                [
+                    (self._inset_drag_coordinate(x), self._inset_drag_coordinate(y)),
+                    (
+                        self._inset_drag_coordinate(destination_x),
+                        self._inset_drag_coordinate(destination_y),
+                    ),
+                ]
+            )
+            path = self._inset_scaled_drag_path(path)
             result = await self.executor.drag(path=path)
             return await _finalize(result)
 

@@ -425,20 +425,24 @@ class XDOExecutor(BaseExecutor):
         if len(path) < 2:
             return ContentResult(error="Drag path must have at least 2 points")
 
+        drag_path = self._interpolate_drag_path(path)
+
         # Hold keys if specified
         await self._hold_keys_context(hold_keys)
 
         try:
             # Start drag
-            start_x, start_y = path[0]
+            start_x, start_y = drag_path[0]
             await self.execute(f"mousemove {start_x} {start_y}", take_screenshot=False)
             await self.execute("mousedown 1", take_screenshot=False)
 
             # Move through intermediate points
-            for i, (x, y) in enumerate(path[1:], 1):
+            for i, (x, y) in enumerate(drag_path[1:], 1):
                 # Apply delay if pattern is specified
                 if pattern and i - 1 < len(pattern):
                     await asyncio.sleep(pattern[i - 1] / 1000.0)  # Convert ms to seconds
+                else:
+                    await asyncio.sleep(0.008)
 
                 await self.execute(f"mousemove {x} {y}", take_screenshot=False)
 
@@ -449,10 +453,10 @@ class XDOExecutor(BaseExecutor):
             if take_screenshot:
                 screenshot = await self.screenshot()
                 result = ContentResult(
-                    output=f"Dragged along {len(path)} points", base64_image=screenshot
+                    output=f"Dragged along {len(drag_path)} points", base64_image=screenshot
                 )
             else:
-                result = ContentResult(output=f"Dragged along {len(path)} points")
+                result = ContentResult(output=f"Dragged along {len(drag_path)} points")
 
         finally:
             # Release held keys
