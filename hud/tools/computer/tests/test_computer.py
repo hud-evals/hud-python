@@ -12,7 +12,18 @@ from hud.tools.computer.hud import HudComputerTool
 from hud.tools.computer.openai import OpenAIComputerTool
 from hud.tools.computer.qwen import QwenComputerTool
 from hud.tools.executors.base import BaseExecutor
+from hud.tools.executors.xdo import XDOExecutor
 from hud.tools.types import Coordinate
+
+
+class RecordingExecutor(BaseExecutor):
+    def __init__(self):
+        super().__init__()
+        self.drag_paths: list[list[tuple[int, int]]] = []
+
+    async def drag(self, path, pattern=None, hold_keys=None, take_screenshot=True):
+        self.drag_paths.append(path)
+        return await super().drag(path, pattern, hold_keys, take_screenshot=False)
 
 
 @pytest.mark.asyncio
@@ -149,6 +160,58 @@ def test_normalized_coordinate_max_stays_in_display_bounds():
     assert y is not None
     assert int(x) <= comp.environment_width - 1
     assert int(y) <= comp.environment_height - 1
+
+
+def test_drag_path_interpolation_adds_intermediate_points():
+    executor = BaseExecutor()
+
+    path = executor._interpolate_drag_path([(0, 0), (120, 0)])
+
+    assert path[0] == (0, 0)
+    assert path[-1] == (120, 0)
+    assert len(path) == 11
+
+
+@pytest.mark.asyncio
+async def test_gemini_drag_clamps_edges_and_interpolates_executor_path():
+    executor = RecordingExecutor()
+    comp = GeminiComputerTool(executor=executor, width=1400, height=850)
+
+    blocks = await comp(
+        action="drag_and_drop",
+        x=0,
+        y=500,
+        destination_x=1000,
+        destination_y=500,
+    )
+
+    assert blocks
+    path = executor.drag_paths[0]
+    assert path[0][0] >= 20
+    assert path[-1][0] <= comp.environment_width - 1 - 20
+
+    interpolated = executor._interpolate_drag_path(path)
+    assert len(interpolated) > 2
+
+
+@pytest.mark.asyncio
+async def test_xdo_drag_executes_interpolated_mouse_moves():
+    executor = XDOExecutor()
+    commands: list[str] = []
+
+    async def record_execute(command, take_screenshot=True):
+        commands.append(command)
+        return None
+
+    executor.execute = record_execute
+
+    result = await executor.drag([(0, 0), (120, 0)], take_screenshot=False)
+
+    mouse_moves = [command for command in commands if command.startswith("mousemove ")]
+    assert result.output == "Dragged along 11 points"
+    assert len(mouse_moves) == 11
+    assert mouse_moves[0] == "mousemove 0 0"
+    assert mouse_moves[-1] == "mousemove 120 0"
 
 
 class TestHudComputerToolExtended:

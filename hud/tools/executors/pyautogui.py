@@ -478,33 +478,26 @@ class PyAutoGUIExecutor(BaseExecutor):
             return ContentResult(error="Drag path must have at least 2 points")
 
         try:
+            drag_path = self._interpolate_drag_path(path)
+
             # Hold keys if specified
             self._hold_keys_context(hold_keys)
 
             try:
                 # Move to start
-                start_x, start_y = path[0]
+                start_x, start_y = drag_path[0]
                 self.pyautogui.moveTo(start_x, start_y)
 
-                # Handle multi-point drag
-                if len(path) == 2:
-                    # Simple drag
-                    end_x, end_y = path[1]
-                    self.pyautogui.dragTo(end_x, end_y, duration=0.5, button="left")
-                    result = ContentResult(
-                        output=f"Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y})"
-                    )
-                else:
-                    # Multi-point drag
-                    self.pyautogui.mouseDown(button="left")
-                    for i, (x, y) in enumerate(path[1:], 1):
-                        duration = 0.1
-                        if pattern and i - 1 < len(pattern):
-                            duration = pattern[i - 1] / 1000.0  # Convert ms to seconds
-                        self.pyautogui.moveTo(x, y, duration=duration)
-                    self.pyautogui.mouseUp(button="left")
+                # Move through enough points for pointer-delta-sensitive UIs.
+                self.pyautogui.mouseDown(button="left")
+                for i, (x, y) in enumerate(drag_path[1:], 1):
+                    duration = 0.01
+                    if pattern and i - 1 < len(pattern):
+                        duration = pattern[i - 1] / 1000.0  # Convert ms to seconds
+                    self.pyautogui.moveTo(x, y, duration=duration)
+                self.pyautogui.mouseUp(button="left")
 
-                    result = ContentResult(output=f"Dragged along {len(path)} points")
+                result = ContentResult(output=f"Dragged along {len(drag_path)} points")
 
                 if hold_keys:
                     result = ContentResult(output=f"{result.output} while holding {hold_keys}")
