@@ -171,7 +171,7 @@ class GeminiComputerTool(HudComputerTool):
             **kwargs,
         )
 
-    def _inset_drag_coordinate(self, value: float) -> float:
+    def _inset_drag_coordinate(self, value: int) -> int:
         """Keep Gemini normalized drag endpoints away from display edges."""
         if (
             self.coordinate_space is None

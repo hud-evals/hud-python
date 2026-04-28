@@ -13,7 +13,17 @@ from hud.tools.computer.openai import OpenAIComputerTool
 from hud.tools.computer.qwen import QwenComputerTool
 from hud.tools.executors.base import BaseExecutor
 from hud.tools.executors.xdo import XDOExecutor
-from hud.tools.types import Coordinate
+from hud.tools.types import ContentResult, Coordinate
+
+
+class RecordingXDOExecutor(XDOExecutor):
+    def __init__(self):
+        super().__init__()
+        self.commands: list[str] = []
+
+    async def execute(self, command: str, take_screenshot: bool = True):
+        self.commands.append(command)
+        return ContentResult(output=command)
 
 
 class RecordingExecutor(BaseExecutor):
@@ -196,18 +206,11 @@ async def test_gemini_drag_clamps_edges_and_interpolates_executor_path():
 
 @pytest.mark.asyncio
 async def test_xdo_drag_executes_interpolated_mouse_moves():
-    executor = XDOExecutor()
-    commands: list[str] = []
-
-    async def record_execute(command, take_screenshot=True):
-        commands.append(command)
-        return None
-
-    executor.execute = record_execute
+    executor = RecordingXDOExecutor()
 
     result = await executor.drag([(0, 0), (120, 0)], take_screenshot=False)
 
-    mouse_moves = [command for command in commands if command.startswith("mousemove ")]
+    mouse_moves = [command for command in executor.commands if command.startswith("mousemove ")]
     assert result.output == "Dragged along 11 points"
     assert len(mouse_moves) == 11
     assert mouse_moves[0] == "mousemove 0 0"
