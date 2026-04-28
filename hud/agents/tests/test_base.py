@@ -1,4 +1,4 @@
-"""Tests for MCPAgent base class with v5 EvalContext pattern."""
+"""Tests for MCPAgent base class with the EvalContext pattern."""
 
 from __future__ import annotations
 

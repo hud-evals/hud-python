@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-import json
 import os
 import re
 import subprocess
@@ -53,140 +52,6 @@ def increment_version(version_str: str, increment_type: str = "patch") -> str:
         return f"{major}.{minor + 1}.0"
     else:  # patch
         return f"{major}.{minor}.{patch + 1}"
-
-
-def find_task_files_in_env(env_dir: Path) -> list[Path]:
-    """Find all task files in an environment directory.
-
-    This looks for .json and .jsonl files that contain task definitions,
-    excluding config files and lock files.
-
-    Args:
-        env_dir: Environment directory to search
-
-    Returns:
-        List of task file paths
-    """
-    task_files: list[Path] = []
-
-    # Find all .json and .jsonl files
-    json_files = list(env_dir.glob("*.json")) + list(env_dir.glob("*.jsonl"))
-
-    # Filter out config files and lock files
-    for file in json_files:
-        # Skip hidden files, config files, and lock files
-        if (
-            file.name.startswith(".")
-            or file.name == "package.json"
-            or file.name == "tsconfig.json"
-            or file.name == "gcp.json"
-            or file.name.endswith(".lock.json")
-        ):
-            continue
-
-        # Check if it's a task file by looking for mcp_config
-        try:
-            with open(file, encoding="utf-8") as f:
-                content = json.load(f)
-
-            # It's a task file if it's a list with mcp_config entries
-            if (
-                isinstance(content, list)
-                and len(content) > 0
-                and any(isinstance(item, dict) and "mcp_config" in item for item in content)
-            ):
-                task_files.append(file)
-        except (json.JSONDecodeError, Exception):  # noqa: S112
-            continue
-
-    return task_files
-
-
-def update_tasks_json_versions(
-    env_dir: Path, base_name: str, old_version: str | None, new_version: str
-) -> list[Path]:
-    """Update image references in tasks.json files to use the new version.
-
-    Args:
-        env_dir: Environment directory
-        base_name: Base image name (without version)
-        old_version: Previous version (if any)
-        new_version: New version to use
-
-    Returns:
-        List of updated task files
-    """
-    hud_console = HUDConsole()
-    updated_files: list[Path] = []
-
-    for task_file in find_task_files_in_env(env_dir):
-        try:
-            with open(task_file, encoding="utf-8") as f:
-                tasks = json.load(f)
-            if not isinstance(tasks, list):
-                continue
-
-            modified = False
-
-            # Process each task
-            for task in tasks:
-                if not isinstance(task, dict) or "mcp_config" not in task:
-                    continue
-
-                mcp_config = task["mcp_config"]
-
-                # Handle local Docker format
-                if "local" in mcp_config and isinstance(mcp_config["local"], dict):
-                    local_config = mcp_config["local"]
-
-                    # Check for docker run args
-                    if "args" in local_config and isinstance(local_config["args"], list):
-                        for i, arg in enumerate(local_config["args"]):
-                            # Match image references
-                            if isinstance(arg, str) and (
-                                arg == f"{base_name}:latest"
-                                or (old_version and arg == f"{base_name}:{old_version}")
-                                or re.match(rf"^{re.escape(base_name)}:\d+\.\d+\.\d+$", arg)
-                            ):
-                                # Update to new version
-                                local_config["args"][i] = f"{base_name}:{new_version}"
-                                modified = True
-
-                # Handle HUD API format (remote MCP)
-                elif "hud" in mcp_config and isinstance(mcp_config["hud"], dict):
-                    hud_config = mcp_config["hud"]
-
-                    # Check headers for Mcp-Image
-                    if "headers" in hud_config and isinstance(hud_config["headers"], dict):
-                        headers = hud_config["headers"]
-
-                        if "Mcp-Image" in headers:
-                            image_ref = headers["Mcp-Image"]
-
-                            # Match various image formats
-                            if isinstance(image_ref, str) and ":" in image_ref:
-                                # Split into image name and tag
-                                image_name, _ = image_ref.rsplit(":", 1)
-
-                                if (
-                                    image_name == base_name  # Exact match
-                                    or image_name.endswith(f"/{base_name}")  # With prefix
-                                ):
-                                    # Update to new version, preserving the full image path
-                                    headers["Mcp-Image"] = f"{image_name}:{new_version}"
-                                    modified = True
-
-            # Save the file if modified
-            if modified:
-                with open(task_file, "w") as f:
-                    json.dump(tasks, f, indent=2)
-                updated_files.append(task_file)
-                hud_console.success(f"Updated {task_file.name} with version {new_version}")
-
-        except Exception as e:
-            hud_console.warning(f"Could not update {task_file.name}: {e}")
-
-    return updated_files
 
 
 def get_existing_version(lock_path: Path) -> str | None:
@@ -933,24 +798,6 @@ def build_environment(
             hud_console.warning("Could not retrieve image digest")
 
         subprocess.run(["docker", "rmi", "-f", build_tag], capture_output=True)  # noqa: S607
-
-    # Update tasks.json files with new version
-    hud_console.progress_message("Updating task files with new version...")
-    if pushing:
-        # Use the tag portion from the user's push tag so task references match
-        # what was actually pushed (e.g. "v1.0" from "registry.com/image:v1.0").
-        _lc, _ls = build_tag.rfind(":"), build_tag.rfind("/")
-        effective_version = build_tag[_lc + 1 :] if _lc > _ls else new_version
-    else:
-        effective_version = new_version
-    updated_task_files = update_tasks_json_versions(
-        env_dir, base_name, existing_version, effective_version
-    )
-
-    if updated_task_files:
-        hud_console.success(f"Updated {len(updated_task_files)} task file(s)")
-    else:
-        hud_console.dim_info("No task files found or updated", value="")
 
     # Print summary
     hud_console.section_title("Build Complete")

@@ -25,7 +25,7 @@ HUD output:
         └── task-b/
             ├── instruction.md
             └── tests/test.sh
-    taskset.json                # v5 taskset referencing the env
+    taskset.json                # taskset referencing the env
 """
 
 from __future__ import annotations
@@ -520,7 +520,7 @@ class HarborConverter(BaseConverter):
                 )
             )
 
-            # --- Generate v5 taskset entries ---
+            # --- Generate taskset entries ---
             for task in group_tasks:
                 metadata: dict[str, Any] = {
                     "harbor_source": task.directory.relative_to(path.parent).as_posix(),

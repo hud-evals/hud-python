@@ -1,27 +1,8 @@
-"""Tests for Environment class - context manager, resources, prompts, prompt feature."""
+"""Tests for Environment class - context manager, resources, prompts."""
 
 from __future__ import annotations
 
 import pytest
-
-
-class TestEnvironmentPrompt:
-    """Tests for Environment.prompt feature."""
-
-    def test_prompt_defaults_to_none(self) -> None:
-        """Environment.prompt defaults to None."""
-        from hud.environment import Environment
-
-        env = Environment("test")
-        assert env.prompt is None
-
-    def test_prompt_can_be_set(self) -> None:
-        """Environment.prompt can be set manually."""
-        from hud.environment import Environment
-
-        env = Environment("test")
-        env.prompt = "Navigate to google.com"
-        assert env.prompt == "Navigate to google.com"
 
 
 class TestEnvironmentContextManager:

@@ -34,7 +34,7 @@ Returned by `hud.eval()`. Extends Environment with evaluation tracking.
 
 ```python
 async with hud.eval(task) as ctx:
-    print(ctx.prompt)      # Task prompt
+    print(ctx.prompt)      # Scenario prompt
     print(ctx.variants)    # Current variant
     ctx.reward = 1.0       # Set reward
 ```
@@ -43,7 +43,7 @@ async with hud.eval(task) as ctx:
 |----------|------|-------------|
 | `trace_id` | `str` | Unique trace identifier |
 | `eval_name` | `str` | Evaluation name |
-| `prompt` | `str \| None` | Task prompt |
+| `prompt` | `str \| None` | Prompt produced by scenario setup |
 | `variants` | `dict[str, Any]` | Current variant assignment |
 | `reward` | `float \| None` | Evaluation reward |
 | `answer` | `str \| None` | Submitted answer |

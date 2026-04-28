@@ -302,7 +302,7 @@ from hud.eval.task import Task  # noqa: E402
 # Resolve Trace.task's forward reference now that Task is available.
 Trace.model_rebuild()
 
-# Type alias for functions that accept v5 Task objects or raw v5 task dicts.
+# Type alias for functions that accept Task objects or raw task dicts.
 TaskInput = Task | dict[str, Any]
 
 __all__ = [

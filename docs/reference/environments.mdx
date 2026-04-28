@@ -448,7 +448,6 @@ env.connect_url("http://localhost:8000/mcp")
 | Property | Type | Description |
 |----------|------|-------------|
 | `name` | `str` | Environment name |
-| `prompt` | `str \| None` | Default prompt (set by scenarios or agent code) |
 | `is_connected` | `bool` | True if in context |
 | `connections` | `dict[str, Connector]` | Active connections |
 
@@ -477,4 +476,3 @@ async with hud.eval(task, variants={"model": ["gpt-4o"]}) as ctx:
 - [MCPServer](/reference/mcpserver) - Building MCP servers
 - [Scaffolding](/building/scaffolding) - Getting started guide
 - [Chat with Environments](/guides/chat) - Multi-turn chat scenarios and A2A serving
-

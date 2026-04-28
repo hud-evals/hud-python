@@ -158,9 +158,6 @@ class Environment(
         self._resource_routing_built = False
         self._in_context = False
 
-        # Default prompt (EvalContext has per-run prompt)
-        self.prompt: str | None = None
-
         # Serialization support
         # _hub_config: set by connect_hub() for serializable task configs.
         self._hub_config: dict[str, Any] | None = None
@@ -826,7 +823,7 @@ class Environment(
     def to_config(self) -> dict[str, Any]:
         """Serialize environment config for remote submission.
 
-        Returns the hub-based config used by v5 task serialization.
+        Returns the hub-based config used by task serialization.
 
         Returns:
             dict: Serializable config

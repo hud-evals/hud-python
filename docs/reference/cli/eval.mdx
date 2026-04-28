@@ -224,15 +224,17 @@ hud eval "My Tasks" claude --full --remote
 ```
 
 - **Remote agent**: Runs on HUD workers (no local compute needed)
-- **Remote environment**: Tasks must use URL-based `mcp_config` (not local Docker)
+- **Remote environment**: Tasks must reference a deployed environment with serializable `env` config
 - Uses HUD Gateway - no model-specific API keys needed
 - Monitor progress at `https://hud.ai/jobs/{job_id}`
 - Cancel with `hud cancel`
 
 <Note>
-Tasks with local Docker configs (`command`-based `mcp_config`) cannot be run remotely. Convert them first:
+Tasks with local tools or scenarios cannot be submitted directly for remote execution. Deploy the environment first, then sync or run tasks that reference it:
 ```bash
-hud convert tasks.json
+hud deploy
+hud sync tasks my-taskset
+hud eval my-taskset claude --full --remote
 ```
 </Note>
 

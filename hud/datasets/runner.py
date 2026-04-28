@@ -71,7 +71,7 @@ async def run_dataset(
     Args:
         tasks: Tasks to run. Can be:
             - A source string (file path, API slug) - loaded via load_tasks()
-            - A single TaskInput (Task or v5 task dict)
+            - A single TaskInput (Task or task dict)
             - A list of TaskInput objects
         agent_type: Agent type (e.g., "claude", "openai", AgentType.CLAUDE).
         agent_params: Parameters to pass to agent.create().

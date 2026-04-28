@@ -83,7 +83,7 @@ def build_eval_name(scenario: str | None, args: dict[str, Any] | None) -> str:
 class Task(BaseModel):
     """A runnable evaluation unit (Pydantic model).
 
-    Simplified v5 Task format:
+    Current Task format:
     - env: Environment instance OR EnvConfig with hub name + filters
     - scenario: Scenario name to run
     - args: Scenario arguments
@@ -99,7 +99,7 @@ class Task(BaseModel):
         args: Scenario arguments
         validation: Optional list of MCPToolCall objects representing successful completion
 
-    Example (v5 format):
+    Example:
         ```python
         from hud.eval import Task
 
@@ -117,7 +117,7 @@ class Task(BaseModel):
         task = Task(env=env, scenario="checkout", args={"user_id": "alice"})
         ```
 
-    Legacy v4 task dictionaries with ``prompt``/``mcp_config`` are no longer accepted.
+    Legacy task dictionaries with ``prompt``/``mcp_config`` are no longer accepted.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -172,7 +172,7 @@ class Task(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def reject_legacy_fields(cls, data: Any) -> Any:
-        """Reject legacy v4 task fields instead of silently ignoring them."""
+        """Reject legacy task fields instead of silently ignoring them."""
         if not isinstance(data, dict):
             return data
 
@@ -186,9 +186,9 @@ class Task(BaseModel):
         present = legacy_fields.intersection(data)
         if present:
             raise ValueError(
-                "v4 task fields are no longer supported: "
+                "Legacy task fields are no longer supported: "
                 f"{', '.join(sorted(present))}. "
-                "Use v5 tasks with env, scenario, args, and validation."
+                "Use tasks with env, scenario, args, and validation."
             )
 
         return data

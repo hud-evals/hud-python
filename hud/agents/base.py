@@ -280,7 +280,7 @@ class MCPAgent(ABC):
         }
         self.config = self.config_cls(**config_kwargs)
 
-        # v5: Store execution context (EvalContext/Environment) - agent uses ctx.call_tool()
+        # Store execution context (EvalContext/Environment); agents use ctx.call_tool().
         self.ctx: EvalContext | Environment | None = params.ctx
 
         self.model_name: str = getattr(params, "model_name", "MCPAgent")
@@ -314,7 +314,7 @@ class MCPAgent(ABC):
     async def _initialize_from_ctx(self, ctx: EvalContext) -> None:
         """Initialize agent from EvalContext - discovers tools and sets up state.
 
-        This is the v5 initialization path. The agent uses ctx.call_tool() directly
+        The agent uses ctx.call_tool() directly
         for tool execution (no EnvironmentClient wrapper needed).
         """
         from hud.eval.context import EvalContext
@@ -410,8 +410,7 @@ class MCPAgent(ABC):
                 raise ValueError(
                     "ctx.prompt is not set.\n\n"
                     "No scenario was specified in your task file.\n"
-                    "Either add a 'scenario' field to your task, or set ctx.prompt manually "
-                    "before running the agent."
+                    "Add a 'scenario' field to your task so scenario setup can produce a prompt."
                 )
 
         # Store context for tool calls

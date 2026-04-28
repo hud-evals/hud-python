@@ -799,7 +799,7 @@ class MCPServer(FastMCP):
                             status_code=400,
                         )
 
-                    # Run v5 tasks against the current Docker MCP environment.
+                    # Run tasks against the current Docker MCP environment.
                     from hud.environment import Environment
 
                     task_objects: list[Task] = []

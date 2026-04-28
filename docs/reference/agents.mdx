@@ -58,8 +58,8 @@ Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP clie
 def create(**kwargs) -> MCPAgent
     """Factory method to create an agent with typed parameters."""
 
-async def run(prompt_or_task: str | Task | dict, max_steps: int = 10) -> Trace
-    """Run agent with prompt or task. Returns Trace with results."""
+async def run(ctx: EvalContext, max_steps: int = 10) -> Trace
+    """Run agent with an evaluation context. Returns Trace with results."""
 
 async def call_tools(tool_call: MCPToolCall | list[MCPToolCall]) -> list[MCPToolResult]
     """Execute tool calls through MCP client."""

@@ -22,7 +22,7 @@ class TestSingleTaskRequest:
     """Tests for SingleTaskRequest schema."""
 
     def test_valid_request(self):
-        """Test creating a valid SingleTaskRequest with v5 task."""
+        """Test creating a valid SingleTaskRequest with a current task."""
         request = SingleTaskRequest(
             task={"env": {"name": "browser"}, "scenario": "checkout"},
             agent_type=AgentType.CLAUDE,
@@ -57,9 +57,9 @@ class TestSingleTaskRequest:
                 trace_name="Test",
             )
 
-    def test_v4_task_fields_rejected(self):
-        """Test that legacy v4 task fields are rejected."""
-        with pytest.raises(ValueError, match="v4 task fields are no longer supported"):
+    def test_legacy_task_fields_rejected(self):
+        """Test that legacy task fields are rejected."""
+        with pytest.raises(ValueError, match="Legacy task fields are no longer supported"):
             SingleTaskRequest(
                 task={
                     "env": {"name": "browser"},
@@ -72,8 +72,8 @@ class TestSingleTaskRequest:
                 trace_name="Test",
             )
 
-    def test_valid_v5_task_accepted(self):
-        """Test that v5 task with env is accepted."""
+    def test_valid_task_accepted(self):
+        """Test that a task with env is accepted."""
         request = SingleTaskRequest(
             task={"env": {"name": "browser"}, "scenario": "login"},
             agent_type=AgentType.CLAUDE,
@@ -240,7 +240,7 @@ class TestSubmitRollouts:
 
     @pytest.mark.asyncio
     async def test_submit_single_task(self):
-        """Test submitting a single task (v5 format)."""
+        """Test submitting a single task."""
         from hud.eval.task import Task
 
         tasks = [Task(env={"name": "browser"}, scenario="test", id="task-1")]

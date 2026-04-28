@@ -167,7 +167,7 @@ class EvalContext(Environment):
         self.variants: dict[str, Any] = variants or {}
 
         # User-settable (per-run values, override Environment defaults)
-        self.prompt: str | None = None  # From scenario setup or task
+        self.prompt: str | None = None  # From scenario setup
         self.conversation: list[dict[str, str]] | None = None  # Multi-turn messages with roles
         self.reward: float | None = None
         self.evaluation_result: EvaluationResult | None = None  # Full result with subscores
@@ -273,10 +273,6 @@ class EvalContext(Environment):
         ctx._local_provider = env._local_provider
         if ctx.providers and ctx.providers[0] is not env._local_provider:
             ctx.providers[0] = env._local_provider
-
-        # Copy prompt
-        if env.prompt:
-            ctx.prompt = env.prompt
 
         # Copy router's conflict resolution strategy
         ctx._router.conflict_resolution = env._router.conflict_resolution

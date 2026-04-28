@@ -32,7 +32,7 @@ class SingleTaskRequest(BaseModel):
     """Request to run a single task remotely - mirrors run_single_task() args."""
 
     task: dict[str, Any] = Field(
-        description="Task definition in v5 Task format.",
+        description="Task definition in the current Task format.",
     )
     agent_type: AgentType = Field(description="Agent type to execute the task.")
     agent_params: dict[str, Any] = Field(
@@ -54,7 +54,7 @@ class SingleTaskRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_task(self) -> SingleTaskRequest:
-        """Validate task is v5 Task format."""
+        """Validate task uses the current Task format."""
         legacy_fields = {
             "prompt",
             "mcp_config",
@@ -65,13 +65,13 @@ class SingleTaskRequest(BaseModel):
         present = legacy_fields.intersection(self.task)
         if present:
             raise ValueError(
-                "v4 task fields are no longer supported: "
+                "Legacy task fields are no longer supported: "
                 f"{', '.join(sorted(present))}. "
-                "Use v5 tasks with env, scenario, args, and validation."
+                "Use tasks with env, scenario, args, and validation."
             )
 
         if "env" not in self.task:
-            raise ValueError("Task must have 'env' (v5 Task format)")
+            raise ValueError("Task must have 'env'")
 
         return self
 
@@ -132,7 +132,7 @@ async def submit_rollouts(
     Returns the list of trace_ids for tracking.
 
     Args:
-        tasks: List of v5 Task objects or dicts
+        tasks: List of Task objects or dicts
         job_id: HUD job ID for telemetry grouping
         agent_type: Agent type to use for execution
         agent_params: Parameters passed to agent.create()

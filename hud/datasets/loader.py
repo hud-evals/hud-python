@@ -1,8 +1,8 @@
 """Task loading utilities for HUD.
 
 Unified interface for loading evaluation tasks from:
-- HUD API (v5 format)
-- Local JSON/JSONL files (v5 Task format)
+- HUD API
+- Local JSON/JSONL files in Task format
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
         source: Task source. Can be:
             - Path to a local JSON/JSONL file
             - HUD API evalset name (e.g., "SheetBench-50")
-        raw: If True, return raw dicts without validation or env var substitution.
+        raw: If True, return raw dicts without Task validation or coercion.
             Useful for preserving template strings like "${HUD_API_KEY}".
 
     Returns:
@@ -192,7 +192,7 @@ def save_tasks(
 
     Args:
         name: Evalset name (e.g., "benchmark-v1").
-        tasks: List of Task objects (v5 format) to save.
+        tasks: List of Task objects to save.
 
     Returns:
         The taskset ID of the created/updated taskset.
@@ -218,17 +218,17 @@ def save_tasks(
         ```
 
     Raises:
-        TypeError: If any task is not a v5 Task object (must have 'scenario')
+        TypeError: If any task is not a Task object (must have 'scenario')
         ValueError: If API key is not set or save fails
     """
     if not settings.api_key:
         raise ValueError("HUD_API_KEY is required to save tasks")
 
-    # Validate all tasks are v5 format (must have 'scenario')
+    # Validate all tasks have the current required shape.
     for i, task in enumerate(tasks):
         if not hasattr(task, "scenario"):
             raise TypeError(
-                f"Task at index {i} is missing 'scenario' - only v5 Task objects can be saved."
+                f"Task at index {i} is missing 'scenario' - only Task objects can be saved."
             )
 
     # Convert tasks to dicts (Task is a Pydantic model).

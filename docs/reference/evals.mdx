@@ -106,7 +106,7 @@ async with hud.eval(
 |----------|------|-------------|
 | `trace_id` | `str` | Unique trace identifier |
 | `eval_name` | `str` | Evaluation name |
-| `prompt` | `str \| None` | Task prompt (from scenario or task) |
+| `prompt` | `str \| None` | Prompt produced by scenario setup |
 | `variants` | `dict[str, Any]` | Current variant assignment |
 | `reward` | `float \| None` | Evaluation reward (settable) |
 | `answer` | `str \| None` | Submitted answer |
@@ -226,4 +226,3 @@ for result in ctx.results:
 - [Tasks & Evaluation](/building/tasks-and-evaluation) - Define tasks, test locally, iterate
 - [Deploy & Go Remote](/building/running-at-scale) - Running evals at scale
 - [`hud eval` CLI](/reference/cli/eval) - Command-line interface
-

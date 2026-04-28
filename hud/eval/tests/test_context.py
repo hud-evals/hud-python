@@ -205,17 +205,6 @@ class TestEvalContextFromEnvironment:
         mock_conn.copy.assert_called_once()
         assert ctx._connections["test-conn"] is mock_conn_copy
 
-    def test_copies_prompt(self) -> None:
-        """from_environment copies prompt from parent."""
-        from hud.environment import Environment
-
-        parent = Environment("parent-env")
-        parent.prompt = "Parent prompt"
-
-        ctx = EvalContext.from_environment(parent, name="test-task")
-
-        assert ctx.prompt == "Parent prompt"
-
     def test_sets_eval_properties(self) -> None:
         """from_environment sets eval-specific properties."""
         from hud.environment import Environment

@@ -10,8 +10,8 @@ from hud.eval.task import Task, TaskAgentConfig
 class TestTaskSerialization:
     """Tests for Task serialization and roundtrip."""
 
-    def test_v5_task_roundtrip(self) -> None:
-        """v5 Task serializes and deserializes correctly."""
+    def test_task_roundtrip(self) -> None:
+        """Task serializes and deserializes correctly."""
         task = Task(
             env={"name": "browser", "include": ["navigate", "click"]},
             scenario="checkout",
@@ -22,7 +22,7 @@ class TestTaskSerialization:
         # Serialize
         data = task.model_dump(mode="json")
 
-        # Should have v5 format
+        # Should have the current task format
         assert "env" in data
         assert data["env"]["name"] == "browser"
         assert data["scenario"] == "checkout"
@@ -41,15 +41,15 @@ class TestTaskSerialization:
 class TestTaskValidation:
     """Tests for Task validation."""
 
-    def test_v5_allows_none_env(self) -> None:
-        """v5 Task allows None env (for blank evals)."""
+    def test_allows_none_env(self) -> None:
+        """Task allows None env (for blank evals)."""
         task = Task(scenario="test")  # env=None is valid
         assert task.env is None
         assert task.scenario == "test"
 
-    def test_rejects_v4_task_fields(self) -> None:
-        """Task rejects legacy v4 task dictionaries."""
-        with pytest.raises(ValueError, match="v4 task fields are no longer supported"):
+    def test_rejects_legacy_task_fields(self) -> None:
+        """Task rejects legacy task dictionaries."""
+        with pytest.raises(ValueError, match="Legacy task fields are no longer supported"):
             Task.model_validate(
                 {
                     "prompt": "test",
@@ -69,7 +69,7 @@ class TestTaskValidation:
         assert task.agent_config.system_prompt == "Hello"
 
     def test_agent_config_rejects_legacy_fields(self) -> None:
-        """agent_config rejects removed v4 compatibility fields."""
+        """agent_config rejects removed compatibility fields."""
         with pytest.raises(ValueError, match="append_setup_output"):
             Task(
                 env={"name": "browser"},
@@ -112,7 +112,7 @@ class TestValidationAnnotation:
         assert task.validation[0].annotation == "Open the cart"
         assert task.validation[1].annotation is None
 
-    def test_v5_validation_annotation_roundtrip(self) -> None:
+    def test_validation_annotation_roundtrip(self) -> None:
         """Annotation survives full Task serialize -> deserialize roundtrip."""
         from hud.types import MCPToolCall
 

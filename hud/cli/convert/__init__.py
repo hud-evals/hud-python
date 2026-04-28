@@ -201,7 +201,7 @@ def convert_command(
     """Convert external benchmark formats to HUD environments + tasksets.
 
     [not dim]Converts tasks from frameworks like Harbor into HUD-compatible
-    environments (env.py + Dockerfile.hud) and v5 taskset files.
+    environments (env.py + Dockerfile.hud) and taskset files.
 
     Supports pluggable formats. Currently: harbor.
 

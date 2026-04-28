@@ -47,7 +47,7 @@ class ConvertResult(BaseModel):
 
     Attributes:
         environments: Generated environment definitions (one per unique env group)
-        taskset: List of v5 Task dicts ready for taskset.json
+        taskset: List of Task dicts ready for taskset.json
         summary: Human-readable summary lines for CLI output
     """
 
