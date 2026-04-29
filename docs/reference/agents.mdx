@@ -11,7 +11,7 @@ The HUD SDK provides a base `MCPAgent` class and several pre-built agent impleme
 Use the `create()` factory method to instantiate agents with typed parameters:
 
 ```python
-from hud.agents import ClaudeAgent
+from hud.agents.claude import ClaudeAgent
 
 agent = ClaudeAgent.create(
     model="claude-sonnet-4-5",
@@ -73,7 +73,7 @@ def get_available_tools() -> list[types.Tool]
 ### ClaudeAgent
 
 ```python
-from hud.agents import ClaudeAgent
+from hud.agents.claude import ClaudeAgent
 ```
 
 Claude-specific implementation using Anthropic's API.
@@ -92,7 +92,7 @@ Claude-specific implementation using Anthropic's API.
 
 ```python
 from hud import Environment
-from hud.agents import ClaudeAgent
+from hud.agents.claude import ClaudeAgent
 
 env = Environment("browser").connect_hub("hud-evals/browser")
 
@@ -157,7 +157,7 @@ Inherits all `OpenAIAgent` parameters.
 ### GeminiAgent
 
 ```python
-from hud.agents import GeminiAgent
+from hud.agents.gemini import GeminiAgent
 ```
 
 Google Gemini agent for standard tool-calling tasks.
@@ -187,7 +187,7 @@ agent = GeminiAgent.create(
 ### GeminiCUAAgent
 
 ```python
-from hud.agents import GeminiCUAAgent
+from hud.agents.gemini_cua import GeminiCUAAgent
 ```
 
 Google Gemini Computer Use Agent with native computer-use capabilities. Extends `GeminiAgent` with support for Gemini's predefined computer actions (click, type, scroll, etc.).
@@ -226,7 +226,7 @@ GeminiCUAAgent supports these native Gemini computer actions:
 
 ```python
 from hud import Environment
-from hud.agents import GeminiCUAAgent
+from hud.agents.gemini_cua import GeminiCUAAgent
 
 env = Environment("browser").connect_hub("hud-evals/browser")
 
@@ -285,7 +285,7 @@ agent = OpenAIChatAgent.create(
 
 ```python
 from hud import Environment
-from hud.agents import ClaudeAgent
+from hud.agents.claude import ClaudeAgent
 
 # Define environment with scenario
 env = Environment("browser").connect_hub("hud-evals/browser")

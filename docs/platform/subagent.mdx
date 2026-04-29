@@ -25,23 +25,21 @@ The workflow is:
 Scenarios define what your agent does. In your environment code:
 
 ```python
-from hud import Env
+from hud import Environment
 
-env = Env("my-assistant")
+env = Environment("my-assistant")
 
 @env.scenario()
 async def answer_question(query: str):
     """Answer a user question using available tools."""
     
-    yield env.setup(f"Answer this question: {query}")
+    result = yield f"Answer this question: {query}"
     
-    result = yield  # Agent runs here
-    
-    # Evaluate the result
+    # Evaluate the result.
     if "helpful" in result.lower():
-        yield env.reward(1.0)
+        yield 1.0
     else:
-        yield env.reward(0.0)
+        yield 0.0
 ```
 
 Deploy your environment through the platform:
@@ -74,7 +72,7 @@ Once your scenario exists, call it via the REST API:
 ### cURL
 
 ```bash
-curl -X POST https://api.hud.so/v1/agent/run \
+curl -X POST https://api.hud.ai/agent/run \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $HUD_API_KEY" \
   -d '{
@@ -161,7 +159,7 @@ Trigger agent runs from external events:
 @app.post("/webhook")
 async def handle_webhook(event: dict):
     response = requests.post(
-        "https://api.hud.so/v1/agent/run",
+        "https://api.hud.ai/agent/run",
         headers={"Authorization": f"Bearer {HUD_API_KEY}"},
         json={
             "env_name": "support-agent",
@@ -179,7 +177,7 @@ Run agents on a schedule with cron or similar:
 
 ```bash
 # Run daily cleanup agent
-0 0 * * * curl -X POST https://api.hud.so/v1/agent/run \
+0 0 * * * curl -X POST https://api.hud.ai/agent/run \
   -H "Authorization: Bearer $HUD_API_KEY" \
   -d '{"env_name": "ops", "scenario_name": "daily_cleanup", "scenario_args": {}, "model": "claude-sonnet-4-5"}'
 ```
@@ -190,7 +188,7 @@ Power a chat UI with agent capabilities:
 
 ```javascript
 async function sendMessage(message) {
-  const response = await fetch("https://api.hud.so/v1/agent/run", {
+  const response = await fetch("https://api.hud.ai/agent/run", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
