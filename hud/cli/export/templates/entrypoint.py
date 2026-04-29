@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Harbor entrypoint for HUD-exported task images.
+
+Two jobs:
+
+1. Start ``hud dev`` in the background so the harbor agent's
+   ``[[environment.mcp_servers]]`` config can connect to it.
+
+2. Register the scenario session against that ``hud dev`` and persist
+   the session id to ``/tmp/.hud_scenario_session`` so the harbor
+   verifier's ``hud scenario grade`` can resume the *same* session
+   later — without re-running ``setup_task`` and clobbering the
+   agent's filesystem edits.
+
+The trick is calling MCP's lower-level ``streamablehttp_client`` with
+``terminate_on_close=False`` here. fastmcp's ``Client`` defaults to
+sending a DELETE on close, which would kill the session as soon as our
+``setup`` call returns — leaving the verifier with a "Session
+terminated" error. With ``terminate_on_close=False`` the session stays
+alive on the server after we disconnect, until either the verifier
+explicitly closes it (default fastmcp behaviour) or the container
+shuts down.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+
+async def _wait_port(port: int, timeout: int = 30) -> bool:
+    """Return True once ``localhost:port`` accepts TCP connections."""
+    for _ in range(timeout * 2):
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except OSError:
+            await asyncio.sleep(0.5)
+    return False
+
+
+async def _register_session(url: str, scenario: str, args_dict: dict) -> str | None:
+    """Run scenario setup against ``url`` and return the resulting MCP
+    session id. The session is intentionally NOT terminated on close.
+    """
+    # Imported lazily so a missing fastmcp install doesn't crash before
+    # we've at least booted ``hud dev``.
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    args_for_mcp = {k: json.dumps(v) if not isinstance(v, str) else v for k, v in args_dict.items()}
+
+    async with streamablehttp_client(url, terminate_on_close=False) as (
+        read_stream,
+        write_stream,
+        get_session_id,
+    ):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            await session.get_prompt(scenario, arguments=args_for_mcp)
+            return get_session_id()
+
+
+def _spawn_hud_dev(port: int) -> subprocess.Popen[bytes]:
+    log_fd = open("/tmp/hud-dev.log", "wb")
+    return subprocess.Popen(
+        ["hud", "dev", "env:env", "--port", str(port)],
+        stdout=log_fd,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def _main() -> None:
+    port = int(os.environ.get("HUD_MCP_PORT", "8765"))
+    scenario = os.environ.get("HUD_TASK_SCENARIO") or ""
+    args_json = os.environ.get("HUD_TASK_ARGS") or "{}"
+    url = f"http://localhost:{port}/mcp"
+
+    _spawn_hud_dev(port)
+
+    if not asyncio.run(_wait_port(port)):
+        print(f"entrypoint: hud dev did not bind :{port}", file=sys.stderr)
+
+    if scenario:
+        try:
+            try:
+                args_dict = json.loads(args_json) if args_json else {}
+            except json.JSONDecodeError as exc:
+                print(f"entrypoint: invalid HUD_TASK_ARGS: {exc}", file=sys.stderr)
+                args_dict = {}
+            session_id = asyncio.run(
+                _register_session(url, scenario, args_dict if isinstance(args_dict, dict) else {})
+            )
+            if session_id:
+                Path("/tmp/.hud_scenario_session").write_text(session_id)
+                print(f"entrypoint: scenario session {session_id}")
+            else:
+                print("entrypoint: scenario setup returned no session id", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001
+            print(f"entrypoint: scenario setup failed: {exc}", file=sys.stderr)
+
+    # Hand off PID 1 to whatever harbor's compose ``command:`` was
+    # (typically ``sh -c "sleep infinity"``).
+    cmd = sys.argv[1:]
+    if cmd:
+        os.execvp(cmd[0], cmd)
+    else:
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        signal.pause()
+
+
+if __name__ == "__main__":
+    _main()

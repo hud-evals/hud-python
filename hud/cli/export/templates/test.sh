@@ -1,12 +1,21 @@
 #!/bin/bash
 # Generic Harbor verifier for HUD-exported tasks.
-# Boots the HUD MCP server inside the running container, registers a fresh
-# scenario session against the (pre-baked) filesystem state, then calls
-# `hud scenario grade` and writes the reward to /logs/verifier/reward.txt.
 #
-# Per-task config comes from environment variables baked into the image:
+# By the time this runs, the image's ENTRYPOINT (entrypoint.py) has
+# already:
+#   - booted ``hud dev`` on $HUD_MCP_PORT,
+#   - registered a scenario session against it (running ``setup_task``
+#     once), and
+#   - persisted the session id to /tmp/.hud_scenario_session.
+#
+# So all we need is ``hud scenario grade`` — which loads the saved
+# session id, calls ``_hud_submit``, reads the grader resource, and
+# returns the reward. No need to call ``setup`` again here, which
+# would re-run the env's destructive ``setup_task`` and wipe the
+# agent's edits.
+#
+# Per-task config from environment variables:
 #   HUD_TASK_SCENARIO  — full scenario name (env:scenario)
-#   HUD_TASK_ARGS      — JSON args (may be "{}")
 set -euo pipefail
 
 REWARD_DIR=${REWARD_DIR:-/logs/verifier}
@@ -20,27 +29,23 @@ fi
 
 HUD_MCP_PORT=${HUD_MCP_PORT:-8765}
 HUD_MCP_URL=${HUD_MCP_URL:-http://localhost:$HUD_MCP_PORT/mcp}
-HUD_DEV_ARGS=${HUD_DEV_ARGS:-env:env}
 
-# Bash parameter expansion stops at the first '}', so '${X:-{}}' doesn't
-# default to '{}'. Use an explicit fallback instead.
-ARGS=${HUD_TASK_ARGS-}
-[[ -z "$ARGS" ]] && ARGS='{}'
+# Confirm hud dev is up. If not (entrypoint.py died, or this image was
+# built without one), surface a clear error rather than letting hud
+# scenario grade fail with an obscure connect error.
+if ! (echo > "/dev/tcp/127.0.0.1/$HUD_MCP_PORT") 2>/dev/null; then
+    echo "hud dev is not running on :$HUD_MCP_PORT — entrypoint may have failed" >&2
+    cat /tmp/hud-dev.log >&2 2>/dev/null || true
+    echo 0 > "$REWARD_DIR/reward.txt"
+    exit 1
+fi
 
-hud dev $HUD_DEV_ARGS --port "$HUD_MCP_PORT" &
-SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
-
-for _ in $(seq 1 30); do
-    if (echo > "/dev/tcp/127.0.0.1/$HUD_MCP_PORT") 2>/dev/null; then
-        break
-    fi
-    sleep 1
-done
-
-# Re-register session against the baked filesystem state.
-# Setup must be idempotent on already-set-up state.
-hud scenario setup "$HUD_TASK_SCENARIO" --args "$ARGS" --url "$HUD_MCP_URL" >/dev/null
+# Confirm the entrypoint registered a session.
+if [[ ! -s /tmp/.hud_scenario_session ]]; then
+    echo "/tmp/.hud_scenario_session is missing — entrypoint scenario setup failed" >&2
+    echo 0 > "$REWARD_DIR/reward.txt"
+    exit 1
+fi
 
 RESULT=$(hud scenario grade "$HUD_TASK_SCENARIO" --answer "${ANSWER:-}" --url "$HUD_MCP_URL")
 # Parse with the Python that ships with `hud` — avoids depending on jq.

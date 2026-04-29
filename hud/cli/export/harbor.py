@@ -168,7 +168,11 @@ def _build_task_toml(
             'url = "http://localhost:8765/mcp"',
             "",
             "[environment.healthcheck]",
-            'command = "curl -fsS http://localhost:8765/mcp >/dev/null 2>&1"',
+            # MCP at /mcp speaks streamable-http (needs POST + handshake),
+            # so a plain ``curl -fsS GET /mcp`` 400s and curl exits 22.
+            # Use a TCP-level connect check instead: any successful
+            # connection means ``hud dev`` is bound and ready.
+            'command = "python3 -c \\"import socket;socket.create_connection((\'localhost\',8765),timeout=2).close()\\""',  # noqa: E501
             "interval_sec = 2.0",
             "timeout_sec = 5.0",
             "start_period_sec = 5.0",
@@ -196,6 +200,9 @@ def _build_task_dockerfile(
         "",
         "COPY bake-setup.sh /opt/hud/bake-setup.sh",
         "RUN chmod +x /opt/hud/bake-setup.sh && /opt/hud/bake-setup.sh",
+        "",
+        "COPY entrypoint.py /opt/hud/entrypoint.py",
+        "RUN chmod +x /opt/hud/entrypoint.py",
     ]
     if required_env:
         parts.append("")
@@ -203,7 +210,8 @@ def _build_task_dockerfile(
     parts.extend(
         [
             "",
-            'CMD ["sh", "-c", "exec hud dev env:env --port 8765"]',
+            'ENTRYPOINT ["python3", "/opt/hud/entrypoint.py"]',
+            'CMD ["sleep", "infinity"]',
             "",
         ]
     )
@@ -275,6 +283,7 @@ class HarborExporter(BaseExporter):
         ordered_slugs: list[str] = []
 
         bake_setup = _read_template("bake-setup.sh")
+        entrypoint_py = _read_template("entrypoint.py")
         test_sh = _read_template("test.sh")
 
         for index, task in enumerate(tasks):
@@ -318,6 +327,7 @@ class HarborExporter(BaseExporter):
             files[f"{base}/task.toml"] = task_toml
             files[f"{base}/environment/Dockerfile"] = dockerfile
             files[f"{base}/environment/bake-setup.sh"] = bake_setup
+            files[f"{base}/environment/entrypoint.py"] = entrypoint_py
             files[f"{base}/tests/test.sh"] = test_sh
 
             summary.append(f"{slug} ({scenario_full})")
