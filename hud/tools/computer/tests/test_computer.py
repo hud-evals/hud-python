@@ -8,7 +8,7 @@ from mcp.types import ImageContent, TextContent
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.computer.gemini import GeminiComputerTool
 from hud.tools.computer.glm import GLMComputerTool
-from hud.tools.computer.hud import HudComputerTool
+from hud.tools.computer.hud import AgentCoordinate, HudComputerTool
 from hud.tools.computer.openai import OpenAIComputerTool
 from hud.tools.computer.qwen import QwenComputerTool
 from hud.tools.executors.base import BaseExecutor
@@ -215,6 +215,26 @@ async def test_xdo_drag_executes_interpolated_mouse_moves():
     assert len(mouse_moves) == 11
     assert mouse_moves[0] == "mousemove 0 0"
     assert mouse_moves[-1] == "mousemove 120 0"
+
+
+@pytest.mark.asyncio
+async def test_xdo_uses_execution_pixels_for_agent_coordinates():
+    executor = RecordingXDOExecutor()
+
+    await executor.click(
+        x=AgentCoordinate(476, 248),
+        y=AgentCoordinate(498, 394),
+        take_screenshot=False,
+    )
+    await executor.scroll(
+        x=AgentCoordinate(476, 248),
+        y=AgentCoordinate(498, 394),
+        scroll_y=AgentCoordinate(480, 400),
+        take_screenshot=False,
+    )
+
+    assert executor.commands[0] == "mousemove 476 498 click 1"
+    assert executor.commands[1] == "mousemove 476 498 click --repeat 4 5"
 
 
 class TestHudComputerToolExtended:

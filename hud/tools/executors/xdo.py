@@ -99,6 +99,11 @@ class XDOExecutor(BaseExecutor):
                 mapped_keys.append(self._map_key(key))
         return mapped_keys
 
+    @staticmethod
+    def _coord(value: int) -> int:
+        """Return execution-space pixels for AgentCoordinate-like ints."""
+        return int(value)
+
     @classmethod
     def is_available(cls) -> bool:
         """
@@ -243,13 +248,16 @@ class XDOExecutor(BaseExecutor):
                 delay = pattern[0] if pattern else 10  # Use first delay for all clicks
 
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click --repeat {click_count} --delay {delay} {button_num}"  # noqa: E501
+                    cmd = (
+                        f"mousemove {self._coord(x)} {self._coord(y)} "
+                        f"click --repeat {click_count} --delay {delay} {button_num}"
+                    )
                 else:
                     cmd = f"click --repeat {click_count} --delay {delay} {button_num}"
             else:
                 # Single click
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click {button_num}"
+                    cmd = f"mousemove {self._coord(x)} {self._coord(y)} click {button_num}"
                 else:
                     cmd = f"click {button_num}"
 
@@ -364,7 +372,10 @@ class XDOExecutor(BaseExecutor):
                 button = scroll_button_map.get(direction, 5)
 
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click --repeat {clicks} {button}"
+                    cmd = (
+                        f"mousemove {self._coord(x)} {self._coord(y)} "
+                        f"click --repeat {clicks} {button}"
+                    )
                 else:
                     cmd = f"click --repeat {clicks} {button}"
 
@@ -378,7 +389,10 @@ class XDOExecutor(BaseExecutor):
                 button = scroll_button_map.get(direction, 7)
 
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click --repeat {clicks} {button}"
+                    cmd = (
+                        f"mousemove {self._coord(x)} {self._coord(y)} "
+                        f"click --repeat {clicks} {button}"
+                    )
                 else:
                     cmd = f"click --repeat {clicks} {button}"
 
@@ -403,13 +417,17 @@ class XDOExecutor(BaseExecutor):
         """Move mouse cursor."""
         if x is not None and y is not None:
             # Absolute move
-            return await self.execute(f"mousemove {x} {y}", take_screenshot=take_screenshot)
+            return await self.execute(
+                f"mousemove {self._coord(x)} {self._coord(y)}",
+                take_screenshot=take_screenshot,
+            )
         elif offset_x is not None or offset_y is not None:
             # Relative move
             offset_x = offset_x or 0
             offset_y = offset_y or 0
             return await self.execute(
-                f"mousemove_relative -- {offset_x} {offset_y}", take_screenshot=take_screenshot
+                f"mousemove_relative -- {self._coord(offset_x)} {self._coord(offset_y)}",
+                take_screenshot=take_screenshot,
             )
         else:
             return ContentResult(output="No move coordinates specified")
@@ -433,7 +451,10 @@ class XDOExecutor(BaseExecutor):
         try:
             # Start drag
             start_x, start_y = drag_path[0]
-            await self.execute(f"mousemove {start_x} {start_y}", take_screenshot=False)
+            await self.execute(
+                f"mousemove {self._coord(start_x)} {self._coord(start_y)}",
+                take_screenshot=False,
+            )
             await self.execute("mousedown 1", take_screenshot=False)
 
             # Move through intermediate points
@@ -444,7 +465,10 @@ class XDOExecutor(BaseExecutor):
                 else:
                     await asyncio.sleep(0.008)
 
-                await self.execute(f"mousemove {x} {y}", take_screenshot=False)
+                await self.execute(
+                    f"mousemove {self._coord(x)} {self._coord(y)}",
+                    take_screenshot=False,
+                )
 
             # End drag
             await self.execute("mouseup 1", take_screenshot=False)
