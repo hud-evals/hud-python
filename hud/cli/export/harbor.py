@@ -162,6 +162,18 @@ def _build_task_toml(
             f"cpus = {cpus}",
             f"memory_mb = {memory_mb}",
             "",
+            "[[environment.mcp_servers]]",
+            'name = "hud_env"',
+            'transport = "streamable-http"',
+            'url = "http://localhost:8765/mcp"',
+            "",
+            "[environment.healthcheck]",
+            'command = "curl -fsS http://localhost:8765/mcp >/dev/null 2>&1"',
+            "interval_sec = 2.0",
+            "timeout_sec = 5.0",
+            "start_period_sec = 5.0",
+            "retries = 30",
+            "",
         ]
     )
     return "\n".join(lines)
@@ -188,7 +200,13 @@ def _build_task_dockerfile(
     if required_env:
         parts.append("")
         parts.extend(f"# {var} must be supplied at run time" for var in sorted(required_env))
-    parts.extend(["", 'CMD ["/bin/bash"]', ""])
+    parts.extend(
+        [
+            "",
+            'CMD ["sh", "-c", "exec hud dev env:env --port 8765"]',
+            "",
+        ]
+    )
     return "\n".join(parts)
 
 
