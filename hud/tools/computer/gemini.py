@@ -228,8 +228,12 @@ class GeminiComputerTool(HudComputerTool):
 
         # Helper to finalize ContentResult: rescale if requested and ensure URL metadata
         async def _finalize(
-            result: ContentResult, requested_url: str | None = None
+            result: ContentResult,
+            requested_url: str | None = None,
+            output: str | None = None,
         ) -> list[ContentBlock]:
+            if output is not None and not result.error:
+                result.output = output
             if result.base64_image and self.rescale_images:
                 try:
                     result.base64_image = await self._rescale_screenshot(result.base64_image)
@@ -253,14 +257,14 @@ class GeminiComputerTool(HudComputerTool):
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="x and y are required"))
             sx, sy = self._scale_coordinates(x, y)
             result = await self.executor.click(x=sx, y=sy)
-            return await _finalize(result)
+            return await _finalize(result, output=f"Clicked at ({x}, {y})")
 
         elif action == "hover_at":
             if x is None or y is None:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="x and y are required"))
             sx, sy = self._scale_coordinates(x, y)
             result = await self.executor.move(x=sx, y=sy)
-            return await _finalize(result)
+            return await _finalize(result, output=f"Hovered at ({x}, {y})")
 
         elif action == "type_text_at":
             if x is None or y is None:
@@ -284,7 +288,7 @@ class GeminiComputerTool(HudComputerTool):
 
             # Type (optionally press enter after)
             result = await self.executor.write(text=text, enter_after=bool(press_enter))
-            return await _finalize(result)
+            return await _finalize(result, output=f"Typed text at ({x}, {y})")
 
         elif action == "scroll_document":
             if direction is None:
@@ -317,7 +321,7 @@ class GeminiComputerTool(HudComputerTool):
                     ErrorData(code=INVALID_PARAMS, message=f"Invalid direction: {direction}")
                 )
             result = await self.executor.scroll(scroll_x=scroll_x, scroll_y=scroll_y)
-            return await _finalize(result)
+            return await _finalize(result, output=f"Scrolled document {direction}")
 
         elif action == "scroll_at":
             if direction is None:
@@ -351,7 +355,7 @@ class GeminiComputerTool(HudComputerTool):
                     ErrorData(code=INVALID_PARAMS, message=f"Invalid direction: {direction}")
                 )
             result = await self.executor.scroll(x=sx, y=sy, scroll_x=scroll_x, scroll_y=scroll_y)
-            return await _finalize(result)
+            return await _finalize(result, output=f"Scrolled {direction} at ({x}, {y})")
 
         elif action == "wait_5_seconds":
             result = await self.executor.wait(time=5000)
@@ -419,7 +423,10 @@ class GeminiComputerTool(HudComputerTool):
             )
             path = self._inset_scaled_drag_path(path)
             result = await self.executor.drag(path=path)
-            return await _finalize(result)
+            return await _finalize(
+                result,
+                output=f"Dragged from ({x}, {y}) to ({destination_x}, {destination_y})",
+            )
 
         else:
             raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown action: {action}"))
