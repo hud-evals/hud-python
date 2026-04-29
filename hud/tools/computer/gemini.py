@@ -105,6 +105,10 @@ URL_FIELD = Field(None, description="Target URL for navigate")
 KEYS_FIELD = Field(None, description="Keys for key_combination")
 DESTINATION_X_FIELD = Field(None, description="Destination X for drag_and_drop (agent space)")
 DESTINATION_Y_FIELD = Field(None, description="Destination Y for drag_and_drop (agent space)")
+SAFETY_DECISION_FIELD = Field(
+    None,
+    description="Gemini safety acknowledgement metadata. Accepted for compatibility.",
+)
 TAKE_SCREENSHOT_ON_CLICK_FIELD = Field(
     True, description="Whether to include a screenshot for interactive actions"
 )
@@ -215,6 +219,8 @@ class GeminiComputerTool(HudComputerTool):
         # Drag parameters
         destination_x: int | None = DESTINATION_X_FIELD,
         destination_y: int | None = DESTINATION_Y_FIELD,
+        # Gemini native computer-use metadata
+        safety_decision: dict[str, Any] | None = SAFETY_DECISION_FIELD,
         # Behavior
         take_screenshot_on_click: bool = TAKE_SCREENSHOT_ON_CLICK_FIELD,
     ) -> list[ContentBlock]:

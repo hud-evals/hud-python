@@ -85,6 +85,22 @@ async def test_gemini_computer_click_reports_agent_coordinates():
 
 
 @pytest.mark.asyncio
+async def test_gemini_computer_accepts_safety_decision_metadata():
+    comp = GeminiComputerTool()
+
+    blocks = await comp(
+        action="click_at",
+        x=214,
+        y=420,
+        safety_decision={"decision": "allowed"},
+    )
+
+    assert any(
+        "(214, 420)" in content.text for content in blocks if isinstance(content, TextContent)
+    )
+
+
+@pytest.mark.asyncio
 async def test_anthropic_computer_zoom():
     """Test zoom action on AnthropicComputerTool.
 
