@@ -36,6 +36,11 @@ class RecordingExecutor(BaseExecutor):
         return await super().drag(path, pattern, hold_keys, take_screenshot=False)
 
 
+class EmptyErrorExecutor(BaseExecutor):
+    async def click(self, *args, **kwargs):
+        return ContentResult(error="")
+
+
 @pytest.mark.asyncio
 async def test_hud_computer_screenshot():
     comp = HudComputerTool()
@@ -98,6 +103,17 @@ async def test_gemini_computer_click_reports_model_coordinates():
         for content in blocks
         if isinstance(content, TextContent)
     )
+
+
+@pytest.mark.asyncio
+async def test_gemini_computer_does_not_mask_empty_error():
+    comp = GeminiComputerTool(executor=EmptyErrorExecutor())
+
+    blocks = await comp(action="click_at", x=214, y=420)
+    text = "\n".join(content.text for content in blocks if isinstance(content, TextContent))
+
+    assert "Clicked at (214, 420)" not in text
+    assert "Tool execution failed with no error output" in text
 
 
 @pytest.mark.asyncio
@@ -244,6 +260,19 @@ async def test_xdo_commands_use_execution_pixels_for_agent_coordinates():
     await executor.click(x=AgentCoordinate(309, 214), y=AgentCoordinate(396, 420))
 
     assert executor.commands[-1] == "mousemove 309 396 click 1"
+
+
+@pytest.mark.asyncio
+async def test_xdo_nonzero_empty_stderr_surfaces_error(monkeypatch):
+    async def fake_run(command: str):
+        return 1, "", ""
+
+    monkeypatch.setattr("hud.tools.executors.xdo.run", fake_run)
+    executor = XDOExecutor()
+
+    result = await executor.execute("mousemove 1 2", take_screenshot=False)
+
+    assert result.error == "Command failed with exit code 1"
 
 
 class TestHudComputerToolExtended:

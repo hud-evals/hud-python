@@ -232,8 +232,10 @@ class GeminiComputerTool(HudComputerTool):
             requested_url: str | None = None,
             output: str | None = None,
         ) -> list[ContentBlock]:
-            if output is not None and not result.error:
+            if output is not None and result.error is None:
                 result.output = output
+            elif result.error == "":
+                result.error = "Tool execution failed with no error output"
             if result.base64_image and self.rescale_images:
                 try:
                     result.base64_image = await self._rescale_screenshot(result.base64_image)
