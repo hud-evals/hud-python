@@ -378,7 +378,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
             f"cd {out_path} && {result.manifest['sample_run_command']}",
             "Build and run the first task locally",
         )
-        rendered_count = len(rendered)
+        rendered_count = result.manifest.get("rendered_prompt_count", 0)
         total = result.manifest.get("task_count", 0)
         if render_prompts == "skip":
             hud_console.info("")

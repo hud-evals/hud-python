@@ -27,7 +27,7 @@ import subprocess
 import time
 from typing import TYPE_CHECKING, Any
 
-from .harbor import _full_scenario_name, _slugify, _task_slug
+from .harbor import _dedupe_slugs, _full_scenario_name, _slugify
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -35,10 +35,6 @@ if TYPE_CHECKING:
     from hud.eval.task import Task
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _slug_for_task(task: Task, index: int) -> str:
-    return _task_slug(task, index)
 
 
 def _serialize_args(args: dict[str, Any] | None) -> dict[str, str]:
@@ -106,13 +102,13 @@ async def render_prompts_via_url(
     from fastmcp.client.transports.http import StreamableHttpTransport
 
     rendered: dict[str, str] = {}
+    slugs = _dedupe_slugs(tasks)
     with _quiet_mcp_retry_logs():
         transport = StreamableHttpTransport(url)
         client = Client(transport)
         await client.__aenter__()
         try:
-            for index, task in enumerate(tasks):
-                slug = _slug_for_task(task, index)
+            for task, slug in zip(tasks, slugs, strict=True):
                 try:
                     full_name = _full_scenario_name(task, taskset_name)
                     args = _serialize_args(task.args)

@@ -56,6 +56,27 @@ def _task_slug(task: Task, fallback_index: int) -> str:
     return _slugify(candidate)
 
 
+def _dedupe_slugs(tasks: list[Task]) -> list[str]:
+    """Return per-task slugs with collisions disambiguated as ``slug-2``, ``slug-3``, ...
+
+    Single source of truth for the export pipeline: ``HarborExporter.export``
+    and ``render_prompts_via_url`` both use this so the slug a prompt is
+    rendered against is the same key the exporter looks up later.
+    """
+    used: set[str] = set()
+    out: list[str] = []
+    for index, task in enumerate(tasks):
+        base = _task_slug(task, index)
+        slug = base
+        n = 1
+        while slug in used:
+            n += 1
+            slug = f"{base}-{n}"
+        used.add(slug)
+        out.append(slug)
+    return out
+
+
 def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
@@ -276,28 +297,21 @@ class HarborExporter(BaseExporter):
 
         files: dict[str, str | bytes] = {}
         summary: list[str] = []
-        slugs_used: set[str] = set()
-        ordered_slugs: list[str] = []
+        ordered_slugs = _dedupe_slugs(tasks)
+        rendered_prompt_count = 0
 
         bake_setup = _read_template("bake-setup.sh")
         entrypoint_py = _read_template("entrypoint.py")
         test_sh = _read_template("test.sh")
 
-        for index, task in enumerate(tasks):
-            slug = _task_slug(task, index)
-            base_slug = slug
-            dedupe = 1
-            while slug in slugs_used:
-                dedupe += 1
-                slug = f"{base_slug}-{dedupe}"
-            slugs_used.add(slug)
-            ordered_slugs.append(slug)
-
+        for task, slug in zip(tasks, ordered_slugs, strict=True):
             scenario_full = _full_scenario_name(task, inp.taskset_name)
             args_json = json.dumps(task.args or {}, sort_keys=True)
             prompt_was_rendered = bool(
                 inp.rendered_prompts.get(slug) or inp.rendered_prompts.get(task.slug or "")
             )
+            if prompt_was_rendered:
+                rendered_prompt_count += 1
             rendered = inp.rendered_prompts.get(slug) or inp.rendered_prompts.get(
                 task.slug or "", ""
             )
@@ -341,6 +355,7 @@ class HarborExporter(BaseExporter):
             "taskset_id": inp.taskset_id,
             "task_count": len(ordered_slugs),
             "task_slugs": ordered_slugs,
+            "rendered_prompt_count": rendered_prompt_count,
             "base_image": inp.env_image,
             "required_env": sorted(inp.env_required_env),
             "sample_run_command": f"./sample-run.sh {ordered_slugs[0]}",
