@@ -492,15 +492,15 @@ hud analyze my-env:latest
 
 # Python testing
 async def test():
-    from hud.clients import MCPClient
+    from hud import Environment
     
-    client = MCPClient({
+    env = Environment("test").connect_mcp_config({
         "env": {"command": "docker", "args": ["run", "-i", "my-env"]}
     })
     
-    async with client:
-        tools = await client.list_tools()
-        result = await client.call_tool("setup", {"value": 0})
+    async with env:
+        tools = await env.list_tools()
+        result = await env.call_tool("setup", value=0)
 ```
 
 ## See Also
