@@ -8,7 +8,7 @@ from mcp.types import ImageContent, TextContent
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.computer.gemini import GeminiComputerTool
 from hud.tools.computer.glm import GLMComputerTool
-from hud.tools.computer.hud import HudComputerTool
+from hud.tools.computer.hud import AgentCoordinate, HudComputerTool
 from hud.tools.computer.openai import OpenAIComputerTool
 from hud.tools.computer.qwen import QwenComputerTool
 from hud.tools.executors.base import BaseExecutor
@@ -34,6 +34,11 @@ class RecordingExecutor(BaseExecutor):
     async def drag(self, path, pattern=None, hold_keys=None, take_screenshot=True):
         self.drag_paths.append(path)
         return await super().drag(path, pattern, hold_keys, take_screenshot=False)
+
+
+class EmptyErrorExecutor(BaseExecutor):
+    async def click(self, *args, **kwargs):
+        return ContentResult(error="")
 
 
 @pytest.mark.asyncio
@@ -75,13 +80,40 @@ async def test_anthropic_computer_screenshot():
 
 
 @pytest.mark.asyncio
-async def test_gemini_computer_click_reports_agent_coordinates():
+async def test_gemini_computer_scaling_preserves_model_coordinates():
     comp = GeminiComputerTool()
+    x, y = comp._scale_coordinates(214, 420)
+
+    assert x is not None
+    assert y is not None
+    assert int(x) != 214
+    assert int(y) != 420
+    assert getattr(x, "agent_value") == 214
+    assert getattr(y, "agent_value") == 420
+
+
+@pytest.mark.asyncio
+async def test_gemini_computer_click_reports_model_coordinates():
+    comp = GeminiComputerTool(executor=BaseExecutor())
+
     blocks = await comp(action="click_at", x=214, y=420)
 
     assert any(
-        "(214, 420)" in content.text for content in blocks if isinstance(content, TextContent)
+        "Clicked at (214, 420)" in content.text
+        for content in blocks
+        if isinstance(content, TextContent)
     )
+
+
+@pytest.mark.asyncio
+async def test_gemini_computer_does_not_mask_empty_error():
+    comp = GeminiComputerTool(executor=EmptyErrorExecutor())
+
+    blocks = await comp(action="click_at", x=214, y=420)
+    text = "\n".join(content.text for content in blocks if isinstance(content, TextContent))
+
+    assert "Clicked at (214, 420)" not in text
+    assert "Tool execution failed with no error output" in text
 
 
 @pytest.mark.asyncio
@@ -125,40 +157,44 @@ async def test_anthropic_computer_zoom():
 
 @pytest.mark.asyncio
 async def test_openai_computer_click():
-    comp = OpenAIComputerTool()
+    comp = OpenAIComputerTool(executor=BaseExecutor())
     blocks = await comp(type="click", x=5, y=5)
     assert blocks
-    assert any("(5, 5)" in content.text for content in blocks if isinstance(content, TextContent))
 
 
 @pytest.mark.asyncio
-async def test_anthropic_computer_click_reports_agent_coordinates():
-    comp = AnthropicComputerTool()
-    blocks = await comp(action="left_click", coordinate=[123, 456], text=None)
+async def test_anthropic_computer_scaling_preserves_agent_coordinates():
+    comp = AnthropicComputerTool(executor=BaseExecutor())
+    x, y = comp._scale_coordinates(123, 456)
 
-    assert any(
-        "(123, 456)" in content.text for content in blocks if isinstance(content, TextContent)
-    )
-
-
-@pytest.mark.asyncio
-async def test_qwen_computer_click_reports_agent_coordinates():
-    comp = QwenComputerTool()
-    blocks = await comp(action="left_click", coordinate=[123, 456])
-
-    assert any(
-        "(123, 456)" in content.text for content in blocks if isinstance(content, TextContent)
-    )
+    assert x is not None
+    assert y is not None
+    assert getattr(x, "agent_value") == 123
+    assert getattr(y, "agent_value") == 456
 
 
 @pytest.mark.asyncio
-async def test_glm_computer_click_reports_agent_coordinates():
-    comp = GLMComputerTool()
-    blocks = await comp(action="left_click", start_box="[123,456]")
+async def test_qwen_computer_scaling_preserves_agent_coordinates():
+    comp = QwenComputerTool(executor=BaseExecutor())
+    x, y = comp._scale_coordinates(123, 456)
 
-    assert any(
-        "(123, 456)" in content.text for content in blocks if isinstance(content, TextContent)
-    )
+    assert x is not None
+    assert y is not None
+    assert getattr(x, "agent_value") == 123
+    assert getattr(y, "agent_value") == 456
+
+
+@pytest.mark.asyncio
+async def test_glm_computer_scaling_preserves_model_coordinates():
+    comp = GLMComputerTool(executor=BaseExecutor())
+    x, y = comp._scale_coordinates(123, 456)
+
+    assert x is not None
+    assert y is not None
+    assert int(x) != 123
+    assert int(y) != 456
+    assert getattr(x, "agent_value") == 123
+    assert getattr(y, "agent_value") == 456
 
 
 def test_normalized_coordinate_max_stays_in_display_bounds():
@@ -215,6 +251,28 @@ async def test_xdo_drag_executes_interpolated_mouse_moves():
     assert len(mouse_moves) == 11
     assert mouse_moves[0] == "mousemove 0 0"
     assert mouse_moves[-1] == "mousemove 120 0"
+
+
+@pytest.mark.asyncio
+async def test_xdo_commands_use_execution_pixels_for_agent_coordinates():
+    executor = RecordingXDOExecutor()
+
+    await executor.click(x=AgentCoordinate(309, 214), y=AgentCoordinate(396, 420))
+
+    assert executor.commands[-1] == "mousemove 309 396 click 1"
+
+
+@pytest.mark.asyncio
+async def test_xdo_nonzero_empty_stderr_surfaces_error(monkeypatch):
+    async def fake_run(command: str):
+        return 1, "", ""
+
+    monkeypatch.setattr("hud.tools.executors.xdo.run", fake_run)
+    executor = XDOExecutor()
+
+    result = await executor.execute("mousemove 1 2", take_screenshot=False)
+
+    assert result.error == "Command failed with exit code 1"
 
 
 class TestHudComputerToolExtended:

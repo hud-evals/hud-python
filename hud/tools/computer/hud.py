@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentCoordinate(int):
-    """Carry both execution and model-visible coordinate values."""
+    """Execution pixel coordinate with optional model-coordinate metadata."""
 
     agent_value: int
 
@@ -32,15 +32,6 @@ class AgentCoordinate(int):
         obj = int.__new__(cls, value)
         obj.agent_value = agent_value
         return obj
-
-    def __format__(self, format_spec: str) -> str:
-        return format(self.agent_value, format_spec)
-
-    def __str__(self) -> str:
-        return str(int(self))
-
-    def __repr__(self) -> str:
-        return repr(self.agent_value)
 
 
 class HudComputerTool(BaseTool):

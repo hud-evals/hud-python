@@ -5,10 +5,12 @@ import base64
 import logging
 import os
 import shlex
-from pathlib import Path
+from contextlib import suppress
 from tempfile import gettempdir
 from typing import Literal
 from uuid import uuid4
+
+from anyio import Path
 
 from hud.tools.types import ContentResult
 from hud.tools.utils import run
@@ -141,9 +143,14 @@ class XDOExecutor(BaseExecutor):
         # Execute command
         returncode, stdout, stderr = await run(full_command)
 
+        error = None
+        if returncode != 0:
+            error = stderr or f"Command failed with exit code {returncode}"
+
         # Prepare result
         result = ContentResult(
-            output=stdout if stdout else None, error=stderr if stderr or returncode != 0 else None
+            output=stdout if stdout else None,
+            error=error,
         )
 
         # Take screenshot if requested
@@ -167,7 +174,7 @@ class XDOExecutor(BaseExecutor):
         # Real screenshot using scrot
         if OUTPUT_DIR:
             output_dir = Path(OUTPUT_DIR)
-            output_dir.mkdir(parents=True, exist_ok=True)
+            await output_dir.mkdir(parents=True, exist_ok=True)
             screenshot_path = output_dir / f"screenshot_{uuid4().hex}.png"
         else:
             # Generate a unique path in system temp dir without opening a file
@@ -177,12 +184,13 @@ class XDOExecutor(BaseExecutor):
 
         returncode, _, _stderr = await run(screenshot_cmd)
 
-        if returncode == 0 and screenshot_path.exists():
+        if returncode == 0 and await screenshot_path.exists():
             try:
-                image_data = screenshot_path.read_bytes()
+                image_data = await screenshot_path.read_bytes()
                 # Remove the file unless user requested persistence via env var
                 if not OUTPUT_DIR:
-                    screenshot_path.unlink(missing_ok=True)
+                    with suppress(FileNotFoundError):
+                        await screenshot_path.unlink()
                 return base64.b64encode(image_data).decode()
             except Exception:
                 return None
