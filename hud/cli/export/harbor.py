@@ -349,6 +349,11 @@ class HarborExporter(BaseExporter):
         files["README.md"] = readme
         files["sample-run.sh"] = sample_run
 
+        bundle_name = inp.bundle_name or _slugify(inp.taskset_name)
+        sample_run_command = (
+            f"tar xzf {bundle_name}.tar.gz\ncd {bundle_name}\n./sample-run.sh {ordered_slugs[0]}"
+        )
+
         manifest: dict[str, Any] = {
             "format": "harbor",
             "taskset_name": inp.taskset_name,
@@ -358,7 +363,8 @@ class HarborExporter(BaseExporter):
             "rendered_prompt_count": rendered_prompt_count,
             "base_image": inp.env_image,
             "required_env": sorted(inp.env_required_env),
-            "sample_run_command": f"./sample-run.sh {ordered_slugs[0]}",
+            "bundle_name": bundle_name,
+            "sample_run_command": sample_run_command,
         }
         files["manifest.json"] = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
 

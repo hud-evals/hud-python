@@ -40,6 +40,7 @@ class ExportInput(BaseModel):
     taskset_name: str
     taskset_id: str | None = None
     task_subset: list[str] | None = None
+    bundle_name: str | None = None
 
 
 class ExportResult(BaseModel):
