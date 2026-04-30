@@ -60,11 +60,14 @@ async def _register_session(url: str, scenario: str, args_dict: dict) -> str | N
 
     args_for_mcp = {k: json.dumps(v) if not isinstance(v, str) else v for k, v in args_dict.items()}
 
-    async with streamablehttp_client(url, terminate_on_close=False) as (
-        read_stream,
-        write_stream,
-        get_session_id,
-    ), ClientSession(read_stream, write_stream) as session:
+    async with (
+        streamablehttp_client(url, terminate_on_close=False) as (
+            read_stream,
+            write_stream,
+            get_session_id,
+        ),
+        ClientSession(read_stream, write_stream) as session,
+    ):
         await session.initialize()
         await session.get_prompt(scenario, arguments=args_for_mcp)
         return get_session_id()
