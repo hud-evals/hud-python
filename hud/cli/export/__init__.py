@@ -12,9 +12,11 @@ Add a new format by subclassing ``BaseExporter`` and registering it in
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -23,6 +25,9 @@ from hud.utils.hud_console import HUDConsole
 from .base import BaseExporter, ExportInput, ExportResult
 from .harbor import HarborExporter
 from .render import render_prompts_via_image, render_prompts_via_url
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = [
     "BaseExporter",
@@ -153,10 +158,8 @@ def _resolve_repo_inputs(
         tasks = collect_tasks(tasks_source)
     finally:
         for p in inserted:
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(p)
-            except ValueError:
-                pass
     if not tasks:
         raise typer.BadParameter(
             f"No tasks found at {tasks_source}. Pass --tasks <file> if your "
@@ -242,7 +245,7 @@ def _resolve_prompts(
     raise typer.BadParameter(f"Unknown render-prompts mode: {mode}")
 
 
-def _make_format_command(exporter: BaseExporter):
+def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
     """Build the per-format Typer command function."""
 
     def _cmd(

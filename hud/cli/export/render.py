@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Any
 from .harbor import _full_scenario_name, _slugify, _task_slug
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from hud.eval.task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -65,7 +67,7 @@ def _extract_text(messages: list[Any]) -> str:
 
 
 @contextlib.contextmanager
-def _quiet_mcp_retry_logs():
+def _quiet_mcp_retry_logs() -> Iterator[None]:
     """Suppress hud.patches.mcp_patches retry warnings during a block.
 
     These fire on every transient ReadError from the streamable-http
@@ -123,7 +125,7 @@ async def render_prompts_via_url(
                         rendered[slug] = text
                     else:
                         LOGGER.warning("Empty prompt for %s", slug)
-                except Exception as exc:  # noqa: BLE001 — best-effort per-task
+                except Exception as exc:
                     LOGGER.warning("Failed to render prompt for %s: %s", slug, exc)
         finally:
             await client.__aexit__(None, None, None)
@@ -209,16 +211,17 @@ async def render_prompts_via_image(
     )
 
     LOGGER.info("Booting image %s for prompt rendering", image)
-    proc = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+    proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"docker run failed: {proc.stderr.strip() or proc.stdout.strip()}")
     container_id = proc.stdout.strip()
 
     try:
         url = f"http://localhost:{host_port}/mcp"
-        if not _wait_for_port("localhost", host_port, boot_timeout):
-            logs = subprocess.run(  # noqa: S603
-                ["docker", "logs", "--tail", "60", container_id],  # noqa: S607
+        if not await asyncio.to_thread(_wait_for_port, "localhost", host_port, boot_timeout):
+            logs = await asyncio.to_thread(
+                subprocess.run,
+                ["docker", "logs", "--tail", "60", container_id],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -233,8 +236,9 @@ async def render_prompts_via_image(
         )
     finally:
         with contextlib.suppress(Exception):
-            subprocess.run(  # noqa: S603
-                ["docker", "rm", "-f", container_id],  # noqa: S607
+            await asyncio.to_thread(
+                subprocess.run,
+                ["docker", "rm", "-f", container_id],
                 capture_output=True,
                 timeout=15,
             )

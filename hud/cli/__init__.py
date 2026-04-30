@@ -32,11 +32,11 @@ from .analyze import analyze_command  # noqa: E402
 from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
 from .convert import convert_command  # noqa: E402
-from .export import export_app  # noqa: E402
 from .debug import debug_command  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
 from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
+from .export import export_app  # noqa: E402
 from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .login import login_command  # noqa: E402

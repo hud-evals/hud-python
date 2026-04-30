@@ -78,10 +78,7 @@ def _system_prompt(task: Task) -> str | None:
 
 def _agent_timeout(task: Task) -> int:
     cfg = task.agent_config
-    if isinstance(cfg, dict):
-        val = cfg.get("timeout")
-    else:
-        val = getattr(cfg, "timeout", None)
+    val = cfg.get("timeout") if isinstance(cfg, dict) else getattr(cfg, "timeout", None)
     try:
         return int(val) if val else 1800
     except (TypeError, ValueError):

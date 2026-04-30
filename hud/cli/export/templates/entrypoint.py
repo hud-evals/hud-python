@@ -26,14 +26,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import subprocess
 import sys
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
 
-async def _wait_port(port: int, timeout: int = 30) -> bool:
+
+async def _wait_port(port: int, timeout: int = 30) -> bool:  # noqa: ASYNC109
     """Return True once ``localhost:port`` accepts TCP connections."""
     for _ in range(timeout * 2):
         try:
@@ -61,23 +64,27 @@ async def _register_session(url: str, scenario: str, args_dict: dict) -> str | N
         read_stream,
         write_stream,
         get_session_id,
-    ):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            await session.get_prompt(scenario, arguments=args_for_mcp)
-            return get_session_id()
+    ), ClientSession(read_stream, write_stream) as session:
+        await session.initialize()
+        await session.get_prompt(scenario, arguments=args_for_mcp)
+        return get_session_id()
 
 
 def _spawn_hud_dev(port: int) -> subprocess.Popen[bytes]:
-    log_fd = open("/tmp/hud-dev.log", "wb")
-    return subprocess.Popen(
-        ["hud", "dev", "env:env", "--port", str(port)],
-        stdout=log_fd,
-        stderr=subprocess.STDOUT,
-    )
+    with open("/tmp/hud-dev.log", "wb") as log_fd:  # noqa: S108
+        return subprocess.Popen(
+            ["hud", "dev", "env:env", "--port", str(port)],  # noqa: S607
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
+        )
 
 
 def _main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="entrypoint: %(message)s",
+        stream=sys.stderr,
+    )
     port = int(os.environ.get("HUD_MCP_PORT", "8765"))
     scenario = os.environ.get("HUD_TASK_SCENARIO") or ""
     args_json = os.environ.get("HUD_TASK_ARGS") or "{}"
@@ -86,31 +93,31 @@ def _main() -> None:
     _spawn_hud_dev(port)
 
     if not asyncio.run(_wait_port(port)):
-        print(f"entrypoint: hud dev did not bind :{port}", file=sys.stderr)
+        logger.error("hud dev did not bind :%d", port)
 
     if scenario:
         try:
             try:
                 args_dict = json.loads(args_json) if args_json else {}
             except json.JSONDecodeError as exc:
-                print(f"entrypoint: invalid HUD_TASK_ARGS: {exc}", file=sys.stderr)
+                logger.error("invalid HUD_TASK_ARGS: %s", exc)
                 args_dict = {}
             session_id = asyncio.run(
                 _register_session(url, scenario, args_dict if isinstance(args_dict, dict) else {})
             )
             if session_id:
-                Path("/tmp/.hud_scenario_session").write_text(session_id)
-                print(f"entrypoint: scenario session {session_id}")
+                Path("/tmp/.hud_scenario_session").write_text(session_id)  # noqa: S108
+                logger.info("scenario session %s", session_id)
             else:
-                print("entrypoint: scenario setup returned no session id", file=sys.stderr)
-        except Exception as exc:  # noqa: BLE001
-            print(f"entrypoint: scenario setup failed: {exc}", file=sys.stderr)
+                logger.error("scenario setup returned no session id")
+        except Exception as exc:
+            logger.error("scenario setup failed: %s", exc)
 
     # Hand off PID 1 to whatever harbor's compose ``command:`` was
     # (typically ``sh -c "sleep infinity"``).
     cmd = sys.argv[1:]
     if cmd:
-        os.execvp(cmd[0], cmd)
+        os.execvp(cmd[0], cmd)  # noqa: S606
     else:
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         signal.pause()

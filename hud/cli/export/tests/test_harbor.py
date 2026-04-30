@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import stat
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,6 +23,9 @@ from hud.cli.export.harbor import (
     _toml_escape,
 )
 from hud.eval.task import Task
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _task(
