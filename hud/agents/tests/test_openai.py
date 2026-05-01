@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -53,6 +54,7 @@ class MockEvalContext(EvalContext):
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
         self.results: list[Any] = []
+        self.calls: list[Any] = []
         self._is_summary = False
 
     def as_tools(self) -> list[types.Tool]:
@@ -66,6 +68,7 @@ class MockEvalContext(EvalContext):
         return self._tools
 
     async def call_tool(self, call: Any, /, **kwargs: Any) -> MCPToolResult:
+        self.calls.append(call)
         return MCPToolResult(
             content=[types.TextContent(type="text", text="ok")],
             isError=False,
@@ -81,7 +84,7 @@ class TestOpenAIAgent:
     @pytest.fixture
     def mock_openai(self) -> Generator[AsyncOpenAI, None, None]:  # type: ignore[misc]
         """Create a stub OpenAI client."""
-        with patch("hud.agents.openai.AsyncOpenAI") as mock_class:
+        with patch("hud.agents.openai.agent.AsyncOpenAI") as mock_class:
             client = AsyncOpenAI(api_key="test", base_url="http://localhost")
             client.chat.completions.create = AsyncMock()
             client.responses.create = AsyncMock()
@@ -127,7 +130,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_init_without_client_no_api_key(self) -> None:
         """Test agent initialization fails without API key."""
-        with patch("hud.agents.openai.settings") as mock_settings:
+        with patch("hud.agents.openai.agent.settings") as mock_settings:
             mock_settings.api_key = None
             mock_settings.openai_api_key = None
             with pytest.raises(ValueError, match="No API key found"):
@@ -427,7 +430,7 @@ class TestOpenAIToolConversion:
     @pytest.fixture
     def mock_openai(self) -> Generator[AsyncOpenAI, None, None]:  # type: ignore[misc]
         """Create a stub OpenAI client."""
-        with patch("hud.agents.openai.AsyncOpenAI") as mock_class:
+        with patch("hud.agents.openai.agent.AsyncOpenAI") as mock_class:
             client = AsyncOpenAI(api_key="test", base_url="http://localhost")
             client.responses.create = AsyncMock()
             mock_class.return_value = client
@@ -435,10 +438,10 @@ class TestOpenAIToolConversion:
 
     @pytest.mark.asyncio
     async def test_shell_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:
-        """Test that shell tool is converted to native format."""
+        """Test that the agent converts shell capability to OpenAI native format."""
         tools = [
             types.Tool(
-                name="shell",
+                name="bash",
                 description="Execute shell commands",
                 inputSchema={"type": "object"},
             )
@@ -455,10 +458,210 @@ class TestOpenAIToolConversion:
         # Check for native shell tool
         shell_tool = next((t for t in agent._openai_tools if t.get("type") == "shell"), None)
         assert shell_tool is not None
+        assert agent._tool_name_map["shell"] == "shell"
+        assert agent._openai_native_tools["shell"].env_tool_name == "bash"
+
+    @pytest.mark.asyncio
+    async def test_apply_patch_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:
+        """Test that the agent converts editor capability to OpenAI native format."""
+        tools = [
+            types.Tool(
+                name="edit",
+                description="Apply V4A patches",
+                inputSchema={"type": "object"},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        apply_patch_tool = next(
+            (t for t in agent._openai_tools if t.get("type") == "apply_patch"),
+            None,
+        )
+        assert apply_patch_tool is not None
+        assert agent._tool_name_map["apply_patch"] == "apply_patch"
+        assert agent._openai_native_tools["apply_patch"].env_tool_name == "edit"
+
+    @pytest.mark.asyncio
+    async def test_capability_metadata_routes_openai_tools(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Test env-level capabilities can bind OpenAI tools to non-public names."""
+        tools = [
+            types.Tool(
+                name="run_shell",
+                description="Execute shell commands",
+                inputSchema={"type": "object"},
+            ),
+            types.Tool(
+                name="patch_files",
+                description="Apply V4A patches",
+                inputSchema={"type": "object"},
+            ),
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.metadata["environment_capabilities"] = {
+            "capabilities": {
+                "shell": "run_shell",
+                "editor": {"tool": "patch_files"},
+            }
+        }
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert {t.get("type") for t in agent._openai_tools} == {"shell", "apply_patch"}
+        assert agent._tool_name_map["shell"] == "shell"
+        assert agent._tool_name_map["apply_patch"] == "apply_patch"
+        assert agent._openai_native_tools["shell"].env_tool_name == "run_shell"
+        assert agent._openai_native_tools["apply_patch"].env_tool_name == "patch_files"
+        assert [tool.name for tool in agent._categorized_tools.generic] == [
+            "run_shell",
+            "patch_files",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_non_hosted_native_metadata_is_generic(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """OpenAI ignores env-owned provider metadata."""
+        tools = [
+            types.Tool(
+                name="custom_tool",
+                description="Custom tool",
+                inputSchema={"type": "object", "properties": {}},
+                _meta={
+                    "native_tools": {
+                        "openai": {
+                            "api_type": "custom_native",
+                            "api_name": "custom_native",
+                            "role": "custom",
+                        }
+                    }
+                },
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert [tool.name for tool in agent._categorized_tools.generic] == ["custom_tool"]
+        assert {tool.get("type") for tool in agent._openai_tools} == {"function"}
+
+    @pytest.mark.asyncio
+    async def test_openai_shell_call_routes_directly_to_bash(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Test OpenAI shell calls stay provider-owned until execution."""
+        tools = [
+            types.Tool(
+                name="bash",
+                description="Execute shell commands",
+                inputSchema={"type": "object"},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        tool_call = agent._extract_tool_call(
+            SimpleNamespace(
+                type="shell_call",
+                action=SimpleNamespace(
+                    to_dict=lambda: {"commands": ["pwd", "ls"], "timeout_ms": 5000}
+                ),
+                call_id="call_1",
+            )
+        )
+
+        assert tool_call == MCPToolCall(
+            name="shell",
+            arguments={"commands": ["pwd", "ls"], "timeout_ms": 5000},
+            id="call_1",
+        )
+
+        results = await agent.call_tools(tool_call)
+        assert [(call.name, call.arguments) for call in ctx.calls] == [
+            ("bash", {"command": "pwd", "timeout_seconds": 5.0}),
+            ("bash", {"command": "ls", "timeout_seconds": 5.0}),
+        ]
+        assert results[0].structuredContent["provider_tool"] == "shell"  # type: ignore[index]
+
+    @pytest.mark.asyncio
+    async def test_openai_apply_patch_call_routes_directly_to_edit(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Test OpenAI apply_patch calls stay provider-owned until execution."""
+        tools = [
+            types.Tool(
+                name="edit",
+                description="Edit files",
+                inputSchema={"type": "object"},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        tool_call = agent._extract_tool_call(
+            SimpleNamespace(
+                type="apply_patch_call",
+                operation=SimpleNamespace(
+                    to_dict=lambda: {
+                        "type": "update_file",
+                        "path": "x.py",
+                        "diff": "@@\n-old\n+new",
+                    }
+                ),
+                call_id="call_1",
+            )
+        )
+
+        assert tool_call == MCPToolCall(
+            name="apply_patch",
+            arguments={"type": "update_file", "path": "x.py", "diff": "@@\n-old\n+new"},
+            id="call_1",
+        )
+
+        async def call_tool(call: Any, /, **kwargs: Any) -> MCPToolResult:
+            del kwargs
+            ctx.calls.append(call)
+            if call.arguments["command"] == "read":
+                return MCPToolResult(
+                    content=[types.TextContent(type="text", text="old\n")],
+                    isError=False,
+                )
+            return MCPToolResult(
+                content=[types.TextContent(type="text", text="written")],
+                isError=False,
+            )
+
+        ctx.call_tool = call_tool  # type: ignore[method-assign]
+        results = await agent.call_tools(tool_call)
+
+        assert [(call.name, call.arguments) for call in ctx.calls] == [
+            ("edit", {"command": "read", "path": "x.py"}),
+            ("edit", {"command": "write", "path": "x.py", "file_text": "new\n"}),
+        ]
+        assert results[0].structuredContent["provider_tool"] == "apply_patch"  # type: ignore[index]
 
     @pytest.mark.asyncio
     async def test_computer_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:
-        """Test that computer tool is converted to function format."""
+        """Test that the agent converts computer capability to OpenAI native format."""
         tools = [
             types.Tool(
                 name="computer",
@@ -475,13 +678,81 @@ class TestOpenAIToolConversion:
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
 
-        # Computer tool is converted to a regular function tool
         computer_tool = next(
-            (t for t in agent._openai_tools if t.get("name") == "computer"),
+            (t for t in agent._openai_tools if t.get("type") == "computer"),
             None,
         )
         assert computer_tool is not None
-        assert computer_tool.get("type") == "function"
+        assert agent._tool_name_map["computer"] == "computer"
+        assert agent._openai_native_tools["computer"].env_tool_name == "computer"
+
+    @pytest.mark.asyncio
+    async def test_openai_computer_call_routes_directly_to_generic_computer(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Test OpenAI computer calls stay provider-owned until execution."""
+        tools = [
+            types.Tool(
+                name="computer",
+                description="Control computer",
+                inputSchema={"type": "object"},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+
+        async def call_tool(call: Any, /, **kwargs: Any) -> MCPToolResult:
+            del kwargs
+            ctx.calls.append(call)
+            if call.arguments["action"] == "screenshot":
+                return MCPToolResult(
+                    content=[types.ImageContent(type="image", data="img", mimeType="image/png")],
+                    isError=False,
+                )
+            return MCPToolResult(
+                content=[types.TextContent(type="text", text="clicked")],
+                isError=False,
+            )
+
+        ctx.call_tool = call_tool  # type: ignore[method-assign]
+        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        tool_call = agent._extract_tool_call(
+            SimpleNamespace(
+                type="computer_call",
+                pending_safety_checks=[],
+                action=SimpleNamespace(
+                    to_dict=lambda: {"type": "click", "x": 10, "y": 20, "button": "left"}
+                ),
+                call_id="call_1",
+            )
+        )
+
+        assert tool_call is not None
+        assert tool_call == MCPToolCall(
+            name="computer",
+            arguments={"type": "click", "x": 10, "y": 20, "button": "left"},
+            id="call_1",
+        )
+
+        results = await agent.call_tools(tool_call)
+        assert [(call.name, call.arguments) for call in ctx.calls] == [
+            ("computer", {"action": "click", "x": 10, "y": 20, "button": "left"}),
+            ("computer", {"action": "screenshot"}),
+        ]
+
+        messages = await agent.format_tool_results([tool_call], results)
+        assert messages == [
+            {
+                "type": "computer_call_output",
+                "call_id": "call_1",
+                "output": {
+                    "type": "computer_screenshot",
+                    "image_url": "data:image/png;base64,img",
+                },
+            }
+        ]
 
 
 class TestOpenAICitations:

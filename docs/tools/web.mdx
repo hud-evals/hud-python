@@ -4,16 +4,17 @@ description: "Browser automation and web search"
 icon: "globe"
 ---
 
-Web tools let agents browse the internet and search for information. Two types: client-executed (your environment runs the browser) and hosted (provider runs the search).
+Web tools let agents browse the internet and search for information. Client-executed
+tools live in the environment. Hosted tools are provider-side agent configuration.
 
 ## Quick Reference
 
 | Tool | Execution | Purpose |
 |------|-----------|---------|
 | `PlaywrightTool` | Client | Full browser automation |
-| `WebSearchTool` | Hosted (Claude) | Real-time web search |
-| `GoogleSearchTool` | Hosted (Gemini) | Google search |
-| `WebFetchTool` | Client | Fetch page content |
+| `ClaudeWebSearchTool` | Hosted (Claude) | Real-time web search |
+| `GeminiGoogleSearchTool` | Hosted (Gemini) | Google search |
+| `ClaudeWebFetchTool` | Hosted (Claude) | Fetch page content |
 
 ## PlaywrightTool
 
@@ -60,55 +61,62 @@ When done:
 await browser.close()
 ```
 
-## WebSearchTool (Claude)
+## ClaudeWebSearchTool
 
-Claude's native web search. Executed server-side by Anthropic. Results appear in the response with citations.
+Claude's native web search. Executed server-side by Anthropic. Results appear in
+the response with citations.
 
 ```python
-from hud.tools.hosted import WebSearchTool
+from hud.agents.claude import ClaudeAgent, ClaudeWebSearchTool
 
-search = WebSearchTool(
-    max_uses=10,                        # Max searches per request
-    allowed_domains=["docs.python.org"],# Only these domains
-    blocked_domains=["spam.com"],       # Never these domains
+agent = ClaudeAgent.create(
+    hosted_tools=[
+        ClaudeWebSearchTool(
+            max_uses=10,
+            allowed_domains=["docs.python.org"],
+            blocked_domains=["spam.com"],
+        )
+    ]
 )
 ```
 
 Uses `web_search_20250305` API. $10 per 1,000 searches.
 
 <Note>
-Hosted tools are declared in your environment but executed by the provider. You don't call them directly—Claude invokes them and results appear in the response.
+Hosted tools are configured on the agent because the provider executes them.
+They are not MCP environment tools and are not called through `ctx.call_tool`.
 </Note>
 
-## GoogleSearchTool (Gemini)
+## GeminiGoogleSearchTool
 
-Google Search for Gemini. Also hosted—executed by Google.
+Google Search for Gemini. Also hosted and executed by Google.
 
 ```python
-from hud.tools.hosted import GoogleSearchTool
+from hud.agents.gemini import GeminiAgent, GeminiGoogleSearchTool
 
-search = GoogleSearchTool()
+agent = GeminiAgent.create(hosted_tools=[GeminiGoogleSearchTool()])
 ```
 
-## WebFetchTool
+## ClaudeWebFetchTool
 
-Fetch and extract content from URLs.
+Claude hosted web fetch for URLs and PDFs.
 
 ```python
-from hud.tools.hosted import WebFetchTool
+from hud.agents.claude import ClaudeAgent, ClaudeWebFetchTool
 
-fetch = WebFetchTool()
-result = await fetch(url="https://example.com/article")
+agent = ClaudeAgent.create(
+    hosted_tools=[ClaudeWebFetchTool(max_content_tokens=20_000)]
+)
 ```
 
 ## Hosted vs Client
 
-**Hosted tools** (WebSearchTool, GoogleSearchTool):
-- You declare them, provider executes them
+**Hosted tools** (ClaudeWebSearchTool, GeminiGoogleSearchTool):
+- You configure them on the agent, provider executes them
 - Results in response metadata
 - No local browser needed
 
-**Client tools** (PlaywrightTool, WebFetchTool):
+**Client tools** (PlaywrightTool):
 - Your environment runs the browser
 - Full control over interaction
 - Screenshots, clicks, form filling
@@ -117,12 +125,13 @@ result = await fetch(url="https://example.com/article")
 
 ```python
 from hud import Environment
+from hud.agents.claude import ClaudeAgent, ClaudeWebSearchTool
 from hud.tools import PlaywrightTool
-from hud.tools.hosted import WebSearchTool
 
 env = Environment("web-env")
 env.add_tool(PlaywrightTool())
-env.add_tool(WebSearchTool())
+
+agent = ClaudeAgent.create(hosted_tools=[ClaudeWebSearchTool()])
 ```
 
 ## CDP for Containers

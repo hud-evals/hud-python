@@ -399,7 +399,7 @@ class TestDetectTransport:
     # --- chained / multi-command shell ---
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
-    def test_chained_and_operator(self, mock_get_cmd):
+    def test_chained_command(self, mock_get_cmd):
         mock_get_cmd.return_value = ["sh", "-c", "cd /app && hud dev env:env --port 8080"]
         mode, port = detect_transport("img:latest")
         assert mode == "http"

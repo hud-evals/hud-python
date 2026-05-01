@@ -96,18 +96,15 @@
             "pages": [
               "tools/computer",
               "tools/coding",
-              "tools/filesystem",
               "tools/memory",
-              "tools/web",
-              "tools/grounding"
+              "tools/web"
             ]
           },
           {
             "group": "Cookbooks",
             "pages": [
               "cookbooks/codex-coding",
-              "cookbooks/ops-diagnostics",
-              "cookbooks/opencode-agent"
+              "cookbooks/ops-diagnostics"
             ]
           },
           {

@@ -4,13 +4,13 @@ Build Your Own Codex - A 1:1 Recreation of OpenAI's Codex CLI
 
 This example shows how to build your own Codex (https://github.com/openai/codex)
 from scratch using the HUD SDK. The implementation matches Codex's behavior
-exactly because HUD's tools conform to the same OpenAI Responses API specs:
+through OpenAI's native coding tools while the environment exposes HUD tools:
 
-- `ShellTool` implements `ShellAction` → `ShellResult` (stdout, stderr, outcome)
-- `ApplyPatchTool` implements V4A diff format (create_file, update_file, delete_file)
+- `BashTool` provides persistent shell execution
+- `EditTool` provides generic file operations
 
-The `OpenAIAgent` automatically converts these to OpenAI's native tool types,
-so the model sees the exact same interface as the official Codex CLI.
+The `OpenAIAgent` exposes OpenAI's native `shell` and `apply_patch` tools and
+translates them to the environment tools.
 
 What you get:
 - **Your own Codex** - Same behavior as `codex` CLI, but fully customizable
@@ -47,7 +47,7 @@ load_dotenv()
 import hud
 from hud.agents.openai import OpenAIAgent
 from hud.settings import settings
-from hud.tools.coding import ApplyPatchTool, ShellTool
+from hud.tools.coding import BashSession, BashTool, EditTool
 
 # =============================================================================
 # Configuration
@@ -80,7 +80,7 @@ async def run_coding_task_local(
     """
     Run a coding task locally without Docker.
 
-    Uses ShellTool and ApplyPatchTool running on your local machine.
+    Uses BashTool and EditTool running on your local machine.
     Files are created in a temporary directory (or specified work_dir).
 
     Args:
@@ -116,11 +116,11 @@ async def run_coding_task_local(
             "Then: export HUD_API_KEY='sk-hud-...'"
         )
 
-    # Create environment with Codex tools - 1:1 match with OpenAI's Codex CLI
-    # Both tools use the same working directory for consistency
+    # Create environment with HUD tools. OpenAIAgent owns the Codex-specific
+    # shell/apply_patch protocol and routes those calls to bash/edit.
     env = hud.Environment("local-codex")
-    env.add_tool(ShellTool(cwd=base_path))
-    env.add_tool(ApplyPatchTool(base_path=base_path))
+    env.add_tool(BashTool(session=BashSession(cwd=base_path)))
+    env.add_tool(EditTool(base_path=base_path))
 
     # Create agent using HUD Gateway (uses HUD_API_KEY)
     model_client = AsyncOpenAI(

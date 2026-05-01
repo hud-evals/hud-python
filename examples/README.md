@@ -30,19 +30,6 @@ uv run python examples/01_codex_coding_agent.py --local \
 
 > Requires `HUD_API_KEY`. Uses HUD Gateway for inference.
 
-### 02_opencode_agent.py
-OpenCode-style coding agent with `EditTool`, `ShellTool`, and filesystem exploration tools (`ReadTool`, `GrepTool`, `GlobTool`, `ListTool`). Includes a read-only plan mode for safe codebase exploration.
-
-```bash
-# Build mode - full coding capabilities
-uv run python examples/02_opencode_agent.py --task "Fix the bug in main.py"
-
-# Plan mode - read-only exploration
-uv run python examples/02_opencode_agent.py --plan --task "How does auth work?"
-```
-
-> Requires `HUD_API_KEY`. Works with any model via `--model`.
-
 ## Key Concepts
 
 ### Using hud.eval()

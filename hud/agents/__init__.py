@@ -3,16 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 from .base import CategorizedTools, MCPAgent
+from .claude import ClaudeAgent
 from .openai import OpenAIAgent
 from .openai_chat import OpenAIChatAgent
-from .operator import OperatorAgent
 
 __all__ = [
     "CategorizedTools",
+    "ClaudeAgent",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
-    "OperatorAgent",
     "create_agent",
 ]
 
@@ -60,7 +60,7 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
         provider = "openai"
         if agent_cls.__name__ == "ClaudeAgent":
             provider = "anthropic"
-        elif agent_cls.__name__ in ("GeminiAgent", "GeminiCUAAgent"):
+        elif agent_cls.__name__ == "GeminiAgent":
             provider = "gemini"
 
     client = build_gateway_client(provider)

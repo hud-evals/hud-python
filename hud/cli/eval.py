@@ -60,11 +60,6 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
     AgentPreset("GPT-5.4", AgentType.OPENAI, "gpt-5.4"),
     AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3-1-pro"),
-    AgentPreset(
-        "Gemini CUA (Gemini Computer Use)",
-        AgentType.GEMINI_CUA,
-        "gemini-2.5-computer-use-preview",
-    ),
     # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
@@ -116,12 +111,6 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # temperature = 1.0
 # top_p = 0.95
 
-[gemini_cua]
-# model = "gemini-2.5-computer-use-preview"
-# temperature = 1.0
-# top_p = 0.95
-# excluded_predefined_functions = []
-
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
 # model = "my-model"
@@ -131,9 +120,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
     AgentType.CLAUDE: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
     AgentType.GEMINI: ("gemini_api_key", "GEMINI_API_KEY"),
-    AgentType.GEMINI_CUA: ("gemini_api_key", "GEMINI_API_KEY"),
     AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),
-    AgentType.OPERATOR: ("openai_api_key", "OPENAI_API_KEY"),
 }
 
 
@@ -302,9 +289,7 @@ class EvalConfig(BaseModel):
         if self.agent_type in (
             AgentType.CLAUDE,
             AgentType.OPENAI,
-            AgentType.OPERATOR,
             AgentType.GEMINI,
-            AgentType.GEMINI_CUA,
         ):
             kwargs["validate_api_key"] = False
 
@@ -319,9 +304,7 @@ class EvalConfig(BaseModel):
             agent_to_provider = {
                 AgentType.CLAUDE: "anthropic",
                 AgentType.OPENAI: "openai",
-                AgentType.OPERATOR: "openai",
                 AgentType.GEMINI: "gemini",
-                AgentType.GEMINI_CUA: "gemini",
                 AgentType.OPENAI_COMPATIBLE: "openai",
             }
             provider = agent_to_provider.get(self.agent_type, "openai")
@@ -747,7 +730,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible",
+        help="Agent: claude, openai, gemini, openai_compatible",
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(

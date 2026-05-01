@@ -628,7 +628,6 @@ class HUDConsole:
     def format_tool_discovery(
         self,
         tools: list[Any],
-        native_tools: list[tuple[Any, Any]] | None = None,
         skipped: list[tuple[Any, str]] | None = None,
         stderr: bool = True,
     ) -> None:
@@ -636,14 +635,10 @@ class HUDConsole:
 
         Args:
             tools: All available MCP tools
-            native_tools: List of (tool, NativeToolSpec) for native tools
             skipped: List of (tool, reason) for skipped tools
             stderr: Output to stderr (default True)
         """
         console = self._stderr_console if stderr else self._stdout_console
-
-        native_names = {t.name for t, _ in (native_tools or [])}
-        native_map = {t.name: s for t, s in (native_tools or [])}
 
         table = Table(
             show_header=True,
@@ -653,16 +648,11 @@ class HUDConsole:
             title_style="",
         )
         table.add_column("Tool", style=TEXT, no_wrap=True)
-        table.add_column("Native", style=DIM)
+        table.add_column("Available", style=DIM)
 
         for tool in tools:
             name = tool.name if hasattr(tool, "name") else str(tool)
-            if name in native_names:
-                spec = native_map[name]
-                api_type = getattr(spec, "api_type", "")
-                table.add_row(name, f"[{GREEN}]{api_type}[/{GREEN}]")
-            else:
-                table.add_row(name, f"[{DIM}]-[/{DIM}]")
+            table.add_row(name, f"[{GREEN}]yes[/{GREEN}]")
 
         console.print(table)
 

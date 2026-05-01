@@ -5,10 +5,12 @@ import base64
 import logging
 import os
 import shlex
-from pathlib import Path
+from contextlib import suppress
 from tempfile import gettempdir
 from typing import Literal
 from uuid import uuid4
+
+from anyio import Path
 
 from hud.tools.types import ContentResult
 from hud.tools.utils import run
@@ -60,6 +62,11 @@ CLA_TO_XDO = {
     # Function keys
     **{f"f{i}": f"F{i}" for i in range(1, 25)},
 }
+
+
+def _command_coord(value: int) -> int:
+    """Return the execution-space coordinate for command construction."""
+    return int(value)
 
 
 class XDOExecutor(BaseExecutor):
@@ -141,9 +148,14 @@ class XDOExecutor(BaseExecutor):
         # Execute command
         returncode, stdout, stderr = await run(full_command)
 
+        error = None
+        if returncode != 0:
+            error = stderr or f"Command failed with exit code {returncode}"
+
         # Prepare result
         result = ContentResult(
-            output=stdout if stdout else None, error=stderr if stderr or returncode != 0 else None
+            output=stdout if stdout else None,
+            error=error,
         )
 
         # Take screenshot if requested
@@ -167,7 +179,7 @@ class XDOExecutor(BaseExecutor):
         # Real screenshot using scrot
         if OUTPUT_DIR:
             output_dir = Path(OUTPUT_DIR)
-            output_dir.mkdir(parents=True, exist_ok=True)
+            await output_dir.mkdir(parents=True, exist_ok=True)
             screenshot_path = output_dir / f"screenshot_{uuid4().hex}.png"
         else:
             # Generate a unique path in system temp dir without opening a file
@@ -177,12 +189,13 @@ class XDOExecutor(BaseExecutor):
 
         returncode, _, _stderr = await run(screenshot_cmd)
 
-        if returncode == 0 and screenshot_path.exists():
+        if returncode == 0 and await screenshot_path.exists():
             try:
-                image_data = screenshot_path.read_bytes()
+                image_data = await screenshot_path.read_bytes()
                 # Remove the file unless user requested persistence via env var
                 if not OUTPUT_DIR:
-                    screenshot_path.unlink(missing_ok=True)
+                    with suppress(FileNotFoundError):
+                        await screenshot_path.unlink()
                 return base64.b64encode(image_data).decode()
             except Exception:
                 return None
@@ -243,13 +256,16 @@ class XDOExecutor(BaseExecutor):
                 delay = pattern[0] if pattern else 10  # Use first delay for all clicks
 
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click --repeat {click_count} --delay {delay} {button_num}"  # noqa: E501
+                    cmd = (
+                        f"mousemove {_command_coord(x)} {_command_coord(y)} "
+                        f"click --repeat {click_count} --delay {delay} {button_num}"
+                    )
                 else:
                     cmd = f"click --repeat {click_count} --delay {delay} {button_num}"
             else:
                 # Single click
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click {button_num}"
+                    cmd = f"mousemove {_command_coord(x)} {_command_coord(y)} click {button_num}"
                 else:
                     cmd = f"click {button_num}"
 
@@ -364,7 +380,10 @@ class XDOExecutor(BaseExecutor):
                 button = scroll_button_map.get(direction, 5)
 
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click --repeat {clicks} {button}"
+                    cmd = (
+                        f"mousemove {_command_coord(x)} {_command_coord(y)} "
+                        f"click --repeat {clicks} {button}"
+                    )
                 else:
                     cmd = f"click --repeat {clicks} {button}"
 
@@ -378,7 +397,10 @@ class XDOExecutor(BaseExecutor):
                 button = scroll_button_map.get(direction, 7)
 
                 if x is not None and y is not None:
-                    cmd = f"mousemove {x} {y} click --repeat {clicks} {button}"
+                    cmd = (
+                        f"mousemove {_command_coord(x)} {_command_coord(y)} "
+                        f"click --repeat {clicks} {button}"
+                    )
                 else:
                     cmd = f"click --repeat {clicks} {button}"
 
@@ -403,7 +425,10 @@ class XDOExecutor(BaseExecutor):
         """Move mouse cursor."""
         if x is not None and y is not None:
             # Absolute move
-            return await self.execute(f"mousemove {x} {y}", take_screenshot=take_screenshot)
+            return await self.execute(
+                f"mousemove {_command_coord(x)} {_command_coord(y)}",
+                take_screenshot=take_screenshot,
+            )
         elif offset_x is not None or offset_y is not None:
             # Relative move
             offset_x = offset_x or 0
@@ -425,22 +450,32 @@ class XDOExecutor(BaseExecutor):
         if len(path) < 2:
             return ContentResult(error="Drag path must have at least 2 points")
 
+        drag_path = self._interpolate_drag_path(path)
+
         # Hold keys if specified
         await self._hold_keys_context(hold_keys)
 
         try:
             # Start drag
-            start_x, start_y = path[0]
-            await self.execute(f"mousemove {start_x} {start_y}", take_screenshot=False)
+            start_x, start_y = drag_path[0]
+            await self.execute(
+                f"mousemove {_command_coord(start_x)} {_command_coord(start_y)}",
+                take_screenshot=False,
+            )
             await self.execute("mousedown 1", take_screenshot=False)
 
             # Move through intermediate points
-            for i, (x, y) in enumerate(path[1:], 1):
+            for i, (x, y) in enumerate(drag_path[1:], 1):
                 # Apply delay if pattern is specified
                 if pattern and i - 1 < len(pattern):
                     await asyncio.sleep(pattern[i - 1] / 1000.0)  # Convert ms to seconds
+                else:
+                    await asyncio.sleep(0.008)
 
-                await self.execute(f"mousemove {x} {y}", take_screenshot=False)
+                await self.execute(
+                    f"mousemove {_command_coord(x)} {_command_coord(y)}",
+                    take_screenshot=False,
+                )
 
             # End drag
             await self.execute("mouseup 1", take_screenshot=False)
@@ -449,10 +484,10 @@ class XDOExecutor(BaseExecutor):
             if take_screenshot:
                 screenshot = await self.screenshot()
                 result = ContentResult(
-                    output=f"Dragged along {len(path)} points", base64_image=screenshot
+                    output=f"Dragged along {len(drag_path)} points", base64_image=screenshot
                 )
             else:
-                result = ContentResult(output=f"Dragged along {len(path)} points")
+                result = ContentResult(output=f"Dragged along {len(drag_path)} points")
 
         finally:
             # Release held keys

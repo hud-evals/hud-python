@@ -41,11 +41,11 @@ Wraps a Task template so it can be called as a tool.
 ```python
 from hud import Environment
 from hud.tools import AgentTool
+from hud.tools import PlaywrightTool
 
 # Define a specialist environment
 researcher_env = Environment("researcher")
 researcher_env.add_tool(PlaywrightTool())
-researcher_env.add_tool(WebSearchTool())
 
 @researcher_env.scenario()
 async def investigate(issue_id: str):

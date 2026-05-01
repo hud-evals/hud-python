@@ -68,7 +68,7 @@ env.add_tool(bash)
 
 ### Complex Stateful Tools
 
-For tools that need internal state, connections, or complex initialization, subclass `BaseTool`. See the [Tools SDK Reference](/reference/tools) for architecture details, base classes, native specs, and complete implementation examples.
+For tools that need internal state, connections, or complex initialization, subclass `BaseTool`. See the [Tools SDK Reference](/reference/tools) for architecture details, base classes, and complete implementation examples.
 
 ## Scenarios
 
@@ -111,55 +111,45 @@ Everything upstream (environments, tools) exists to support scenarios. Everythin
 
 HUD ships with pre-built tools, connectors, and graders so you can assemble environments without writing everything from scratch.
 
-### Native Tools
+### Environment Tools
 
-Each model provider (Anthropic, OpenAI, Google) has its own tool specification. HUD handles the translation — add a tool once, and it adapts to whatever agent connects:
+Each model provider (Anthropic, OpenAI, Google) has its own tool specification. HUD keeps provider-specific details in the agent harness; environments expose generic tools and capabilities:
 
 ```python
 from hud import Environment
-from hud.tools import AnthropicComputerTool, BashTool, EditTool
+from hud.tools import ComputerTool, BashTool, EditTool
 
 env = Environment("desktop-agent")
-env.add_tool(AnthropicComputerTool())
+env.add_tool(ComputerTool())
 env.add_tool(BashTool())
 env.add_tool(EditTool())
 ```
 
-Claude gets native `computer_20250124` and `bash_20250124`. OpenAI gets compatible function calls. Same environment, every agent.
+Claude gets native `computer_20250124` and `bash_20250124`. OpenAI gets native `computer`, `shell`, and `apply_patch`. Gemini gets its CLI-shaped function declarations. Same environment, provider-specific model interface.
 
-Tools declare `native_specs` that map to each provider's format. When an agent connects, HUD checks for a matching spec and registers using the provider's native format — or falls back to standard function calling. Tools with the same `role` (e.g. two shell tools) are mutually exclusive.
+Provider agents infer the environment capabilities they need from the generic tool surface or environment-level capability metadata. Provider API versions, model gates, betas, and argument translation live in the agent harness.
 
 **Match tools to your agent:**
 
 | Agent | Computer | Shell | Editor | Memory |
 |-------|----------|-------|--------|--------|
-| Claude | `AnthropicComputerTool` | `BashTool` | `EditTool` | `ClaudeMemoryTool` |
-| OpenAI | `OpenAIComputerTool` | `ShellTool` | `ApplyPatchTool` | `SessionMemoryTool` |
-| Gemini | `GeminiComputerTool` | `GeminiShellTool` | `GeminiEditTool` | `GeminiMemoryTool` |
-
-Filesystem tools are agent-agnostic — choose based on output style:
-
-| Style | Read | Search | Glob | List |
-|-------|------|--------|------|------|
-| OpenCode | `ReadTool` | `GrepTool` | `GlobTool` | `ListTool` |
-| Gemini CLI | `GeminiReadTool` | `GeminiSearchTool` | `GeminiGlobTool` | `GeminiListTool` |
+| Claude | `ComputerTool` | `BashTool` | `EditTool` | `MemoryTool` |
+| OpenAI | `ComputerTool` | `BashTool` | `EditTool` | — |
+| Gemini | `ComputerTool` | `BashTool` | `EditTool` | `MemoryTool` |
 
 **Example — computer use environment:**
 
 ```python
 from hud import Environment
-from hud.tools import AnthropicComputerTool, BashTool, EditTool
-from hud.tools.filesystem import ReadTool, GrepTool
+from hud.tools import ComputerTool, BashTool, EditTool
 
 env = Environment("desktop-agent")
-env.add_tool(AnthropicComputerTool())
+env.add_tool(ComputerTool())
 env.add_tool(BashTool())
 env.add_tool(EditTool())
-env.add_tool(ReadTool())
-env.add_tool(GrepTool())
 ```
 
-See the full [Tools Reference](/tools/computer) for all available tools (computer, coding, filesystem, memory, web, grounding).
+See the full [Tools Reference](/tools/computer) for available built-in tools.
 
 ### Connectors
 
@@ -249,17 +239,11 @@ At this point you have an environment with tools and scenarios — the static de
   <Card title="Coding" icon="code" href="/tools/coding">
     Shell execution, file editing
   </Card>
-  <Card title="Filesystem" icon="folder-open" href="/tools/filesystem">
-    Read, search, and list files
-  </Card>
   <Card title="Memory" icon="brain" href="/tools/memory">
     Persistent storage
   </Card>
   <Card title="Web" icon="globe" href="/tools/web">
     Browser automation, search
-  </Card>
-  <Card title="Grounding" icon="crosshairs" href="/tools/grounding">
-    Element description → coordinates
   </Card>
 </CardGroup>
 

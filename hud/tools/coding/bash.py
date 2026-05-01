@@ -1,173 +1,31 @@
-"""Bash tool for Claude agents.
-
-This tool conforms to Anthropic's bash tool specification and is used
-when running with Claude models that support native bash.
-
-Note: This uses a simpler readuntil-based session compared to ShellTool's
-polling-based session, as Claude's bash API has different timeout handling.
-"""
+"""Environment bash tool."""
 
 from __future__ import annotations
-
-import asyncio
-from typing import ClassVar
 
 from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.tools.base import BaseTool
-from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
-from hud.types import AgentType
 
-from .utils import get_demote_preexec_fn
+from .session import BashSession
 
-
-class ClaudeBashSession:
-    """A persistent bash shell session for Claude's bash tool.
-
-    Uses readuntil-based output capture, which is simpler than ShellTool's
-    polling approach.
-    """
-
-    _started: bool
-    _process: asyncio.subprocess.Process
-    _timed_out: bool
-
-    command: str = "/bin/bash"
-    _sentinel: str = "<<exit>>"
-
-    DEFAULT_TIMEOUT: float = 120.0  # seconds
-
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT) -> None:
-        self._started = False
-        self._timed_out = False
-        self._timeout = timeout
-
-    async def start(self) -> None:
-        """Start the bash session."""
-        if self._started:
-            await asyncio.sleep(0)
-            return
-
-        self._process = await asyncio.create_subprocess_shell(
-            self.command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            preexec_fn=get_demote_preexec_fn(),
-        )
-
-        self._started = True
-
-    def stop(self) -> None:
-        """Terminate the bash shell."""
-        if not self._started:
-            raise ToolError("Session has not started.")
-        if self._process.returncode is not None:
-            return
-        self._process.terminate()
-
-    async def run(self, command: str) -> ContentResult:
-        """Execute a command in the bash shell."""
-        if not self._started:
-            raise ToolError("Session has not started.")
-        if self._process.returncode is not None:
-            await asyncio.sleep(0)
-            return ContentResult(
-                system="tool must be restarted",
-                error=f"bash has exited with returncode {self._process.returncode}",
-            )
-        if self._timed_out:
-            raise ToolError(
-                f"Bash session timed out waiting for output after {self._timeout}s. "
-                "Background processes may still be running. "
-                "Use restart=true to get a new session.",
-            ) from None
-
-        if self._process.stdin is None:
-            raise ToolError("stdin is None")
-        if self._process.stdout is None:
-            raise ToolError("stdout is None")
-        if self._process.stderr is None:
-            raise ToolError("stderr is None")
-
-        # Send command to the process.
-        # Use a newline before the sentinel echo (not ";") so that:
-        # 1. Heredoc delimiters aren't corrupted (e.g. EOF; echo '...' wouldn't match EOF)
-        # 2. The echo is a standalone command, avoiding syntax errors from leading ";"
-        self._process.stdin.write(command.encode() + f"\necho '{self._sentinel}'\n".encode())
-        await self._process.stdin.drain()
-
-        # Read output from the process, until the sentinel is found
-        sentinel_line = f"{self._sentinel}\n"
-        sentinel_bytes = sentinel_line.encode()
-
-        try:
-            raw_out: bytes = await asyncio.wait_for(
-                self._process.stdout.readuntil(sentinel_bytes),
-                timeout=self._timeout,
-            )
-            output = raw_out.decode()[: -len(sentinel_line)]
-        except asyncio.IncompleteReadError:
-            self._timed_out = True
-            raise ToolError(
-                f"bash exited unexpectedly (returncode={self._process.returncode}) "
-                f"and must be restarted",
-            ) from None
-        except (TimeoutError, asyncio.LimitOverrunError):
-            self._timed_out = True
-            raise ToolError(
-                f"Bash session timed out waiting for output after {self._timeout}s. "
-                "Background processes may still be running. "
-                "Use restart=true to get a new session.",
-            ) from None
-
-        # Attempt non-blocking stderr fetch (may return empty)
-        try:
-            error_bytes = await asyncio.wait_for(self._process.stderr.read(), timeout=0.01)
-            error = error_bytes.decode().rstrip("\n")
-        except TimeoutError:
-            error = ""
-
-        return ContentResult(output=output, error=error)
-
-
-# Alias for backward compatibility
-_BashSession = ClaudeBashSession
+ClaudeBashSession = BashSession
+_BashSession = BashSession
 
 
 class BashTool(BaseTool):
-    """A tool that allows the agent to run bash commands.
+    """Environment tool for running commands in a persistent bash shell.
 
     The tool maintains a persistent bash session that can be restarted.
-    This is the Claude-native version that returns ContentResult format
-    and supports manual restart via the `restart` parameter.
-
-    Native specs: Claude (bash_20250124)
-    Role: "shell" (mutually exclusive with ShellTool)
-    Supported models: Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet 4, Opus 4
     """
-
-    native_specs: ClassVar[NativeToolSpecs] = {
-        AgentType.CLAUDE: NativeToolSpec(
-            api_type="bash_20250124",
-            api_name="bash",
-            role="shell",
-            supported_models=(
-                "*claude-3-5-sonnet-*",
-                "*claude-3-7-sonnet-*",
-                "*claude-sonnet-4-*",
-                "*claude-opus-4-*",
-                "*claude-4-5-sonnet-*",
-                "*claude-4-5-opus-*",
-            ),
-        ),
-    }
 
     def __init__(
         self,
-        session: ClaudeBashSession | None = None,
-        timeout: float = ClaudeBashSession.DEFAULT_TIMEOUT,
+        session: BashSession | None = None,
+        timeout: float = BashSession.DEFAULT_TIMEOUT,
+        name: str = "bash",
+        title: str = "Bash Shell",
+        description: str = "Execute bash commands in a persistent shell session",
     ) -> None:
         """Initialize BashTool with an optional session.
 
@@ -180,30 +38,37 @@ class BashTool(BaseTool):
         """
         super().__init__(
             env=session,
-            name="bash",
-            title="Bash Shell",
-            description="Execute bash commands in a persistent shell session",
+            name=name,
+            title=title,
+            description=description,
         )
         self._timeout = session._timeout if session is not None else timeout
 
     @property
-    def session(self) -> ClaudeBashSession | None:
+    def session(self) -> BashSession | None:
         """Get the current bash session."""
         return self.env
 
     @session.setter
-    def session(self, value: ClaudeBashSession | None) -> None:
+    def session(self, value: BashSession | None) -> None:
         """Set the bash session."""
         self.env = value
 
+    def _create_session(self) -> BashSession:
+        return ClaudeBashSession(timeout=self._timeout)
+
     async def __call__(
-        self, command: str | None = None, restart: bool = False
+        self,
+        command: str | None = None,
+        restart: bool = False,
+        timeout_seconds: float | None = None,
     ) -> list[ContentBlock]:
         """Execute a bash command or restart the session.
 
         Args:
             command: Shell command to execute
             restart: If True, restart the bash session
+            timeout_seconds: Optional per-command timeout in seconds
 
         Returns:
             List of MCP ContentBlocks with the result
@@ -211,21 +76,26 @@ class BashTool(BaseTool):
         if restart:
             if self.session:
                 self.session.stop()
-            self.session = ClaudeBashSession(timeout=self._timeout)
+            self.session = self._create_session()
             await self.session.start()
             return ContentResult(output="Bash session restarted.").to_content_blocks()
 
         if self.session is None:
-            self.session = ClaudeBashSession(timeout=self._timeout)
+            self.session = self._create_session()
 
         if not self.session._started:
             await self.session.start()
 
         if command is not None:
-            result = await self.session.run(command)
-            return result.to_content_blocks()
+            timeout = timeout_seconds if timeout_seconds is not None else self._timeout
+            timeout_ms = int(timeout * 1000)
+            result = await self.session.run(command, timeout_ms=timeout_ms)
+            return result.to_content_result().to_content_blocks()
 
         raise ToolError("No command provided.")
 
 
-__all__ = ["BashTool", "ClaudeBashSession", "_BashSession"]
+BashToolSession = BashSession
+
+
+__all__ = ["BashTool", "BashToolSession", "ClaudeBashSession", "_BashSession"]

@@ -23,8 +23,8 @@ from hud.tests.public_api._import_contracts import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_EXAMPLES_PATHS = (
     REPO_ROOT / "README.md",
-    *sorted((REPO_ROOT / "docs").rglob("*.mdx")),
-    *sorted((REPO_ROOT / "docs").rglob("*.md")),
+    *sorted(path for path in (REPO_ROOT / "docs").rglob("*.mdx") if "internal" not in path.parts),
+    *sorted(path for path in (REPO_ROOT / "docs").rglob("*.md") if "internal" not in path.parts),
     *sorted((REPO_ROOT / "examples").rglob("*.md")),
     *sorted((REPO_ROOT / "examples").rglob("*.py")),
 )

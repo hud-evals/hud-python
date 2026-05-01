@@ -23,6 +23,14 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 import mcp.types as types
 from openai import AsyncOpenAI
 
+from hud.agents.openai_compatible.tools import OpenAICompatibleToolParam, openai_compatible_tools
+from hud.agents.tools import (
+    AgentTool,
+    EnvironmentCapability,
+    call_agent_tools,
+    capabilities_metadata_from_context,
+    discover_environment_capabilities,
+)
 from hud.settings import settings
 from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
@@ -98,12 +106,47 @@ class OpenAIChatAgent(MCPAgent):
 
         self.mcp_schemas: list[ChatCompletionToolParam] = []
         self.hud_console = HUDConsole(logger=logger)
+        self._openai_compatible_tool_params: list[OpenAICompatibleToolParam] = []
+        self._openai_compatible_native_tools: dict[
+            str,
+            AgentTool[OpenAICompatibleToolParam],
+        ] = {}
+        self._environment_capabilities: dict[str, EnvironmentCapability] = {}
+        self._openai_compatible_backing_tools: set[str] = set()
 
         self._continuation_token_ids: list[int] | None = None
         self._continuation_message_count: int | None = None
 
-    @staticmethod
-    def _oai_to_mcp(tool_call: Any) -> MCPToolCall:  # type: ignore[valid-type]
+    def _on_tools_ready(self) -> None:
+        self._convert_tools_for_openai_compatible()
+
+    def _discover_environment_capabilities(
+        self, tools: list[types.Tool]
+    ) -> dict[str, EnvironmentCapability]:
+        return discover_environment_capabilities(
+            tools,
+            env_metadata=capabilities_metadata_from_context(self.ctx),
+            name_fallbacks=openai_compatible_tools.name_fallbacks,
+        )
+
+    def _convert_tools_for_openai_compatible(self) -> None:
+        """Build OpenAI-compatible native tool mappings from environment capabilities."""
+        self._openai_compatible_tool_params = []
+        self._openai_compatible_native_tools = {}
+        self._openai_compatible_backing_tools = set()
+
+        capabilities = self._discover_environment_capabilities(self.get_available_tools())
+        self._environment_capabilities = capabilities
+
+        for capability in capabilities.values():
+            if capability.name not in openai_compatible_tools.capabilities:
+                continue
+            for tool in openai_compatible_tools.tools_for_capability(capability, self.model):
+                self._openai_compatible_backing_tools.add(tool.env_tool_name)
+                self._openai_compatible_native_tools[tool.name] = tool
+                self._openai_compatible_tool_params.append(tool.to_params())
+
+    def _oai_to_mcp(self, tool_call: Any) -> MCPToolCall:  # type: ignore[valid-type]
         """Convert an OpenAI ``tool_call`` to :class:`MCPToolCall`."""
         args = json.loads(tool_call.function.arguments or "{}")
         if isinstance(args, list):
@@ -199,9 +242,13 @@ class OpenAIChatAgent(MCPAgent):
 
         return sanitized or {"type": "object"}
 
-    def get_tool_schemas(self) -> list[dict]:
-        tool_schemas = super().get_tool_schemas()
-        openai_tools = []
+    def get_tool_schemas(self) -> list[OpenAICompatibleToolParam]:
+        tool_schemas = [
+            schema
+            for schema in super().get_tool_schemas()
+            if schema["name"] not in self._openai_compatible_backing_tools
+        ]
+        openai_tools = list(self._openai_compatible_tool_params)
         for schema in tool_schemas:
             parameters = schema.get("parameters", {})
 
@@ -210,7 +257,7 @@ class OpenAIChatAgent(MCPAgent):
             else:
                 sanitized_params = {"type": "object", "properties": {}}
 
-            openai_tool = {
+            openai_tool: ChatCompletionToolParam = {
                 "type": "function",
                 "function": {
                     "name": schema["name"],
@@ -220,6 +267,12 @@ class OpenAIChatAgent(MCPAgent):
             }
             openai_tools.append(openai_tool)
         return openai_tools
+
+    async def call_tools(
+        self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
+    ) -> list[MCPToolResult]:
+        """Route OpenAI-compatible provider tools through agent-owned translators."""
+        return await call_agent_tools(self, self._openai_compatible_native_tools, tool_call)
 
     async def _invoke_chat_completion(
         self,

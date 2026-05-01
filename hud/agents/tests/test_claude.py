@@ -31,7 +31,11 @@ if TYPE_CHECKING:
 class MockEvalContext(EvalContext):
     """Mock EvalContext for testing."""
 
-    def __init__(self, tools: list[types.Tool] | None = None) -> None:
+    def __init__(
+        self,
+        tools: list[types.Tool] | None = None,
+        environment_capabilities: dict[str, Any] | None = None,
+    ) -> None:
         # Core attributes
         self.prompt = "Test prompt"
         self._tools = tools or []
@@ -55,6 +59,7 @@ class MockEvalContext(EvalContext):
         self.scenario_returns_schema: dict[str, Any] | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
+        self.environment_capabilities = environment_capabilities
         self.results: list[Any] = []
         self._is_summary = False
 
@@ -165,7 +170,7 @@ class TestClaudeAgent:
     @pytest.fixture
     def mock_anthropic(self) -> Generator[AsyncAnthropic, None, None]:  # type: ignore[misc]
         """Create a stub Anthropic client."""
-        with patch("hud.agents.claude.AsyncAnthropic") as mock_class:
+        with patch("hud.agents.claude.agent.AsyncAnthropic") as mock_class:
             client = MagicMock(spec=AsyncAnthropic)
             client.api_key = "test-key"
             mock_class.return_value = client
@@ -382,6 +387,326 @@ class TestClaudeAgent:
         await agent._initialize_from_ctx(ctx)
 
         assert agent.has_computer_tool is True
+
+    @pytest.mark.asyncio
+    async def test_computer_name_activates_agent_side_tool(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude native computer calls route through the agent-side tool."""
+        tools = [
+            types.Tool(
+                name="computer",
+                description="HUD computer",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"action": {"type": "string"}, "x": {"type": "integer"}},
+                },
+                _meta={"resolution": {"width": 1280, "height": 720}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock(
+            return_value=MCPToolResult(
+                content=[types.TextContent(type="text", text="clicked")],
+                isError=False,
+            )
+        )
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+        results = await agent.call_tools(
+            MCPToolCall(
+                name="computer",
+                arguments={"action": "left_click", "coordinate": [10, 20]},
+            )
+        )
+
+        assert results[0].isError is False
+        called = ctx.call_tool.call_args.args[0]
+        assert called.name == "computer"
+        assert called.arguments == {
+            "action": "click",
+            "x": 10,
+            "y": 20,
+            "hold_keys": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_env_level_capability_activates_agent_side_tool(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Env-level capabilities are the preferred binding source."""
+        tools = [
+            types.Tool(
+                name="desktop",
+                description="Computer",
+                inputSchema={"type": "object", "properties": {"action": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(
+            tools=tools,
+            environment_capabilities={
+                "capabilities": {
+                    "computer": {
+                        "tool": "desktop",
+                        "resolution": {"width": 1600, "height": 900},
+                    }
+                }
+            },
+        )
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent.claude_tools[0]["name"] == "computer"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["display_width_px"] == 1600  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["display_height_px"] == 900  # type: ignore[typeddict-item]
+
+    @pytest.mark.asyncio
+    async def test_anthropic_computer_registration_uses_role_as_capability(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Old Claude native metadata acts only as a capability signal."""
+        tools = [
+            types.Tool(
+                name="anthropic_computer",
+                description="Anthropic computer",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                    },
+                },
+                _meta={
+                    "native_tools": {
+                        "claude": {
+                            "api_type": "stale_env_computer_spec",
+                            "api_name": "computer",
+                            "beta": "stale-env-beta",
+                            "role": "computer",
+                            "display_width": 1920,
+                            "display_height": 1080,
+                        }
+                    }
+                },
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock(
+            return_value=MCPToolResult(
+                content=[types.TextContent(type="text", text="clicked")],
+                isError=False,
+            )
+        )
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-20250514",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+        assert agent.claude_tools[0]["name"] == "computer"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["type"] == "computer_20250124"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["display_width_px"] != 1920  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["display_height_px"] != 1080  # type: ignore[typeddict-item]
+        assert agent._required_betas == {"computer-use-2025-01-24"}
+
+        await agent.call_tools(
+            MCPToolCall(
+                name="computer",
+                arguments={"action": "left_click", "coordinate": [10, 20]},
+            )
+        )
+
+        called = ctx.call_tool.call_args.args[0]
+        assert called.name == "anthropic_computer"
+        assert called.arguments == {
+            "action": "click",
+            "x": 10,
+            "y": 20,
+            "hold_keys": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_bash_name_activates_agent_side_tool(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude native bash calls route through the agent-side tool."""
+        tools = [
+            types.Tool(
+                name="bash",
+                description="Bash shell",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock(
+            return_value=MCPToolResult(
+                content=[types.TextContent(type="text", text="ok")],
+                isError=False,
+            )
+        )
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent.claude_tools[0]["name"] == "bash"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["type"] == "bash_20250124"  # type: ignore[typeddict-item]
+
+        results = await agent.call_tools(
+            MCPToolCall(name="bash", arguments={"command": "echo ok"})
+        )
+
+        assert results[0].isError is False
+        called = ctx.call_tool.call_args.args[0]
+        assert called.name == "bash"
+        assert called.arguments == {"command": "echo ok"}
+
+    @pytest.mark.asyncio
+    async def test_bash_restart_matches_anthropic_contract(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude bash supports restart without command."""
+        tools = [
+            types.Tool(
+                name="bash",
+                description="Bash shell",
+                inputSchema={"type": "object", "properties": {}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock(
+            return_value=MCPToolResult(
+                content=[types.TextContent(type="text", text="Bash session restarted.")],
+                isError=False,
+            )
+        )
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+        results = await agent.call_tools(MCPToolCall(name="bash", arguments={"restart": True}))
+
+        assert results[0].isError is False
+        called = ctx.call_tool.call_args.args[0]
+        assert called.name == "bash"
+        assert called.arguments == {"restart": True}
+
+    @pytest.mark.asyncio
+    async def test_bash_requires_command_unless_restart(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Malformed Claude bash calls fail before reaching the environment."""
+        tools = [
+            types.Tool(
+                name="bash",
+                description="Bash shell",
+                inputSchema={"type": "object", "properties": {}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock()
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+        results = await agent.call_tools(MCPToolCall(name="bash", arguments={}))
+
+        assert results[0].isError is True
+        assert "command is required" in results[0].content[0].text  # type: ignore[attr-defined]
+        ctx.call_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_edit_name_activates_agent_side_tool(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude native editor calls route through the environment edit tool."""
+        tools = [
+            types.Tool(
+                name="edit",
+                description="File editor",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock(
+            return_value=MCPToolResult(
+                content=[types.TextContent(type="text", text="edited")],
+                isError=False,
+            )
+        )
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent.claude_tools[0]["name"] == "str_replace_based_edit_tool"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["type"] == "text_editor_20250728"  # type: ignore[typeddict-item]
+
+        results = await agent.call_tools(
+            MCPToolCall(
+                name="str_replace_based_edit_tool",
+                arguments={
+                    "command": "str_replace",
+                    "path": "/tmp/file.txt",
+                    "old_str": "old",
+                    "new_str": "new",
+                },
+            )
+        )
+
+        assert results[0].isError is False
+        called = ctx.call_tool.call_args.args[0]
+        assert called.name == "edit"
+        assert called.arguments == {
+            "command": "replace",
+            "path": "/tmp/file.txt",
+            "old_text": "old",
+            "new_text": "new",
+        }
+
+    @pytest.mark.asyncio
+    async def test_memory_name_activates_agent_side_tool(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude native memory calls route through the environment memory tool."""
+        tools = [
+            types.Tool(
+                name="memory",
+                description="Memory",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock(
+            return_value=MCPToolResult(
+                content=[types.TextContent(type="text", text="remembered")],
+                isError=False,
+            )
+        )
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent.claude_tools[0]["name"] == "memory"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["type"] == "memory_20250818"  # type: ignore[typeddict-item]
+        assert agent._required_betas == {"context-management-2025-06-27"}
+
+        results = await agent.call_tools(
+            MCPToolCall(name="memory", arguments={"command": "view", "path": "/"})
+        )
+
+        assert results[0].isError is False
+        called = ctx.call_tool.call_args.args[0]
+        assert called.name == "memory"
+        assert called.arguments == {"command": "view", "path": "/"}
 
     @pytest.mark.asyncio
     async def test_get_response_with_text(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -667,88 +992,6 @@ class TestClaudeAgentComputerTool20251124:
         from unittest.mock import MagicMock
 
         return MagicMock(spec=["messages", "beta"])
-
-    def test_build_native_tool_computer_20251124(self, mock_anthropic: Any) -> None:
-        """Test that _build_native_tool handles computer_20251124."""
-        from hud.tools.native_types import NativeToolSpec
-
-        agent = ClaudeAgent.create(
-            model_client=mock_anthropic,
-            model="claude-opus-4-6-20260101",
-            validate_api_key=False,
-        )
-
-        spec = NativeToolSpec(
-            api_type="computer_20251124",
-            api_name="computer",
-            beta="computer-use-2025-11-24",
-            role="computer",
-            extra={"display_width": 1920, "display_height": 1080},
-        )
-
-        tool = types.Tool(
-            name="computer",
-            description="Computer tool",
-            inputSchema={},
-        )
-
-        result = cast("dict[str, Any]", agent._build_native_tool(tool, spec))
-        assert result["type"] == "computer_20251124"
-        assert result["name"] == "computer"
-        assert result["display_width_px"] == 1920
-        assert result["display_height_px"] == 1080
-        assert result["enable_zoom"] is True
-
-    def test_get_native_api_name_computer_20251124(self, mock_anthropic: Any) -> None:
-        """Test that _get_native_api_name handles computer_20251124."""
-        from hud.tools.native_types import NativeToolSpec
-
-        agent = ClaudeAgent.create(
-            model_client=mock_anthropic,
-            validate_api_key=False,
-        )
-        spec = NativeToolSpec(api_type="computer_20251124", api_name="computer")
-        assert agent._get_native_api_name(spec) == "computer"
-
-    def test_legacy_fallback_opus_46_uses_new_computer(self, mock_anthropic: Any) -> None:
-        """Test legacy fallback returns computer_20251124 for Opus 4.6 models."""
-        agent = ClaudeAgent.create(
-            model_client=mock_anthropic,
-            model="claude-opus-4-6-20260101",
-            validate_api_key=False,
-        )
-        agent._available_tools = []
-
-        legacy_tool = types.Tool(
-            name="anthropic_computer",
-            description="Old-style computer tool",
-            inputSchema={"type": "object", "properties": {}},
-        )
-
-        spec = agent._legacy_native_spec_fallback(legacy_tool)
-        assert spec is not None
-        assert spec.api_type == "computer_20251124"
-        assert spec.beta == "computer-use-2025-11-24"
-
-    def test_legacy_fallback_sonnet4_uses_old_computer(self, mock_anthropic: Any) -> None:
-        """Test legacy fallback returns computer_20250124 for non-Opus 4.5/4.6 models."""
-        agent = ClaudeAgent.create(
-            model_client=mock_anthropic,
-            model="claude-sonnet-4-20250514",
-            validate_api_key=False,
-        )
-        agent._available_tools = []
-
-        legacy_tool = types.Tool(
-            name="anthropic_computer",
-            description="Old-style computer tool",
-            inputSchema={"type": "object", "properties": {}},
-        )
-
-        spec = agent._legacy_native_spec_fallback(legacy_tool)
-        assert spec is not None
-        assert spec.api_type == "computer_20250124"
-        assert spec.beta == "computer-use-2025-01-24"
 
     def test_no_fine_grained_streaming_beta(self, mock_anthropic: Any) -> None:
         """Test that fine-grained-tool-streaming beta is no longer included."""

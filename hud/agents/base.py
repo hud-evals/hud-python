@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
 
-from hud.tools.native_types import NativeToolSpec
 from hud.tools.types import Citation
 from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
@@ -29,26 +28,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CategorizedTools:
-    """Result of categorizing tools by native spec availability.
-
-    Used by agents to efficiently process tools with shared logic for
-    role-based mutual exclusion.
-    """
-
-    native: list[tuple[types.Tool, NativeToolSpec]] = field(default_factory=list)
-    """Tools with native specs for this agent (tool, spec) pairs."""
-
-    hosted: list[tuple[types.Tool, NativeToolSpec]] = field(default_factory=list)
-    """Hosted tools with native specs for this agent (tool, spec) pairs."""
+    """Result of filtering tools for model-facing schemas."""
 
     generic: list[types.Tool] = field(default_factory=list)
-    """Tools without native specs that aren't role-blocked."""
-
-    claimed_roles: set[str] = field(default_factory=set)
-    """Roles claimed by native tools."""
+    """MCP tools exposed through generic function calling."""
 
     skipped: list[tuple[types.Tool, str]] = field(default_factory=list)
-    """Tools skipped due to role conflicts (tool, reason) pairs."""
+    """Tools intentionally hidden from generic function calling."""
 
 
 class MCPAgent(ABC):
@@ -75,188 +61,19 @@ class MCPAgent(ABC):
         """Return the AgentType for this agent.
 
         Subclasses must implement this to return their corresponding AgentType enum value.
-        This is used for resolving native tool specifications.
+        This is used for provider-specific configuration and routing.
 
         Returns:
             AgentType enum value for this agent
         """
         raise NotImplementedError
 
-    def resolve_native_spec(self, tool: types.Tool) -> NativeToolSpec | None:
-        """Check if a tool has a native spec for this agent type and model.
-
-        Looks up the tool's meta.native_tools field for a spec matching this agent's type.
-        If found, validates that the current model supports this native spec.
-        Returns a NativeToolSpec that can be used to register the tool with
-        the provider's native API format.
-
-        When the spec data is a list (model-specific variants), specs are tried in order
-        and the first one whose supports_model() matches wins.
-
-        Falls back to legacy name-based detection for backwards compatibility with
-        old environments that don't emit native_tools metadata.
-
-        Args:
-            tool: MCP Tool object to check for native specs
-
-        Returns:
-            NativeToolSpec if the tool has a native spec for this agent and the
-            current model supports it, None otherwise. When the model doesn't
-            match supported_models, returns None so the tool falls back to
-            generic function calling.
-        """
-        spec: NativeToolSpec | None = None
-        spec_data = None
-
-        # First try metadata-based resolution
-        if tool.meta:
-            native_tools = tool.meta.get("native_tools", {})
-            spec_data = native_tools.get(self.agent_type().value)
-
-            if isinstance(spec_data, list):
-                # List of specs -- pick first model-matching spec
-                for item in spec_data:
-                    if not isinstance(item, dict):
-                        continue
-                    candidate = _parse_spec_dict(item)
-                    if candidate and candidate.supports_model(self.model):
-                        spec = candidate
-                        break
-            elif isinstance(spec_data, dict):
-                spec = _parse_spec_dict(spec_data)
-
-        # Fall back to legacy name-based detection for old environments
-        # Only if metadata didn't contain specs for this agent type at all
-        if spec is None and not spec_data:
-            spec = self._legacy_native_spec_fallback(tool)
-
-        # Check if current model supports this native spec
-        if spec is not None and not spec.supports_model(self.model):
-            logger.debug(
-                "Model %s not in supported_models for native spec %s, falling back to functions",
-                self.model,
-                spec.api_type,
-            )
-            return None
-
-        return spec
-
-    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
-        """Detect native tools by name for backwards compatibility.
-
-        Override in subclasses to support old environments that expose tools
-        without native_tools metadata.
-
-        Args:
-            tool: MCP Tool object to check
-
-        Returns:
-            NativeToolSpec if the tool matches a known legacy pattern, None otherwise
-        """
-        return None
-
-    def get_tool_role(self, tool: types.Tool) -> str | None:
-        """Get the role of a tool from any of its native specs.
-
-        The role is used for mutual exclusion - when an agent accepts a tool
-        natively, other tools with the same role are excluded.
-
-        Checks metadata first, then falls back to legacy name-based detection
-        so old environments without native_tools metadata still get proper
-        role-based exclusion.
-
-        Args:
-            tool: MCP Tool object to check
-
-        Returns:
-            The role string if any native spec defines one, None otherwise
-        """
-        # Check metadata-based specs first
-        if tool.meta:
-            native_tools = tool.meta.get("native_tools", {})
-            if native_tools:
-                # Check all specs for a role (they should all have the same role)
-                for spec_data in native_tools.values():
-                    if isinstance(spec_data, dict) and spec_data.get("role"):
-                        return spec_data["role"]
-                    if isinstance(spec_data, list):
-                        for item in spec_data:
-                            if isinstance(item, dict) and item.get("role"):
-                                return item["role"]
-
-        # Fall back to legacy detection for old environments without metadata
-        legacy_spec = self._legacy_native_spec_fallback(tool)
-        if legacy_spec and legacy_spec.role:
-            return legacy_spec.role
-
-        return None
-
     def categorize_tools(self, tools: list[types.Tool] | None = None) -> CategorizedTools:
-        """Categorize tools by native spec availability with role-based exclusion.
-
-        This shared method implements the two-pass tool processing logic:
-        1. First pass: identify native/hosted tools and claim their roles
-        2. Second pass: include generic tools if their role isn't claimed
-
-        Args:
-            tools: List of MCP tools to categorize. If None, uses get_available_tools()
-
-        Returns:
-            CategorizedTools with native, hosted, generic, and skipped tools
-        """
+        """Return the MCP tools that should be exposed as generic function tools."""
         if tools is None:
             tools = self.get_available_tools()
 
-        result = CategorizedTools()
-
-        # First pass: process tools with native specs for this agent
-        for tool in tools:
-            spec = self.resolve_native_spec(tool)
-            if not spec:
-                continue
-
-            # Check for role conflicts between native tools
-            if spec.role:
-                if spec.role in result.claimed_roles:
-                    # Another native tool already claimed this role - skip this one
-                    result.skipped.append(
-                        (tool, f"role '{spec.role}' already claimed by another native tool")
-                    )
-                    continue
-                result.claimed_roles.add(spec.role)
-
-            if spec.hosted:
-                result.hosted.append((tool, spec))
-            else:
-                result.native.append((tool, spec))
-
-        # Collect api_names claimed by native tools to prevent name collisions
-        claimed_api_names = {s.api_name for _, s in result.native if s.api_name}
-        claimed_api_names |= {s.api_name for _, s in result.hosted if s.api_name}
-
-        # Second pass: process tools without native specs (generic function tools)
-        for tool in tools:
-            spec = self.resolve_native_spec(tool)
-            if spec:
-                # Already processed in first pass
-                continue
-
-            # Check if this tool's role is already claimed by a native tool
-            tool_role = self.get_tool_role(tool)
-            if tool_role and tool_role in result.claimed_roles:
-                result.skipped.append((tool, f"role '{tool_role}' already claimed by native tool"))
-                continue
-
-            # Check if this tool's name collides with a native tool's api_name
-            if tool.name in claimed_api_names:
-                result.skipped.append(
-                    (tool, f"name '{tool.name}' collides with native tool api_name")
-                )
-                continue
-
-            result.generic.append(tool)
-
-        return result
+        return CategorizedTools(generic=list(tools))
 
     def __init__(self, params: BaseCreateParams | None = None, **kwargs: Any) -> None:
         if params is None:
@@ -295,7 +112,6 @@ class MCPAgent(ABC):
         self.system_prompt = self.config.system_prompt
 
         self._available_tools: list[types.Tool] | None = None
-        self._tool_map: dict[str, types.Tool] = {}
         self._categorized_tools: CategorizedTools = CategorizedTools()
         self._initialized: bool = False
 
@@ -325,7 +141,6 @@ class MCPAgent(ABC):
         # Refresh tools from connections, then get filtered list for agent
         await ctx.list_tools()
         self._available_tools = ctx.as_tools()
-        self._tool_map = {t.name: t for t in self._available_tools}
 
         # Validate required tools are present
         available_tool_names = {t.name for t in self._available_tools}
@@ -341,7 +156,6 @@ class MCPAgent(ABC):
         # Show tool discovery table (visible at INFO level)
         self.console.format_tool_discovery(
             tools=self._available_tools,
-            native_tools=self._categorized_tools.native + self._categorized_tools.hosted,
             skipped=self._categorized_tools.skipped,
         )
 
@@ -799,16 +613,12 @@ class MCPAgent(ABC):
     def get_tool_schemas(self) -> list[dict]:
         """Get tool schemas in a format suitable for the model.
 
-        Uses categorized tools so that skipped tools (role-blocked)
-        are excluded from schemas automatically. Falls back to
-        get_available_tools() if called before categorization.
+        Uses categorized tools so that skipped tools are excluded from schemas
+        automatically. Falls back to get_available_tools() if called before
+        categorization.
         """
         if self._initialized:
-            tools = (
-                [t for t, _spec in self._categorized_tools.native]
-                + [t for t, _spec in self._categorized_tools.hosted]
-                + list(self._categorized_tools.generic)
-            )
+            tools = list(self._categorized_tools.generic)
         else:
             tools = self.get_available_tools()
 
@@ -846,29 +656,6 @@ class MCPAgent(ABC):
         """Cleanup resources."""
         # Clear context reference
         self.ctx = None
-
-
-def _parse_spec_dict(spec_dict: dict[str, Any]) -> NativeToolSpec | None:
-    """Parse a dict (from MCP meta) into a NativeToolSpec."""
-    if not spec_dict:
-        return None
-    known_fields = {"api_type", "api_name", "beta", "hosted", "role", "supported_models", "extra"}
-    extra = {k: v for k, v in spec_dict.items() if k not in known_fields}
-    if isinstance(spec_dict.get("extra"), dict):
-        extra.update(spec_dict["extra"])
-    supported_models_raw = spec_dict.get("supported_models")
-    supported_models: tuple[str, ...] | None = None
-    if supported_models_raw:
-        supported_models = tuple(supported_models_raw)
-    return NativeToolSpec(
-        api_type=spec_dict.get("api_type"),
-        api_name=spec_dict.get("api_name"),
-        beta=spec_dict.get("beta"),
-        hosted=spec_dict.get("hosted", False),
-        role=spec_dict.get("role"),
-        supported_models=supported_models,
-        extra=extra,
-    )
 
 
 def _format_error_result(error_message: str) -> MCPToolResult:

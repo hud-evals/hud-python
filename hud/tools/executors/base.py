@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 from io import BytesIO
+from itertools import pairwise
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from hud.tools.types import ContentResult
@@ -12,6 +14,8 @@ if TYPE_CHECKING:
     from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+DRAG_STEP_PIXELS = 12
 
 
 class BaseExecutor:
@@ -34,13 +38,38 @@ class BaseExecutor:
             display_num: X display number (for Linux/X11 systems)
         """
         if display_num is None:
-            from hud.tools.computer.settings import computer_settings
+            from hud.tools.computer import computer_settings
 
             self.display_num = computer_settings.DISPLAY_NUM
         else:
             self.display_num = display_num
         self._screenshot_delay = 0.5
         logger.info("BaseExecutor initialized")
+
+    def _interpolate_drag_path(
+        self, path: list[tuple[int, int]], step_pixels: int = DRAG_STEP_PIXELS
+    ) -> list[tuple[int, int]]:
+        """Fill long drag segments with intermediate points for pointer-delta UIs."""
+        if len(path) < 2:
+            return path
+
+        interpolated: list[tuple[int, int]] = [path[0]]
+        for start, end in pairwise(path):
+            start_x, start_y = start
+            end_x, end_y = end
+            distance = math.hypot(end_x - start_x, end_y - start_y)
+            steps = max(1, math.ceil(distance / max(step_pixels, 1)))
+
+            for step in range(1, steps + 1):
+                t = step / steps
+                point = (
+                    round(start_x + (end_x - start_x) * t),
+                    round(start_y + (end_y - start_y) * t),
+                )
+                if point != interpolated[-1]:
+                    interpolated.append(point)
+
+        return interpolated
 
     # ===== Core CLA Actions =====
 

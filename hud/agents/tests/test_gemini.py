@@ -12,6 +12,7 @@ from google.genai import types as genai_types
 from mcp import types
 
 from hud.agents.gemini import GeminiAgent
+from hud.agents.gemini.tools import GeminiComputerTool as AgentGeminiComputerTool
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
@@ -102,7 +103,7 @@ class TestGeminiAgent:
         """Test agent initialization without model client."""
         with (
             patch("hud.settings.settings.gemini_api_key", "test_key"),
-            patch("hud.agents.gemini.genai.Client") as mock_client_class,
+            patch("hud.agents.gemini.agent.genai.Client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client.api_key = "test_key"
@@ -449,6 +450,92 @@ class TestGeminiAgent:
         assert tool_call.name == "navigate"
         assert tool_call.arguments == {"url": "https://example.com"}
 
+    @pytest.mark.asyncio
+    async def test_agent_owns_gemini_cli_tool_surface(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """GeminiAgent exposes Gemini-shaped tools backed by generic env primitives."""
+        tools = [
+            types.Tool(name="bash", description="Run shell", inputSchema={"type": "object"}),
+            types.Tool(name="edit", description="Edit files", inputSchema={"type": "object"}),
+            types.Tool(name="read", description="Read files", inputSchema={"type": "object"}),
+            types.Tool(name="grep", description="Search files", inputSchema={"type": "object"}),
+            types.Tool(name="glob", description="Find files", inputSchema={"type": "object"}),
+            types.Tool(name="list", description="List files", inputSchema={"type": "object"}),
+            types.Tool(name="memory", description="Remember facts", inputSchema={"type": "object"}),
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        declaration_names = {
+            declaration.name
+            for tool in agent.gemini_tools
+            for declaration in (getattr(tool, "function_declarations", None) or [])
+        }
+        assert {
+            "run_shell_command",
+            "replace",
+            "write_file",
+            "read_file",
+            "grep_search",
+            "glob",
+            "list_directory",
+            "save_memory",
+        } <= declaration_names
+        assert agent._gemini_native_tools["run_shell_command"].env_tool_name == "bash"
+        assert agent._gemini_native_tools["replace"].env_tool_name == "edit"
+        assert agent._gemini_native_tools["write_file"].env_tool_name == "edit"
+        assert agent._gemini_native_tools["read_file"].env_tool_name == "read"
+        assert agent._gemini_native_tools["grep_search"].env_tool_name == "grep"
+        assert agent._gemini_native_tools["glob"].env_tool_name == "glob"
+        assert agent._gemini_native_tools["list_directory"].env_tool_name == "list"
+        assert agent._gemini_native_tools["save_memory"].env_tool_name == "memory"
+
+    @pytest.mark.asyncio
+    async def test_gemini_legacy_env_tools_activate_harness_tools(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Old Gemini env constructors register canonical names for harness activation."""
+        from hud.tools import (
+            GeminiGlobTool,
+            GeminiListTool,
+            GeminiMemoryTool,
+            GeminiReadTool,
+            GeminiSearchTool,
+        )
+
+        env_tools = [
+            GeminiReadTool(),
+            GeminiSearchTool(),
+            GeminiGlobTool(),
+            GeminiListTool(),
+            GeminiMemoryTool(),
+        ]
+        tools = [
+            types.Tool(name=tool.name, description=tool.description, inputSchema={"type": "object"})
+            for tool in env_tools
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent._gemini_native_tools["read_file"].env_tool_name == "read"
+        assert agent._gemini_native_tools["grep_search"].env_tool_name == "grep"
+        assert agent._gemini_native_tools["glob"].env_tool_name == "glob"
+        assert agent._gemini_native_tools["list_directory"].env_tool_name == "list"
+        assert agent._gemini_native_tools["save_memory"].env_tool_name == "memory"
+
     def test_regular_agent_routes_computer_use_function_call(
         self, mock_gemini_client: MagicMock
     ) -> None:
@@ -475,6 +562,27 @@ class TestGeminiAgent:
             "y": 250,
         }
         assert getattr(tool_call, "gemini_name") == "click_at"
+
+    def test_gemini_computer_drag_insets_edge_coordinates(self) -> None:
+        """Gemini drag endpoints should be inset before calling the environment tool."""
+        spec = AgentGeminiComputerTool.default_spec("gemini-3-flash-preview")
+        assert spec is not None
+        tool = AgentGeminiComputerTool(env_tool_name="computer", spec=spec)
+
+        calls = tool._env_calls(
+            "drag_and_drop",
+            {"x": 0, "y": 500, "destination_x": 1000, "destination_y": 500},
+        )
+
+        assert calls == [
+            {
+                "action": "drag",
+                "path": [
+                    {"x": 25, "y": 500},
+                    {"x": 975, "y": 500},
+                ],
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_regular_agent_formats_computer_use_results(

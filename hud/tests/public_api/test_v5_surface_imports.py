@@ -43,7 +43,6 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
-        "OperatorAgent",
         "create_agent",
     ),
     "hud.agents.claude": (
@@ -83,51 +82,28 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "OpenAIComputerTool",
         "PlaywrightTool",
     ),
-    "hud.tools.filesystem": (
-        "GeminiGlobTool",
-        "GeminiListTool",
-        "GeminiReadTool",
-        "GeminiSearchTool",
-        "GlobTool",
-        "GrepTool",
-        "ListTool",
-        "ReadTool",
-    ),
-    "hud.tools.grounding": (
-        "GroundedComputerTool",
-        "Grounder",
-        "GrounderConfig",
-    ),
-    "hud.tools.hosted": (
-        "GoogleSearchTool",
-        "WebFetchTool",
-        "WebSearchTool",
-    ),
-    "hud.tools.memory": (
-        "ClaudeMemoryTool",
-        "GeminiMemoryTool",
-        "SessionMemoryTool",
-    ),
     "hud.types": (
         "AgentType",
         "InferenceResult",
         "MCPToolCall",
         "MCPToolResult",
         "Trace",
-        "TraceStep",
     ),
 }
 
 
 ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents": (
+        "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
-        "OperatorAgent",
         "create_agent",
     ),
     "hud.agents.claude": (
         "ClaudeAgent",
+        "base64_to_content_block",
+        "text_to_content_block",
+        "tool_use_content_block",
     ),
     "hud.datasets": (
         "display_results",
@@ -150,12 +126,14 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.tools": (
         "AgentTool",
         "AnthropicComputerTool",
+        "BaseHub",
         "BaseTool",
         "BashTool",
         "EditTool",
         "HudComputerTool",
         "OpenAIComputerTool",
         "PlaywrightTool",
+        "SubmitTool",
     ),
     "hud.tools.filesystem": (
         "GeminiGlobTool",
@@ -168,14 +146,12 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "ListTool",
         "ReadTool",
     ),
-    "hud.tools.grounding": (
-        "GrounderConfig",
-    ),
     "hud.types": (
         "AgentType",
         "MCPToolCall",
         "MCPToolResult",
         "Trace",
+        "TraceStep",
     ),
 }
 
@@ -187,17 +163,12 @@ DOCS_EXAMPLES_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents.gemini": (
         "GeminiAgent",
     ),
-    "hud.agents.gemini_cua": (
-        "GeminiCUAAgent",
-    ),
     "hud.agents.openai": (
         "OpenAIAgent",
     ),
     "hud.tools.coding": (
         "ApplyPatchTool",
         "EditTool",
-        "GeminiEditTool",
-        "GeminiShellTool",
         "ShellTool",
     ),
     "hud.tools.computer": (
@@ -209,9 +180,6 @@ DOCS_EXAMPLES_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
         "BaseExecutor",
         "PyAutoGUIExecutor",
         "XDOExecutor",
-    ),
-    "hud.tools.native_types": (
-        "NativeToolSpec",
     ),
     "hud.tools.types": (
         "ContentResult",
@@ -245,6 +213,7 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.datasets.utils": (
         "BatchRequest",
         "SingleTaskRequest",
+        "submit_rollouts",
     ),
     "hud.native.graders": (
         "BashGrader",
@@ -270,12 +239,6 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     ),
     "hud.agents.gemini": (
         "GeminiAgent",
-    ),
-    "hud.agents.gemini_cua": (
-        "GeminiCUAAgent",
-    ),
-    "hud.agents.grounded_openai": (
-        "GroundedOpenAIChatAgent",
     ),
     "hud.agents.openai": (
         "OpenAIAgent",
@@ -325,9 +288,19 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
         "HudComputerTool",
         "OpenAIComputerTool",
         "QwenComputerTool",
+        "computer_settings",
     ),
     "hud.tools.computer.settings": (
         "computer_settings",
+    ),
+    "hud.tools.computer.anthropic": (
+        "AnthropicComputerTool",
+    ),
+    "hud.tools.computer.hud": (
+        "HudComputerTool",
+    ),
+    "hud.tools.computer.openai": (
+        "OpenAIComputerTool",
     ),
     "hud.tools.executors": (
         "BaseExecutor",
@@ -340,9 +313,6 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     ),
     "hud.tools.playwright": (
         "PlaywrightTool",
-    ),
-    "hud.tools.response": (
-        "ResponseTool",
     ),
     "hud.tools.types": (
         "AgentAnswer",

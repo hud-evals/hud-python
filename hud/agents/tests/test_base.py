@@ -424,7 +424,7 @@ class TestMCPAgentCategorizeTools:
 
     @pytest.mark.asyncio
     async def test_categorize_generic_tools(self) -> None:
-        """Test that tools without native specs are categorized as generic."""
+        """All MCP tools are generic unless a provider agent filters them."""
         tools = [
             types.Tool(name="tool1", description="Tool 1", inputSchema={}),
             types.Tool(name="tool2", description="Tool 2", inputSchema={}),
@@ -437,16 +437,14 @@ class TestMCPAgentCategorizeTools:
         categorized = agent.categorize_tools()
 
         assert len(categorized.generic) == 2
-        assert len(categorized.native) == 0
-        assert len(categorized.hosted) == 0
         assert len(categorized.skipped) == 0
 
     @pytest.mark.asyncio
-    async def test_categorize_native_tools(self) -> None:
-        """Test that tools with native specs are categorized correctly."""
-        native_tool = types.Tool(
-            name="native_tool",
-            description="Native tool",
+    async def test_ignores_legacy_native_tool_metadata(self) -> None:
+        """Legacy native metadata no longer affects base categorization."""
+        tool_with_metadata = types.Tool(
+            name="tool_with_metadata",
+            description="Tool with ignored metadata",
             inputSchema={},
             _meta={
                 "native_tools": {
@@ -457,8 +455,7 @@ class TestMCPAgentCategorizeTools:
                 }
             },
         )
-        generic_tool = types.Tool(name="generic", description="Generic", inputSchema={})
-        tools = [native_tool, generic_tool]
+        tools = [tool_with_metadata]
 
         ctx = MockEvalContext(prompt="Test", tools=tools)
         agent = MockMCPAgent()
@@ -467,17 +464,14 @@ class TestMCPAgentCategorizeTools:
 
         categorized = agent.categorize_tools()
 
-        assert len(categorized.native) == 1
-        assert categorized.native[0][0].name == "native_tool"
         assert len(categorized.generic) == 1
-        assert categorized.generic[0].name == "generic"
-        assert "test_role" in categorized.claimed_roles
+        assert categorized.generic[0].name == "tool_with_metadata"
+        assert len(categorized.skipped) == 0
 
     @pytest.mark.asyncio
-    async def test_categorize_role_exclusion(self) -> None:
-        """Test that tools with claimed roles are skipped."""
-        # Native tool claims the "computer" role
-        native_tool = types.Tool(
+    async def test_no_role_exclusion_from_legacy_metadata(self) -> None:
+        """Tool role metadata is not a control plane anymore."""
+        first_tool = types.Tool(
             name="claude_computer",
             description="Claude computer",
             inputSchema={},
@@ -490,8 +484,7 @@ class TestMCPAgentCategorizeTools:
                 }
             },
         )
-        # Another computer tool that should be skipped
-        other_computer = types.Tool(
+        second_tool = types.Tool(
             name="gemini_computer",
             description="Gemini computer",
             inputSchema={},
@@ -504,7 +497,7 @@ class TestMCPAgentCategorizeTools:
                 }
             },
         )
-        tools = [native_tool, other_computer]
+        tools = [first_tool, second_tool]
 
         ctx = MockEvalContext(prompt="Test", tools=tools)
         agent = MockMCPAgent()
@@ -513,15 +506,12 @@ class TestMCPAgentCategorizeTools:
 
         categorized = agent.categorize_tools()
 
-        assert len(categorized.native) == 1
-        assert categorized.native[0][0].name == "claude_computer"
-        assert len(categorized.skipped) == 1
-        assert categorized.skipped[0][0].name == "gemini_computer"
-        assert "computer" in categorized.claimed_roles
+        assert [tool.name for tool in categorized.generic] == ["claude_computer", "gemini_computer"]
+        assert len(categorized.skipped) == 0
 
     @pytest.mark.asyncio
-    async def test_categorize_hosted_tools(self) -> None:
-        """Test that hosted tools are categorized separately."""
+    async def test_hosted_metadata_stays_generic(self) -> None:
+        """Hosted tools are configured on agents, not environment metadata."""
         hosted_tool = types.Tool(
             name="google_search",
             description="Google Search",
@@ -544,7 +534,4 @@ class TestMCPAgentCategorizeTools:
 
         categorized = agent.categorize_tools()
 
-        assert len(categorized.hosted) == 1
-        assert categorized.hosted[0][0].name == "google_search"
-        assert categorized.hosted[0][1].hosted is True
-        assert len(categorized.native) == 0
+        assert [tool.name for tool in categorized.generic] == ["google_search"]

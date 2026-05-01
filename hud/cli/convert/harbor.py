@@ -172,7 +172,6 @@ from pathlib import Path
 {extra_imports}
 from hud import Environment
 from hud.tools import BashTool, EditTool
-from hud.tools.filesystem import GlobTool, GrepTool, ListTool, ReadTool
 
 LOGGER = logging.getLogger(__name__)
 
@@ -183,10 +182,6 @@ env = Environment("{env_name}")
 # Standard coding tools - agents interact via bash (matching Harbor's model)
 env.add_tool(BashTool())
 env.add_tool(EditTool())
-env.add_tool(ReadTool())
-env.add_tool(GrepTool())
-env.add_tool(GlobTool())
-env.add_tool(ListTool())
 
 '''
 

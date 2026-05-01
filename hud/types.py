@@ -13,9 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class AgentType(str, Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
-    OPERATOR = "operator"
     GEMINI = "gemini"
-    GEMINI_CUA = "gemini_cua"
     OPENAI_COMPATIBLE = "openai_compatible"
 
     @property
@@ -28,18 +26,10 @@ class AgentType(str, Enum):
             from hud.agents import OpenAIAgent
 
             return OpenAIAgent
-        elif self == AgentType.OPERATOR:
-            from hud.agents import OperatorAgent
-
-            return OperatorAgent
         elif self == AgentType.GEMINI:
             from hud.agents.gemini import GeminiAgent
 
             return GeminiAgent
-        elif self == AgentType.GEMINI_CUA:
-            from hud.agents.gemini_cua import GeminiCUAAgent
-
-            return GeminiCUAAgent
         elif self == AgentType.OPENAI_COMPATIBLE:
             from hud.agents.openai_chat import OpenAIChatAgent
 
@@ -53,18 +43,14 @@ class AgentType(str, Enum):
         from hud.agents.types import (
             ClaudeConfig,
             GeminiConfig,
-            GeminiCUAConfig,
             OpenAIChatConfig,
             OpenAIConfig,
-            OperatorConfig,
         )
 
         mapping: dict[AgentType, type] = {
             AgentType.CLAUDE: ClaudeConfig,
             AgentType.OPENAI: OpenAIConfig,
-            AgentType.OPERATOR: OperatorConfig,
             AgentType.GEMINI: GeminiConfig,
-            AgentType.GEMINI_CUA: GeminiCUAConfig,
             AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
         }
         if self not in mapping:
@@ -78,6 +64,7 @@ class BaseAgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
 
     system_prompt: str | None = None
+    hosted_tools: list[Any] = Field(default_factory=list)
 
 
 class MCPToolCall(CallToolRequestParams):

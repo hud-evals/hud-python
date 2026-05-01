@@ -11,18 +11,16 @@ def test_tools_imports():
     assert hud.tools is not None
 
     # Try importing key submodules
-    from hud.tools import base, utils
-    from hud.tools.coding import bash, edit
+    from hud.tools import base, coding, utils
 
     assert base is not None
-    assert bash is not None
-    assert edit is not None
+    assert coding is not None
     assert utils is not None
 
     # Check key classes/functions
     assert hasattr(base, "BaseTool")
     assert hasattr(base, "BaseHub")
-    assert hasattr(bash, "BashTool")
-    assert hasattr(edit, "EditTool")
+    assert hasattr(coding, "BashTool")
+    assert hasattr(coding, "EditTool")
     assert hasattr(utils, "run")
     assert hasattr(utils, "maybe_truncate")

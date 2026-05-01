@@ -9,41 +9,44 @@ from __future__ import annotations
 
 import inspect
 from importlib import import_module
+from typing import Any, cast
 
-from mcp.types import TextContent
+from mcp.types import TextContent, TextResourceContents
 from pydantic import BaseModel
 
 import hud
 from hud import Environment
-from hud.agents import MCPAgent, OpenAIAgent, OpenAIChatAgent, OperatorAgent, create_agent
+from hud.agents import MCPAgent, OpenAIAgent, OpenAIChatAgent, create_agent
 from hud.agents.gemini import GeminiAgent
-from hud.agents.gemini_cua import GeminiCUAAgent
-from hud.agents.grounded_openai import GroundedOpenAIChatAgent
 from hud.eval.context import EvalContext
 from hud.eval.task import Task
 from hud.native import Grade, contains, contains_all, contains_any, exact_match, f1_score
 from hud.server import MCPRouter, MCPServer
 from hud.services import ChatService
-from hud.tools.agent import AgentTool
-from hud.tools.base import BaseHub, BaseTool
-from hud.tools.coding import ApplyPatchTool, EditTool, ShellTool
-from hud.tools.computer import (
+from hud.tools import (
     AnthropicComputerTool,
+    ApplyPatchTool,
     GeminiComputerTool,
     HudComputerTool,
     OpenAIComputerTool,
+    ShellTool,
 )
+from hud.tools.agent import AgentTool
+from hud.tools.base import BaseHub, BaseTool
+from hud.tools.coding import EditTool
 from hud.tools.executors.base import BaseExecutor
 from hud.tools.executors.xdo import XDOExecutor
 from hud.tools.filesystem import GlobTool, GrepTool, ListTool, ReadTool
 from hud.tools.playwright import PlaywrightTool
-from hud.tools.response import ResponseTool
 from hud.tools.types import AgentAnswer, ContentResult, EvaluationResult, SubScore
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace, TraceStep
 
 
-def _assert_signature_contains(callable_obj: object, expected: tuple[str, ...]) -> None:
-    parameters = inspect.signature(callable_obj).parameters
+def _assert_signature_contains(
+    callable_obj: object,
+    expected: tuple[str, ...],
+) -> None:
+    parameters = inspect.signature(cast("Any", callable_obj)).parameters
     missing = [name for name in expected if name not in parameters]
     assert not missing, f"{callable_obj!r} missing parameters: {missing}"
 
@@ -51,17 +54,6 @@ def _assert_signature_contains(callable_obj: object, expected: tuple[str, ...]) 
 class _ContractTool(BaseTool):
     async def __call__(self) -> list[TextContent]:
         return [TextContent(text="ok", type="text")]
-
-
-class _ContractResponseTool(ResponseTool):
-    async def __call__(
-        self,
-        response: str | None = None,
-        messages: list[TextContent] | None = None,
-    ) -> list[TextContent]:
-        if messages:
-            return messages
-        return [TextContent(text=response or "", type="text")]
 
 
 async def test_environment_authoring_workflow_entrypoints_are_usable() -> None:
@@ -129,6 +121,7 @@ async def test_environment_decorator_forms_used_by_env_templates() -> None:
 
     assert {tool.name for tool in tools} >= {"default_named_tool", "custom_name"}
     assert [str(resource.uri) for resource in resources] == ["telemetry://live"]
+    assert isinstance(resource_contents[0], TextResourceContents)
     assert resource_contents[0].text == "live"
     assert env._shutdown_fn is cleanup
     assert env._initializer_fn is initialize
@@ -357,7 +350,7 @@ def test_task_identity_validation_copy_and_model_dump_contract() -> None:
         env=env,
         scenario="checkout",
         args={"user_id": "alice"},
-        validation=[{"name": "submit", "arguments": {"answer": "done"}}],
+        validation=[MCPToolCall(name="submit", arguments={"answer": "done"})],
     )
 
     task.id = "mutated-task-version"
@@ -477,10 +470,7 @@ def test_agent_selection_contract_keeps_factory_and_run_methods() -> None:
         MCPAgent,
         OpenAIAgent,
         OpenAIChatAgent,
-        OperatorAgent,
         GeminiAgent,
-        GeminiCUAAgent,
-        GroundedOpenAIChatAgent,
     ):
         assert callable(getattr(agent_cls, "create"))
         assert callable(getattr(agent_cls, "run"))
@@ -513,7 +503,7 @@ async def test_mcp_server_lifecycle_and_mount_contract() -> None:
     nested = MCPServer("Nested Lifecycle Contract")
     hub = BaseHub("mounted")
     tool = _ContractTool(name="contract_tool")
-    response_tool = _ContractResponseTool()
+    response_tool = _ContractTool(name="response")
 
     @server.initialize
     async def initialize() -> None:
@@ -618,7 +608,8 @@ async def test_environment_provider_format_helpers_resolve_registered_tools() ->
     await env.list_tools()
 
     assert [t.name for t in env.as_tools()] == ["contract_tool"]
-    assert env.as_openai_chat_tools(strict=True)[0]["function"]["name"] == "contract_tool"
+    openai_tool = cast("dict[str, Any]", env.as_openai_chat_tools(strict=True)[0])
+    assert openai_tool["function"]["name"] == "contract_tool"
 
 
 def test_agent_tool_constructor_uses_task_template_contract() -> None:
@@ -762,8 +753,8 @@ def test_tool_constructor_contracts_from_external_consumers() -> None:
     glob = GlobTool(base_path=".", max_results=10)
     listing = ListTool(base_path=".", max_entries=10)
 
-    assert shell.name == "shell"
-    assert patch.name == "apply_patch"
+    assert shell.name == "bash"
+    assert patch.name == "edit"
     assert edit.name == "edit"
     assert read.name == "read"
     assert grep.name == "grep"

@@ -1,61 +1,59 @@
 """HUD tools for computer control, file editing, and bash commands.
 
-For coding tools (shell, bash, edit, apply_patch), import from:
-    from hud.tools.coding import BashTool, ShellTool, EditTool, ApplyPatchTool
+For coding tools, import from:
+    from hud.tools.coding import BashTool, EditTool
 
-For filesystem tools (read, grep, glob, list), import from:
+For filesystem tools, import from:
     from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
 
+For legacy compatibility shims, import from:
+    from hud.tools import ShellTool, ApplyPatchTool
+
 For computer tools, import from:
-    from hud.tools.computer import AnthropicComputerTool, OpenAIComputerTool
+    from hud.tools.computer import ComputerTool
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ._legacy import install_legacy_aliases as _install_legacy_aliases
+
 # Base classes and types
 from .agent import AgentTool
 from .base import BaseHub, BaseTool
-from .hosted import (
-    CodeExecutionTool,
-    GoogleSearchTool,
-    HostedTool,
-    UrlContextTool,
-    WebFetchTool,
-    WebSearchTool,
-)
 from .memory import (
-    ClaudeMemoryTool,
-    GeminiMemoryTool,
     MemoryTool,
-    SessionMemoryTool,
 )
-from .native_types import NativeToolSpec, NativeToolSpecs
 from .playwright import PlaywrightTool
-from .response import ResponseTool
 from .submit import SubmitTool
 
 if TYPE_CHECKING:
-    from .coding import (
-        ApplyPatchTool,
-        BashTool,
-        EditTool,
-        GeminiEditTool,
-        GeminiShellTool,
-        GeminiWriteTool,
-        ShellTool,
-    )
-    from .computer import (
+    from ._legacy import (
         AnthropicComputerTool,
+        ApplyPatchTool,
+        ClaudeMemoryTool,
         GeminiComputerTool,
+        GeminiGlobTool,
+        GeminiListTool,
+        GeminiMemoryTool,
+        GeminiReadManyTool,
+        GeminiReadTool,
+        GeminiSearchTool,
         GLMComputerTool,
         HudComputerTool,
         OpenAIComputerTool,
         QwenComputerTool,
+        ShellTool,
+    )
+    from .coding import (
+        BashTool,
+        EditTool,
+    )
+    from .computer import (
+        ComputerTool,
     )
     from .filesystem import (
-        GeminiReadManyTool,
         GlobTool,
         GrepTool,
         ListTool,
@@ -70,77 +68,72 @@ __all__ = [
     "BaseTool",
     "BashTool",
     "ClaudeMemoryTool",
-    "CodeExecutionTool",
+    "ComputerTool",
     "EditTool",
     "GLMComputerTool",
     "GeminiComputerTool",
-    "GeminiEditTool",
+    "GeminiGlobTool",
+    "GeminiListTool",
     "GeminiMemoryTool",
     "GeminiReadManyTool",
-    "GeminiShellTool",
-    "GeminiWriteTool",
+    "GeminiReadTool",
+    "GeminiSearchTool",
     "GlobTool",
-    "GoogleSearchTool",
     "GrepTool",
-    "HostedTool",
     "HudComputerTool",
     "ListTool",
     "MemoryTool",
-    "NativeToolSpec",
-    "NativeToolSpecs",
     "OpenAIComputerTool",
     "PlaywrightTool",
     "QwenComputerTool",
     "ReadTool",
-    "ResponseTool",
-    "SessionMemoryTool",
     "ShellTool",
     "SubmitTool",
-    "UrlContextTool",
-    "WebFetchTool",
-    "WebSearchTool",
 ]
 
 
 def __getattr__(name: str) -> Any:
     """Lazy import tools to avoid heavy imports unless needed."""
     # Computer tools
+    if name == "ComputerTool":
+        from . import computer
+
+        return getattr(computer, name)
+
+    # Coding tools
+    if name in ("BashTool", "EditTool"):
+        from . import coding
+
+        return getattr(coding, name)
+
+    # Filesystem tools
+    if name in ("ReadTool", "GrepTool", "GlobTool", "ListTool"):
+        from . import filesystem
+
+        return getattr(filesystem, name)
+
+    # Compatibility shims
     if name in (
+        "ApplyPatchTool",
+        "ShellTool",
+        "ClaudeMemoryTool",
         "AnthropicComputerTool",
         "GLMComputerTool",
         "HudComputerTool",
         "OpenAIComputerTool",
         "GeminiComputerTool",
         "QwenComputerTool",
-    ):
-        from . import computer
-
-        return getattr(computer, name)
-
-    # Coding tools
-    if name in (
-        "BashTool",
-        "EditTool",
-        "ShellTool",
-        "ApplyPatchTool",
-        "GeminiShellTool",
-        "GeminiEditTool",
-        "GeminiWriteTool",
-    ):
-        from . import coding
-
-        return getattr(coding, name)
-
-    # Filesystem tools
-    if name in (
-        "ReadTool",
-        "GrepTool",
-        "GlobTool",
-        "ListTool",
+        "GeminiReadTool",
         "GeminiReadManyTool",
+        "GeminiSearchTool",
+        "GeminiGlobTool",
+        "GeminiListTool",
+        "GeminiMemoryTool",
     ):
-        from . import filesystem
+        from . import _legacy
 
-        return getattr(filesystem, name)
+        return getattr(_legacy, name)
 
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+_install_legacy_aliases()
+del _install_legacy_aliases

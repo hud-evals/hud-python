@@ -73,21 +73,6 @@ class GeminiCreateParams(BaseCreateParams, GeminiConfig):
     pass
 
 
-class GeminiCUAConfig(GeminiConfig):
-    """Configuration for GeminiCUAAgent."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "GeminiCUA"
-    model: str = Field(
-        default="gemini-2.5-computer-use-preview-10-2025", validation_alias=_model_alias
-    )
-
-
-class GeminiCUACreateParams(BaseCreateParams, GeminiCUAConfig):
-    pass
-
-
 # -----------------------------------------------------------------------------
 # OpenAI
 # -----------------------------------------------------------------------------
@@ -136,23 +121,4 @@ class OpenAIChatConfig(BaseAgentConfig):
 
 
 class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
-    pass
-
-
-# -----------------------------------------------------------------------------
-# Operator
-# -----------------------------------------------------------------------------
-
-
-class OperatorConfig(OpenAIConfig):
-    """Configuration for OperatorAgent."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "Operator"
-    model: str = Field(default="computer-use-preview", validation_alias=_model_alias)
-    environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux"
-
-
-class OperatorCreateParams(BaseCreateParams, OperatorConfig):
     pass

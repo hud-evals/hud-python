@@ -1,8 +1,4 @@
-"""Shared bash session for shell/bash tools.
-
-This module provides a unified BashSession that can be used by both
-BashTool (Claude) and ShellTool (OpenAI) with different output formats.
-"""
+"""Shared bash session for environment shell tools."""
 
 from __future__ import annotations
 
@@ -66,8 +62,7 @@ class ShellCommandOutput:
 class BashSession:
     """A persistent bash shell session.
 
-    This session can be used by both BashTool (Claude) and ShellTool (OpenAI).
-    The main differences are in the output format, not the session logic.
+    This session is used by BashTool.
     """
 
     _started: bool
@@ -78,12 +73,17 @@ class BashSession:
     command: str = "cmd.exe" if sys.platform == "win32" else "/bin/bash"
     _output_delay: float = 0.2  # seconds for polling mode
     _sentinel: str = "<<exit>>"
-    _default_timeout: float = 120.0  # seconds
+    DEFAULT_TIMEOUT: float = 120.0  # seconds
 
-    def __init__(self, cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        cwd: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> None:
         self._started = False
         self._timed_out = False
         self._cwd = cwd
+        self._timeout = timeout
 
     async def start(self) -> None:
         """Start the bash session."""
@@ -143,11 +143,11 @@ class BashSession:
 
         if self._timed_out:
             raise ToolError(
-                f"timed out: bash did not return in {self._default_timeout} seconds "
+                f"timed out: bash did not return in {self._timeout} seconds "
                 "and must be restarted"
             )
 
-        timeout_sec = (timeout_ms / 1000.0) if timeout_ms else self._default_timeout
+        timeout_sec = (timeout_ms / 1000.0) if timeout_ms else self._timeout
 
         assert self._process.stdin
         assert self._process.stdout
