@@ -205,7 +205,7 @@ Here's what makes your HUD Codex identical to the official Codex CLI. The `OpenA
 ```python
 # What you register:
 @env.tool()
-async def shell(commands: list[str], ...): ...
+async def shell(commands: list[str], timeout_ms: int | None = None): ...
 
 # What the model sees (same as official Codex):
 {"type": "shell"}  # Native tool, not a function!

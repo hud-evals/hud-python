@@ -55,16 +55,16 @@ Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP clie
 
 ```python
 @classmethod
-def create(**kwargs) -> MCPAgent
+def create(**kwargs) -> MCPAgent:
     """Factory method to create an agent with typed parameters."""
 
-async def run(ctx: EvalContext, max_steps: int = 10) -> Trace
+async def run(ctx: EvalContext, max_steps: int = 10) -> Trace:
     """Run agent with an evaluation context. Returns Trace with results."""
 
-async def call_tools(tool_call: MCPToolCall | list[MCPToolCall]) -> list[MCPToolResult]
+async def call_tools(tool_call: MCPToolCall | list[MCPToolCall]) -> list[MCPToolResult]:
     """Execute tool calls through MCP client."""
 
-def get_available_tools() -> list[types.Tool]
+def get_available_tools() -> list[types.Tool]:
     """Get filtered list of available tools."""
 ```
 

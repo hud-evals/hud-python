@@ -61,7 +61,7 @@ async with hud.eval(
     variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
 ) as ctx:
     model = ctx.variants["model"]  # Current variant
-    response = await client.chat.completions.create(model=model, ...)
+    response = await client.chat.completions.create(model=model, messages=[])
 ```
 
 Lists expand to all combinations:
