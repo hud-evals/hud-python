@@ -214,7 +214,7 @@ def _extract_hud_dev_module(runtime_command: list[str] | None) -> str | None:
         tokens.extend(shlex.split(arg) if (" " in arg or "$" in arg) else [arg])
 
     for index, token in enumerate(tokens):
-        if token == "hud" and index + 1 < len(tokens) and tokens[index + 1] == "dev":
+        if token == "hud" and index + 1 < len(tokens) and tokens[index + 1] == "dev":  # noqa: S105
             for candidate in tokens[index + 2 :]:
                 if candidate.startswith("-"):
                     continue
