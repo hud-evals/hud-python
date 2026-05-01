@@ -245,6 +245,17 @@ def _resolve_prompts(
     raise typer.BadParameter(f"Unknown render-prompts mode: {mode}")
 
 
+def _strip_extract_prefix(sample_run_command: str) -> str:
+    """Drop the ``tar xzf … && cd …`` prefix from ``manifest.sample_run_command``.
+
+    The platform stamps a tar+cd prefix for browser users who download
+    the raw tarball. The CLI (local and remote modes) already has the
+    files extracted in ``out_path``, so only the trailing run command
+    after the last ``&&`` is meaningful.
+    """
+    return sample_run_command.rsplit(" && ", 1)[-1]
+
+
 def _run_remote_export(
     *,
     exporter: BaseExporter,
@@ -319,7 +330,7 @@ def _run_remote_export(
     if sample_cmd:
         console.section_title("Try it")
         console.command_example(
-            f"cd {out_path} && {sample_cmd}",
+            f"cd {out_path} && {_strip_extract_prefix(sample_cmd)}",
             "Run all tasks",
         )
 
@@ -483,7 +494,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
 
         hud_console.section_title("Try it")
         hud_console.command_example(
-            f"cd {out_path} && {result.manifest['sample_run_command']}",
+            f"cd {out_path} && {_strip_extract_prefix(result.manifest['sample_run_command'])}",
             "Run all tasks",
         )
         rendered_count = result.manifest.get("rendered_prompt_count", 0)
