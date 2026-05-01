@@ -151,12 +151,27 @@ if [ "$GRADE_RC" -ne 0 ]; then
 fi
 
 # Parse with the Python that ships with `hud` — avoids depending on jq.
+# ``GRADE_OUTPUT`` mixes stderr noise (deprecation warnings from
+# fastmcp/authlib, etc.) with the grader's stdout JSON because we
+# captured ``2>&1`` to surface errors. Skim for the LAST line that
+# parses as a dict with a ``reward`` key — that's authoritative.
 REWARD=$(printf '%s' "$GRADE_OUTPUT" | python3 -c \
     'import json,sys
-try:
-    print(float(json.loads(sys.stdin.read()).get("reward", 0)))
-except Exception:
-    print(0)')
+reward = 0
+for line in sys.stdin.read().splitlines():
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if isinstance(obj, dict) and "reward" in obj:
+        try:
+            reward = float(obj["reward"])
+        except (TypeError, ValueError):
+            pass
+print(reward)')
 
 write_reward "$REWARD"
 
