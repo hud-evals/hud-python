@@ -74,12 +74,77 @@ async def _register_session(url: str, scenario: str, args_dict: dict) -> str | N
 
 
 def _spawn_hud_dev(port: int) -> subprocess.Popen[bytes]:
+    dev_args = os.environ.get("HUD_DEV_ARGS") or "env:env"
     with open("/tmp/hud-dev.log", "wb") as log_fd:  # noqa: S108
         return subprocess.Popen(
-            ["hud", "dev", "env:env", "--port", str(port)],  # noqa: S607
+            ["hud", "dev", dev_args, "--port", str(port)],  # noqa: S607
             stdout=log_fd,
             stderr=subprocess.STDOUT,
         )
+
+
+_KEEPALIVE_INTERVAL_SEC = 30
+_KEEPALIVE_LOG_PATH = "/logs/agent/keepalive.log"
+
+
+def _spawn_session_keepalive(url: str, session_id: str) -> subprocess.Popen[bytes]:
+    """Background-ping the registered MCP session to keep it alive.
+
+    The agent runs on its OWN MCP session (claude-code/codex/etc. each
+    open one when they connect), so the session entrypoint registered
+    here sits idle the entire time the agent is doing work. Without
+    keepalive, the verifier's ``hud scenario grade`` fails with
+    ``McpError: Session terminated`` because the session was reaped
+    mid-trial. A cheap ``list_tools`` every 30s keeps it warm.
+
+    The script runs as a detached subprocess so PID 1 is free to
+    ``exec`` into Harbor's compose command. ``streamablehttp_client``
+    is used with ``terminate_on_close=False`` so the keepalive doesn't
+    accidentally DELETE the session it's trying to preserve. Logs are
+    timestamped + flushed eagerly so a missing keepalive process is
+    obvious in /logs/keepalive.log.
+    """
+    script = (
+        "import asyncio, sys, time, os\n"
+        "URL = " + repr(url) + "\n"
+        "SID = " + repr(session_id) + "\n"
+        "INTERVAL = " + repr(_KEEPALIVE_INTERVAL_SEC) + "\n"
+        "def _log(msg):\n"
+        "    sys.stdout.write(f\"[{time.strftime('%H:%M:%S')}] keepalive: {msg}\\n\")\n"
+        "    sys.stdout.flush()\n"
+        '_log(f"started; session={SID[:8]}... interval={INTERVAL}s")\n'
+        "async def _ping_loop():\n"
+        "    from mcp import ClientSession\n"
+        "    from mcp.client.streamable_http import streamablehttp_client\n"
+        "    n = 0\n"
+        "    while True:\n"
+        "        try:\n"
+        "            async with streamablehttp_client(\n"
+        '                URL, terminate_on_close=False, headers={"mcp-session-id": SID}\n'
+        "            ) as (r, w, _gid):\n"
+        "                async with ClientSession(r, w) as session:\n"
+        "                    await session.initialize()\n"
+        "                    tools = await session.list_tools()\n"
+        "                    n += 1\n"
+        '                    _log(f"ping #{n} ok ({len(tools.tools)} tools)")\n'
+        "        except Exception as exc:\n"
+        '            _log(f"ping #{n} failed: {type(exc).__name__}: {exc}")\n'
+        "        await asyncio.sleep(INTERVAL)\n"
+        "asyncio.run(_ping_loop())\n"
+    )
+    # Open the log under /logs for post-mortem visibility; if /logs
+    # isn't writable yet (Harbor sometimes lazily mounts), fall back
+    # to /tmp.
+    try:
+        log_fd = open(_KEEPALIVE_LOG_PATH, "wb")  # noqa: SIM115
+    except OSError:
+        log_fd = open("/tmp/hud-keepalive.log", "wb")  # noqa: S108, SIM115
+    return subprocess.Popen(
+        ["python3", "-u", "-c", script],  # noqa: S607
+        stdout=log_fd,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
 
 
 def _main() -> None:
@@ -111,6 +176,8 @@ def _main() -> None:
             if session_id:
                 Path("/tmp/.hud_scenario_session").write_text(session_id)  # noqa: S108
                 logger.info("scenario session %s", session_id)
+                _spawn_session_keepalive(url, session_id)
+                logger.info("session keepalive started (every %ds)", _KEEPALIVE_INTERVAL_SEC)
             else:
                 logger.error("scenario setup returned no session id")
         except Exception as exc:

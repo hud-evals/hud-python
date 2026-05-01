@@ -65,6 +65,8 @@ def build_lock_data(
     build_method: str | None = None,
     directory_name: str | None = None,
     local_image_ref: str | None = None,
+    runtime_command: list[str] | None = None,
+    runtime_workdir: str | None = None,
 ) -> dict[str, Any]:
     """Build a `hud.lock.yaml`-compatible dict from shared analysis data."""
     from hud.cli.build import extract_env_vars_from_dockerfile, parse_base_image
@@ -105,6 +107,10 @@ def build_lock_data(
             "internalToolCount": int(analysis.get("internalToolCount", 0) or 0),
         },
     }
+    if runtime_command:
+        lock_content["environment"]["command"] = list(runtime_command)
+    if runtime_workdir:
+        lock_content["environment"]["workdir"] = runtime_workdir
     if build_id is not None:
         lock_content["build"]["buildId"] = build_id
     if build_method is not None:

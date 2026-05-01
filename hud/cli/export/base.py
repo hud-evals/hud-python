@@ -34,6 +34,7 @@ class ExportInput(BaseModel):
     tasks: list[Task]
     env_image: str
     env_platform: str | None = None
+    env_runtime_command: list[str] | None = None
     env_required_env: list[str] = Field(default_factory=list)
     repo_root: Path | None = None
     rendered_prompts: dict[str, str] = Field(default_factory=dict)

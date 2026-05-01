@@ -201,12 +201,35 @@ def _build_task_toml(
     return "\n".join(lines)
 
 
+def _extract_hud_dev_module(runtime_command: list[str] | None) -> str | None:
+    """Pull the ``module:attr`` token out of an env's launch command."""
+    if not runtime_command:
+        return None
+    import shlex
+
+    tokens: list[str] = []
+    for arg in runtime_command:
+        if arg in {"sh", "bash", "/bin/sh", "/bin/bash", "-c", "-lc", "exec"}:
+            continue
+        tokens.extend(shlex.split(arg) if (" " in arg or "$" in arg) else [arg])
+
+    for index, token in enumerate(tokens):
+        if token == "hud" and index + 1 < len(tokens) and tokens[index + 1] == "dev":
+            for candidate in tokens[index + 2 :]:
+                if candidate.startswith("-"):
+                    continue
+                return candidate
+            return None
+    return None
+
+
 def _build_task_dockerfile(
     base_image: str,
     scenario_full: str,
     args_json: str,
     required_env: list[str],
     platform: str | None = None,
+    hud_dev_args: str | None = None,
 ) -> str:
     safe_args = args_json.replace("'", "'\\''")
     from_line = f"FROM --platform={platform} {base_image}" if platform else f"FROM {base_image}"
@@ -215,13 +238,19 @@ def _build_task_dockerfile(
         "",
         f"ENV HUD_TASK_SCENARIO={scenario_full}",
         f"ENV HUD_TASK_ARGS='{safe_args}'",
-        "",
-        "COPY bake-setup.sh /opt/hud/bake-setup.sh",
-        "RUN chmod +x /opt/hud/bake-setup.sh && /opt/hud/bake-setup.sh",
-        "",
-        "COPY entrypoint.py /opt/hud/entrypoint.py",
-        "RUN chmod +x /opt/hud/entrypoint.py",
     ]
+    if hud_dev_args:
+        parts.append(f"ENV HUD_DEV_ARGS={hud_dev_args}")
+    parts.extend(
+        [
+            "",
+            "COPY bake-setup.sh /opt/hud/bake-setup.sh",
+            "RUN chmod +x /opt/hud/bake-setup.sh && /opt/hud/bake-setup.sh",
+            "",
+            "COPY entrypoint.py /opt/hud/entrypoint.py",
+            "RUN chmod +x /opt/hud/entrypoint.py",
+        ]
+    )
     if required_env:
         parts.append("")
         parts.extend(f"# {var} must be supplied at run time" for var in sorted(required_env))
@@ -303,6 +332,7 @@ class HarborExporter(BaseExporter):
         bake_setup = _read_template("bake-setup.sh")
         entrypoint_py = _read_template("entrypoint.py")
         test_sh = _read_template("test.sh")
+        hud_dev_args = _extract_hud_dev_module(inp.env_runtime_command)
 
         for task, slug in zip(tasks, ordered_slugs, strict=True):
             scenario_full = _full_scenario_name(task, inp.taskset_name)
@@ -331,6 +361,7 @@ class HarborExporter(BaseExporter):
                 args_json=args_json,
                 required_env=inp.env_required_env,
                 platform=inp.env_platform,
+                hud_dev_args=hud_dev_args,
             )
 
             base = f"tasks/{slug}"
