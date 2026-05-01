@@ -320,7 +320,7 @@ def _run_remote_export(
         console.section_title("Try it")
         console.command_example(
             f"cd {out_path} && {sample_cmd}",
-            "Build and run the first task locally",
+            "Run all tasks",
         )
 
     rendered_count = int(manifest.get("rendered_prompt_count", 0))
@@ -484,7 +484,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
         hud_console.section_title("Try it")
         hud_console.command_example(
             f"cd {out_path} && {result.manifest['sample_run_command']}",
-            "Build and run the first task locally",
+            "Run all tasks",
         )
         rendered_count = result.manifest.get("rendered_prompt_count", 0)
         total = result.manifest.get("task_count", 0)

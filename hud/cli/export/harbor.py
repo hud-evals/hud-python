@@ -350,7 +350,9 @@ class HarborExporter(BaseExporter):
         files["sample-run.sh"] = sample_run
 
         bundle_name = inp.bundle_name or _slugify(inp.taskset_name)
-        sample_run_command = f"tar xzf {bundle_name}.tar.gz\ncd {bundle_name}\nharbor run -p tasks"
+        sample_run_command = (
+            f"tar xzf {bundle_name}.tar.gz && cd {bundle_name} && harbor run -p tasks"
+        )
 
         manifest: dict[str, Any] = {
             "format": "harbor",
