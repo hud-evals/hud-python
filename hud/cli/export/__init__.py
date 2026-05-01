@@ -16,7 +16,7 @@ import contextlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -245,6 +245,95 @@ def _resolve_prompts(
     raise typer.BadParameter(f"Unknown render-prompts mode: {mode}")
 
 
+def _run_remote_export(
+    *,
+    exporter: BaseExporter,
+    taskset: str,
+    output: Path,
+    private: bool,
+    path: Path,
+    tasks: str | None,
+    image: str | None,
+    render_prompts: str,
+    prompts_file: Path | None,
+    env_var: list[str] | None,
+    task_subset: list[str] | None,
+    console: HUDConsole,
+) -> None:
+    """Delegate the export to the platform; download + extract to ``output``.
+
+    Local-mode flags don't apply in remote mode (the platform owns task
+    discovery, image, prompts, env), so reject any of them up front.
+    """
+    from .remote import remote_export
+
+    conflicting: list[str] = []
+    if path != Path("."):
+        conflicting.append("path argument")
+    if tasks:
+        conflicting.append("--tasks")
+    if image:
+        conflicting.append("--image")
+    if render_prompts != "auto":
+        conflicting.append("--render-prompts")
+    if prompts_file:
+        conflicting.append("--prompts-file")
+    if env_var:
+        conflicting.append("--env")
+    if task_subset:
+        conflicting.append("--task")
+    if conflicting:
+        console.error(
+            "--taskset (remote mode) cannot be combined with: "
+            + ", ".join(conflicting)
+            + ". Remove these flags, or run without --taskset to export from "
+            "a local repo."
+        )
+        raise typer.Exit(1)
+
+    out_path = remote_export(
+        taskset_name=taskset,
+        output_dir=output,
+        fmt=exporter.name,
+        private=private,
+        console=console,
+    )
+
+    manifest_path = out_path / "manifest.json"
+    manifest: dict[str, Any] = {}
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            manifest = {}
+
+    console.header(f"Exported to {exporter.name}")
+    console.section_title("Output")
+    console.status_item("Directory", str(out_path))
+    console.status_item("Tasks", str(manifest.get("task_count", 0)))
+    if manifest.get("base_image"):
+        console.status_item("Base image", str(manifest["base_image"]))
+    console.info("")
+
+    sample_cmd = manifest.get("sample_run_command")
+    if sample_cmd:
+        console.section_title("Try it")
+        console.command_example(
+            f"cd {out_path} && {sample_cmd}",
+            "Build and run the first task locally",
+        )
+
+    rendered_count = int(manifest.get("rendered_prompt_count", 0))
+    total = int(manifest.get("task_count", 0))
+    if total and rendered_count < total:
+        missing = total - rendered_count
+        console.info("")
+        console.info(
+            f"{missing} of {total} prompt(s) could not be rendered; "
+            "those instruction.md files fall back to args.description."
+        )
+
+
 def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
     """Build the per-format Typer command function."""
 
@@ -262,7 +351,16 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
         taskset: str | None = typer.Option(
             None,
             "--taskset",
-            help="Taskset name; reserved for future remote-mode support",
+            help=(
+                "Taskset name (or UUID) — runs the export on the HUD platform "
+                "and downloads the result. Required for users behind private "
+                "ECR who can't pull env images locally."
+            ),
+        ),
+        private: bool = typer.Option(
+            False,
+            "--private",
+            help="(remote-mode only) Push mirrored images to private Docker Hub repos.",
         ),
         tasks: str | None = typer.Option(
             None,
@@ -300,11 +398,21 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
         hud_console = HUDConsole()
 
         if taskset:
-            hud_console.error(
-                "--taskset (remote mode) is not yet supported in the CLI. "
-                "Use the platform pipeline, or run from a local repo."
+            _run_remote_export(
+                exporter=exporter,
+                taskset=taskset,
+                output=output,
+                private=private,
+                path=path,
+                tasks=tasks,
+                image=image,
+                render_prompts=render_prompts,
+                prompts_file=prompts_file,
+                env_var=env_var,
+                task_subset=task_subset,
+                console=hud_console,
             )
-            raise typer.Exit(1)
+            return
 
         repo_path = path.resolve()
 
