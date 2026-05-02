@@ -219,8 +219,7 @@ def _build_compose_override(required_env: list[str]) -> str | None:
     if not required_env:
         return None
     lines = ["services:", "  main:", "    environment:"]
-    for var in sorted(required_env):
-        lines.append(f"      {var}: ${{{var}}}")
+    lines.extend(f"      {var}: ${{{var}}}" for var in sorted(required_env))
     lines.append("")
     return "\n".join(lines)
 
