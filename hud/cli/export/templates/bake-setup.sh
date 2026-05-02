@@ -25,8 +25,7 @@ ARGS=${HUD_TASK_ARGS-}
 # ``--port`` — required for envs that wrap ``hud dev`` in a multi-
 # process startup (e.g. ``sh -c "uvicorn sidecars... & exec hud dev
 # env:env --stdio"``); skip the prefix and the sidecars never run.
-# Falls back to the legacy ``HUD_DEV_ARGS`` (just the ``module:attr``
-# token) for older bundles.
+# Falls back to a bare ``hud dev env:env`` when not set.
 LAUNCH_SHELL=$(python3 - <<'PY'
 import json, os, shlex
 raw = os.environ.get("HUD_LAUNCH_COMMAND") or ""
@@ -43,8 +42,7 @@ if raw:
             out.append(str(arg))
     print(shlex.join(out))
 else:
-    dev_args = os.environ.get("HUD_DEV_ARGS") or "env:env"
-    print(f"hud dev {shlex.quote(dev_args)} --port {shlex.quote(port)}")
+    print(f"hud dev env:env --port {shlex.quote(port)}")
 PY
 )
 

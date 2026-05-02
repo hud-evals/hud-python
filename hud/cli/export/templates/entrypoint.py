@@ -82,15 +82,10 @@ def _build_launch_command(port: int) -> list[str]:
     """Return the env's launch command, with ``--stdio`` rewritten to
     ``--port <port>`` so MCP speaks HTTP for Harbor's compose driver.
 
-    Order of preference:
-
-    1. ``HUD_LAUNCH_COMMAND`` (JSON list) — the env image's full original
-       CMD, captured at build time and threaded through the export's
-       lock yaml. Required for envs that wrap ``hud dev`` in a multi-
-       process startup.
-    2. ``HUD_DEV_ARGS`` (legacy) — just the ``module:attr`` token. Older
-       bundles that only know about the simple form still work.
-    3. ``env:env`` fallback.
+    ``HUD_LAUNCH_COMMAND`` (JSON list) is the env image's full original
+    CMD, captured at build time and threaded through the export's lock
+    yaml. Required for envs that wrap ``hud dev`` in a multi-process
+    startup. Falls back to a bare ``hud dev env:env`` when not set.
     """
     raw = os.environ.get("HUD_LAUNCH_COMMAND")
     if raw:
@@ -105,8 +100,7 @@ def _build_launch_command(port: int) -> list[str]:
             else:
                 rewritten.append(str(arg))
         return rewritten
-    dev_args = os.environ.get("HUD_DEV_ARGS") or "env:env"
-    return ["hud", "dev", dev_args, "--port", str(port)]
+    return ["hud", "dev", "env:env", "--port", str(port)]
 
 
 def _spawn_hud_dev(port: int) -> subprocess.Popen[bytes]:
