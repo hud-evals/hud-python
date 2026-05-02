@@ -802,29 +802,29 @@ class Environment(
 
         if conn_name is None:
             # Local resource -- read via local provider
-            try:
-                resource = await self._local_provider.get_resource(uri)
-                if resource is None:
-                    raise ValueError(f"Resource not found: {uri}")
-                result = await resource.read()
-                resource_uri = AnyUrl(uri)
+            resource = await self._local_provider.get_resource(uri)
+            if resource is None:
+                raise ValueError(f"Resource not found: {uri}")
+            # Intentionally do *not* wrap ``resource.read()`` exceptions
+            # in a ``Resource not found`` ValueError — that masks
+            # actually-actionable failures from inside the resource
+            # handler (missing API keys, scenario-evaluator bugs, etc.).
+            result = await resource.read()
+            resource_uri = AnyUrl(uri)
 
-                content = getattr(result, "content", result)
-                if isinstance(content, str):
-                    return [mcp_types.TextResourceContents(uri=resource_uri, text=content)]
-                if hasattr(content, "text"):
-                    return [mcp_types.TextResourceContents(uri=resource_uri, text=content.text)]  # type: ignore[union-attr]
-                import base64
+            content = getattr(result, "content", result)
+            if isinstance(content, str):
+                return [mcp_types.TextResourceContents(uri=resource_uri, text=content)]
+            if hasattr(content, "text"):
+                return [mcp_types.TextResourceContents(uri=resource_uri, text=content.text)]  # type: ignore[union-attr]
+            import base64
 
-                raw = content if isinstance(content, bytes) else str(content).encode()
-                return [
-                    mcp_types.BlobResourceContents(
-                        uri=resource_uri, blob=base64.b64encode(raw).decode()
-                    )
-                ]
-            except Exception as e:
-                logger.debug("Local resource read failed for %s: %s", uri, e)
-                raise ValueError(f"Resource not found: {uri}") from e
+            raw = content if isinstance(content, bytes) else str(content).encode()
+            return [
+                mcp_types.BlobResourceContents(
+                    uri=resource_uri, blob=base64.b64encode(raw).decode()
+                )
+            ]
         else:
             # Remote resource
             conn = self._connections.get(conn_name)

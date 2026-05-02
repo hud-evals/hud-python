@@ -36,8 +36,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def _wait_port(port: int, timeout: int = 30) -> bool:  # noqa: ASYNC109
-    """Return True once ``localhost:port`` accepts TCP connections."""
+async def _wait_port(port: int, timeout: int = 180) -> bool:  # noqa: ASYNC109
+    """Return True once ``localhost:port`` accepts TCP connections.
+
+    Default 180s because some env packages do significant work at
+    import time. A too-short timeout here makes the entrypoint barrel into
+    ``_register_session`` before the MCP server is listening.
+    """
     for _ in range(timeout * 2):
         try:
             _, writer = await asyncio.open_connection("127.0.0.1", port)
@@ -73,13 +78,50 @@ async def _register_session(url: str, scenario: str, args_dict: dict) -> str | N
         return get_session_id()
 
 
-def _spawn_hud_dev(port: int) -> subprocess.Popen[bytes]:
+def _build_launch_command(port: int) -> list[str]:
+    """Return the env's launch command, with ``--stdio`` rewritten to
+    ``--port <port>`` so MCP speaks HTTP for Harbor's compose driver.
+
+    Order of preference:
+
+    1. ``HUD_LAUNCH_COMMAND`` (JSON list) — the env image's full original
+       CMD, captured at build time and threaded through the export's
+       lock yaml. Required for envs that wrap ``hud dev`` in a multi-
+       process startup.
+    2. ``HUD_DEV_ARGS`` (legacy) — just the ``module:attr`` token. Older
+       bundles that only know about the simple form still work.
+    3. ``env:env`` fallback.
+    """
+    raw = os.environ.get("HUD_LAUNCH_COMMAND")
+    if raw:
+        cmd = json.loads(raw)
+        rewritten: list[str] = []
+        for arg in cmd:
+            if arg == "--stdio":
+                rewritten.extend(["--port", str(port)])
+            elif "--stdio" in arg:
+                # ``sh -c`` shell-string forms — rewrite inside the string
+                rewritten.append(arg.replace("--stdio", f"--port {port}"))
+            else:
+                rewritten.append(str(arg))
+        return rewritten
     dev_args = os.environ.get("HUD_DEV_ARGS") or "env:env"
+    return ["hud", "dev", dev_args, "--port", str(port)]
+
+
+def _spawn_hud_dev(port: int) -> subprocess.Popen[bytes]:
+    cmd = _build_launch_command(port)
     with open("/tmp/hud-dev.log", "wb") as log_fd:  # noqa: S108
+        # ``start_new_session=True`` puts the launch tree in its own
+        # process group so envs that fork sub-processes (uvicorn, Xvfb,
+        # chrome, ...) survive ``os.execvp`` into Harbor's compose
+        # ``sleep infinity`` below — and also so a future graceful
+        # shutdown could ``killpg`` the whole tree if needed.
         return subprocess.Popen(
-            ["hud", "dev", dev_args, "--port", str(port)],  # noqa: S607
+            cmd,
             stdout=log_fd,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
 
 
@@ -164,6 +206,16 @@ def _main() -> None:
         logger.error("hud dev did not bind :%d", port)
 
     if scenario:
+        # Bake-time ``hud scenario setup`` already wrote a session id
+        # into the image at /tmp/.hud_scenario_session. That id belongs
+        # to a server that no longer exists. If runtime registration
+        # below fails (slow env init, transient error, etc.) we want
+        # the verifier's ``hud scenario grade`` to fall through to a
+        # *new* session rather than try to resume the dead bake-time
+        # one and crash with "Session terminated". So clear the stale
+        # value upfront and only repopulate on a confirmed re-register.
+        session_file = Path("/tmp/.hud_scenario_session")  # noqa: S108
+        session_file.unlink(missing_ok=True)
         try:
             try:
                 args_dict = json.loads(args_json) if args_json else {}
@@ -174,7 +226,7 @@ def _main() -> None:
                 _register_session(url, scenario, args_dict if isinstance(args_dict, dict) else {})
             )
             if session_id:
-                Path("/tmp/.hud_scenario_session").write_text(session_id)  # noqa: S108
+                session_file.write_text(session_id)
                 logger.info("scenario session %s", session_id)
                 _spawn_session_keepalive(url, session_id)
                 logger.info("session keepalive started (every %ds)", _KEEPALIVE_INTERVAL_SEC)

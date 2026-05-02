@@ -132,7 +132,21 @@ def build_lock_data(
 
     required_from_extra = set(additional_required_env_vars or [])
     provided_env_vars = set((env_vars or {}).keys())
-    all_required = (set(required_env) | required_from_extra | provided_env_vars) - set(optional_env)
+    scenario_required: set[str] = set()
+    for source_key in ("prompts", "scenarios"):
+        items = analysis.get(source_key) or []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            meta = item.get("meta") or {}
+            declared = meta.get("required_env_vars") or []
+            if isinstance(declared, list):
+                scenario_required.update(v for v in declared if isinstance(v, str))
+    all_required = (
+        set(required_env) | required_from_extra | provided_env_vars | scenario_required
+    ) - set(optional_env)
     if all_required or optional_env:
         variables: dict[str, Any] = {
             "_note": (

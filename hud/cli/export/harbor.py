@@ -138,6 +138,7 @@ def _build_task_toml(
     taskset_name: str,
     instruction: str,
     prompt_was_rendered: bool,
+    required_env: list[str] | None = None,
 ) -> str:
     name = f"{_slugify(taskset_name)}/{slug}"
     description_seed = _derive_description(task, slug, instruction, prompt_was_rendered)
@@ -195,32 +196,33 @@ def _build_task_toml(
             "timeout_sec = 5.0",
             "start_period_sec = 5.0",
             "retries = 30",
-            "",
         ]
     )
+    if required_env:
+        lines.extend(["", "[environment.env]"])
+        lines.extend(f'{var} = "${{{var}}}"' for var in sorted(required_env))
+    lines.append("")
     return "\n".join(lines)
 
 
-def _extract_hud_dev_module(runtime_command: list[str] | None) -> str | None:
-    """Pull the ``module:attr`` token out of an env's launch command."""
-    if not runtime_command:
+def _build_compose_override(required_env: list[str]) -> str | None:
+    """Render a docker-compose override that forwards host-resolved env
+    vars into the running ``main`` container.
+
+    Harbor's base compose YAML has no ``environment:`` block, so values
+    that ``task.toml``'s ``[environment.env]`` resolves into the compose
+    subprocess's env never reach the running container without an
+    override. Emit one whenever the env declared any required vars.
+    Returns ``None`` for empty ``required_env`` so the bundle stays
+    minimal.
+    """
+    if not required_env:
         return None
-    import shlex
-
-    tokens: list[str] = []
-    for arg in runtime_command:
-        if arg in {"sh", "bash", "/bin/sh", "/bin/bash", "-c", "-lc", "exec"}:
-            continue
-        tokens.extend(shlex.split(arg) if (" " in arg or "$" in arg) else [arg])
-
-    for index, token in enumerate(tokens):
-        if token == "hud" and index + 1 < len(tokens) and tokens[index + 1] == "dev":  # noqa: S105
-            for candidate in tokens[index + 2 :]:
-                if candidate.startswith("-"):
-                    continue
-                return candidate
-            return None
-    return None
+    lines = ["services:", "  main:", "    environment:"]
+    for var in sorted(required_env):
+        lines.append(f"      {var}: ${{{var}}}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _build_task_dockerfile(
@@ -229,8 +231,14 @@ def _build_task_dockerfile(
     args_json: str,
     required_env: list[str],
     platform: str | None = None,
-    hud_dev_args: str | None = None,
+    runtime_command: list[str] | None = None,
 ) -> str:
+    """Render a per-task Dockerfile.
+
+    ``runtime_command`` is the env image's *full* launch command from
+    the build's lock yaml (e.g. ``["sh", "-c", "uvicorn ... & sleep 5
+    && exec hud dev env:env --stdio"]``).
+    """
     safe_args = args_json.replace("'", "'\\''")
     from_line = f"FROM --platform={platform} {base_image}" if platform else f"FROM {base_image}"
     parts = [
@@ -239,8 +247,12 @@ def _build_task_dockerfile(
         f"ENV HUD_TASK_SCENARIO={scenario_full}",
         f"ENV HUD_TASK_ARGS='{safe_args}'",
     ]
-    if hud_dev_args:
-        parts.append(f"ENV HUD_DEV_ARGS={hud_dev_args}")
+    if runtime_command:
+        # JSON-encode and shell-escape single quotes so the docker ENV
+        # value survives both Dockerfile parsing and bash dequoting.
+        launch_json = json.dumps(list(runtime_command))
+        safe_launch = launch_json.replace("'", "'\\''")
+        parts.append(f"ENV HUD_LAUNCH_COMMAND='{safe_launch}'")
     parts.extend(
         [
             "",
@@ -332,7 +344,6 @@ class HarborExporter(BaseExporter):
         bake_setup = _read_template("bake-setup.sh")
         entrypoint_py = _read_template("entrypoint.py")
         test_sh = _read_template("test.sh")
-        hud_dev_args = _extract_hud_dev_module(inp.env_runtime_command)
 
         for task, slug in zip(tasks, ordered_slugs, strict=True):
             scenario_full = _full_scenario_name(task, inp.taskset_name)
@@ -353,7 +364,12 @@ class HarborExporter(BaseExporter):
 
             instruction = _build_instruction_md(task, rendered)
             task_toml = _build_task_toml(
-                task, slug, inp.taskset_name, instruction, prompt_was_rendered
+                task,
+                slug,
+                inp.taskset_name,
+                instruction,
+                prompt_was_rendered,
+                required_env=inp.env_required_env,
             )
             dockerfile = _build_task_dockerfile(
                 base_image=inp.env_image,
@@ -361,7 +377,7 @@ class HarborExporter(BaseExporter):
                 args_json=args_json,
                 required_env=inp.env_required_env,
                 platform=inp.env_platform,
-                hud_dev_args=hud_dev_args,
+                runtime_command=inp.env_runtime_command,
             )
 
             base = f"tasks/{slug}"
@@ -370,6 +386,9 @@ class HarborExporter(BaseExporter):
             files[f"{base}/environment/Dockerfile"] = dockerfile
             files[f"{base}/environment/bake-setup.sh"] = bake_setup
             files[f"{base}/environment/entrypoint.py"] = entrypoint_py
+            compose_override = _build_compose_override(inp.env_required_env)
+            if compose_override:
+                files[f"{base}/environment/docker-compose.yaml"] = compose_override
             files[f"{base}/tests/test.sh"] = test_sh
 
             summary.append(f"{slug} ({scenario_full})")
