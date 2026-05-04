@@ -71,6 +71,23 @@ def get_docker_cmd(image: str) -> list[str] | None:
         return None
 
 
+def get_docker_entrypoint(image: str) -> list[str] | None:
+    """Extract the ENTRYPOINT from a Docker image. ``None`` if unset."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", image],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        inspect_data = json.loads(result.stdout)
+        if inspect_data and isinstance(inspect_data[0], dict):
+            entrypoint = inspect_data[0].get("Config", {}).get("Entrypoint") or []
+            return list(entrypoint) or None
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, FileNotFoundError):
+        return None
+
+
 DEFAULT_HTTP_PORT = 8765
 
 

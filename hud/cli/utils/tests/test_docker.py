@@ -8,6 +8,7 @@ from hud.cli.utils.docker import (
     build_run_command,
     generate_container_name,
     get_docker_cmd,
+    get_docker_entrypoint,
     image_exists,
     remove_container,
     require_docker_running,
@@ -56,6 +57,24 @@ def test_get_docker_cmd_success(mock_run):
 def test_get_docker_cmd_none(mock_run):
     mock_run.return_value = MagicMock(stdout="[]", returncode=0)
     assert get_docker_cmd("img") is None
+
+
+@patch("subprocess.run")
+def test_get_docker_entrypoint_present(mock_run):
+    mock_run.return_value = MagicMock(
+        stdout='[{"Config": {"Entrypoint": ["/start.sh"], "Cmd": null}}]',
+        returncode=0,
+    )
+    assert get_docker_entrypoint("img") == ["/start.sh"]
+
+
+@patch("subprocess.run")
+def test_get_docker_entrypoint_none_when_unset(mock_run):
+    mock_run.return_value = MagicMock(
+        stdout='[{"Config": {"Entrypoint": null, "Cmd": ["x"]}}]',
+        returncode=0,
+    )
+    assert get_docker_entrypoint("img") is None
 
 
 @patch("subprocess.run")

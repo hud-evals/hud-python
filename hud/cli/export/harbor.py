@@ -38,10 +38,51 @@ if TYPE_CHECKING:
 __all__ = ["HarborExporter"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+_HARBOR_MCP_PORT = 8765
 
 
 def _read_template(name: str) -> str:
     return (_TEMPLATES_DIR / name).read_text(encoding="utf-8")
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _rewrite_stdio_to_port(cmd: list[Any], port: int) -> list[str]:
+    """Replace ``--stdio`` with ``--port <port>`` in an argv-style command.
+
+    The env image's launch command (from the build's lock yaml) typically
+    runs ``hud dev … --stdio`` for MCP-over-stdio. Harbor's compose driver
+    needs HTTP, so the exporter rewrites the command once at build time
+    and stamps the result as ``HUD_LAUNCH_COMMAND``. Both bake-setup.sh
+    and entrypoint.py consume the rewritten value verbatim — no runtime
+    rewriting.
+
+    Handles both standalone ``--stdio`` tokens and ``--stdio`` embedded
+    inside shell-string args (e.g. ``sh -c "uvicorn … & exec hud dev … --stdio"``).
+    """
+    port_str = str(port)
+    out: list[str] = []
+    for arg in cmd:
+        s = str(arg)
+        if s == "--stdio":
+            out.extend(["--port", port_str])
+        elif "--stdio" in s:
+            out.append(s.replace("--stdio", f"--port {port_str}"))
+        else:
+            out.append(s)
+    return out
 
 
 def _slugify(value: str) -> str:
@@ -100,10 +141,7 @@ def _system_prompt(task: Task) -> str | None:
 def _agent_timeout(task: Task) -> int:
     cfg = task.agent_config
     val = cfg.get("timeout") if isinstance(cfg, dict) else getattr(cfg, "timeout", None)
-    try:
-        return int(val) if val else 1800
-    except (TypeError, ValueError):
-        return 1800
+    return _coerce_int(val, 1800)
 
 
 def _build_instruction_md(task: Task, rendered_prompt: str) -> str:
@@ -148,11 +186,11 @@ def _build_task_toml(
 
     difficulty = task.metadata.get("difficulty")
     category = task.metadata.get("category")
-    verifier_timeout = float(task.metadata.get("verifier_timeout", 1800))
-    agent_timeout = float(_agent_timeout(task))
-    build_timeout = float(task.metadata.get("build_timeout", 2400))
-    cpus = int(task.metadata.get("cpus", 4))
-    memory_mb = int(task.metadata.get("memory_mb", 16384))
+    verifier_timeout = _coerce_float(task.metadata.get("verifier_timeout"), 1800)
+    agent_timeout = _coerce_float(_agent_timeout(task), 1800)
+    build_timeout = _coerce_float(task.metadata.get("build_timeout"), 2400)
+    cpus = _coerce_int(task.metadata.get("cpus"), 4)
+    memory_mb = _coerce_int(task.metadata.get("memory_mb"), 16384)
 
     lines: list[str] = [
         "[task]",
@@ -236,7 +274,9 @@ def _build_task_dockerfile(
 
     ``runtime_command`` is the env image's *full* launch command from
     the build's lock yaml (e.g. ``["sh", "-c", "uvicorn ... & sleep 5
-    && exec hud dev env:env --stdio"]``).
+    && exec hud dev env:env --stdio"]``). The exporter rewrites
+    ``--stdio`` to ``--port <_HARBOR_MCP_PORT>`` once here so the runtime
+    scripts (bake-setup.sh, entrypoint.py) can consume the value verbatim.
     """
     safe_args = args_json.replace("'", "'\\''")
     from_line = f"FROM --platform={platform} {base_image}" if platform else f"FROM {base_image}"
@@ -247,9 +287,10 @@ def _build_task_dockerfile(
         f"ENV HUD_TASK_ARGS='{safe_args}'",
     ]
     if runtime_command:
+        rewritten = _rewrite_stdio_to_port(list(runtime_command), _HARBOR_MCP_PORT)
         # JSON-encode and shell-escape single quotes so the docker ENV
         # value survives both Dockerfile parsing and bash dequoting.
-        launch_json = json.dumps(list(runtime_command))
+        launch_json = json.dumps(rewritten)
         safe_launch = launch_json.replace("'", "'\\''")
         parts.append(f"ENV HUD_LAUNCH_COMMAND='{safe_launch}'")
     parts.extend(
@@ -347,15 +388,13 @@ class HarborExporter(BaseExporter):
         for task, slug in zip(tasks, ordered_slugs, strict=True):
             scenario_full = _full_scenario_name(task, inp.taskset_name)
             args_json = json.dumps(task.args or {}, sort_keys=True)
-            prompt_was_rendered = bool(
-                inp.rendered_prompts.get(slug) or inp.rendered_prompts.get(task.slug or "")
+            rendered = (
+                inp.rendered_prompts.get(slug) or inp.rendered_prompts.get(task.slug or "") or ""
             )
+            prompt_was_rendered = bool(rendered)
             if prompt_was_rendered:
                 rendered_prompt_count += 1
-            rendered = inp.rendered_prompts.get(slug) or inp.rendered_prompts.get(
-                task.slug or "", ""
-            )
-            if not rendered:
+            else:
                 rendered = (
                     f"[Prompt for scenario {scenario_full!r} was not rendered "
                     f"during export. Run with --render-prompts live or trace.]"

@@ -123,10 +123,10 @@ def _resolve_repo_inputs(
     path: Path,
     image_override: str | None,
     tasks_override: str | None,
-) -> tuple[list, str, list[str], str | None]:
+) -> tuple[list, str, list[str], str | None, list[str] | None]:
     """Load tasks and image ref from a local repo.
 
-    Returns (tasks, image_ref, required_env, platform).
+    Returns (tasks, image_ref, required_env, platform, runtime_command).
     """
     import sys
 
@@ -167,6 +167,7 @@ def _resolve_repo_inputs(
         )
 
     platform: str | None = None
+    runtime_command: list[str] | None = None
     if image_override:
         image_ref = image_override
         required_env: list[str] = []
@@ -183,11 +184,15 @@ def _resolve_repo_inputs(
             raise typer.BadParameter(
                 "Lock file has no pushed/local image. Run `hud push` first, or pass --image <ref>."
             )
-        env_block = lock_data.get("environment", {}).get("variables", {}) or {}
+        env_section = lock_data.get("environment", {}) or {}
+        env_block = env_section.get("variables", {}) or {}
         required_env = list(env_block.get("required") or [])
         platform = lock_data.get("build", {}).get("platform")
+        cmd = env_section.get("command")
+        if isinstance(cmd, list) and cmd:
+            runtime_command = [str(arg) for arg in cmd]
 
-    return tasks, image_ref, required_env, platform
+    return tasks, image_ref, required_env, platform, runtime_command
 
 
 def _resolve_prompts(
@@ -262,7 +267,6 @@ def _run_remote_export(
     taskset: str,
     output: Path,
     private: bool,
-    path: Path,
     tasks: str | None,
     image: str | None,
     render_prompts: str,
@@ -279,8 +283,6 @@ def _run_remote_export(
     from .remote import remote_export
 
     conflicting: list[str] = []
-    if path != Path("."):
-        conflicting.append("path argument")
     if tasks:
         conflicting.append("--tasks")
     if image:
@@ -414,7 +416,6 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
                 taskset=taskset,
                 output=output,
                 private=private,
-                path=path,
                 tasks=tasks,
                 image=image,
                 render_prompts=render_prompts,
@@ -428,7 +429,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
         repo_path = path.resolve()
 
         try:
-            collected, image_ref, required_env, platform = _resolve_repo_inputs(
+            collected, image_ref, required_env, platform, runtime_command = _resolve_repo_inputs(
                 repo_path, image, tasks
             )
         except typer.BadParameter as exc:
@@ -466,6 +467,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
             tasks=collected,
             env_image=image_ref,
             env_platform=platform,
+            env_runtime_command=runtime_command,
             env_required_env=required_env,
             repo_root=repo_path,
             rendered_prompts=rendered,
@@ -476,10 +478,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
 
         try:
             result = exporter.export(inp)
-        except NotImplementedError as exc:
-            hud_console.error(str(exc))
-            raise typer.Exit(1) from None
-        except ValueError as exc:
+        except (NotImplementedError, ValueError) as exc:
             hud_console.error(str(exc))
             raise typer.Exit(1) from None
 

@@ -21,26 +21,15 @@ ARGS=${HUD_TASK_ARGS-}
 [[ -z "$ARGS" ]] && ARGS='{}'
 
 # Render the env's launch command. ``HUD_LAUNCH_COMMAND`` (JSON list)
-# is the env image's full original CMD with ``--stdio`` rewritten to
-# ``--port`` — required for envs that wrap ``hud dev`` in a multi-
-# process startup (e.g. ``sh -c "uvicorn sidecars... & exec hud dev
-# env:env --stdio"``); skip the prefix and the sidecars never run.
-# Falls back to a bare ``hud dev env:env`` when not set.
+# is the env image's full original CMD already rewritten by the exporter
+# (``--stdio`` → ``--port <HARBOR_MCP_PORT>``); shells just shlex-join
+# and run. Falls back to a bare ``hud dev env:env`` when unset.
 LAUNCH_SHELL=$(python3 - <<'PY'
 import json, os, shlex
 raw = os.environ.get("HUD_LAUNCH_COMMAND") or ""
 port = os.environ["HUD_MCP_PORT"]
 if raw:
-    cmd = json.loads(raw)
-    out = []
-    for arg in cmd:
-        if arg == "--stdio":
-            out.extend(["--port", port])
-        elif "--stdio" in arg:
-            out.append(arg.replace("--stdio", f"--port {port}"))
-        else:
-            out.append(str(arg))
-    print(shlex.join(out))
+    print(shlex.join(str(a) for a in json.loads(raw)))
 else:
     print(f"hud dev env:env --port {shlex.quote(port)}")
 PY

@@ -17,8 +17,10 @@ from hud.cli.export import (
 )
 from hud.cli.export.base import ExportInput
 from hud.cli.export.harbor import (
+    _HARBOR_MCP_PORT,
     _full_scenario_name,
     _render_keywords,
+    _rewrite_stdio_to_port,
     _slugify,
     _toml_escape,
 )
@@ -111,6 +113,29 @@ class TestTomlEscape:
 
     def test_newline(self) -> None:
         assert _toml_escape("a\nb") == "a\\nb"
+
+
+class TestRewriteStdioToPort:
+    def test_standalone_token(self) -> None:
+        assert _rewrite_stdio_to_port(["hud", "dev", "env:env", "--stdio"], 8765) == [
+            "hud",
+            "dev",
+            "env:env",
+            "--port",
+            "8765",
+        ]
+
+    def test_embedded_in_shell_string(self) -> None:
+        assert _rewrite_stdio_to_port(
+            ["sh", "-c", "uvicorn app & exec hud dev env:env --stdio"], 8765
+        ) == ["sh", "-c", "uvicorn app & exec hud dev env:env --port 8765"]
+
+    def test_passthrough_without_stdio(self) -> None:
+        assert _rewrite_stdio_to_port(["hud", "dev", "env:env"], 8765) == [
+            "hud",
+            "dev",
+            "env:env",
+        ]
 
 
 # --------------------------------------------------------------------------- #
@@ -212,6 +237,30 @@ class TestHarborExport:
         dockerfile = result.files["tasks/wrongflag/environment/Dockerfile"]
         assert isinstance(dockerfile, str)
         assert "GITHUB_TOKEN" in dockerfile
+
+    def test_dockerfile_rewrites_runtime_command_stdio_to_port(self) -> None:
+        result = HarborExporter().export(
+            _make_input(
+                env_runtime_command=[
+                    "sh",
+                    "-c",
+                    "uvicorn app:app & exec hud dev env:env --stdio",
+                ]
+            )
+        )
+        dockerfile = result.files["tasks/wrongflag/environment/Dockerfile"]
+        assert isinstance(dockerfile, str)
+        assert "HUD_LAUNCH_COMMAND=" in dockerfile
+        # ``--stdio`` must not survive into the stamped value — the
+        # runtime scripts consume it verbatim and don't rewrite.
+        assert "--stdio" not in dockerfile
+        assert f"--port {_HARBOR_MCP_PORT}" in dockerfile
+
+    def test_dockerfile_omits_launch_command_when_no_runtime_command(self) -> None:
+        result = HarborExporter().export(_make_input())
+        dockerfile = result.files["tasks/wrongflag/environment/Dockerfile"]
+        assert isinstance(dockerfile, str)
+        assert "HUD_LAUNCH_COMMAND" not in dockerfile
 
     def test_test_sh_calls_hud_scenario_grade(self) -> None:
         result = HarborExporter().export(_make_input())
