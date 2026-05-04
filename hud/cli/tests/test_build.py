@@ -709,9 +709,13 @@ ENV API_KEY
         }
         mock_get_id.return_value = "sha256:abc123"
 
-        # Mock final rebuild
+        # Mock final rebuild. ``stdout="[]"`` keeps the global subprocess
+        # mock JSON-parseable for the ``docker inspect`` calls that
+        # ``get_docker_cmd`` / ``get_docker_entrypoint`` make during
+        # build (they ``json.loads`` the stdout).
         mock_result = mock.Mock()
         mock_result.returncode = 0
+        mock_result.stdout = "[]"
         mock_run.return_value = mock_result
 
         # Run build
@@ -780,6 +784,7 @@ FROM python:3.11
 
         mock_result = mock.Mock()
         mock_result.returncode = 0
+        mock_result.stdout = "[]"
         mock_run.return_value = mock_result
 
         build_environment(str(env_dir), "env-int:latest")
