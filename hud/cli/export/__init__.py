@@ -23,7 +23,7 @@ import typer
 from hud.utils.hud_console import HUDConsole
 
 from .base import BaseExporter, ExportInput, ExportResult
-from .harbor import HarborExporter
+from .harbor import HarborExporter, _slugify
 from .render import render_prompts_via_image, render_prompts_via_url
 
 if TYPE_CHECKING:
@@ -205,7 +205,11 @@ def _resolve_prompts(
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
 ) -> dict[str, str]:
-    """Return a slug → rendered-prompt dict per the chosen mode."""
+    """Return a slug → rendered-prompt dict per the chosen mode.
+
+    ``--prompts-file`` always wins over ``mode``: if a file is supplied,
+    skip Docker entirely and load the dict from disk.
+    """
     if prompts_file:
         data = json.loads(prompts_file.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -226,28 +230,9 @@ def _resolve_prompts(
                 platform=platform,
             )
         )
-    if mode == "trace":
-        # Trace mode reads pre-recorded prompt spans from the platform's
-        # trace store. The platform pipeline performs this lookup itself
-        # and supplies rendered_prompts via ExportInput; the local CLI
-        # has no trace store to query.
-        raise NotImplementedError(
-            "--render-prompts trace requires the platform pipeline. "
-            "Use --render-prompts live (Docker), --prompts-file <json>, "
-            "or --render-prompts skip from the CLI."
-        )
-    if mode == "auto":
-        # No trace store available locally; auto == live for the CLI.
-        return _resolve_prompts(
-            tasks,
-            "live",
-            None,
-            image=image,
-            taskset_name=taskset_name,
-            env_vars=env_vars,
-            platform=platform,
-        )
-    raise typer.BadParameter(f"Unknown render-prompts mode: {mode}")
+    raise typer.BadParameter(
+        f"Unknown --render-prompts mode: {mode!r}. Use 'live' (default) or 'skip'."
+    )
 
 
 def _strip_extract_prefix(sample_run_command: str) -> str:
@@ -264,7 +249,7 @@ def _strip_extract_prefix(sample_run_command: str) -> str:
 def _run_remote_export(
     *,
     exporter: BaseExporter,
-    taskset: str,
+    taskset_name: str,
     output: Path,
     private: bool,
     tasks: str | None,
@@ -287,7 +272,7 @@ def _run_remote_export(
         conflicting.append("--tasks")
     if image:
         conflicting.append("--image")
-    if render_prompts != "auto":
+    if render_prompts != "live":
         conflicting.append("--render-prompts")
     if prompts_file:
         conflicting.append("--prompts-file")
@@ -297,15 +282,15 @@ def _run_remote_export(
         conflicting.append("--task")
     if conflicting:
         console.error(
-            "--taskset (remote mode) cannot be combined with: "
+            "--remote cannot be combined with: "
             + ", ".join(conflicting)
-            + ". Remove these flags, or run without --taskset to export from "
+            + ". Remove these flags, or run without --remote to export from "
             "a local repo."
         )
         raise typer.Exit(1)
 
     out_path = remote_export(
-        taskset_name=taskset,
+        taskset_name=taskset_name,
         output_dir=output,
         fmt=exporter.name,
         private=private,
@@ -351,29 +336,41 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
     """Build the per-format Typer command function."""
 
     def _cmd(
-        path: Path = typer.Argument(  # noqa: B008
-            Path("."),
-            help="Path to the HUD environment repo (default: current directory)",
+        name: str | None = typer.Argument(
+            None,
+            help=(
+                "Bundle name — used in task.toml, README, manifest, and the "
+                "default output directory. Defaults to the source directory "
+                "name locally. Required with --remote (becomes the platform "
+                "taskset name to fetch)."
+            ),
         ),
-        output: Path = typer.Option(  # noqa: B008
-            Path("./hud_exported"),
+        source: str = typer.Argument(
+            ".",
+            help=(
+                "Path to the HUD environment repo (default: current directory). "
+                "Ignored when --remote is set."
+            ),
+        ),
+        output: Path | None = typer.Option(  # noqa: B008
+            None,
             "--output",
             "-o",
-            help="Output directory",
+            help="Output directory (default: ./<name>)",
         ),
-        taskset: str | None = typer.Option(
-            None,
-            "--taskset",
+        remote: bool = typer.Option(
+            False,
+            "--remote",
             help=(
-                "Taskset name (or UUID) — runs the export on the HUD platform "
-                "and downloads the result. Required for users behind private "
-                "ECR who can't pull env images locally."
+                "Run the export on the HUD platform instead of locally and "
+                "download the result. Required for users behind private ECR "
+                "who can't pull env images locally."
             ),
         ),
         private: bool = typer.Option(
             False,
             "--private",
-            help="(remote-mode only) Push mirrored images to private Docker Hub repos.",
+            help="(--remote only) Push mirrored images to private Docker Hub repos.",
         ),
         tasks: str | None = typer.Option(
             None,
@@ -386,20 +383,24 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
             help="Override the base image reference",
         ),
         render_prompts: str = typer.Option(
-            "auto",
+            "live",
             "--render-prompts",
-            help="How to render prompts: auto (default) | live | trace | skip",
+            help=(
+                "How to render prompts: live (default; boots the env image "
+                "in Docker and queries MCP) | skip (use placeholders). "
+                "Overridden by --prompts-file when set."
+            ),
         ),
         prompts_file: Path | None = typer.Option(  # noqa: B008
             None,
             "--prompts-file",
-            help="JSON object mapping task slug → rendered prompt",
+            help="JSON object mapping task slug → rendered prompt (overrides --render-prompts)",
         ),
         env_var: list[str] | None = typer.Option(  # noqa: B008
             None,
             "--env",
             "-e",
-            help="KEY=VALUE env vars for live render container (repeatable)",
+            help="KEY=VALUE env vars for the live render container (repeatable)",
         ),
         task_subset: list[str] | None = typer.Option(  # noqa: B008
             None,
@@ -410,11 +411,17 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
         f"""Export to {exporter.name}."""  # noqa: B021
         hud_console = HUDConsole()
 
-        if taskset:
+        if remote:
+            if not name:
+                hud_console.error(
+                    "--remote requires a taskset name as the first positional "
+                    "argument (e.g. `hud export harbor my-taskset --remote`)."
+                )
+                raise typer.Exit(1)
             _run_remote_export(
                 exporter=exporter,
-                taskset=taskset,
-                output=output,
+                taskset_name=name,
+                output=output or Path(f"./{_slugify(name)}"),
                 private=private,
                 tasks=tasks,
                 image=image,
@@ -426,7 +433,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
             )
             return
 
-        repo_path = path.resolve()
+        repo_path = Path(source).resolve()
 
         try:
             collected, image_ref, required_env, platform, runtime_command = _resolve_repo_inputs(
@@ -444,13 +451,15 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
             key, value = raw.split("=", 1)
             env_vars[key.strip()] = value
 
+        taskset_name = name or repo_path.name
+
         try:
             rendered = _resolve_prompts(
                 collected,
                 render_prompts,
                 prompts_file,
                 image=image_ref,
-                taskset_name=taskset or repo_path.name,
+                taskset_name=taskset_name,
                 env_vars=env_vars,
                 platform=platform,
             )
@@ -460,8 +469,6 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
         except (RuntimeError, OSError) as exc:
             hud_console.error(f"Live render failed: {exc}")
             raise typer.Exit(1) from None
-
-        taskset_name = taskset or repo_path.name
 
         inp = ExportInput(
             tasks=collected,
@@ -482,7 +489,7 @@ def _make_format_command(exporter: BaseExporter) -> Callable[..., None]:
             hud_console.error(str(exc))
             raise typer.Exit(1) from None
 
-        out_path = write_result(result, output)
+        out_path = write_result(result, output or Path(f"./{_slugify(taskset_name)}"))
 
         hud_console.header(f"Exported to {exporter.name}")
         hud_console.section_title("Output")
