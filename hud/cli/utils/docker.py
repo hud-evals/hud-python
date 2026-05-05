@@ -43,36 +43,14 @@ def extract_name_and_tag(image_ref: str) -> tuple[str, str]:
     return name, tag
 
 
-def get_docker_cmd(image: str) -> list[str] | None:
+def _inspect_config(image: str) -> dict | None:
+    """Return ``Config`` block from ``docker inspect`` for ``image``.
+
+    Callers that need a single field can read it directly off the
+    returned dict (e.g. ``Entrypoint``, ``WorkingDir``); ``get_docker_cmd``
+    is a thin wrapper around ``Config.Cmd``. Returns ``None`` on any
+    inspect/parse error.
     """
-    Extract the CMD from a Docker image.
-
-    Args:
-        image: Docker image name
-
-    Returns:
-        List of command parts or None if not found
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", image],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        inspect_data = json.loads(result.stdout)
-        if inspect_data and len(inspect_data) > 0 and isinstance(inspect_data[0], dict):
-            config = inspect_data[0].get("Config", {})
-            cmd = config.get("Cmd", [])
-            return cmd if cmd else None
-
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, FileNotFoundError):
-        return None
-
-
-def get_docker_entrypoint(image: str) -> list[str] | None:
-    """Extract the ENTRYPOINT from a Docker image. ``None`` if unset."""
     try:
         result = subprocess.run(
             ["docker", "inspect", image],  # noqa: S607
@@ -82,10 +60,19 @@ def get_docker_entrypoint(image: str) -> list[str] | None:
         )
         inspect_data = json.loads(result.stdout)
         if inspect_data and isinstance(inspect_data[0], dict):
-            entrypoint = inspect_data[0].get("Config", {}).get("Entrypoint") or []
-            return list(entrypoint) or None
+            return inspect_data[0].get("Config") or {}
     except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, FileNotFoundError):
         return None
+    return None
+
+
+def get_docker_cmd(image: str) -> list[str] | None:
+    """Extract the CMD from a Docker image. ``None`` if unset."""
+    config = _inspect_config(image)
+    if config is None:
+        return None
+    cmd = config.get("Cmd") or []
+    return list(cmd) or None
 
 
 DEFAULT_HTTP_PORT = 8765

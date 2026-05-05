@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 
-from hud.cli.utils.docker import get_docker_cmd, get_docker_entrypoint
+from hud.cli.utils.docker import _inspect_config
 from hud.cli.utils.environment import find_dockerfile
 from hud.cli.utils.lockfile import (
     build_lock_data,
@@ -815,8 +815,9 @@ def build_environment(
     effective_platform = platform if platform is not None else "linux/amd64"
 
     env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
-    runtime_command = (get_docker_entrypoint(analysis_image) or []) + (
-        get_docker_cmd(analysis_image) or []
+    image_config = _inspect_config(analysis_image) or {}
+    runtime_command = (
+        (image_config.get("Entrypoint") or []) + (image_config.get("Cmd") or [])
     ) or None
     lock_content = build_lock_data(
         source_dir=env_dir,
