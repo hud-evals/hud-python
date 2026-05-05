@@ -20,4 +20,5 @@ class ApplyPatchTool(EditTool):
             description="View, create, and edit files with undo support",
         )
 
+
 __all__ = ["ApplyPatchTool", "DiffError"]

@@ -65,7 +65,6 @@ class GeminiEditTool(GeminiFunctionTool):
             "instruction": {"type": "string", "description": "Semantic description."},
             "old_string": {"type": "string", "description": "Exact text to replace."},
             "new_string": {"type": "string", "description": "Replacement text."},
-            "allow_multiple": {"type": "boolean", "description": "Replace all occurrences."},
         },
         "required": ["file_path", "old_string", "new_string"],
     }

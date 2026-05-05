@@ -110,9 +110,7 @@ class ReadTool(FilesystemTool):
     name = "read"
     capability = "filesystem"
     env_tool_names = ("read",)
-    description = (
-        "Reads a file from the local filesystem. Use offset and limit for pagination."
-    )
+    description = "Reads a file from the local filesystem. Use offset and limit for pagination."
     parameters: ClassVar[FunctionParameters] = READ_PARAMETERS
 
 
@@ -122,9 +120,7 @@ class GrepTool(FilesystemTool):
     name = "grep"
     capability = "filesystem"
     env_tool_names = ("grep",)
-    description = (
-        "Searches file contents using a regular expression and returns matching lines."
-    )
+    description = "Searches file contents using a regular expression and returns matching lines."
     parameters: ClassVar[FunctionParameters] = GREP_PARAMETERS
 
 

@@ -41,4 +41,5 @@ class AnthropicComputerTool(ComputerTool):
         )
         self.screenshot_quality = screenshot_quality
 
+
 __all__ = ["AnthropicComputerTool"]

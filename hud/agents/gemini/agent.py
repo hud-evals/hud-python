@@ -389,9 +389,20 @@ class GeminiAgent(MCPAgent):
                                 )
                             )
                         )
+                    elif isinstance(content, types.TextContent) and content.text.startswith(
+                        "__GEMINI_SAFETY_BLOCKED__:"
+                    ):
+                        response_dict.pop("success", None)
+                        response_dict["blocked"] = True
+                        response_dict["reason"] = content.text.replace(
+                            "__GEMINI_SAFETY_BLOCKED__:", "", 1
+                        )
 
                 response_dict["url"] = url or "about:blank"
-                if tool_call.arguments and tool_call.arguments.get("safety_decision"):
+                safety_decision = (
+                    tool_call.arguments.get("safety_decision") if tool_call.arguments else None
+                )
+                if safety_decision and not result.isError and not response_dict.get("blocked"):
                     response_dict["safety_acknowledgement"] = True
             else:
                 # Add text content to response
@@ -462,8 +473,8 @@ class GeminiAgent(MCPAgent):
             for gemini_tool in gemini_tools.tools_for_capability(capability, self.model):
                 provider_backing_tools.add(gemini_tool.env_tool_name)
                 if isinstance(gemini_tool, GeminiComputerTool):
-                    self._computer_tool_name = gemini_tool.env_tool_name
-                    self._gemini_native_tools[gemini_tool.env_tool_name] = gemini_tool
+                    self._computer_tool_name = gemini_tool.name
+                    self._gemini_native_tools[gemini_tool.name] = gemini_tool
                     gemini_tool.excluded_predefined_functions = (
                         self._computer_use_excluded_function_names(gemini_tool.env_tool_name)
                     )
@@ -490,7 +501,12 @@ class GeminiAgent(MCPAgent):
                 self.gemini_tools.append(gemini_tool)
 
         # Log actual tools being used
-        tool_names = sorted(self._gemini_to_mcp_tool_map.keys())
+        tool_names = sorted(
+            {
+                *self._gemini_to_mcp_tool_map.keys(),
+                *self._gemini_native_tools.keys(),
+            }
+        )
         self.console.info(
             f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
         )
@@ -505,9 +521,7 @@ class GeminiAgent(MCPAgent):
     def _colliding_predefined_function_names(self, computer_tool_name: str) -> list[str]:
         """Exclude predefined computer actions shadowed by generic MCP tools."""
         generic_names = {
-            tool.name
-            for tool in self._categorized_tools.generic
-            if tool.name != computer_tool_name
+            tool.name for tool in self._categorized_tools.generic if tool.name != computer_tool_name
         }
         return sorted(set(gemini_tools.predefined_computer_functions) & generic_names)
 

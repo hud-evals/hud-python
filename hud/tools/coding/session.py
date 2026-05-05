@@ -143,8 +143,7 @@ class BashSession:
 
         if self._timed_out:
             raise ToolError(
-                f"timed out: bash did not return in {self._timeout} seconds "
-                "and must be restarted"
+                f"timed out: bash did not return in {self._timeout} seconds and must be restarted"
             )
 
         timeout_sec = (timeout_ms / 1000.0) if timeout_ms else self._timeout

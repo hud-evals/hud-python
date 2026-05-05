@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp.types as types
 import pytest
@@ -73,11 +73,15 @@ def test_openai_compatible_agent_uses_glm_computer_tool() -> None:
     agent._on_tools_ready()
 
     schemas = agent.get_tool_schemas()
+    schema = cast("dict[str, Any]", schemas[0])
 
-    assert schemas[0]["type"] == "function"
-    assert schemas[0]["function"]["name"] == "computer"
+    assert schema["type"] == "function"
+    assert schema["function"]["name"] == "computer"
     assert len(schemas) == 1
     assert "computer" in agent._openai_compatible_native_tools
+    actions = schema["function"]["parameters"]["properties"]["action"]["enum"]
+    assert "DONE" not in actions
+    assert "FAIL" not in actions
 
 
 def test_openai_compatible_agent_uses_qwen_computer_tool() -> None:
@@ -93,11 +97,15 @@ def test_openai_compatible_agent_uses_qwen_computer_tool() -> None:
     agent._on_tools_ready()
 
     schemas = agent.get_tool_schemas()
+    schema = cast("dict[str, Any]", schemas[0])
 
-    assert schemas[0]["type"] == "computer_use"
-    assert schemas[0]["name"] == "computer_use"
+    assert schema["type"] == "computer_use"
+    assert schema["name"] == "computer_use"
     assert len(schemas) == 1
     assert "computer_use" in agent._openai_compatible_native_tools
+    actions = schema["parameters"]["properties"]["action"]["enum"]
+    assert "terminate" not in actions
+    assert "answer" not in actions
 
 
 def test_openai_compatible_registry_ignores_legacy_native_metadata() -> None:
@@ -233,6 +241,30 @@ async def test_qwen_computer_translates_to_environment_calls() -> None:
         "scroll_y": -50,
     }
     assert calls[1].arguments == {"action": "screenshot"}
+
+
+@pytest.mark.asyncio
+async def test_qwen_left_click_drag_uses_mouse_drag_sequence() -> None:
+    tool = QwenComputerTool.from_capability(
+        capability(computer_tool()),
+        QwenComputerTool.default_spec("qwen2.5-vl"),  # type: ignore[arg-type]
+        "qwen2.5-vl",
+    )
+    calls: list[MCPToolCall] = []
+
+    async def caller(call: MCPToolCall) -> MCPToolResult:
+        calls.append(call)
+        return MCPToolResult(content=[], isError=False)
+
+    await tool.execute(caller, {"action": "left_click_drag", "coordinate": [300, 400]})
+
+    assert [call.name for call in calls] == ["computer", "computer", "computer", "computer"]
+    assert [call.arguments for call in calls] == [
+        {"action": "mouse_down", "button": "left"},
+        {"action": "move", "x": 300, "y": 400},
+        {"action": "mouse_up", "button": "left"},
+        {"action": "screenshot"},
+    ]
 
 
 @pytest.mark.asyncio

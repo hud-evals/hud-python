@@ -75,8 +75,6 @@ class GeminiSearchTool(GeminiFilesystemTool):
             "pattern": {"type": "string", "description": "Regex pattern to search for."},
             "dir_path": {"type": "string", "description": "Directory to search."},
             "include_pattern": {"type": "string", "description": "Glob filter."},
-            "exclude_pattern": {"type": "string", "description": "Regex exclusion filter."},
-            "names_only": {"type": "boolean", "description": "Return paths only."},
         },
         "required": ["pattern"],
     }
@@ -113,10 +111,6 @@ class GeminiGlobTool(GeminiFilesystemTool):
                 "type": "boolean",
                 "description": "Whether matching is case-sensitive.",
             },
-            "respect_git_ignore": {
-                "type": "boolean",
-                "description": "Whether to respect .gitignore.",
-            },
         },
         "required": ["pattern"],
     }
@@ -130,7 +124,11 @@ class GeminiGlobTool(GeminiFilesystemTool):
         return await call_tool(
             caller,
             self.env_tool_name,
-            {"pattern": _required_str(arguments, "pattern"), "path": arguments.get("dir_path")},
+            {
+                "pattern": _required_str(arguments, "pattern"),
+                "path": arguments.get("dir_path"),
+                "case_sensitive": arguments.get("case_sensitive", True),
+            },
         )
 
 

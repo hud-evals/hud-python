@@ -70,16 +70,19 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
         api_name="computer",
         beta="computer-use-2025-11-24",
         supported_models=(
-            "*claude-opus-4-5*",
             "*claude-opus-4-6*",
             "*claude-sonnet-4-6*",
-            "claude-opus-4-7*",
+            "*claude-opus-4-7*",
         ),
     ),
     ClaudeToolSpec(
         api_type="computer_20250124",
         api_name="computer",
         beta="computer-use-2025-01-24",
+        supported_models=(
+            "*claude-sonnet-4-5*",
+            "*claude-haiku-4-5*",
+        ),
     ),
 )
 
@@ -97,7 +100,7 @@ class ClaudeComputerTool(ClaudeTool):
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
-        return CLAUDE_COMPUTER_SPECS[-1]
+        return None
 
     def __init__(
         self,
@@ -158,7 +161,7 @@ class ClaudeComputerTool(ClaudeTool):
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
-        return CLAUDE_COMPUTER_SPECS[-1]
+        return spec
 
     def to_params(
         self,
@@ -171,6 +174,7 @@ class ClaudeComputerTool(ClaudeTool):
                     "name": self.name,
                     "display_width_px": self.display_width,
                     "display_height_px": self.display_height,
+                    "display_number": 1,
                     "enable_zoom": True,
                 },
             )
@@ -181,6 +185,7 @@ class ClaudeComputerTool(ClaudeTool):
                 "name": self.name,
                 "display_width_px": self.display_width,
                 "display_height_px": self.display_height,
+                "display_number": 1,
             },
         )
 
@@ -267,10 +272,26 @@ class ClaudeComputerTool(ClaudeTool):
             ]
         if action == "right_click":
             x, y = xy()
-            return [{"action": "click", "x": x, "y": y, "button": "right"}]
+            return [
+                {
+                    "action": "click",
+                    "x": x,
+                    "y": y,
+                    "button": "right",
+                    "hold_keys": self._hold_keys(text),
+                }
+            ]
         if action == "middle_click":
             x, y = xy()
-            return [{"action": "click", "x": x, "y": y, "button": "middle"}]
+            return [
+                {
+                    "action": "click",
+                    "x": x,
+                    "y": y,
+                    "button": "middle",
+                    "hold_keys": self._hold_keys(text),
+                }
+            ]
         if action in ("mouse_move", "move"):
             x, y = xy()
             return [{"action": "move", "x": x, "y": y}]
@@ -301,14 +322,25 @@ class ClaudeComputerTool(ClaudeTool):
                 path.append({"x": start[0], "y": start[1]})
             if isinstance(coordinate, list) and len(coordinate) >= 2:
                 if not path:
-                    path.append({"x": 0, "y": 0})
+                    return [
+                        {"action": "mouse_down", "button": "left"},
+                        {"action": "move", "x": coordinate[0], "y": coordinate[1]},
+                        {"action": "mouse_up", "button": "left"},
+                    ]
                 path.append({"x": coordinate[0], "y": coordinate[1]})
-            return [{"action": "drag", "path": path}]
+            return [{"action": "drag", "path": path, "hold_keys": self._hold_keys(text)}]
         if action == "wait":
             duration = arguments.get("duration") or 0
             return [{"action": "wait", "time": int(float(duration) * 1000)}]
         if action == "hold_key":
-            return [{"action": "hold_key", "text": text, "duration": arguments.get("duration")}]
+            keys = self._keys(text)
+            return [
+                {
+                    "action": "hold_key",
+                    "text": keys[0] if keys else text,
+                    "duration": arguments.get("duration"),
+                }
+            ]
         if action == "left_mouse_down":
             return [{"action": "mouse_down", "button": "left"}]
         if action == "left_mouse_up":

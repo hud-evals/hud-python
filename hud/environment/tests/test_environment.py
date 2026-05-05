@@ -449,6 +449,7 @@ class TestEnvironmentAsTools:
         assert "tool_a" in tool_names
         assert "tool_b" in tool_names
 
+
 class TestMCPServerToolExclusion:
     """Tests that scenario exclude_tools/exclude_sources/allowed_tools
     are enforced on the MCP server path (_env_list_tools, _env_call_tool).

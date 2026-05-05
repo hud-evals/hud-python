@@ -128,6 +128,10 @@ class GeminiComputerTool(GeminiTool):
         action = arguments.get("action")
         if not isinstance(action, str):
             return _error_result("action is required")
+        if _requires_confirmation(arguments.get("safety_decision")):
+            return _blocked_result(
+                "Gemini Computer Use action requires user confirmation before execution."
+            )
 
         result = MCPToolResult(content=[], isError=False)
         for call in self._env_calls(action, arguments):
@@ -152,10 +156,14 @@ class GeminiComputerTool(GeminiTool):
         if action == "hover_at":
             return [{"action": "move", "x": arguments.get("x"), "y": arguments.get("y")}]
         if action == "type_text_at":
-            calls: list[dict[str, Any]] = [
-                {"action": "move", "x": arguments.get("x"), "y": arguments.get("y")},
-                {"action": "click", "x": arguments.get("x"), "y": arguments.get("y")},
-            ]
+            calls: list[dict[str, Any]] = []
+            if arguments.get("x") is not None and arguments.get("y") is not None:
+                calls.extend(
+                    [
+                        {"action": "move", "x": arguments.get("x"), "y": arguments.get("y")},
+                        {"action": "click", "x": arguments.get("x"), "y": arguments.get("y")},
+                    ]
+                )
             if arguments.get("clear_before_typing", True):
                 calls.extend(_clear_text_calls())
             calls.append(
@@ -186,10 +194,7 @@ class GeminiComputerTool(GeminiTool):
                 {"action": "write", "text": arguments.get("url"), "enter_after": True},
             ]
         if action == "key_combination":
-            keys = arguments.get("keys")
-            if isinstance(keys, str):
-                keys = [key.strip() for key in keys.split("+") if key.strip()]
-            return [{"action": "press", "keys": keys}]
+            return [{"action": "press", "keys": _normalize_key_combination(arguments.get("keys"))}]
         if action == "drag_and_drop":
             return [
                 {
@@ -239,6 +244,32 @@ def _clear_text_calls() -> list[dict[str, Any]]:
     ]
 
 
+def _normalize_key_combination(keys: Any) -> list[str] | Any:
+    if isinstance(keys, str):
+        return [_normalize_key(key) for key in keys.split("+") if key.strip()]
+    if isinstance(keys, list):
+        return [_normalize_key(key) if isinstance(key, str) else key for key in keys]
+    return keys
+
+
+def _normalize_key(key: str) -> str:
+    normalized = key.strip().lower()
+    aliases = {
+        "control": "ctrl",
+        "cmd": "cmd",
+        "command": "cmd",
+        "meta": "cmd" if _is_mac() else "ctrl",
+        "return": "enter",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _requires_confirmation(safety_decision: Any) -> bool:
+    if not isinstance(safety_decision, dict):
+        return False
+    return safety_decision.get("decision") == "require_confirmation"
+
+
 def _address_bar_calls() -> list[dict[str, Any]]:
     return [{"action": "press", "keys": ["cmd", "l"] if _is_mac() else ["ctrl", "l"]}]
 
@@ -255,6 +286,13 @@ def _error_result(message: str) -> MCPToolResult:
     return MCPToolResult(
         content=[TextContent(type="text", text=message)],
         isError=True,
+    )
+
+
+def _blocked_result(message: str) -> MCPToolResult:
+    return MCPToolResult(
+        content=[TextContent(type="text", text=f"__GEMINI_SAFETY_BLOCKED__:{message}")],
+        isError=False,
     )
 
 

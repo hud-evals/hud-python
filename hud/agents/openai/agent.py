@@ -6,7 +6,7 @@ import copy
 import json
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
@@ -236,11 +236,6 @@ class OpenAIAgent(MCPAgent):
         elif item.type == "shell_call":
             target_name = "shell"
             return MCPToolCall(name=target_name, arguments=item.action.to_dict(), id=item.call_id)
-        elif item.type == "apply_patch_call":
-            target_name = "apply_patch"
-            return MCPToolCall(
-                name=target_name, arguments=item.operation.to_dict(), id=item.call_id
-            )
         return None
 
     async def call_tools(
@@ -444,9 +439,13 @@ class OpenAIAgent(MCPAgent):
                 output_payload = ComputerCallOutput(
                     type="computer_call_output",
                     call_id=call_id,
-                    output=ResponseComputerToolCallOutputScreenshotParam(
-                        type="computer_screenshot",
-                        image_url=f"data:image/png;base64,{screenshot}",
+                    output=cast(
+                        "ResponseComputerToolCallOutputScreenshotParam",
+                        {
+                            "type": "computer_screenshot",
+                            "image_url": f"data:image/png;base64,{screenshot}",
+                            "detail": "original",
+                        },
                     ),
                 )
                 if acknowledged_checks:

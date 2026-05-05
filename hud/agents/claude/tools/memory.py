@@ -15,7 +15,12 @@ if TYPE_CHECKING:
 CLAUDE_MEMORY_SPEC = ClaudeToolSpec(
     api_type="memory_20250818",
     api_name="memory",
-    beta="context-management-2025-06-27",
+    supported_models=(
+        "claude-opus-4-7*",
+        "claude-opus-4-6*",
+        "claude-sonnet-4-6*",
+        "claude-haiku-4-5*",
+    ),
 )
 
 
@@ -27,8 +32,9 @@ class ClaudeMemoryTool(ClaudeTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
-        del model
-        return CLAUDE_MEMORY_SPEC
+        if CLAUDE_MEMORY_SPEC.supports_model(model):
+            return CLAUDE_MEMORY_SPEC
+        return None
 
     def __init__(self, *, env_tool_name: str, spec: ClaudeToolSpec) -> None:
         del spec

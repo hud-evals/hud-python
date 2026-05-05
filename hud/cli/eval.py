@@ -97,7 +97,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # gateway = false  # Route LLM API calls through HUD Gateway
 
 [claude]
-# model = "claude-sonnet-4-5"
+# model = "claude-sonnet-4-6"
 # max_tokens = 16384
 # use_computer_beta = true
 

@@ -36,4 +36,3 @@ class ClaudeToolSettings(BaseSettings):
 claude_tool_settings = ClaudeToolSettings()
 
 __all__ = ["ClaudeToolSettings", "claude_tool_settings"]
-

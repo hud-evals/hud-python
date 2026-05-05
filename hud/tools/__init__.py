@@ -135,5 +135,7 @@ def __getattr__(name: str) -> Any:
         return getattr(_legacy, name)
 
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
 _install_legacy_aliases()
 del _install_legacy_aliases

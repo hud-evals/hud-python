@@ -181,12 +181,12 @@ class TestClaudeAgent:
         """Test agent initialization with provided client."""
         agent = ClaudeAgent.create(
             model_client=mock_anthropic,
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             validate_api_key=False,
         )
 
         assert agent.model_name == "Claude"
-        assert agent.config.model == "claude-sonnet-4-20250514"
+        assert agent.config.model == "claude-sonnet-4-6"
         assert agent.anthropic_client == mock_anthropic
 
     @pytest.mark.asyncio
@@ -194,7 +194,7 @@ class TestClaudeAgent:
         """Test agent initialization with various parameters."""
         agent = ClaudeAgent.create(
             model_client=mock_anthropic,
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=4096,
             validate_api_key=False,
         )
@@ -504,17 +504,19 @@ class TestClaudeAgent:
         )
         agent = ClaudeAgent.create(
             model_client=mock_anthropic,
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             validate_api_key=False,
         )
 
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
         assert agent.claude_tools[0]["name"] == "computer"  # type: ignore[typeddict-item]
-        assert agent.claude_tools[0]["type"] == "computer_20250124"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["type"] == "computer_20251124"  # type: ignore[typeddict-item]
         assert agent.claude_tools[0]["display_width_px"] != 1920  # type: ignore[typeddict-item]
         assert agent.claude_tools[0]["display_height_px"] != 1080  # type: ignore[typeddict-item]
-        assert agent._required_betas == {"computer-use-2025-01-24"}
+        assert agent.claude_tools[0]["display_number"] == 1  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["enable_zoom"] is True  # type: ignore[typeddict-item]
+        assert agent._required_betas == {"computer-use-2025-11-24"}
 
         await agent.call_tools(
             MCPToolCall(
@@ -531,6 +533,68 @@ class TestClaudeAgent:
             "y": 20,
             "hold_keys": None,
         }
+
+    @pytest.mark.asyncio
+    async def test_computer_translates_modifiers_drag_and_hold_key(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude computer actions translate to valid generic environment calls."""
+        tools = [
+            types.Tool(
+                name="computer",
+                description="Computer",
+                inputSchema={"type": "object", "properties": {"action": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        calls: list[MCPToolCall] = []
+
+        async def call_tool(call: MCPToolCall) -> MCPToolResult:
+            calls.append(call)
+            return MCPToolResult(
+                content=[types.TextContent(type="text", text="ok")],
+                isError=False,
+            )
+
+        ctx.call_tool = call_tool  # type: ignore[method-assign]
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+        await agent.call_tools(
+            [
+                MCPToolCall(
+                    name="computer",
+                    arguments={
+                        "action": "right_click",
+                        "coordinate": [10, 20],
+                        "text": "Shift",
+                    },
+                ),
+                MCPToolCall(
+                    name="computer",
+                    arguments={"action": "left_click_drag", "coordinate": [30, 40]},
+                ),
+                MCPToolCall(
+                    name="computer",
+                    arguments={"action": "hold_key", "text": "Control", "duration": 0.5},
+                ),
+            ]
+        )
+
+        assert [call.arguments for call in calls] == [
+            {
+                "action": "click",
+                "x": 10,
+                "y": 20,
+                "button": "right",
+                "hold_keys": ["shift"],
+            },
+            {"action": "mouse_down", "button": "left"},
+            {"action": "move", "x": 30, "y": 40},
+            {"action": "mouse_up", "button": "left"},
+            {"action": "hold_key", "text": "ctrl", "duration": 0.5},
+        ]
 
     @pytest.mark.asyncio
     async def test_bash_name_activates_agent_side_tool(
@@ -559,9 +623,7 @@ class TestClaudeAgent:
         assert agent.claude_tools[0]["name"] == "bash"  # type: ignore[typeddict-item]
         assert agent.claude_tools[0]["type"] == "bash_20250124"  # type: ignore[typeddict-item]
 
-        results = await agent.call_tools(
-            MCPToolCall(name="bash", arguments={"command": "echo ok"})
-        )
+        results = await agent.call_tools(MCPToolCall(name="bash", arguments={"command": "echo ok"}))
 
         assert results[0].isError is False
         called = ctx.call_tool.call_args.args[0]
@@ -672,6 +734,125 @@ class TestClaudeAgent:
         }
 
     @pytest.mark.asyncio
+    async def test_claude_3_7_sonnet_editor_stays_generic(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude 3.7 Sonnet editor support is intentionally not advertised."""
+        tools = [
+            types.Tool(
+                name="edit",
+                description="File editor",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-3-7-sonnet-20250219",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert "str_replace_editor" not in agent._claude_native_tools
+        assert "str_replace_based_edit_tool" not in agent._claude_native_tools
+        assert agent.claude_tools[0]["name"] == "edit"  # type: ignore[typeddict-item]
+
+    @pytest.mark.asyncio
+    async def test_sonnet_4_5_uses_current_native_coding_tools(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Sonnet 4.5 keeps native bash and editor support for compatibility."""
+        tools = [
+            types.Tool(
+                name="bash",
+                description="Bash shell",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            ),
+            types.Tool(
+                name="edit",
+                description="File editor",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            ),
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-5",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        tool_types = {tool["name"]: tool.get("type") for tool in agent.claude_tools}  # type: ignore[index]
+        assert tool_types["bash"] == "bash_20250124"
+        assert tool_types["str_replace_based_edit_tool"] == "text_editor_20250728"
+
+    @pytest.mark.asyncio
+    async def test_sonnet_4_5_uses_20250124_native_computer_tool(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Sonnet 4.5 keeps native computer support on its compatible spec."""
+        tools = [
+            types.Tool(
+                name="computer",
+                description="Computer",
+                inputSchema={"type": "object", "properties": {"action": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-5",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent.claude_tools[0]["name"] == "computer"  # type: ignore[typeddict-item]
+        assert agent.claude_tools[0]["type"] == "computer_20250124"  # type: ignore[typeddict-item]
+
+    @pytest.mark.asyncio
+    async def test_20250728_editor_rejects_unsupported_commands(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Claude 4 editor shape only forwards commands supported by the provider spec."""
+        tools = [
+            types.Tool(
+                name="edit",
+                description="File editor",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        ctx.call_tool = AsyncMock()
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+        results = await agent.call_tools(
+            MCPToolCall(
+                name="str_replace_based_edit_tool",
+                arguments={"command": "undo_edit", "path": "/tmp/file.txt"},
+            )
+        )
+
+        assert results[0].isError is True
+        assert "does not support command 'undo_edit'" in results[0].content[0].text  # type: ignore[attr-defined]
+        results = await agent.call_tools(
+            MCPToolCall(
+                name="str_replace_based_edit_tool",
+                arguments={"command": "undo", "path": "/tmp/file.txt"},
+            )
+        )
+        assert results[0].isError is True
+        assert "does not support command 'undo'" in results[0].content[0].text  # type: ignore[attr-defined]
+        ctx.call_tool.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_memory_name_activates_agent_side_tool(
         self, mock_anthropic: AsyncAnthropic
     ) -> None:
@@ -697,7 +878,7 @@ class TestClaudeAgent:
 
         assert agent.claude_tools[0]["name"] == "memory"  # type: ignore[typeddict-item]
         assert agent.claude_tools[0]["type"] == "memory_20250818"  # type: ignore[typeddict-item]
-        assert agent._required_betas == {"context-management-2025-06-27"}
+        assert agent._required_betas == set()
 
         results = await agent.call_tools(
             MCPToolCall(name="memory", arguments={"command": "view", "path": "/"})
@@ -707,6 +888,30 @@ class TestClaudeAgent:
         called = ctx.call_tool.call_args.args[0]
         assert called.name == "memory"
         assert called.arguments == {"command": "view", "path": "/"}
+
+    @pytest.mark.asyncio
+    async def test_old_sonnet_memory_stays_generic(self, mock_anthropic: AsyncAnthropic) -> None:
+        """Claude memory is only advertised natively for the supported current models."""
+        tools = [
+            types.Tool(
+                name="memory",
+                description="Memory",
+                inputSchema={"type": "object", "properties": {"command": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(tools=tools)
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-5",
+            validate_api_key=False,
+        )
+
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        assert agent.claude_tools[0]["name"] == "memory"  # type: ignore[typeddict-item]
+        assert "type" not in agent.claude_tools[0]  # type: ignore[operator]
+        assert "memory" not in agent._claude_native_tools
 
     @pytest.mark.asyncio
     async def test_get_response_with_text(self, mock_anthropic: AsyncAnthropic) -> None:

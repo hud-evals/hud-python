@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from google.genai import types as genai_types
 
@@ -22,14 +21,9 @@ class GeminiGoogleSearchTool(GeminiHostedTool):
     dynamic_threshold: float | None = None
 
     def to_params(self) -> genai_types.Tool:
-        kwargs: dict[str, Any] = {}
         if self.dynamic_threshold is not None:
-            kwargs["dynamic_threshold"] = self.dynamic_threshold
-        try:
-            google_search = genai_types.GoogleSearch(**kwargs)
-        except Exception:
-            google_search = genai_types.GoogleSearch()
-        return genai_types.Tool(google_search=google_search)
+            raise ValueError("dynamic_threshold is not supported by Gemini Google Search.")
+        return genai_types.Tool(google_search=genai_types.GoogleSearch())
 
 
 @dataclass(frozen=True, kw_only=True)

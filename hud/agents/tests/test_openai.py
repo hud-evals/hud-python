@@ -457,13 +457,13 @@ class TestOpenAIToolConversion:
 
         # Check for native shell tool
         shell_tool = next((t for t in agent._openai_tools if t.get("type") == "shell"), None)
-        assert shell_tool is not None
+        assert shell_tool == {"type": "shell", "environment": {"type": "local"}}
         assert agent._tool_name_map["shell"] == "shell"
         assert agent._openai_native_tools["shell"].env_tool_name == "bash"
 
     @pytest.mark.asyncio
-    async def test_apply_patch_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:
-        """Test that the agent converts editor capability to OpenAI native format."""
+    async def test_editor_tool_stays_generic(self, mock_openai: AsyncOpenAI) -> None:
+        """Editor capabilities are not advertised as OpenAI apply_patch."""
         tools = [
             types.Tool(
                 name="edit",
@@ -480,18 +480,14 @@ class TestOpenAIToolConversion:
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
 
-        apply_patch_tool = next(
-            (t for t in agent._openai_tools if t.get("type") == "apply_patch"),
-            None,
-        )
-        assert apply_patch_tool is not None
-        assert agent._tool_name_map["apply_patch"] == "apply_patch"
-        assert agent._openai_native_tools["apply_patch"].env_tool_name == "edit"
+        assert all(t.get("type") != "apply_patch" for t in agent._openai_tools)
+        assert "apply_patch" not in agent._tool_name_map
+        assert "apply_patch" not in agent._openai_native_tools
+        assert [tool.get("type") for tool in agent._openai_tools] == ["function"]
+        assert agent._openai_tools[0].get("name") == "edit"
 
     @pytest.mark.asyncio
-    async def test_capability_metadata_routes_openai_tools(
-        self, mock_openai: AsyncOpenAI
-    ) -> None:
+    async def test_capability_metadata_routes_openai_tools(self, mock_openai: AsyncOpenAI) -> None:
         """Test env-level capabilities can bind OpenAI tools to non-public names."""
         tools = [
             types.Tool(
@@ -520,20 +516,18 @@ class TestOpenAIToolConversion:
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
 
-        assert {t.get("type") for t in agent._openai_tools} == {"shell", "apply_patch"}
+        assert {t.get("type") for t in agent._openai_tools} == {"shell", "function"}
         assert agent._tool_name_map["shell"] == "shell"
-        assert agent._tool_name_map["apply_patch"] == "apply_patch"
         assert agent._openai_native_tools["shell"].env_tool_name == "run_shell"
-        assert agent._openai_native_tools["apply_patch"].env_tool_name == "patch_files"
+        assert "apply_patch" not in agent._tool_name_map
+        assert "apply_patch" not in agent._openai_native_tools
         assert [tool.name for tool in agent._categorized_tools.generic] == [
             "run_shell",
             "patch_files",
         ]
 
     @pytest.mark.asyncio
-    async def test_non_hosted_native_metadata_is_generic(
-        self, mock_openai: AsyncOpenAI
-    ) -> None:
+    async def test_non_hosted_native_metadata_is_generic(self, mock_openai: AsyncOpenAI) -> None:
         """OpenAI ignores env-owned provider metadata."""
         tools = [
             types.Tool(
@@ -601,65 +595,6 @@ class TestOpenAIToolConversion:
         assert results[0].structuredContent["provider_tool"] == "shell"  # type: ignore[index]
 
     @pytest.mark.asyncio
-    async def test_openai_apply_patch_call_routes_directly_to_edit(
-        self, mock_openai: AsyncOpenAI
-    ) -> None:
-        """Test OpenAI apply_patch calls stay provider-owned until execution."""
-        tools = [
-            types.Tool(
-                name="edit",
-                description="Edit files",
-                inputSchema={"type": "object"},
-            )
-        ]
-        ctx = MockEvalContext(tools=tools)
-        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
-        agent.ctx = ctx
-        await agent._initialize_from_ctx(ctx)
-
-        tool_call = agent._extract_tool_call(
-            SimpleNamespace(
-                type="apply_patch_call",
-                operation=SimpleNamespace(
-                    to_dict=lambda: {
-                        "type": "update_file",
-                        "path": "x.py",
-                        "diff": "@@\n-old\n+new",
-                    }
-                ),
-                call_id="call_1",
-            )
-        )
-
-        assert tool_call == MCPToolCall(
-            name="apply_patch",
-            arguments={"type": "update_file", "path": "x.py", "diff": "@@\n-old\n+new"},
-            id="call_1",
-        )
-
-        async def call_tool(call: Any, /, **kwargs: Any) -> MCPToolResult:
-            del kwargs
-            ctx.calls.append(call)
-            if call.arguments["command"] == "read":
-                return MCPToolResult(
-                    content=[types.TextContent(type="text", text="old\n")],
-                    isError=False,
-                )
-            return MCPToolResult(
-                content=[types.TextContent(type="text", text="written")],
-                isError=False,
-            )
-
-        ctx.call_tool = call_tool  # type: ignore[method-assign]
-        results = await agent.call_tools(tool_call)
-
-        assert [(call.name, call.arguments) for call in ctx.calls] == [
-            ("edit", {"command": "read", "path": "x.py"}),
-            ("edit", {"command": "write", "path": "x.py", "file_text": "new\n"}),
-        ]
-        assert results[0].structuredContent["provider_tool"] == "apply_patch"  # type: ignore[index]
-
-    @pytest.mark.asyncio
     async def test_computer_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:
         """Test that the agent converts computer capability to OpenAI native format."""
         tools = [
@@ -723,7 +658,13 @@ class TestOpenAIToolConversion:
                 type="computer_call",
                 pending_safety_checks=[],
                 action=SimpleNamespace(
-                    to_dict=lambda: {"type": "click", "x": 10, "y": 20, "button": "left"}
+                    to_dict=lambda: {
+                        "type": "click",
+                        "x": 10,
+                        "y": 20,
+                        "button": "left",
+                        "keys": ["CTRL"],
+                    }
                 ),
                 call_id="call_1",
             )
@@ -732,13 +673,16 @@ class TestOpenAIToolConversion:
         assert tool_call is not None
         assert tool_call == MCPToolCall(
             name="computer",
-            arguments={"type": "click", "x": 10, "y": 20, "button": "left"},
+            arguments={"type": "click", "x": 10, "y": 20, "button": "left", "keys": ["CTRL"]},
             id="call_1",
         )
 
         results = await agent.call_tools(tool_call)
         assert [(call.name, call.arguments) for call in ctx.calls] == [
-            ("computer", {"action": "click", "x": 10, "y": 20, "button": "left"}),
+            (
+                "computer",
+                {"action": "click", "x": 10, "y": 20, "button": "left", "hold_keys": ["ctrl"]},
+            ),
             ("computer", {"action": "screenshot"}),
         ]
 
@@ -750,6 +694,7 @@ class TestOpenAIToolConversion:
                 "output": {
                     "type": "computer_screenshot",
                     "image_url": "data:image/png;base64,img",
+                    "detail": "original",
                 },
             }
         ]

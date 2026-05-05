@@ -35,7 +35,7 @@ class ClaudeConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Claude"
-    model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
+    model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
     model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_tokens: int = 16384
     use_computer_beta: bool = True

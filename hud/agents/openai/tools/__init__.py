@@ -8,9 +8,7 @@ from hud.agents.tools import AgentToolRegistry
 
 from .base import OpenAITool
 from .coding import (
-    OPENAI_APPLY_PATCH_SPEC,
     OPENAI_SHELL_SPEC,
-    OpenAIApplyPatchTool,
     OpenAIShellTool,
 )
 from .computer import OPENAI_COMPUTER_SPEC, OpenAIComputerTool
@@ -24,7 +22,6 @@ class OpenAIToolRegistry(AgentToolRegistry[OpenAITool]):
     tool_classes: tuple[type[OpenAITool], ...] = (
         OpenAIComputerTool,
         OpenAIShellTool,
-        OpenAIApplyPatchTool,
     )
     name_fallbacks: dict[str, tuple[str, ...]] = field(
         default_factory=lambda: {
@@ -46,10 +43,8 @@ class OpenAIToolRegistry(AgentToolRegistry[OpenAITool]):
 openai_tools = OpenAIToolRegistry()
 
 __all__ = [
-    "OPENAI_APPLY_PATCH_SPEC",
     "OPENAI_COMPUTER_SPEC",
     "OPENAI_SHELL_SPEC",
-    "OpenAIApplyPatchTool",
     "OpenAICodeInterpreterTool",
     "OpenAIComputerTool",
     "OpenAIHostedTool",

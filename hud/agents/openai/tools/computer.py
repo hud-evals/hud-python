@@ -21,6 +21,8 @@ OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
     supported_models=(
         "gpt-5.4",
         "gpt-5.4-*",
+        "gpt-5.5",
+        "gpt-5.5-*",
     ),
 )
 
@@ -150,7 +152,8 @@ class OpenAIComputerTool(OpenAITool):
                 "action": "click",
                 "x": arguments.get("x"),
                 "y": arguments.get("y"),
-                "button": arguments.get("button") or "left",
+                "button": _map_button(arguments.get("button")),
+                "hold_keys": _hold_keys(arguments.get("keys")),
             }
         if action_type == "double_click":
             return {
@@ -159,6 +162,7 @@ class OpenAIComputerTool(OpenAITool):
                 "y": arguments.get("y"),
                 "button": "left",
                 "pattern": [100],
+                "hold_keys": _hold_keys(arguments.get("keys")),
             }
         if action_type == "scroll":
             return {
@@ -167,6 +171,7 @@ class OpenAIComputerTool(OpenAITool):
                 "y": arguments.get("y"),
                 "scroll_x": arguments.get("scroll_x") or 0,
                 "scroll_y": arguments.get("scroll_y") or 0,
+                "hold_keys": _hold_keys(arguments.get("keys")),
             }
         if action_type == "type":
             return {
@@ -184,7 +189,11 @@ class OpenAIComputerTool(OpenAITool):
                 keys = []
             return {"action": "press", "keys": [_map_key(str(key)) for key in keys]}
         if action_type == "drag":
-            return {"action": "drag", "path": arguments.get("path") or []}
+            return {
+                "action": "drag",
+                "path": arguments.get("path") or [],
+                "hold_keys": _hold_keys(arguments.get("keys")),
+            }
         if action_type == "custom":
             custom = arguments.get("action")
             raise ValueError(f"Custom action not supported: {custom}")
@@ -193,6 +202,18 @@ class OpenAIComputerTool(OpenAITool):
 
 def _map_key(key: str) -> str:
     return OPENAI_KEY_ALIASES.get(key.lower(), key.lower())
+
+
+def _hold_keys(keys: Any) -> list[str] | None:
+    if not isinstance(keys, list):
+        return None
+    return [_map_key(str(key)) for key in keys]
+
+
+def _map_button(button: Any) -> str:
+    if button == "wheel":
+        return "middle"
+    return button if isinstance(button, str) else "left"
 
 
 def _has_image(result: MCPToolResult) -> bool:

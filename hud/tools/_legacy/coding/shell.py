@@ -16,4 +16,5 @@ class ShellTool(BashTool):
             description="Execute shell commands in a persistent bash session",
         )
 
+
 __all__ = ["BashSession", "ShellTool"]

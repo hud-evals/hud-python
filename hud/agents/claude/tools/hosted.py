@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
 
 from anthropic.types.beta import (
     BetaCitationsConfigParam,
@@ -26,12 +25,19 @@ class ClaudeHostedTool(HostedTool[BetaToolUnionParam]):
 class ClaudeWebSearchTool(ClaudeHostedTool):
     """Claude web search."""
 
+    supported_models: tuple[str, ...] | None = (
+        "claude-opus-4-7*",
+        "claude-opus-4-6*",
+        "claude-sonnet-4-6*",
+        "claude-haiku-4-5*",
+    )
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
     user_location: BetaUserLocationParam | None = None
 
     def to_params(self) -> BetaWebSearchTool20250305Param:
+        _validate_domain_filters(self.allowed_domains, self.blocked_domains)
         params = BetaWebSearchTool20250305Param(
             type="web_search_20250305",
             name="web_search",
@@ -51,7 +57,11 @@ class ClaudeWebSearchTool(ClaudeHostedTool):
 class ClaudeWebFetchTool(ClaudeHostedTool):
     """Claude web fetch."""
 
-    required_beta: ClassVar[str] = "web-fetch-2025-09-10"
+    supported_models: tuple[str, ...] | None = (
+        "claude-opus-4-7*",
+        "claude-opus-4-6*",
+        "claude-sonnet-4-6*",
+    )
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
@@ -59,6 +69,7 @@ class ClaudeWebFetchTool(ClaudeHostedTool):
     citations_enabled: bool = False
 
     def to_params(self) -> BetaWebFetchTool20250910Param:
+        _validate_domain_filters(self.allowed_domains, self.blocked_domains)
         params = BetaWebFetchTool20250910Param(
             type="web_fetch_20250910",
             name="web_fetch",
@@ -82,10 +93,10 @@ class ClaudeToolSearchTool(ClaudeHostedTool):
 
     threshold: int = 10
     supported_models: tuple[str, ...] | None = (
-        "claude-sonnet-4-5*",
-        "claude-sonnet-4-6*",
-        "claude-opus-4-5*",
+        "claude-opus-4-7*",
         "claude-opus-4-6*",
+        "claude-sonnet-4-6*",
+        "claude-haiku-4-5*",
     )
 
     def to_params(self) -> BetaToolSearchToolBm25_20251119Param:
@@ -93,6 +104,14 @@ class ClaudeToolSearchTool(ClaudeHostedTool):
             type="tool_search_tool_bm25_20251119",
             name="tool_search_tool_bm25",
         )
+
+
+def _validate_domain_filters(
+    allowed_domains: list[str] | None,
+    blocked_domains: list[str] | None,
+) -> None:
+    if allowed_domains and blocked_domains:
+        raise ValueError("Use either allowed_domains or blocked_domains, not both.")
 
 
 __all__ = [

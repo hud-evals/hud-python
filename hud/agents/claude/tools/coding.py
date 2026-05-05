@@ -11,34 +11,47 @@ from hud.types import MCPToolResult
 from .base import CallTool, ClaudeTool, ClaudeToolSpec, call_tool
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import BetaToolBash20250124Param, BetaToolTextEditor20250728Param
+    from anthropic.types.beta import (
+        BetaToolBash20250124Param,
+        BetaToolTextEditor20250728Param,
+    )
 
 
 CLAUDE_BASH_SPEC = ClaudeToolSpec(
     api_type="bash_20250124",
     api_name="bash",
     supported_models=(
-        "*claude-3-5-sonnet-*",
-        "*claude-3-7-sonnet-*",
-        "*claude-sonnet-4-*",
-        "*claude-opus-4-*",
-        "*claude-4-5-sonnet-*",
-        "*claude-4-5-opus-*",
+        "*claude-opus-4-7*",
+        "*claude-opus-4-6*",
+        "*claude-sonnet-4-5*",
+        "*claude-sonnet-4-6*",
+        "*claude-haiku-4-5*",
     ),
 )
 
-CLAUDE_TEXT_EDITOR_SPEC = ClaudeToolSpec(
-    api_type="text_editor_20250728",
-    api_name="str_replace_based_edit_tool",
-    supported_models=(
-        "*claude-3-5-sonnet-*",
-        "*claude-3-7-sonnet-*",
-        "*claude-sonnet-4-*",
-        "*claude-opus-4-*",
-        "*claude-4-5-sonnet-*",
-        "*claude-4-5-opus-*",
+CLAUDE_TEXT_EDITOR_SPECS: tuple[ClaudeToolSpec, ...] = (
+    ClaudeToolSpec(
+        api_type="text_editor_20250728",
+        api_name="str_replace_based_edit_tool",
+        supported_models=(
+            "*claude-opus-4-7*",
+            "*claude-opus-4-6*",
+            "*claude-sonnet-4-5*",
+            "*claude-sonnet-4-6*",
+            "*claude-haiku-4-5*",
+        ),
     ),
 )
+
+CLAUDE_TEXT_EDITOR_SPEC = CLAUDE_TEXT_EDITOR_SPECS[0]
+
+CLAUDE_TEXT_EDITOR_NAMES = {
+    "text_editor_20250728": "str_replace_based_edit_tool",
+}
+
+CLAUDE_TEXT_EDITOR_COMMANDS = {
+    "text_editor_20250728": frozenset({"view", "create", "str_replace", "insert"}),
+}
 
 
 class ClaudeBashTool(ClaudeTool):
@@ -92,20 +105,24 @@ class ClaudeTextEditorTool(ClaudeTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
-        if CLAUDE_TEXT_EDITOR_SPEC.supports_model(model):
-            return CLAUDE_TEXT_EDITOR_SPEC
+        for spec in CLAUDE_TEXT_EDITOR_SPECS:
+            if spec.supports_model(model):
+                return spec
         return None
 
     def __init__(self, *, env_tool_name: str, spec: ClaudeToolSpec) -> None:
-        del spec
-        super().__init__(env_tool_name=env_tool_name, spec=CLAUDE_TEXT_EDITOR_SPEC)
+        super().__init__(env_tool_name=env_tool_name, spec=spec)
+
+    @property
+    def provider_name(self) -> str:
+        return CLAUDE_TEXT_EDITOR_NAMES.get(self.spec.api_type, self.spec.api_name)
 
     def to_params(self) -> BetaToolTextEditor20250728Param:
         return cast(
             "BetaToolTextEditor20250728Param",
             {
-                "type": "text_editor_20250728",
-                "name": self.name,
+                "type": self.spec.api_type,
+                "name": self.provider_name,
             },
         )
 
@@ -114,6 +131,21 @@ class ClaudeTextEditorTool(ClaudeTool):
         caller: CallTool,
         arguments: dict[str, Any],
     ) -> MCPToolResult:
+        command = arguments.get("command")
+        allowed_commands = CLAUDE_TEXT_EDITOR_COMMANDS.get(self.spec.api_type)
+        if allowed_commands is not None and command not in allowed_commands:
+            return MCPToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"{self.spec.api_type} does not support command {command!r}. "
+                            f"Supported commands: {', '.join(sorted(allowed_commands))}"
+                        ),
+                    )
+                ],
+                isError=True,
+            )
         return await call_tool(caller, self.env_tool_name, _claude_editor_arguments(arguments))
 
 
@@ -136,11 +168,6 @@ def _claude_editor_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
                 "insert_line": arguments.get("insert_line"),
                 "insert_text": arguments.get("new_str"),
             }
-        case "undo_edit":
-            return {
-                "command": "undo",
-                "path": arguments.get("path"),
-            }
         case _:
             return dict(arguments)
 
@@ -148,6 +175,7 @@ def _claude_editor_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "CLAUDE_BASH_SPEC",
     "CLAUDE_TEXT_EDITOR_SPEC",
+    "CLAUDE_TEXT_EDITOR_SPECS",
     "ClaudeBashTool",
     "ClaudeTextEditorTool",
 ]

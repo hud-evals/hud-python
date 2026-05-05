@@ -22,8 +22,8 @@ def clear_cache() -> None:
 MOCK_MODELS = [
     {
         "id": "uuid-1",
-        "name": "Claude Sonnet 4.5",
-        "model_name": "claude-sonnet-4-5",
+        "name": "Claude Sonnet 4.6",
+        "model_name": "claude-sonnet-4-6",
         "sdk_agent_type": None,
         "provider": {"name": "Anthropic", "default_sdk_agent_type": "claude"},
     },
@@ -103,10 +103,10 @@ class TestResolveCls:
         from hud.agents.claude import ClaudeAgent
 
         with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
-            cls, info = resolve_cls("claude-sonnet-4-5")
+            cls, info = resolve_cls("claude-sonnet-4-6")
             assert cls == ClaudeAgent
             assert info is not None
-            assert info["model_name"] == "claude-sonnet-4-5"
+            assert info["model_name"] == "claude-sonnet-4-6"
 
     def test_resolves_openai_model(self) -> None:
         """Resolves OpenAI model to OpenAIAgent via sdk_agent_type."""
@@ -231,7 +231,7 @@ class TestCreateAgent:
             mock_build_client.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
-            create_agent("claude-sonnet-4-5")
+            create_agent("claude-sonnet-4-6")
 
             mock_build_client.assert_called_once_with("Anthropic")
 

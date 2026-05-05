@@ -108,7 +108,6 @@ class ClaudeAgent(MCPAgent):
         self._environment_capabilities: dict[str, EnvironmentCapability] = {}
         self._required_betas: set[str] = set()
         self._tool_search_threshold: int | None = None
-        self._gated_screenshot_tools: set[str] = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
@@ -143,11 +142,6 @@ class ClaudeAgent(MCPAgent):
                     getattr(block, "name", ""),
                 )
                 arguments = block_input if isinstance(block_input, dict) else block_input.__dict__
-                if mcp_name in self._gated_screenshot_tools:
-                    arguments = {**arguments, "take_screenshot_on_click": False}
-                    logger.debug(
-                        "Injected take_screenshot_on_click=False for gated tool %s", mcp_name
-                    )
                 tool_call = MCPToolCall(
                     id=getattr(block, "id", ""),
                     name=mcp_name,
@@ -452,7 +446,6 @@ class ClaudeAgent(MCPAgent):
         self._claude_native_tools = {}
         self._required_betas: set[str] = set()
         self._tool_search_threshold = None
-        self._gated_screenshot_tools: set[str] = set()
 
         categorized = self._categorized_tools
 
@@ -467,8 +460,9 @@ class ClaudeAgent(MCPAgent):
             if claude_tool is None:
                 continue
             provider_backing_tools.add(capability.tool_name)
-            self._claude_native_tools[claude_tool.name] = claude_tool
-            self.tool_mapping[claude_tool.name] = claude_tool.name
+            provider_name = getattr(claude_tool, "provider_name", claude_tool.name)
+            self._claude_native_tools[provider_name] = claude_tool
+            self.tool_mapping[provider_name] = provider_name
             self.claude_tools.append(claude_tool.to_params())
             if claude_tool.required_beta:
                 self._required_betas.add(claude_tool.required_beta)

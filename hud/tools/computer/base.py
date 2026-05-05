@@ -473,4 +473,5 @@ class ComputerTool(BaseTool):
                 ErrorData(code=INVALID_PARAMS, message=f"Invalid parameters for {action}: {e!s}")
             ) from e
 
+
 __all__ = ["AgentCoordinate", "ComputerTool"]

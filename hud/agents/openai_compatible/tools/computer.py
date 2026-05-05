@@ -37,8 +37,6 @@ GLMAction = Literal[
     "scroll",
     "screenshot",
     "WAIT",
-    "DONE",
-    "FAIL",
 ]
 
 VALID_GLM_ACTIONS: set[str] = set(get_args(GLMAction))
@@ -59,7 +57,7 @@ GLM_SYSTEM_INSTRUCTIONS = (
     "You are a GUI Agent. Your task is to respond accurately to user requests by using "
     "tools or performing GUI operations until the task is fulfilled. Coordinates are in "
     "thousandths (0-999). Complete tasks autonomously without asking for confirmation. "
-    "If a task cannot be completed, use FAIL()."
+    "If a task cannot be completed, explain the failure in your final response."
 )
 
 GLM_COMPUTER_DESCRIPTION = """\
@@ -74,8 +72,8 @@ Use this tool to interact with the computer via GLM's PC action space.
   - left_drag(start_box='[x,y]', end_box='[x,y]')
   - key(keys='ctrl+c'), type(content='text')
   - scroll(start_box='[x,y]', direction='up|down', step=5)
-  - screenshot(), WAIT(), DONE(), FAIL()
-* If a task cannot be completed, use FAIL.\
+  - screenshot(), WAIT()
+* If a task cannot be completed, explain the failure in your final response.\
 """.strip()
 
 GLM_COMPUTER_PARAMETERS: FunctionParameters = {
@@ -86,7 +84,7 @@ GLM_COMPUTER_PARAMETERS: FunctionParameters = {
             "description": (
                 "REQUIRED. Action to perform: left_click, right_click, middle_click, "
                 "hover, left_double_click, left_drag, key, type, scroll, screenshot, "
-                "WAIT, DONE, FAIL"
+                "WAIT"
             ),
             "enum": sorted(VALID_GLM_ACTIONS),
         },
@@ -171,10 +169,6 @@ class GLMComputerTool(AgentTool[OpenAICompatibleToolParam]):
         action = arguments.get("action")
         if not isinstance(action, str):
             return _error_result("'action' is required")
-        if action == "DONE":
-            return _error_result("DONE action is not supported for computer control.")
-        if action == "FAIL":
-            return _error_result("FAIL action is not supported for computer control.")
 
         result = MCPToolResult(content=[], isError=False)
         for call in self._env_calls(action, arguments):
@@ -381,7 +375,11 @@ class QwenComputerTool(AgentTool[OpenAICompatibleToolParam]):
             return [call]
         if action == "left_click_drag":
             x, y = _required_coordinate(coordinate, action)
-            return [{"action": "drag", "path": [{"x": x, "y": y}]}]
+            return [
+                {"action": "mouse_down", "button": "left"},
+                {"action": "move", "x": x, "y": y},
+                {"action": "mouse_up", "button": "left"},
+            ]
         if action == "wait":
             time = arguments.get("time")
             if not isinstance(time, int | float):
@@ -410,8 +408,6 @@ key releases in reverse order.
 * `scroll`: Performs a vertical scroll.
 * `hscroll`: Performs a horizontal scroll.
 * `wait`: Wait specified seconds for the change to happen.
-* `terminate`: Terminate the current task and report its completion status (not supported).
-* `answer`: Answer a question (not supported).
 """.strip(),
             "enum": [
                 "key",
@@ -426,14 +422,12 @@ key releases in reverse order.
                 "scroll",
                 "hscroll",
                 "wait",
-                "terminate",
-                "answer",
             ],
             "type": "string",
         },
         "keys": {"description": "Required only by `action=key`.", "type": "array"},
         "text": {
-            "description": "Required only by `action=type` and `action=answer`.",
+            "description": "Required only by `action=type`.",
             "type": "string",
         },
         "coordinate": {
@@ -447,11 +441,6 @@ key releases in reverse order.
         "time": {
             "description": "Seconds to wait. Required only by `action=wait`.",
             "type": "number",
-        },
-        "status": {
-            "description": "The status of the task. Required only by `action=terminate`.",
-            "type": "string",
-            "enum": ["success", "failure"],
         },
     },
     "required": ["action"],

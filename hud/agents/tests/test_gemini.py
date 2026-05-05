@@ -394,7 +394,9 @@ class TestGeminiAgent:
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
 
-        assert agent._computer_tool_name == "gemini_computer"
+        assert agent._computer_tool_name == "computer_use"
+        assert agent._gemini_native_tools["computer_use"].env_tool_name == "gemini_computer"
+        assert "gemini_computer" not in agent._gemini_native_tools
         assert len(agent.gemini_tools) == 1
         computer_tool = agent.gemini_tools[0]
         assert isinstance(computer_tool, genai_types.Tool)
@@ -451,9 +453,7 @@ class TestGeminiAgent:
         assert tool_call.arguments == {"url": "https://example.com"}
 
     @pytest.mark.asyncio
-    async def test_agent_owns_gemini_cli_tool_surface(
-        self, mock_gemini_client: MagicMock
-    ) -> None:
+    async def test_agent_owns_gemini_cli_tool_surface(self, mock_gemini_client: MagicMock) -> None:
         """GeminiAgent exposes Gemini-shaped tools backed by generic env primitives."""
         tools = [
             types.Tool(name="bash", description="Run shell", inputSchema={"type": "object"}),
@@ -469,6 +469,7 @@ class TestGeminiAgent:
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
+        agent.console.info = MagicMock()
 
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
@@ -496,6 +497,23 @@ class TestGeminiAgent:
         assert agent._gemini_native_tools["glob"].env_tool_name == "glob"
         assert agent._gemini_native_tools["list_directory"].env_tool_name == "list"
         assert agent._gemini_native_tools["save_memory"].env_tool_name == "memory"
+        declarations = {
+            declaration.name: declaration
+            for tool in agent.gemini_tools
+            for declaration in (getattr(tool, "function_declarations", None) or [])
+        }
+        assert "allow_multiple" not in declarations["replace"].parameters_json_schema["properties"]
+        assert (
+            "exclude_pattern"
+            not in declarations["grep_search"].parameters_json_schema["properties"]
+        )
+        assert "names_only" not in declarations["grep_search"].parameters_json_schema["properties"]
+        assert "respect_git_ignore" not in declarations["glob"].parameters_json_schema["properties"]
+        agent.console.info.assert_called_with(
+            "Agent initialized with 8 tools: "
+            "glob, grep_search, list_directory, read_file, replace, run_shell_command, "
+            "save_memory, write_file"
+        )
 
     @pytest.mark.asyncio
     async def test_gemini_legacy_env_tools_activate_harness_tools(
@@ -544,7 +562,7 @@ class TestGeminiAgent:
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
-        agent._computer_tool_name = "gemini_computer"
+        agent._computer_tool_name = "computer_use"
 
         function_call = MagicMock()
         function_call.name = "click_at"
@@ -554,7 +572,7 @@ class TestGeminiAgent:
         tool_call = agent._extract_tool_call(part)
 
         assert tool_call is not None
-        assert tool_call.name == "gemini_computer"
+        assert tool_call.name == "computer_use"
         assert tool_call.arguments == {
             "action": "click_at",
             "safety_decision": {"decision": "allowed"},
@@ -584,6 +602,49 @@ class TestGeminiAgent:
             }
         ]
 
+    def test_gemini_computer_normalizes_keys_and_optional_type_coordinates(self) -> None:
+        """Gemini key strings should map cleanly to the environment press contract."""
+        spec = AgentGeminiComputerTool.default_spec("gemini-3-flash-preview")
+        assert spec is not None
+        tool = AgentGeminiComputerTool(env_tool_name="computer", spec=spec)
+
+        assert tool._env_calls("key_combination", {"keys": "Control+A"}) == [
+            {"action": "press", "keys": ["ctrl", "a"]}
+        ]
+        assert tool._env_calls("type_text_at", {"text": "hello", "clear_before_typing": False}) == [
+            {"action": "write", "text": "hello", "enter_after": False}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_gemini_computer_blocks_confirmation_required_actions(self) -> None:
+        """Gemini require_confirmation actions need HITL before execution."""
+        spec = AgentGeminiComputerTool.default_spec("gemini-3-flash-preview")
+        assert spec is not None
+        tool = AgentGeminiComputerTool(env_tool_name="computer", spec=spec)
+        calls: list[MCPToolCall] = []
+
+        async def call_tool(call: MCPToolCall) -> MCPToolResult:
+            calls.append(call)
+            return MCPToolResult(
+                content=[types.TextContent(type="text", text="executed")],
+                isError=False,
+            )
+
+        result = await tool.execute(
+            call_tool,
+            {
+                "action": "click_at",
+                "x": 10,
+                "y": 20,
+                "safety_decision": {"decision": "require_confirmation"},
+            },
+        )
+
+        assert result.isError is False
+        assert isinstance(result.content[0], types.TextContent)
+        assert result.content[0].text.startswith("__GEMINI_SAFETY_BLOCKED__:")
+        assert calls == []
+
     @pytest.mark.asyncio
     async def test_regular_agent_formats_computer_use_results(
         self, mock_gemini_client: MagicMock
@@ -593,11 +654,11 @@ class TestGeminiAgent:
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
-        agent._computer_tool_name = "gemini_computer"
+        agent._computer_tool_name = "computer_use"
         screenshot = base64.b64encode(b"png bytes").decode()
         tool_calls = [
             MCPToolCall(
-                name="gemini_computer",
+                name="computer_use",
                 arguments={"action": "click_at", "safety_decision": {"decision": "allowed"}},
                 gemini_name="click_at",  # type: ignore[arg-type]
             )
@@ -627,6 +688,54 @@ class TestGeminiAgent:
         inline_data = function_response.parts[0].inline_data
         assert inline_data is not None
         assert inline_data.mime_type == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_regular_agent_formats_blocked_computer_use_results(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """Blocked Gemini safety actions should not be reported as tool errors."""
+        agent = GeminiAgent.create(
+            model_client=mock_gemini_client,
+            validate_api_key=False,
+        )
+        agent._computer_tool_name = "computer_use"
+        tool_calls = [
+            MCPToolCall(
+                name="computer_use",
+                arguments={
+                    "action": "click_at",
+                    "safety_decision": {"decision": "require_confirmation"},
+                },
+                gemini_name="click_at",  # type: ignore[arg-type]
+            )
+        ]
+        tool_results = [
+            MCPToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=(
+                            "__GEMINI_SAFETY_BLOCKED__:Gemini Computer Use action requires "
+                            "user confirmation before execution."
+                        ),
+                    ),
+                ],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        parts = messages[0].parts
+        assert parts is not None
+        function_response = parts[0].function_response
+        assert function_response is not None
+        response = function_response.response
+        assert response is not None
+        assert response["blocked"] is True
+        assert "success" not in response
+        assert response["url"] == "about:blank"
+        assert "safety_acknowledgement" not in response
 
 
 class TestGeminiToolConversion:
