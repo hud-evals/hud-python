@@ -289,6 +289,15 @@ def _run_remote_export(
         )
         raise typer.Exit(1)
 
+    if not private:
+        prompt = (
+            "--remote will mirror env image(s) to your Docker Hub "
+            "(public by default; pass --private to force private). Continue?"
+        )
+        if not console.confirm(prompt, default=False):
+            console.info("Aborted.")
+            raise typer.Exit(0)
+
     out_path = remote_export(
         taskset_name=taskset_name,
         output_dir=output,
