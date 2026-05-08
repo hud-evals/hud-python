@@ -59,6 +59,16 @@ def resolve_cls(model: str) -> tuple[type[MCPAgent], dict[str, Any] | None]:
     for m in _fetch_gateway_models():
         if model in (m.get("id"), m.get("name"), m.get("model_name")):
             agent_str = m.get("sdk_agent_type") or m["provider"]["default_sdk_agent_type"]
+            if agent_str == "operator":
+                raise ValueError(
+                    "Operator agent is no longer supported; use openai with a supported "
+                    "OpenAI computer model."
+                )
+            if agent_str == "gemini_cua":
+                raise ValueError(
+                    "Gemini CUA agent is no longer supported; use gemini with a supported "
+                    "Gemini computer-use model."
+                )
             return AgentType(agent_str).cls, m
 
     raise ValueError(f"Model '{model}' not found")

@@ -4,7 +4,7 @@ import logging
 
 from mcp.types import ContentBlock, TextContent
 
-from .response import ResponseTool
+from .base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def get_submission() -> str | None:
     return _SUBMISSION
 
 
-class SubmitTool(ResponseTool):
+class SubmitTool(BaseTool):
     """Lifecycle tool to submit the agent's final answer for evaluation.
 
     Accepts either a `response` string or a `messages` list and stores the
@@ -33,6 +33,18 @@ class SubmitTool(ResponseTool):
     name: str = "response"
     title: str = "Submit Tool"
     description: str = "Submit the agent's final response for later evaluation"
+
+    def __init__(
+        self,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        super().__init__(
+            name=name or self.name,
+            title=title or self.title,
+            description=description or self.description,
+        )
 
     async def __call__(
         self, response: str | None = None, messages: list[ContentBlock] | None = None

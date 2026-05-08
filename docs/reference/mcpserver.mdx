@@ -273,7 +273,8 @@ From `environments/remote_browser/src/hud_controller/server.py`:
 
 ```python
 from hud.server import MCPServer
-from hud.tools.computer import HudComputerTool, AnthropicComputerTool, OpenAIComputerTool
+from hud.tools import AnthropicComputerTool, OpenAIComputerTool
+from hud.tools.computer import ComputerTool
 from .tools import PlaywrightToolWithMemory, BrowserExecutor
 from .setup import setup as setup_hub
 from .evaluate import evaluate as evaluate_hub
@@ -334,7 +335,7 @@ async def initialize_environment(ctx):
             tool_kwargs["height"] = height
     
     # Add computer tools (all are BaseTool subclasses)
-    mcp.add_tool(HudComputerTool(**tool_kwargs))
+    mcp.add_tool(ComputerTool(**tool_kwargs))
     mcp.add_tool(AnthropicComputerTool(**tool_kwargs))
     mcp.add_tool(OpenAIComputerTool(**tool_kwargs))
     

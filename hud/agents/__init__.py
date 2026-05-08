@@ -3,16 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 from .base import CategorizedTools, MCPAgent
+from .claude import ClaudeAgent
 from .openai import OpenAIAgent
 from .openai_chat import OpenAIChatAgent
-from .operator import OperatorAgent
 
 __all__ = [
     "CategorizedTools",
+    "ClaudeAgent",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
-    "OperatorAgent",
     "create_agent",
 ]
 
@@ -24,7 +24,7 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
     (using your own API keys), use the agent classes directly.
 
     Args:
-        model: Model name (e.g., "gpt-4o", "claude-sonnet-4-5").
+        model: Model name (e.g., "gpt-5.4", "claude-sonnet-4-6").
         **kwargs: Additional params passed to agent.create().
 
     Returns:
@@ -33,13 +33,13 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
     Example:
         ```python
         # Gateway routing (recommended)
-        agent = create_agent("gpt-4o")
-        agent = create_agent("claude-sonnet-4-5", temperature=0.7)
+        agent = create_agent("gpt-5.4")
+        agent = create_agent("claude-sonnet-4-6", temperature=0.7)
 
         # Direct API access (use agent classes)
         from hud.agents.claude import ClaudeAgent
 
-        agent = ClaudeAgent.create(model="claude-sonnet-4-5")
+        agent = ClaudeAgent.create(model="claude-sonnet-4-6")
         ```
     """
     from hud.agents.gateway import build_gateway_client
@@ -60,7 +60,7 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
         provider = "openai"
         if agent_cls.__name__ == "ClaudeAgent":
             provider = "anthropic"
-        elif agent_cls.__name__ in ("GeminiAgent", "GeminiCUAAgent"):
+        elif agent_cls.__name__ == "GeminiAgent":
             provider = "gemini"
 
     client = build_gateway_client(provider)

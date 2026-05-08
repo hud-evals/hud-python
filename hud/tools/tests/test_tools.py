@@ -5,8 +5,8 @@ import sys
 import pytest
 from mcp.types import ImageContent, TextContent
 
-from hud.tools.coding import BashTool, EditTool
-from hud.tools.computer.hud import HudComputerTool
+from hud.tools._legacy import HudComputerTool
+from hud.tools.coding import BashTool, EditTool, ShellCallOutcome, ShellCommandOutput
 
 
 @pytest.mark.asyncio
@@ -14,13 +14,16 @@ async def test_bash_tool_echo():
     tool = BashTool()
 
     # Monkey-patch the private _session methods so no subprocess is spawned
-    from hud.tools.types import ContentResult
-
     class _FakeSession:
         _started: bool = True  # Pretend session is already started
 
-        async def run(self, cmd: str):
-            return ContentResult(output=f"mocked: {cmd}")
+        async def run(self, cmd: str, timeout_ms: int | None = None):
+            del timeout_ms
+            return ShellCommandOutput(
+                stdout=f"mocked: {cmd}",
+                stderr="",
+                outcome=ShellCallOutcome(type="exit", exit_code=0),
+            )
 
         async def start(self):
             return None
@@ -39,13 +42,16 @@ async def test_bash_tool_restart_and_no_command():
 
     tool = BashTool()
 
-    from hud.tools.types import ContentResult
-
     class _FakeSession:
         _started: bool = True  # Pretend session is already started
 
-        async def run(self, cmd: str):
-            return ContentResult(output="ran")
+        async def run(self, cmd: str, timeout_ms: int | None = None):
+            del cmd, timeout_ms
+            return ShellCommandOutput(
+                stdout="ran",
+                stderr="",
+                outcome=ShellCallOutcome(type="exit", exit_code=0),
+            )
 
         async def start(self):
             return None
@@ -63,7 +69,7 @@ async def test_bash_tool_restart_and_no_command():
         # minimal fake process attributes used later
         self._process = SimpleNamespace(returncode=None)
 
-    import hud.tools.coding.bash as bash_mod
+    import hud.tools.coding as bash_mod
 
     bash_mod._BashSession.start = _dummy_start  # type: ignore[assignment]
 
@@ -100,14 +106,19 @@ async def test_edit_tool_flow(tmp_path):
     assert "hello" in combined_text
 
     # replace
-    res = await edit(command="str_replace", path=str(file_path), old_str="world", new_str="earth")
+    res = await edit(command="replace", path=str(file_path), old_text="world", new_text="earth")
     # Check for success message in content blocks
     text_blocks = [b for b in res if isinstance(b, TextContent)]
     combined_text = "".join(b.text for b in text_blocks)
     assert "has been edited" in combined_text
 
     # insert
-    res = await edit(command="insert", path=str(file_path), insert_line=1, new_str="first line\n")
+    res = await edit(
+        command="insert",
+        path=str(file_path),
+        insert_line=1,
+        insert_text="first line\n",
+    )
     assert res
 
 

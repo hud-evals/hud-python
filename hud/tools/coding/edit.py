@@ -1,62 +1,46 @@
-"""Edit tool for Claude agents.
-
-This tool conforms to Anthropic's text_editor tool specification and is used
-when running with Claude models that support native str_replace editing.
-"""
+"""Environment file-edit tool."""
 
 from __future__ import annotations
 
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import ClassVar, Literal, get_args
+from typing import Literal, get_args
 
 from mcp.types import ContentBlock  # noqa: TC002 - used at runtime by FunctionTool
 
 from hud.tools.base import BaseTool
-from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
-from hud.types import AgentType
 
 from .utils import SNIPPET_LINES, make_snippet, read_file_async, write_file_async
 
 Command = Literal[
+    "read",
     "view",
     "create",
-    "str_replace",
+    "write",
+    "delete",
+    "replace",
     "insert",
-    "undo_edit",
+    "undo",
 ]
 
 
 class EditTool(BaseTool):
-    """A filesystem editor tool for viewing, creating, and editing files.
+    """Environment tool for viewing, creating, and editing files.
 
     Uses str_replace operations for precise text modifications.
     Maintains a history of file edits for undo functionality.
-
-    Native specs: Claude (text_editor_20250728)
-    Role: "editor" (mutually exclusive with ApplyPatchTool)
-    Supported models: Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet 4, Opus 4
     """
 
-    native_specs: ClassVar[NativeToolSpecs] = {
-        AgentType.CLAUDE: NativeToolSpec(
-            api_type="text_editor_20250728",
-            api_name="str_replace_based_edit_tool",
-            role="editor",
-            supported_models=(
-                "*claude-3-5-sonnet-*",
-                "*claude-3-7-sonnet-*",
-                "*claude-sonnet-4-*",
-                "*claude-opus-4-*",
-                "*claude-4-5-sonnet-*",
-                "*claude-4-5-opus-*",
-            ),
-        ),
-    }
-
-    def __init__(self, file_history: dict[Path, list[str]] | None = None) -> None:
+    def __init__(
+        self,
+        file_history: dict[Path, list[str]] | None = None,
+        base_path: str | Path | None = None,
+        name: str = "edit",
+        title: str = "File Editor",
+        description: str = "View, create, and edit files with undo support",
+    ) -> None:
         """Initialize EditTool with optional file history.
 
         Args:
@@ -65,10 +49,11 @@ class EditTool(BaseTool):
         """
         super().__init__(
             env=file_history or defaultdict(list),
-            name="edit",  # Generic name; Claude uses api_name override
-            title="File Editor",
-            description="View, create, and edit files with undo support",
+            name=name,
+            title=title,
+            description=description,
         )
+        self.base_path = Path(base_path).resolve() if base_path is not None else None
 
     @property
     def file_history(self) -> dict[Path, list[str]]:
@@ -78,18 +63,25 @@ class EditTool(BaseTool):
     async def __call__(
         self,
         *,
-        command: Command,
+        command: Command | None = None,
         path: str,
         file_text: str | None = None,
         view_range: list[int] | None = None,
-        old_str: str | None = None,
-        new_str: str | None = None,
+        old_text: str | None = None,
+        new_text: str | None = None,
         insert_line: int | None = None,
+        insert_text: str | None = None,
     ) -> list[ContentBlock]:
-        _path = Path(path)
+        if command is None:
+            raise ToolError("Parameter `command` is required.")
+
+        _path = self._resolve_path(Path(path))
         self.validate_path(command, _path)
 
-        if command == "view":
+        if command == "read":
+            result = await self.read(_path)
+            return result.to_content_blocks()
+        elif command == "view":
             result = await self.view(_path, view_range)
             return result.to_content_blocks()
         elif command == "create":
@@ -100,19 +92,36 @@ class EditTool(BaseTool):
             return ContentResult(
                 output=f"File created successfully at: {_path}"
             ).to_content_blocks()
-        elif command == "str_replace":
-            if old_str is None:
-                raise ToolError("Parameter `old_str` is required for command: str_replace")
-            result = await self.str_replace(_path, old_str, new_str)
+        elif command == "write":
+            if file_text is None:
+                raise ToolError("Parameter `file_text` is required for command: write")
+            old_text = await read_file_async(_path) if _path.exists() else ""
+            _path.parent.mkdir(parents=True, exist_ok=True)
+            _path.write_text(file_text)
+            self.file_history[_path].append(old_text)
+            result = ContentResult(output=f"File written successfully at: {_path}")
+            return result.to_content_blocks()
+        elif command == "delete":
+            if _path.is_dir():
+                raise ToolError(f"The path {_path} is a dir and cannot be deleted by edit.")
+            old_text = await read_file_async(_path)
+            _path.unlink()
+            self.file_history[_path].append(old_text)
+            result = ContentResult(output=f"File deleted successfully at: {_path}")
+            return result.to_content_blocks()
+        elif command == "replace":
+            if old_text is None:
+                raise ToolError("Parameter `old_text` is required for command: replace")
+            result = await self.replace(_path, old_text, new_text)
             return result.to_content_blocks()
         elif command == "insert":
             if insert_line is None:
                 raise ToolError("Parameter `insert_line` is required for command: insert")
-            if new_str is None:
-                raise ToolError("Parameter `new_str` is required for command: insert")
-            result = await self.insert(_path, insert_line, new_str)
+            if insert_text is None:
+                raise ToolError("Parameter `insert_text` is required for command: insert")
+            result = await self.insert(_path, insert_line, insert_text)
             return result.to_content_blocks()
-        elif command == "undo_edit":
+        elif command == "undo":
             result = await self.undo_edit(_path)
             return result.to_content_blocks()
 
@@ -120,6 +129,14 @@ class EditTool(BaseTool):
             f"Unrecognized command {command}. The allowed commands for the {self.name} tool are: "
             f"{', '.join(get_args(Command))}"
         )
+
+    def _resolve_path(self, path: Path) -> Path:
+        if path.is_absolute() or self.base_path is None:
+            return path
+        resolved = (self.base_path / path).resolve()
+        if resolved != self.base_path and self.base_path not in resolved.parents:
+            raise ToolError(f"Path traversal detected: {path}")
+        return resolved
 
     def validate_path(self, command: str, path: Path) -> None:
         """Check that the path/command combination is valid."""
@@ -134,7 +151,7 @@ class EditTool(BaseTool):
                 f"The path {path} is not an absolute path, it should start with `/`. "
                 f"Maybe you meant {suggested_path}?"
             )
-        if not path.exists() and command != "create":
+        if not path.exists() and command in {"read", "view", "delete", "replace", "insert"}:
             raise ToolError(f"The path {path} does not exist. Please provide a valid path.")
         if path.exists() and command == "create":
             raise ToolError(
@@ -144,6 +161,10 @@ class EditTool(BaseTool):
             raise ToolError(
                 f"The path {path} is a dir and only the `view` command can be used on dirs."
             )
+
+    async def read(self, path: Path) -> ContentResult:
+        """Read a file without snippet formatting."""
+        return ContentResult(output=await read_file_async(path))
 
     async def view(self, path: Path, view_range: list[int] | None = None) -> ContentResult:
         """Implement the view command."""
@@ -198,33 +219,33 @@ class EditTool(BaseTool):
 
         return ContentResult(output=make_snippet(file_content, str(path), init_line))
 
-    async def str_replace(self, path: Path, old_str: str, new_str: str | None) -> ContentResult:
-        """Implement the str_replace command."""
+    async def replace(self, path: Path, old_text: str, new_text: str | None) -> ContentResult:
+        """Replace a unique text fragment in a file."""
         file_content = (await read_file_async(path)).expandtabs()
-        old_str = old_str.expandtabs()
-        new_str = new_str.expandtabs() if new_str is not None else ""
+        old_text = old_text.expandtabs()
+        new_text = new_text.expandtabs() if new_text is not None else ""
 
-        occurrences = file_content.count(old_str)
+        occurrences = file_content.count(old_text)
         if occurrences == 0:
             raise ToolError(
-                f"No replacement was performed, old_str `{old_str}` did not appear verbatim in "
+                f"No replacement was performed, old_text `{old_text}` did not appear verbatim in "
                 f"{path}."
             )
         elif occurrences > 1:
             file_content_lines = file_content.split("\n")
-            lines = [idx + 1 for idx, line in enumerate(file_content_lines) if old_str in line]
+            lines = [idx + 1 for idx, line in enumerate(file_content_lines) if old_text in line]
             raise ToolError(
-                f"No replacement was performed. Multiple occurrences of old_str `{old_str}` "
+                f"No replacement was performed. Multiple occurrences of old_text `{old_text}` "
                 f"in lines {lines}. Please ensure it is unique"
             )
 
-        new_file_content = file_content.replace(old_str, new_str)
+        new_file_content = file_content.replace(old_text, new_text)
         await write_file_async(path, new_file_content)
         self.file_history[path].append(file_content)
 
-        replacement_line = file_content.split(old_str)[0].count("\n")
+        replacement_line = file_content.split(old_text)[0].count("\n")
         start_line = max(0, replacement_line - SNIPPET_LINES)
-        end_line = replacement_line + SNIPPET_LINES + new_str.count("\n")
+        end_line = replacement_line + SNIPPET_LINES + new_text.count("\n")
         snippet = "\n".join(new_file_content.split("\n")[start_line : end_line + 1])
 
         success_msg = f"The file {path} has been edited. "
@@ -236,10 +257,10 @@ class EditTool(BaseTool):
 
         return ContentResult(output=success_msg)
 
-    async def insert(self, path: Path, insert_line: int, new_str: str) -> ContentResult:
+    async def insert(self, path: Path, insert_line: int, insert_text: str) -> ContentResult:
         """Implement the insert command."""
         file_text = (await read_file_async(path)).expandtabs()
-        new_str = new_str.expandtabs()
+        insert_text = insert_text.expandtabs()
         file_text_lines = file_text.split("\n")
         n_lines_file = len(file_text_lines)
 
@@ -249,13 +270,13 @@ class EditTool(BaseTool):
                 f"of lines of the file: {[0, n_lines_file]}"
             )
 
-        new_str_lines = new_str.split("\n")
+        insert_text_lines = insert_text.split("\n")
         new_file_text_lines = (
-            file_text_lines[:insert_line] + new_str_lines + file_text_lines[insert_line:]
+            file_text_lines[:insert_line] + insert_text_lines + file_text_lines[insert_line:]
         )
         snippet_lines = (
             file_text_lines[max(0, insert_line - SNIPPET_LINES) : insert_line]
-            + new_str_lines
+            + insert_text_lines
             + file_text_lines[insert_line : insert_line + SNIPPET_LINES]
         )
 

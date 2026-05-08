@@ -57,3 +57,5 @@ hud/rl/checkpoints_test/
 .hud_eval.toml
 
 docs/internal
+
+environments/

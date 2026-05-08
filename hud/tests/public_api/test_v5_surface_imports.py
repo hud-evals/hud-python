@@ -43,12 +43,9 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
-        "OperatorAgent",
         "create_agent",
     ),
-    "hud.agents.claude": (
-        "ClaudeAgent",
-    ),
+    "hud.agents.claude": ("ClaudeAgent",),
     "hud.native": (
         "BashGrader",
         "Grade",
@@ -83,51 +80,28 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "OpenAIComputerTool",
         "PlaywrightTool",
     ),
-    "hud.tools.filesystem": (
-        "GeminiGlobTool",
-        "GeminiListTool",
-        "GeminiReadTool",
-        "GeminiSearchTool",
-        "GlobTool",
-        "GrepTool",
-        "ListTool",
-        "ReadTool",
-    ),
-    "hud.tools.grounding": (
-        "GroundedComputerTool",
-        "Grounder",
-        "GrounderConfig",
-    ),
-    "hud.tools.hosted": (
-        "GoogleSearchTool",
-        "WebFetchTool",
-        "WebSearchTool",
-    ),
-    "hud.tools.memory": (
-        "ClaudeMemoryTool",
-        "GeminiMemoryTool",
-        "SessionMemoryTool",
-    ),
     "hud.types": (
         "AgentType",
         "InferenceResult",
         "MCPToolCall",
         "MCPToolResult",
         "Trace",
-        "TraceStep",
     ),
 }
 
 
 ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents": (
+        "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
-        "OperatorAgent",
         "create_agent",
     ),
     "hud.agents.claude": (
         "ClaudeAgent",
+        "base64_to_content_block",
+        "text_to_content_block",
+        "tool_use_content_block",
     ),
     "hud.datasets": (
         "display_results",
@@ -137,25 +111,23 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "save_tasks",
         "submit_rollouts",
     ),
-    "hud.environment": (
-        "Environment",
-    ),
+    "hud.environment": ("Environment",),
     "hud.server": (
         "MCPRouter",
         "MCPServer",
     ),
-    "hud.services": (
-        "ChatService",
-    ),
+    "hud.services": ("ChatService",),
     "hud.tools": (
         "AgentTool",
         "AnthropicComputerTool",
+        "BaseHub",
         "BaseTool",
         "BashTool",
         "EditTool",
         "HudComputerTool",
         "OpenAIComputerTool",
         "PlaywrightTool",
+        "SubmitTool",
     ),
     "hud.tools.filesystem": (
         "GeminiGlobTool",
@@ -168,36 +140,23 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "ListTool",
         "ReadTool",
     ),
-    "hud.tools.grounding": (
-        "GrounderConfig",
-    ),
     "hud.types": (
         "AgentType",
         "MCPToolCall",
         "MCPToolResult",
         "Trace",
+        "TraceStep",
     ),
 }
 
 
 DOCS_EXAMPLES_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
-    "hud.eval.task": (
-        "Task",
-    ),
-    "hud.agents.gemini": (
-        "GeminiAgent",
-    ),
-    "hud.agents.gemini_cua": (
-        "GeminiCUAAgent",
-    ),
-    "hud.agents.openai": (
-        "OpenAIAgent",
-    ),
+    "hud.eval.task": ("Task",),
+    "hud.agents.gemini": ("GeminiAgent",),
+    "hud.agents.openai": ("OpenAIAgent",),
     "hud.tools.coding": (
         "ApplyPatchTool",
         "EditTool",
-        "GeminiEditTool",
-        "GeminiShellTool",
         "ShellTool",
     ),
     "hud.tools.computer": (
@@ -210,9 +169,6 @@ DOCS_EXAMPLES_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
         "PyAutoGUIExecutor",
         "XDOExecutor",
     ),
-    "hud.tools.native_types": (
-        "NativeToolSpec",
-    ),
     "hud.tools.types": (
         "ContentResult",
         "EvaluationResult",
@@ -223,28 +179,23 @@ DOCS_EXAMPLES_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
 
 
 ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
-    "hud.datasets.loader": (
-        "resolve_taskset_id",
-    ),
+    "hud.datasets.loader": ("resolve_taskset_id",),
     "hud.environment.connection": (
         "ConnectionConfig",
         "ConnectionType",
         "Connector",
     ),
-    "hud.eval.manager": (
-        "_send_job_enter",
-    ),
+    "hud.eval.manager": ("_send_job_enter",),
     "hud.eval.context": (
         "EvalContext",
         "get_current_trace_id",
         "set_trace_context",
     ),
-    "hud.eval.task": (
-        "Task",
-    ),
+    "hud.eval.task": ("Task",),
     "hud.datasets.utils": (
         "BatchRequest",
         "SingleTaskRequest",
+        "submit_rollouts",
     ),
     "hud.native.graders": (
         "BashGrader",
@@ -255,34 +206,16 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
         "attach_context",
         "run_context_server",
     ),
-    "hud.server.server": (
-        "MCPServer",
-    ),
-    "hud.settings": (
-        "settings",
-    ),
+    "hud.server.server": ("MCPServer",),
+    "hud.settings": ("settings",),
     "hud.tools.base": (
         "BaseTool",
         "BaseHub",
     ),
-    "hud.tools.agent": (
-        "AgentTool",
-    ),
-    "hud.agents.gemini": (
-        "GeminiAgent",
-    ),
-    "hud.agents.gemini_cua": (
-        "GeminiCUAAgent",
-    ),
-    "hud.agents.grounded_openai": (
-        "GroundedOpenAIChatAgent",
-    ),
-    "hud.agents.openai": (
-        "OpenAIAgent",
-    ),
-    "hud.agents.openai_chat": (
-        "OpenAIChatAgent",
-    ),
+    "hud.tools.agent": ("AgentTool",),
+    "hud.agents.gemini": ("GeminiAgent",),
+    "hud.agents.openai": ("OpenAIAgent",),
+    "hud.agents.openai_chat": ("OpenAIChatAgent",),
     "hud.tools.coding": (
         "ApplyPatchTool",
         "BashTool",
@@ -303,47 +236,30 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
         "Command",
         "EditTool",
     ),
-    "hud.tools.coding.gemini_edit": (
-        "GeminiEditTool",
-    ),
-    "hud.tools.coding.gemini_shell": (
-        "GeminiShellTool",
-    ),
-    "hud.tools.coding.session": (
-        "BashSession",
-    ),
+    "hud.tools.coding.gemini_edit": ("GeminiEditTool",),
+    "hud.tools.coding.gemini_shell": ("GeminiShellTool",),
+    "hud.tools.coding.session": ("BashSession",),
     "hud.tools.coding.shell": (
         "BashSession",
         "ShellTool",
     ),
-    "hud.tools.coding.utils": (
-        "get_demote_preexec_fn",
-    ),
+    "hud.tools.coding.utils": ("get_demote_preexec_fn",),
     "hud.tools.computer": (
         "AnthropicComputerTool",
         "GeminiComputerTool",
         "HudComputerTool",
         "OpenAIComputerTool",
         "QwenComputerTool",
-    ),
-    "hud.tools.computer.settings": (
         "computer_settings",
     ),
-    "hud.tools.executors": (
-        "BaseExecutor",
-    ),
-    "hud.tools.executors.base": (
-        "BaseExecutor",
-    ),
-    "hud.tools.jupyter": (
-        "JupyterTool",
-    ),
-    "hud.tools.playwright": (
-        "PlaywrightTool",
-    ),
-    "hud.tools.response": (
-        "ResponseTool",
-    ),
+    "hud.tools.computer.settings": ("computer_settings",),
+    "hud.tools.computer.anthropic": ("AnthropicComputerTool",),
+    "hud.tools.computer.hud": ("HudComputerTool",),
+    "hud.tools.computer.openai": ("OpenAIComputerTool",),
+    "hud.tools.executors": ("BaseExecutor",),
+    "hud.tools.executors.base": ("BaseExecutor",),
+    "hud.tools.jupyter": ("JupyterTool",),
+    "hud.tools.playwright": ("PlaywrightTool",),
     "hud.tools.types": (
         "AgentAnswer",
         "ContentResult",
@@ -351,18 +267,10 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
         "SubScore",
         "ToolError",
     ),
-    "hud.telemetry.exporter": (
-        "queue_span",
-    ),
-    "hud.telemetry.instrument": (
-        "instrument",
-    ),
-    "hud.tools.executors.pyautogui": (
-        "PyAutoGUIExecutor",
-    ),
-    "hud.tools.executors.xdo": (
-        "XDOExecutor",
-    ),
+    "hud.telemetry.exporter": ("queue_span",),
+    "hud.telemetry.instrument": ("instrument",),
+    "hud.tools.executors.pyautogui": ("PyAutoGUIExecutor",),
+    "hud.tools.executors.xdo": ("XDOExecutor",),
 }
 
 
@@ -409,10 +317,7 @@ def _merge_symbol_tables(
     for table in tables:
         for module_name, symbols in table.items():
             merged.setdefault(module_name, set()).update(symbols)
-    return {
-        module_name: tuple(sorted(symbols))
-        for module_name, symbols in sorted(merged.items())
-    }
+    return {module_name: tuple(sorted(symbols)) for module_name, symbols in sorted(merged.items())}
 
 
 PUBLIC_SURFACE = _merge_symbol_tables(

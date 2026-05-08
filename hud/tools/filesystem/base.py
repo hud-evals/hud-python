@@ -1,14 +1,8 @@
 """Base classes for filesystem tools.
 
 Provides shared functionality for file reading, searching, and listing tools.
-Two styles are supported:
-- OpenCode-style: ReadTool, GrepTool, GlobTool, ListTool
-- Gemini CLI-style: GeminiReadTool, GeminiSearchTool, GeminiGlobTool, GeminiListTool
-
-Both styles share common operations but differ in:
-- Parameter naming conventions
-- Output formatting
-- Truncation/pagination messages
+Provider agents can expose provider-specific tool declarations on top of these
+generic HUD environment tools.
 """
 
 from __future__ import annotations
@@ -21,7 +15,7 @@ import re
 from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from hud.tools.base import BaseTool
 from hud.tools.coding.utils import resolve_path_safely
@@ -30,9 +24,7 @@ from hud.tools.types import ContentResult, ToolError
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from mcp.types import ContentBlock
-
-    from hud.tools.native_types import NativeToolSpecs
+    from mcp.types import ContentBlock, ImageContent, TextContent
 
 LOGGER = logging.getLogger(__name__)
 
@@ -102,8 +94,6 @@ class BaseFilesystemTool(BaseTool):
     - File reading with encoding handling
     - Directory iteration with ignore patterns
     """
-
-    native_specs: ClassVar[NativeToolSpecs] = {}
 
     _base_path: Path
 
@@ -248,12 +238,8 @@ class BaseFilesystemTool(BaseTool):
         ...
 
 
-class BaseReadTool(BaseFilesystemTool):
-    """Base class for file reading tools.
-
-    Provides common file reading logic with pagination.
-    Subclasses override format_output() to customize output style.
-    """
+class ReadTool(BaseFilesystemTool):
+    """Generic file reading environment primitive."""
 
     _max_lines: int
     _max_line_length: int
@@ -336,26 +322,51 @@ class BaseReadTool(BaseFilesystemTool):
             truncated_by_bytes=truncated_by_bytes,
         )
 
-    @abstractmethod
     def format_output(self, result: ReadResult, path: str) -> str:
-        """Format the read result as output string.
+        """Format the read result as output string."""
+        numbered_lines = [
+            f"{i + result.start_offset + 1}: {line}" for i, line in enumerate(result.lines)
+        ]
+        output = [f"File: {path}", *numbered_lines]
+        last_read_line = result.start_offset + len(result.lines)
 
-        Args:
-            result: ReadResult from read_with_pagination
-            path: Original path string for display
+        if result.truncated_by_bytes:
+            output.append(
+                f"Output truncated at {self._max_bytes} bytes; continue from line "
+                f"{last_read_line + 1}."
+            )
+        elif result.total_lines > last_read_line or result.truncated:
+            output.append(f"More lines available; continue from line {last_read_line + 1}.")
+        else:
+            output.append(f"End of file; total lines: {result.total_lines}.")
+        return "\n".join(output)
 
-        Returns:
-            Formatted output string
-        """
-        ...
+    async def __call__(
+        self,
+        filePath: str | None = None,
+        path: str | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> list[TextContent | ImageContent]:
+        """Read a file, with compatibility for filePath and path argument names."""
+        path_str = filePath or path
+        if not path_str:
+            raise ToolError("filePath is required")
+
+        resolved = self.resolve_path(path_str)
+        if not resolved.exists():
+            raise ToolError(f"File not found: {path_str}")
+        if resolved.is_dir():
+            raise ToolError(f"Path is a directory: {path_str}")
+        if self.is_image(resolved):
+            return self.read_image(resolved).to_content_blocks()  # type: ignore[return-value]
+
+        result = self.read_with_pagination(resolved, offset=offset or 0, limit=limit)
+        return list(ContentResult(output=self.format_output(result, path_str)).to_text_blocks())
 
 
-class BaseSearchTool(BaseFilesystemTool):
-    """Base class for file content search tools.
-
-    Provides common regex search logic.
-    Subclasses override format_output() to customize output style.
-    """
+class GrepTool(BaseFilesystemTool):
+    """Generic file content search environment primitive."""
 
     _max_results: int
     _max_files: int
@@ -463,26 +474,37 @@ class BaseSearchTool(BaseFilesystemTool):
 
         return matches
 
-    @abstractmethod
     def format_output(self, matches: list[FileMatch], pattern: str) -> str:
-        """Format search results as output string.
+        """Format search results as output string."""
+        if not matches:
+            return f"No matches found for pattern: {pattern}"
+        lines = [f"Found {len(matches)} matches for pattern: {pattern}"]
+        lines.extend(
+            f"{match.path}:{match.line_num}: {match.line_text}"
+            for match in sorted(matches, key=lambda item: (item.path, item.line_num))
+        )
+        if len(matches) >= self._max_results:
+            lines.append("Results truncated; use a narrower path or pattern.")
+        return "\n".join(lines)
 
-        Args:
-            matches: List of FileMatch objects
-            pattern: Original search pattern
+    async def __call__(
+        self,
+        pattern: str,
+        path: str | None = None,
+        include: str | None = None,
+    ) -> list[TextContent]:
+        """Search file contents."""
+        regex = self.compile_pattern(pattern)
+        search_path = self.resolve_path(path or ".")
+        if not search_path.exists():
+            raise ToolError(f"Path not found: {path or '.'}")
 
-        Returns:
-            Formatted output string
-        """
-        ...
+        matches = self.search_files(search_path, regex, include)
+        return ContentResult(output=self.format_output(matches, pattern)).to_text_blocks()
 
 
-class BaseGlobTool(BaseFilesystemTool):
-    """Base class for file globbing tools.
-
-    Provides common glob logic.
-    Subclasses override format_output() to customize output style.
-    """
+class GlobTool(BaseFilesystemTool):
+    """Generic file globbing environment primitive."""
 
     _max_results: int
 
@@ -566,26 +588,40 @@ class BaseGlobTool(BaseFilesystemTool):
 
         return matches
 
-    @abstractmethod
     def format_output(self, matches: list[tuple[Path, float]], pattern: str) -> str:
-        """Format glob results as output string.
+        """Format glob results as output string."""
+        if not matches:
+            return f"No files matched pattern: {pattern}"
+        lines = [f"Found {len(matches)} files for pattern: {pattern}"]
+        for path, _mtime in sorted(matches, key=lambda item: str(item[0])):
+            try:
+                display_path = str(path.relative_to(self._base_path))
+            except ValueError:
+                display_path = str(path)
+            lines.append(display_path)
+        if len(matches) >= self._max_results:
+            lines.append("Results truncated; use a narrower pattern.")
+        return "\n".join(lines)
 
-        Args:
-            matches: List of (path, mtime) tuples
-            pattern: Original glob pattern
+    async def __call__(
+        self,
+        pattern: str,
+        path: str | None = None,
+        case_sensitive: bool = True,
+    ) -> list[TextContent]:
+        """Find files by glob pattern."""
+        directory = self.resolve_path(path or ".")
+        if not directory.exists():
+            raise ToolError(f"Path not found: {path or '.'}")
+        if not directory.is_dir():
+            raise ToolError(f"Path is not a directory: {path or '.'}")
 
-        Returns:
-            Formatted output string
-        """
-        ...
+        matches = self.find_files(directory, pattern, case_sensitive=case_sensitive)
+        return ContentResult(output=self.format_output(matches, pattern)).to_text_blocks()
 
 
-class BaseListTool(BaseFilesystemTool):
-    """Base class for directory listing tools.
-
-    Provides common directory listing logic.
-    Subclasses override format_output() to customize output style.
-    """
+class ListTool(BaseFilesystemTool):
+    """Generic directory listing environment primitive."""
 
     _max_entries: int
 
@@ -679,24 +715,39 @@ class BaseListTool(BaseFilesystemTool):
         collect(directory)
         return entries
 
-    @abstractmethod
     def format_output(
         self,
         entries: list[tuple[str, bool]],
         directory: Path,
         path_str: str,
     ) -> str:
-        """Format directory listing as output string.
+        """Format directory listing as output string."""
+        if not entries:
+            return f"No entries found in {path_str}"
+        lines = [f"Directory: {path_str}"]
+        lines.extend(
+            f"{entry}{'/' if is_dir and not entry.endswith('/') else ''}"
+            for entry, is_dir in entries
+        )
+        if len(entries) >= self._max_entries:
+            lines.append("Results truncated; use a narrower path or ignore pattern.")
+        return "\n".join(lines)
 
-        Args:
-            entries: List of (relative_path, is_dir) tuples
-            directory: Directory that was listed
-            path_str: Original path string for display
+    async def __call__(
+        self,
+        path: str = ".",
+        ignore: list[str] | None = None,
+    ) -> list[TextContent]:
+        """List directory contents."""
+        directory = self.resolve_path(path)
+        if not directory.exists():
+            raise ToolError(f"Path not found: {path}")
+        if not directory.is_dir():
+            raise ToolError(f"Path is not a directory: {path}")
 
-        Returns:
-            Formatted output string
-        """
-        ...
+        entries = self.list_directory(directory, ignore=ignore)
+        output = self.format_output(entries, directory, path)
+        return ContentResult(output=output).to_text_blocks()
 
 
 __all__ = [
@@ -710,10 +761,10 @@ __all__ = [
     "IMAGE_EXTENSIONS",
     "MIME_TYPES",
     "BaseFilesystemTool",
-    "BaseGlobTool",
-    "BaseListTool",
-    "BaseReadTool",
-    "BaseSearchTool",
     "FileMatch",
+    "GlobTool",
+    "GrepTool",
+    "ListTool",
     "ReadResult",
+    "ReadTool",
 ]

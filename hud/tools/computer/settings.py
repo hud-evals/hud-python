@@ -40,17 +40,6 @@ class ComputerSettings(BaseSettings):
         validation_alias="HUD_COMPUTER_HEIGHT",
     )
 
-    ANTHROPIC_COMPUTER_WIDTH: int = Field(
-        default=1400,
-        description="Width of the display to use for the Anthropic computer tools",
-        validation_alias="ANTHROPIC_COMPUTER_WIDTH",
-    )
-    ANTHROPIC_COMPUTER_HEIGHT: int = Field(
-        default=850,
-        description="Height of the display to use for the Anthropic computer tools",
-        validation_alias="ANTHROPIC_COMPUTER_HEIGHT",
-    )
-
     OPENAI_COMPUTER_WIDTH: int = Field(
         default=1024,
         description="Width of the display to use for the OpenAI computer tools",
@@ -77,16 +66,6 @@ class ComputerSettings(BaseSettings):
         default=False,
         description="Whether to rescale images to the agent width and height",
         validation_alias="HUD_RESCALE_IMAGES",
-    )
-    ANTHROPIC_RESCALE_IMAGES: bool = Field(
-        default=True,
-        description="Whether to rescale images to the agent width and height",
-        validation_alias="ANTHROPIC_RESCALE_IMAGES",
-    )
-    ANTHROPIC_SCREENSHOT_QUALITY: int | None = Field(
-        default=None,
-        description="JPEG quality for screenshots (1-95). None keeps lossless PNG.",
-        validation_alias="ANTHROPIC_SCREENSHOT_QUALITY",
     )
     OPENAI_RESCALE_IMAGES: bool = Field(
         default=True,

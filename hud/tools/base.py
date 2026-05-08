@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastmcp import FastMCP
 
-from hud.tools.native_types import NativeToolSpec, NativeToolSpecs  # noqa: TC001
 from hud.tools.types import ContentBlock, EvaluationResult
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from fastmcp.tools import FunctionTool, Tool, ToolResult
-
-    from hud.types import AgentType
 
 # Basic result types for tools
 BaseResult = list[ContentBlock] | EvaluationResult
@@ -36,24 +33,9 @@ class BaseTool(ABC):
     Both of these types of tools are processed via structuredContent.
     Any other type of tool will not be processed well by the client.
 
-    NATIVE SPECS:
-    Subclasses can define a `native_specs` class variable to declare framework-specific
-    native tool configurations. These are embedded in the tool's meta field and used by
-    agents to register tools with their provider's native API format.
-
-    Example:
-        class BashTool(BaseTool):
-            native_specs: ClassVar[NativeToolSpecs] = {
-                AgentType.CLAUDE: NativeToolSpec(
-                    api_type="bash_20250124",
-                    api_name="bash",
-                    beta="computer-use-2025-01-24",
-                ),
-            }
+    Provider-native tool definitions belong to agent harnesses. Environment
+    tools expose MCP schemas and optional environment metadata only.
     """
-
-    # Class-level native tool specifications (override in subclasses)
-    native_specs: ClassVar[NativeToolSpecs] = {}
 
     def __init__(
         self,
@@ -62,7 +44,6 @@ class BaseTool(ABC):
         title: str | None = None,
         description: str | None = None,
         meta: dict[str, Any] | None = None,
-        native_specs: NativeToolSpecs | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -76,7 +57,6 @@ class BaseTool(ABC):
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
             meta: Metadata to include in MCP tool listing (e.g., resolution info)
-            native_specs: Instance-level native specs to merge with class-level specs
         """
         self.env = env
         self.name = name or self.__class__.__name__.lower().replace("tool", "")
@@ -88,52 +68,10 @@ class BaseTool(ABC):
             list[Callable[..., Awaitable[Any]]],
         ] = {}  # {"event_name": [callback_functions]}
 
-        # Merge class-level and instance-level native specs
-        self._native_specs: NativeToolSpecs = {
-            **self.__class__.native_specs,
-            **(native_specs or {}),
-        }
-
-        # Embed native specs in meta for MCP transport
-        if self._native_specs:
-            native_tools_meta: dict[str, Any] = {}
-            for agent_type, spec_or_list in self._native_specs.items():
-                if isinstance(spec_or_list, list):
-                    native_tools_meta[agent_type.value] = [
-                        s.model_dump(exclude_none=True) for s in spec_or_list
-                    ]
-                else:
-                    native_tools_meta[agent_type.value] = spec_or_list.model_dump(exclude_none=True)
-            self.meta["native_tools"] = native_tools_meta
-
         # Expose attributes FastMCP expects when registering an instance directly
         self.__name__ = self.name  # FastMCP uses fn.__name__ if name param omitted
         if self.description:
             self.__doc__ = self.description
-
-    def get_native_spec(
-        self, agent_type: AgentType, model: str | None = None
-    ) -> NativeToolSpec | None:
-        """Get the native tool spec for a specific agent type.
-
-        When the spec is a list, returns the first spec that supports the given model.
-
-        Args:
-            agent_type: The agent type to get the spec for
-            model: Optional model name for list-of-specs resolution
-
-        Returns:
-            NativeToolSpec if one exists for the agent type, None otherwise
-        """
-        spec_or_list = self._native_specs.get(agent_type)
-        if spec_or_list is None:
-            return None
-        if isinstance(spec_or_list, list):
-            for s in spec_or_list:
-                if s.supports_model(model):
-                    return s
-            return None
-        return spec_or_list
 
     @abstractmethod
     async def __call__(self, **kwargs: Any) -> ToolResult:

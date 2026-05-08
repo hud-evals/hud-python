@@ -22,8 +22,8 @@ def clear_cache() -> None:
 MOCK_MODELS = [
     {
         "id": "uuid-1",
-        "name": "Claude Sonnet 4.5",
-        "model_name": "claude-sonnet-4-5",
+        "name": "Claude Sonnet 4.6",
+        "model_name": "claude-sonnet-4-6",
         "sdk_agent_type": None,
         "provider": {"name": "Anthropic", "default_sdk_agent_type": "claude"},
     },
@@ -103,10 +103,10 @@ class TestResolveCls:
         from hud.agents.claude import ClaudeAgent
 
         with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
-            cls, info = resolve_cls("claude-sonnet-4-5")
+            cls, info = resolve_cls("claude-sonnet-4-6")
             assert cls == ClaudeAgent
             assert info is not None
-            assert info["model_name"] == "claude-sonnet-4-5"
+            assert info["model_name"] == "claude-sonnet-4-6"
 
     def test_resolves_openai_model(self) -> None:
         """Resolves OpenAI model to OpenAIAgent via sdk_agent_type."""
@@ -117,15 +117,13 @@ class TestResolveCls:
             assert cls == OpenAIAgent
             assert info is not None
 
-    def test_resolves_operator_model(self) -> None:
-        """Resolves OpenAI CUA model to OperatorAgent via sdk_agent_type override."""
-        from hud.agents import OperatorAgent
-
-        with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
-            cls, info = resolve_cls("computer-use-preview")
-            assert cls == OperatorAgent
-            assert info is not None
-            assert info["sdk_agent_type"] == "operator"
+    def test_operator_model_is_not_supported(self) -> None:
+        """Stale gateway Operator models fail with a clear message."""
+        with (
+            patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS),
+            pytest.raises(ValueError, match="Operator agent is no longer supported"),
+        ):
+            resolve_cls("computer-use-preview")
 
     def test_resolves_gemini_model(self) -> None:
         """Resolves Gemini model to GeminiAgent via provider default."""
@@ -136,15 +134,13 @@ class TestResolveCls:
             assert cls == GeminiAgent
             assert info is not None
 
-    def test_resolves_gemini_cua_model(self) -> None:
-        """Resolves Gemini CUA model to GeminiCUAAgent via sdk_agent_type override."""
-        from hud.agents.gemini_cua import GeminiCUAAgent
-
-        with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
-            cls, info = resolve_cls("gemini-2.5-computer-use-preview")
-            assert cls == GeminiCUAAgent
-            assert info is not None
-            assert info["sdk_agent_type"] == "gemini_cua"
+    def test_gemini_cua_model_is_not_supported(self) -> None:
+        """Stale gateway Gemini CUA models fail with a clear message."""
+        with (
+            patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS),
+            pytest.raises(ValueError, match="Gemini CUA agent is no longer supported"),
+        ):
+            resolve_cls("gemini-2.5-computer-use-preview")
 
     def test_resolves_openai_compatible_model(self) -> None:
         """Resolves OpenAI-compatible model to OpenAIChatAgent via provider default."""
@@ -155,17 +151,13 @@ class TestResolveCls:
             assert cls == OpenAIChatAgent
             assert info is not None
 
-    def test_sdk_agent_type_overrides_provider_default(self) -> None:
-        """Model's sdk_agent_type takes precedence over provider's default."""
-        from hud.agents import OperatorAgent
-
-        with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
-            # computer-use-preview has sdk_agent_type="operator" but provider default is "openai"
-            cls, info = resolve_cls("computer-use-preview")
-            assert cls == OperatorAgent
-            assert info is not None
-            assert info["provider"]["default_sdk_agent_type"] == "openai"
-            assert info["sdk_agent_type"] == "operator"
+    def test_unsupported_sdk_agent_type_is_rejected(self) -> None:
+        """Unsupported sdk_agent_type values are not silently remapped."""
+        with (
+            patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS),
+            pytest.raises(ValueError, match="Operator agent is no longer supported"),
+        ):
+            resolve_cls("computer-use-preview")
 
 
 class TestCreateAgent:
@@ -239,7 +231,7 @@ class TestCreateAgent:
             mock_build_client.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
-            create_agent("claude-sonnet-4-5")
+            create_agent("claude-sonnet-4-6")
 
             mock_build_client.assert_called_once_with("Anthropic")
 
