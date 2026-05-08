@@ -171,7 +171,7 @@ agent = GeminiAgent.create(
 ### OpenAIChatAgent
 
 ```python
-from hud.agents import OpenAIChatAgent
+from hud.agents.openai_compatible import OpenAIChatAgent
 ```
 
 OpenAI-compatible chat.completions agent. Works with any endpoint implementing the OpenAI schema (vLLM, Ollama, Together, etc.).
@@ -189,7 +189,7 @@ OpenAI-compatible chat.completions agent. Works with any endpoint implementing t
 **Example:**
 
 ```python
-from hud.agents import OpenAIChatAgent
+from hud.agents.openai_compatible import OpenAIChatAgent
 
 # Using base_url and api_key
 agent = OpenAIChatAgent.create(

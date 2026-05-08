@@ -31,7 +31,7 @@ class AgentType(str, Enum):
 
             return GeminiAgent
         elif self == AgentType.OPENAI_COMPATIBLE:
-            from hud.agents.openai_chat import OpenAIChatAgent
+            from hud.agents.openai_compatible import OpenAIChatAgent
 
             return OpenAIChatAgent
         else:

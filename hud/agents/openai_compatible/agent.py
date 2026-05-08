@@ -1,15 +1,15 @@
-"""OpenAI Chat Completions Agent.
+"""OpenAI-compatible Chat Completions agent.
 
 This class provides the minimal glue required to connect any endpoint that
-implements the OpenAI compatible *chat.completions* API with MCP tool calling
+implements the OpenAI-compatible *chat.completions* API with MCP tool calling
 through the existing :class:`hud.agent.MCPAgent` scaffolding.
 
 Key points:
 - Stateless, no special server-side conversation state is assumed.
 - Defaults to HUD inference gateway (inference.hud.ai) when HUD_API_KEY is set
 - Accepts an :class:`openai.AsyncOpenAI` client, caller can supply their own
-  base_url / api_key (e.g. llama.cpp, together.ai, …)
-- All HUD features (step_count, OTel spans, tool filtering, screenshots, …)
+  base_url / api_key (e.g. llama.cpp, together.ai)
+- All HUD features (step_count, OTel spans, tool filtering, screenshots)
   come from the ``MCPAgent`` base class, we only implement the three abstract
   methods
 """
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 import mcp.types as types
 from openai import AsyncOpenAI
 
-from hud.agents.openai_compatible.tools import OpenAICompatibleToolParam, openai_compatible_tools
+from hud.agents.base import MCPAgent
 from hud.agents.tools import (
     AgentTool,
     EnvironmentCapability,
@@ -31,13 +31,13 @@ from hud.agents.tools import (
     capabilities_metadata_from_context,
     discover_environment_capabilities,
 )
+from hud.agents.types import OpenAIChatConfig, OpenAIChatCreateParams
 from hud.settings import settings
 from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
-from .base import MCPAgent
-from .types import OpenAIChatConfig, OpenAIChatCreateParams
+from .tools import OpenAICompatibleToolParam, openai_compatible_tools
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionToolParam

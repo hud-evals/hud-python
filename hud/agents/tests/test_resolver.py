@@ -144,7 +144,7 @@ class TestResolveCls:
 
     def test_resolves_openai_compatible_model(self) -> None:
         """Resolves OpenAI-compatible model to OpenAIChatAgent via provider default."""
-        from hud.agents.openai_chat import OpenAIChatAgent
+        from hud.agents.openai_compatible import OpenAIChatAgent
 
         with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
             cls, info = resolve_cls("grok-4-1-fast")

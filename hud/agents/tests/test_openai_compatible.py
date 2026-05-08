@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, cast
 import mcp.types as types
 import pytest
 
-from hud.agents.openai_chat import OpenAIChatAgent
+from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import openai_compatible_tools
 from hud.agents.openai_compatible.tools.computer import (
     GLMComputerTool,

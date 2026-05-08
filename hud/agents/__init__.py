@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sys
+from types import ModuleType
 from typing import Any
 
 from .base import CategorizedTools, MCPAgent
 from .claude import ClaudeAgent
 from .openai import OpenAIAgent
-from .openai_chat import OpenAIChatAgent
+from .openai_compatible import OpenAIChatAgent
 
 __all__ = [
     "CategorizedTools",
@@ -15,6 +17,20 @@ __all__ = [
     "OpenAIChatAgent",
     "create_agent",
 ]
+
+
+def _install_openai_chat_compat_module() -> None:
+    module_name = f"{__name__}.openai_chat"
+    if module_name in sys.modules:
+        return
+
+    module: Any = ModuleType(module_name, "Compatibility module for OpenAIChatAgent.")
+    module.OpenAIChatAgent = OpenAIChatAgent
+    module.__all__ = ["OpenAIChatAgent"]
+    sys.modules[module_name] = module
+
+
+_install_openai_chat_compat_module()
 
 
 def create_agent(model: str, **kwargs: Any) -> MCPAgent:
