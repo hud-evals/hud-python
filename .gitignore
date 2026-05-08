@@ -59,3 +59,6 @@ hud/rl/checkpoints_test/
 docs/internal
 
 environments/
+
+experiments/
+.memories/
