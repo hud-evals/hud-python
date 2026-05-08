@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -36,6 +37,17 @@ LOGGER = logging.getLogger(__name__)
 
 # Shell script extensions that need CRLF -> LF normalization
 _SHELL_EXTENSIONS = frozenset({".sh", ".bash", ".zsh", ".ksh"})
+_SOURCE_CONTEXT_MARKDOWN_RE = re.compile(r"^[a-z]{2,8}-\d+(?:-\d+)*\.md$", re.IGNORECASE)
+
+
+def _should_skip_task_data_item(path: Path) -> bool:
+    """Return True for source task files that should not be exposed to agents."""
+    lower_name = path.name.lower()
+    return (
+        path.name in ("environment", "solution")
+        or lower_name in (".dockerignore", "scoring.md")
+        or bool(_SOURCE_CONTEXT_MARKDOWN_RE.match(path.name))
+    )
 
 
 def _normalize_line_endings(directory: Path) -> None:
@@ -154,8 +166,8 @@ def write_result(result: ConvertResult, output_dir: Path) -> Path:
             dest.mkdir(parents=True, exist_ok=True)
 
             for item in source_dir.iterdir():
-                # Skip dirs that are handled by the Dockerfile or ignored
-                if item.name in ("environment", "solution"):
+                # Skip dirs handled elsewhere and files that leak scoring/source context.
+                if _should_skip_task_data_item(item):
                     continue
                 if item.is_dir():
                     shutil.copytree(item, dest / item.name)

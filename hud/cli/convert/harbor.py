@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 - used at runtime
@@ -76,6 +77,56 @@ def _normalize_name(name: str) -> str:
     return normalized.strip("-") or "converted"
 
 
+def _docker_instruction_name(line: str) -> str | None:
+    """Return the Dockerfile instruction name for *line*, if it has one."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    return stripped.split(maxsplit=1)[0].upper()
+
+
+def _docker_instruction_value(line: str) -> str:
+    """Return the remainder of a Dockerfile instruction line."""
+    parts = line.strip().split(maxsplit=1)
+    return parts[1] if len(parts) > 1 else ""
+
+
+def _extract_workdir(content: str) -> str:
+    """Return the last Dockerfile WORKDIR, defaulting to /app."""
+    workdir = "/app"
+    for line in content.splitlines():
+        if _docker_instruction_name(line) != "WORKDIR":
+            continue
+        value = _docker_instruction_value(line)
+        if value:
+            workdir = value
+    return workdir
+
+
+def _make_task_slug(task_id: str, used_slugs: set[str]) -> str:
+    """Create a stable, unique HUD task slug from a Harbor task id."""
+    base = _normalize_name(task_id)
+    digest = hashlib.sha256(task_id.encode()).hexdigest()[:8]
+
+    def with_suffix(suffix: str) -> str:
+        prefix_limit = 99 - len(suffix)
+        return f"{base[:prefix_limit].rstrip('-')}-{suffix}"
+
+    slug = with_suffix(digest) if len(base) > 100 else base
+
+    if slug in used_slugs:
+        slug = with_suffix(f"{digest}-1" if len(base) > 100 else digest)
+
+    counter = 2
+    while slug in used_slugs:
+        suffix = f"{digest}-{counter}"
+        slug = with_suffix(suffix)
+        counter += 1
+
+    used_slugs.add(slug)
+    return slug
+
+
 def _find_dockerfile(env_dir: Path) -> str | None:
     """Read the Dockerfile from a Harbor environment directory."""
     for name in ("Dockerfile", "dockerfile"):
@@ -92,8 +143,20 @@ def _adapt_harbor_dockerfile(content: str) -> str:
     """
     lines = content.splitlines()
     adapted: list[str] = []
+    in_healthcheck_continuation = False
     for line in lines:
         stripped = line.strip().upper()
+
+        if stripped.startswith("HEALTHCHECK "):
+            adapted.append(line)
+            in_healthcheck_continuation = line.rstrip().endswith("\\")
+            continue
+
+        if in_healthcheck_continuation:
+            adapted.append(line)
+            in_healthcheck_continuation = line.rstrip().endswith("\\")
+            continue
+
         if stripped.startswith(("CMD ", "CMD[", "ENTRYPOINT ", "ENTRYPOINT[")):
             adapted.append(f"# [harbor original] {line}")
         else:
@@ -167,26 +230,64 @@ then executes the test script and parses the reward.
 
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 {extra_imports}
 from hud import Environment
 from hud.tools import BashTool, EditTool
 from hud.tools.filesystem import GlobTool, GrepTool, ListTool, ReadTool
+from hud.tools.types import ToolError
 
 LOGGER = logging.getLogger(__name__)
 
-TASKS_DIR = Path("/harbor/tasks")
+TASKS_DIR = Path("/root/.hud_harbor/tasks")
+AGENT_WORKDIR = os.path.expandvars({agent_workdir!r})
+
+
+def _set_agent_workdir() -> None:
+    """Put agent shell sessions in the original Harbor challenge workdir."""
+    try:
+        os.chdir(AGENT_WORKDIR)
+    except FileNotFoundError:
+        if TASKS_DIR.exists():
+            LOGGER.warning("Agent workdir does not exist: %s", AGENT_WORKDIR)
+        else:
+            LOGGER.debug("Skipping container workdir on host import: %s", AGENT_WORKDIR)
+
+
+_set_agent_workdir()
+
+
+def _resolve_within_base(file_path: Path, base_path: Path) -> Path:
+    resolved = file_path.resolve() if file_path.is_absolute() else (base_path / file_path).resolve()
+    try:
+        resolved.relative_to(base_path)
+    except ValueError:
+        raise ToolError(f"Path escapes base directory: {{file_path}}") from None
+    return resolved
+
+
+class ScopedEditTool(EditTool):
+    """EditTool variant constrained to the task workdir."""
+
+    def __init__(self, base_path: str | Path) -> None:
+        super().__init__()
+        self._base_path = Path(base_path).resolve()
+
+    def validate_path(self, command: str, path: Path) -> None:
+        resolved = _resolve_within_base(path, self._base_path)
+        super().validate_path(command, resolved)
 
 env = Environment("{env_name}")
 
 # Standard coding tools - agents interact via bash (matching Harbor's model)
-env.add_tool(BashTool())
-env.add_tool(EditTool())
-env.add_tool(ReadTool())
-env.add_tool(GrepTool())
-env.add_tool(GlobTool())
-env.add_tool(ListTool())
+env.add_tool(BashTool(timeout=600.0))
+env.add_tool(ScopedEditTool(base_path=AGENT_WORKDIR))
+env.add_tool(ReadTool(base_path=AGENT_WORKDIR))
+env.add_tool(GrepTool(base_path=AGENT_WORKDIR))
+env.add_tool(GlobTool(base_path=AGENT_WORKDIR))
+env.add_tool(ListTool(base_path=AGENT_WORKDIR))
 
 '''
 
@@ -208,7 +309,7 @@ async def run_task(task_id: TaskId):
 _SCENARIO_BODY = '''\
     """Run a Harbor task by ID.
 
-    Reads /harbor/tasks/<task_id>/instruction.md as the prompt.
+    Reads the root-only task bundle's instruction.md as the prompt.
     After the agent works, runs tests/test.sh and parses
     /logs/verifier/reward.txt or reward.json for the reward.
     """
@@ -228,6 +329,11 @@ _SCENARIO_BODY = '''\
     # Ensure log output directory exists
     logs_dir = Path("/logs/verifier")
     logs_dir.mkdir(parents=True, exist_ok=True)
+    for reward_file in (Path("/logs/verifier/reward.txt"), Path("/logs/verifier/reward.json")):
+        try:
+            reward_file.unlink(missing_ok=True)
+        except OSError as exc:
+            LOGGER.warning("Failed to clear stale reward file %s: %s", reward_file, exc)
 
     # Harbor mounts the task's tests/ directory at /tests/ — replicate that
     tests_link = Path("/tests")
@@ -243,7 +349,7 @@ _SCENARIO_BODY = '''\
         try:
             result = subprocess.run(
                 ["bash", str(test_script)],
-                cwd="/app",
+                cwd=AGENT_WORKDIR if Path(AGENT_WORKDIR).is_dir() else "/app",
                 capture_output=True,
                 text=True,
                 timeout={verifier_timeout},
@@ -303,6 +409,7 @@ def _build_env_py(
     source_path: str,
     task_ids: list[str],
     verifier_timeout: int,
+    agent_workdir: str,
 ) -> str:
     """Build the env.py content, adapting the scenario signature to task count."""
     if len(task_ids) == 1:
@@ -318,6 +425,7 @@ def _build_env_py(
         source_path=source_path,
         task_count=len(task_ids),
         extra_imports=extra_imports,
+        agent_workdir=agent_workdir,
     )
     body = _SCENARIO_BODY.format(verifier_timeout=verifier_timeout)
     return header + scenario + body
@@ -327,6 +435,14 @@ def _build_env_py(
 # Shared snippet: install uv standalone (works on any base image with curl or
 # apt), then use uv to bootstrap Python and sync dependencies.
 _HUD_LAYER = """\
+USER root
+# HUD coding subprocesses run as uid/gid 1000, so let them edit the original
+# challenge tree while keeping scenario-only task data outside that tree.
+RUN agent_workdir={agent_workdir_shell} \\
+    && eval "agent_workdir=\\"$agent_workdir\\"" \\
+    && mkdir -p /workspace /app \\
+    && if [ -d "$agent_workdir" ]; then chmod -R a+rwX "$agent_workdir"; fi
+
 # ============================================================
 # HUD MCP server layer
 # ============================================================
@@ -341,11 +457,14 @@ RUN command -v curl >/dev/null 2>&1 || \\
 ENV PATH="/root/.local/bin:$PATH"
 
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null || \\
-    uv sync --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --python 3.12 2>/dev/null || \\
+    uv sync --no-dev --no-install-project --python 3.12
+ENV PATH="/hud/.venv/bin:$PATH"
 
-# Harbor task data (instructions + test scripts baked into image)
-COPY tasks/ /harbor/tasks/
+# The scenario reads task data directly from a root-only bundle. The agent only
+# receives the yielded prompt and task workdir files.
+COPY tasks/ /root/.hud_harbor/tasks/
+RUN chown -R root:root /root/.hud_harbor && chmod -R go-rwx /root/.hud_harbor
 
 # Ensure standard directories exist and are writable at runtime
 # (MCP server may run as non-root; Harbor tasks expect /app writable)
@@ -353,7 +472,7 @@ RUN mkdir -p /logs/verifier /workspace /app && chmod 777 /logs/verifier /workspa
 
 COPY env.py ./
 
-CMD ["uv", "run", "--no-project", "python", "-m", "hud", "dev", "env:env", "--stdio"]
+CMD ["hud", "dev", "env:env", "--stdio"]
 """
 
 DOCKERFILE_WITH_BASE_TEMPLATE = (
@@ -457,6 +576,7 @@ class HarborConverter(BaseConverter):
         # Generate environments and taskset
         environments: list[GeneratedEnvironment] = []
         taskset: list[dict[str, Any]] = []
+        used_slugs: set[str] = set()
         base_name = f"hud-harbor-{_normalize_name(dataset_name)}"
 
         # Sort groups by size (largest first) for consistent naming
@@ -470,6 +590,13 @@ class HarborConverter(BaseConverter):
             rep_task = group_tasks[0]
             env_dir = rep_task.directory / "environment"
             dockerfile_content = _find_dockerfile(env_dir) if env_dir.exists() else None
+            agent_workdir = _extract_workdir(dockerfile_content or "")
+            env_cfg = rep_task.config.get("environment", {})
+            if isinstance(env_cfg, dict):
+                configured_workdir = env_cfg.get("workdir")
+                if isinstance(configured_workdir, str) and configured_workdir:
+                    agent_workdir = configured_workdir
+            agent_workdir_shell = shlex.quote(agent_workdir)
 
             # Extract verifier timeout from config
             verifier_timeout = 600
@@ -487,6 +614,7 @@ class HarborConverter(BaseConverter):
                 source_path=path.as_posix(),
                 task_ids=task_ids,
                 verifier_timeout=verifier_timeout,
+                agent_workdir=agent_workdir,
             )
 
             # --- Generate Dockerfile.hud ---
@@ -495,9 +623,12 @@ class HarborConverter(BaseConverter):
                 dockerfile = DOCKERFILE_WITH_BASE_TEMPLATE.format(
                     source=env_dir.as_posix(),
                     base_dockerfile=adapted,
+                    agent_workdir_shell=agent_workdir_shell,
                 )
             else:
-                dockerfile = DOCKERFILE_FALLBACK_TEMPLATE
+                dockerfile = DOCKERFILE_FALLBACK_TEMPLATE.format(
+                    agent_workdir_shell=agent_workdir_shell,
+                )
 
             # --- Generate pyproject.toml ---
             pyproject = PYPROJECT_TEMPLATE.format(name=env_name)
@@ -532,10 +663,13 @@ class HarborConverter(BaseConverter):
 
                 taskset.append(
                     {
+                        "slug": _make_task_slug(task.task_id, used_slugs),
                         "env": {"name": env_name},
                         "scenario": f"{env_name}:run-task",
                         "args": {"task_id": task.task_id},
                         "metadata": metadata,
+                        "agent_config": {"append_setup_output": False},
+                        "validation": None,
                     }
                 )
 

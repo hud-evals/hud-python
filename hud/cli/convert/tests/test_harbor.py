@@ -7,6 +7,7 @@ defined in conftest.py.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING
 
@@ -19,9 +20,11 @@ from hud.cli.convert import detect_format, get_converter, list_formats, write_re
 from hud.cli.convert.harbor import (
     HarborConverter,
     _adapt_harbor_dockerfile,
+    _extract_workdir,
     _find_dockerfile,
     _hash_directory,
     _is_harbor_task,
+    _make_task_slug,
     _normalize_name,
     _parse_task,
 )
@@ -59,6 +62,22 @@ class TestNormalizeName:
         assert _normalize_name("a---b") == "a-b"
 
 
+class TestTaskSlug:
+    def test_long_name_collision_uses_first_counter_suffix(self) -> None:
+        task_id = "long-task-name-" + ("segment-" * 20)
+        digest = hashlib.sha256(task_id.encode()).hexdigest()[:8]
+        used_slugs: set[str] = set()
+
+        first = _make_task_slug(task_id, used_slugs)
+        second = _make_task_slug(task_id, used_slugs)
+
+        assert first.endswith(f"-{digest}")
+        assert second.endswith(f"-{digest}-1")
+        assert len(first) <= 100
+        assert len(second) <= 100
+        assert first != second
+
+
 class TestAdaptDockerfile:
     def test_comments_cmd(self) -> None:
         result = _adapt_harbor_dockerfile('CMD ["bash"]')
@@ -84,6 +103,23 @@ class TestAdaptDockerfile:
     def test_no_cmd_or_entrypoint(self) -> None:
         dockerfile = "FROM python:3.11\nRUN apt-get update"
         assert _adapt_harbor_dockerfile(dockerfile) == dockerfile
+
+    def test_preserves_healthcheck_cmd(self) -> None:
+        dockerfile = (
+            "FROM python:3.11\n"
+            "HEALTHCHECK --interval=10s \\\n"
+            "    CMD pg_isready -q || exit 1\n"
+            'ENTRYPOINT ["/entrypoint.sh"]'
+        )
+        result = _adapt_harbor_dockerfile(dockerfile)
+        assert "    CMD pg_isready -q || exit 1" in result
+        assert '# [harbor original] ENTRYPOINT ["/entrypoint.sh"]' in result
+
+
+class TestDockerfileExtraction:
+    def test_extracts_last_workdir(self) -> None:
+        dockerfile = "FROM python:3.11\nWORKDIR /tmp\nWORKDIR /app/src\n"
+        assert _extract_workdir(dockerfile) == "/app/src"
 
 
 class TestHashDirectory:
@@ -247,6 +283,7 @@ class TestHarborConverterConvertSingleTask:
         result = self.converter.convert(single_task)
         entry = result.taskset[0]
         env_name = result.environments[0].name
+        assert entry["slug"] == "cancel-async-tasks"
         assert entry["scenario"] == f"{env_name}:run-task"
         assert entry["args"]["task_id"] == "cancel-async-tasks"
 
@@ -277,6 +314,11 @@ class TestHarborConverterConvertDataset:
         result = self.converter.convert(dataset_same_env)
         task_ids = {e["args"]["task_id"] for e in result.taskset}
         assert task_ids == {"cancel-async-tasks", "build-pmars", "chess-best-move"}
+
+    def test_all_task_slugs_present(self, dataset_same_env: Path) -> None:
+        result = self.converter.convert(dataset_same_env)
+        slugs = {e["slug"] for e in result.taskset}
+        assert slugs == {"cancel-async-tasks", "build-pmars", "chess-best-move"}
 
     def test_env_name_from_dataset(self, dataset_same_env: Path) -> None:
         result = self.converter.convert(dataset_same_env)
@@ -481,6 +523,12 @@ class TestTasksetMetadata:
         assert meta.get("category") == "systems"
         assert meta.get("difficulty") == "medium"
 
+    def test_taskset_disables_agent_setup_append(self, single_task: Path) -> None:
+        result = self.converter.convert(single_task)
+        entry = result.taskset[0]
+        assert entry["agent_config"] == {"append_setup_output": False}
+        assert entry["validation"] is None
+
 
 # ============================================================================
 # Dockerfile generation
@@ -507,7 +555,18 @@ class TestDockerfileGeneration:
     def test_tasks_copied_into_image(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
         dockerfile = result.environments[0].dockerfile
-        assert "COPY tasks/ /harbor/tasks/" in dockerfile
+        assert "COPY tasks/ /root/.hud_harbor/tasks/" in dockerfile
+
+    def test_task_data_hidden_from_agent_uid(self, single_task: Path) -> None:
+        result = self.converter.convert(single_task)
+        dockerfile = result.environments[0].dockerfile
+        assert "chmod -R go-rwx /root/.hud_harbor" in dockerfile
+
+    def test_agent_workdir_permissions_added(self, single_task: Path) -> None:
+        result = self.converter.convert(single_task)
+        dockerfile = result.environments[0].dockerfile
+        assert "agent_workdir=/workspace" in dockerfile
+        assert 'chmod -R a+rwX "$agent_workdir"' in dockerfile
 
     def test_logs_dir_created(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
@@ -529,12 +588,45 @@ class TestEnvPyGeneration:
         env_py = result.environments[0].env_py
         assert "from hud import Environment" in env_py
         assert "from hud.tools import BashTool" in env_py
+        assert "from hud.tools.filesystem import GlobTool, GrepTool, ListTool, ReadTool" in env_py
+        assert "from hud.tools.types import ToolError" in env_py
 
     def test_tools_added(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
         env_py = result.environments[0].env_py
-        assert "env.add_tool(BashTool())" in env_py
-        assert "env.add_tool(EditTool())" in env_py
+        assert "env.add_tool(BashTool(timeout=600.0))" in env_py
+        assert "env.add_tool(ScopedEditTool(base_path=AGENT_WORKDIR))" in env_py
+        for tool in ("GlobTool", "GrepTool", "ListTool", "ReadTool"):
+            assert f"env.add_tool({tool}(base_path=AGENT_WORKDIR))" in env_py
+        assert "class ScopedEditTool(EditTool)" in env_py
+
+    def test_agent_workdir_set_from_dockerfile(self, single_task: Path) -> None:
+        result = self.converter.convert(single_task)
+        env_py = result.environments[0].env_py
+        assert "AGENT_WORKDIR = os.path.expandvars('/workspace')" in env_py
+        assert "_set_agent_workdir()" in env_py
+        assert 'cwd=AGENT_WORKDIR if Path(AGENT_WORKDIR).is_dir() else "/app"' in env_py
+
+    def test_agent_workdir_prefers_task_config(self, tmp_path: Path) -> None:
+        task_toml = """
+[metadata]
+category = "systems"
+
+[environment]
+workdir = "/build/repo"
+
+[verifier]
+timeout_sec = 120
+"""
+        task = make_harbor_task(
+            tmp_path,
+            "configured-workdir",
+            task_toml=task_toml,
+            dockerfile="FROM python:3.11\nWORKDIR /donotaccess\n",
+        )
+        result = self.converter.convert(task)
+        env_py = result.environments[0].env_py
+        assert "AGENT_WORKDIR = os.path.expandvars('/build/repo')" in env_py
 
     def test_reward_parsing_logic(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
@@ -662,6 +754,7 @@ class TestWriteResult:
 
         assert isinstance(data, list)
         assert len(data) == 1
+        assert data[0]["slug"] == "cancel-async-tasks"
         assert data[0]["args"]["task_id"] == "cancel-async-tasks"
 
     def test_task_files_copied(self, single_task: Path, tmp_path: Path) -> None:
@@ -675,6 +768,23 @@ class TestWriteResult:
         assert (task_out / "instruction.md").is_file()
         assert (task_out / "task.toml").is_file()
         assert (task_out / "tests" / "test.sh").is_file()
+
+    def test_scoring_and_source_context_not_copied(self, single_task: Path, tmp_path: Path) -> None:
+        hidden_files = ("SCORING.md", "ref-1.md", "note-12-3.md", ".dockerignore")
+        for file_name in hidden_files:
+            (single_task / file_name).write_text("hidden task context", encoding="utf-8")
+        (single_task / "README.md").write_text("public task context", encoding="utf-8")
+
+        result = self.converter.convert(single_task)
+        out = tmp_path / "output"
+        write_result(result, out)
+
+        env = result.environments[0]
+        task_out = out / env.name / "tasks" / "cancel-async-tasks"
+
+        for file_name in hidden_files:
+            assert not (task_out / file_name).exists()
+        assert (task_out / "README.md").is_file()
 
     def test_environment_dir_not_copied(self, single_task: Path, tmp_path: Path) -> None:
         result = self.converter.convert(single_task)
