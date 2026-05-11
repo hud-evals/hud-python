@@ -44,6 +44,7 @@ from .push import push_command  # noqa: E402
 from .rl import rl_run_command, rl_status_command  # noqa: E402
 from .scenario import scenario_app  # noqa: E402
 from .sync import sync_app  # noqa: E402
+from .tasks import tasks_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -116,6 +117,9 @@ app.add_typer(scenario_app, name="scenario")
 
 # Sync subcommand group
 app.add_typer(sync_app, name="sync")
+
+# Tasks subcommand group
+app.add_typer(tasks_app, name="tasks")
 
 # RL subcommand group
 rl_app = typer.Typer(help="🚀 RL training commands\n\nExample: hud rl run my-taskset -m <model-id>")
