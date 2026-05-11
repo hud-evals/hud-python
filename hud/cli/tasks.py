@@ -76,9 +76,7 @@ def list_command(
         None,
         help="Taskset id (falls back to .hud/config.json if omitted)",
     ),
-    as_json: bool = typer.Option(
-        False, "--json", help="Emit raw JSON instead of a table"
-    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit raw JSON instead of a table"),
 ) -> None:
     """List tasks in a taskset with status + pass-rate."""
     require_api_key("list tasks")
@@ -91,7 +89,7 @@ def list_command(
     payload = resp.json()
     tasks: list[dict[str, Any]] = payload.get("tasks") or []
     stats_by_version: dict[str, dict[str, Any]] = {
-        s["task_version_id"]: s for s in (payload.get("task_stats") or [])
+        str(s["task_version_id"]): s for s in (payload.get("task_stats") or [])
     }
 
     if as_json:
@@ -103,9 +101,7 @@ def list_command(
         return
 
     evalset_name = payload.get("evalset_name")
-    title = (
-        f'Tasks in "{evalset_name}" ({ts[:7]})' if evalset_name else f"Tasks in {ts[:12]}"
-    )
+    title = f'Tasks in "{evalset_name}" ({ts[:7]})' if evalset_name else f"Tasks in {ts[:12]}"
     table = Table(title=title, show_lines=False)
     table.add_column("slug", style="cyan", no_wrap=True)
     table.add_column("ver", justify="right")
@@ -152,7 +148,7 @@ def show_command(
     payload = resp.json()
     tasks: list[dict[str, Any]] = payload.get("tasks") or []
     stats_by_version: dict[str, dict[str, Any]] = {
-        s["task_version_id"]: s for s in (payload.get("task_stats") or [])
+        str(s["task_version_id"]): s for s in (payload.get("task_stats") or [])
     }
     for entry in tasks:
         task = entry.get("task") or {}
@@ -177,21 +173,13 @@ def status_command(
     slugs: list[str] | None = typer.Argument(  # noqa: B008
         None, help="One or more task slugs (omit when using --all)"
     ),
-    set_value: str | None = typer.Option(
-        None, "--set", help="Status to apply"
-    ),
-    clear: bool = typer.Option(
-        False, "--clear", help="Clear the current status"
-    ),
-    all_tasks: bool = typer.Option(
-        False, "--all", help="Apply to every task in the taskset"
-    ),
+    set_value: str | None = typer.Option(None, "--set", help="Status to apply"),
+    clear: bool = typer.Option(False, "--clear", help="Clear the current status"),
+    all_tasks: bool = typer.Option(False, "--all", help="Apply to every task in the taskset"),
     taskset: str | None = typer.Option(
         None, "--taskset", "-t", help="Taskset id (falls back to .hud/config.json)"
     ),
-    as_json: bool = typer.Option(
-        False, "--json", help="Emit raw JSON instead of summary"
-    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit raw JSON instead of summary"),
 ) -> None:
     """Set or clear status for one, many, or all tasks in a taskset."""
     require_api_key("set task status")
@@ -261,15 +249,11 @@ def duplicate_command(
     target: str | None = typer.Option(
         None, "--to", help="Target taskset id (omit to copy within the source taskset)"
     ),
-    on_conflict: str = typer.Option(
-        "error", "--on-conflict", help="Slug conflict strategy"
-    ),
+    on_conflict: str = typer.Option("error", "--on-conflict", help="Slug conflict strategy"),
     taskset: str | None = typer.Option(
         None, "--taskset", "-t", help="Source taskset id (falls back to .hud/config.json)"
     ),
-    as_json: bool = typer.Option(
-        False, "--json", help="Emit raw JSON instead of summary"
-    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit raw JSON instead of summary"),
 ) -> None:
     """Duplicate tasks within their source taskset or into another."""
     require_api_key("duplicate tasks")
@@ -325,18 +309,12 @@ def move_command(
     slugs: list[str] = typer.Argument(  # noqa: B008
         ..., help="One or more task slugs"
     ),
-    target: str = typer.Option(
-        ..., "--to", help="Target taskset id (required)"
-    ),
-    on_conflict: str = typer.Option(
-        "error", "--on-conflict", help="Slug conflict strategy"
-    ),
+    target: str = typer.Option(..., "--to", help="Target taskset id (required)"),
+    on_conflict: str = typer.Option("error", "--on-conflict", help="Slug conflict strategy"),
     taskset: str | None = typer.Option(
         None, "--taskset", "-t", help="Source taskset id (falls back to .hud/config.json)"
     ),
-    as_json: bool = typer.Option(
-        False, "--json", help="Emit raw JSON instead of summary"
-    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit raw JSON instead of summary"),
 ) -> None:
     """Move tasks to another taskset."""
     require_api_key("move tasks")
@@ -358,9 +336,7 @@ def move_command(
         Console().print_json(data=payload)
         return
 
-    hud_console.success(
-        f"Moved {payload.get('tasks_moved', 0)} task(s) into {target[:12]}"
-    )
+    hud_console.success(f"Moved {payload.get('tasks_moved', 0)} task(s) into {target[:12]}")
     if payload.get("renamed_count"):
         hud_console.info(f"  renamed: {payload['renamed_count']}")
     if payload.get("skipped_count"):
