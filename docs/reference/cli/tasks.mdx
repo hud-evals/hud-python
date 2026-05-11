@@ -1,0 +1,154 @@
+---
+title: "hud tasks"
+description: "List, inspect, and mutate tasks on the HUD platform"
+icon: "list-check"
+---
+
+`hud tasks` is a thin CLI over the platform tasks API.
+
+## Typical workflow
+
+```bash
+hud tasks list
+hud tasks show my-slug
+hud tasks status my-slug --set ready
+hud tasks duplicate my-slug --to <target-taskset-id>
+hud tasks move my-slug --to <target-taskset-id>
+```
+
+## Source taskset
+
+- `hud tasks list` takes the taskset ID as an **optional positional argument**.
+- All other commands take it via `--taskset` / `-t`.
+- When the source taskset is omitted, every command falls back to the taskset ID stored in `.hud/config.json` (set by `hud sync tasks <name>`).
+
+## `hud tasks list`
+
+```bash
+hud tasks list [taskset]
+```
+
+Columns: slug, version, status, `pass>0`, scorable runs.
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `taskset` | From `.hud/config.json` | Taskset ID |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Emit raw JSON instead of a table |
+
+```bash
+hud tasks list                                          # use stored taskset
+hud tasks list 6f8f8d45-45c7-429c-a255-4dc92fac1f2d     # explicit taskset
+hud tasks list --json                                   # machine-readable
+```
+
+## `hud tasks show`
+
+```bash
+hud tasks show <slug> [--taskset <id>]
+```
+
+Prints the full JSON record for the given slug.
+
+| Argument | Description |
+|----------|-------------|
+| `slug` | Task slug (`external_id`) |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--taskset` / `-t` | Source taskset ID (falls back to `.hud/config.json`) |
+
+```bash
+hud tasks show my-task
+hud tasks show my-task -t 6f8f8d45-45c7-429c-a255-4dc92fac1f2d
+```
+
+## `hud tasks status`
+
+```bash
+hud tasks status <slug...> --set <value> [--taskset <id>]
+hud tasks status <slug...> --clear [--taskset <id>]
+hud tasks status --all --set <value> [--taskset <id>]
+```
+
+With explicit slugs, the CLI sends one bulk request. With `--all`, it first fetches the taskset to expand slugs, then sends the bulk request.
+
+| Argument | Description |
+|----------|-------------|
+| `slug...` | One or more task slugs (omit when using `--all`) |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--set <value>` | Status to apply (server validates) |
+| `--clear` | Clear the current status |
+| `--all` | Apply to every task in the taskset (mutually exclusive with explicit slugs) |
+| `--taskset` / `-t` | Source taskset ID |
+| `--json` | Emit raw JSON instead of a summary |
+
+```bash
+hud tasks status my-task --set ready                   # one task
+hud tasks status task-a task-b task-c --set verified   # several in one request
+hud tasks status --all --set ready                     # every task in the taskset
+hud tasks status my-task --clear                       # clear status
+```
+
+Per-task failures are relayed verbatim; partial successes commit.
+
+## `hud tasks duplicate`
+
+```bash
+hud tasks duplicate <slug...> [--to <id>] [--on-conflict <strategy>] [--taskset <id>]
+```
+
+With `--to`, copies into a different taskset; without it, clones within the source taskset.
+
+| Argument | Description |
+|----------|-------------|
+| `slug...` | One or more task slugs |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--to <id>` | Target taskset ID (omit to copy within the source taskset) |
+| `--on-conflict <strategy>` | Slug conflict strategy (server-validated, default `error`). Only applies with `--to`; ignored when cloning in place. |
+| `--taskset` / `-t` | Source taskset ID |
+| `--json` | Emit raw JSON |
+
+```bash
+hud tasks duplicate my-task                                                       # clone in place
+hud tasks duplicate task-a task-b --to <target-taskset-id>                        # copy into another taskset
+hud tasks duplicate task-a --to <target-taskset-id> --on-conflict rename          # handle slug collisions
+```
+
+## `hud tasks move`
+
+```bash
+hud tasks move <slug...> --to <id> [--on-conflict <strategy>] [--taskset <id>]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `slug...` | One or more task slugs |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--to <id>` | Target taskset ID (**required**) |
+| `--on-conflict <strategy>` | Slug conflict strategy (server-validated, default `error`) |
+| `--taskset` / `-t` | Source taskset ID |
+| `--json` | Emit raw JSON |
+
+```bash
+hud tasks move my-task --to <target-taskset-id>
+hud tasks move task-a task-b --to <target-taskset-id> --on-conflict skip
+```

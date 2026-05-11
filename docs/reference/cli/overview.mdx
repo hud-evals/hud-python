@@ -59,6 +59,11 @@ hud login
 |---------|-------|-------------|---------|
 | `hud sync tasks` | Taskset + source | Sync local tasks to platform | `hud sync tasks my-taskset` |
 | `hud sync` | (stored config) | Sync using .hud/config.json | `hud sync` |
+| `hud tasks list` | Taskset | List tasks with status & pass rate | `hud tasks list` |
+| `hud tasks show` | Slug | Inspect one task | `hud tasks show my-slug` |
+| `hud tasks status` | Slugs or `--all` | Set or clear task status | `hud tasks status my-slug --set ready` |
+| `hud tasks duplicate` | Slugs | Clone tasks, optionally across tasksets | `hud tasks duplicate my-slug --to <id>` |
+| `hud tasks move` | Slugs + target | Move tasks to another taskset | `hud tasks move my-slug --to <id>` |
 
 ### Local Development
 | Command | Input | Description | Example |

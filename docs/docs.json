@@ -125,6 +125,7 @@
               "reference/cli/eval",
               "reference/cli/rl",
               "reference/cli/sync",
+              "reference/cli/tasks",
               "reference/cli/misc"
             ]
           },
