@@ -1,9 +1,4 @@
-"""`hud tasks` — CLI for listing, inspecting, and mutating tasks on the HUD platform.
-
-Each command is a thin wrapper: parse args, call the corresponding endpoint,
-render the response. Validation, status semantics, and access control are
-owned by the platform.
-"""
+"""``hud tasks`` command group — list, inspect, and mutate tasks on the platform."""
 
 from __future__ import annotations
 
