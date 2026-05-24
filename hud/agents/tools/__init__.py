@@ -2,30 +2,28 @@
 
 from __future__ import annotations
 
-from .base import AgentTool, AgentToolSpec, CallTool, call_agent_tools, call_tool
+from .base import (
+    AgentTool,
+    AgentTools,
+    AgentToolSpec,
+)
 from .capabilities import (
+    CapabilityEntry,
     EnvironmentCapability,
     GroupedCapabilityMixin,
-    capabilities_metadata_from_context,
+    ToolMetadata,
     discover_environment_capabilities,
 )
-from .hosted import (
-    HostedTool,
-    select_hosted_tools,
-)
-from .registry import AgentToolRegistry
+from .hosted import HostedTool
 
 __all__ = [
     "AgentTool",
-    "AgentToolRegistry",
     "AgentToolSpec",
-    "CallTool",
+    "AgentTools",
+    "CapabilityEntry",
     "EnvironmentCapability",
     "GroupedCapabilityMixin",
     "HostedTool",
-    "call_agent_tools",
-    "call_tool",
-    "capabilities_metadata_from_context",
+    "ToolMetadata",
     "discover_environment_capabilities",
-    "select_hosted_tools",
 ]

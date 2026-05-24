@@ -42,7 +42,7 @@ Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP clie
 |-----------|------|-------------|---------|
 | `mcp_client` | `AgentMCPClient` | MCP client for server connections | `None` |
 | `auto_trace` | `bool` | Enable automatic tracing spans | `True` |
-| `auto_respond` | `bool` | Use ResponseAgent to decide when to stop/continue | `False` |
+| `auto_respond` | `bool` | Use response automation to decide when to stop/continue | `False` |
 | `verbose` | `bool` | Verbose console logs for development | `False` |
 
 **Base Config** (shared by all agents):
@@ -63,9 +63,6 @@ async def run(ctx: EvalContext, max_steps: int = 10) -> Trace:
 
 async def call_tools(tool_call: MCPToolCall | list[MCPToolCall]) -> list[MCPToolResult]:
     """Execute tool calls through MCP client."""
-
-def get_available_tools() -> list[types.Tool]:
-    """Get filtered list of available tools."""
 ```
 
 ## Pre-built Agents
@@ -251,7 +248,7 @@ result = await agent.run(task, max_steps=20)
 
 ### Auto-Respond Mode
 
-When `auto_respond=True`, the agent uses a ResponseAgent to decide whether to continue or stop after each model response:
+When `auto_respond=True`, the agent uses response automation to decide whether to continue or stop after each model response:
 
 ```python
 agent = ClaudeAgent.create(

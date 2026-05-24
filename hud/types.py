@@ -3,11 +3,28 @@ from __future__ import annotations
 import json
 import uuid
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from hud.agents.claude import ClaudeAgent
+    from hud.agents.gemini import GeminiAgent
+    from hud.agents.openai import OpenAIAgent
+    from hud.agents.openai_compatible import OpenAIChatAgent
+    from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+
+    AgentClass: TypeAlias = type[ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent]
+    AgentConfigClass: TypeAlias = type[
+        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
+    ]
+    _AgentTypeInfo: TypeAlias = tuple[AgentClass, AgentConfigClass, str]
+
+# JSON-compatible scalar/container values.
+JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 
 class AgentType(str, Enum):
@@ -17,29 +34,25 @@ class AgentType(str, Enum):
     OPENAI_COMPATIBLE = "openai_compatible"
 
     @property
-    def cls(self) -> type:
-        if self == AgentType.CLAUDE:
-            from hud.agents.claude import ClaudeAgent
-
-            return ClaudeAgent
-        elif self == AgentType.OPENAI:
-            from hud.agents import OpenAIAgent
-
-            return OpenAIAgent
-        elif self == AgentType.GEMINI:
-            from hud.agents.gemini import GeminiAgent
-
-            return GeminiAgent
-        elif self == AgentType.OPENAI_COMPATIBLE:
-            from hud.agents.openai_compatible import OpenAIChatAgent
-
-            return OpenAIChatAgent
-        else:
-            raise ValueError(f"Unsupported agent type: {self}")
+    def cls(self) -> AgentClass:
+        return self._info[0]
 
     @property
-    def config_cls(self) -> type:
+    def config_cls(self) -> AgentConfigClass:
         """Get config class without importing agent (avoids SDK dependency)."""
+        return self._info[1]
+
+    @property
+    def gateway_provider(self) -> str:
+        """Default provider client used when this agent type is a gateway shortcut."""
+        return self._info[2]
+
+    @property
+    def _info(self) -> _AgentTypeInfo:
+        from hud.agents import OpenAIAgent
+        from hud.agents.claude import ClaudeAgent
+        from hud.agents.gemini import GeminiAgent
+        from hud.agents.openai_compatible import OpenAIChatAgent
         from hud.agents.types import (
             ClaudeConfig,
             GeminiConfig,
@@ -47,24 +60,15 @@ class AgentType(str, Enum):
             OpenAIConfig,
         )
 
-        mapping: dict[AgentType, type] = {
-            AgentType.CLAUDE: ClaudeConfig,
-            AgentType.OPENAI: OpenAIConfig,
-            AgentType.GEMINI: GeminiConfig,
-            AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
-        }
-        if self not in mapping:
-            raise ValueError(f"Unsupported agent type for config: {self}")
-        return mapping[self]
-
-
-class BaseAgentConfig(BaseModel):
-    """Agent configuration for LLM-specific settings."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
-
-    system_prompt: str | None = None
-    hosted_tools: list[Any] = Field(default_factory=list)
+        match self:
+            case AgentType.CLAUDE:
+                return ClaudeAgent, ClaudeConfig, "anthropic"
+            case AgentType.OPENAI:
+                return OpenAIAgent, OpenAIConfig, "openai"
+            case AgentType.GEMINI:
+                return GeminiAgent, GeminiConfig, "gemini"
+            case AgentType.OPENAI_COMPATIBLE:
+                return OpenAIChatAgent, OpenAIChatConfig, "openai"
 
 
 class MCPToolCall(CallToolRequestParams):
@@ -72,6 +76,7 @@ class MCPToolCall(CallToolRequestParams):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
     annotation: str | None = None  # Optional explanation of why this action is taken
+    provider_name: str | None = None  # Original provider tool name when it differs from MCP name
 
     def __str__(self) -> str:
         """Format tool call as plain text."""
@@ -149,8 +154,8 @@ class MCPToolResult(CallToolResult):
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
-class InferenceResult(BaseModel):
-    """Result of a single LLM inference call.
+class AgentResponse(BaseModel):
+    """Result of a single agent inference call.
 
     Returned by provider agents' ``get_response()`` methods.  Carries the
     model's text output, any tool calls it wants to make, and provider-
@@ -171,7 +176,7 @@ class InferenceResult(BaseModel):
 
     # --- RESPONSE METADATA ---
     # Populated by provider agents when citations are available.
-    # Uses dict form of Citation (provider-normalized) so InferenceResult
+    # Uses dict form of Citation (provider-normalized) so AgentResponse
     # doesn't depend on hud.tools.types at import time.
     citations: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -192,10 +197,6 @@ class InferenceResult(BaseModel):
         if self.raw:
             response += f"Raw: {self.raw}"
         return response
-
-
-# Backwards-compatible alias (deprecated — use InferenceResult)
-AgentResponse = InferenceResult
 
 
 class TraceStep(BaseModel):
@@ -262,7 +263,7 @@ class Trace(BaseModel):
     content: str | None = Field(default=None)
     isError: bool = Field(default=False)
 
-    # Response metadata carried from the final InferenceResult
+    # Response metadata carried from the final AgentResponse
     citations: list[dict[str, Any]] = Field(default_factory=list)
 
     # Metadata
@@ -296,7 +297,8 @@ __all__ = [
     "AgentResponse",
     "AgentType",
     "HudSpan",
-    "InferenceResult",
+    "JsonObject",
+    "JsonValue",
     "MCPToolCall",
     "MCPToolResult",
     "Task",

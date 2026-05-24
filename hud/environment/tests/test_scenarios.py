@@ -1356,6 +1356,41 @@ class TestScenarioSessionState:
         assert prompt.meta.get("enable_citations") is True
 
     @pytest.mark.asyncio
+    async def test_structured_answer_parses_json_wrapped_content_and_citations(self) -> None:
+        """Structured scenario parsing unwraps model-emitted content/citations JSON."""
+        env = Environment("test-env")
+
+        class Answer(BaseModel):
+            final: str
+
+        captured = None
+
+        @env.scenario("typed", returns=Answer, enable_citations=True)
+        async def typed_scenario():
+            nonlocal captured
+            captured = yield "Prompt"
+            yield 1.0
+
+        await env.run_scenario_setup("typed", {})
+        await env.submit(
+            "typed",
+            """```json
+{
+  "content": {"final": "done"},
+  "citations": [
+    {"type": "url_citation", "source": "https://example.com", "text": "source"}
+  ]
+}
+```""",
+        )
+        result = await env.run_scenario_evaluate("typed")
+
+        assert result.reward == 1.0
+        assert captured is not None
+        assert captured.content.final == "done"
+        assert captured.citations[0].source == "https://example.com"
+
+    @pytest.mark.asyncio
     async def test_submit_before_setup_raises(self) -> None:
         """Calling submit() before run_scenario_setup() should raise."""
         env = Environment("test-env")

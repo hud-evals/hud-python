@@ -38,8 +38,8 @@ class SingleTaskRequest(BaseModel):
     agent_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Agent constructor parameters passed to agent.create(). "
-        "Should include fields from BaseCreateParams (auto_trace, auto_respond, verbose) "
-        "plus agent-specific config fields (e.g., checkpoint_name for ClaudeConfig).",
+        "Should include runtime fields (ctx, auto_respond) plus agent-specific "
+        "config fields (e.g., checkpoint_name for ClaudeConfig).",
     )
     max_steps: int = Field(default=10, description="Maximum steps allowed for the agent.")
     job_id: str = Field(description="HUD job identifier for telemetry association.")

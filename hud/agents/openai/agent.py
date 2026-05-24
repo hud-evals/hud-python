@@ -2,86 +2,59 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
-from inspect import cleandoc
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from functools import cached_property
+from typing import Any, Literal, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
 from openai.types.responses import (
-    FunctionToolParam,
-    ResponseComputerToolCallOutputScreenshotParam,
-    ResponseFunctionCallOutputItemListParam,
     ResponseIncludable,
-    ResponseInputFileContentParam,
-    ResponseInputImageContentParam,
     ResponseInputImageParam,
     ResponseInputMessageContentListParam,
     ResponseInputParam,
-    ResponseInputTextContentParam,
     ResponseInputTextParam,
     ResponseOutputText,
     ToolParam,
 )
+from openai.types.responses.easy_input_message_param import EasyInputMessageParam
 from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import (
-    ComputerCallOutput,
-    ComputerCallOutputAcknowledgedSafetyCheck,
-    FunctionCallOutput,
     Message,
+    ResponseInputItemParam,
 )
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
+from hud.agents import gateway
 from hud.agents.base import MCPAgent
-from hud.agents.tools import (
-    EnvironmentCapability,
-    call_agent_tools,
-    capabilities_metadata_from_context,
-    discover_environment_capabilities,
-    select_hosted_tools,
-)
-from hud.agents.types import OpenAIConfig, OpenAICreateParams
+from hud.agents.types import OpenAIConfig
 from hud.settings import settings
-from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
-from hud.utils.strict_schema import ensure_strict_json_schema
+from hud.types import AgentResponse, MCPToolCall
 from hud.utils.types import with_signature
 
-from .tools import OpenAIHostedTool, OpenAIToolSearchTool, openai_tools
-
-if TYPE_CHECKING:
-    from .tools import OpenAITool
+from .tools import OpenAIAgentTools
 
 logger = logging.getLogger(__name__)
 
 
-class OpenAIAgent(MCPAgent):
+class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
     """Generic OpenAI agent that can execute MCP tools through the Responses API."""
 
-    metadata: ClassVar[dict[str, Any] | None] = None
-    config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIConfig
-
+    @with_signature(OpenAIConfig)
     @classmethod
-    def agent_type(cls) -> AgentType:
-        """Return the AgentType for OpenAI."""
-        return AgentType.OPENAI
+    def create(cls, **kwargs: object) -> OpenAIAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return cls(OpenAIConfig.model_validate(kwargs))
 
-    @with_signature(OpenAICreateParams)
-    @classmethod
-    def create(cls, **kwargs: Any) -> OpenAIAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
-        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
-
-    def __init__(self, params: OpenAICreateParams | None = None, **kwargs: Any) -> None:
-        super().__init__(params, **kwargs)
+    def __init__(self, config: OpenAIConfig | None = None) -> None:
+        config = config or OpenAIConfig()
+        super().__init__(config)
         self.config: OpenAIConfig
 
         model_client = self.config.model_client
         if model_client is None:
             if settings.api_key:
-                from hud.agents.gateway import build_gateway_client
-
-                model_client = build_gateway_client("openai")
+                model_client = gateway.build_gateway_client("openai")
             elif settings.openai_api_key:
                 model_client = AsyncOpenAI(api_key=settings.openai_api_key)
                 if self.config.validate_api_key:
@@ -99,7 +72,7 @@ class OpenAIAgent(MCPAgent):
                     " access"
                 )
 
-        self.openai_client: AsyncOpenAI = model_client
+        self.openai_client: AsyncOpenAI = cast("AsyncOpenAI", model_client)
         self._model = self.config.model
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
@@ -109,178 +82,40 @@ class OpenAIAgent(MCPAgent):
         self.text = self.config.text
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation
 
-        self._openai_tools: list[ToolParam] = []
-        self._openai_native_tools: dict[str, OpenAITool] = {}
-        self._tool_name_map: dict[str, str] = {}
-        self._environment_capabilities: dict[str, EnvironmentCapability] = {}
-        self._tool_search_threshold: int | None = None
-
         self.last_response_id: str | None = None
         self._message_cursor = 0
-        self.pending_call_id: str | None = None
-        self.pending_safety_checks: list[Any] = []
 
-    def _on_tools_ready(self) -> None:
-        """Build OpenAI-specific tool mappings after tools are discovered."""
-        self._convert_tools_for_openai()
+    @cached_property
+    def tools(self) -> OpenAIAgentTools:
+        return OpenAIAgentTools()
 
-    def _discover_environment_capabilities(
-        self, tools: list[types.Tool]
-    ) -> dict[str, EnvironmentCapability]:
-        return discover_environment_capabilities(
-            tools,
-            env_metadata=capabilities_metadata_from_context(self.ctx),
-            name_fallbacks=openai_tools.name_fallbacks,
-        )
+    async def format_messages(
+        self, messages: list[types.PromptMessage]
+    ) -> list[ResponseInputItemParam]:
+        """Convert MCP prompt messages into OpenAI Responses input items."""
+        formatted_messages: list[ResponseInputItemParam] = []
+        for message in messages:
+            match message.content:
+                case types.TextContent() as block:
+                    content: ResponseInputMessageContentListParam = [
+                        ResponseInputTextParam(type="input_text", text=block.text)
+                    ]
+                case types.ImageContent() as block:
+                    mime_type = getattr(block, "mimeType", "image/png")
+                    content = [
+                        ResponseInputImageParam(
+                            type="input_image",
+                            image_url=f"data:{mime_type};base64,{block.data}",
+                            detail="auto",
+                        )
+                    ]
+                case _:
+                    content = [ResponseInputTextParam(type="input_text", text="")]
 
-    def _to_function_tool(self, tool: types.Tool) -> FunctionToolParam | None:
-        """Convert an MCP tool to OpenAI function tool format.
+            formatted_messages.append(EasyInputMessageParam(role=message.role, content=content))
+        return formatted_messages
 
-        Args:
-            tool: MCP tool to convert
-
-        Returns:
-            OpenAI function tool parameter
-        """
-        if tool.description is None or tool.inputSchema is None:
-            raise ValueError(
-                cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
-                Add these by:
-                1. Adding a docstring to your @mcp.tool decorated function for the description
-                2. Using pydantic Field() annotations on function parameters for the schema
-                """)
-            )
-
-        try:
-            strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
-        except Exception as e:
-            self.console.warning_log(f"Failed to convert tool '{tool.name}' schema to strict: {e}")
-            return None
-
-        return FunctionToolParam(
-            type="function",
-            name=tool.name,
-            description=tool.description,
-            parameters=strict_schema,
-            strict=True,
-        )
-
-    def _convert_tools_for_openai(self) -> None:
-        """Convert MCP tools into OpenAI Responses tool definitions."""
-        self._openai_tools = []
-        self._openai_native_tools = {}
-        self._tool_name_map = {}
-        self._tool_search_threshold = None
-
-        categorized = self._categorized_tools
-
-        capabilities = self._discover_environment_capabilities(self.get_available_tools())
-        self._environment_capabilities = capabilities
-        provider_backing_tools: set[str] = set()
-
-        for capability in capabilities.values():
-            if capability.name not in openai_tools.capabilities:
-                continue
-            openai_tool = openai_tools.tool_for_capability(capability, self.model)
-            if openai_tool is None:
-                continue
-            provider_backing_tools.add(capability.tool_name)
-            self._openai_native_tools[openai_tool.name] = openai_tool
-            self._tool_name_map[openai_tool.name] = openai_tool.name
-            self._openai_tools.append(openai_tool.to_params())
-
-        configured_hosted = select_hosted_tools(
-            self.config.hosted_tools,
-            tool_type=OpenAIHostedTool,
-            model=self.model,
-        )
-        for hosted_tool in configured_hosted:
-            self._openai_tools.append(hosted_tool.to_params())
-            if isinstance(hosted_tool, OpenAIToolSearchTool):
-                self._tool_search_threshold = hosted_tool.threshold
-
-        # Process generic tools (function tools)
-        for tool in categorized.generic:
-            if tool.name in provider_backing_tools:
-                continue
-            openai_tool = self._to_function_tool(tool)
-            if openai_tool:
-                self._tool_name_map[tool.name] = tool.name
-                self._openai_tools.append(openai_tool)
-
-        # Log actual tools being used
-        tool_names = sorted(self._tool_name_map.keys())
-        self.console.info(
-            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
-        )
-
-    def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
-        """Extract an MCPToolCall from a response output item.
-
-        Subclasses can override to customize tool call extraction (e.g., routing
-        computer_call to a different tool name).
-        """
-        if item.type == "function_call":
-            tool_name = item.name or ""
-            target_name = self._tool_name_map.get(tool_name, tool_name)
-            arguments = json.loads(item.arguments)
-            return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
-        elif item.type == "computer_call":
-            self.pending_safety_checks = item.pending_safety_checks or []
-            target_name = self._tool_name_map.get("computer", "computer")
-            if hasattr(item, "actions") and item.actions:
-                arguments = {"actions": [a.to_dict() for a in item.actions]}
-            else:
-                arguments = item.action.to_dict()
-            return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
-        elif item.type == "shell_call":
-            target_name = "shell"
-            return MCPToolCall(name=target_name, arguments=item.action.to_dict(), id=item.call_id)
-        return None
-
-    async def call_tools(
-        self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
-    ) -> list[MCPToolResult]:
-        """Route OpenAI provider tools through their agent-owned adapters."""
-        return await call_agent_tools(self, self._openai_native_tools, tool_call)
-
-    async def _run_context(
-        self, context: list[types.ContentBlock], *, max_steps: int = 10
-    ) -> Trace:
-        """Reset internal state before delegating to the base loop."""
-        self._reset_response_state()
-        return await super()._run_context(context, max_steps=max_steps)
-
-    def _reset_response_state(self) -> None:
-        self.last_response_id = None
-        self._message_cursor = 0
-        self.pending_call_id = None
-        self.pending_safety_checks = []
-
-    async def get_system_messages(self) -> list[types.ContentBlock]:
-        """System messages are provided via the `instructions` field."""
-        return []
-
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Message]:
-        """Convert MCP content blocks into OpenAI user messages."""
-        content: ResponseInputMessageContentListParam = []
-        for block in blocks:
-            if isinstance(block, types.TextContent):
-                content.append(ResponseInputTextParam(type="input_text", text=block.text))
-            elif isinstance(block, types.ImageContent):
-                mime_type = getattr(block, "mimeType", "image/png")
-                content.append(
-                    ResponseInputImageParam(
-                        type="input_image",
-                        image_url=f"data:{mime_type};base64,{block.data}",
-                        detail="auto",
-                    )
-                )
-        if not content:
-            content.append(ResponseInputTextParam(type="input_text", text=""))
-        return [Message(role="user", content=content)]
-
-    async def get_response(self, messages: ResponseInputParam) -> InferenceResult:
+    async def get_response(self, messages: list[ResponseInputItemParam]) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
         new_items: ResponseInputParam = messages[self._message_cursor :]
         if not new_items:
@@ -291,33 +126,29 @@ class OpenAIAgent(MCPAgent):
                     )
                 ]
             else:
-                self.console.debug("No new messages to send to OpenAI.")
-                return InferenceResult(content="", tool_calls=[], done=True)
+                logger.debug("No new messages to send to OpenAI.")
+                return AgentResponse(content="", tool_calls=[], done=True)
 
-        scenario_enable_citations = bool(
-            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx is not None else False
-        )
         include_param: list[ResponseIncludable] | Omit = Omit()
-        if scenario_enable_citations:
+        if self.enable_citations:
             include_param = ["web_search_call.action.sources"]
 
-        effective_tools: list[ToolParam] = list(self._openai_tools)
-        if self._tool_search_threshold is not None:
-            fn_count = sum(
-                1 for t in effective_tools if isinstance(t, dict) and t.get("type") == "function"
-            )
-            if fn_count > self._tool_search_threshold:
+        effective_tools: list[ToolParam] = list(self.tools.params)
+        if self.tools.tool_search_threshold is not None:
+            fn_count = sum(1 for t in effective_tools if t.get("type") == "function")
+            if fn_count > self.tools.tool_search_threshold:
                 logger.debug(
                     "tool_search: %d function tools > threshold %d, applying defer_loading",
                     fn_count,
-                    self._tool_search_threshold,
+                    self.tools.tool_search_threshold,
                 )
-                effective_tools = [  # type: ignore[assignment]
-                    {**t, "defer_loading": True}
-                    if isinstance(t, dict) and t.get("type") == "function"
-                    else t
-                    for t in effective_tools
-                ]
+                effective_tools = cast(
+                    "list[ToolParam]",
+                    [
+                        {**t, "defer_loading": True} if t.get("type") == "function" else t
+                        for t in effective_tools
+                    ],
+                )
 
         response = await self.openai_client.responses.create(
             model=self._model,
@@ -340,227 +171,89 @@ class OpenAIAgent(MCPAgent):
         self.last_response_id = response.id
         self._message_cursor = len(messages)
 
-        agent_response = InferenceResult(content="", tool_calls=[], done=True)
         text_chunks: list[str] = []
         reasoning_chunks: list[str] = []
-
-        citations: list[dict[str, Any]] = []
+        citations: list[dict[str, object]] = []
+        tool_calls: list[MCPToolCall] = []
 
         for item in response.output:
-            if item.type == "message":
-                for content_block in item.content:
-                    if isinstance(content_block, ResponseOutputText):
+            match item.type:
+                case "message":
+                    for content_block in item.content:
+                        if not isinstance(content_block, ResponseOutputText):
+                            continue
                         if content_block.text:
                             text_chunks.append(content_block.text)
-                        # Extract citations from annotations
-                        if content_block.annotations:
-                            for ann in content_block.annotations:
-                                ann_type = getattr(ann, "type", "")
-                                if ann_type == "url_citation":
-                                    cit_obj = getattr(ann, "url_citation", ann)
+                        for ann in content_block.annotations or []:
+                            match ann.type:
+                                case "url_citation":
+                                    citation = ann
                                     citations.append(
                                         {
                                             "type": "url_citation",
-                                            "text": getattr(cit_obj, "title", "") or "",
-                                            "source": getattr(cit_obj, "url", "") or "",
-                                            "title": getattr(cit_obj, "title", None),
-                                            "start_index": getattr(ann, "start_index", None),
-                                            "end_index": getattr(ann, "end_index", None),
+                                            "text": citation.title,
+                                            "source": citation.url,
+                                            "title": citation.title,
+                                            "start_index": citation.start_index,
+                                            "end_index": citation.end_index,
                                         }
                                     )
-                                elif ann_type == "file_citation":
-                                    cit_obj = getattr(ann, "file_citation", ann)
+                                case "file_citation":
+                                    citation = ann
                                     citations.append(
                                         {
                                             "type": "file_citation",
-                                            "text": getattr(cit_obj, "filename", "") or "",
-                                            "source": getattr(cit_obj, "file_id", "") or "",
-                                            "title": getattr(cit_obj, "filename", None),
-                                            "start_index": getattr(ann, "start_index", None),
-                                            "end_index": getattr(ann, "end_index", None),
+                                            "text": citation.filename,
+                                            "source": citation.file_id,
+                                            "title": citation.filename,
                                         }
                                     )
-            elif item.type == "reasoning":
-                reasoning_chunks.append("".join(summary.text for summary in item.summary))
-            else:
-                tool_call = self._extract_tool_call(item)
-                if tool_call is not None:
-                    agent_response.tool_calls.append(tool_call)
-
-        if agent_response.tool_calls:
-            agent_response.done = False
-
-        agent_response.content = "".join(text_chunks)
-        agent_response.citations = citations
-        if reasoning_chunks:
-            agent_response.reasoning = "\n".join(reasoning_chunks)
-        return agent_response
-
-    async def format_tool_results(
-        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[Any]:
-        """Convert MCP tool outputs into Responses input items.
-
-        Detects computer tool results and formats them as ComputerCallOutput
-        with screenshots. Non-computer calls are formatted as FunctionCallOutput.
-        """
-        computer_tool_name = self._tool_name_map.get("computer")
-        has_computer_call = bool(computer_tool_name) and any(
-            c.name == computer_tool_name for c in tool_calls
-        )
-        has_native_call = any(c.name in self._openai_native_tools for c in tool_calls)
-        if not has_computer_call and not has_native_call:
-            return list(await self._format_function_results(tool_calls, tool_results))
-
-        remaining_calls: list[MCPToolCall] = []
-        remaining_results: list[MCPToolResult] = []
-        computer_outputs: list[ComputerCallOutput] = []
-        native_outputs: list[dict[str, Any]] = []
-        ordering: list[tuple[str, int]] = []
-
-        for call, result in zip(tool_calls, tool_results, strict=False):
-            if call.name == computer_tool_name:
-                screenshot = self._extract_latest_screenshot(result)
-                if not screenshot:
-                    raise ValueError(
-                        "Computer tool result missing screenshot. "
-                        "The tool must always return a screenshot for computer_call_output."
+                                case _:
+                                    continue
+                case "reasoning":
+                    reasoning_chunks.append("".join(summary.text for summary in item.summary))
+                case "function_call":
+                    tool_name = item.name or ""
+                    tool_calls.append(
+                        MCPToolCall(
+                            name=self.tools.name_map.get(tool_name, tool_name),
+                            arguments=json.loads(item.arguments),
+                            id=item.call_id,
+                        )
                     )
-                call_id = call.id or self.pending_call_id
-                if not call_id:
-                    self.console.warning_log("Computer tool call missing ID; skipping output.")
+                case "computer_call":
+                    if item.actions:
+                        arguments = {"actions": [action.to_dict() for action in item.actions]}
+                    elif item.action is not None:
+                        arguments = item.action.to_dict()
+                    else:
+                        raise ValueError("OpenAI computer_call missing action")
+                    call: dict[str, Any] = {
+                        "name": self.tools.name_map.get("computer", "computer"),
+                        "arguments": arguments,
+                        "id": item.call_id,
+                    }
+                    if item.pending_safety_checks:
+                        call["pending_safety_checks"] = [
+                            check.model_dump() if hasattr(check, "model_dump") else check
+                            for check in item.pending_safety_checks
+                        ]
+                    tool_calls.append(MCPToolCall.model_validate(call))
+                case "shell_call":
+                    tool_calls.append(
+                        MCPToolCall(
+                            name="shell",
+                            arguments=item.action.to_dict(),
+                            id=item.call_id,
+                        )
+                    )
+                case _:
                     continue
-                acknowledged_checks: list[ComputerCallOutputAcknowledgedSafetyCheck] = []
-                for check in self.pending_safety_checks:
-                    if hasattr(check, "model_dump"):
-                        acknowledged_checks.append(check.model_dump())  # type: ignore[arg-type]
-                    elif isinstance(check, dict):
-                        acknowledged_checks.append(check)  # type: ignore[arg-type]
-                output_payload = ComputerCallOutput(
-                    type="computer_call_output",
-                    call_id=call_id,
-                    output=cast(
-                        "ResponseComputerToolCallOutputScreenshotParam",
-                        {
-                            "type": "computer_screenshot",
-                            "image_url": f"data:image/png;base64,{screenshot}",
-                            "detail": "original",
-                        },
-                    ),
-                )
-                if acknowledged_checks:
-                    output_payload["acknowledged_safety_checks"] = acknowledged_checks
-                computer_outputs.append(output_payload)
-                self.pending_call_id = None
-                self.pending_safety_checks = []
-                ordering.append(("computer", len(computer_outputs) - 1))
-            elif call.name in self._openai_native_tools:
-                native_outputs.append(
-                    self._openai_native_tools[call.name].format_result(call, result)
-                )
-                ordering.append(("native", len(native_outputs) - 1))
-            else:
-                remaining_calls.append(call)
-                remaining_results.append(result)
-                ordering.append(("function", len(remaining_calls) - 1))
 
-        formatted: list[Any] = []
-        function_outputs: list[FunctionCallOutput] = []
-        if remaining_calls:
-            function_outputs = await self._format_function_results(
-                remaining_calls, remaining_results
-            )
-
-        for kind, idx in ordering:
-            if kind == "computer" and idx < len(computer_outputs):
-                formatted.append(computer_outputs[idx])
-            elif kind == "native" and idx < len(native_outputs):
-                formatted.append(native_outputs[idx])
-            elif kind == "function" and idx < len(function_outputs):
-                formatted.append(function_outputs[idx])
-        return formatted
-
-    def _extract_latest_screenshot(self, result: MCPToolResult) -> str | None:
-        """Extract the latest screenshot from a tool result."""
-        if not result.content:
-            return None
-        for content in reversed(result.content):
-            if isinstance(content, types.ImageContent):
-                return content.data
-            if isinstance(content, types.TextContent) and result.isError:
-                self.console.error_log(f"Computer tool error: {content.text}")
-        return None
-
-    async def _format_function_results(
-        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[FunctionCallOutput]:
-        """Convert MCP tool outputs into function call output items."""
-        formatted: list[FunctionCallOutput] = []
-        for call, result in zip(tool_calls, tool_results, strict=False):
-            if not call.id:
-                self.console.warning_log(f"Tool '{call.name}' missing call_id; skipping output.")
-                continue
-
-            output_items: ResponseFunctionCallOutputItemListParam = []
-            if result.isError:
-                output_items.append(
-                    ResponseInputTextParam(type="input_text", text="[tool_error] true")
-                )
-
-            if result.structuredContent is not None:
-                output_items.append(
-                    ResponseInputTextParam(
-                        type="input_text", text=json.dumps(result.structuredContent, default=str)
-                    )
-                )
-
-            for block in result.content:
-                match block:
-                    case types.TextContent():
-                        output_items.append(
-                            ResponseInputTextContentParam(type="input_text", text=block.text)
-                        )
-                    case types.ImageContent():
-                        mime_type = getattr(block, "mimeType", "image/png")
-                        output_items.append(
-                            ResponseInputImageContentParam(
-                                type="input_image",
-                                image_url=f"data:{mime_type};base64,{block.data}",
-                            )
-                        )
-                    case types.ResourceLink():
-                        output_items.append(
-                            ResponseInputFileContentParam(
-                                type="input_file", file_url=str(block.uri)
-                            )
-                        )
-                    case types.EmbeddedResource():
-                        match block.resource:
-                            case types.TextResourceContents():
-                                output_items.append(
-                                    ResponseInputTextContentParam(
-                                        type="input_text", text=block.resource.text
-                                    )
-                                )
-                            case types.BlobResourceContents():
-                                output_items.append(
-                                    ResponseInputFileContentParam(
-                                        type="input_file", file_data=block.resource.blob
-                                    )
-                                )
-                            case _:
-                                self.console.warning_log(
-                                    f"Unknown resource type: {type(block.resource)}"
-                                )
-                    case _:
-                        self.console.warning_log(f"Unknown content block type: {type(block)}")
-
-            if not output_items:
-                output_items.append(ResponseInputTextParam(type="input_text", text=""))
-
-            formatted.append(
-                FunctionCallOutput(
-                    type="function_call_output", call_id=call.id, output=output_items
-                ),
-            )
-        return formatted
+        return AgentResponse(
+            content="".join(text_chunks),
+            reasoning="\n".join(reasoning_chunks) if reasoning_chunks else None,
+            citations=citations,
+            tool_calls=tool_calls,
+            done=not tool_calls,
+        )

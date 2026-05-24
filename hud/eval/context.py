@@ -13,8 +13,12 @@ import contextvars
 import logging
 import uuid
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
+import mcp.types as types
+
+from hud.agents.base import AgentContext
+from hud.agents.tools.base import ToolClient
 from hud.environment import Environment
 from hud.settings import settings
 from hud.shared import make_request
@@ -24,14 +28,16 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from types import TracebackType
 
+    from hud.agents.tools import CapabilityEntry, ToolMetadata
     from hud.eval.task import Task
     from hud.tools.types import EvaluationResult
-    from hud.types import MCPToolResult
+    from hud.types import MCPToolResult, Trace
 
 
 from hud.eval.types import EvalExitPayload, EvalPayload, ParallelEvalComplete
 
 logger = logging.getLogger(__name__)
+
 
 # Contextvar to store current trace headers (for httpx auto-instrumentation)
 _current_trace_headers: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
@@ -109,7 +115,7 @@ class EvalContext(Environment):
         # With task (scenario sets reward automatically)
         tasks = load_tasks("my-org/task:1")
         async with hud.eval(tasks) as ctx:
-            await agent.run(ctx)
+            await ctx._run(agent)
             # reward set by scenario evaluate phase in __aexit__
 
         # Blank eval (manual reward)
@@ -174,7 +180,7 @@ class EvalContext(Environment):
         self.answer: str | dict[str, Any] | None = None  # Agent's submitted answer
         self.system_prompt: str | None = None  # From task.agent_config, passed to agent
         self.scenario_returns_schema: dict[str, Any] | None = None
-        self.scenario_enable_citations: bool = False
+        self.enable_citations: bool = False
 
         # Error tracking
         self.error: BaseException | None = None
@@ -374,18 +380,9 @@ class EvalContext(Environment):
         if prompt:
             self.prompt = prompt
 
-        # If scenario yielded multi-turn messages, store as conversation
         session = self._get_session()
         self.scenario_returns_schema = session.returns_schema if session else None
-        self.scenario_enable_citations = bool(session.enable_citations) if session else False
-        if session and session.prompt_messages and len(session.prompt_messages) > 1:
-            self.conversation = [
-                {
-                    "role": pm.role,
-                    "content": getattr(pm.content, "text", str(pm.content)),
-                }
-                for pm in session.prompt_messages
-            ]
+        self.enable_citations = bool(session.enable_citations) if session else False
 
     async def _run_task_scenario_evaluate(self) -> None:
         """Run the task's scenario evaluate phase (if scenario provided)."""
@@ -511,8 +508,7 @@ class EvalContext(Environment):
 
         Example:
             async with env("checkout", product="laptop") as ctx:
-                response = await agent.run(ctx.prompt)
-                await ctx.submit(response)
+                await ctx.submit("answer")
             # On exit, scenario's evaluate phase receives the answer
         """
         if not self._task or not self._task.scenario:
@@ -523,6 +519,90 @@ class EvalContext(Environment):
 
         # Delegate to Environment.submit() which handles storage + broadcast
         await super().submit(self._task.scenario, answer)
+
+    async def submit_result(self, result: Trace) -> None:
+        """Record an agent result on the eval context."""
+        if result.isError:
+            error_msg = result.info.get("error") if result.info else result.content
+            self.error = Exception(str(error_msg)) if error_msg else Exception("Agent error")
+            return
+
+        if not result.content:
+            return
+
+        if result.citations:
+            await self.submit({"content": result.content, "citations": result.citations})
+        else:
+            await self.submit(result.content)
+
+    async def _run(self, agent: Any, *, max_steps: int = 10) -> Trace:
+        """Run an agent against this eval context."""
+        await self.list_tools()
+        initial_messages = self.prompt_messages()
+        tool_client = ToolClient(
+            tools=self.as_tools(),
+            tool_handler=self.call_tool,
+            tool_metadata=self._tool_metadata(),
+        )
+
+        agent.enable_citations = bool(getattr(self, "enable_citations", False))
+        result = await agent.run(
+            AgentContext(
+                messages=initial_messages,
+                tool_client=tool_client,
+            ),
+            max_steps=max_steps,
+        )
+        await self.submit_result(result)
+        return result
+
+    def _tool_metadata(self) -> ToolMetadata | None:
+        if environment_capabilities := self.metadata.get("environment_capabilities"):
+            return cast("ToolMetadata", environment_capabilities)
+        if capabilities := self.metadata.get("capabilities"):
+            return {"capabilities": cast("dict[str, str | CapabilityEntry]", capabilities)}
+        return None
+
+    def prompt_messages(self) -> list[types.PromptMessage]:
+        """Return raw MCP prompt messages for an agent run."""
+        session = self._get_session()
+        if session and session.prompt_messages:
+            return session.prompt_messages
+
+        conversation = getattr(self, "conversation", None)
+        if conversation:
+            messages: list[types.PromptMessage] = []
+            for msg in conversation:
+                role = cast("Literal['user', 'assistant']", msg.get("role", "user"))
+                messages.append(
+                    types.PromptMessage(
+                        role=role,
+                        content=types.TextContent(type="text", text=msg.get("content", "")),
+                    )
+                )
+            return messages
+
+        prompt = getattr(self, "prompt", None)
+        if not prompt:
+            if self.has_scenario:
+                scenario = self._task.scenario if self._task else "unknown"
+                raise ValueError(
+                    f"ctx.prompt is not set.\n\n"
+                    f"Scenario '{scenario}' was specified but returned an empty prompt.\n"
+                    f"Check that the scenario's setup function returns a non-empty string."
+                )
+            raise ValueError(
+                "ctx.prompt is not set.\n\n"
+                "No scenario was specified in your task file.\n"
+                "Add a 'scenario' field to your task so scenario setup can produce a prompt."
+            )
+
+        return [
+            types.PromptMessage(
+                role="user",
+                content=types.TextContent(type="text", text=prompt),
+            )
+        ]
 
     async def _eval_enter(self) -> None:
         """Notify backend that eval has started."""

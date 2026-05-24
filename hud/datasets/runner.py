@@ -145,7 +145,7 @@ async def run_dataset(
 
         # Create agent using AgentType.cls.create()
         agent = agent_type.cls.create(**final_agent_params)
-        await agent.run(ctx, max_steps=max_steps)
+        await ctx._run(agent, max_steps=max_steps)
         # Reward is computed by EvalContext.__aexit__ from the scenario evaluate phase.
 
     # For parallel execution, results are collected via ctx.results
@@ -252,7 +252,7 @@ async def run_single_task(
         if metadata:
             ctx.metadata.update(metadata)
 
-        result = await agent.run(ctx, max_steps=max_steps)
+        result = await ctx._run(agent, max_steps=max_steps)
         # Reward is computed by EvalContext.__aexit__ from the scenario evaluate phase.
 
     # Propagate reward from EvalContext (set in __aexit__) to returned Trace

@@ -3,19 +3,37 @@
 from __future__ import annotations
 
 import fnmatch
+import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, cast
 
+import mcp.types as types
+
+from hud.agents.tools.capabilities import discover_environment_capabilities
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
-    from hud.agents.base import MCPAgent
-    from hud.agents.tools.capabilities import EnvironmentCapability
+    from collections.abc import Mapping
 
+    from hud.agents.tools.capabilities import EnvironmentCapability, ToolMetadata
+    from hud.agents.tools.hosted import HostedTool
+
+AgentToolParamT_co = TypeVar("AgentToolParamT_co", covariant=True)
 ToolParamT = TypeVar("ToolParamT")
+AgentToolT = TypeVar("AgentToolT", bound="AgentTool[object]")
 CallTool = Callable[[MCPToolCall], Awaitable[MCPToolResult]]
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ToolClient:
+    """MCP tools and execution hook available for one agent run."""
+
+    tools: list[types.Tool] = field(default_factory=list[types.Tool])
+    tool_handler: CallTool | None = None
+    tool_metadata: ToolMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -24,20 +42,21 @@ class AgentToolSpec:
 
     api_type: str
     api_name: str
-    beta: str | None = None
     supported_models: tuple[str, ...] | None = None
 
     def supports_model(self, model: str | None) -> bool:
-        if not self.supported_models or not model or model == "unknown":
+        if not self.supported_models:
             return True
+        if not model or model == "unknown":
+            return False
         model_lower = model.lower()
         return any(
             fnmatch.fnmatch(model_lower, pattern.lower()) for pattern in self.supported_models
         )
 
 
-class AgentTool(ABC, Generic[ToolParamT]):
-    """Provider-facing tool backed by one environment tool."""
+class AgentTool(ABC, Generic[AgentToolParamT_co]):
+    """Provider-facing tool owned by an agent harness."""
 
     name: ClassVar[str]
     capability: ClassVar[str]
@@ -46,79 +65,182 @@ class AgentTool(ABC, Generic[ToolParamT]):
         self.env_tool_name = env_tool_name
         self.spec = spec
 
+    @property
+    def provider_name(self) -> str:
+        return self.name
+
+    @classmethod
+    def env_tool_name_for_capability(cls, capability: EnvironmentCapability) -> str | None:
+        return capability.tool_name
+
     @classmethod
     def from_capability(
         cls,
         capability: EnvironmentCapability,
-        spec: AgentToolSpec,
         model: str,
-    ) -> Self:
-        del model
-        return cls(env_tool_name=capability.tool_name, spec=spec)
+    ) -> Self | None:
+        spec = cls.default_spec(model)
+        env_tool_name = cls.env_tool_name_for_capability(capability)
+        if spec is None or env_tool_name is None:
+            return None
+        return cls(env_tool_name=env_tool_name, spec=spec)
 
     @classmethod
     def default_spec(cls, model: str) -> AgentToolSpec | None:
         """Return the provider spec this agent should use for this capability."""
-        del model
         return None
 
-    @property
-    def required_beta(self) -> str | None:
-        return self.spec.beta
+    @classmethod
+    def from_tool(cls, tool: types.Tool) -> Self | None:
+        """Build a provider tool for a generic environment tool."""
+        del tool
+        return None
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        """Execute by forwarding to the backing environment tool."""
-        return await call_tool(caller, self.env_tool_name, arguments)
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+        """Execute an environment-backed tool by forwarding to its MCP tool."""
+        return await call_tool(MCPToolCall(name=self.env_tool_name, arguments=arguments))
+
+    def format_result(self, call: MCPToolCall, result: MCPToolResult) -> Any | None:
+        """Format a single tool result for the provider continuation turn."""
+        del result
+        logger.warning("Tool '%s' does not implement result formatting.", call.name)
+        return None
 
     @abstractmethod
-    def to_params(self) -> ToolParamT: ...
+    def to_params(self) -> AgentToolParamT_co: ...
 
 
-async def call_tool(
-    caller: CallTool,
-    env_tool_name: str,
-    arguments: dict[str, Any],
-) -> MCPToolResult:
-    result = await caller(MCPToolCall(name=env_tool_name, arguments=arguments))
-    return MCPToolResult(content=result.content, isError=result.isError)
+class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT]):
+    """Prepared tool state owned by a single agent run."""
 
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = ()
+    function_tool_class: ClassVar[type[AgentTool[object]] | None] = None
+    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {}
 
-async def call_agent_tools(
-    agent: MCPAgent,
-    agent_tools: Mapping[str, AgentTool[Any]],
-    tool_call: MCPToolCall | list[MCPToolCall] | None = None,
-) -> list[MCPToolResult]:
-    """Route provider-owned tool calls through adapters, otherwise through MCP."""
-    import mcp.types as types
+    def __init__(self) -> None:
+        super().__init__()
+        self.params: list[ToolParamT] = []
+        self.name_map: dict[str, str] = {}
+        self.hosted_tools: list[HostedTool[object]] = []
 
-    from hud.agents.base import MCPAgent
+    def select_tools(
+        self,
+        tools: list[types.Tool],
+        model: str,
+        *,
+        tool_metadata: ToolMetadata | None = None,
+    ) -> tuple[list[AgentToolT], list[types.Tool]]:
+        """Split MCP tools into provider-owned and user-defined tools."""
+        logger.info("Discovered %s tools: %s", len(tools), ", ".join(tool.name for tool in tools))
 
-    if tool_call is None:
-        return []
-    tool_calls = [tool_call] if isinstance(tool_call, MCPToolCall) else tool_call
+        capabilities = discover_environment_capabilities(
+            tools,
+            tool_metadata=tool_metadata,
+            name_fallbacks=self.name_fallbacks,
+        )
+        agent_tools: list[AgentToolT] = []
+        for capability in capabilities.values():
+            for raw_tool_cls in self.native_tool_classes:
+                tool_cls = cast("type[AgentToolT]", raw_tool_cls)
+                if tool_cls.capability != capability.name:
+                    continue
+                tool = tool_cls.from_capability(capability, model)
+                if tool is not None:
+                    agent_tools.append(tool)
+        agent_tool_names = {tool.env_tool_name for tool in agent_tools}
+        user_tools = [tool for tool in tools if tool.name not in agent_tool_names]
+        return agent_tools, user_tools
 
-    async def call_env_tool(call: MCPToolCall) -> MCPToolResult:
-        return (await MCPAgent.call_tools(agent, call))[0]
+    def generic_tool(
+        self,
+        tool: types.Tool,
+    ) -> ToolParamT | None:
+        """Convert an environment MCP tool into provider params."""
+        del tool
+        return None
 
-    results: list[MCPToolResult] = []
-    for tc in tool_calls:
-        agent_tool = agent_tools.get(tc.name)
-        if agent_tool is None:
-            results.extend(await MCPAgent.call_tools(agent, tc))
-            continue
+    def prepare(
+        self,
+        *,
+        model: str,
+        tools: list[types.Tool],
+        hosted_tools: list[HostedTool[object]] | None = None,
+        tool_metadata: ToolMetadata | None = None,
+    ) -> None:
+        """Prepare a generic provider tool map for an agent run."""
+        provider_tools, user_tools = self.select_tools(
+            tools,
+            model,
+            tool_metadata=tool_metadata,
+        )
+        tools_by_name = {tool.provider_name: tool for tool in provider_tools}
+        installed_names = set(tools_by_name)
+        self.update(tools_by_name)
+        self.params.extend(cast("ToolParamT", tool.to_params()) for tool in provider_tools)
+        self.name_map.update({name: name for name in tools_by_name})
 
-        try:
+        selected_hosted_tools: list[HostedTool[object]] = []
+        for tool in hosted_tools or []:
+            if not tool.supports_model(model):
+                continue
+            selected_hosted_tools.append(tool)
+            self.params.append(cast("ToolParamT", tool.to_params()))
+        self.hosted_tools = selected_hosted_tools
+
+        for tool in user_tools:
+            if self.function_tool_class is not None:
+                function_tool_cls = cast("type[AgentToolT]", self.function_tool_class)
+                agent_tool = function_tool_cls.from_tool(tool)
+                if agent_tool is None:
+                    continue
+                self[agent_tool.provider_name] = agent_tool
+                installed_names.add(agent_tool.provider_name)
+                self.name_map[tool.name] = agent_tool.provider_name
+                self.params.append(cast("ToolParamT", agent_tool.to_params()))
+                continue
+            generic_tool = self.generic_tool(tool)
+            if generic_tool is None:
+                continue
+            installed_names.add(tool.name)
+            self.name_map[tool.name] = tool.name
+            self.params.append(generic_tool)
+
+        tool_names = sorted(installed_names)
+        logger.info("Agent initialized with %s tools: %s", len(tool_names), ", ".join(tool_names))
+
+    async def execute(
+        self,
+        call_tool: CallTool | None,
+        tool_call: MCPToolCall | list[MCPToolCall] | None = None,
+    ) -> list[Any]:
+        if tool_call is None:
+            return []
+
+        if call_tool is None:
+            raise ValueError("call_tool callback is required to execute tool calls")
+
+        outputs: list[Any] = []
+        tool_calls = [tool_call] if isinstance(tool_call, MCPToolCall) else tool_call
+        for tc in tool_calls:
+            agent_tool = self[tc.name]
             arguments = tc.arguments if isinstance(tc.arguments, dict) else {}
-            results.append(await agent_tool.execute(call_env_tool, arguments))
-        except Exception as exc:
-            agent.console.error_log(f"Agent tool execution failed: {exc}")
-            results.append(
-                MCPToolResult(
+            try:
+                result = await agent_tool.execute(call_tool, arguments)
+            except TimeoutError:
+                raise
+            except Exception as exc:
+                logger.exception("Tool execution failed")
+                result = MCPToolResult(
                     content=[types.TextContent(type="text", text=str(exc))],
                     isError=True,
                 )
-            )
-    return results
 
+            output = agent_tool.format_result(tc, result)
+            if output is None:
+                continue
+            if isinstance(output, list):
+                outputs.extend(cast("list[Any]", output))
+            else:
+                outputs.append(output)
 
-__all__ = ["AgentTool", "AgentToolSpec", "CallTool", "call_agent_tools", "call_tool"]
+        return outputs

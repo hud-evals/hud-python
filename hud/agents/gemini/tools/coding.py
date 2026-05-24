@@ -6,16 +6,17 @@ import shlex
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
+    from hud.agents.tools.base import CallTool
     from hud.types import MCPToolResult
 
-from .base import CallTool, GeminiFunctionTool, GeminiToolSpec, call_tool
+from .base import GeminiTool, GeminiToolSpec
 
 GEMINI_SHELL_SPEC = GeminiToolSpec(api_type="run_shell_command", api_name="run_shell_command")
 GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")
 GEMINI_WRITE_SPEC = GeminiToolSpec(api_type="write_file", api_name="write_file")
 
 
-class GeminiShellTool(GeminiFunctionTool):
+class GeminiShellTool(GeminiTool):
     """Translate Gemini CLI shell calls into the generic bash env primitive."""
 
     name = "run_shell_command"
@@ -39,17 +40,17 @@ class GeminiShellTool(GeminiFunctionTool):
         del model
         return GEMINI_SHELL_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
         if not isinstance(command, str) or not command:
             raise ValueError("command is required")
         dir_path = arguments.get("dir_path")
         if isinstance(dir_path, str) and dir_path:
             command = f"cd {shlex.quote(dir_path)} && {command}"
-        return await call_tool(caller, self.env_tool_name, {"command": command})
+        return await super().execute(call_tool, {"command": command})
 
 
-class GeminiEditTool(GeminiFunctionTool):
+class GeminiEditTool(GeminiTool):
     """Translate Gemini CLI replace calls into the generic edit env primitive."""
 
     name = "replace"
@@ -74,19 +75,21 @@ class GeminiEditTool(GeminiFunctionTool):
         del model
         return GEMINI_EDIT_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
         file_path = _required_str(arguments, "file_path")
         old_string = arguments.get("old_string")
         new_string = arguments.get("new_string")
         if old_string == "":
-            return await call_tool(
-                caller,
-                self.env_tool_name,
-                {"command": "create", "path": file_path, "file_text": new_string or ""},
+            return await super().execute(
+                call_tool,
+                {
+                    "command": "create",
+                    "path": file_path,
+                    "file_text": new_string or "",
+                },
             )
-        return await call_tool(
-            caller,
-            self.env_tool_name,
+        return await super().execute(
+            call_tool,
             {
                 "command": "replace",
                 "path": file_path,
@@ -96,7 +99,7 @@ class GeminiEditTool(GeminiFunctionTool):
         )
 
 
-class GeminiWriteTool(GeminiFunctionTool):
+class GeminiWriteTool(GeminiTool):
     """Translate Gemini CLI write_file calls into the generic edit env primitive."""
 
     name = "write_file"
@@ -116,10 +119,9 @@ class GeminiWriteTool(GeminiFunctionTool):
         del model
         return GEMINI_WRITE_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await call_tool(
-            caller,
-            self.env_tool_name,
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+        return await super().execute(
+            call_tool,
             {
                 "command": "write",
                 "path": _required_str(arguments, "file_path"),
@@ -133,13 +135,3 @@ def _required_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} is required")
     return value
-
-
-__all__ = [
-    "GEMINI_EDIT_SPEC",
-    "GEMINI_SHELL_SPEC",
-    "GEMINI_WRITE_SPEC",
-    "GeminiEditTool",
-    "GeminiShellTool",
-    "GeminiWriteTool",
-]

@@ -212,6 +212,7 @@ exclude = [
 ]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
+strict = ["hud/agents"]
 reportMissingImports = "warning"
 
 [tool.coverage.run]

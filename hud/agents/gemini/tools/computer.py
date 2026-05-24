@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import base64
 import platform
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from google.genai import types as genai_types
 from mcp.types import ImageContent, TextContent
 
-from hud.types import MCPToolResult
+from hud.agents.tools import AgentTool
+from hud.agents.tools.computer import computer_error_result, execute_computer_calls
+from hud.types import MCPToolCall, MCPToolResult
 
-from .base import CallTool, GeminiTool, GeminiToolSpec, call_tool
+from .base import GeminiToolSpec
 
 if TYPE_CHECKING:
-    from hud.agents.tools import EnvironmentCapability
+    from hud.agents.tools.base import CallTool
 
 SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
     "gemini-2.5-computer-use-preview-10-2025",
@@ -22,6 +25,7 @@ SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
 
 GEMINI_COORDINATE_SPACE = 1000
 GEMINI_DRAG_INSET = 25
+IS_MAC = platform.system().lower() == "darwin"
 
 PREDEFINED_COMPUTER_USE_FUNCTIONS = (
     "open_web_browser",
@@ -38,6 +42,8 @@ PREDEFINED_COMPUTER_USE_FUNCTIONS = (
     "key_combination",
     "drag_and_drop",
 )
+GEMINI_URL_PREFIX = "__URL__:"
+GEMINI_SAFETY_BLOCKED_PREFIX = "__GEMINI_SAFETY_BLOCKED__:"
 
 GEMINI_COMPUTER_SPEC = GeminiToolSpec(
     api_type="computer_use",
@@ -46,51 +52,7 @@ GEMINI_COMPUTER_SPEC = GeminiToolSpec(
 )
 
 
-def normalize_gemini_computer_use_args(action: str, raw_args: dict[str, Any]) -> dict[str, Any]:
-    """Normalize Gemini Computer Use function-call args to agent-tool args."""
-    normalized_args: dict[str, Any] = {"action": action}
-
-    coord = raw_args.get("coordinate") or raw_args.get("coordinates")
-    if isinstance(coord, list | tuple) and len(coord) >= 2:
-        try:
-            normalized_args["x"] = int(coord[0])
-            normalized_args["y"] = int(coord[1])
-        except (TypeError, ValueError):
-            pass
-
-    dest = (
-        raw_args.get("destination")
-        or raw_args.get("destination_coordinate")
-        or raw_args.get("destinationCoordinate")
-    )
-    if isinstance(dest, list | tuple) and len(dest) >= 2:
-        try:
-            normalized_args["destination_x"] = int(dest[0])
-            normalized_args["destination_y"] = int(dest[1])
-        except (TypeError, ValueError):
-            pass
-
-    for key in (
-        "text",
-        "press_enter",
-        "clear_before_typing",
-        "safety_decision",
-        "direction",
-        "magnitude",
-        "url",
-        "keys",
-        "x",
-        "y",
-        "destination_x",
-        "destination_y",
-    ):
-        if key in raw_args:
-            normalized_args[key] = raw_args[key]
-
-    return normalized_args
-
-
-class GeminiComputerTool(GeminiTool):
+class GeminiComputerTool(AgentTool[genai_types.Tool]):
     """Translate Gemini Computer Use calls into generic environment computer calls."""
 
     name = "computer_use"
@@ -102,19 +64,24 @@ class GeminiComputerTool(GeminiTool):
             return GEMINI_COMPUTER_SPEC
         return None
 
-    @classmethod
-    def from_capability(
-        cls,
-        capability: EnvironmentCapability,
+    def __init__(
+        self,
+        *,
+        env_tool_name: str,
         spec: GeminiToolSpec,
-        model: str,
-    ) -> GeminiComputerTool:
-        del model
-        return cls(env_tool_name=capability.tool_name, spec=spec)
-
-    def __init__(self, *, env_tool_name: str, spec: GeminiToolSpec) -> None:
+        excluded_predefined_functions: list[str] | None = None,
+    ) -> None:
         super().__init__(env_tool_name=env_tool_name, spec=spec)
-        self.excluded_predefined_functions: list[str] = []
+        self.excluded_predefined_functions = excluded_predefined_functions or []
+
+    def with_excluded_predefined_functions(
+        self, excluded_predefined_functions: list[str]
+    ) -> GeminiComputerTool:
+        return GeminiComputerTool(
+            env_tool_name=self.env_tool_name,
+            spec=self.spec,
+            excluded_predefined_functions=excluded_predefined_functions,
+        )
 
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(
@@ -124,31 +91,100 @@ class GeminiComputerTool(GeminiTool):
             )
         )
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    def tool_call(self, function_name: str, raw_args: dict[str, Any]) -> MCPToolCall:
+        return MCPToolCall(
+            name=self.name,
+            arguments={"action": function_name, **raw_args},
+            provider_name=function_name,
+        )
+
+    def format_result(self, call: MCPToolCall, result: MCPToolResult) -> genai_types.Content:
+        text = next(
+            (
+                content.text
+                for content in result.content
+                if isinstance(content, TextContent)
+                and not content.text.startswith(GEMINI_URL_PREFIX)
+            ),
+            None,
+        )
+        response: dict[str, Any] = (
+            {"error": text or "Tool execution failed"} if result.isError else {"success": True}
+        )
+        if text is not None and not result.isError:
+            response["output"] = text
+
+        url = None
+        parts: list[genai_types.FunctionResponsePart] = []
+        for content in result.content:
+            match content:
+                case ImageContent(data=data, mimeType=mime_type):
+                    parts.append(
+                        genai_types.FunctionResponsePart(
+                            inline_data=genai_types.FunctionResponseBlob(
+                                mime_type=mime_type or "image/png",
+                                data=base64.b64decode(data),
+                            )
+                        )
+                    )
+                case TextContent(text=text) if text.startswith(GEMINI_URL_PREFIX):
+                    url = text.removeprefix(GEMINI_URL_PREFIX)
+                case TextContent(text=text) if text.startswith(GEMINI_SAFETY_BLOCKED_PREFIX):
+                    response.pop("success", None)
+                    response["blocked"] = True
+                    response["reason"] = text.removeprefix(GEMINI_SAFETY_BLOCKED_PREFIX)
+                case _:
+                    continue
+
+        response["url"] = url or "about:blank"
+        safety_decision = call.arguments.get("safety_decision") if call.arguments else None
+        if safety_decision and not result.isError and not response.get("blocked"):
+            response["safety_acknowledgement"] = True
+
+        return genai_types.Content(
+            role="user",
+            parts=[
+                genai_types.Part(
+                    function_response=genai_types.FunctionResponse(
+                        name=call.provider_name or call.name,
+                        response=response,
+                        parts=parts or None,
+                    )
+                )
+            ],
+        )
+
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         if not isinstance(action, str):
-            return _error_result("action is required")
-        if _requires_confirmation(arguments.get("safety_decision")):
-            return _blocked_result(
-                "Gemini Computer Use action requires user confirmation before execution."
+            return computer_error_result("action is required")
+        safety_decision = arguments.get("safety_decision")
+        if (
+            isinstance(safety_decision, dict)
+            and cast("dict[str, Any]", safety_decision).get("decision") == "require_confirmation"
+        ):
+            return MCPToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"{GEMINI_SAFETY_BLOCKED_PREFIX}"
+                            "Gemini Computer Use action requires user confirmation before "
+                            "execution."
+                        ),
+                    )
+                ],
+                isError=False,
             )
 
-        result = MCPToolResult(content=[], isError=False)
-        for call in self._env_calls(action, arguments):
-            result = await call_tool(caller, self.env_tool_name, call)
-            if result.isError:
-                return result
+        return await execute_computer_calls(
+            call_tool,
+            env_tool_name=self.env_tool_name,
+            calls=self._computer_actions(action, arguments),
+            ensure_screenshot=action != "open_web_browser",
+        )
 
-        if action != "open_web_browser" and not _has_image(result):
-            screenshot = await call_tool(caller, self.env_tool_name, {"action": "screenshot"})
-            if not screenshot.isError and screenshot.content:
-                result = MCPToolResult(
-                    content=[*result.content, *screenshot.content],
-                    isError=result.isError,
-                )
-        return result
-
-    def _env_calls(self, action: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    def _computer_actions(self, action: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
         if action == "open_web_browser":
             return [{"action": "screenshot"}]
         if action == "click_at":
@@ -165,7 +201,12 @@ class GeminiComputerTool(GeminiTool):
                     ]
                 )
             if arguments.get("clear_before_typing", True):
-                calls.extend(_clear_text_calls())
+                calls.extend(
+                    [
+                        {"action": "press", "keys": ["cmd", "a"] if IS_MAC else ["ctrl", "a"]},
+                        {"action": "press", "keys": ["backspace" if IS_MAC else "delete"]},
+                    ]
+                )
             calls.append(
                 {
                     "action": "write",
@@ -175,133 +216,77 @@ class GeminiComputerTool(GeminiTool):
             )
             return calls
         if action in ("scroll_document", "scroll_at"):
-            call = _scroll_call(arguments)
+            direction = arguments.get("direction")
+            magnitude = arguments.get("magnitude") or 800
+            if direction == "down":
+                call = {"action": "scroll", "scroll_x": None, "scroll_y": magnitude}
+            elif direction == "up":
+                call = {"action": "scroll", "scroll_x": None, "scroll_y": -magnitude}
+            elif direction == "right":
+                call = {"action": "scroll", "scroll_x": magnitude, "scroll_y": None}
+            elif direction == "left":
+                call = {"action": "scroll", "scroll_x": -magnitude, "scroll_y": None}
+            else:
+                raise ValueError("direction must be one of up, down, left, right")
             if action == "scroll_at":
                 call.update({"x": arguments.get("x"), "y": arguments.get("y")})
             return [call]
         if action == "wait_5_seconds":
             return [{"action": "wait", "time": 5000}]
         if action == "go_back":
-            return [{"action": "press", "keys": ["cmd", "["] if _is_mac() else ["alt", "left"]}]
+            return [{"action": "press", "keys": ["cmd", "["] if IS_MAC else ["alt", "left"]}]
         if action == "go_forward":
-            return [{"action": "press", "keys": ["cmd", "]"] if _is_mac() else ["alt", "right"]}]
+            return [{"action": "press", "keys": ["cmd", "]"] if IS_MAC else ["alt", "right"]}]
         if action == "search":
             target = arguments.get("url") or "https://www.google.com"
-            return [*_address_bar_calls(), {"action": "write", "text": target, "enter_after": True}]
+            return [
+                {"action": "press", "keys": ["cmd", "l"] if IS_MAC else ["ctrl", "l"]},
+                {"action": "write", "text": target, "enter_after": True},
+            ]
         if action == "navigate":
             return [
-                *_address_bar_calls(),
+                {"action": "press", "keys": ["cmd", "l"] if IS_MAC else ["ctrl", "l"]},
                 {"action": "write", "text": arguments.get("url"), "enter_after": True},
             ]
         if action == "key_combination":
-            return [{"action": "press", "keys": _normalize_key_combination(arguments.get("keys"))}]
+            keys = arguments.get("keys")
+            if not isinstance(keys, str):
+                raise ValueError("keys must be a '+'-separated string")
+            aliases = {
+                "control": "ctrl",
+                "cmd": "cmd",
+                "command": "cmd",
+                "meta": "cmd" if IS_MAC else "ctrl",
+                "return": "enter",
+            }
+            normalized_keys = [
+                aliases.get(key, key) for part in keys.split("+") if (key := part.strip().lower())
+            ]
+            return [{"action": "press", "keys": normalized_keys}]
         if action == "drag_and_drop":
+            max_drag_coordinate = max(
+                GEMINI_COORDINATE_SPACE - GEMINI_DRAG_INSET,
+                GEMINI_DRAG_INSET,
+            )
+
+            def drag_coordinate(value: Any) -> Any:
+                if not isinstance(value, int | float) or not 0 <= value <= GEMINI_COORDINATE_SPACE:
+                    return value
+                return min(max(int(value), GEMINI_DRAG_INSET), max_drag_coordinate)
+
             return [
                 {
                     "action": "drag",
                     "path": [
                         {
-                            "x": _inset_drag_coordinate(arguments.get("x")),
-                            "y": _inset_drag_coordinate(arguments.get("y")),
+                            "x": drag_coordinate(arguments.get("x")),
+                            "y": drag_coordinate(arguments.get("y")),
                         },
                         {
-                            "x": _inset_drag_coordinate(arguments.get("destination_x")),
-                            "y": _inset_drag_coordinate(arguments.get("destination_y")),
+                            "x": drag_coordinate(arguments.get("destination_x")),
+                            "y": drag_coordinate(arguments.get("destination_y")),
                         },
                     ],
                 }
             ]
         raise ValueError(f"Unknown Gemini computer action: {action}")
-
-
-def _scroll_call(arguments: dict[str, Any]) -> dict[str, Any]:
-    direction = arguments.get("direction")
-    magnitude = arguments.get("magnitude") or 800
-    if direction == "down":
-        return {"action": "scroll", "scroll_x": None, "scroll_y": magnitude}
-    if direction == "up":
-        return {"action": "scroll", "scroll_x": None, "scroll_y": -magnitude}
-    if direction == "right":
-        return {"action": "scroll", "scroll_x": magnitude, "scroll_y": None}
-    if direction == "left":
-        return {"action": "scroll", "scroll_x": -magnitude, "scroll_y": None}
-    raise ValueError("direction must be one of up, down, left, right")
-
-
-def _inset_drag_coordinate(value: Any) -> Any:
-    """Keep Gemini normalized drag endpoints away from display edges."""
-    if not isinstance(value, int | float) or not 0 <= value <= GEMINI_COORDINATE_SPACE:
-        return value
-    max_value = max(GEMINI_COORDINATE_SPACE - GEMINI_DRAG_INSET, GEMINI_DRAG_INSET)
-    return min(max(int(value), GEMINI_DRAG_INSET), max_value)
-
-
-def _clear_text_calls() -> list[dict[str, Any]]:
-    is_mac = _is_mac()
-    return [
-        {"action": "press", "keys": ["cmd", "a"] if is_mac else ["ctrl", "a"]},
-        {"action": "press", "keys": ["backspace" if is_mac else "delete"]},
-    ]
-
-
-def _normalize_key_combination(keys: Any) -> list[str] | Any:
-    if isinstance(keys, str):
-        return [_normalize_key(key) for key in keys.split("+") if key.strip()]
-    if isinstance(keys, list):
-        return [_normalize_key(key) if isinstance(key, str) else key for key in keys]
-    return keys
-
-
-def _normalize_key(key: str) -> str:
-    normalized = key.strip().lower()
-    aliases = {
-        "control": "ctrl",
-        "cmd": "cmd",
-        "command": "cmd",
-        "meta": "cmd" if _is_mac() else "ctrl",
-        "return": "enter",
-    }
-    return aliases.get(normalized, normalized)
-
-
-def _requires_confirmation(safety_decision: Any) -> bool:
-    if not isinstance(safety_decision, dict):
-        return False
-    return safety_decision.get("decision") == "require_confirmation"
-
-
-def _address_bar_calls() -> list[dict[str, Any]]:
-    return [{"action": "press", "keys": ["cmd", "l"] if _is_mac() else ["ctrl", "l"]}]
-
-
-def _is_mac() -> bool:
-    return platform.system().lower() == "darwin"
-
-
-def _has_image(result: MCPToolResult) -> bool:
-    return any(isinstance(block, ImageContent) for block in result.content)
-
-
-def _error_result(message: str) -> MCPToolResult:
-    return MCPToolResult(
-        content=[TextContent(type="text", text=message)],
-        isError=True,
-    )
-
-
-def _blocked_result(message: str) -> MCPToolResult:
-    return MCPToolResult(
-        content=[TextContent(type="text", text=f"__GEMINI_SAFETY_BLOCKED__:{message}")],
-        isError=False,
-    )
-
-
-__all__ = [
-    "GEMINI_COMPUTER_SPEC",
-    "GEMINI_COORDINATE_SPACE",
-    "GEMINI_DRAG_INSET",
-    "PREDEFINED_COMPUTER_USE_FUNCTIONS",
-    "SUPPORTED_GEMINI_COMPUTER_USE_MODELS",
-    "GeminiComputerTool",
-    "normalize_gemini_computer_use_args",
-]

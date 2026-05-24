@@ -111,12 +111,12 @@ print(result.reward, result.done)
 | `trace` | `list[TraceStep]` | Execution trace steps |
 | `messages` | `list[Any]` | Final conversation state |
 
-## InferenceResult
+## AgentResponse
 
 Returned by agent `get_response()` methods. Represents the result of a single LLM inference call.
 
 ```python
-from hud.types import InferenceResult
+from hud.types import AgentResponse
 ```
 
 | Field | Type | Description |
@@ -128,8 +128,6 @@ from hud.types import InferenceResult
 | `citations` | `list[dict[str, Any]]` | Provider-normalized citations |
 | `info` | `dict[str, Any]` | Provider-specific metadata |
 | `isError` | `bool` | Error flag |
-
-> **Note:** `AgentResponse` is available as a backwards-compatible alias for `InferenceResult`.
 
 ## AgentType
 

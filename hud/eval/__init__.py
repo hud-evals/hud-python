@@ -13,12 +13,12 @@ Usage:
         await ctx.call_tool("navigate", url="...")
 
     async with env("checkout", user_id="alice") as ctx:
-        await agent.run(ctx.prompt)
+        await ctx.submit("answer")
 
     # Orchestrated with Task objects
     tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
     async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
-        await agent.run(ctx.prompt)
+        await ctx._run(agent)
 
     # Blank eval for manual reward
     async with hud.eval() as ctx:

@@ -216,7 +216,7 @@ class AgentTool(BaseTool):
                 else:
                     agent = self._agent_cls.create(**self._agent_params)  # type: ignore
 
-                result = await agent.run(ctx)
+                result = await ctx._run(agent)
                 content = result.content if hasattr(result, "content") and result.content else ""
                 return ToolResult(content=[TextContent(type="text", text=content)])
 
