@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
+    from hud.agents.tools.base import CallTool
     from hud.types import MCPToolResult
 
 from hud.agents.tools import GroupedCapabilityMixin
 
-from .base import CallTool, GeminiFunctionTool, GeminiToolSpec, call_tool
+from .base import GeminiTool, GeminiToolSpec
 
 GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
 GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")
@@ -17,7 +18,7 @@ GEMINI_GLOB_SPEC = GeminiToolSpec(api_type="glob", api_name="glob")
 GEMINI_LIST_SPEC = GeminiToolSpec(api_type="list_directory", api_name="list_directory")
 
 
-class GeminiFilesystemTool(GroupedCapabilityMixin, GeminiFunctionTool):
+class GeminiFilesystemTool(GroupedCapabilityMixin, GeminiTool):
     """Gemini function tool backed by one filesystem environment primitive."""
 
     capability = "filesystem"
@@ -45,16 +46,15 @@ class GeminiReadTool(GeminiFilesystemTool):
         del model
         return GEMINI_READ_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         offset = int(start) - 1 if isinstance(start, int) and start > 0 else None
         limit = None
         if offset is not None and isinstance(start, int) and isinstance(end, int) and end >= start:
             limit = end - start + 1
-        return await call_tool(
-            caller,
-            self.env_tool_name,
+        return await super().execute(
+            call_tool,
             {
                 "filePath": _required_str(arguments, "file_path"),
                 "offset": offset,
@@ -84,10 +84,9 @@ class GeminiSearchTool(GeminiFilesystemTool):
         del model
         return GEMINI_SEARCH_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await call_tool(
-            caller,
-            self.env_tool_name,
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+        return await super().execute(
+            call_tool,
             {
                 "pattern": _required_str(arguments, "pattern"),
                 "path": arguments.get("dir_path"),
@@ -120,10 +119,9 @@ class GeminiGlobTool(GeminiFilesystemTool):
         del model
         return GEMINI_GLOB_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await call_tool(
-            caller,
-            self.env_tool_name,
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+        return await super().execute(
+            call_tool,
             {
                 "pattern": _required_str(arguments, "pattern"),
                 "path": arguments.get("dir_path"),
@@ -156,11 +154,13 @@ class GeminiListTool(GeminiFilesystemTool):
         del model
         return GEMINI_LIST_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await call_tool(
-            caller,
-            self.env_tool_name,
-            {"path": _required_str(arguments, "dir_path"), "ignore": arguments.get("ignore")},
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+        return await super().execute(
+            call_tool,
+            {
+                "path": _required_str(arguments, "dir_path"),
+                "ignore": arguments.get("ignore"),
+            },
         )
 
 
@@ -169,16 +169,3 @@ def _required_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} is required")
     return value
-
-
-__all__ = [
-    "GEMINI_GLOB_SPEC",
-    "GEMINI_LIST_SPEC",
-    "GEMINI_READ_SPEC",
-    "GEMINI_SEARCH_SPEC",
-    "GeminiFilesystemTool",
-    "GeminiGlobTool",
-    "GeminiListTool",
-    "GeminiReadTool",
-    "GeminiSearchTool",
-]

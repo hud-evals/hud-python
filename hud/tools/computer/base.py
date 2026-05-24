@@ -88,12 +88,14 @@ class ComputerTool(BaseTool):
         self.height = height or computer_settings.DISPLAY_HEIGHT
 
         # Build metadata with resolution info
-        meta = {
+        meta: dict[str, object] = {
             "resolution": {
                 "width": self.width,
                 "height": self.height,
             }
         }
+        if coordinate_space is not None:
+            meta["coordinate_space"] = coordinate_space
 
         # Initialize base tool with executor as env
         super().__init__(

@@ -24,7 +24,7 @@ hud_console = HUDConsole()
 # =============================================================================
 
 
-async def _fetch_env_metadata(env_name: str, headers: dict[str, str]) -> dict[str, Any] | None:
+async def _fetch_tool_metadata(env_name: str, headers: dict[str, str]) -> dict[str, Any] | None:
     """Fetch env metadata from mcp-config endpoint. Returns response dict or None."""
     url = f"{settings.hud_api_url}/environments/{env_name}/mcp-config"
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -116,20 +116,20 @@ async def _preflight_validate(tasks: list[Any]) -> None:
 
     hud_console.info(f"Preflight: checking {len(env_names)} environment(s)…")
 
-    env_metadata: dict[str, dict[str, Any]] = {}
+    tool_metadata: dict[str, dict[str, Any]] = {}
     for name in sorted(env_names):
-        data = await _fetch_env_metadata(name, headers)
+        data = await _fetch_tool_metadata(name, headers)
         if data is None:
             hud_console.error(f"Environment '{name}' not found on platform")
             hud_console.hint("Deploy it first with: hud deploy")
             raise typer.Exit(1)
-        env_metadata[name] = data
+        tool_metadata[name] = data
         hud_console.info(f"  ✓ {name}")
 
     env_scenarios = _extract_scenarios(tasks)
     for env_name, scenarios in sorted(env_scenarios.items()):
-        if env_name in env_metadata:
-            _check_scenarios(env_name, scenarios, env_metadata[env_name])
+        if env_name in tool_metadata:
+            _check_scenarios(env_name, scenarios, tool_metadata[env_name])
 
     hud_console.success("Preflight passed")
 

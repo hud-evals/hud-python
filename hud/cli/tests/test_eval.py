@@ -44,6 +44,7 @@ class MockEvalContext(EvalContext):
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
         self._is_summary = False
+        self._scenario_sessions = {}
 
     def as_tools(self) -> list[types.Tool]:
         return self._tools

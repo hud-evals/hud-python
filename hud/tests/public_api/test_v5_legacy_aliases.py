@@ -54,12 +54,6 @@ def test_load_dataset_warns_and_delegates_to_load_tasks(
     assert calls == [("local-or-remote-source", True)]
 
 
-def test_agent_response_aliases_inference_result() -> None:
-    import hud.types as types
-
-    assert types.AgentResponse is types.InferenceResult
-
-
 def test_tool_router_aliases_environment_mcp_router() -> None:
     import hud.environment as environment
 

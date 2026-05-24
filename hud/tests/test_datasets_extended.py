@@ -39,6 +39,7 @@ class TestRunDatasetExtended:
         mock_ctx = AsyncMock()
         mock_ctx.results = None
         mock_ctx.reward = None
+        mock_ctx._run.return_value = Trace(reward=1.0, done=True)
 
         # Create mock agent class and instance (use MagicMock since create() is sync)
         mock_agent_instance = AsyncMock()
@@ -57,7 +58,7 @@ class TestRunDatasetExtended:
 
             # Should return list with ctx
             assert len(results) == 1
-            mock_agent_instance.run.assert_called_once()
+            mock_ctx._run.assert_called_once_with(mock_agent_instance, max_steps=5)
 
     @pytest.mark.asyncio
     async def test_run_dataset_from_source_string(self):
@@ -70,6 +71,7 @@ class TestRunDatasetExtended:
 
         mock_ctx = AsyncMock()
         mock_ctx.results = None
+        mock_ctx._run.return_value = Trace(reward=1.0, done=True)
 
         # Create mock agent class and instance (use MagicMock since create() is sync)
         mock_agent_instance = AsyncMock()
@@ -101,6 +103,7 @@ class TestRunDatasetExtended:
 
         mock_ctx = AsyncMock()
         mock_ctx.results = None
+        mock_ctx._run.return_value = Trace(reward=1.0, done=True)
 
         # Create mock agent class and instance (use MagicMock since create() is sync)
         mock_agent_instance = AsyncMock()

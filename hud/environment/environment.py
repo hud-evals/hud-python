@@ -986,7 +986,7 @@ class Environment(
 
             # Single task via hud.eval
             async with hud.eval(env("checkout", user_id="alice")) as ctx:
-                await agent.run(ctx.prompt)
+                await ctx._run(agent)
 
             # Multiple tasks with variants
             tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]

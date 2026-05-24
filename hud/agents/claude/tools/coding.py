@@ -8,13 +8,15 @@ from mcp.types import TextContent
 
 from hud.types import MCPToolResult
 
-from .base import CallTool, ClaudeTool, ClaudeToolSpec, call_tool
+from .base import ClaudeTool, ClaudeToolSpec
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
         BetaToolBash20250124Param,
         BetaToolTextEditor20250728Param,
     )
+
+    from hud.agents.tools.base import CallTool
 
 
 CLAUDE_BASH_SPEC = ClaudeToolSpec(
@@ -29,29 +31,17 @@ CLAUDE_BASH_SPEC = ClaudeToolSpec(
     ),
 )
 
-CLAUDE_TEXT_EDITOR_SPECS: tuple[ClaudeToolSpec, ...] = (
-    ClaudeToolSpec(
-        api_type="text_editor_20250728",
-        api_name="str_replace_based_edit_tool",
-        supported_models=(
-            "*claude-opus-4-7*",
-            "*claude-opus-4-6*",
-            "*claude-sonnet-4-5*",
-            "*claude-sonnet-4-6*",
-            "*claude-haiku-4-5*",
-        ),
+CLAUDE_TEXT_EDITOR_SPEC = ClaudeToolSpec(
+    api_type="text_editor_20250728",
+    api_name="str_replace_based_edit_tool",
+    supported_models=(
+        "*claude-opus-4-7*",
+        "*claude-opus-4-6*",
+        "*claude-sonnet-4-5*",
+        "*claude-sonnet-4-6*",
+        "*claude-haiku-4-5*",
     ),
 )
-
-CLAUDE_TEXT_EDITOR_SPEC = CLAUDE_TEXT_EDITOR_SPECS[0]
-
-CLAUDE_TEXT_EDITOR_NAMES = {
-    "text_editor_20250728": "str_replace_based_edit_tool",
-}
-
-CLAUDE_TEXT_EDITOR_COMMANDS = {
-    "text_editor_20250728": frozenset({"view", "create", "str_replace", "insert"}),
-}
 
 
 class ClaudeBashTool(ClaudeTool):
@@ -81,7 +71,7 @@ class ClaudeBashTool(ClaudeTool):
 
     async def execute(
         self,
-        caller: CallTool,
+        call_tool: CallTool,
         arguments: dict[str, Any],
     ) -> MCPToolResult:
         if not arguments.get("restart") and "command" not in arguments:
@@ -94,7 +84,7 @@ class ClaudeBashTool(ClaudeTool):
                 ],
                 isError=True,
             )
-        return await call_tool(caller, self.env_tool_name, arguments)
+        return await super().execute(call_tool, arguments)
 
 
 class ClaudeTextEditorTool(ClaudeTool):
@@ -105,9 +95,8 @@ class ClaudeTextEditorTool(ClaudeTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
-        for spec in CLAUDE_TEXT_EDITOR_SPECS:
-            if spec.supports_model(model):
-                return spec
+        if CLAUDE_TEXT_EDITOR_SPEC.supports_model(model):
+            return CLAUDE_TEXT_EDITOR_SPEC
         return None
 
     def __init__(self, *, env_tool_name: str, spec: ClaudeToolSpec) -> None:
@@ -115,7 +104,7 @@ class ClaudeTextEditorTool(ClaudeTool):
 
     @property
     def provider_name(self) -> str:
-        return CLAUDE_TEXT_EDITOR_NAMES.get(self.spec.api_type, self.spec.api_name)
+        return self.spec.api_name
 
     def to_params(self) -> BetaToolTextEditor20250728Param:
         return cast(
@@ -128,25 +117,10 @@ class ClaudeTextEditorTool(ClaudeTool):
 
     async def execute(
         self,
-        caller: CallTool,
+        call_tool: CallTool,
         arguments: dict[str, Any],
     ) -> MCPToolResult:
-        command = arguments.get("command")
-        allowed_commands = CLAUDE_TEXT_EDITOR_COMMANDS.get(self.spec.api_type)
-        if allowed_commands is not None and command not in allowed_commands:
-            return MCPToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text=(
-                            f"{self.spec.api_type} does not support command {command!r}. "
-                            f"Supported commands: {', '.join(sorted(allowed_commands))}"
-                        ),
-                    )
-                ],
-                isError=True,
-            )
-        return await call_tool(caller, self.env_tool_name, _claude_editor_arguments(arguments))
+        return await super().execute(call_tool, _claude_editor_arguments(arguments))
 
 
 def _claude_editor_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -170,12 +144,3 @@ def _claude_editor_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
             }
         case _:
             return dict(arguments)
-
-
-__all__ = [
-    "CLAUDE_BASH_SPEC",
-    "CLAUDE_TEXT_EDITOR_SPEC",
-    "CLAUDE_TEXT_EDITOR_SPECS",
-    "ClaudeBashTool",
-    "ClaudeTextEditorTool",
-]

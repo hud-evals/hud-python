@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from mcp.types import ImageContent, TextContent
 
-from hud.types import InferenceResult, MCPToolCall, MCPToolResult, Trace, TraceStep
+from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace, TraceStep
 
 
 def test_mcp_tool_call_str_long_args():
@@ -164,17 +164,17 @@ def test_mcp_tool_result_rich():
         mock_console.format_tool_result.assert_called_once()
 
 
-def test_inference_result_str_with_reasoning():
-    """Test InferenceResult __str__ includes reasoning."""
-    response = InferenceResult(reasoning="Test reasoning", content="Test content")
+def test_agent_response_str_with_reasoning():
+    """Test AgentResponse __str__ includes reasoning."""
+    response = AgentResponse(reasoning="Test reasoning", content="Test content")
     output = str(response)
     assert "Reasoning: Test reasoning" in output
     assert "Content: Test content" in output
 
 
-def test_inference_result_str_with_tool_calls():
-    """Test InferenceResult __str__ includes tool calls."""
-    response = InferenceResult(
+def test_agent_response_str_with_tool_calls():
+    """Test AgentResponse __str__ includes tool calls."""
+    response = AgentResponse(
         tool_calls=[
             MCPToolCall(name="tool1", arguments={"a": 1}),
             MCPToolCall(name="tool2", arguments={"b": 2}),
@@ -186,36 +186,27 @@ def test_inference_result_str_with_tool_calls():
     assert "tool2" in output
 
 
-def test_inference_result_str_with_raw():
-    """Test InferenceResult __str__ includes raw."""
-    response = InferenceResult(raw={"raw_data": "value"})
+def test_agent_response_str_with_raw():
+    """Test AgentResponse __str__ includes raw."""
+    response = AgentResponse(raw={"raw_data": "value"})
     output = str(response)
     assert "Raw:" in output
 
 
-def test_inference_result_citations_default_empty():
-    """InferenceResult.citations defaults to empty list."""
-    result = InferenceResult(content="hello")
+def test_agent_response_citations_default_empty():
+    """AgentResponse.citations defaults to empty list."""
+    result = AgentResponse(content="hello")
     assert result.citations == []
 
 
-def test_inference_result_citations_roundtrip():
+def test_agent_response_citations_roundtrip():
     """Citations survive serialize/deserialize."""
     cit = {"type": "url_citation", "source": "https://example.com", "title": "Example"}
-    result = InferenceResult(content="hello", citations=[cit])
+    result = AgentResponse(content="hello", citations=[cit])
     data = result.model_dump(mode="json")
-    restored = InferenceResult(**data)
+    restored = AgentResponse(**data)
     assert len(restored.citations) == 1
     assert restored.citations[0]["source"] == "https://example.com"
-
-
-def test_agent_response_alias():
-    """AgentResponse is a backwards-compatible alias for InferenceResult."""
-    from hud.types import AgentResponse
-
-    assert AgentResponse is InferenceResult
-    r = AgentResponse(content="test", done=True)
-    assert isinstance(r, InferenceResult)
 
 
 def test_trace_citations_default_empty():

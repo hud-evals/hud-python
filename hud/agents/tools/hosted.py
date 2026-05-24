@@ -2,49 +2,30 @@
 
 from __future__ import annotations
 
+import fnmatch
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
-from .base import AgentToolSpec
-
-HostedToolParamT = TypeVar("HostedToolParamT")
-HostedToolT = TypeVar("HostedToolT", bound="HostedTool[Any]")
+HostedToolParamT_co = TypeVar("HostedToolParamT_co", covariant=True)
 
 
 @dataclass(frozen=True, kw_only=True)
-class HostedTool(Generic[HostedToolParamT]):
+class HostedTool(ABC, Generic[HostedToolParamT_co]):
     """Provider-side tool activated only through explicit agent config."""
 
     supported_models: tuple[str, ...] | None = None
 
     def supports_model(self, model: str | None) -> bool:
-        spec = AgentToolSpec(
-            api_type="hosted",
-            api_name=self.__class__.__name__,
-            supported_models=self.supported_models,
+        if not self.supported_models:
+            return True
+        if not model or model == "unknown":
+            return False
+        model_lower = model.lower()
+        return any(
+            fnmatch.fnmatch(model_lower, pattern.lower()) for pattern in self.supported_models
         )
-        return spec.supports_model(model)
 
-    def to_params(self) -> HostedToolParamT:
+    @abstractmethod
+    def to_params(self) -> HostedToolParamT_co:
         raise NotImplementedError
-
-
-def select_hosted_tools(
-    hosted_tools: list[Any],
-    *,
-    tool_type: type[HostedToolT],
-    model: str,
-) -> list[HostedToolT]:
-    """Select explicitly configured hosted tools for one provider/model."""
-    selected: list[HostedToolT] = []
-    for hosted_tool in hosted_tools:
-        if not isinstance(hosted_tool, tool_type) or not hosted_tool.supports_model(model):
-            continue
-        selected.append(hosted_tool)
-    return selected
-
-
-__all__ = [
-    "HostedTool",
-    "select_hosted_tools",
-]

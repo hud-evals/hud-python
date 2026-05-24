@@ -175,6 +175,7 @@ def test_glm_computer_is_legacy_generic_registration():
 
     assert comp.name == "glm_computer"
     assert "native_tools" not in comp.meta
+    assert comp.meta["coordinate_space"] == 999
 
 
 @pytest.mark.asyncio

@@ -89,7 +89,7 @@ class Chat(AgentExecutor):
     Each ``send()`` call:
     1. Appends the user message to history
     2. Creates a Task copy with the full history as scenario args
-    3. Runs ``hud.eval(task)`` -> scenario setup -> ``agent.run(ctx)`` -> evaluate
+    3. Runs ``hud.eval(task)`` -> scenario setup -> ``ctx._run(agent)`` -> evaluate
     4. Appends the assistant response to history
     5. Returns the Trace
 

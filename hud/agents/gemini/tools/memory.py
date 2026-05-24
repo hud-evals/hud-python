@@ -6,14 +6,15 @@ import hashlib
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
+    from hud.agents.tools.base import CallTool
     from hud.types import MCPToolResult
 
-from .base import CallTool, GeminiFunctionTool, GeminiToolSpec, call_tool
+from .base import GeminiTool, GeminiToolSpec
 
 GEMINI_MEMORY_SPEC = GeminiToolSpec(api_type="save_memory", api_name="save_memory")
 
 
-class GeminiMemoryTool(GeminiFunctionTool):
+class GeminiMemoryTool(GeminiTool):
     """Translate Gemini save_memory calls into the file-backed memory env primitive."""
 
     name = "save_memory"
@@ -32,21 +33,17 @@ class GeminiMemoryTool(GeminiFunctionTool):
         del model
         return GEMINI_MEMORY_SPEC
 
-    async def execute(self, caller: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
         fact = arguments.get("fact")
         if not isinstance(fact, str) or not fact.strip():
             raise ValueError("fact is required")
         text = fact.strip()
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-        return await call_tool(
-            caller,
-            self.env_tool_name,
+        return await super().execute(
+            call_tool,
             {
                 "command": "create",
                 "path": f"/memories/gemini-{digest}.md",
                 "file_text": f"{text}\n",
             },
         )
-
-
-__all__ = ["GEMINI_MEMORY_SPEC", "GeminiMemoryTool"]

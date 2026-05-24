@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
-from .base import CallTool, ClaudeTool, ClaudeToolSpec, call_tool
+from .base import ClaudeTool, ClaudeToolSpec
 
 if TYPE_CHECKING:
     from anthropic.types.beta import BetaToolUnionParam
-
-    from hud.types import MCPToolResult
 
 
 CLAUDE_MEMORY_SPEC = ClaudeToolSpec(
@@ -48,13 +46,3 @@ class ClaudeMemoryTool(ClaudeTool):
                 "name": self.name,
             },
         )
-
-    async def execute(
-        self,
-        caller: CallTool,
-        arguments: dict[str, Any],
-    ) -> MCPToolResult:
-        return await call_tool(caller, self.env_tool_name, arguments)
-
-
-__all__ = ["CLAUDE_MEMORY_SPEC", "ClaudeMemoryTool"]

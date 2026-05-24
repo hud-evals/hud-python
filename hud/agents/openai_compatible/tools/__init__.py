@@ -2,31 +2,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, ClassVar
 
-from hud.agents.tools import AgentTool, AgentToolRegistry
+from hud.agents.tools import AgentTool, AgentTools
 
-from .computer import (
-    GLM_COMPUTER_SPEC,
-    QWEN_COMPUTER_SPEC,
-    GLMComputerTool,
-    QwenComputerTool,
+from .base import (
+    OpenAICompatibleFunctionTool,
+    OpenAICompatibleToolParam,
 )
 from .filesystem import (
-    FilesystemTool,
     GlobTool,
     GrepTool,
     ListTool,
     ReadTool,
 )
-from .types import OpenAICompatibleToolParam
+from .glm_computer import GLMComputerTool
+from .qwen_computer import QwenComputerTool
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
-@dataclass(frozen=True)
-class OpenAICompatibleToolRegistry(AgentToolRegistry[AgentTool[OpenAICompatibleToolParam]]):
-    """Registry for OpenAI-compatible harness tools."""
+class OpenAICompatibleAgentTools(
+    AgentTools[AgentTool[OpenAICompatibleToolParam], OpenAICompatibleToolParam]
+):
+    """Prepared OpenAI-compatible chat tool state for a run."""
 
-    tool_classes: tuple[type[AgentTool[OpenAICompatibleToolParam]], ...] = (
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = (
         GLMComputerTool,
         QwenComputerTool,
         ReadTool,
@@ -34,43 +36,19 @@ class OpenAICompatibleToolRegistry(AgentToolRegistry[AgentTool[OpenAICompatibleT
         GlobTool,
         ListTool,
     )
-    name_fallbacks: dict[str, tuple[str, ...]] = field(
-        default_factory=lambda: {
-            "computer": (
-                "computer",
-                "hud_computer",
-                "openai_computer",
-                "glm_computer",
-                "qwen_computer",
-            ),
-            "filesystem": ("read", "grep", "glob", "list"),
-        }
-    )
+    function_tool_class = OpenAICompatibleFunctionTool
+    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {
+        "computer": (
+            "computer",
+            "hud_computer",
+            "openai_computer",
+            "glm_computer",
+            "qwen_computer",
+        ),
+        "filesystem": ("read", "grep", "glob", "list"),
+    }
 
-    @property
-    def api_types(self) -> frozenset[str]:
-        api_types: set[str] = set()
-        for cls in self.tool_classes:
-            spec = cls.default_spec("unknown")
-            if spec is not None and spec.api_type != "function":
-                api_types.add(spec.api_type)
-            api_types.update(getattr(cls, "ignored_api_types", frozenset()))
-        return frozenset(api_types)
-
-
-openai_compatible_tools = OpenAICompatibleToolRegistry()
 
 __all__ = [
-    "GLM_COMPUTER_SPEC",
-    "QWEN_COMPUTER_SPEC",
-    "FilesystemTool",
-    "GLMComputerTool",
-    "GlobTool",
-    "GrepTool",
-    "ListTool",
-    "OpenAICompatibleToolParam",
-    "OpenAICompatibleToolRegistry",
-    "QwenComputerTool",
-    "ReadTool",
-    "openai_compatible_tools",
+    "OpenAICompatibleAgentTools",
 ]
