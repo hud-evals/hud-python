@@ -116,6 +116,16 @@ Python `>=3.11, <3.13`.
 - Add or update focused tests for behavior changes. Put tests near the module
   they cover, following the existing `*/tests/` layout.
 - Test behavior and contracts, not private implementation details.
+- Regression tests should fail on the old behavior through the normal lifecycle
+  or public boundary. Do not manually seed private state such as internal maps,
+  caches, cursors, or prepared containers just to prove a changed line.
+- If a bug involves internal state, reach it through real setup and execution:
+  construction, configuration, preparation, run loop, provider response, tool
+  execution, or public API call.
+- Do not add hooks, helper methods, or abstraction layers only to make tests
+  easier. If a test needs that, reconsider the behavior boundary instead.
+- Test names should describe the observable behavior or contract, not the
+  private mechanism.
 - Mock external services, provider APIs, network, Docker, browser, and filesystem
   boundaries as needed. Do not mock core logic just to make a test easy.
 - Mark tests that require `HUD_API_KEY`, network access, or deployed services as
