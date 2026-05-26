@@ -98,12 +98,7 @@ async def test_supported_openai_hosted_tool_is_sent_to_provider() -> None:
         hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})],
     )
 
-    result = await agent.run(
-        AgentContext(
-            messages=[text_prompt("use hosted code")],
-            tool_client=RecordingToolEnvironment().client,
-        )
-    )
+    result = await agent.run(AgentContext(prompt=[text_prompt("use hosted code")]))
 
     assert result.content == "done"
     tools = client.responses.create.await_args.kwargs["tools"]
@@ -122,12 +117,7 @@ async def test_unsupported_openai_hosted_tool_is_not_sent_to_provider() -> None:
         hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})],
     )
 
-    result = await agent.run(
-        AgentContext(
-            messages=[text_prompt("use hosted code")],
-            tool_client=RecordingToolEnvironment().client,
-        )
-    )
+    result = await agent.run(AgentContext(prompt=[text_prompt("use hosted code")]))
 
     assert result.content == "done"
     tools = client.responses.create.await_args.kwargs["tools"]
@@ -168,7 +158,7 @@ async def test_openai_tool_search_threshold_defers_function_loading() -> None:
 
     result = await agent.run(
         AgentContext(
-            messages=[text_prompt("use tools")],
+            prompt=[text_prompt("use tools")],
             tool_client=environment.client,
         )
     )
@@ -201,12 +191,7 @@ async def test_claude_hosted_web_fetch_payload_is_sent_to_provider() -> None:
         ],
     )
 
-    result = await agent.run(
-        AgentContext(
-            messages=[text_prompt("fetch")],
-            tool_client=RecordingToolEnvironment().client,
-        )
-    )
+    result = await agent.run(AgentContext(prompt=[text_prompt("fetch")]))
 
     assert result.content == "done"
     tools = client.beta.messages.stream.call_args.kwargs["tools"]
@@ -238,7 +223,7 @@ async def test_claude_tool_search_threshold_defers_generic_tools() -> None:
 
     result = await agent.run(
         AgentContext(
-            messages=[text_prompt("use tools")],
+            prompt=[text_prompt("use tools")],
             tool_client=RecordingToolEnvironment([mcp_tool("first"), mcp_tool("second")]).client,
         )
     )
@@ -260,12 +245,7 @@ async def test_gemini_hosted_code_execution_payload_is_sent_to_provider() -> Non
         hosted_tools=[GeminiCodeExecutionTool()],
     )
 
-    result = await agent.run(
-        AgentContext(
-            messages=[text_prompt("run code")],
-            tool_client=RecordingToolEnvironment().client,
-        )
-    )
+    result = await agent.run(AgentContext(prompt=[text_prompt("run code")]))
 
     assert result.content == "done"
     config = client.aio.models.generate_content.await_args.kwargs["config"]

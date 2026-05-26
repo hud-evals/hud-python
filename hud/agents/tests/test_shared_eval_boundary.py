@@ -173,7 +173,9 @@ async def test_eval_run_passes_max_steps_to_agent_run() -> None:
 
     result = await ctx.run_agent(agent, max_steps=1)
 
-    assert result.content is None
+    assert result.isError is True
+    assert result.content == "Max steps exceeded"
+    assert result.info["error"] == "max_steps_exceeded"
     assert ctx.submitted is None
     assert [(call.name, call.arguments) for call in ctx.environment.calls] == [("lookup", {})]
 

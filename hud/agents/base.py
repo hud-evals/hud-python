@@ -6,8 +6,9 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from functools import cached_property
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
+
+from pydantic import BaseModel, ConfigDict
 
 from hud.agents.misc import auto_respond
 from hud.types import AgentResponse, Trace
@@ -19,26 +20,38 @@ if TYPE_CHECKING:
     from hud.agents.tools.base import CallTool, ToolClient
     from hud.agents.types import AgentConfig
 
-ProviderMessageT = TypeVar("ProviderMessageT")
+MessageT = TypeVar("MessageT")
+ToolsT = TypeVar("ToolsT", bound="AgentTools[Any, Any, Any]")
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class AgentContext:
-    """Prompt messages plus optional MCP tool access for one agent run."""
+class AgentState(BaseModel, Generic[MessageT, ToolsT]):
+    """Mutable provider-formatted state for one agent run."""
 
-    messages: list[types.PromptMessage]
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    messages: list[MessageT]
+    tools: ToolsT
+
+
+StateT = TypeVar("StateT", bound="AgentState[Any, Any]")
+
+
+@dataclass
+class AgentContext(Generic[StateT]):
+    """Prompt input, tools, and provider-local state for one agent run."""
+
+    prompt: list[types.PromptMessage]
     tool_client: ToolClient | None = None
+    state: StateT | None = None
 
 
-class MCPAgent(ABC, Generic[ProviderMessageT]):
+class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
     """
     Base class for agents that interact with HUD MCP-backed environments.
 
-    Agent instances are intended to be run-scoped: create a fresh agent for each
-    independent evaluation or task run. Provider implementations may keep
-    conversation IDs, continuation cursors, and prepared tool state on the
-    instance during a run.
+    Agent instances hold provider configuration and clients. Per-run messages
+    and provider state live on ``AgentContext`` under the ``state`` field.
 
     Agents interact with environments through per-run tools and tool handlers supplied
     by the caller.
@@ -60,18 +73,12 @@ class MCPAgent(ABC, Generic[ProviderMessageT]):
         self.auto_respond: bool = config.auto_respond
 
     @classmethod
-    def create(cls, **kwargs: object) -> MCPAgent[ProviderMessageT]:
+    def create(cls, **kwargs: object) -> MCPAgent[MessageT, ToolsT, StateT]:
         raise NotImplementedError(f"{cls.__name__}.create() must be implemented by subclasses")
-
-    @cached_property
-    @abstractmethod
-    def tools(self) -> AgentTools[Any, Any]:
-        """Provider-specific tool container used by the shared run loop."""
-        raise NotImplementedError
 
     async def run(
         self,
-        ctx: AgentContext,
+        ctx: AgentContext[StateT],
         *,
         max_steps: int = 10,
     ) -> Trace:
@@ -85,19 +92,28 @@ class MCPAgent(ABC, Generic[ProviderMessageT]):
         Returns:
             Trace with reward, done, content fields and trace steps
         """
-        tool_handler: CallTool | None = None
-        if ctx.tool_client is not None:
-            self.tools.prepare(
-                model=self.model,
-                tools=ctx.tool_client.tools,
-                hosted_tools=self.config.hosted_tools,
-                tool_metadata=ctx.tool_client.tool_metadata,
-            )
-            tool_handler = ctx.tool_client.tool_handler
+        if max_steps < -1:
+            raise ValueError("max_steps must be -1 or greater")
 
-        messages: list[ProviderMessageT] = []
+        tool_handler: CallTool | None = None
+        tools: list[types.Tool] = []
+        tool_metadata = None
+        if ctx.tool_client is not None:
+            tools = ctx.tool_client.tools
+            tool_handler = ctx.tool_client.tool_handler
+            tool_metadata = ctx.tool_client.tool_metadata
+
+        messages: list[MessageT] = []
         try:
-            messages = await self.format_messages(ctx.messages)
+            state = await self.initialize_state(ctx.prompt)
+            ctx.state = state
+            state.tools.prepare(
+                model=self.model,
+                tools=tools,
+                hosted_tools=self.config.hosted_tools,
+                tool_metadata=tool_metadata,
+            )
+            messages = state.messages
             logger.debug("Messages: %s", messages)
 
             step_count = 0
@@ -110,7 +126,7 @@ class MCPAgent(ABC, Generic[ProviderMessageT]):
 
                 try:
                     # 1. Get model response
-                    response = await self.get_response(messages)
+                    response = await self.get_response(state)
 
                     logger.debug("Agent:\n%s", response)
 
@@ -120,31 +136,32 @@ class MCPAgent(ABC, Generic[ProviderMessageT]):
                             enabled=self.auto_respond,
                         ):
                             logger.debug("Continuing execution")
-                            messages.extend(await self.format_messages([follow_up]))
+                            follow_up_state = await self.initialize_state([follow_up])
+                            state.messages.extend(follow_up_state.messages)
                             continue
 
                         logger.debug("Stopping execution")
                         return Trace(
                             done=True,
-                            messages=messages,
+                            messages=state.messages,
                             content=response.content,
                             isError=response.isError,
                             citations=response.citations,
                         )
 
                     # 2. Execute tools
-                    tool_messages = await self.tools.execute(
+                    tool_messages = await state.tools.execute(
                         tool_handler,
                         response.tool_calls,
                     )
 
-                    messages.extend(cast("list[ProviderMessageT]", tool_messages))
+                    state.messages.extend(tool_messages)
 
                 except Exception as e:
                     logger.exception("Step failed")
                     return Trace(
                         done=True,
-                        messages=messages,
+                        messages=state.messages,
                         content=str(e),
                         isError=True,
                         info={"error": str(e)},
@@ -177,20 +194,22 @@ class MCPAgent(ABC, Generic[ProviderMessageT]):
                 isError=True,
                 info={"error": str(e)},
             )
-
         return Trace(
             done=True,
             messages=messages,
+            content="Max steps exceeded",
+            isError=True,
+            info={"error": "max_steps_exceeded", "max_steps": max_steps},
         )
 
     @abstractmethod
-    async def get_response(self, messages: list[ProviderMessageT]) -> AgentResponse:
+    async def get_response(self, state: StateT) -> AgentResponse:
         """
         Get response from the model including any tool calls.
 
 
         Args:
-            messages: Current conversation messages
+            state: Current provider conversation state
 
         Returns:
             AgentResponse with content, tool_calls, and done fields
@@ -198,6 +217,9 @@ class MCPAgent(ABC, Generic[ProviderMessageT]):
         raise NotImplementedError
 
     @abstractmethod
-    async def format_messages(self, messages: list[types.PromptMessage]) -> list[ProviderMessageT]:
-        """Format MCP prompt messages into provider messages."""
+    async def initialize_state(
+        self,
+        prompt: list[types.PromptMessage],
+    ) -> StateT:
+        """Build provider run state from MCP prompt messages."""
         raise NotImplementedError

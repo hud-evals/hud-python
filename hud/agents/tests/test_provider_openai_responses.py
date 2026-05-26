@@ -17,7 +17,14 @@ from openai.types.responses.response_reasoning_item import Summary
 
 from hud.agents.base import AgentContext
 from hud.agents.openai import OpenAIAgent
-from hud.agents.tests.conftest import RecordingToolEnvironment, mcp_tool, text_prompt, text_result
+from hud.agents.openai.agent import OpenAIAgentState
+from hud.agents.openai.tools import OpenAIAgentTools
+from hud.agents.tests.conftest import (
+    RecordingToolEnvironment,
+    mcp_tool,
+    text_prompt,
+    text_result,
+)
 
 
 def _message_response(text: str, *, response_id: str = "resp_final") -> SimpleNamespace:
@@ -32,6 +39,13 @@ def _message_response(text: str, *, response_id: str = "resp_final") -> SimpleNa
                 content=[ResponseOutputText(type="output_text", text=text, annotations=[])],
             )
         ],
+    )
+
+
+def provider_state(messages: list[Any] | None = None) -> OpenAIAgentState:
+    return OpenAIAgentState.model_construct(
+        messages=[] if messages is None else messages,
+        tools=OpenAIAgentTools(),
     )
 
 
@@ -65,7 +79,7 @@ async def test_openai_run_executes_model_tool_call_and_returns_final_answer() ->
     agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
 
     result = await agent.run(
-        AgentContext(messages=[text_prompt("answer with lookup")], tool_client=environment.client)
+        AgentContext(prompt=[text_prompt("answer with lookup")], tool_client=environment.client)
     )
 
     assert result.content == "final answer"
@@ -121,7 +135,7 @@ async def test_openai_get_response_preserves_reasoning_and_citations() -> None:
     )
     agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
 
-    response = await agent.get_response([])
+    response = await agent.get_response(provider_state())
 
     assert response.content == "Example"
     assert response.reasoning == "thought"
@@ -145,7 +159,7 @@ async def test_openai_citation_mode_requests_provider_source_metadata() -> None:
     agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
     agent.enable_citations = True
 
-    response = await agent.get_response([])
+    response = await agent.get_response(provider_state())
 
     assert response.content == "answer"
     assert client.responses.create.await_args.kwargs["include"] == [
@@ -183,7 +197,7 @@ async def test_openai_get_response_parses_native_computer_and_shell_calls() -> N
     )
     agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
 
-    response = await agent.get_response([])
+    response = await agent.get_response(provider_state())
 
     assert response.done is False
     assert [(call.name, call.arguments, call.id) for call in response.tool_calls] == [
@@ -199,8 +213,32 @@ async def test_openai_run_returns_error_trace_for_provider_failure() -> None:
     )
     agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
 
-    result = await agent.run(AgentContext(messages=[text_prompt("hello")]))
+    result = await agent.run(AgentContext(prompt=[text_prompt("hello")]))
 
     assert result.isError is True
     assert result.content == "provider down"
     assert result.info["error"] == "provider down"
+
+
+@pytest.mark.asyncio
+async def test_openai_run_resets_response_continuation_between_runs() -> None:
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=AsyncMock(
+                side_effect=[
+                    _message_response("first", response_id="resp_first"),
+                    _message_response("second", response_id="resp_second"),
+                ]
+            )
+        )
+    )
+    agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
+
+    first = await agent.run(AgentContext(prompt=[text_prompt("first")]))
+    second = await agent.run(AgentContext(prompt=[text_prompt("second")]))
+
+    assert first.content == "first"
+    assert second.content == "second"
+    assert client.responses.create.await_count == 2
+    second_kwargs = client.responses.create.await_args_list[1].kwargs
+    assert second_kwargs["previous_response_id"] != "resp_first"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,7 +10,14 @@ from google.genai import types as genai_types
 
 from hud.agents.base import AgentContext
 from hud.agents.gemini import GeminiAgent
-from hud.agents.tests.conftest import RecordingToolEnvironment, mcp_tool, text_prompt, text_result
+from hud.agents.gemini.agent import GeminiAgentState
+from hud.agents.gemini.tools import GeminiAgentTools
+from hud.agents.tests.conftest import (
+    RecordingToolEnvironment,
+    mcp_tool,
+    text_prompt,
+    text_result,
+)
 
 
 def _gemini_response(*parts: genai_types.Part) -> genai_types.GenerateContentResponse:
@@ -34,6 +41,13 @@ def _gemini_client(*responses: genai_types.GenerateContentResponse) -> MagicMock
     return client
 
 
+def provider_state(messages: list[Any] | None = None) -> GeminiAgentState:
+    return GeminiAgentState.model_construct(
+        messages=[] if messages is None else messages,
+        tools=GeminiAgentTools(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_gemini_run_executes_model_tool_call_and_returns_final_answer() -> None:
     client = _gemini_client(
@@ -54,7 +68,7 @@ async def test_gemini_run_executes_model_tool_call_and_returns_final_answer() ->
     agent = GeminiAgent.create(model_client=client, validate_api_key=False)
 
     result = await agent.run(
-        AgentContext(messages=[text_prompt("answer with lookup")], tool_client=environment.client)
+        AgentContext(prompt=[text_prompt("answer with lookup")], tool_client=environment.client)
     )
 
     assert result.content == "final answer"
@@ -81,7 +95,7 @@ async def test_gemini_no_candidates_is_a_user_visible_error() -> None:
     agent = GeminiAgent.create(model_client=client, validate_api_key=False)
 
     with pytest.raises(RuntimeError, match="returned no candidates"):
-        await agent.get_response([])
+        await agent.get_response(provider_state())
 
 
 @pytest.mark.asyncio
@@ -90,7 +104,7 @@ async def test_gemini_citations_enable_google_search_at_provider_boundary() -> N
     agent = GeminiAgent.create(model_client=client, validate_api_key=False)
     agent.enable_citations = True
 
-    response = await agent.get_response([])
+    response = await agent.get_response(provider_state())
 
     assert response.content == "answer"
     config = client.aio.models.generate_content.await_args.kwargs["config"]
@@ -107,7 +121,7 @@ async def test_gemini_preserves_thought_parts_as_reasoning() -> None:
     )
     agent = GeminiAgent.create(model_client=client, validate_api_key=False)
 
-    response = await agent.get_response([])
+    response = await agent.get_response(provider_state())
 
     assert response.content == "answer"
     assert response.reasoning == "private reasoning"
@@ -145,7 +159,7 @@ async def test_gemini_prunes_older_computer_screenshots_before_request() -> None
     agent = GeminiAgent.create(model_client=client, validate_api_key=False)
     agent.max_recent_turn_with_screenshots = 1
 
-    response = await agent.get_response(messages)
+    response = await agent.get_response(provider_state(cast("list[Any]", messages)))
 
     assert response.content == "answer"
     assert old_response.parts is None

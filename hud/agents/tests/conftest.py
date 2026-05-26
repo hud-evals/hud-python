@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-from functools import cached_property
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias, cast
 
 import pytest
 from mcp import types
 
-from hud.agents.base import MCPAgent
+from hud.agents.base import AgentState, MCPAgent
 from hud.agents.tools import (
     AgentTool,
     AgentTools,
@@ -59,7 +58,7 @@ def result_text(result: MCPToolResult) -> str:
     return "\n".join(block.text for block in result.content if isinstance(block, types.TextContent))
 
 
-class HarnessTool(AgentTool[dict[str, Any]]):
+class HarnessTool(AgentTool[dict[str, Any], dict[str, Any]]):
     name = "function"
     capability = "function"
 
@@ -86,7 +85,7 @@ class HarnessTool(AgentTool[dict[str, Any]]):
         }
 
 
-class HarnessTools(AgentTools[HarnessTool, dict[str, Any]]):
+class HarnessTools(AgentTools[HarnessTool, dict[str, Any], dict[str, Any]]):
     function_tool_class = HarnessTool
 
 
@@ -119,13 +118,20 @@ class HarnessFilesystemReadTool(GroupedCapabilityMixin, HarnessTool):
         return AgentToolSpec(api_type="function", api_name="read_file")
 
 
-class RoutingHarnessTools(AgentTools[HarnessTool, dict[str, Any]]):
+class RoutingHarnessTools(AgentTools[HarnessTool, dict[str, Any], dict[str, Any]]):
     native_tool_classes = (HarnessNativeShellTool, HarnessFilesystemReadTool)
     function_tool_class = HarnessTool
     name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {"shell": ("bash",)}
 
 
-class ScriptedAgent(MCPAgent[dict[str, Any]]):
+HarnessAgentTools: TypeAlias = AgentTools[HarnessTool, dict[str, Any], dict[str, Any]]
+
+
+class HarnessAgentState(AgentState[dict[str, Any], HarnessAgentTools]):
+    pass
+
+
+class ScriptedAgent(MCPAgent[dict[str, Any], HarnessAgentTools, HarnessAgentState]):
     """Agent fake that exercises the real `MCPAgent.run` loop."""
 
     def __init__(
@@ -133,7 +139,7 @@ class ScriptedAgent(MCPAgent[dict[str, Any]]):
         responses: list[AgentResponse | BaseException],
         *,
         config: HarnessConfig | None = None,
-        tools_factory: Callable[[], AgentTools[Any, Any]] | None = None,
+        tools_factory: Callable[[], HarnessAgentTools] | None = None,
     ) -> None:
         super().__init__(config or HarnessConfig())
         self.config: HarnessConfig
@@ -141,13 +147,12 @@ class ScriptedAgent(MCPAgent[dict[str, Any]]):
         self.seen_messages: list[list[dict[str, Any]]] = []
         self._tools_factory = tools_factory or HarnessTools
 
-    @cached_property
-    def tools(self) -> AgentTools[Any, Any]:
-        return self._tools_factory()
-
-    async def format_messages(self, messages: list[types.PromptMessage]) -> list[dict[str, Any]]:
+    async def initialize_state(
+        self,
+        prompt: list[types.PromptMessage],
+    ) -> HarnessAgentState:
         formatted: list[dict[str, Any]] = []
-        for message in messages:
+        for message in prompt:
             content = message.content
             formatted.append(
                 {
@@ -155,10 +160,13 @@ class ScriptedAgent(MCPAgent[dict[str, Any]]):
                     "content": content.text if isinstance(content, types.TextContent) else "",
                 }
             )
-        return formatted
+        return HarnessAgentState.model_construct(
+            messages=formatted,
+            tools=self._tools_factory(),
+        )
 
-    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
-        self.seen_messages.append([dict(message) for message in messages])
+    async def get_response(self, state: HarnessAgentState) -> AgentResponse:
+        self.seen_messages.append([dict(message) for message in state.messages])
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response

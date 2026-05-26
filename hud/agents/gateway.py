@@ -17,9 +17,13 @@ if TYPE_CHECKING:
     from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
     from google.genai import Client as GenaiClient
 
-    from hud.agents.base import MCPAgent
+    from hud.agents.claude import ClaudeAgent
+    from hud.agents.gemini import GeminiAgent
+    from hud.agents.openai import OpenAIAgent
+    from hud.agents.openai_compatible import OpenAIChatAgent
 
     GatewayClient: TypeAlias = AsyncAnthropic | AsyncAnthropicBedrock | GenaiClient | AsyncOpenAI
+    GatewayAgent: TypeAlias = ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
 
 
 class GatewayProviderInfo(BaseModel):
@@ -94,7 +98,7 @@ def _fetch_gateway_models() -> list[GatewayModelInfo]:
         return []
 
 
-def create_agent(model: str, **kwargs: Any) -> MCPAgent[Any]:
+def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     """Create an agent routed through the HUD gateway.
 
     For direct API access with provider API keys, instantiate the agent classes directly.

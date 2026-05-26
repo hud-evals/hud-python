@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from openai.types.chat import ChatCompletionMessageParam
+
 from hud.agents.tools import AgentTool, AgentTools
 
 from .base import (
@@ -24,11 +26,15 @@ if TYPE_CHECKING:
 
 
 class OpenAICompatibleAgentTools(
-    AgentTools[AgentTool[OpenAICompatibleToolParam], OpenAICompatibleToolParam]
+    AgentTools[
+        AgentTool[OpenAICompatibleToolParam, ChatCompletionMessageParam],
+        OpenAICompatibleToolParam,
+        ChatCompletionMessageParam,
+    ]
 ):
     """Prepared OpenAI-compatible chat tool state for a run."""
 
-    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = (
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object, object]], ...]] = (
         GLMComputerTool,
         QwenComputerTool,
         ReadTool,

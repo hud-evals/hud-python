@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 OpenAICompatibleToolParam: TypeAlias = "ChatCompletionToolParam | QwenComputerUseToolParam"
 
 
-class OpenAICompatibleTool(AgentTool[OpenAICompatibleToolParam]):
+class OpenAICompatibleTool(AgentTool[OpenAICompatibleToolParam, "ChatCompletionMessageParam"]):
     """Agent-side OpenAI-compatible tool backed by an environment tool."""
 
     def format_result(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import logging
-from functools import cached_property
 from typing import Any, cast
 
 import mcp.types as types
@@ -12,7 +11,7 @@ from google import genai
 from google.genai import types as genai_types
 
 from hud.agents import gateway
-from hud.agents.base import MCPAgent
+from hud.agents.base import AgentState, MCPAgent
 from hud.agents.types import GeminiConfig
 from hud.settings import settings
 from hud.tools.types import Citation
@@ -25,7 +24,11 @@ from .tools import GeminiAgentTools
 logger = logging.getLogger(__name__)
 
 
-class GeminiAgent(MCPAgent[genai_types.Content]):
+class GeminiAgentState(AgentState[genai_types.Content, GeminiAgentTools]):
+    pass
+
+
+class GeminiAgent(MCPAgent[genai_types.Content, GeminiAgentTools, GeminiAgentState]):
     """
     Gemini agent that uses MCP servers for tool execution.
 
@@ -77,26 +80,25 @@ class GeminiAgent(MCPAgent[genai_types.Content]):
             gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
 
-    @cached_property
-    def tools(self) -> GeminiAgentTools:
-        return GeminiAgentTools(
-            excluded_predefined_functions=self.excluded_predefined_functions,
+    async def initialize_state(self, prompt: list[types.PromptMessage]) -> GeminiAgentState:
+        """Format MCP prompt messages for Gemini."""
+        return GeminiAgentState.model_construct(
+            messages=[
+                genai_types.Content(
+                    role="model" if str(message.role) == "assistant" else str(message.role),
+                    parts=[_format_content(message.content)],
+                )
+                for message in prompt
+            ],
+            tools=GeminiAgentTools(
+                excluded_predefined_functions=self.excluded_predefined_functions,
+            ),
         )
 
-    async def format_messages(
-        self, messages: list[types.PromptMessage]
-    ) -> list[genai_types.Content]:
-        """Format MCP prompt messages for Gemini."""
-        return [
-            genai_types.Content(
-                role="model" if str(message.role) == "assistant" else str(message.role),
-                parts=[_format_content(message.content)],
-            )
-            for message in messages
-        ]
-
-    async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
+    async def get_response(self, state: GeminiAgentState) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
+        messages = state.messages
+        tools = state.tools
         # Drop screenshots from older computer tool responses to keep context small.
         screenshot_turns: list[list[genai_types.FunctionResponse]] = []
         for content in reversed(messages):
@@ -109,7 +111,7 @@ class GeminiAgent(MCPAgent[genai_types.Content]):
                 if (
                     function_response is not None
                     and function_response.parts
-                    and function_response.name in self.tools.predefined_computer_functions
+                    and function_response.name in tools.predefined_computer_functions
                 ):
                     turn_responses.append(function_response)
 
@@ -121,9 +123,12 @@ class GeminiAgent(MCPAgent[genai_types.Content]):
                 function_response.parts = None
 
         # Configure Gemini generation options.
-        tools = cast("genai_types.ToolListUnion", self.tools.params)
-        if self.enable_citations and not any(tool.google_search for tool in self.tools.params):
-            tools = [*list(tools), genai_types.Tool(google_search=genai_types.GoogleSearch())]
+        provider_tools = cast("genai_types.ToolListUnion", tools.params)
+        if self.enable_citations and not any(tool.google_search for tool in tools.params):
+            provider_tools = [
+                *list(provider_tools),
+                genai_types.Tool(google_search=genai_types.GoogleSearch()),
+            ]
 
         thinking_config = None
         if self.thinking_level is not None or self.include_thoughts:
@@ -139,7 +144,7 @@ class GeminiAgent(MCPAgent[genai_types.Content]):
             top_p=self.top_p,
             top_k=self.top_k,
             max_output_tokens=self.max_output_tokens,
-            tools=tools,
+            tools=provider_tools,
             system_instruction=self.system_prompt,
             thinking_config=thinking_config,
         )
@@ -183,7 +188,7 @@ class GeminiAgent(MCPAgent[genai_types.Content]):
         for part in parts:
             function_call = part.function_call
             if function_call is not None:
-                result.tool_calls.append(self.tools.tool_call(function_call))
+                result.tool_calls.append(tools.tool_call(function_call))
                 result.done = False
                 continue
 

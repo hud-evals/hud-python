@@ -18,14 +18,13 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import cached_property
 from typing import Any, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
-from hud.agents.base import MCPAgent
+from hud.agents.base import AgentState, MCPAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall
@@ -38,7 +37,14 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
-class OpenAIChatAgent(MCPAgent[ChatCompletionMessageParam]):
+class OpenAIChatAgentState(AgentState[ChatCompletionMessageParam, OpenAICompatibleAgentTools]):
+    continuation_token_ids: list[int] | None = None
+    continuation_message_count: int | None = None
+
+
+class OpenAIChatAgent(
+    MCPAgent[ChatCompletionMessageParam, OpenAICompatibleAgentTools, OpenAIChatAgentState]
+):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
 
     @with_signature(OpenAIChatConfig)
@@ -89,19 +95,10 @@ class OpenAIChatAgent(MCPAgent[ChatCompletionMessageParam]):
             extra_body["checkpoint"] = self.config.checkpoint
             self.completion_kwargs["extra_body"] = extra_body
 
-        self._continuation_token_ids: list[int] | None = None
-        self._continuation_message_count: int | None = None
-
-    @cached_property
-    def tools(self) -> OpenAICompatibleAgentTools:
-        return OpenAICompatibleAgentTools()
-
-    async def format_messages(
-        self, messages: list[types.PromptMessage]
-    ) -> list[ChatCompletionMessageParam]:
+    async def initialize_state(self, prompt: list[types.PromptMessage]) -> OpenAIChatAgentState:
         """Format MCP prompt messages for OpenAI-compatible chat."""
         formatted_messages: list[ChatCompletionMessageParam] = []
-        for message in messages:
+        for message in prompt:
             content: list[dict[str, Any]] = []
             block = message.content
             if isinstance(block, types.TextContent):
@@ -120,10 +117,14 @@ class OpenAIChatAgent(MCPAgent[ChatCompletionMessageParam]):
                     {"role": message.role, "content": content},
                 )
             )
-        return formatted_messages
+        return OpenAIChatAgentState.model_construct(
+            messages=formatted_messages,
+            tools=OpenAICompatibleAgentTools(),
+        )
 
-    async def get_response(self, messages: list[ChatCompletionMessageParam]) -> AgentResponse:
+    async def get_response(self, state: OpenAIChatAgentState) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
+        messages = state.messages
 
         reserved_kwargs = {"model", "messages", "stream", "tools"}
         request_kwargs = {
@@ -134,12 +135,12 @@ class OpenAIChatAgent(MCPAgent[ChatCompletionMessageParam]):
         provider_body: dict[str, Any] = dict(request_kwargs.pop("extra_body", None) or {})
         return_token_ids = bool(provider_body.get("return_token_ids"))
 
-        if self.tools.params:
-            provider_body["tools"] = self.tools.params
+        if state.tools.params:
+            provider_body["tools"] = state.tools.params
 
-        if return_token_ids and self._continuation_token_ids and self._continuation_message_count:
-            provider_body["prompt_token_ids"] = self._continuation_token_ids
-            provider_body["continuation_from"] = self._continuation_message_count
+        if return_token_ids and state.continuation_token_ids and state.continuation_message_count:
+            provider_body["prompt_token_ids"] = state.continuation_token_ids
+            provider_body["continuation_from"] = state.continuation_message_count
 
         if provider_body:
             request_kwargs["extra_body"] = provider_body
@@ -202,8 +203,8 @@ class OpenAIChatAgent(MCPAgent[ChatCompletionMessageParam]):
             prompt_token_ids = getattr(choice, "prompt_token_ids", None)
             token_ids = getattr(choice, "token_ids", None)
             if prompt_token_ids is not None and token_ids is not None:
-                self._continuation_token_ids = list(prompt_token_ids) + list(token_ids)
-                self._continuation_message_count = len(messages)
+                state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
+                state.continuation_message_count = len(messages)
 
         tool_calls: list[MCPToolCall] = []
         for tool_call in function_calls:

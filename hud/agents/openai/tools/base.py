@@ -19,14 +19,12 @@ from openai.types.responses import (
     ResponseInputTextParam,
     ToolParam,
 )
-from openai.types.responses.response_input_param import FunctionCallOutput
+from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputItemParam
 
 from hud.agents.tools import AgentTool, AgentToolSpec
 from hud.utils.strict_schema import ensure_strict_json_schema
 
 if TYPE_CHECKING:
-    from openai.types.responses import ResponseInputItemParam
-
     from hud.types import MCPToolCall, MCPToolResult
 
 logger = logging.getLogger(__name__)
@@ -34,7 +32,7 @@ logger = logging.getLogger(__name__)
 OpenAIToolSpec = AgentToolSpec
 
 
-class OpenAITool(AgentTool[ToolParam], ABC):
+class OpenAITool(AgentTool[ToolParam, ResponseInputItemParam], ABC):
     """Agent-side OpenAI provider tool backed by an environment tool."""
 
     def format_result(

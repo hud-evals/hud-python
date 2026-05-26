@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from anthropic.types.beta import BetaToolUnionParam
+from anthropic.types.beta import BetaMessageParam, BetaToolUnionParam
 
 from hud.agents.tools import AgentTools
 
@@ -20,10 +20,10 @@ if TYPE_CHECKING:
     from hud.agents.tools import AgentTool
 
 
-class ClaudeAgentTools(AgentTools[ClaudeTool, BetaToolUnionParam]):
+class ClaudeAgentTools(AgentTools[ClaudeTool, BetaToolUnionParam, BetaMessageParam]):
     """Prepared Claude tool state for a run."""
 
-    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = (
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object, object]], ...]] = (
         ClaudeComputerTool,
         ClaudeBashTool,
         ClaudeTextEditorTool,

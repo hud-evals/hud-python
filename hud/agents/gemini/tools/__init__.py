@@ -37,10 +37,16 @@ if TYPE_CHECKING:
     from hud.agents.tools import ToolMetadata
 
 
-class GeminiAgentTools(AgentTools[AgentTool[genai_types.Tool], genai_types.Tool]):
+class GeminiAgentTools(
+    AgentTools[
+        AgentTool[genai_types.Tool, genai_types.Content],
+        genai_types.Tool,
+        genai_types.Content,
+    ]
+):
     """Prepared Gemini tool state for a run."""
 
-    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = (
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object, object]], ...]] = (
         GeminiComputerTool,
         GeminiShellTool,
         GeminiEditTool,
@@ -93,7 +99,7 @@ class GeminiAgentTools(AgentTools[AgentTool[genai_types.Tool], genai_types.Tool]
         *,
         tool_metadata: ToolMetadata | None = None,
         excluded_predefined_functions: list[str] | None = None,
-    ) -> tuple[list[AgentTool[genai_types.Tool]], list[types.Tool]]:
+    ) -> tuple[list[AgentTool[genai_types.Tool, genai_types.Content]], list[types.Tool]]:
         provider_tools, user_tools = super().select_tools(
             tools,
             model,

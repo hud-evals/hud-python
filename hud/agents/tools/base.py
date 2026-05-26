@@ -21,8 +21,10 @@ if TYPE_CHECKING:
     from hud.agents.tools.hosted import HostedTool
 
 AgentToolParamT_co = TypeVar("AgentToolParamT_co", covariant=True)
+MessageT_co = TypeVar("MessageT_co", covariant=True)
 ToolParamT = TypeVar("ToolParamT")
-AgentToolT = TypeVar("AgentToolT", bound="AgentTool[object]")
+MessageT = TypeVar("MessageT")
+AgentToolT = TypeVar("AgentToolT", bound="AgentTool[Any, Any]")
 CallTool = Callable[[MCPToolCall], Awaitable[MCPToolResult]]
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,7 @@ class AgentToolSpec:
         )
 
 
-class AgentTool(ABC, Generic[AgentToolParamT_co]):
+class AgentTool(ABC, Generic[AgentToolParamT_co, MessageT_co]):
     """Provider-facing tool owned by an agent harness."""
 
     name: ClassVar[str]
@@ -100,7 +102,9 @@ class AgentTool(ABC, Generic[AgentToolParamT_co]):
         """Execute an environment-backed tool by forwarding to its MCP tool."""
         return await call_tool(MCPToolCall(name=self.env_tool_name, arguments=arguments))
 
-    def format_result(self, call: MCPToolCall, result: MCPToolResult) -> Any | None:
+    def format_result(
+        self, call: MCPToolCall, result: MCPToolResult
+    ) -> MessageT_co | list[MessageT_co] | None:
         """Format a single tool result for the provider continuation turn."""
         del result
         logger.warning("Tool '%s' does not implement result formatting.", call.name)
@@ -110,11 +114,11 @@ class AgentTool(ABC, Generic[AgentToolParamT_co]):
     def to_params(self) -> AgentToolParamT_co: ...
 
 
-class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT]):
+class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT, MessageT]):
     """Prepared tool state owned by a single agent run."""
 
-    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = ()
-    function_tool_class: ClassVar[type[AgentTool[object]] | None] = None
+    native_tool_classes: ClassVar[tuple[type[AgentTool[Any, Any]], ...]] = ()
+    function_tool_class: ClassVar[type[AgentTool[Any, Any]] | None] = None
     name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {}
 
     def __init__(self) -> None:
@@ -168,6 +172,11 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT]):
         tool_metadata: ToolMetadata | None = None,
     ) -> None:
         """Prepare a generic provider tool map for an agent run."""
+        self.clear()
+        self.params = []
+        self.name_map = {}
+        self.hosted_tools = []
+
         provider_tools, user_tools = self.select_tools(
             tools,
             model,
@@ -212,14 +221,14 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT]):
         self,
         call_tool: CallTool | None,
         tool_call: MCPToolCall | list[MCPToolCall] | None = None,
-    ) -> list[Any]:
+    ) -> list[MessageT]:
         if tool_call is None:
             return []
 
         if call_tool is None:
             raise ValueError("call_tool callback is required to execute tool calls")
 
-        outputs: list[Any] = []
+        outputs: list[MessageT] = []
         tool_calls = [tool_call] if isinstance(tool_call, MCPToolCall) else tool_call
         for tc in tool_calls:
             agent_tool = self[tc.name]
@@ -235,11 +244,11 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT]):
                     isError=True,
                 )
 
-            output = agent_tool.format_result(tc, result)
+            output = cast("MessageT | list[MessageT] | None", agent_tool.format_result(tc, result))
             if output is None:
                 continue
             if isinstance(output, list):
-                outputs.extend(cast("list[Any]", output))
+                outputs.extend(cast("list[MessageT]", output))
             else:
                 outputs.append(output)
 

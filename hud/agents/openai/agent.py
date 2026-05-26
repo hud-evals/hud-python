@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import cached_property
 from typing import Any, Literal, cast
 
 import mcp.types as types
@@ -27,7 +26,7 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.agents import gateway
-from hud.agents.base import MCPAgent
+from hud.agents.base import AgentState, MCPAgent
 from hud.agents.types import OpenAIConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall
@@ -38,7 +37,12 @@ from .tools import OpenAIAgentTools
 logger = logging.getLogger(__name__)
 
 
-class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
+class OpenAIAgentState(AgentState[ResponseInputItemParam, OpenAIAgentTools]):
+    last_response_id: str | None = None
+    message_cursor: int = 0
+
+
+class OpenAIAgent(MCPAgent[ResponseInputItemParam, OpenAIAgentTools, OpenAIAgentState]):
     """Generic OpenAI agent that can execute MCP tools through the Responses API."""
 
     @with_signature(OpenAIConfig)
@@ -82,19 +86,10 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
         self.text = self.config.text
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation
 
-        self.last_response_id: str | None = None
-        self._message_cursor = 0
-
-    @cached_property
-    def tools(self) -> OpenAIAgentTools:
-        return OpenAIAgentTools()
-
-    async def format_messages(
-        self, messages: list[types.PromptMessage]
-    ) -> list[ResponseInputItemParam]:
+    async def initialize_state(self, prompt: list[types.PromptMessage]) -> OpenAIAgentState:
         """Convert MCP prompt messages into OpenAI Responses input items."""
         formatted_messages: list[ResponseInputItemParam] = []
-        for message in messages:
+        for message in prompt:
             match message.content:
                 case types.TextContent() as block:
                     content: ResponseInputMessageContentListParam = [
@@ -113,13 +108,17 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
                     content = [ResponseInputTextParam(type="input_text", text="")]
 
             formatted_messages.append(EasyInputMessageParam(role=message.role, content=content))
-        return formatted_messages
+        return OpenAIAgentState.model_construct(
+            messages=formatted_messages,
+            tools=OpenAIAgentTools(),
+        )
 
-    async def get_response(self, messages: list[ResponseInputItemParam]) -> AgentResponse:
+    async def get_response(self, state: OpenAIAgentState) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
-        new_items: ResponseInputParam = messages[self._message_cursor :]
+        messages = state.messages
+        new_items: ResponseInputParam = messages[state.message_cursor :]
         if not new_items:
-            if self.last_response_id is None:
+            if state.last_response_id is None:
                 new_items = [
                     Message(
                         role="user", content=[ResponseInputTextParam(type="input_text", text="")]
@@ -133,14 +132,15 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
         if self.enable_citations:
             include_param = ["web_search_call.action.sources"]
 
-        effective_tools: list[ToolParam] = list(self.tools.params)
-        if self.tools.tool_search_threshold is not None:
+        tools = state.tools
+        effective_tools: list[ToolParam] = list(tools.params)
+        if tools.tool_search_threshold is not None:
             fn_count = sum(1 for t in effective_tools if t.get("type") == "function")
-            if fn_count > self.tools.tool_search_threshold:
+            if fn_count > tools.tool_search_threshold:
                 logger.debug(
                     "tool_search: %d function tools > threshold %d, applying defer_loading",
                     fn_count,
-                    self.tools.tool_search_threshold,
+                    tools.tool_search_threshold,
                 )
                 effective_tools = cast(
                     "list[ToolParam]",
@@ -162,14 +162,14 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
             reasoning=self.reasoning if self.reasoning is not None else Omit(),
             tools=effective_tools if effective_tools else Omit(),
             previous_response_id=(
-                self.last_response_id if self.last_response_id is not None else Omit()
+                state.last_response_id if state.last_response_id is not None else Omit()
             ),
             truncation=self.truncation if self.truncation is not None else Omit(),
             include=include_param,
         )
 
-        self.last_response_id = response.id
-        self._message_cursor = len(messages)
+        state.last_response_id = response.id
+        state.message_cursor = len(messages)
 
         text_chunks: list[str] = []
         reasoning_chunks: list[str] = []
@@ -216,7 +216,7 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
                     tool_name = item.name or ""
                     tool_calls.append(
                         MCPToolCall(
-                            name=self.tools.name_map.get(tool_name, tool_name),
+                            name=tools.name_map.get(tool_name, tool_name),
                             arguments=json.loads(item.arguments),
                             id=item.call_id,
                         )
@@ -229,7 +229,7 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam]):
                     else:
                         raise ValueError("OpenAI computer_call missing action")
                     call: dict[str, Any] = {
-                        "name": self.tools.name_map.get("computer", "computer"),
+                        "name": tools.name_map.get("computer", "computer"),
                         "arguments": arguments,
                         "id": item.call_id,
                     }

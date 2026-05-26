@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 GeminiToolSpec = AgentToolSpec
 
 
-class GeminiTool(AgentTool[genai_types.Tool]):
+class GeminiTool(AgentTool[genai_types.Tool, genai_types.Content]):
     """Gemini function declaration backed by an environment tool."""
 
     description: ClassVar[str]

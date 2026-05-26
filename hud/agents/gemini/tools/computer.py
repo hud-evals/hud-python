@@ -52,7 +52,7 @@ GEMINI_COMPUTER_SPEC = GeminiToolSpec(
 )
 
 
-class GeminiComputerTool(AgentTool[genai_types.Tool]):
+class GeminiComputerTool(AgentTool[genai_types.Tool, genai_types.Content]):
     """Translate Gemini Computer Use calls into generic environment computer calls."""
 
     name = "computer_use"

@@ -39,7 +39,7 @@ class ClaudeToolSpec(AgentToolSpec):
     beta: str | None = None
 
 
-class ClaudeTool(AgentTool["BetaToolUnionParam"]):
+class ClaudeTool(AgentTool["BetaToolUnionParam", BetaMessageParam]):
     """Agent-side Claude provider tool backed by an environment tool."""
 
     def __init__(self, *, env_tool_name: str, spec: ClaudeToolSpec) -> None:

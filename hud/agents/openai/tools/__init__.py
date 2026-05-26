@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from openai.types.responses import ToolParam
+from openai.types.responses.response_input_param import ResponseInputItemParam
 
 from hud.agents.tools import AgentTool, AgentTools
 
@@ -17,10 +18,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-class OpenAIAgentTools(AgentTools[OpenAITool, ToolParam]):
+class OpenAIAgentTools(AgentTools[OpenAITool, ToolParam, ResponseInputItemParam]):
     """Prepared OpenAI Responses tool state for a run."""
 
-    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = (
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object, object]], ...]] = (
         OpenAIComputerTool,
         OpenAIShellTool,
     )

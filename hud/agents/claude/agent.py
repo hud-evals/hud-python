@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from functools import cached_property
 from typing import TYPE_CHECKING, Literal, cast
 
 import mcp.types as mcp_types
@@ -25,7 +24,7 @@ from anthropic.types.beta import (
 )
 
 from hud.agents import gateway
-from hud.agents.base import MCPAgent
+from hud.agents.base import AgentState, MCPAgent
 from hud.agents.types import ClaudeConfig
 from hud.settings import settings
 from hud.tools.types import Citation
@@ -42,7 +41,11 @@ logger = logging.getLogger(__name__)
 ClaudeImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
 
 
-class ClaudeAgent(MCPAgent[BetaMessageParam]):
+class ClaudeAgentState(AgentState[BetaMessageParam, ClaudeAgentTools]):
+    pass
+
+
+class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]):
     """
     Claude agent that uses MCP servers for tool execution.
 
@@ -82,14 +85,10 @@ class ClaudeAgent(MCPAgent[BetaMessageParam]):
         )
         self.max_tokens = self.config.max_tokens
 
-    @cached_property
-    def tools(self) -> ClaudeAgentTools:
-        return ClaudeAgentTools()
-
-    async def format_messages(self, messages: list[types.PromptMessage]) -> list[BetaMessageParam]:
+    async def initialize_state(self, prompt: list[types.PromptMessage]) -> ClaudeAgentState:
         """Format MCP prompt messages for Claude."""
         formatted: list[BetaMessageParam] = []
-        for message in messages:
+        for message in prompt:
             match message.content:
                 case mcp_types.TextContent():
                     content = BetaTextBlockParam(type="text", text=message.content.text)
@@ -121,26 +120,26 @@ class ClaudeAgent(MCPAgent[BetaMessageParam]):
                     content=[content],
                 )
             )
-        return formatted
+        return ClaudeAgentState.model_construct(messages=formatted, tools=ClaudeAgentTools())
 
-    async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
+    async def get_response(self, state: ClaudeAgentState) -> AgentResponse:
         """Get response from Claude including any tool calls."""
+        messages = state.messages
+        tools = state.tools
         # Betas are collected during provider tool conversion.
         # Only pass betas when non-empty; an empty list can produce an empty
         # anthropic-beta header which the API rejects.
-        betas: list[str] | Omit = (
-            list(self.tools.required_betas) if self.tools.required_betas else Omit()
-        )
+        betas: list[str] | Omit = list(tools.required_betas) if tools.required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
 
-        effective_tools: list[BetaToolUnionParam] = list(self.tools.params)
-        if self.tools.tool_search_threshold is not None:
+        effective_tools: list[BetaToolUnionParam] = list(tools.params)
+        if tools.tool_search_threshold is not None:
             generic_count = sum(1 for t in effective_tools if "input_schema" in t)
-            if generic_count > self.tools.tool_search_threshold:
+            if generic_count > tools.tool_search_threshold:
                 logger.debug(
                     "tool_search: %d generic tools > threshold %d, applying defer_loading",
                     generic_count,
-                    self.tools.tool_search_threshold,
+                    tools.tool_search_threshold,
                 )
                 effective_tools = [
                     {**t, "defer_loading": True} if "input_schema" in t else t
@@ -250,7 +249,7 @@ class ClaudeAgent(MCPAgent[BetaMessageParam]):
             match block.type:
                 case "tool_use":
                     tool_use = block
-                    mcp_name = self.tools.name_map.get(tool_use.name, tool_use.name)
+                    mcp_name = tools.name_map.get(tool_use.name, tool_use.name)
                     result.tool_calls.append(
                         MCPToolCall(
                             id=tool_use.id,

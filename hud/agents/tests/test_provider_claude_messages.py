@@ -10,7 +10,14 @@ import pytest
 
 from hud.agents.base import AgentContext
 from hud.agents.claude import ClaudeAgent
-from hud.agents.tests.conftest import RecordingToolEnvironment, mcp_tool, text_prompt, text_result
+from hud.agents.claude.agent import ClaudeAgentState
+from hud.agents.claude.tools import ClaudeAgentTools
+from hud.agents.tests.conftest import (
+    RecordingToolEnvironment,
+    mcp_tool,
+    text_prompt,
+    text_result,
+)
 
 
 class Stream:
@@ -84,6 +91,17 @@ def _message(*blocks: MagicMock) -> MagicMock:
     return response
 
 
+def provider_state(messages: list[Any] | None = None) -> ClaudeAgentState:
+    return ClaudeAgentState.model_construct(
+        messages=[] if messages is None else messages,
+        tools=ClaudeAgentTools(),
+    )
+
+
+def _user_state() -> ClaudeAgentState:
+    return provider_state([{"role": "user", "content": [{"type": "text", "text": "hello"}]}])
+
+
 @pytest.mark.asyncio
 async def test_claude_run_executes_model_tool_call_and_returns_final_answer() -> None:
     client = SimpleNamespace(
@@ -105,7 +123,7 @@ async def test_claude_run_executes_model_tool_call_and_returns_final_answer() ->
     agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
 
     result = await agent.run(
-        AgentContext(messages=[text_prompt("answer with lookup")], tool_client=environment.client)
+        AgentContext(prompt=[text_prompt("answer with lookup")], tool_client=environment.client)
     )
 
     assert result.content == "final answer"
@@ -136,9 +154,7 @@ async def test_claude_retries_streamed_invalid_tool_json_once() -> None:
     )
     agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
 
-    response = await agent.get_response(
-        [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
-    )
+    response = await agent.get_response(_user_state())
 
     assert response.content == "ok"
     assert response.done is True
@@ -164,7 +180,7 @@ async def test_claude_second_invalid_json_retry_adds_guidance_message() -> None:
     agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
     messages = [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
 
-    response = await agent.get_response(cast("Any", messages))
+    response = await agent.get_response(provider_state(cast("list[Any]", messages)))
 
     assert response.content == "ok"
     assert client.beta.messages.stream.call_count == 3
@@ -189,9 +205,7 @@ async def test_claude_response_preserves_thinking_as_reasoning() -> None:
     )
     agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
 
-    response = await agent.get_response(
-        [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
-    )
+    response = await agent.get_response(_user_state())
 
     assert response.content == "answer"
     assert response.reasoning == "plan"
@@ -215,9 +229,7 @@ async def test_claude_extracts_document_citations_from_text_blocks() -> None:
     )
     agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
 
-    response = await agent.get_response(
-        [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
-    )
+    response = await agent.get_response(_user_state())
 
     assert response.citations == [
         {
@@ -245,11 +257,10 @@ async def test_claude_native_computer_requests_required_beta_header() -> None:
         model_client=client,
         validate_api_key=False,
     )
-    agent.tools.prepare(model=agent.config.model, tools=[mcp_tool("computer")])
+    state = _user_state()
+    state.tools.prepare(model=agent.config.model, tools=[mcp_tool("computer")])
 
-    response = await agent.get_response(
-        [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
-    )
+    response = await agent.get_response(state)
 
     assert response.content == "answer"
     kwargs = client.beta.messages.stream.call_args.kwargs
