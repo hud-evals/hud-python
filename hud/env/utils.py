@@ -1,38 +1,26 @@
-"""Internal utilities shared across the env package.
-
-Two groups:
-
-* **JSON-RPC 2.0 framing** — `send_frame` / `read_frame` / `reply` / `error`.
-  The control channel and any future RPC binding speak the same envelope.
-* **URL helpers** — `SCHEME_RE` regex + `normalize_url(...)` for the
-  capability factories. Accepts shorthand like ``"127.0.0.1:9090"`` and
-  produces a well-formed URL with a scheme + port.
-
-Add more cross-module helpers here as they appear. Per-module private
-helpers (SSH key generation, mount-flag table, etc.) stay in their
-owning module.
-"""
+"""Shared helpers: JSON-RPC framing + URL normalization."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+if TYPE_CHECKING:
+    import asyncio
 
-# ─────────────────────────── JSON-RPC 2.0 framing ───────────────────────────
+# ─── JSON-RPC 2.0 framing ───
 
 
 async def send_frame(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
-    """Write a single newline-delimited JSON frame and flush."""
+    """Write one newline-delimited JSON frame and flush."""
     writer.write(json.dumps(msg, separators=(",", ":")).encode("utf-8") + b"\n")
     await writer.drain()
 
 
 async def read_frame(reader: asyncio.StreamReader) -> dict[str, Any] | None:
-    """Read one newline-delimited JSON frame; returns None on EOF."""
+    """Read one frame; None on EOF."""
     line = await reader.readline()
     if not line:
         return None
@@ -40,29 +28,23 @@ async def read_frame(reader: asyncio.StreamReader) -> dict[str, Any] | None:
 
 
 def reply(msg_id: int, result: dict[str, Any]) -> dict[str, Any]:
-    """Build a JSON-RPC 2.0 success response."""
+    """JSON-RPC 2.0 success response."""
     return {"jsonrpc": "2.0", "id": msg_id, "result": result}
 
 
 def error(msg_id: int, code: int, message: str) -> dict[str, Any]:
-    """Build a JSON-RPC 2.0 error response."""
+    """JSON-RPC 2.0 error response."""
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
 
 
-# ─────────────────────────── URL helpers ───────────────────────────
+# ─── URL helpers ───
 
-
-#: Matches the scheme portion of a URL per RFC 3986: alpha then alnum/+/-/.
+#: Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
 
 
 def normalize_url(url: str, *, default_scheme: str, default_port: int | None) -> str:
-    """Add ``default_scheme://`` if missing; append ``:default_port`` if missing.
-
-    Accepts shorthand like ``"127.0.0.1:9090"`` or ``"127.0.0.1"`` and
-    produces a well-formed URL such as ``"ws://127.0.0.1:9090"``. Raises if
-    the URL has no scheme after normalization or no hostname.
-    """
+    """Coerce shorthand ``host[:port]`` into a full ``scheme://host:port[/path]`` URL."""
     s = url if "://" in url else f"{default_scheme}://{url}"
     parts = urlsplit(s)
     if parts.scheme == "":
@@ -78,11 +60,4 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
     return s
 
 
-__all__ = [
-    "SCHEME_RE",
-    "error",
-    "normalize_url",
-    "read_frame",
-    "reply",
-    "send_frame",
-]
+__all__ = ["SCHEME_RE", "error", "normalize_url", "read_frame", "reply", "send_frame"]

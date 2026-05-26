@@ -1,48 +1,4 @@
-"""Workspace — a directory exposed to an agent over SSH (bwrap-isolated).
-
-A ``Workspace`` is *one* thing: a directory on disk plus an SSH server that
-gives the agent a bwrap-isolated bash + SFTP chroot'd to that directory.
-Construct it, ``await workspace.start()`` once to bind the SSH listener,
-then wire it into your ``Env`` by constructing a ``Capability.ssh(...)``
-from the workspace's published URL and keys::
-
-    workspace = Workspace(root="/tmp/coding")
-    await workspace.start()
-    env = Env(
-        name="coding",
-        capabilities=[Capability.ssh(
-            url=workspace.ssh_url,
-            host_pubkey=workspace.ssh_host_pubkey,
-            client_key_path=workspace.ssh_client_key_path,
-        )],
-    )
-
-The env-author manipulates the workspace as a normal directory — write
-files with ``(workspace.root / "x.py").write_text(...)``, run commands with
-``asyncio.create_subprocess_exec(...)``, etc. There's no ``exec`` /
-``read_file`` helper because plain Python is just as good and there's no
-benefit to a wrapper.
-
-What the agent sees over SSH:
-
-* A bash session inside a bwrap namespace where the only writable directory
-  is ``/workspace`` (= ``workspace.root`` on the host). On non-Linux hosts
-  where ``bwrap`` is missing, the session falls back to plain host bash
-  (with a startup warning).
-* SFTP rooted at ``/`` = ``workspace.root``. The agent can list, read, and
-  write anywhere under it — but they can't escape.
-
-Auth: ed25519 host + client keypairs are generated under
-``<root>/.hud/ssh/`` on first start. The public host key and the path to
-the ephemeral client private key are published in the capability ``params``
-so a dev harness can connect immediately. Pass ``authorized_client_keys``
-to use pre-existing keys instead (production).
-
-Mounts: pass ``Mount`` instances to expose host paths inside the namespace
-— e.g. ``Mount("ro", src="/opt/venv", dst="/opt/venv")`` to share a Python
-environment. ``DEFAULT_SYSTEM_MOUNTS`` already covers ``/usr``, ``/etc``,
-``/tmp``, ``/proc``, ``/dev`` and the standard ``/lib → /usr/lib`` symlinks.
-"""
+"""Workspace: a directory + bwrap-isolated SSH server (bash + SFTP chroot)."""
 
 from __future__ import annotations
 
@@ -51,12 +7,14 @@ import logging
 import os
 import shutil
 import sys
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import asyncssh
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 LOGGER = logging.getLogger("hud.env.workspace")
 
@@ -68,28 +26,18 @@ MountKind = Literal["ro", "rw", "tmpfs", "symlink", "proc", "dev"]
 
 # kind -> (normal-flag, optional-variant or None, takes-src)
 _MOUNT_FLAGS: dict[MountKind, tuple[str, str | None, bool]] = {
-    "ro":      ("--ro-bind", "--ro-bind-try", True),
-    "rw":      ("--bind",    "--bind-try",    True),
-    "symlink": ("--symlink", None,            True),
-    "tmpfs":   ("--tmpfs",   None,            False),
-    "proc":    ("--proc",    None,            False),
-    "dev":     ("--dev",     None,            False),
+    "ro": ("--ro-bind", "--ro-bind-try", True),
+    "rw": ("--bind", "--bind-try", True),
+    "symlink": ("--symlink", None, True),
+    "tmpfs": ("--tmpfs", None, False),
+    "proc": ("--proc", None, False),
+    "dev": ("--dev", None, False),
 }
 
 
 @dataclass(slots=True, frozen=True)
 class Mount:
-    """One bwrap mount entry. Construct with kwargs; render with ``to_bwrap_args``.
-
-    ::
-
-        Mount("ro",      src="/usr",      dst="/usr")
-        Mount("rw",      src="/data",     dst="/data",  optional=True)
-        Mount("symlink", src="usr/lib",   dst="/lib")
-        Mount("tmpfs",   dst="/tmp")
-        Mount("proc",    dst="/proc")
-        Mount("dev",     dst="/dev")
-    """
+    """One bwrap mount entry: ``Mount(kind, src=..., dst=..., optional=...)``."""
 
     kind: MountKind
     src: str = ""
@@ -105,15 +53,15 @@ class Mount:
 # Most slim Linux distros merge ``/lib`` into ``/usr/lib`` via symlinks;
 # we mirror that inside the namespace.
 DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
-    Mount("ro",      src="/usr",     dst="/usr"),
-    Mount("ro",      src="/etc",     dst="/etc"),
-    Mount("symlink", src="usr/lib",  dst="/lib"),
+    Mount("ro", src="/usr", dst="/usr"),
+    Mount("ro", src="/etc", dst="/etc"),
+    Mount("symlink", src="usr/lib", dst="/lib"),
     Mount("symlink", src="usr/lib64", dst="/lib64"),
-    Mount("symlink", src="usr/bin",  dst="/bin"),
+    Mount("symlink", src="usr/bin", dst="/bin"),
     Mount("symlink", src="usr/sbin", dst="/sbin"),
-    Mount("proc",    dst="/proc"),
-    Mount("dev",     dst="/dev"),
-    Mount("tmpfs",   dst="/tmp"),
+    Mount("proc", dst="/proc"),
+    Mount("dev", dst="/dev"),
+    Mount("tmpfs", dst="/tmp"),  # noqa: S108 — namespace-local tmpfs, not a host tempdir
 )
 
 
@@ -124,7 +72,7 @@ _DEFAULT_USER = "agent"
 
 
 class Workspace:
-    """A directory exposed to an agent over SSH (bwrap-isolated shell + SFTP)."""
+    """Directory + bwrap-isolated SSH (bash + chroot'd SFTP)."""
 
     def __init__(
         self,
@@ -172,7 +120,7 @@ class Workspace:
     # ─── lifecycle ────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Bind the SSH listener. Idempotent; call once after construction."""
+        """Bind the SSH listener. Idempotent."""
         if self._acceptor is not None:
             return
         host_key, self._host_pubkey_str = self._load_or_generate_host_key()
@@ -191,14 +139,16 @@ class Workspace:
         )
         LOGGER.info(
             "Workspace SSH listening on %s as user %r (client key: %s)",
-            self.ssh_url, self._ssh_user, self._client_key_path,
+            self.ssh_url,
+            self._ssh_user,
+            self._client_key_path,
         )
 
     # ─── ssh accessors / capability ───────────────────────────────────
 
     @property
     def ssh_url(self) -> str:
-        """Network URL the agent connects to, e.g. ``ssh://127.0.0.1:54321``."""
+        """``ssh://host:port`` once started."""
         if self._acceptor is None:
             raise RuntimeError("Workspace not started; call `await workspace.start()` first")
         sock = self._acceptor.sockets[0].getsockname()
@@ -206,17 +156,17 @@ class Workspace:
 
     @property
     def ssh_host_pubkey(self) -> str:
-        """OpenSSH-format public host key string for the harness's ``known_hosts``."""
+        """OpenSSH-format public host key (for harness ``known_hosts``)."""
         return self._host_pubkey_str
 
     @property
     def ssh_client_key_path(self) -> Path | None:
-        """Path to the ephemeral client private key (None if external keys were supplied)."""
+        """Ephemeral client private key path (None if external keys supplied)."""
         return self._client_key_path
 
     @property
     def ssh_user(self) -> str:
-        """SSH username the agent should connect as."""
+        """SSH username."""
         return self._ssh_user
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
@@ -232,10 +182,7 @@ class Workspace:
         cwd: str = "/workspace",
         env: Mapping[str, str] | None = None,
     ) -> list[str]:
-        """Build the argv that runs ``command`` inside the bwrap namespace.
-
-        Raises if bwrap is unavailable — branch on ``bwrap_available``.
-        """
+        """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable."""
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
         full_env = {**os.environ, **self.env, **(env or {})}
@@ -273,7 +220,7 @@ class Workspace:
         cwd: str = "/workspace",
         env: Mapping[str, str] | None = None,
     ) -> list[str]:
-        """Argv for the per-session shell (bwrap'd if available, host bash otherwise)."""
+        """Per-session shell argv (bwrap'd if available, else host bash)."""
         if self._bwrap is not None:
             inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
             return self.bwrap_argv(inner, cwd=cwd, env=env)
@@ -302,14 +249,15 @@ class Workspace:
         return key, key.export_public_key().decode("ascii").strip()
 
     def _ensure_authorized_keys_file(self) -> Path:
-        """Materialise the authorized_keys file asyncssh wants on disk."""
+        """Write the authorized_keys file asyncssh wants on disk."""
         creds = self._credentials_dir()
         auth_path = creds / "authorized_keys"
         pub_lines: list[str] = []
 
         if self._ssh_authorized_client_keys:
-            for p in self._ssh_authorized_client_keys:
-                pub_lines.append(Path(p).read_text().strip())
+            pub_lines.extend(
+                Path(p).read_text().strip() for p in self._ssh_authorized_client_keys
+            )
         else:
             priv_path = creds / "client_ed25519"
             pub_path = priv_path.with_suffix(".pub")

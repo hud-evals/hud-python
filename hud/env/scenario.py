@@ -1,18 +1,4 @@
-"""Scenario primitives.
-
-A scenario is an async generator registered against an ``Env`` via
-``@env.scenario(...)``. It yields twice:
-
-  1. ``yield {"prompt": ..., "requires": [...]}`` — setup done, here is
-     the task; runner returns this to the harness.
-  2. ``yield {"score": ..., "reason": ...}`` — evaluation result, after
-     the runner pushes ``asend(evaluate_payload)``.
-
-Scenarios take arbitrary ``**kwargs``; the harness sends them as ``args``
-on ``scenarios.start`` and the runner forwards them. Closures over the
-env's sandbox + module-level state are fine — scenarios run inside the
-env process.
-"""
+"""Scenario: async-generator that yields {"prompt": ...} then {"score": ...}."""
 
 from __future__ import annotations
 
@@ -36,7 +22,7 @@ class Scenario:
 
 
 class ScenarioRunner:
-    """Drives one scenario through its prompt -> evaluate lifecycle."""
+    """Drives one scenario through prompt -> evaluate."""
 
     def __init__(self, scenario: Scenario, args: dict[str, Any] | None = None) -> None:
         self.scenario = scenario
