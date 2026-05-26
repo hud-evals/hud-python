@@ -9,13 +9,19 @@ from __future__ import annotations
 import base64
 import logging
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from mcp.types import ImageContent, TextContent
+from mcp.types import ImageContent
 
+from hud.agents.tools.computer import (
+    computer_error_result,
+    computer_tool_info,
+    execute_computer_calls,
+    first_image_data,
+)
 from hud.types import MCPToolResult
 
-from .base import CallTool, ClaudeTool, ClaudeToolSpec, call_tool
+from .base import ClaudeTool, ClaudeToolSpec
 from .settings import claude_tool_settings
 
 if TYPE_CHECKING:
@@ -25,6 +31,7 @@ if TYPE_CHECKING:
     )
 
     from hud.agents.tools import EnvironmentCapability
+    from hud.agents.tools.base import CallTool
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +93,6 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ),
 )
 
-_AUTO_SCREENSHOT_OFF_SPECS = {"computer_20251124"}
-
 
 class ClaudeComputerTool(ClaudeTool):
     """Translate Claude native computer calls into environment computer calls."""
@@ -107,61 +112,35 @@ class ClaudeComputerTool(ClaudeTool):
         *,
         env_tool_name: str,
         spec: ClaudeToolSpec,
-        model: str,
         display_width: int,
         display_height: int,
-        schema: Literal["hud", "anthropic"],
     ) -> None:
-        super().__init__(env_tool_name=env_tool_name, spec=self._resolve_spec(spec, model))
+        super().__init__(env_tool_name=env_tool_name, spec=spec)
         self.display_width = display_width
         self.display_height = display_height
-        self.schema = schema
 
     @classmethod
     def from_capability(
         cls,
         capability: EnvironmentCapability,
-        spec: ClaudeToolSpec,
         model: str,
-    ) -> ClaudeComputerTool:
-        tool = capability.tool
-        props = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
-        schema: Literal["hud", "anthropic"] = (
-            "anthropic" if {"coordinate", "scroll_direction"} & set(props) else "hud"
-        )
+    ) -> ClaudeComputerTool | None:
+        spec = cls.default_spec(model)
+        if spec is None:
+            return None
 
-        metadata_resolution = capability.metadata.get("resolution", {})
-        if not isinstance(metadata_resolution, dict):
-            metadata_resolution = {}
-        resolution = (tool.meta or {}).get("resolution", {}) if tool.meta else {}
-        display_width = int(
-            metadata_resolution.get("width")
-            or resolution.get("width")
-            or claude_tool_settings.COMPUTER_WIDTH
-        )
-        display_height = int(
-            metadata_resolution.get("height")
-            or resolution.get("height")
-            or claude_tool_settings.COMPUTER_HEIGHT
+        computer_info = computer_tool_info(
+            capability.tool,
+            default_width=claude_tool_settings.COMPUTER_WIDTH,
+            default_height=claude_tool_settings.COMPUTER_HEIGHT,
         )
 
         return cls(
             env_tool_name=capability.tool_name,
             spec=spec,
-            model=model,
-            display_width=display_width,
-            display_height=display_height,
-            schema=schema,
+            display_width=computer_info.display_width,
+            display_height=computer_info.display_height,
         )
-
-    @staticmethod
-    def _resolve_spec(spec: ClaudeToolSpec, model: str) -> ClaudeToolSpec:
-        if spec.api_type and spec.api_type.startswith("computer_"):
-            return spec
-        for candidate in CLAUDE_COMPUTER_SPECS:
-            if candidate.supports_model(model):
-                return candidate
-        return spec
 
     def to_params(
         self,
@@ -191,47 +170,20 @@ class ClaudeComputerTool(ClaudeTool):
 
     async def execute(
         self,
-        caller: CallTool,
-        arguments: dict[str, Any],
-    ) -> MCPToolResult:
-        if self.schema == "anthropic":
-            return await self._call_env(caller, self._as_anthropic_arguments(arguments))
-        return await self._call_env_tool(caller, arguments)
-
-    async def _call_env(
-        self,
-        caller: CallTool,
-        arguments: dict[str, Any],
-    ) -> MCPToolResult:
-        return await call_tool(caller, self.env_tool_name, arguments)
-
-    async def _call_env_tool(
-        self,
-        caller: CallTool,
+        call_tool: CallTool,
         arguments: dict[str, Any],
     ) -> MCPToolResult:
         action = arguments.get("action")
 
         if action == "zoom":
-            return await self._zoom(caller, arguments)
+            return await self._zoom(call_tool, arguments)
 
-        calls = self._env_calls(arguments)
-        result = MCPToolResult(content=[], isError=False)
-        for call in calls:
-            result = await self._call_env(caller, call)
-            if result.isError:
-                return result
-        return result
-
-    def _as_anthropic_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        args = dict(arguments)
-        if (
-            self.spec.api_type in _AUTO_SCREENSHOT_OFF_SPECS
-            and args.get("action") != "screenshot"
-            and "take_screenshot_on_click" not in args
-        ):
-            args["take_screenshot_on_click"] = False
-        return args
+        return await execute_computer_calls(
+            call_tool,
+            env_tool_name=self.env_tool_name,
+            calls=self._env_calls(arguments),
+            ensure_screenshot=False,
+        )
 
     def _env_calls(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
         action = arguments.get("action")
@@ -239,8 +191,10 @@ class ClaudeComputerTool(ClaudeTool):
         text = arguments.get("text")
 
         def xy() -> tuple[int | None, int | None]:
-            if isinstance(coordinate, list) and len(coordinate) >= 2:
-                return coordinate[0], coordinate[1]
+            if isinstance(coordinate, list):
+                coords = cast("list[Any]", coordinate)
+                if len(coords) >= 2:
+                    return int(coords[0]), int(coords[1])
             return None, None
 
         if action == "screenshot":
@@ -317,17 +271,21 @@ class ClaudeComputerTool(ClaudeTool):
             ]
         if action in ("left_click_drag", "drag"):
             start = arguments.get("start_coordinate")
-            path = []
-            if isinstance(start, list) and len(start) >= 2:
-                path.append({"x": start[0], "y": start[1]})
-            if isinstance(coordinate, list) and len(coordinate) >= 2:
-                if not path:
-                    return [
-                        {"action": "mouse_down", "button": "left"},
-                        {"action": "move", "x": coordinate[0], "y": coordinate[1]},
-                        {"action": "mouse_up", "button": "left"},
-                    ]
-                path.append({"x": coordinate[0], "y": coordinate[1]})
+            path: list[dict[str, Any]] = []
+            if isinstance(start, list):
+                start_coords = cast("list[Any]", start)
+                if len(start_coords) >= 2:
+                    path.append({"x": start_coords[0], "y": start_coords[1]})
+            if isinstance(coordinate, list):
+                end_coords = cast("list[Any]", coordinate)
+                if len(end_coords) >= 2:
+                    if not path:
+                        return [
+                            {"action": "mouse_down", "button": "left"},
+                            {"action": "move", "x": end_coords[0], "y": end_coords[1]},
+                            {"action": "mouse_up", "button": "left"},
+                        ]
+                    path.append({"x": end_coords[0], "y": end_coords[1]})
             return [{"action": "drag", "path": path, "hold_keys": self._hold_keys(text)}]
         if action == "wait":
             duration = arguments.get("duration") or 0
@@ -351,28 +309,23 @@ class ClaudeComputerTool(ClaudeTool):
 
     async def _zoom(
         self,
-        caller: CallTool,
+        call_tool: CallTool,
         arguments: dict[str, Any],
     ) -> MCPToolResult:
         region = arguments.get("region")
-        if not isinstance(region, (list, tuple)) or len(region) != 4:
-            return MCPToolResult(
-                content=[TextContent(type="text", text="region must be [x0, y0, x1, y1]")],
-                isError=True,
-            )
+        region_value = cast("list[Any] | tuple[Any, ...]", region)
+        if not isinstance(region, (list, tuple)) or len(region_value) != 4:
+            return computer_error_result("region must be [x0, y0, x1, y1]")
 
-        screenshot = await self._call_env(caller, {"action": "screenshot"})
+        screenshot = await super().execute(call_tool, {"action": "screenshot"})
         if screenshot.isError:
             return screenshot
-        image_data = _first_image(screenshot)
+        image_data = first_image_data(screenshot)
         if image_data is None:
-            return MCPToolResult(
-                content=[TextContent(type="text", text="screenshot returned no image")],
-                isError=True,
-            )
+            return computer_error_result("screenshot returned no image")
 
         try:
-            x0, y0, x1, y1 = (int(v) for v in region)
+            x0, y0, x1, y1 = (int(v) for v in region_value)
             image = ImageContent(
                 type="image",
                 mimeType="image/png",
@@ -381,7 +334,7 @@ class ClaudeComputerTool(ClaudeTool):
             return MCPToolResult(content=[image], isError=False)
         except Exception as exc:
             logger.warning("Claude computer zoom failed: %s", exc)
-            return MCPToolResult(content=[TextContent(type="text", text=str(exc))], isError=True)
+            return computer_error_result(str(exc))
 
     @staticmethod
     def _keys(text: str | None) -> list[str]:
@@ -419,13 +372,6 @@ def _map_key(key: str) -> str:
     return ANTHROPIC_TO_CLA_KEYS.get(key, ANTHROPIC_TO_CLA_KEYS.get(key.capitalize(), key.lower()))
 
 
-def _first_image(result: MCPToolResult) -> str | None:
-    for block in result.content or []:
-        if isinstance(block, ImageContent):
-            return block.data
-    return None
-
-
 def _crop_png(image_data: str, region: tuple[int, int, int, int]) -> str:
     from PIL import Image  # type: ignore[import-not-found]
 
@@ -434,6 +380,3 @@ def _crop_png(image_data: str, region: tuple[int, int, int, int]) -> str:
     buffer = BytesIO()
     crop.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("ascii")
-
-
-__all__ = ["CLAUDE_COMPUTER_SPECS", "ClaudeComputerTool"]

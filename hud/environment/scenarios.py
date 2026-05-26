@@ -246,6 +246,18 @@ def _normalize_prompt_yield(value: Any) -> list[PromptMessage]:
                 role=item.role,  # type: ignore[arg-type]
                 content=TextContent(type="text", text=str(item.content)),
             )
+        if hasattr(item, "content"):
+            role = getattr(item, "role", default_role)
+            content = item.content
+            if isinstance(content, str):
+                content = TextContent(type="text", text=content)
+            elif isinstance(content, TextContent) or hasattr(content, "type"):
+                pass
+            elif hasattr(content, "text"):
+                content = TextContent(type="text", text=str(content.text))
+            else:
+                content = TextContent(type="text", text=str(content))
+            return PromptMessage(role=role, content=content)  # type: ignore[arg-type]
         if isinstance(item, str):
             return PromptMessage(
                 role=default_role,  # type: ignore[arg-type]
@@ -294,6 +306,22 @@ def _build_answer_for_generator(session: ScenarioSession) -> Any:
     elif isinstance(raw_answer, str):
         raw_text = raw_answer
         raw_citations = []
+        text = raw_answer.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            if len(parts) >= 3:
+                text = parts[1].removeprefix("json").strip()
+        try:
+            parsed_answer = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            parsed_answer = None
+        if isinstance(parsed_answer, dict) and (
+            "content" in parsed_answer or "citations" in parsed_answer
+        ):
+            content = parsed_answer.get("content", "")
+            raw_text = content if isinstance(content, str) else json.dumps(content)
+            citations = parsed_answer.get("citations", [])
+            raw_citations = [c for c in citations if isinstance(c, dict)]
     else:
         raw_text = str(raw_answer) if raw_answer is not None else ""
         raw_citations = []
@@ -741,10 +769,13 @@ class ScenarioMixin:
                 # Prompt exists remotely; original setup/rendering error.
                 raise
 
-            # Extract prompt text from response
+            # Extract prompt messages and text from response
+            prompt_messages = (
+                _normalize_prompt_yield(list(result.messages)) if result.messages else None
+            )
             prompt_text: str | None = None
-            if result.messages:
-                first_msg = result.messages[0]
+            if prompt_messages:
+                first_msg = prompt_messages[0]
                 content = first_msg.content
                 if hasattr(content, "text") and isinstance(content.text, str):  # type: ignore[union-attr]
                     prompt_text = content.text  # type: ignore[union-attr]
@@ -793,6 +824,7 @@ class ScenarioMixin:
                 allowed_tools=allowed_tools_meta,
                 returns_schema=returns_schema_meta,
                 enable_citations=enable_citations_meta,
+                prompt_messages=prompt_messages,
             )
             self._set_session(session, session_id)
 

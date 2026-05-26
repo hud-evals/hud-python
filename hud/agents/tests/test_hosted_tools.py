@@ -1,48 +1,137 @@
+"""Provider-hosted tool configuration tests."""
+
 from __future__ import annotations
 
-import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
-from hud.agents.base import CategorizedTools
+import pytest
+from google.genai import types as genai_types
+from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+from hud.agents.base import AgentContext
 from hud.agents.claude import (
     ClaudeAgent,
     ClaudeToolSearchTool,
     ClaudeWebFetchTool,
     ClaudeWebSearchTool,
 )
-from hud.agents.gemini import (
-    GeminiAgent,
-    GeminiCodeExecutionTool,
-    GeminiGoogleSearchTool,
-    GeminiUrlContextTool,
-)
-from hud.agents.openai import (
-    OpenAIAgent,
-    OpenAICodeInterpreterTool,
-    OpenAIToolSearchTool,
-)
+from hud.agents.gemini import GeminiAgent, GeminiCodeExecutionTool, GeminiGoogleSearchTool
+from hud.agents.openai import OpenAIAgent, OpenAICodeInterpreterTool, OpenAIToolSearchTool
+from hud.agents.tests.conftest import RecordingToolEnvironment, mcp_tool, text_prompt
 
 
-def test_claude_agent_configured_hosted_tools() -> None:
-    agent = ClaudeAgent.create(
-        model_client=object(),
-        hosted_tools=[
-            ClaudeWebSearchTool(max_uses=3),
-            ClaudeWebFetchTool(citations_enabled=True),
-            ClaudeToolSearchTool(threshold=7),
+def _message_response(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        id="resp",
+        output=[
+            ResponseOutputMessage(
+                id="msg",
+                type="message",
+                role="assistant",
+                status="completed",
+                content=[ResponseOutputText(type="output_text", text=text, annotations=[])],
+            )
         ],
     )
-    agent._available_tools = []
-    agent._categorized_tools = CategorizedTools()
 
-    agent._convert_tools_for_claude()
 
-    assert {tool.get("type") for tool in agent.claude_tools if isinstance(tool, dict)} == {
-        "web_search_20250305",
-        "web_fetch_20250910",
-        "tool_search_tool_bm25_20251119",
-    }
-    assert agent._required_betas == set()
-    assert agent._tool_search_threshold == 7
+class Stream:
+    def __init__(self, text: str) -> None:
+        block = MagicMock()
+        block.type = "text"
+        block.text = text
+        block.citations = None
+        self.response = MagicMock()
+        self.response.content = [block]
+
+    async def __aenter__(self) -> Stream:
+        return self
+
+    async def __aexit__(self, *args: object) -> bool:
+        return False
+
+    def __aiter__(self) -> Stream:
+        return self
+
+    async def __anext__(self) -> None:
+        raise StopAsyncIteration
+
+    async def get_final_message(self) -> MagicMock:
+        return self.response
+
+
+def _gemini_response(text: str) -> genai_types.GenerateContentResponse:
+    return genai_types.GenerateContentResponse(
+        candidates=[
+            genai_types.Candidate(
+                content=genai_types.Content(role="model", parts=[genai_types.Part(text=text)])
+            )
+        ]
+    )
+
+
+def _gemini_client(response: genai_types.GenerateContentResponse) -> MagicMock:
+    client = MagicMock()
+    client.aio = MagicMock()
+    client.aio.models = MagicMock()
+    client.aio.models.generate_content = AsyncMock(return_value=response)
+    return client
+
+
+def test_openai_hosted_tools_are_model_gated() -> None:
+    tool = OpenAICodeInterpreterTool(container={"type": "auto"})
+
+    assert tool.supports_model("gpt-5.4")
+    assert not tool.supports_model("gpt-4.1")
+
+
+@pytest.mark.asyncio
+async def test_supported_openai_hosted_tool_is_sent_to_provider() -> None:
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=AsyncMock(return_value=_message_response("done")))
+    )
+    agent = OpenAIAgent.create(
+        model="gpt-5.4",
+        model_client=client,
+        validate_api_key=False,
+        hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})],
+    )
+
+    result = await agent.run(
+        AgentContext(
+            messages=[text_prompt("use hosted code")],
+            tool_client=RecordingToolEnvironment().client,
+        )
+    )
+
+    assert result.content == "done"
+    tools = client.responses.create.await_args.kwargs["tools"]
+    assert any(tool["type"] == "code_interpreter" for tool in tools)
+
+
+@pytest.mark.asyncio
+async def test_unsupported_openai_hosted_tool_is_not_sent_to_provider() -> None:
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=AsyncMock(return_value=_message_response("done")))
+    )
+    agent = OpenAIAgent.create(
+        model="gpt-4.1",
+        model_client=client,
+        validate_api_key=False,
+        hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})],
+    )
+
+    result = await agent.run(
+        AgentContext(
+            messages=[text_prompt("use hosted code")],
+            tool_client=RecordingToolEnvironment().client,
+        )
+    )
+
+    assert result.content == "done"
+    tools = client.responses.create.await_args.kwargs["tools"]
+    assert not isinstance(tools, list)
 
 
 def test_claude_hosted_domain_filters_are_mutually_exclusive() -> None:
@@ -59,68 +148,126 @@ def test_claude_hosted_domain_filters_are_mutually_exclusive() -> None:
         ).to_params()
 
 
-def test_openai_agent_configured_hosted_tools() -> None:
-    agent = OpenAIAgent.create(
-        model_client=object(),
-        hosted_tools=[
-            OpenAICodeInterpreterTool(container={"type": "auto"}),
-            OpenAIToolSearchTool(threshold=4),
-        ],
-    )
-    agent._available_tools = []
-    agent._categorized_tools = CategorizedTools()
-
-    agent._convert_tools_for_openai()
-
-    assert {"code_interpreter", "tool_search"} <= {
-        tool.get("type") for tool in agent._openai_tools if isinstance(tool, dict)
-    }
-    assert agent._tool_search_threshold == 4
-
-
-def test_openai_hosted_tools_are_model_gated() -> None:
-    agent = OpenAIAgent.create(
-        model_client=object(),
-        model="gpt-4.1",
-        hosted_tools=[
-            OpenAICodeInterpreterTool(container={"type": "auto"}),
-            OpenAIToolSearchTool(threshold=4),
-        ],
-    )
-    agent._available_tools = []
-    agent._categorized_tools = CategorizedTools()
-
-    agent._convert_tools_for_openai()
-
-    assert agent._openai_tools == []
-    assert agent._tool_search_threshold is None
-
-
-def test_gemini_agent_configured_hosted_tools() -> None:
-    agent = GeminiAgent.create(
-        model_client=object(),
-        hosted_tools=[
-            GeminiGoogleSearchTool(),
-            GeminiUrlContextTool(),
-            GeminiCodeExecutionTool(),
-        ],
-    )
-    agent._available_tools = []
-    agent._categorized_tools = CategorizedTools()
-
-    agent._convert_tools_for_gemini()
-
-    assert any(getattr(tool, "google_search", None) is not None for tool in agent.gemini_tools)
-    assert any(getattr(tool, "url_context", None) is not None for tool in agent.gemini_tools)
-    assert any(getattr(tool, "code_execution", None) is not None for tool in agent.gemini_tools)
-
-
 def test_gemini_google_search_rejects_unsupported_dynamic_threshold() -> None:
-    tool = GeminiGoogleSearchTool(dynamic_threshold=0.2)
+    with pytest.raises(ValueError, match="dynamic_threshold"):
+        GeminiGoogleSearchTool(dynamic_threshold=0.2).to_params()
 
-    try:
-        tool.to_params()
-    except ValueError as exc:
-        assert "dynamic_threshold" in str(exc)
-    else:
-        raise AssertionError("dynamic_threshold should be rejected")
+
+@pytest.mark.asyncio
+async def test_openai_tool_search_threshold_defers_function_loading() -> None:
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=AsyncMock(return_value=_message_response("done")))
+    )
+    agent = OpenAIAgent.create(
+        model="gpt-5.4",
+        model_client=client,
+        validate_api_key=False,
+        hosted_tools=[OpenAIToolSearchTool(threshold=1)],
+    )
+    environment = RecordingToolEnvironment([mcp_tool("first"), mcp_tool("second")])
+
+    result = await agent.run(
+        AgentContext(
+            messages=[text_prompt("use tools")],
+            tool_client=environment.client,
+        )
+    )
+
+    assert result.content == "done"
+    tools = client.responses.create.await_args.kwargs["tools"]
+    function_tools = [tool for tool in tools if tool["type"] == "function"]
+    assert len(function_tools) == 2
+    assert all(tool["defer_loading"] is True for tool in function_tools)
+
+
+@pytest.mark.asyncio
+async def test_claude_hosted_web_fetch_payload_is_sent_to_provider() -> None:
+    client = SimpleNamespace(
+        beta=SimpleNamespace(
+            messages=SimpleNamespace(stream=MagicMock(return_value=Stream("done")))
+        )
+    )
+    agent = ClaudeAgent.create(
+        model="claude-sonnet-4-6",
+        model_client=client,
+        validate_api_key=False,
+        hosted_tools=[
+            ClaudeWebFetchTool(
+                max_uses=2,
+                allowed_domains=["example.com"],
+                max_content_tokens=500,
+                citations_enabled=True,
+            )
+        ],
+    )
+
+    result = await agent.run(
+        AgentContext(
+            messages=[text_prompt("fetch")],
+            tool_client=RecordingToolEnvironment().client,
+        )
+    )
+
+    assert result.content == "done"
+    tools = client.beta.messages.stream.call_args.kwargs["tools"]
+    assert tools == [
+        {
+            "type": "web_fetch_20250910",
+            "name": "web_fetch",
+            "max_uses": 2,
+            "allowed_domains": ["example.com"],
+            "max_content_tokens": 500,
+            "citations": {"enabled": True},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_claude_tool_search_threshold_defers_generic_tools() -> None:
+    client = SimpleNamespace(
+        beta=SimpleNamespace(
+            messages=SimpleNamespace(stream=MagicMock(return_value=Stream("done")))
+        )
+    )
+    agent = ClaudeAgent.create(
+        model="claude-sonnet-4-6",
+        model_client=client,
+        validate_api_key=False,
+        hosted_tools=[ClaudeToolSearchTool(threshold=1)],
+    )
+
+    result = await agent.run(
+        AgentContext(
+            messages=[text_prompt("use tools")],
+            tool_client=RecordingToolEnvironment([mcp_tool("first"), mcp_tool("second")]).client,
+        )
+    )
+
+    assert result.content == "done"
+    tools = client.beta.messages.stream.call_args.kwargs["tools"]
+    generic_tools = [tool for tool in tools if "input_schema" in tool]
+    assert len(generic_tools) == 2
+    assert all(tool["defer_loading"] is True for tool in generic_tools)
+    assert any(tool["type"] == "tool_search_tool_bm25_20251119" for tool in tools)
+
+
+@pytest.mark.asyncio
+async def test_gemini_hosted_code_execution_payload_is_sent_to_provider() -> None:
+    client = _gemini_client(_gemini_response("done"))
+    agent = GeminiAgent.create(
+        model_client=client,
+        validate_api_key=False,
+        hosted_tools=[GeminiCodeExecutionTool()],
+    )
+
+    result = await agent.run(
+        AgentContext(
+            messages=[text_prompt("run code")],
+            tool_client=RecordingToolEnvironment().client,
+        )
+    )
+
+    assert result.content == "done"
+    config = client.aio.models.generate_content.await_args.kwargs["config"]
+    assert len(config.tools) == 1
+    assert config.tools[0].code_execution is not None

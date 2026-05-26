@@ -18,52 +18,37 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from functools import cached_property
+from typing import Any, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
 from hud.agents.base import MCPAgent
-from hud.agents.tools import (
-    AgentTool,
-    EnvironmentCapability,
-    call_agent_tools,
-    capabilities_metadata_from_context,
-    discover_environment_capabilities,
-)
-from hud.agents.types import OpenAIChatConfig, OpenAIChatCreateParams
+from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
-from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
-from hud.utils.hud_console import HUDConsole
+from hud.types import AgentResponse, MCPToolCall
 from hud.utils.types import with_signature
 
-from .tools import OpenAICompatibleToolParam, openai_compatible_tools
-
-if TYPE_CHECKING:
-    from openai.types.chat import ChatCompletionToolParam
-
+from .tools import (
+    OpenAICompatibleAgentTools,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class OpenAIChatAgent(MCPAgent):
+class OpenAIChatAgent(MCPAgent[ChatCompletionMessageParam]):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
 
-    metadata: ClassVar[dict[str, Any] | None] = None
-    config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIChatConfig
-
-    @classmethod
-    def agent_type(cls) -> AgentType:
-        """Return the AgentType for OpenAI-compatible agents."""
-        return AgentType.OPENAI_COMPATIBLE
-
-    @with_signature(OpenAIChatCreateParams)
+    @with_signature(OpenAIChatConfig)
     @classmethod
     def create(cls, **kwargs: Any) -> OpenAIChatAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
-        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
+        return cls(OpenAIChatConfig(**kwargs))
 
-    def __init__(self, params: OpenAIChatCreateParams | None = None, **kwargs: Any) -> None:
-        super().__init__(params, **kwargs)
+    def __init__(self, config: OpenAIChatConfig | None = None) -> None:
+        config = config or OpenAIChatConfig()
+        super().__init__(config)
         self.config: OpenAIChatConfig
 
         if (
@@ -100,76 +85,25 @@ class OpenAIChatAgent(MCPAgent):
         # If a specific checkpoint is requested, inject it into extra_body
         # so the HUD gateway routes to the exact checkpoint for inference.
         if self.config.checkpoint:
-            extra_body = self.completion_kwargs.get("extra_body") or {}
+            extra_body: dict[str, Any] = dict(self.completion_kwargs.get("extra_body") or {})
             extra_body["checkpoint"] = self.config.checkpoint
             self.completion_kwargs["extra_body"] = extra_body
-
-        self.mcp_schemas: list[ChatCompletionToolParam] = []
-        self.hud_console = HUDConsole(logger=logger)
-        self._openai_compatible_tool_params: list[OpenAICompatibleToolParam] = []
-        self._openai_compatible_native_tools: dict[
-            str,
-            AgentTool[OpenAICompatibleToolParam],
-        ] = {}
-        self._environment_capabilities: dict[str, EnvironmentCapability] = {}
-        self._openai_compatible_backing_tools: set[str] = set()
 
         self._continuation_token_ids: list[int] | None = None
         self._continuation_message_count: int | None = None
 
-    def _on_tools_ready(self) -> None:
-        self._convert_tools_for_openai_compatible()
+    @cached_property
+    def tools(self) -> OpenAICompatibleAgentTools:
+        return OpenAICompatibleAgentTools()
 
-    def _discover_environment_capabilities(
-        self, tools: list[types.Tool]
-    ) -> dict[str, EnvironmentCapability]:
-        return discover_environment_capabilities(
-            tools,
-            env_metadata=capabilities_metadata_from_context(self.ctx),
-            name_fallbacks=openai_compatible_tools.name_fallbacks,
-        )
-
-    def _convert_tools_for_openai_compatible(self) -> None:
-        """Build OpenAI-compatible native tool mappings from environment capabilities."""
-        self._openai_compatible_tool_params = []
-        self._openai_compatible_native_tools = {}
-        self._openai_compatible_backing_tools = set()
-
-        capabilities = self._discover_environment_capabilities(self.get_available_tools())
-        self._environment_capabilities = capabilities
-
-        for capability in capabilities.values():
-            if capability.name not in openai_compatible_tools.capabilities:
-                continue
-            for tool in openai_compatible_tools.tools_for_capability(capability, self.model):
-                self._openai_compatible_backing_tools.add(tool.env_tool_name)
-                self._openai_compatible_native_tools[tool.name] = tool
-                self._openai_compatible_tool_params.append(tool.to_params())
-
-    def _oai_to_mcp(self, tool_call: Any) -> MCPToolCall:  # type: ignore[valid-type]
-        """Convert an OpenAI ``tool_call`` to :class:`MCPToolCall`."""
-        args = json.loads(tool_call.function.arguments or "{}")
-        if isinstance(args, list):
-            args = args[0]
-        if not isinstance(args, dict):
-            args = {}
-        return MCPToolCall(
-            id=tool_call.id,
-            name=tool_call.function.name,
-            arguments=args,
-        )
-
-    async def get_system_messages(self) -> list[dict[str, Any]]:
-        """Get system messages for OpenAI."""
-        if self.system_prompt is not None:
-            return [{"role": "system", "content": self.system_prompt}]
-        else:
-            return []
-
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[dict[str, Any]]:
-        """Format blocks for OpenAI."""
-        content = []
-        for block in blocks:
+    async def format_messages(
+        self, messages: list[types.PromptMessage]
+    ) -> list[ChatCompletionMessageParam]:
+        """Format MCP prompt messages for OpenAI-compatible chat."""
+        formatted_messages: list[ChatCompletionMessageParam] = []
+        for message in messages:
+            content: list[dict[str, Any]] = []
+            block = message.content
             if isinstance(block, types.TextContent):
                 content.append({"type": "text", "text": block.text})
             elif isinstance(block, types.ImageContent):
@@ -180,146 +114,54 @@ class OpenAIChatAgent(MCPAgent):
                     }
                 )
 
-        return [{"role": "user", "content": content}]
+            formatted_messages.append(
+                cast(
+                    "ChatCompletionMessageParam",
+                    {"role": message.role, "content": content},
+                )
+            )
+        return formatted_messages
 
-    def _sanitize_schema_for_openai(self, schema: dict) -> dict:
-        """Convert MCP JSON Schema to OpenAI-compatible format.
-
-        Handles unsupported features like anyOf and prefixItems.
-        """
-        if not isinstance(schema, dict):
-            return schema
-
-        sanitized = {}
-
-        for key, value in schema.items():
-            if key == "anyOf" and isinstance(value, list):
-                # Handle anyOf patterns (usually for nullable fields)
-                non_null_types = [
-                    v for v in value if not (isinstance(v, dict) and v.get("type") == "null")
-                ]
-                if non_null_types:
-                    # Use the first non-null type
-                    sanitized.update(self._sanitize_schema_for_openai(non_null_types[0]))
-                else:
-                    sanitized["type"] = "string"  # Fallback
-
-            elif key == "prefixItems":
-                # Convert prefixItems to simple items
-                sanitized["type"] = "array"
-                if isinstance(value, list) and value:
-                    # Use the type from the first item as the items schema
-                    first_item = value[0]
-                    if isinstance(first_item, dict):
-                        sanitized["items"] = {"type": first_item.get("type", "string")}
-                    else:
-                        sanitized["items"] = {"type": "string"}
-
-            elif key == "properties" and isinstance(value, dict):
-                # Recursively sanitize property schemas
-                sanitized[key] = {
-                    prop_name: self._sanitize_schema_for_openai(prop_schema)
-                    for prop_name, prop_schema in value.items()
-                }
-
-            elif key == "items" and isinstance(value, dict):
-                # Recursively sanitize items schema
-                sanitized[key] = self._sanitize_schema_for_openai(value)
-
-            elif key in (
-                "type",
-                "description",
-                "enum",
-                "required",
-                "default",
-                "minimum",
-                "maximum",
-                "minItems",
-                "maxItems",
-            ):
-                # These are supported by OpenAI
-                sanitized[key] = value
-
-        return sanitized or {"type": "object"}
-
-    def get_tool_schemas(self) -> list[OpenAICompatibleToolParam]:
-        tool_schemas = [
-            schema
-            for schema in super().get_tool_schemas()
-            if schema["name"] not in self._openai_compatible_backing_tools
-        ]
-        openai_tools = list(self._openai_compatible_tool_params)
-        for schema in tool_schemas:
-            parameters = schema.get("parameters", {})
-
-            if parameters:
-                sanitized_params = self._sanitize_schema_for_openai(parameters)
-            else:
-                sanitized_params = {"type": "object", "properties": {}}
-
-            openai_tool: ChatCompletionToolParam = {
-                "type": "function",
-                "function": {
-                    "name": schema["name"],
-                    "description": schema.get("description", ""),
-                    "parameters": sanitized_params,
-                },
-            }
-            openai_tools.append(openai_tool)
-        return openai_tools
-
-    async def call_tools(
-        self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
-    ) -> list[MCPToolResult]:
-        """Route OpenAI-compatible provider tools through agent-owned translators."""
-        return await call_agent_tools(self, self._openai_compatible_native_tools, tool_call)
-
-    async def _invoke_chat_completion(
-        self,
-        *,
-        messages: list[Any],
-        tools: list[dict] | None,
-        extra: dict[str, Any],
-    ) -> Any:
-        if self.oai is None:
-            raise ValueError("openai_client is required for OpenAIChatAgent")
-        # default transport = OpenAI SDK
-        return await self.oai.chat.completions.create(
-            model=self.config.model,
-            messages=messages,
-            tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
-            **extra,
-        )  # type: ignore
-
-    async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
+    async def get_response(self, messages: list[ChatCompletionMessageParam]) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
 
-        # Convert MCP tool schemas to OpenAI format
-        tools = cast("list[ChatCompletionToolParam]", self.get_tool_schemas())
+        reserved_kwargs = {"model", "messages", "stream", "tools"}
+        request_kwargs = {
+            key: value
+            for key, value in self.completion_kwargs.items()
+            if key not in reserved_kwargs
+        }
+        provider_body: dict[str, Any] = dict(request_kwargs.pop("extra_body", None) or {})
+        return_token_ids = bool(provider_body.get("return_token_ids"))
 
-        protected_keys = {"model", "messages", "tools"}
-        extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
-        extra_body = extra.get("extra_body") or {}
-        return_token_ids = extra_body.get("return_token_ids")
+        if self.tools.params:
+            provider_body["tools"] = self.tools.params
 
         if return_token_ids and self._continuation_token_ids and self._continuation_message_count:
-            extra_body["prompt_token_ids"] = self._continuation_token_ids
-            extra_body["continuation_from"] = self._continuation_message_count
-            extra["extra_body"] = extra_body
+            provider_body["prompt_token_ids"] = self._continuation_token_ids
+            provider_body["continuation_from"] = self._continuation_message_count
+
+        if provider_body:
+            request_kwargs["extra_body"] = provider_body
 
         try:
-            response = await self._invoke_chat_completion(
-                messages=messages,
-                tools=tools,  # type: ignore
-                extra=extra,
+            response: ChatCompletion = await self.oai.chat.completions.create(
+                model=self.config.model,
+                messages=(
+                    [{"role": "system", "content": self.system_prompt}, *messages]
+                    if self.system_prompt is not None
+                    else messages
+                ),
+                stream=False,
+                **request_kwargs,
             )
         except Exception as e:
             error_content = f"Error getting response {e}"
             if "Invalid JSON" in str(e):
                 error_content = "Invalid JSON, response was truncated"
-            self.hud_console.warning_log(error_content)
+            logger.warning(error_content)
 
-            return InferenceResult(
+            return AgentResponse(
                 content=error_content,
                 tool_calls=[],
                 done=True,
@@ -328,24 +170,33 @@ class OpenAIChatAgent(MCPAgent):
             )
 
         choice = response.choices[0]
-        msg = choice.message
-        assistant_msg: dict[str, Any] = {"role": "assistant"}
+        message = choice.message
+        function_calls = [
+            tool_call for tool_call in message.tool_calls or [] if tool_call.type == "function"
+        ]
 
-        if msg.content:
-            assistant_msg["content"] = msg.content
-
-        if msg.tool_calls:
-            serialized_tool_calls = []
-            for tc in msg.tool_calls:
-                serialized_tc = {
-                    "id": tc.id,
+        assistant_message = message.model_dump(exclude_none=True)
+        reasoning_content = getattr(message, "reasoning_content", None)
+        reasoning = reasoning_content if isinstance(reasoning_content, str) else None
+        if not reasoning:
+            raw_reasoning = getattr(message, "reasoning", None)
+            reasoning = raw_reasoning if isinstance(raw_reasoning, str) else None
+        for field in ("reasoning_content", "reasoning", "reasoning_details"):
+            if value := getattr(message, field, None):
+                assistant_message[field] = value
+        if function_calls:
+            assistant_message["tool_calls"] = [
+                {
+                    "id": tool_call.id,
                     "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    },
                 }
-                serialized_tool_calls.append(serialized_tc)
-            assistant_msg["tool_calls"] = serialized_tool_calls
-
-        messages.append(assistant_msg)
+                for tool_call in function_calls
+            ]
+        messages.append(cast("ChatCompletionMessageParam", assistant_message))
 
         if return_token_ids:
             prompt_token_ids = getattr(choice, "prompt_token_ids", None)
@@ -354,91 +205,23 @@ class OpenAIChatAgent(MCPAgent):
                 self._continuation_token_ids = list(prompt_token_ids) + list(token_ids)
                 self._continuation_message_count = len(messages)
 
-        tool_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                if tc.function.name is not None:  # type: ignore
-                    # _oai_to_mcp returns a single MCPToolCall; append it
-                    tool_calls.append(self._oai_to_mcp(tc))  # noqa: PERF401
+        tool_calls: list[MCPToolCall] = []
+        for tool_call in function_calls:
+            raw_args = json.loads(tool_call.function.arguments or "{}")
+            arguments = cast("dict[str, Any]", raw_args) if isinstance(raw_args, dict) else {}
+            tool_calls.append(
+                MCPToolCall(
+                    id=tool_call.id,
+                    name=tool_call.function.name,
+                    arguments=arguments,
+                )
+            )
 
-        # Only stop on length (token limit), never on "stop"
-        done = choice.finish_reason == "length"
-        if done:
-            self.hud_console.info_log(f"Done decision: finish_reason={choice.finish_reason}")
-
-        return InferenceResult(
-            content=msg.content or "",
-            reasoning=getattr(msg, "reasoning_content", None),
+        return AgentResponse(
+            content=message.content or "",
+            reasoning=reasoning,
+            info={"finish_reason": choice.finish_reason},
             tool_calls=tool_calls,
-            done=done,
+            done=not tool_calls,
             raw=response,
         )
-
-    async def format_tool_results(
-        self,
-        tool_calls: list[MCPToolCall],
-        tool_results: list[MCPToolResult],
-    ) -> list[dict[str, Any]]:
-        """Render MCP tool results as OpenAI messages.
-
-        Note: OpenAI tool messages only support string content.
-        When images are present, we return both a tool message and a user message.
-        """
-        rendered: list[dict[str, Any]] = []
-
-        # Separate text and image content
-        image_parts = []
-        for call, res in zip(tool_calls, tool_results, strict=False):
-            # Use structuredContent.result if available, otherwise use content
-            text_parts = []
-            items = res.content
-            if not res.content and res.structuredContent:
-                items = [res.structuredContent.get("result", res.content)]
-
-            for item in items:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                    elif item.get("type") == "image":
-                        mime_type = item.get("mimeType", "image/png")
-                        data = item.get("data", "")
-                        image_parts.append(
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime_type};base64,{data}"},
-                            }
-                        )
-                elif isinstance(item, types.TextContent):
-                    text_parts.append(item.text)
-                elif isinstance(item, types.ImageContent):
-                    image_parts.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{item.mimeType};base64,{item.data}"},
-                        }
-                    )
-
-            text_content = "".join(text_parts) if text_parts else "Tool executed successfully"
-            rendered.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": text_content,
-                }
-            )
-
-        # If there are images, add them as a separate user message
-        if image_parts:
-            # Add a user message with the images
-            content_with_images = [
-                {"type": "text", "text": "Tool returned the following:"},
-                image_parts[-1],
-            ]
-            rendered.append(
-                {
-                    "role": "user",
-                    "content": content_with_images,
-                }
-            )
-
-        return rendered

@@ -148,12 +148,12 @@ async def run_eval(
         env = Environment("my-env").connect_hub("browser")
         tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
         async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
-            await agent.run(ctx.prompt)
+            await ctx._run(agent)
 
         # Load tasks from file or API
         tasks = load_tasks("hud-evals/SheetBench-50")
         async with hud.eval(tasks) as ctx:
-            await agent.run(ctx)
+            await ctx._run(agent)
 
         # With variants and group
         async with hud.eval(
@@ -167,7 +167,7 @@ async def run_eval(
 
         # With concurrency limit
         async with hud.eval(tasks, max_concurrent=10) as ctx:
-            await agent.run(ctx)
+            await ctx._run(agent)
 
         # Access results after parallel run
         for e in ctx.results:

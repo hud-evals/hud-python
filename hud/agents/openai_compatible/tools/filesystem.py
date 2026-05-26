@@ -4,84 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from hud.agents.tools import AgentTool, AgentToolSpec, GroupedCapabilityMixin
+from hud.agents.tools import AgentToolSpec, GroupedCapabilityMixin
 
-from .types import OpenAICompatibleToolParam
+from .base import OpenAICompatibleTool
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionToolParam
     from openai.types.shared_params.function_parameters import FunctionParameters
 
-READ_PARAMETERS: FunctionParameters = {
-    "type": "object",
-    "properties": {
-        "filePath": {
-            "type": "string",
-            "description": "Absolute path to the file to read.",
-        },
-        "offset": {
-            "type": "integer",
-            "description": "0-based line offset to start reading from.",
-        },
-        "limit": {
-            "type": "integer",
-            "description": "Maximum number of lines to read.",
-        },
-    },
-    "required": ["filePath"],
-}
 
-GREP_PARAMETERS: FunctionParameters = {
-    "type": "object",
-    "properties": {
-        "pattern": {
-            "type": "string",
-            "description": "Regular expression pattern to search for.",
-        },
-        "path": {
-            "type": "string",
-            "description": "Directory to search in.",
-        },
-        "include": {
-            "type": "string",
-            "description": "Glob pattern for files to include.",
-        },
-    },
-    "required": ["pattern"],
-}
-
-GLOB_PARAMETERS: FunctionParameters = {
-    "type": "object",
-    "properties": {
-        "pattern": {
-            "type": "string",
-            "description": "Glob pattern to match.",
-        },
-        "path": {
-            "type": "string",
-            "description": "Directory to search from.",
-        },
-    },
-    "required": ["pattern"],
-}
-
-LIST_PARAMETERS: FunctionParameters = {
-    "type": "object",
-    "properties": {
-        "path": {
-            "type": "string",
-            "description": "Directory to list.",
-        },
-        "ignore": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Glob patterns to ignore.",
-        },
-    },
-}
-
-
-class FilesystemTool(GroupedCapabilityMixin, AgentTool[OpenAICompatibleToolParam]):
+class _FilesystemTool(GroupedCapabilityMixin, OpenAICompatibleTool):
     """Function tool backed by a HUD filesystem environment tool."""
 
     description: ClassVar[str]
@@ -104,54 +36,101 @@ class FilesystemTool(GroupedCapabilityMixin, AgentTool[OpenAICompatibleToolParam
         }
 
 
-class ReadTool(FilesystemTool):
+class ReadTool(_FilesystemTool):
     """Expose a read function over the environment read tool."""
 
     name = "read"
     capability = "filesystem"
     env_tool_names = ("read",)
     description = "Reads a file from the local filesystem. Use offset and limit for pagination."
-    parameters: ClassVar[FunctionParameters] = READ_PARAMETERS
+    parameters: ClassVar[FunctionParameters] = {
+        "type": "object",
+        "properties": {
+            "filePath": {
+                "type": "string",
+                "description": "Absolute path to the file to read.",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "0-based line offset to start reading from.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of lines to read.",
+            },
+        },
+        "required": ["filePath"],
+    }
 
 
-class GrepTool(FilesystemTool):
+class GrepTool(_FilesystemTool):
     """Expose a grep function over the environment grep tool."""
 
     name = "grep"
     capability = "filesystem"
     env_tool_names = ("grep",)
     description = "Searches file contents using a regular expression and returns matching lines."
-    parameters: ClassVar[FunctionParameters] = GREP_PARAMETERS
+    parameters: ClassVar[FunctionParameters] = {
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": "Regular expression pattern to search for.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Directory to search in.",
+            },
+            "include": {
+                "type": "string",
+                "description": "Glob pattern for files to include.",
+            },
+        },
+        "required": ["pattern"],
+    }
 
 
-class GlobTool(FilesystemTool):
+class GlobTool(_FilesystemTool):
     """Expose a glob function over the environment glob tool."""
 
     name = "glob"
     capability = "filesystem"
     env_tool_names = ("glob",)
     description = "Finds files matching a glob pattern."
-    parameters: ClassVar[FunctionParameters] = GLOB_PARAMETERS
+    parameters: ClassVar[FunctionParameters] = {
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": "Glob pattern to match.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Directory to search from.",
+            },
+        },
+        "required": ["pattern"],
+    }
 
 
-class ListTool(FilesystemTool):
+class ListTool(_FilesystemTool):
     """Expose a list function over the environment list tool."""
 
     name = "list"
     capability = "filesystem"
     env_tool_names = ("list",)
     description = "Lists files and directories in a given path."
-    parameters: ClassVar[FunctionParameters] = LIST_PARAMETERS
-
-
-__all__ = [
-    "GLOB_PARAMETERS",
-    "GREP_PARAMETERS",
-    "LIST_PARAMETERS",
-    "READ_PARAMETERS",
-    "FilesystemTool",
-    "GlobTool",
-    "GrepTool",
-    "ListTool",
-    "ReadTool",
-]
+    parameters: ClassVar[FunctionParameters] = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Directory to list.",
+            },
+            "ignore": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Glob patterns to ignore.",
+            },
+        },
+    }

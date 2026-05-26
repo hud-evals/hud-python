@@ -321,10 +321,12 @@ class TestEnvironmentMCPProtocol:
             mock_ctx = AsyncMock()
             mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_ctx.__aexit__ = AsyncMock(return_value=None)
+            from hud.types import Trace
+
+            mock_ctx._run.return_value = Trace(content="subagent output", done=True)
             mock_run_eval.return_value = mock_ctx
 
             mock_agent = MagicMock()
-            mock_agent.run = AsyncMock(return_value=MagicMock(content="subagent output"))
             mock_create_agent.return_value = mock_agent
             req_meta = RequestParams.Meta.model_validate({"_hud_trace_id": "trace-from-meta"})
             req_context = RequestContext(

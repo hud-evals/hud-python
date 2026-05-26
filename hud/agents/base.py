@@ -3,543 +3,188 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from dataclasses import dataclass
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
-import mcp.types as types
-
-from hud.tools.types import Citation
-from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
-from hud.utils.hud_console import HUDConsole
-
-from .types import BaseCreateParams
+from hud.agents.misc import auto_respond
+from hud.types import AgentResponse, Trace
 
 if TYPE_CHECKING:
-    from hud.environment import Environment
-    from hud.eval.context import EvalContext
+    import mcp.types as types
 
+    from hud.agents.tools import AgentTools
+    from hud.agents.tools.base import CallTool, ToolClient
+    from hud.agents.types import AgentConfig
 
+ProviderMessageT = TypeVar("ProviderMessageT")
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CategorizedTools:
-    """Result of filtering tools for model-facing schemas."""
+@dataclass(frozen=True)
+class AgentContext:
+    """Prompt messages plus optional MCP tool access for one agent run."""
 
-    generic: list[types.Tool] = field(default_factory=list)
-    """MCP tools exposed through generic function calling."""
-
-    skipped: list[tuple[types.Tool, str]] = field(default_factory=list)
-    """Tools intentionally hidden from generic function calling."""
+    messages: list[types.PromptMessage]
+    tool_client: ToolClient | None = None
 
 
-class MCPAgent(ABC):
+class MCPAgent(ABC, Generic[ProviderMessageT]):
     """
-    Base class for MCP-enabled agents.
+    Base class for agents that interact with HUD MCP-backed environments.
 
-    Agents interact with MCP servers through an EvalContext:
-    - run(ctx): Main entry point - takes EvalContext from hud.eval()
-    - ctx.call_tool(): Used internally for all tool execution
-    - ctx.submit(): Called automatically with agent's final response
+    Agent instances are intended to be run-scoped: create a fresh agent for each
+    independent evaluation or task run. Provider implementations may keep
+    conversation IDs, continuation cursors, and prepared tool state on the
+    instance during a run.
 
-    Subclasses implement provider-specific formatting and response fetching
-    by overriding: `get_system_messages`, `get_response`, `format_blocks`,
-    and `format_tool_results`.
+    Agents interact with environments through per-run tools and tool handlers supplied
+    by the caller.
+
+    Subclasses implement provider-specific message formatting, response fetching,
+    and tool result rendering.
     """
 
-    metadata: ClassVar[dict[str, Any] | None] = None
-    required_tools: ClassVar[list[str]] = []  # Tools that must be available
-    config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
+    def __init__(self, config: AgentConfig) -> None:
+        self.config = config
 
-    @classmethod
-    @abstractmethod
-    def agent_type(cls) -> AgentType:
-        """Return the AgentType for this agent.
-
-        Subclasses must implement this to return their corresponding AgentType enum value.
-        This is used for provider-specific configuration and routing.
-
-        Returns:
-            AgentType enum value for this agent
-        """
-        raise NotImplementedError
-
-    def categorize_tools(self, tools: list[types.Tool] | None = None) -> CategorizedTools:
-        """Return the MCP tools that should be exposed as generic function tools."""
-        if tools is None:
-            tools = self.get_available_tools()
-
-        return CategorizedTools(generic=list(tools))
-
-    def __init__(self, params: BaseCreateParams | None = None, **kwargs: Any) -> None:
-        if params is None:
-            import warnings
-
-            warnings.warn(
-                f"Passing kwargs to {self.__class__.__name__}() is deprecated. "
-                f"Use {self.__class__.__name__}.create(...) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            CreateParams = type(
-                f"{self.config_cls.__name__}CreateParams",
-                (BaseCreateParams, self.config_cls),
-                {"__module__": self.config_cls.__module__},
-            )
-            params = CreateParams(**kwargs)
-
-        config_kwargs = {
-            k: getattr(params, k) for k in self.config_cls.model_fields if hasattr(params, k)
-        }
-        self.config = self.config_cls(**config_kwargs)
-
-        # Store execution context (EvalContext/Environment); agents use ctx.call_tool().
-        self.ctx: EvalContext | Environment | None = params.ctx
-
-        self.model_name: str = getattr(params, "model_name", "MCPAgent")
-        self.model: str = getattr(params, "model", None) or "unknown"
-        self.auto_respond = params.auto_respond
-
-        self.console = HUDConsole(logger=logger)
-
-        if params.verbose:
-            self.console.set_verbose(True)
+        self.model_name: str = self.config.model_name
+        self.model: str = self.config.model
 
         self.system_prompt = self.config.system_prompt
 
-        self._available_tools: list[types.Tool] | None = None
-        self._categorized_tools: CategorizedTools = CategorizedTools()
-        self._initialized: bool = False
+        self.enable_citations: bool = False
+
+        self.auto_respond: bool = config.auto_respond
 
     @classmethod
-    def create(cls, **kwargs: Any) -> MCPAgent:
-        """
-        Factory method to create an agent with typed parameters.
-        """
-        CreateParams = type(
-            f"{cls.config_cls.__name__}CreateParams",
-            (BaseCreateParams, cls.config_cls),
-            {"__module__": cls.config_cls.__module__},
-        )
-        return cls(params=CreateParams(**kwargs))
+    def create(cls, **kwargs: object) -> MCPAgent[ProviderMessageT]:
+        raise NotImplementedError(f"{cls.__name__}.create() must be implemented by subclasses")
 
-    async def _initialize_from_ctx(self, ctx: EvalContext) -> None:
-        """Initialize agent from EvalContext - discovers tools and sets up state.
-
-        The agent uses ctx.call_tool() directly
-        for tool execution (no EnvironmentClient wrapper needed).
-        """
-        from hud.eval.context import EvalContext
-
-        if not isinstance(ctx, EvalContext):
-            raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
-
-        # Refresh tools from connections, then get filtered list for agent
-        await ctx.list_tools()
-        self._available_tools = ctx.as_tools()
-
-        # Validate required tools are present
-        available_tool_names = {t.name for t in self._available_tools}
-        missing_tools = [tool for tool in self.required_tools if tool not in available_tool_names]
-        if missing_tools:
-            raise ValueError(
-                f"Required tools are missing: {missing_tools}. "
-                f"Available tools: {sorted(available_tool_names)}"
-            )
-
-        self._categorized_tools = self.categorize_tools()
-
-        # Show tool discovery table (visible at INFO level)
-        self.console.format_tool_discovery(
-            tools=self._available_tools,
-            skipped=self._categorized_tools.skipped,
-        )
-
-        for tool, reason in self._categorized_tools.skipped:
-            logger.debug("Skipping tool %s: %s", tool.name, reason)
-
-        # Call hook for subclass-specific initialization (e.g., tool format conversion)
-        self._on_tools_ready()
-
-        self._initialized = True
-
-    def _on_tools_ready(self) -> None:
-        """Hook called after tools are discovered and validated.
-
-        Subclasses can override this to perform provider-specific setup,
-        such as converting MCP tools to the provider's format.
-
-        Called by _initialize_from_ctx() after _available_tools is populated.
-        """
-        return  # Default no-op - subclasses override for provider-specific setup
+    @cached_property
+    @abstractmethod
+    def tools(self) -> AgentTools[Any, Any]:
+        """Provider-specific tool container used by the shared run loop."""
+        raise NotImplementedError
 
     async def run(
         self,
-        ctx: EvalContext,
+        ctx: AgentContext,
         *,
         max_steps: int = 10,
     ) -> Trace:
         """
-        Run the agent on the given evaluation context.
-
-        The agent uses ctx.prompt as the task and ctx.call_tool() for tool execution.
-        Automatically calls ctx.submit() with the final answer.
+        Run the agent loop with prepared messages and optional tools.
 
         Args:
-            ctx: EvalContext from hud.eval() - contains prompt and tools
+            ctx: Prompt messages and optional environment client
             max_steps: Maximum number of agent steps (-1 for infinite)
-
-        Returns:
-            Trace with done, content, isError fields
-
-        Example:
-            ```python
-            async with hud.eval(task) as ctx:
-                agent = ClaudeAgent.create()
-                await agent.run(ctx)
-            # ctx.reward is set by the scenario's evaluate phase
-            ```
-        """
-        from hud.eval.context import EvalContext
-
-        if not isinstance(ctx, EvalContext):
-            raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
-
-        if not ctx.prompt:
-            if ctx.has_scenario:
-                # Scenario was specified but prompt is still empty
-                # (e.g., scenario returned empty string, or edge case not caught in scenarios.py)
-                scenario = ctx._task.scenario if ctx._task else "unknown"
-                raise ValueError(
-                    f"ctx.prompt is not set.\n\n"
-                    f"Scenario '{scenario}' was specified but returned an empty prompt.\n"
-                    f"Check that the scenario's setup function returns a non-empty string."
-                )
-            else:
-                # No scenario specified at all
-                raise ValueError(
-                    "ctx.prompt is not set.\n\n"
-                    "No scenario was specified in your task file.\n"
-                    "Add a 'scenario' field to your task so scenario setup can produce a prompt."
-                )
-
-        # Store context for tool calls
-        self.ctx = ctx
-
-        # Initialize tools from context
-        if not self._initialized:
-            await self._initialize_from_ctx(ctx)
-
-        try:
-            # Build initial context
-            conversation: list[dict[str, str]] | None = getattr(ctx, "conversation", None)
-
-            if conversation:
-                # Multi-turn: build alternating role messages
-                initial_messages = await self._build_conversation_messages(conversation)
-            else:
-                # Single-turn: single user message from prompt
-                initial_messages = await self.format_message(ctx.prompt)
-
-            result = await self._run_context(initial_messages, max_steps=max_steps)
-
-            # Propagate error state to context for platform visibility
-            if result.isError and hasattr(ctx, "error"):
-                error_msg = result.info.get("error") if result.info else result.content
-                ctx.error = Exception(str(error_msg)) if error_msg else Exception("Agent error")
-
-            # Submit final answer to context (only if scenario is running)
-            if result.content and ctx.has_scenario:
-                if result.citations:
-                    await ctx.submit(
-                        {
-                            "content": result.content,
-                            "citations": result.citations,
-                        }
-                    )
-                else:
-                    await ctx.submit(result.content)
-
-            return result
-
-        except Exception as e:
-            logger.exception("Error while running agent:")
-            # Propagate error to context for platform visibility
-            if hasattr(ctx, "error"):
-                ctx.error = e
-            return Trace(
-                reward=0.0,
-                done=True,
-                content=f"Agent failed with error: {e}",
-                isError=True,
-                info={"error": str(e)},
-            )
-        finally:
-            # Cleanup auto-created resources
-            await self._cleanup()
-
-    def _map_role(self, role: str) -> str:
-        """Map a canonical role name to the provider-specific role.
-
-        Override in subclasses where the provider uses different role names.
-        Default passes through (works for OpenAI and Claude which use "assistant").
-        """
-        return role
-
-    async def _build_conversation_messages(self, conversation: list[dict[str, str]]) -> list[Any]:
-        """Build provider-formatted messages from a conversation history."""
-        result: list[Any] = []
-        for msg in conversation:
-            role = self._map_role(msg.get("role", "user"))
-            content = msg.get("content", "")
-            formatted = await self.format_message(content)
-            for fm in formatted:
-                if isinstance(fm, dict):
-                    fm["role"] = role
-                elif hasattr(fm, "role"):
-                    fm.role = role  # type: ignore[attr-defined]
-            result.extend(formatted)
-        return result
-
-    async def _run_context(self, initial_messages: list[Any], *, max_steps: int = 10) -> Trace:
-        """
-        Run the agent with pre-built messages. This is the core agent loop.
-
-        Args:
-            initial_messages: Provider-formatted messages (from format_message or conversation)
-            max_steps: Maximum number of steps (-1 for infinite)
 
         Returns:
             Trace with reward, done, content fields and trace steps
         """
-        final_response: InferenceResult | None = None
-        error = None
+        tool_handler: CallTool | None = None
+        if ctx.tool_client is not None:
+            self.tools.prepare(
+                model=self.model,
+                tools=ctx.tool_client.tools,
+                hosted_tools=self.config.hosted_tools,
+                tool_metadata=ctx.tool_client.tool_metadata,
+            )
+            tool_handler = ctx.tool_client.tool_handler
 
-        messages: list[Any] = []
-
+        messages: list[ProviderMessageT] = []
         try:
-            messages = await self.get_system_messages()
-            messages.extend(initial_messages)
-            self.console.debug(f"Messages: {messages}")
+            messages = await self.format_messages(ctx.messages)
+            logger.debug("Messages: %s", messages)
 
             step_count = 0
             while max_steps == -1 or step_count < max_steps:
                 step_count += 1
                 if max_steps == -1:
-                    self.console.debug(f"Step {step_count} (unlimited)")
+                    logger.debug("Step %s (unlimited)", step_count)
                 else:
-                    self.console.debug(f"Step {step_count}/{max_steps}")
+                    logger.debug("Step %s/%s", step_count, max_steps)
 
                 try:
                     # 1. Get model response
                     response = await self.get_response(messages)
 
-                    self.console.debug(f"Agent:\n{response}")
+                    logger.debug("Agent:\n%s", response)
 
-                    # Check if we should stop
                     if response.done or not response.tool_calls:
-                        # Use auto_respond to decide whether to stop
-                        decision: Literal["STOP", "CONTINUE"] = "STOP"
-                        if self.auto_respond and response.content:
-                            try:
-                                from hud.agents.misc import ResponseAgent
-
-                                response_agent = ResponseAgent()
-                                decision = await response_agent.determine_response(response.content)
-                            except Exception as e:
-                                self.console.warning_log(f"Auto-respond failed: {e}")
-                        if decision == "STOP":
-                            if (
-                                getattr(self.ctx, "scenario_enable_citations", False)
-                                and not response.citations
-                            ):
-                                recovered = self._recover_citations_from_content(response)
-                                if recovered:
-                                    self.console.info_log(
-                                        "Recovered citations from JSON answer payload"
-                                    )
-                                else:
-                                    self.console.warning_log(
-                                        "Citations required by scenario but missing in final response"  # noqa: E501
-                                    )
-                            self.console.debug("Stopping execution")
-                            final_response = response
-                            break
-                        else:
-                            self.console.debug("Continuing execution")
-                            messages.extend(await self.format_message(decision))
+                        if follow_up := await auto_respond(
+                            response.content,
+                            enabled=self.auto_respond,
+                        ):
+                            logger.debug("Continuing execution")
+                            messages.extend(await self.format_messages([follow_up]))
                             continue
 
-                    # 2. Execute tools
-                    tool_calls = response.tool_calls
-                    tool_results = await self.call_tools(tool_calls)
-
-                    # 3. Format tool results and add to messages
-                    tool_messages = await self.format_tool_results(tool_calls, tool_results)
-                    messages.extend(tool_messages)
-
-                    if logger.isEnabledFor(logging.INFO):
-                        self.console.format_step(
-                            step=step_count,
-                            max_steps=max_steps,
-                            tool_calls=tool_calls,
-                            tool_results=tool_results,
+                        logger.debug("Stopping execution")
+                        return Trace(
+                            done=True,
+                            messages=messages,
+                            content=response.content,
+                            isError=response.isError,
+                            citations=response.citations,
                         )
 
+                    # 2. Execute tools
+                    tool_messages = await self.tools.execute(
+                        tool_handler,
+                        response.tool_calls,
+                    )
+
+                    messages.extend(cast("list[ProviderMessageT]", tool_messages))
+
                 except Exception as e:
-                    self.console.error_log(f"Step failed: {e}")
-                    error = str(e)
-                    break
+                    logger.exception("Step failed")
+                    return Trace(
+                        done=True,
+                        messages=messages,
+                        content=str(e),
+                        isError=True,
+                        info={"error": str(e)},
+                    )
 
         except KeyboardInterrupt:
-            self.console.warning_log("Agent execution interrupted by user")
-            error = "Interrupted by user"
+            logger.warning("Agent execution interrupted by user")
+            return Trace(
+                done=True,
+                messages=messages,
+                content="Interrupted by user",
+                isError=True,
+                info={"error": "Interrupted by user"},
+            )
         except asyncio.CancelledError:
-            self.console.warning_log("Agent execution cancelled")
-            error = "Cancelled"
+            logger.warning("Agent execution cancelled")
+            return Trace(
+                done=True,
+                messages=messages,
+                content="Cancelled",
+                isError=True,
+                info={"error": "Cancelled"},
+            )
         except Exception as e:
-            self.console.error_log(f"Unexpected error: {e}")
-            error = str(e)
-
-        # Build result
-        if error is not None or (
-            final_response and hasattr(final_response, "isError") and final_response.isError
-        ):
-            is_error = True
-        else:
-            is_error = False
-
-        # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
-        reward = 0.0
-        if self.ctx is not None:
-            ctx_reward = getattr(self.ctx, "reward", None)
-            if ctx_reward is not None:
-                reward = ctx_reward
+            logger.exception("Unexpected error")
+            return Trace(
+                done=True,
+                messages=messages,
+                content=str(e),
+                isError=True,
+                info={"error": str(e)},
+            )
 
         return Trace(
-            reward=reward,
             done=True,
             messages=messages,
-            content=final_response.content if final_response else error,
-            isError=is_error,
-            citations=final_response.citations if final_response else [],
-            info={"error": error} if error else {},
         )
 
-    def _recover_citations_from_content(self, response: InferenceResult) -> bool:
-        """Try to extract citations from model content when native citations are missing.
-
-        Handles two cases: raw JSON content and fenced ```json blocks.
-        """
-        raw = response.content or ""
-        if not raw:
-            return False
-
-        # Try raw content first, then try extracting from fenced block.
-        for text in dict.fromkeys([raw, self._extract_fenced_json(raw) or ""]):
-            if not text:
-                continue
-            try:
-                parsed = json.loads(text)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if not isinstance(parsed, dict):
-                continue
-
-            raw_citations = parsed.get("citations")
-            if not isinstance(raw_citations, list) or not raw_citations:
-                continue
-
-            normalized: list[Citation] = [
-                c
-                for cit in raw_citations
-                if isinstance(cit, dict) and (c := self._normalize_citation(cit)) is not None
-            ]
-            if not normalized:
-                continue
-
-            content = parsed.get("content")
-            if isinstance(content, str) and content.strip():
-                response.content = content
-            response.citations = [c.model_dump(exclude={"provider_data"}) for c in normalized]
-            return True
-
-        return False
-
-    @staticmethod
-    def _extract_fenced_json(value: str) -> str | None:
-        """Extract JSON content from a fenced code block."""
-        match = re.search(r"```(?:json)?\s*\n(.*?)```", value, re.DOTALL)
-        return match.group(1).strip() if match else None
-
-    @staticmethod
-    def _normalize_citation(cit: dict[str, Any]) -> Citation | None:
-        """Normalize a citation dict to canonical Citation shape.
-
-        Maps common key aliases to canonical names and validates via Citation.
-        Returns None only if construction fails (e.g. extra-forbid violation).
-        """
-        source = cit.get("source") or cit.get("document") or ""
-        try:
-            return Citation(
-                type=cit.get("type", "document_citation"),
-                text=cit.get("text") or cit.get("cited_text", ""),
-                source=str(source),
-                title=cit.get("title") or cit.get("document_title"),
-                start_index=cit.get("start_index", cit.get("start_char_index")),
-                end_index=cit.get("end_index", cit.get("end_char_index")),
-            )
-        except Exception:
-            return None
-
-    async def call_tools(
-        self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
-    ) -> list[MCPToolResult]:
-        """
-        Call tools through the bound EvalContext.
-
-        Args:
-            tool_call: MCPToolCall or list of MCPToolCall
-
-        Returns:
-            List of MCPToolResult
-        """
-        if tool_call is None:
-            return []
-
-        if isinstance(tool_call, MCPToolCall):
-            tool_call = [tool_call]
-
-        if self.ctx is None:
-            raise ValueError("Agent not bound to context - call run(ctx) first")
-
-        results: list[MCPToolResult] = []
-        for tc in tool_call:
-            try:
-                self.console.debug(f"Calling tool: {tc}")
-                result = await self.ctx.call_tool(tc)
-                results.append(MCPToolResult(content=result.content, isError=result.isError))
-            except TimeoutError as e:
-                self.console.error_log(f"Tool execution timed out: {e}")
-                raise
-            except Exception as e:
-                self.console.error_log(f"Tool execution failed: {e}")
-                results.append(_format_error_result(str(e)))
-        return results
-
     @abstractmethod
-    async def get_system_messages(self) -> list[types.ContentBlock]:
-        """
-        Get the system prompt.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    async def get_response(self, messages: list[Any]) -> InferenceResult:
+    async def get_response(self, messages: list[ProviderMessageT]) -> AgentResponse:
         """
         Get response from the model including any tool calls.
 
@@ -553,114 +198,6 @@ class MCPAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
-        """
-        Format a list of content blocks into a list of messages.
-        """
+    async def format_messages(self, messages: list[types.PromptMessage]) -> list[ProviderMessageT]:
+        """Format MCP prompt messages into provider messages."""
         raise NotImplementedError
-
-    @abstractmethod
-    async def format_tool_results(
-        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[Any]:
-        """
-        Format tool results into messages for the model.
-
-        Args:
-            tool_calls: List of MCPToolCall objects that were executed
-            tool_results: List of MCPToolResult objects from tool execution
-
-        Returns:
-            List of formatted messages to append to conversation
-        """
-        raise NotImplementedError
-
-    async def format_message(
-        self,
-        message: str
-        | list[str]
-        | types.ContentBlock
-        | list[types.ContentBlock]
-        | list[str | types.ContentBlock],
-    ) -> list[Any]:  # maybe type messages as list[types.ContentBlock]
-        """
-        Convencience function.
-
-        Format a single content message into a list of messages for the model.
-        """
-        blocks: list[types.ContentBlock] = []
-        if not isinstance(message, list):
-            message = [message]
-
-        for m in message:
-            if isinstance(m, str):
-                blocks.append(types.TextContent(text=m, type="text"))
-            elif isinstance(m, types.ContentBlock):
-                blocks.append(m)
-            else:
-                raise ValueError(f"Invalid message type: {type(m)}")
-
-        return await self.format_blocks(blocks)
-
-    def get_available_tools(self) -> list[types.Tool]:
-        """Get list of available MCP tools for LLM use (excludes lifecycle tools)."""
-        if self._available_tools is None:
-            raise RuntimeError(
-                "Tools have not been initialized. Call initialize() before accessing available tools."  # noqa: E501
-            )
-        return self._available_tools
-
-    def get_tool_schemas(self) -> list[dict]:
-        """Get tool schemas in a format suitable for the model.
-
-        Uses categorized tools so that skipped tools are excluded from schemas
-        automatically. Falls back to get_available_tools() if called before
-        categorization.
-        """
-        if self._initialized:
-            tools = list(self._categorized_tools.generic)
-        else:
-            tools = self.get_available_tools()
-
-        schemas = []
-        for tool in tools:
-            schema = {
-                "name": tool.name,
-                "description": tool.description,
-            }
-            if tool.inputSchema:
-                schema["parameters"] = tool.inputSchema
-            schemas.append(schema)
-        return schemas
-
-    async def _filter_messages(
-        self,
-        message_list: list[types.ContentBlock],
-        include_types: list[
-            Literal["text", "image", "audio", "resource_link", "embedded_resource"]
-        ],
-    ) -> list[types.ContentBlock]:
-        """
-        Filter a list of messages and return only the messages of the given types.
-
-        Args:
-            message_list: The list of messages to filter
-            include_types: List of types to include (None = all types)
-
-        Returns:
-            List of messages in provider-specific format
-        """
-        return [message for message in message_list if message.type in include_types]
-
-    async def _cleanup(self) -> None:
-        """Cleanup resources."""
-        # Clear context reference
-        self.ctx = None
-
-
-def _format_error_result(error_message: str) -> MCPToolResult:
-    return MCPToolResult(content=text_to_blocks(error_message), isError=True)
-
-
-def text_to_blocks(text: str) -> list[types.ContentBlock]:
-    return [types.TextContent(text=text, type="text")]

@@ -15,7 +15,7 @@ Usage:
 
     # With scenario
     async with env("checkout", user_id="alice") as ctx:
-        await agent.run(ctx.prompt)
+        await ctx.submit("answer")
 
     # Orchestrated via hud.eval
     tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
@@ -279,7 +279,7 @@ class Task(BaseModel):
             agent = create_agent(agent)
 
         async with run_eval(self, trace=trace, quiet=quiet) as ctx:
-            result = await agent.run(ctx, max_steps=max_steps)
+            result = await ctx._run(agent, max_steps=max_steps)
 
         if ctx.reward is not None:
             result.reward = ctx.reward

@@ -10,20 +10,22 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from hud.types import BaseAgentConfig
+from hud.agents.tools.hosted import HostedTool
 
 # Alias to accept both 'model' and 'checkpoint_name' (backwards compat)
 _model_alias = AliasChoices("model", "checkpoint_name")
 
 
-class BaseCreateParams(BaseModel):
-    """Runtime parameters for agent creation."""
-
+class AgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     ctx: Any = None  # EvalContext or Environment
     auto_respond: bool = False
-    verbose: bool = False
+    system_prompt: str | None = None
+    hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
+
+    model_name: str = "Agent"
+    model: str = Field(default="unknown", validation_alias=_model_alias)
 
 
 # -----------------------------------------------------------------------------
@@ -31,9 +33,7 @@ class BaseCreateParams(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class ClaudeConfig(BaseAgentConfig):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
+class ClaudeConfig(AgentConfig):
     model_name: str = "Claude"
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
     model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
@@ -42,23 +42,17 @@ class ClaudeConfig(BaseAgentConfig):
     validate_api_key: bool = True
 
 
-class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
-    pass
-
-
 # -----------------------------------------------------------------------------
 # Gemini
 # -----------------------------------------------------------------------------
 
 
-class GeminiConfig(BaseAgentConfig):
+class GeminiConfig(AgentConfig):
     """Configuration for GeminiAgent."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Gemini"
     model: str = Field(default="gemini-3-pro-preview", validation_alias=_model_alias)
-    model_client: Any = None  # genai.Client
+    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 40
@@ -69,23 +63,17 @@ class GeminiConfig(BaseAgentConfig):
     include_thoughts: bool = True
 
 
-class GeminiCreateParams(BaseCreateParams, GeminiConfig):
-    pass
-
-
 # -----------------------------------------------------------------------------
 # OpenAI
 # -----------------------------------------------------------------------------
 
 
-class OpenAIConfig(BaseAgentConfig):
+class OpenAIConfig(AgentConfig):
     """Configuration for OpenAIAgent."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI"
     model: str = Field(default="gpt-5.4", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncOpenAI
+    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Any = None  # openai Reasoning
@@ -96,14 +84,8 @@ class OpenAIConfig(BaseAgentConfig):
     validate_api_key: bool = True
 
 
-class OpenAICreateParams(BaseCreateParams, OpenAIConfig):
-    pass
-
-
-class OpenAIChatConfig(BaseAgentConfig):
+class OpenAIChatConfig(AgentConfig):
     """Configuration for OpenAIChatAgent."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI Chat"
     model: str = Field(default="gpt-5-mini", validation_alias=_model_alias)
@@ -118,7 +100,3 @@ class OpenAIChatConfig(BaseAgentConfig):
     api_key: str | None = None
     base_url: str | None = None
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
-
-
-class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
-    pass

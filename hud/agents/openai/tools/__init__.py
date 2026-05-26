@@ -2,55 +2,46 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, ClassVar
 
-from hud.agents.tools import AgentToolRegistry
+from openai.types.responses import ToolParam
 
-from .base import OpenAITool
-from .coding import (
-    OPENAI_SHELL_SPEC,
-    OpenAIShellTool,
-)
-from .computer import OPENAI_COMPUTER_SPEC, OpenAIComputerTool
+from hud.agents.tools import AgentTool, AgentTools
+
+from .base import OpenAIFunctionTool, OpenAITool
+from .coding import OpenAIShellTool
+from .computer import OpenAIComputerTool
 from .hosted import OpenAICodeInterpreterTool, OpenAIHostedTool, OpenAIToolSearchTool
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
-@dataclass(frozen=True)
-class OpenAIToolRegistry(AgentToolRegistry[OpenAITool]):
-    """Registry for OpenAI harness tools."""
 
-    tool_classes: tuple[type[OpenAITool], ...] = (
+class OpenAIAgentTools(AgentTools[OpenAITool, ToolParam]):
+    """Prepared OpenAI Responses tool state for a run."""
+
+    native_tool_classes: ClassVar[tuple[type[AgentTool[object]], ...]] = (
         OpenAIComputerTool,
         OpenAIShellTool,
     )
-    name_fallbacks: dict[str, tuple[str, ...]] = field(
-        default_factory=lambda: {
-            "computer": ("computer", "openai_computer"),
-            "shell": ("bash",),
-            "editor": ("edit",),
-        }
-    )
+    function_tool_class = OpenAIFunctionTool
+    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {
+        "computer": ("computer", "openai_computer"),
+        "shell": ("bash",),
+        "editor": ("edit",),
+    }
 
     @property
-    def api_types(self) -> frozenset[str]:
-        return frozenset(cls.name for cls in self.tool_classes)
+    def tool_search_threshold(self) -> int | None:
+        for hosted_tool in self.hosted_tools:
+            if isinstance(hosted_tool, OpenAIToolSearchTool):
+                return hosted_tool.threshold
+        return None
 
-    @property
-    def roles(self) -> frozenset[str]:
-        return self.capabilities
-
-
-openai_tools = OpenAIToolRegistry()
 
 __all__ = [
-    "OPENAI_COMPUTER_SPEC",
-    "OPENAI_SHELL_SPEC",
+    "OpenAIAgentTools",
     "OpenAICodeInterpreterTool",
-    "OpenAIComputerTool",
     "OpenAIHostedTool",
-    "OpenAIShellTool",
-    "OpenAITool",
-    "OpenAIToolRegistry",
     "OpenAIToolSearchTool",
-    "openai_tools",
 ]

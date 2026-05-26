@@ -650,7 +650,7 @@ def test_native_grader_helpers_keep_basic_semantics() -> None:
     assert f1_score("hello hud", "hello sdk") == 0.5
 
 
-def test_eval_context_user_facing_properties_and_tool_surface() -> None:
+def test_eval_context_user_facing_properties_and_tool_helpers() -> None:
     ctx = EvalContext(trace=False, quiet=True, variants={"model": "test"})
 
     ctx.prompt = "Do the task"

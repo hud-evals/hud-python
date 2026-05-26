@@ -2,40 +2,30 @@
 
 from __future__ import annotations
 
+import base64
 import logging
-from typing import Any, ClassVar, cast
+from functools import cached_property
+from typing import Any, cast
 
 import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
 
+from hud.agents import gateway
 from hud.agents.base import MCPAgent
-from hud.agents.tools import (
-    EnvironmentCapability,
-    call_agent_tools,
-    capabilities_metadata_from_context,
-    discover_environment_capabilities,
-    select_hosted_tools,
-)
-from hud.agents.types import GeminiConfig, GeminiCreateParams
+from hud.agents.types import GeminiConfig
 from hud.settings import settings
-from hud.tools.computer import computer_settings
-from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
-from hud.utils.hud_console import HUDConsole
+from hud.tools.types import Citation
+from hud.types import AgentResponse
 from hud.utils.types import with_signature
 
-from .tools import (
-    GeminiComputerTool,
-    GeminiHostedTool,
-    GeminiTool,
-    gemini_tools,
-    normalize_gemini_computer_use_args,
-)
+from .settings import gemini_agent_settings
+from .tools import GeminiAgentTools
 
 logger = logging.getLogger(__name__)
 
 
-class GeminiAgent(MCPAgent):
+class GeminiAgent(MCPAgent[genai_types.Content]):
     """
     Gemini agent that uses MCP servers for tool execution.
 
@@ -43,38 +33,25 @@ class GeminiAgent(MCPAgent):
     tools through MCP servers instead of direct implementation.
     """
 
-    metadata: ClassVar[dict[str, Any] | None] = None
-    config_cls: ClassVar[type[BaseAgentConfig]] = GeminiConfig
-
+    @with_signature(GeminiConfig)
     @classmethod
-    def agent_type(cls) -> AgentType:
-        """Return the AgentType for Gemini."""
-        return AgentType.GEMINI
+    def create(cls, **kwargs: object) -> GeminiAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return cls(GeminiConfig.model_validate(kwargs))
 
-    @with_signature(GeminiCreateParams)
-    @classmethod
-    def create(cls, **kwargs: Any) -> GeminiAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
-        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
-
-    def __init__(self, params: GeminiCreateParams | None = None, **kwargs: Any) -> None:
-        super().__init__(params, **kwargs)
+    def __init__(self, config: GeminiConfig | None = None) -> None:
+        config = config or GeminiConfig()
+        super().__init__(config)
         self.config: GeminiConfig
 
         model_client = self.config.model_client
         if model_client is None:
             if settings.api_key:
-                from hud.agents.gateway import build_gateway_client
-
-                model_client = build_gateway_client("gemini")
+                model_client = gateway.build_gateway_client("gemini")
             elif settings.gemini_api_key:
                 model_client = genai.Client(api_key=settings.gemini_api_key)
                 if self.config.validate_api_key:
                     try:
-                        list(
-                            model_client.models.list(
-                                config=genai_types.ListModelsConfig(page_size=1)
-                            )
-                        )
+                        next(iter(model_client.models.list()), None)
                     except Exception as e:
                         raise ValueError(f"Gemini API key is invalid: {e}") from e
             else:
@@ -87,90 +64,76 @@ class GeminiAgent(MCPAgent):
                     " access"
                 )
 
-        self.gemini_client: genai.Client = model_client
+        self.gemini_client: genai.Client = cast("genai.Client", model_client)
         self.temperature = self.config.temperature
         self.top_p = self.config.top_p
         self.top_k = self.config.top_k
         self.max_output_tokens = self.config.max_output_tokens
         self.thinking_level = self.config.thinking_level
         self.include_thoughts = self.config.include_thoughts
-        self.hud_console = HUDConsole(logger=logger)
 
-        # Track mapping from Gemini tool names to MCP tool names
-        self._gemini_to_mcp_tool_map: dict[str, str] = {}
-        self._computer_tool_name: str | None = None
-        self._gemini_native_tools: dict[str, GeminiTool] = {}
-        self._environment_capabilities: dict[str, EnvironmentCapability] = {}
         self.excluded_predefined_functions = list(self.config.excluded_predefined_functions)
         self.max_recent_turn_with_screenshots = (
-            computer_settings.GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS
-        )
-        self.gemini_tools: genai_types.ToolListUnion = []
-
-    def _on_tools_ready(self) -> None:
-        """Build Gemini-specific tool mappings after tools are discovered."""
-        self._convert_tools_for_gemini()
-
-    def _discover_environment_capabilities(
-        self, tools: list[types.Tool]
-    ) -> dict[str, EnvironmentCapability]:
-        return discover_environment_capabilities(
-            tools,
-            env_metadata=capabilities_metadata_from_context(self.ctx),
-            name_fallbacks=gemini_tools.name_fallbacks,
+            gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
 
-    async def get_system_messages(self) -> list[genai_types.Content]:
-        """No system messages for Gemini because applied in get_response"""
-        return []
+    @cached_property
+    def tools(self) -> GeminiAgentTools:
+        return GeminiAgentTools(
+            excluded_predefined_functions=self.excluded_predefined_functions,
+        )
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[genai_types.Content]:
-        """Format messages for Gemini."""
-        # Convert MCP content types to Gemini content types
-        gemini_parts: list[genai_types.Part] = []
+    async def format_messages(
+        self, messages: list[types.PromptMessage]
+    ) -> list[genai_types.Content]:
+        """Format MCP prompt messages for Gemini."""
+        return [
+            genai_types.Content(
+                role="model" if str(message.role) == "assistant" else str(message.role),
+                parts=[_format_content(message.content)],
+            )
+            for message in messages
+        ]
 
-        for block in blocks:
-            if isinstance(block, types.TextContent):
-                gemini_parts.append(genai_types.Part(text=block.text))
-            elif isinstance(block, types.ImageContent):
-                # Convert MCP ImageContent to Gemini format
-                # Need to decode base64 string to bytes
-                import base64
-
-                image_bytes = base64.b64decode(block.data)
-                gemini_parts.append(
-                    genai_types.Part.from_bytes(data=image_bytes, mime_type=block.mimeType)
-                )
-            else:
-                # For other types, try to handle but log a warning
-                self.hud_console.log(f"Unknown content block type: {type(block)}", level="warning")
-
-        return [genai_types.Content(role="user", parts=gemini_parts)]
-
-    async def get_response(self, messages: list[genai_types.Content]) -> InferenceResult:
+    async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
-        self._remove_old_screenshots(messages)
-        tools = self.gemini_tools
+        # Drop screenshots from older computer tool responses to keep context small.
+        screenshot_turns: list[list[genai_types.FunctionResponse]] = []
+        for content in reversed(messages):
+            if content.role != "user":
+                continue
 
-        citations_enabled = bool(
-            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
-        )
-        if citations_enabled and not self._has_google_search_tool():
+            turn_responses: list[genai_types.FunctionResponse] = []
+            for part in content.parts or []:
+                function_response = part.function_response
+                if (
+                    function_response is not None
+                    and function_response.parts
+                    and function_response.name in self.tools.predefined_computer_functions
+                ):
+                    turn_responses.append(function_response)
+
+            if turn_responses:
+                screenshot_turns.append(turn_responses)
+
+        for old_turn in screenshot_turns[self.max_recent_turn_with_screenshots :]:
+            for function_response in old_turn:
+                function_response.parts = None
+
+        # Configure Gemini generation options.
+        tools = cast("genai_types.ToolListUnion", self.tools.params)
+        if self.enable_citations and not any(tool.google_search for tool in self.tools.params):
             tools = [*list(tools), genai_types.Tool(google_search=genai_types.GoogleSearch())]
 
         thinking_config = None
         if self.thinking_level is not None or self.include_thoughts:
-            thinking_level = (
-                genai_types.ThinkingLevel(self.thinking_level.upper())
-                if self.thinking_level is not None
-                else None
-            )
             thinking_config = genai_types.ThinkingConfig(
-                thinking_level=thinking_level,
+                thinking_level=genai_types.ThinkingLevel(self.thinking_level.upper())
+                if self.thinking_level is not None
+                else None,
                 include_thoughts=self.include_thoughts,
             )
 
-        # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
             temperature=self.temperature,
             top_p=self.top_p,
@@ -181,396 +144,120 @@ class GeminiAgent(MCPAgent):
             thinking_config=thinking_config,
         )
 
-        # Use async API to avoid blocking the event loop
-        response = await self.gemini_client.aio.models.generate_content(
+        api_response = await self.gemini_client.aio.models.generate_content(
             model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )
-
-        # Append assistant response (including any function_call) so that
-        # subsequent FunctionResponse messages correspond to a prior FunctionCall
-        if response.candidates and len(response.candidates) > 0 and response.candidates[0].content:
-            messages.append(response.candidates[0].content)
-
-        # Process response
-        result = InferenceResult(content="", tool_calls=[], done=True)
-        collected_tool_calls: list[MCPToolCall] = []
-
-        if not response.candidates:
-            detail_parts = []
-            for attr in ("prompt_feedback", "usage_metadata"):
-                value = getattr(response, attr, None)
-                if value is None:
-                    continue
-                if hasattr(value, "model_dump_json"):
-                    value_repr = value.model_dump_json()
-                elif hasattr(value, "model_dump"):
-                    value_repr = repr(value.model_dump())
-                else:
-                    value_repr = repr(value)
-                detail_parts.append(f"{attr}={value_repr}")
+        if not api_response.candidates:
+            detail_parts: list[str] = []
+            if api_response.prompt_feedback is not None:
+                detail_parts.append(
+                    f"prompt_feedback={api_response.prompt_feedback.model_dump_json()}"
+                )
+            if api_response.usage_metadata is not None:
+                detail_parts.append(
+                    f"usage_metadata={api_response.usage_metadata.model_dump_json()}"
+                )
             details = "; ".join(detail_parts) if detail_parts else "no response metadata"
             raise RuntimeError(
                 f"Gemini response returned no candidates for model {self.config.model}. {details}"
             )
 
-        candidate = response.candidates[0]
+        candidate = api_response.candidates[0]
 
-        # Extract text content and function calls
-        text_content = ""
-        thinking_content = ""
+        # Append assistant response (including any function_call) so that
+        # subsequent FunctionResponse messages correspond to a prior FunctionCall
+        content = candidate.content
+        if content is not None:
+            messages.append(content)
 
-        if candidate.content and candidate.content.parts:
-            for part in candidate.content.parts:
-                if part.function_call:
-                    tool_call = self._extract_tool_call(part)
-                    if tool_call is not None:
-                        collected_tool_calls.append(tool_call)
-                elif part.thought is True and part.text:
-                    if thinking_content:
-                        thinking_content += "\n"
-                    thinking_content += part.text
-                elif part.text:
-                    text_content += part.text
+        # Normalize text, thoughts, tool calls, and citations.
+        result = AgentResponse(content="", tool_calls=[], done=True)
+        text_parts: list[str] = []
+        thought_parts: list[str] = []
 
-        # Assign collected tool calls and mark done status
-        if collected_tool_calls:
-            result.tool_calls = collected_tool_calls
-            result.done = False
+        parts = []
+        if content is not None:
+            parts = content.parts or []
+        for part in parts:
+            function_call = part.function_call
+            if function_call is not None:
+                result.tool_calls.append(self.tools.tool_call(function_call))
+                result.done = False
+                continue
 
-        result.content = text_content
-        if thinking_content:
-            result.reasoning = thinking_content
+            if not part.text:
+                continue
 
-        # Extract grounding citations from groundingMetadata
-        grounding_meta = getattr(candidate, "grounding_metadata", None)
-        if grounding_meta:
-            citations: list[dict[str, Any]] = []
+            if part.thought is True:
+                thought_parts.append(part.text)
+            else:
+                text_parts.append(part.text)
 
-            # Build a lookup from chunk index → source info
-            chunks = getattr(grounding_meta, "grounding_chunks", None) or []
-            chunk_sources: list[dict[str, Any]] = []
-            for chunk in chunks:
-                web = getattr(chunk, "web", None)
-                if web:
-                    chunk_sources.append(
-                        {
-                            "source": getattr(web, "uri", "") or "",
-                            "title": getattr(web, "title", None),
-                        }
-                    )
-                else:
-                    chunk_sources.append({"source": "", "title": None})
+        result.content = "".join(text_parts)
+        if thought_parts:
+            result.reasoning = "\n".join(thought_parts)
 
-            # Walk groundingSupports for text-segment anchoring
-            supports = getattr(grounding_meta, "grounding_supports", None) or []
-            seen_chunk_indices: set[int] = set()
-            for support in supports:
-                segment = getattr(support, "segment", None)
-                support_chunk_indices = getattr(support, "grounding_chunk_indices", None) or []
-                segment_text = getattr(segment, "text", "") or "" if segment else ""
-                start_idx = getattr(segment, "start_index", None) if segment else None
-                end_idx = getattr(segment, "end_index", None) if segment else None
-
-                for idx in support_chunk_indices:
-                    seen_chunk_indices.add(idx)
-                    source_info = chunk_sources[idx] if idx < len(chunk_sources) else {}
-                    citations.append(
-                        {
-                            "type": "grounding",
-                            "text": segment_text,
-                            "source": source_info.get("source", ""),
-                            "title": source_info.get("title"),
-                            "start_index": start_idx,
-                            "end_index": end_idx,
-                        }
-                    )
-
-            # Include any chunks not referenced by a support entry
-            for idx, src in enumerate(chunk_sources):
-                if idx not in seen_chunk_indices and src.get("source"):
-                    citations.append(
-                        {
-                            "type": "grounding",
-                            "text": "",
-                            "source": src["source"],
-                            "title": src.get("title"),
-                        }
-                    )
-
-            result.citations = citations
+        grounding_meta = candidate.grounding_metadata
+        if grounding_meta is not None:
+            # TODO: Also normalize candidate.citation_metadata for URL-context citation spans.
+            result.citations = [
+                citation.model_dump(exclude={"provider_data"})
+                for citation in _grounding_citations(grounding_meta)
+            ]
 
         return result
 
-    def _extract_tool_call(self, part: genai_types.Part) -> MCPToolCall | None:
-        """Extract an MCPToolCall from a function call part.
 
-        Subclasses can override to customize tool call extraction (e.g., normalizing
-        computer use calls to a different schema).
-        """
-        if not part.function_call:
-            return None
-
-        func_name = part.function_call.name or ""
-        raw_args = dict(part.function_call.args) if part.function_call.args else {}
-        mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name)
-
-        if mcp_tool_name:
-            return MCPToolCall(
-                name=mcp_tool_name,
-                arguments=raw_args,
+def _format_content(
+    content: types.ContentBlock,
+) -> genai_types.Part:
+    match content:
+        case types.TextContent(text=text):
+            return genai_types.Part(text=text)
+        case types.ImageContent(data=data, mimeType=mime_type):
+            return genai_types.Part.from_bytes(
+                data=base64.b64decode(data),
+                mime_type=mime_type or "image/png",
             )
+        case _:
+            raise ValueError(f"Unknown content block type: {type(content)}")
 
-        if self._computer_tool_name and func_name in gemini_tools.predefined_computer_functions:
-            return MCPToolCall(
-                name=self._computer_tool_name,
-                arguments=normalize_gemini_computer_use_args(func_name, raw_args),
-                gemini_name=func_name,  # type: ignore[arg-type]
-            )
 
-        if func_name in self._gemini_native_tools:
-            return MCPToolCall(
-                name=func_name,
-                arguments=raw_args,
-            )
+def _grounding_citations(
+    grounding_meta: genai_types.GroundingMetadata,
+) -> list[Citation]:
+    citations: list[Citation] = []
+    chunk_sources: list[tuple[str, str | None]] = []
+    for chunk in grounding_meta.grounding_chunks or []:
+        if chunk.web is None:
+            chunk_sources.append(("", None))
+        else:
+            chunk_sources.append((chunk.web.uri or "", chunk.web.title))
 
-        return MCPToolCall(
-            name=func_name,
-            arguments=raw_args,
-        )
+    seen_chunk_indices: set[int] = set()
+    for support in grounding_meta.grounding_supports or []:
+        segment = support.segment
+        segment_text = segment.text or "" if segment else ""
+        start_idx = segment.start_index if segment else None
+        end_idx = segment.end_index if segment else None
 
-    async def format_tool_results(
-        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[genai_types.Content]:
-        """Format tool results into Gemini messages."""
-        # Process each tool result
-        function_responses = []
-
-        for tool_call, result in zip(tool_calls, tool_results, strict=True):
-            # Get the Gemini function name from metadata
-            gemini_name = getattr(tool_call, "gemini_name", tool_call.name)
-
-            # Convert MCP tool results to Gemini format
-            response_dict: dict[str, Any] = {}
-            is_computer_call = (
-                self._computer_tool_name is not None and tool_call.name == self._computer_tool_name
-            )
-
-            if result.isError:
-                # Extract error message from content
-                error_msg = "Tool execution failed"
-                for content in result.content:
-                    if isinstance(content, types.TextContent):
-                        if content.text.startswith("__URL__:"):
-                            continue
-                        error_msg = content.text
-                        break
-                response_dict["error"] = error_msg
-                if is_computer_call:
-                    response_dict["url"] = self._extract_url(result) or "about:blank"
-            else:
-                # Process success content
-                response_dict["success"] = True
-
-            screenshot_parts: list[genai_types.FunctionResponsePart] = []
-            if is_computer_call:
-                url = self._extract_url(result)
-                for content in result.content:
-                    if isinstance(content, types.ImageContent):
-                        import base64
-
-                        image_bytes = base64.b64decode(content.data)
-                        screenshot_parts.append(
-                            genai_types.FunctionResponsePart(
-                                inline_data=genai_types.FunctionResponseBlob(
-                                    mime_type=content.mimeType or "image/png",
-                                    data=image_bytes,
-                                )
-                            )
-                        )
-                    elif isinstance(content, types.TextContent) and content.text.startswith(
-                        "__GEMINI_SAFETY_BLOCKED__:"
-                    ):
-                        response_dict.pop("success", None)
-                        response_dict["blocked"] = True
-                        response_dict["reason"] = content.text.replace(
-                            "__GEMINI_SAFETY_BLOCKED__:", "", 1
-                        )
-
-                response_dict["url"] = url or "about:blank"
-                safety_decision = (
-                    tool_call.arguments.get("safety_decision") if tool_call.arguments else None
+        for idx in support.grounding_chunk_indices or []:
+            seen_chunk_indices.add(idx)
+            source, title = chunk_sources[idx] if 0 <= idx < len(chunk_sources) else ("", None)
+            citations.append(
+                Citation(
+                    type="grounding",
+                    text=segment_text,
+                    source=source,
+                    title=title,
+                    start_index=start_idx,
+                    end_index=end_idx,
                 )
-                if safety_decision and not result.isError and not response_dict.get("blocked"):
-                    response_dict["safety_acknowledgement"] = True
-            else:
-                # Add text content to response
-                for content in result.content:
-                    if isinstance(content, types.TextContent):
-                        response_dict["output"] = content.text
-                        break
-
-            # Create function response
-            function_response = genai_types.FunctionResponse(
-                name=gemini_name,
-                response=response_dict,
-                parts=screenshot_parts if screenshot_parts else None,
             )
-            function_responses.append(function_response)
 
-        # Return as a user message containing all function responses
-        return [
-            genai_types.Content(
-                role="user",
-                parts=[genai_types.Part(function_response=fr) for fr in function_responses],
-            )
-        ]
-
-    @staticmethod
-    def _extract_url(result: MCPToolResult) -> str | None:
-        for content in result.content:
-            if isinstance(content, types.TextContent) and content.text.startswith("__URL__:"):
-                return content.text.replace("__URL__:", "", 1)
-        return None
-
-    async def call_tools(
-        self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
-    ) -> list[MCPToolResult]:
-        """Route Gemini-owned native tool calls through provider translators."""
-        return await call_agent_tools(self, self._gemini_native_tools, tool_call)
-
-    def _map_role(self, role: str) -> str:
-        """Gemini uses 'model' instead of 'assistant' for non-user turns."""
-        if role == "assistant":
-            return "model"
-        return role
-
-    async def create_user_message(self, text: str) -> genai_types.Content:
-        """Create a user message in Gemini's format."""
-        return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])
-
-    def _has_google_search_tool(self) -> bool:
-        """Check if google_search is already in the tool list."""
-        return any(getattr(tool, "google_search", None) is not None for tool in self.gemini_tools)
-
-    def _convert_tools_for_gemini(self) -> None:
-        """Convert MCP tools to Gemini tool format."""
-        self._gemini_to_mcp_tool_map = {}
-        self._computer_tool_name = None
-        self._gemini_native_tools = {}
-        self.gemini_tools = []
-
-        categorized = self._categorized_tools
-
-        capabilities = self._discover_environment_capabilities(self.get_available_tools())
-        self._environment_capabilities = capabilities
-        provider_backing_tools: set[str] = set()
-
-        for capability in capabilities.values():
-            if capability.name not in gemini_tools.capabilities:
-                continue
-            for gemini_tool in gemini_tools.tools_for_capability(capability, self.model):
-                provider_backing_tools.add(gemini_tool.env_tool_name)
-                if isinstance(gemini_tool, GeminiComputerTool):
-                    self._computer_tool_name = gemini_tool.name
-                    self._gemini_native_tools[gemini_tool.name] = gemini_tool
-                    gemini_tool.excluded_predefined_functions = (
-                        self._computer_use_excluded_function_names(gemini_tool.env_tool_name)
-                    )
-                    self.gemini_tools.append(gemini_tool.to_params())
-                    continue
-
-                self._gemini_native_tools[gemini_tool.name] = gemini_tool
-                self.gemini_tools.append(gemini_tool.to_params())
-
-        configured_hosted = select_hosted_tools(
-            self.config.hosted_tools,
-            tool_type=GeminiHostedTool,
-            model=self.model,
-        )
-        self.gemini_tools.extend(tool.to_params() for tool in configured_hosted)
-
-        # Process generic function tools
-        for tool in categorized.generic:
-            if tool.name in provider_backing_tools:
-                continue
-            gemini_tool = self._to_gemini_tool(tool)
-            if gemini_tool:
-                self._gemini_to_mcp_tool_map[tool.name] = tool.name
-                self.gemini_tools.append(gemini_tool)
-
-        # Log actual tools being used
-        tool_names = sorted(
-            {
-                *self._gemini_to_mcp_tool_map.keys(),
-                *self._gemini_native_tools.keys(),
-            }
-        )
-        self.console.info(
-            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
-        )
-
-    def _computer_use_excluded_function_names(self, computer_tool_name: str) -> list[str]:
-        excluded = [
-            *self.excluded_predefined_functions,
-            *self._colliding_predefined_function_names(computer_tool_name),
-        ]
-        return sorted(set(excluded))
-
-    def _colliding_predefined_function_names(self, computer_tool_name: str) -> list[str]:
-        """Exclude predefined computer actions shadowed by generic MCP tools."""
-        generic_names = {
-            tool.name for tool in self._categorized_tools.generic if tool.name != computer_tool_name
-        }
-        return sorted(set(gemini_tools.predefined_computer_functions) & generic_names)
-
-    def _remove_old_screenshots(self, messages: list[genai_types.Content]) -> None:
-        """Drop older Gemini Computer Use screenshots to keep context growth bounded."""
-        if self._computer_tool_name is None:
-            return
-
-        turn_with_screenshots_found = 0
-        for content in reversed(messages):
-            if content.role != "user" or not content.parts:
-                continue
-
-            has_screenshot = any(
-                part.function_response
-                and part.function_response.parts
-                and part.function_response.name in gemini_tools.predefined_computer_functions
-                for part in content.parts
-            )
-            if not has_screenshot:
-                continue
-
-            turn_with_screenshots_found += 1
-            if turn_with_screenshots_found <= self.max_recent_turn_with_screenshots:
-                continue
-
-            for part in content.parts:
-                if (
-                    part.function_response
-                    and part.function_response.parts
-                    and part.function_response.name in gemini_tools.predefined_computer_functions
-                ):
-                    part.function_response.parts = None
-
-    def _to_gemini_tool(self, tool: types.Tool) -> genai_types.Tool | None:
-        """Convert a single MCP tool to Gemini function tool format.
-
-        Args:
-            tool: MCP tool to convert
-
-        Returns:
-            Gemini Tool with function declaration
-        """
-        if tool.description is None or tool.inputSchema is None:
-            raise ValueError(f"MCP tool {tool.name} requires both a description and inputSchema.")
-
-        function_decl = genai_types.FunctionDeclaration(
-            name=tool.name,
-            description=tool.description,
-            parameters_json_schema=tool.inputSchema,
-        )
-        return genai_types.Tool(function_declarations=[function_decl])
+    for idx, (source, title) in enumerate(chunk_sources):
+        if idx not in seen_chunk_indices and source:
+            citations.append(Citation(type="grounding", text="", source=source, title=title))
+    return citations

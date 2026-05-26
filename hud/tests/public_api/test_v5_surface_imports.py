@@ -81,8 +81,8 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "PlaywrightTool",
     ),
     "hud.types": (
+        "AgentResponse",
         "AgentType",
-        "InferenceResult",
         "MCPToolCall",
         "MCPToolResult",
         "Trace",
@@ -97,12 +97,7 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "OpenAIChatAgent",
         "create_agent",
     ),
-    "hud.agents.claude": (
-        "ClaudeAgent",
-        "base64_to_content_block",
-        "text_to_content_block",
-        "tool_use_content_block",
-    ),
+    "hud.agents.claude": ("ClaudeAgent",),
     "hud.datasets": (
         "display_results",
         "load_tasks",
@@ -215,7 +210,6 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.tools.agent": ("AgentTool",),
     "hud.agents.gemini": ("GeminiAgent",),
     "hud.agents.openai": ("OpenAIAgent",),
-    "hud.agents.openai_chat": ("OpenAIChatAgent",),
     "hud.tools.coding": (
         "ApplyPatchTool",
         "BashTool",

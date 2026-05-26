@@ -1,42 +1,218 @@
-"""Shared test fixtures for agent tests."""
+# pyright: reportPrivateUsage=false
+"""Shared behavioral harness for agent tests."""
 
 from __future__ import annotations
 
-from typing import Any
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 from mcp import types
 
+from hud.agents.base import MCPAgent
+from hud.agents.tools import (
+    AgentTool,
+    AgentTools,
+    AgentToolSpec,
+    GroupedCapabilityMixin,
+    ToolMetadata,
+)
+from hud.agents.tools.base import ToolClient
+from hud.agents.types import AgentConfig
 from hud.environment.router import ToolRouter
+from hud.environment.scenarios import ScenarioSession
 from hud.eval.context import EvalContext
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
 
 
-class MockEvalContext(EvalContext):
-    """Mock EvalContext for testing agents.
+class HarnessConfig(AgentConfig):
+    model_name: str = "HarnessAgent"
+    model: str = "harness-model"
 
-    This provides a minimal EvalContext implementation that can be used
-    to test agent initialization and tool calling without a real environment.
-    """
+
+def mcp_tool(name: str, *, description: str | None = None) -> types.Tool:
+    return types.Tool(
+        name=name,
+        description=description or f"{name} tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+
+
+def text_prompt(text: str, *, role: types.Role = "user") -> types.PromptMessage:
+    return types.PromptMessage(
+        role=role,
+        content=types.TextContent(type="text", text=text),
+    )
+
+
+def text_result(text: str, *, is_error: bool = False) -> MCPToolResult:
+    return MCPToolResult(
+        content=[types.TextContent(type="text", text=text)],
+        isError=is_error,
+    )
+
+
+def result_text(result: MCPToolResult) -> str:
+    return "\n".join(block.text for block in result.content if isinstance(block, types.TextContent))
+
+
+class HarnessTool(AgentTool[dict[str, Any]]):
+    name = "function"
+    capability = "function"
+
+    @classmethod
+    def from_tool(cls, tool: types.Tool) -> HarnessTool:
+        return cls(
+            env_tool_name=tool.name,
+            spec=AgentToolSpec(api_type="function", api_name=tool.name),
+        )
+
+    @property
+    def provider_name(self) -> str:
+        return self.env_tool_name
+
+    def to_params(self) -> dict[str, Any]:
+        return {"name": self.provider_name}
+
+    def format_result(self, call: MCPToolCall, result: MCPToolResult) -> dict[str, Any]:
+        return {
+            "role": "tool",
+            "name": call.name,
+            "content": result_text(result),
+            "is_error": result.isError,
+        }
+
+
+class HarnessTools(AgentTools[HarnessTool, dict[str, Any]]):
+    function_tool_class = HarnessTool
+
+
+class HarnessNativeShellTool(HarnessTool):
+    name = "shell"
+    capability = "shell"
+
+    @property
+    def provider_name(self) -> str:
+        return self.name
+
+    @classmethod
+    def default_spec(cls, model: str) -> AgentToolSpec:
+        del model
+        return AgentToolSpec(api_type="shell", api_name="shell")
+
+
+class HarnessFilesystemReadTool(GroupedCapabilityMixin, HarnessTool):
+    name = "read_file"
+    capability = "filesystem"
+    env_tool_names: ClassVar[tuple[str, ...]] = ("read", "read_file")
+
+    @property
+    def provider_name(self) -> str:
+        return self.name
+
+    @classmethod
+    def default_spec(cls, model: str) -> AgentToolSpec:
+        del model
+        return AgentToolSpec(api_type="function", api_name="read_file")
+
+
+class RoutingHarnessTools(AgentTools[HarnessTool, dict[str, Any]]):
+    native_tool_classes = (HarnessNativeShellTool, HarnessFilesystemReadTool)
+    function_tool_class = HarnessTool
+    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {"shell": ("bash",)}
+
+
+class ScriptedAgent(MCPAgent[dict[str, Any]]):
+    """Agent fake that exercises the real `MCPAgent.run` loop."""
+
+    def __init__(
+        self,
+        responses: list[AgentResponse | BaseException],
+        *,
+        config: HarnessConfig | None = None,
+        tools_factory: Callable[[], AgentTools[Any, Any]] | None = None,
+    ) -> None:
+        super().__init__(config or HarnessConfig())
+        self.config: HarnessConfig
+        self.responses = list(responses)
+        self.seen_messages: list[list[dict[str, Any]]] = []
+        self._tools_factory = tools_factory or HarnessTools
+
+    @cached_property
+    def tools(self) -> AgentTools[Any, Any]:
+        return self._tools_factory()
+
+    async def format_messages(self, messages: list[types.PromptMessage]) -> list[dict[str, Any]]:
+        formatted: list[dict[str, Any]] = []
+        for message in messages:
+            content = message.content
+            formatted.append(
+                {
+                    "role": message.role,
+                    "content": content.text if isinstance(content, types.TextContent) else "",
+                }
+            )
+        return formatted
+
+    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+        self.seen_messages.append([dict(message) for message in messages])
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
+class RecordingToolEnvironment:
+    """Records the environment-facing MCP calls made by an agent run."""
+
+    def __init__(
+        self,
+        tools: list[types.Tool] | None = None,
+        *,
+        results: Mapping[str, MCPToolResult | Exception] | None = None,
+        tool_metadata: ToolMetadata | None = None,
+    ) -> None:
+        self.tools = tools or []
+        self.results = dict(results or {})
+        self.tool_metadata = tool_metadata
+        self.calls: list[MCPToolCall] = []
+
+    @property
+    def client(self) -> ToolClient:
+        return ToolClient(
+            tools=self.tools,
+            tool_handler=self.call_tool,
+            tool_metadata=self.tool_metadata,
+        )
+
+    async def call_tool(self, call: MCPToolCall) -> MCPToolResult:
+        self.calls.append(call)
+        result = self.results.get(call.name, text_result(f"result from {call.name}"))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class HarnessEvalContext(EvalContext):
+    """Small EvalContext double that keeps the real `_run` and prompt behavior."""
 
     def __init__(
         self,
         prompt: str = "Test prompt",
+        *,
         tools: list[types.Tool] | None = None,
-        call_tool_handler: Any = None,
+        tool_results: Mapping[str, MCPToolResult | Exception] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
-        # Core attributes
         self.prompt = prompt
-        self._tools = tools or []
+        self.environment = RecordingToolEnvironment(tools or [], results=tool_results)
         self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
-        self._call_tool_handler = call_tool_handler
-        self.tool_calls: list[tuple[str, dict[str, Any]]] = []
-
-        # Environment attributes
         self._router = ToolRouter()
-
-        # EvalContext attributes
+        self._scenario_sessions = {}
         self._task = None
         self.trace_id = "test-trace-id"
         self.eval_name = "test-eval"
@@ -47,85 +223,61 @@ class MockEvalContext(EvalContext):
         self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
-        self.metadata: dict[str, Any] = {}
+        self.metadata = metadata or {}
         self.results: list[Any] = []
         self._is_summary = False
+        self._eval_api_key: str | None = None
+        self._trace_enabled = False
 
     def as_tools(self) -> list[types.Tool]:
-        return self._tools
+        return self.environment.tools
 
     @property
-    def has_scenario(self) -> bool:
-        return False
+    def submitted(self) -> str | dict[str, Any] | None:
+        return self._submitted
 
-    async def list_tools(self) -> list[types.Tool]:
-        return self._tools
+    def set_scenario_messages(self, messages: list[types.PromptMessage]) -> None:
+        self._scenario_sessions["__client__"] = ScenarioSession(
+            local_name="chat",
+            full_name="test-env:chat",
+            is_local=True,
+            connection_name=None,
+            resource_uri="test-env:chat",
+            prompt_messages=messages,
+        )
+
+    def tool_metadata_for_run(self) -> ToolMetadata | None:
+        return self._tool_metadata()
+
+    async def run_agent(self, agent: Any, *, max_steps: int = 10) -> Trace:
+        return await self._run(agent, max_steps=max_steps)
+
+    async def list_tools(self, **kwargs: Any) -> list[types.Tool]:
+        del kwargs
+        return self.environment.tools
 
     async def call_tool(self, call: Any, /, **kwargs: Any) -> MCPToolResult:
-        # Parse the call
-        if isinstance(call, tuple):
-            name, args = call[0], call[1] if len(call) > 1 else {}
-        elif hasattr(call, "name"):
-            name, args = call.name, getattr(call, "arguments", {}) or {}
+        if isinstance(call, MCPToolCall):
+            tool_call = call
+        elif isinstance(call, tuple):
+            call_tuple = cast("tuple[Any, ...]", call)
+            tool_call = MCPToolCall(
+                name=str(call_tuple[0]),
+                arguments=cast("dict[str, Any]", call_tuple[1] if len(call_tuple) > 1 else {}),
+            )
         else:
-            name, args = str(call), kwargs
-
-        self.tool_calls.append((name, args))
-
-        if self._call_tool_handler:
-            tc = MCPToolCall(name=name, arguments=args)
-            return self._call_tool_handler(tc)
-
-        return MCPToolResult(
-            content=[types.TextContent(type="text", text=f"Result from {name}")],
-            isError=False,
-        )
+            tool_call = MCPToolCall(name=str(call), arguments=kwargs)
+        return await self.environment.call_tool(tool_call)
 
     async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 
 @pytest.fixture
-def mock_eval_context() -> MockEvalContext:
-    """Create a basic mock EvalContext."""
-    return MockEvalContext()
+def basic_tool() -> types.Tool:
+    return mcp_tool("lookup")
 
 
 @pytest.fixture
-def mock_eval_context_with_tools() -> MockEvalContext:
-    """Create a mock EvalContext with test tools."""
-    return MockEvalContext(
-        tools=[
-            types.Tool(
-                name="test_tool",
-                description="A test tool",
-                inputSchema={"type": "object", "properties": {}},
-            )
-        ]
-    )
-
-
-@pytest.fixture
-def mock_eval_context_computer() -> MockEvalContext:
-    """Create a mock EvalContext with computer tool."""
-    return MockEvalContext(
-        tools=[
-            types.Tool(
-                name="computer",
-                description="Computer use tool",
-                inputSchema={"type": "object"},
-            )
-        ]
-    )
-
-
-@pytest.fixture
-def mock_eval_context_browser_tools() -> MockEvalContext:
-    """Create a mock EvalContext with browser-like tools."""
-    return MockEvalContext(
-        tools=[
-            types.Tool(name="screenshot", description="Take screenshot", inputSchema={}),
-            types.Tool(name="click", description="Click at coordinates", inputSchema={}),
-            types.Tool(name="type", description="Type text", inputSchema={}),
-        ]
-    )
+def recording_environment(basic_tool: types.Tool) -> RecordingToolEnvironment:
+    return RecordingToolEnvironment([basic_tool])

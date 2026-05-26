@@ -34,7 +34,6 @@ TODO.md
 /dev/
 
 .claude
-CLAUDE.md
 
 *.csv
 .rl_config_*.json
