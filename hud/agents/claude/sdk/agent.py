@@ -69,8 +69,8 @@ class ClaudeSDKAgent(Agent):
                 from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
                 port = await serve_computer_mcp(client)
                 self._mcp_servers["computer-use"] = {
-                    "type": "sse",
-                    "url": f"http://127.0.0.1:{port}/sse",
+                    "type": "http",
+                    "url": f"http://127.0.0.1:{port}/mcp",
                 }
         if self._ssh is None:
             raise RuntimeError("ClaudeSDKAgent requires an SSH capability")
@@ -86,13 +86,22 @@ class ClaudeSDKAgent(Agent):
         assert self._ssh is not None  # noqa: S101
 
         mcp_config_path = await self._write_mcp_config()
+
+        # Write prompt to file via SFTP — avoids all shell quoting issues.
+        async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_prompt.txt", "wb") as f:
+            await f.write(prompt.encode("utf-8"))
+
         run_cmd = self._build_cli_command(
             prompt=prompt, max_steps=max_steps, system_prompt=system_prompt,
             mcp_config_path=mcp_config_path,
         )
 
         if self._shell in ("cmd", "powershell"):
-            full_cmd = run_cmd
+            # Write command to bat file — cmd.exe mangles inline quotes.
+            bat_content = f"@echo off\r\n{run_cmd}\r\n"
+            async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_run.bat", "wb") as f:
+                await f.write(bat_content.encode("utf-8"))
+            full_cmd = ".hud_run.bat"
         else:
             parts: list[str] = [
                 'command -v claude >/dev/null 2>&1 || '
@@ -173,7 +182,8 @@ class ClaudeSDKAgent(Agent):
 
         def q(s: str) -> str:
             if is_win:
-                return f'"{s}"'
+                escaped = s.replace('"', '""')
+                return f'"{escaped}"'
             return shlex.quote(s)
 
         cli_parts = [
@@ -191,7 +201,8 @@ class ClaudeSDKAgent(Agent):
         for tool in self.config.allowed_tools:
             cli_parts.extend(["--allowedTools", tool])
         if mcp_config_path:
-            cli_parts.extend(["--mcp-config", q(mcp_config_path), "--strict-mcp-config"])
+            cli_parts.extend(["--mcp-config", mcp_config_path])
+
         cli_parts.extend(["--", q(prompt)])
 
         cli_cmd = " ".join(cli_parts)
