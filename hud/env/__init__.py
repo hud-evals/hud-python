@@ -1,6 +1,7 @@
-"""HUD env runtime: Workspace + Env + Capability + Scenario. See experiments/ for demos."""
+"""HUD env runtime: Workspace + Env + Scenario. See experiments/ for demos."""
 
-from .capability import Capability, Endpoint
+from hud.capabilities import Capability
+
 from .env import Env
 from .scenario import Scenario, ScenarioFn, ScenarioRunner
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
@@ -8,7 +9,6 @@ from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
     "Capability",
-    "Endpoint",
     "Env",
     "Mount",
     "MountKind",

@@ -1,12 +1,24 @@
-"""Base MCP Agent implementation."""
+"""Agent ABC + legacy MCPAgent.
+
+``Agent`` (new) is the minimal contract: declare which CapabilityClient
+classes the agent natively drives, ``initialize(manifest)`` to negotiate /
+open clients, ``run(...)`` to execute the scenario, ``close()`` to clean up.
+Subclasses define their own ``run`` signature (a ToolAgent takes a prompt
+and max_steps; a robotics agent takes a goal pose and a control rate; ...).
+
+``MCPAgent`` (legacy) is the previous MCP-server-coupled base; it stays
+here while we port the provider implementations (Claude / Gemini / OpenAI)
+to ``Agent``.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,10 +31,64 @@ if TYPE_CHECKING:
     from hud.agents.tools import AgentTools
     from hud.agents.tools.base import CallTool, ToolClient
     from hud.agents.types import AgentConfig
+    from hud.capabilities import CapabilityClient
+    from hud.client import Manifest
 
 MessageT = TypeVar("MessageT")
 ToolsT = TypeVar("ToolsT", bound="AgentTools[Any, Any, Any]")
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────── Agent ABC (new) ───────────────────────────
+
+
+class Agent(ABC):
+    """Minimal agent contract.
+
+    Lifecycle mirrors the wire:
+
+    * ``initialize(manifest)`` — capability negotiation. Reconcile the env's
+      published bindings against ``type(self).clients`` and open the matching
+      clients; cache them on ``self`` for ``run`` to use.
+    * ``run(...)`` — scenario execution. Subclasses define the signature
+      (prompt + max_steps for tool agents; goal + rate for robotics; etc.).
+    * ``close()`` — release the opened clients.
+    """
+
+    #: Static — CapabilityClient classes this agent type can drive.
+    clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
+
+    #: Populated by ``initialize``; ``{binding_name: opened_client}``.
+    connections: dict[str, CapabilityClient]
+
+    async def initialize(self, manifest: Manifest) -> None:
+        """Open clients for every manifest binding whose protocol we support, in parallel.
+
+        Subclasses can override (calling ``super().initialize(manifest)``) to
+        add provider-specific state (LLM client, model config, etc.).
+        """
+        by_protocol = {cls.protocol: cls for cls in type(self).clients}
+        pairs = [
+            (b, by_protocol[b.protocol])
+            for b in manifest.bindings
+            if b.protocol in by_protocol
+        ]
+        opened = await asyncio.gather(*(cls.connect(b) for b, cls in pairs))
+        self.connections = {
+            b.name: c for (b, _), c in zip(pairs, opened, strict=False)
+        }
+
+    # Subclasses define their own ``run`` signature. There's no universal
+    # contract — a ToolAgent runs ``run(*, prompt, max_steps)``, a robotics
+    # agent runs ``run(*, goal, control_hz)``, a training agent runs
+    # ``run(*, dataset, epochs)``. All return a ``Trace``.
+
+    async def close(self) -> None:
+        """Close every opened client. Idempotent; safe to call without initialize."""
+        for client in getattr(self, "connections", {}).values():
+            with contextlib.suppress(Exception):
+                await client.close()
+        self.connections = {}
 
 
 class AgentState(BaseModel, Generic[MessageT, ToolsT]):

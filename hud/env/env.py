@@ -15,7 +15,8 @@ from .utils import error, read_frame, reply, send_frame
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .capability import Capability
+    from hud.capabilities import Capability
+
     from .scenario import ScenarioFn
 
 LOGGER = logging.getLogger("hud.env.env")
@@ -114,7 +115,7 @@ class Env:
                             {
                                 "session_id": session_id,
                                 "env": {"name": self.name, "version": self.version},
-                                "bindings": [c.manifest_entry() for c in self.capabilities],
+                                "bindings": [c.to_manifest() for c in self.capabilities],
                             },
                         )
 
@@ -147,15 +148,6 @@ class Env:
                         prompt = await active_runner.start()
                         await reply_to(msg_id, prompt)
 
-                    elif method == "engage":
-                        wanted = list(params.get("bindings", []))
-                        known = {c.name for c in self.capabilities}
-                        unknown = [b for b in wanted if b not in known]
-                        if unknown:
-                            await error_to(msg_id, -32602, f"unknown bindings: {unknown}")
-                            continue
-                        await reply_to(msg_id, {"engaged": sorted(set(wanted) & known)})
-
                     elif method == "scenarios.evaluate":
                         if active_runner is None:
                             await error_to(msg_id, -32600, "no scenario in progress")
@@ -169,14 +161,6 @@ class Env:
                             await active_runner.cancel()
                             active_runner = None
                         await reply_to(msg_id, {"cancelled": True})
-
-                    elif method == "disengage":
-                        await reply_to(
-                            msg_id,
-                            {
-                                "disengaged": list(params.get("bindings", [])),
-                            },
-                        )
 
                     elif method == "bye":
                         await reply_to(msg_id, {"goodbye": True})

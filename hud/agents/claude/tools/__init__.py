@@ -1,56 +1,20 @@
-"""Agent-owned Claude native tools."""
+"""Claude provider tools — coding (SSH) and MCP proxy.
+
+Computer-use, memory, and hosted tools will land here once their capability
+clients (RFB, hosted-tool plumbing) are ported.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
-
-from anthropic.types.beta import BetaMessageParam, BetaToolUnionParam
-
-from hud.agents.tools import AgentTools
-
-from .base import ClaudeFunctionTool, ClaudeTool
-from .coding import ClaudeBashTool, ClaudeTextEditorTool
-from .computer import ClaudeComputerTool
-from .hosted import ClaudeHostedTool, ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
-from .memory import ClaudeMemoryTool
-
-if TYPE_CHECKING:
-    from hud.agents.tools import AgentTool
-
-
-class ClaudeAgentTools(AgentTools[ClaudeTool, BetaToolUnionParam, BetaMessageParam]):
-    """Prepared Claude tool state for a run."""
-
-    native_tool_classes: ClassVar[tuple[type[AgentTool[object, object]], ...]] = (
-        ClaudeComputerTool,
-        ClaudeBashTool,
-        ClaudeTextEditorTool,
-        ClaudeMemoryTool,
-    )
-    function_tool_class = ClaudeFunctionTool
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.required_betas: set[str] = set()
-
-    def prepare(self, **kwargs: Any) -> None:
-        super().prepare(**kwargs)
-        self.required_betas = {
-            required_beta for tool in self.values() if (required_beta := tool.required_beta)
-        }
-
-    @property
-    def tool_search_threshold(self) -> int | None:
-        for hosted_tool in self.hosted_tools:
-            if isinstance(hosted_tool, ClaudeToolSearchTool):
-                return hosted_tool.threshold
-        return None
-
+from .base import ClaudeToolSpec
+from .coding import CLAUDE_BASH_SPEC, CLAUDE_TEXT_EDITOR_SPEC, ClaudeBashTool, ClaudeTextEditorTool
+from .mcp_proxy import ClaudeMCPProxyTool
 
 __all__ = [
-    "ClaudeAgentTools",
-    "ClaudeHostedTool",
-    "ClaudeToolSearchTool",
-    "ClaudeWebFetchTool",
-    "ClaudeWebSearchTool",
+    "CLAUDE_BASH_SPEC",
+    "CLAUDE_TEXT_EDITOR_SPEC",
+    "ClaudeBashTool",
+    "ClaudeMCPProxyTool",
+    "ClaudeTextEditorTool",
+    "ClaudeToolSpec",
 ]

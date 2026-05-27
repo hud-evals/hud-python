@@ -1,0 +1,30 @@
+"""HUD wire client: ``Manifest`` and (soon) ``HudClient``."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hud.capabilities import Capability
+
+
+@dataclass(frozen=True, slots=True)
+class ServerInfo:
+    """Identity of the env serving this session (for compatibility / observability)."""
+
+    name: str
+    version: str
+
+
+@dataclass(frozen=True, slots=True)
+class Manifest:
+    """Env welcome frame returned by ``HudClient.hello()``."""
+
+    session_id: str
+    protocol_version: str             # e.g. "hud/1.0"
+    server_info: ServerInfo
+    bindings: list[Capability]
+
+
+__all__ = ["Manifest", "ServerInfo"]
