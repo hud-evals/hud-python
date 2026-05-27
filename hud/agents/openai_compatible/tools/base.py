@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import mcp.types as mcp_types
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
     from .qwen_computer import QwenComputerUseToolParam
 
 OpenAICompatibleToolParam: TypeAlias = "ChatCompletionToolParam | QwenComputerUseToolParam"
+_TOOL_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 
 
 class OpenAICompatibleTool(AgentTool[OpenAICompatibleToolParam, "ChatCompletionMessageParam"]):
@@ -85,26 +88,52 @@ class OpenAICompatibleFunctionTool(OpenAICompatibleTool):
     name = "function"
     capability = "function"
 
-    def __init__(self, *, env_tool_name: str, params: OpenAICompatibleToolParam) -> None:
+    def __init__(
+        self,
+        *,
+        env_tool_name: str,
+        provider_name: str,
+        params: OpenAICompatibleToolParam,
+    ) -> None:
         super().__init__(
             env_tool_name=env_tool_name,
             spec=AgentToolSpec(api_type="function", api_name=env_tool_name),
         )
+        self._provider_name = provider_name
         self.params = params
 
     @classmethod
     def from_tool(cls, tool: mcp_types.Tool) -> OpenAICompatibleFunctionTool:
-        return cls(env_tool_name=tool.name, params=openai_compatible_tool_param(tool))
+        provider_name = openai_compatible_tool_name(tool.name)
+        return cls(
+            env_tool_name=tool.name,
+            provider_name=provider_name,
+            params=openai_compatible_tool_param(tool, name=provider_name),
+        )
 
     @property
     def provider_name(self) -> str:
-        return self.env_tool_name
+        return self._provider_name
 
     def to_params(self) -> OpenAICompatibleToolParam:
         return self.params
 
 
-def openai_compatible_tool_param(tool: mcp_types.Tool) -> OpenAICompatibleToolParam:
+def openai_compatible_tool_name(name: str) -> str:
+    sanitized = _TOOL_NAME_PATTERN.sub("_", name).strip("_") or "tool"
+    if sanitized == name and len(sanitized) <= 64:
+        return sanitized
+
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    prefix = sanitized[: 64 - len(digest) - 1].rstrip("_") or "tool"
+    return f"{prefix}_{digest}"
+
+
+def openai_compatible_tool_param(
+    tool: mcp_types.Tool,
+    *,
+    name: str | None = None,
+) -> OpenAICompatibleToolParam:
     parameters = tool.inputSchema
     sanitized_params: dict[str, Any] = (
         _sanitize_schema_for_openai(parameters)
@@ -117,7 +146,7 @@ def openai_compatible_tool_param(tool: mcp_types.Tool) -> OpenAICompatibleToolPa
         {
             "type": "function",
             "function": {
-                "name": tool.name,
+                "name": name or openai_compatible_tool_name(tool.name),
                 "description": tool.description or f"Call {tool.name}",
                 "parameters": sanitized_params,
             },

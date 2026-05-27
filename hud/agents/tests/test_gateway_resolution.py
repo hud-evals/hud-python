@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import builtins
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +12,7 @@ from hud.agents import OpenAIAgent, create_agent
 from hud.agents.claude import ClaudeAgent
 from hud.agents.gateway import GatewayModelsResponse, build_gateway_client
 from hud.agents.openai_compatible import OpenAIChatAgent
+from hud.types import AgentType
 
 MODELS = GatewayModelsResponse.model_validate(
     {
@@ -145,6 +148,36 @@ def test_create_agent_rejects_gateway_model_with_invalid_agent_metadata() -> Non
         pytest.raises(ValueError, match="invalid agent type metadata"),
     ):
         create_agent("bad-model")
+
+
+def test_agent_type_config_and_gateway_metadata_do_not_import_optional_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+    blocked = (
+        "anthropic",
+        "google.genai",
+        "hud.agents.claude",
+        "hud.agents.gemini",
+    )
+
+    def guarded_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        if any(name == module or name.startswith(f"{module}.") for module in blocked):
+            raise AssertionError(f"unexpected optional provider import: {name}")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    assert AgentType.CLAUDE.config_cls().model_name == "Claude"
+    assert AgentType.GEMINI.config_cls().model_name == "Gemini"
+    assert AgentType.CLAUDE.gateway_provider == "anthropic"
+    assert AgentType.GEMINI.gateway_provider == "gemini"
 
 
 def test_build_gateway_client_uses_openai_compatible_client_by_default() -> None:

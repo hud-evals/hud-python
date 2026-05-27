@@ -185,6 +185,57 @@ async def test_openai_compatible_api_error_returns_error_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_compatible_run_routes_sanitized_tool_names_to_environment() -> None:
+    provider_tool_name: str | None = None
+
+    async def create_response(**kwargs: Any) -> ChatCompletion:
+        nonlocal provider_tool_name
+        if provider_tool_name is None:
+            tools = kwargs["extra_body"]["tools"]
+            provider_tool_name = tools[0]["function"]["name"]
+            return _chat_completion(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": provider_tool_name,
+                                "arguments": '{"query":"hud"}',
+                            },
+                        }
+                    ],
+                },
+                finish_reason="tool_calls",
+            )
+        return _chat_completion({"role": "assistant", "content": "final answer"})
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=AsyncMock(side_effect=create_response))
+        )
+    )
+    agent = OpenAIChatAgent.create(model="test-model", openai_client=client)
+    environment = RecordingToolEnvironment(
+        [mcp_tool("lookup.tool")],
+        results={"lookup.tool": text_result("tool result")},
+    )
+
+    result = await agent.run(
+        AgentContext(prompt=[text_prompt("answer with lookup")], tool_client=environment.client)
+    )
+
+    assert result.content == "final answer"
+    assert provider_tool_name is not None
+    assert provider_tool_name != "lookup.tool"
+    assert [(call.name, call.arguments) for call in environment.calls] == [
+        ("lookup.tool", {"query": "hud"})
+    ]
+
+
+@pytest.mark.asyncio
 async def test_openai_compatible_checkpoint_is_sent_in_provider_body() -> None:
     client = _client(_chat_completion({"role": "assistant", "content": "answer"}))
     agent = OpenAIChatAgent.create(

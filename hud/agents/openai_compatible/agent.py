@@ -208,12 +208,13 @@ class OpenAIChatAgent(
 
         tool_calls: list[MCPToolCall] = []
         for tool_call in function_calls:
+            provider_name = tool_call.function.name
             raw_args = json.loads(tool_call.function.arguments or "{}")
             arguments = cast("dict[str, Any]", raw_args) if isinstance(raw_args, dict) else {}
             tool_calls.append(
                 MCPToolCall(
                     id=tool_call.id,
-                    name=tool_call.function.name,
+                    name=state.tools.name_map.get(provider_name, provider_name),
                     arguments=arguments,
                 )
             )

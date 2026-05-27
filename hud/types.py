@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     AgentConfigClass: TypeAlias = type[
         ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
     ]
-    _AgentTypeInfo: TypeAlias = tuple[AgentClass, AgentConfigClass, str]
 
 # JSON-compatible scalar/container values.
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -35,40 +34,51 @@ class AgentType(str, Enum):
 
     @property
     def cls(self) -> AgentClass:
-        return self._info[0]
+        match self:
+            case AgentType.CLAUDE:
+                from hud.agents.claude import ClaudeAgent
+
+                return ClaudeAgent
+            case AgentType.OPENAI:
+                from hud.agents.openai import OpenAIAgent
+
+                return OpenAIAgent
+            case AgentType.GEMINI:
+                from hud.agents.gemini import GeminiAgent
+
+                return GeminiAgent
+            case AgentType.OPENAI_COMPATIBLE:
+                from hud.agents.openai_compatible import OpenAIChatAgent
+
+                return OpenAIChatAgent
 
     @property
     def config_cls(self) -> AgentConfigClass:
         """Get config class without importing agent (avoids SDK dependency)."""
-        return self._info[1]
+        from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+
+        match self:
+            case AgentType.CLAUDE:
+                return ClaudeConfig
+            case AgentType.OPENAI:
+                return OpenAIConfig
+            case AgentType.GEMINI:
+                return GeminiConfig
+            case AgentType.OPENAI_COMPATIBLE:
+                return OpenAIChatConfig
 
     @property
     def gateway_provider(self) -> str:
         """Default provider client used when this agent type is a gateway shortcut."""
-        return self._info[2]
-
-    @property
-    def _info(self) -> _AgentTypeInfo:
-        from hud.agents import OpenAIAgent
-        from hud.agents.claude import ClaudeAgent
-        from hud.agents.gemini import GeminiAgent
-        from hud.agents.openai_compatible import OpenAIChatAgent
-        from hud.agents.types import (
-            ClaudeConfig,
-            GeminiConfig,
-            OpenAIChatConfig,
-            OpenAIConfig,
-        )
-
         match self:
             case AgentType.CLAUDE:
-                return ClaudeAgent, ClaudeConfig, "anthropic"
+                return "anthropic"
             case AgentType.OPENAI:
-                return OpenAIAgent, OpenAIConfig, "openai"
+                return "openai"
             case AgentType.GEMINI:
-                return GeminiAgent, GeminiConfig, "gemini"
+                return "gemini"
             case AgentType.OPENAI_COMPATIBLE:
-                return OpenAIChatAgent, OpenAIChatConfig, "openai"
+                return "openai"
 
 
 class MCPToolCall(CallToolRequestParams):

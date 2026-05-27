@@ -81,7 +81,7 @@ mcp.add_tool(MyTool())  # Automatically wraps with .mcp
 Provider-native and provider-hosted tools are configured on agents, not on environment tools. Use environment tools for client-executed capabilities and agent config for hosted tools:
 
 ```python
-from hud.agents import ClaudeAgent
+from hud.agents.claude import ClaudeAgent
 from hud.tools import BashTool
 
 env.add_tool(BashTool())

@@ -10,7 +10,10 @@ re-exports here just because they exist in the current package.
 
 from __future__ import annotations
 
+import builtins
+import sys
 from importlib import import_module
+from typing import Any
 
 import pytest
 
@@ -343,6 +346,37 @@ def test_hud_top_level_all_is_exact_v5_surface() -> None:
 
 def test_hud_top_level_exports_are_available() -> None:
     assert_module_has_symbols("hud", TOP_LEVEL_EXPORTS)
+
+
+def test_hud_agents_public_import_avoids_optional_provider_sdks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for module_name in ("hud.agents", "hud.agents.claude", "hud.agents.gemini"):
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    real_import = builtins.__import__
+
+    def guarded_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        imports_google_genai = name == "google" and "genai" in fromlist
+        if (
+            name == "anthropic"
+            or name.startswith("anthropic.")
+            or name == "google.genai"
+            or imports_google_genai
+            or name in {"hud.agents.claude", "hud.agents.gemini"}
+        ):
+            raise AssertionError(f"unexpected optional provider import: {name}")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    assert_module_has_symbols("hud.agents", PUBLIC_SURFACE["hud.agents"])
 
 
 @pytest.mark.parametrize(("module_name", "symbols"), sorted(PUBLIC_SURFACE.items()))

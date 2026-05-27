@@ -204,7 +204,7 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT, MessageT
                     continue
                 self[agent_tool.provider_name] = agent_tool
                 installed_names.add(agent_tool.provider_name)
-                self.name_map[tool.name] = agent_tool.provider_name
+                self.name_map[agent_tool.provider_name] = agent_tool.provider_name
                 self.params.append(cast("ToolParamT", agent_tool.to_params()))
                 continue
             generic_tool = self.generic_tool(tool)
