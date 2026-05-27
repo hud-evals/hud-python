@@ -102,9 +102,8 @@ async def test_gemini_no_candidates_is_a_user_visible_error() -> None:
 async def test_gemini_citations_enable_google_search_at_provider_boundary() -> None:
     client = _gemini_client(_gemini_response(genai_types.Part(text="answer")))
     agent = GeminiAgent.create(model_client=client, validate_api_key=False)
-    agent.enable_citations = True
 
-    response = await agent.get_response(provider_state())
+    response = await agent.get_response(provider_state(), citations_enabled=True)
 
     assert response.content == "answer"
     config = client.aio.models.generate_content.await_args.kwargs["config"]

@@ -95,7 +95,13 @@ class GeminiAgent(MCPAgent[genai_types.Content, GeminiAgentTools, GeminiAgentSta
             ),
         )
 
-    async def get_response(self, state: GeminiAgentState) -> AgentResponse:
+    async def get_response(
+        self,
+        state: GeminiAgentState,
+        *,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
         messages = state.messages
         tools = state.tools
@@ -124,7 +130,7 @@ class GeminiAgent(MCPAgent[genai_types.Content, GeminiAgentTools, GeminiAgentSta
 
         # Configure Gemini generation options.
         provider_tools = cast("genai_types.ToolListUnion", tools.params)
-        if self.enable_citations and not any(tool.google_search for tool in tools.params):
+        if citations_enabled and not any(tool.google_search for tool in tools.params):
             provider_tools = [
                 *list(provider_tools),
                 genai_types.Tool(google_search=genai_types.GoogleSearch()),
@@ -145,7 +151,7 @@ class GeminiAgent(MCPAgent[genai_types.Content, GeminiAgentTools, GeminiAgentSta
             top_k=self.top_k,
             max_output_tokens=self.max_output_tokens,
             tools=provider_tools,
-            system_instruction=self.system_prompt,
+            system_instruction=system_prompt,
             thinking_config=thinking_config,
         )
 

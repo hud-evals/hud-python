@@ -6,6 +6,7 @@ import pytest
 
 from hud.agents.base import AgentContext
 from hud.agents.tests.conftest import (
+    HarnessAgentState,
     HarnessConfig,
     RecordingToolEnvironment,
     ScriptedAgent,
@@ -26,6 +27,39 @@ async def test_run_returns_final_response_without_tools() -> None:
     assert result.isError is False
     assert result.content == "done"
     assert agent.seen_messages == [[{"role": "user", "content": "do it"}]]
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_resolves_from_config_default_or_context_override() -> None:
+    agent = ScriptedAgent(
+        [
+            AgentResponse(content="first", done=True),
+            AgentResponse(content="second", done=True),
+        ],
+        config=HarnessConfig(system_prompt="config default"),
+    )
+
+    first_ctx: AgentContext[HarnessAgentState] = AgentContext(prompt=[text_prompt("first")])
+    second_ctx: AgentContext[HarnessAgentState] = AgentContext(
+        prompt=[text_prompt("second")],
+        system_prompt="run override",
+    )
+
+    await agent.run(first_ctx)
+    await agent.run(second_ctx)
+
+    assert agent.seen_run_options == [
+        ("config default", False),
+        ("run override", False),
+    ]
+    assert first_ctx.state is not None
+    assert second_ctx.state is not None
+    assert not hasattr(first_ctx.state, "system_prompt")
+    assert not hasattr(first_ctx.state, "enable_citations")
+    assert not hasattr(first_ctx.state, "citations_enabled")
+    assert not hasattr(second_ctx.state, "system_prompt")
+    assert not hasattr(second_ctx.state, "enable_citations")
+    assert not hasattr(second_ctx.state, "citations_enabled")
 
 
 @pytest.mark.asyncio

@@ -103,14 +103,15 @@ async def test_prompt_messages_use_conversation_before_prompt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_eval_run_passes_citation_flag_to_agent() -> None:
+async def test_eval_run_passes_context_options_to_agent() -> None:
     ctx = HarnessEvalContext(prompt="Do the task")
+    ctx.system_prompt = "Be precise."
     ctx.enable_citations = True
     agent = ScriptedAgent([AgentResponse(content="answer", done=True)])
 
     await ctx.run_agent(agent)
 
-    assert agent.enable_citations is True
+    assert agent.seen_run_options == [("Be precise.", True)]
 
 
 @pytest.mark.asyncio

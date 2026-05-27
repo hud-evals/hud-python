@@ -93,7 +93,7 @@ class ComputerTool(BaseTool):
             "resolution": {
                 "width": self.width,
                 "height": self.height,
-            }
+            },
         }
         if coordinate_space is not None:
             meta["coordinate_space"] = coordinate_space

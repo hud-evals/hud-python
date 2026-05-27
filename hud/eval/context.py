@@ -543,11 +543,12 @@ class EvalContext(Environment):
             tool_handler=self.call_tool,
         )
 
-        agent.enable_citations = bool(getattr(self, "enable_citations", False))
         result = await agent.run(
             AgentContext(
                 prompt=initial_messages,
                 tool_client=tool_client,
+                system_prompt=self.system_prompt,
+                citations_enabled=bool(getattr(self, "enable_citations", False)),
             ),
             max_steps=max_steps,
         )

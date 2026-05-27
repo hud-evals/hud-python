@@ -76,7 +76,7 @@ def test_claude_formats_result_blocks_and_citation_documents() -> None:
             name="lookup",
             id="call_1",
             arguments={},
-            _meta=types.RequestParams.Meta.model_validate({"enable_citations": True}),
+            _meta=types.RequestParams.Meta.model_validate({"citations_enabled": True}),
         ),
         _text_image_result(),
     )

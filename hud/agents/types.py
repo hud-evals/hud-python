@@ -19,7 +19,6 @@ _model_alias = AliasChoices("model", "checkpoint_name")
 class AgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    ctx: Any = None  # EvalContext or Environment
     auto_respond: bool = False
     system_prompt: str | None = None
     hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])

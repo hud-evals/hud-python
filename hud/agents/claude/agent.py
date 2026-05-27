@@ -122,7 +122,13 @@ class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]
             )
         return ClaudeAgentState.model_construct(messages=formatted, tools=ClaudeAgentTools())
 
-    async def get_response(self, state: ClaudeAgentState) -> AgentResponse:
+    async def get_response(
+        self,
+        state: ClaudeAgentState,
+        *,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> AgentResponse:
         """Get response from Claude including any tool calls."""
         messages = state.messages
         tools = state.tools
@@ -168,7 +174,7 @@ class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]
                 if isinstance(client, AsyncAnthropicBedrock):
                     response = await client.beta.messages.create(
                         model=self.config.model,
-                        system=self.system_prompt if self.system_prompt is not None else Omit(),
+                        system=system_prompt if system_prompt is not None else Omit(),
                         max_tokens=self.max_tokens,
                         messages=messages_cached,
                         tools=effective_tools,
@@ -178,7 +184,7 @@ class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]
                 else:
                     async with client.beta.messages.stream(
                         model=self.config.model,
-                        system=self.system_prompt if self.system_prompt is not None else Omit(),
+                        system=system_prompt if system_prompt is not None else Omit(),
                         max_tokens=self.max_tokens,
                         messages=messages_cached,
                         tools=effective_tools,
@@ -255,7 +261,7 @@ class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]
                             name=tool_use.name,
                             arguments=dict(tool_use.input),
                             _meta=mcp_types.RequestParams.Meta.model_validate(
-                                {"enable_citations": self.enable_citations}
+                                {"citations_enabled": citations_enabled}
                             ),
                         )
                     )

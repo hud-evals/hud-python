@@ -147,6 +147,7 @@ class ScriptedAgent(MCPAgent[dict[str, Any], HarnessAgentTools, HarnessAgentStat
         self.config: HarnessConfig
         self.responses = list(responses)
         self.seen_messages: list[list[dict[str, Any]]] = []
+        self.seen_run_options: list[tuple[str | None, bool]] = []
         self._tools_factory = tools_factory or HarnessTools
 
     async def initialize_state(
@@ -167,8 +168,15 @@ class ScriptedAgent(MCPAgent[dict[str, Any], HarnessAgentTools, HarnessAgentStat
             tools=self._tools_factory(),
         )
 
-    async def get_response(self, state: HarnessAgentState) -> AgentResponse:
+    async def get_response(
+        self,
+        state: HarnessAgentState,
+        *,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> AgentResponse:
         self.seen_messages.append([dict(message) for message in state.messages])
+        self.seen_run_options.append((system_prompt, citations_enabled))
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response

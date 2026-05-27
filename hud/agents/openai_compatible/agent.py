@@ -122,8 +122,15 @@ class OpenAIChatAgent(
             tools=OpenAICompatibleAgentTools(),
         )
 
-    async def get_response(self, state: OpenAIChatAgentState) -> AgentResponse:
+    async def get_response(
+        self,
+        state: OpenAIChatAgentState,
+        *,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
+        del citations_enabled
         messages = state.messages
 
         reserved_kwargs = {"model", "messages", "stream", "tools"}
@@ -149,8 +156,8 @@ class OpenAIChatAgent(
             response: ChatCompletion = await self.oai.chat.completions.create(
                 model=self.config.model,
                 messages=(
-                    [{"role": "system", "content": self.system_prompt}, *messages]
-                    if self.system_prompt is not None
+                    [{"role": "system", "content": system_prompt}, *messages]
+                    if system_prompt is not None
                     else messages
                 ),
                 stream=False,

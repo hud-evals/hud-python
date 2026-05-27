@@ -39,10 +39,13 @@ StateT = TypeVar("StateT", bound="AgentState[Any, Any]")
 
 @dataclass
 class AgentContext(Generic[StateT]):
-    """Prompt input, tools, and provider-local state for one agent run."""
+    """Prompt input, tools, and run-local options for one agent run."""
 
     prompt: list[types.PromptMessage]
     tool_client: ToolClient | None = None
+    # Per-run override; falls back to AgentConfig.system_prompt.
+    system_prompt: str | None = None
+    citations_enabled: bool = False
     state: StateT | None = None
 
 
@@ -65,10 +68,6 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
 
         self.model_name: str = self.config.model_name
         self.model: str = self.config.model
-
-        self.system_prompt = self.config.system_prompt
-
-        self.enable_citations: bool = False
 
         self.auto_respond: bool = config.auto_respond
 
@@ -102,6 +101,10 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
             tool_handler = ctx.tool_client.tool_handler
 
         messages: list[MessageT] = []
+        system_prompt = (
+            ctx.system_prompt if ctx.system_prompt is not None else self.config.system_prompt
+        )
+        citations_enabled = ctx.citations_enabled
         try:
             state = await self.initialize_state(ctx.prompt)
             ctx.state = state
@@ -123,7 +126,11 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
 
                 try:
                     # 1. Get model response
-                    response = await self.get_response(state)
+                    response = await self.get_response(
+                        state,
+                        system_prompt=system_prompt,
+                        citations_enabled=citations_enabled,
+                    )
 
                     logger.debug("Agent:\n%s", response)
 
@@ -200,13 +207,21 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
         )
 
     @abstractmethod
-    async def get_response(self, state: StateT) -> AgentResponse:
+    async def get_response(
+        self,
+        state: StateT,
+        *,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> AgentResponse:
         """
         Get response from the model including any tool calls.
 
 
         Args:
             state: Current provider conversation state
+            system_prompt: Resolved run system prompt, if any
+            citations_enabled: Whether provider citation metadata should be requested
 
         Returns:
             AgentResponse with content, tool_calls, and done fields

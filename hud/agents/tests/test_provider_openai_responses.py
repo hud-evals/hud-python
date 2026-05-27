@@ -157,9 +157,8 @@ async def test_openai_citation_mode_requests_provider_source_metadata() -> None:
         responses=SimpleNamespace(create=AsyncMock(return_value=_message_response("answer")))
     )
     agent = OpenAIAgent.create(model_client=client, validate_api_key=False)
-    agent.enable_citations = True
 
-    response = await agent.get_response(provider_state())
+    response = await agent.get_response(provider_state(), citations_enabled=True)
 
     assert response.content == "answer"
     assert client.responses.create.await_args.kwargs["include"] == [

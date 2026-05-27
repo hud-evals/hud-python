@@ -69,13 +69,13 @@ class ClaudeTool(AgentTool["BetaToolUnionParam", BetaMessageParam]):
 
         claude_blocks: list[ClaudeToolResultContent] = []
         sibling_docs: list[BetaRequestDocumentBlockParam] = []
-        enable_citations = bool(getattr(call.meta, "enable_citations", False))
+        citations_enabled = bool(getattr(call.meta, "citations_enabled", False))
         for content in result_content:
             citation_doc = None
             match content:
                 case types.TextContent():
                     block = BetaTextBlockParam(type="text", text=content.text)
-                    if enable_citations and not result.isError:
+                    if citations_enabled and not result.isError:
                         citation_doc = BetaRequestDocumentBlockParam(
                             type="document",
                             source=BetaPlainTextSourceParam(
@@ -106,7 +106,7 @@ class ClaudeTool(AgentTool["BetaToolUnionParam", BetaMessageParam]):
                             data=resource.blob,
                         ),
                     )
-                    if enable_citations and not result.isError:
+                    if citations_enabled and not result.isError:
                         citation_doc = BetaRequestDocumentBlockParam(
                             type="document",
                             source=block["source"],

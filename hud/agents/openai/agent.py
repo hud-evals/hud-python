@@ -113,7 +113,13 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam, OpenAIAgentTools, OpenAIAgent
             tools=OpenAIAgentTools(),
         )
 
-    async def get_response(self, state: OpenAIAgentState) -> AgentResponse:
+    async def get_response(
+        self,
+        state: OpenAIAgentState,
+        *,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
         messages = state.messages
         new_items: ResponseInputParam = messages[state.message_cursor :]
@@ -129,7 +135,7 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam, OpenAIAgentTools, OpenAIAgent
                 return AgentResponse(content="", tool_calls=[], done=True)
 
         include_param: list[ResponseIncludable] | Omit = Omit()
-        if self.enable_citations:
+        if citations_enabled:
             include_param = ["web_search_call.action.sources"]
 
         tools = state.tools
@@ -153,7 +159,7 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam, OpenAIAgentTools, OpenAIAgent
         response = await self.openai_client.responses.create(
             model=self._model,
             input=new_items,
-            instructions=self.system_prompt,
+            instructions=system_prompt,
             max_output_tokens=self.max_output_tokens,
             temperature=self.temperature,
             text=self.text if self.text is not None else Omit(),
