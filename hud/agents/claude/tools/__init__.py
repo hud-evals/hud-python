@@ -11,6 +11,7 @@ from .coding import CLAUDE_BASH_SPEC, CLAUDE_TEXT_EDITOR_SPEC, ClaudeBashTool, C
 from .computer import CLAUDE_COMPUTER_SPECS, ClaudeComputerTool
 from .hosted import ClaudeHostedTool, ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 from .mcp_proxy import ClaudeMCPProxyTool
+from .memory import ClaudeMemoryTool
 
 __all__ = [
     "CLAUDE_BASH_SPEC",
