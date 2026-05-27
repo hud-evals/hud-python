@@ -255,9 +255,7 @@ class Workspace:
         pub_lines: list[str] = []
 
         if self._ssh_authorized_client_keys:
-            pub_lines.extend(
-                Path(p).read_text().strip() for p in self._ssh_authorized_client_keys
-            )
+            pub_lines.extend(Path(p).read_text().strip() for p in self._ssh_authorized_client_keys)
         else:
             priv_path = creds / "client_ed25519"
             pub_path = priv_path.with_suffix(".pub")
