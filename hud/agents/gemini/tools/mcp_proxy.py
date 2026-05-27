@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from google.genai import types as genai_types
 
 from hud.agents.tools import MCPTool
 
 from .base import GeminiToolSpec
-
-if TYPE_CHECKING:
-    pass
 
 
 class GeminiMCPProxyTool(MCPTool):

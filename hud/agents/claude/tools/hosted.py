@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from anthropic.types.beta import (
     BetaCitationsConfigParam,
     BetaToolSearchToolBm25_20251119Param,
     BetaToolUnionParam,
-    BetaUserLocationParam,
     BetaWebFetchTool20250910Param,
     BetaWebSearchTool20250305Param,
 )
+
+if TYPE_CHECKING:
+    BetaUserLocationParam = Any
 
 from hud.agents.tools import HostedTool
 

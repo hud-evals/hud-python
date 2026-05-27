@@ -50,11 +50,13 @@ class RFBTool(AgentTool[RFBClient]):
         """Capture a PNG screenshot and return it as a single ``ImageContent`` block."""
         png = await self.client.screenshot_png()
         return MCPToolResult(
-            content=[mcp_types.ImageContent(
-                type="image",
-                mimeType="image/png",
-                data=base64.b64encode(png).decode("ascii"),
-            )],
+            content=[
+                mcp_types.ImageContent(
+                    type="image",
+                    mimeType="image/png",
+                    data=base64.b64encode(png).decode("ascii"),
+                )
+            ],
         )
 
     # ─── pointer ─────────────────────────────────────────────────────

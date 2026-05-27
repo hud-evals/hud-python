@@ -11,7 +11,7 @@ declared by agent config.
 
 from __future__ import annotations
 
-from .base import AgentTool, AgentToolSpec, ClientT
+from .base import AgentTool, AgentToolSpec, ClientT, result_text, tool_err, tool_ok
 from .hosted import HostedTool
 from .mcp import MCPTool
 from .rfb import RFBTool
@@ -25,4 +25,7 @@ __all__ = [
     "MCPTool",
     "RFBTool",
     "SSHTool",
+    "result_text",
+    "tool_err",
+    "tool_ok",
 ]

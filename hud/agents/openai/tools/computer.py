@@ -1,69 +1,51 @@
-"""Agent-side OpenAI native computer tool backed by an environment computer."""
+"""OpenAI computer tool — backed by RFBClient."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+import logging
+from typing import Any, cast
 
-from mcp.types import TextContent
-from openai.types.responses.response_input_param import ComputerCallOutput
+import mcp.types as mcp_types
 
-from hud.agents.tools.computer import (
-    computer_error_result,
-    execute_computer_calls,
-    last_image_data,
-)
-from hud.types import MCPToolCall, MCPToolResult
+from hud.agents.tools import RFBTool
+from hud.agents.tools.base import tool_err
+from hud.types import MCPToolResult
 
-from .base import OpenAITool, OpenAIToolSpec
+from .base import OpenAIToolSpec
 
-if TYPE_CHECKING:
-    from openai.types.responses import (
-        ComputerToolParam,
-        ResponseComputerToolCallOutputScreenshotParam,
-        ResponseInputItemParam,
-    )
-    from openai.types.responses.response_input_param import (
-        ComputerCallOutputAcknowledgedSafetyCheck,
-    )
-
-    from hud.agents.tools.base import CallTool
-else:
-    ComputerToolParam = Any
+logger = logging.getLogger(__name__)
 
 OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
     api_type="computer",
     api_name="computer",
-    supported_models=(
-        "gpt-5.4",
-        "gpt-5.4-*",
-        "gpt-5.5",
-        "gpt-5.5-*",
-    ),
+    supported_models=("gpt-5.4", "gpt-5.4-*", "gpt-5.5", "gpt-5.5-*"),
 )
 
-OPENAI_KEY_ALIASES = {
-    "return": "enter",
-    "escape": "escape",
-    "arrowup": "up",
-    "arrowdown": "down",
-    "arrowleft": "left",
-    "arrowright": "right",
-    "backspace": "backspace",
-    "delete": "delete",
-    "tab": "tab",
+OPENAI_KEY_ALIASES: dict[str, str] = {
+    "return": "Return",
+    "escape": "Escape",
+    "arrowup": "Up",
+    "arrowdown": "Down",
+    "arrowleft": "Left",
+    "arrowright": "Right",
+    "backspace": "BackSpace",
+    "delete": "Delete",
+    "tab": "Tab",
     "space": "space",
-    "control": "ctrl",
-    "alt": "alt",
-    "shift": "shift",
-    "meta": "win",
-    "cmd": "cmd",
-    "command": "cmd",
-    "super": "win",
-    "pageup": "pageup",
-    "pagedown": "pagedown",
-    "home": "home",
-    "end": "end",
-    "insert": "insert",
+    "control": "Control_L",
+    "ctrl": "Control_L",
+    "alt": "Alt_L",
+    "shift": "Shift_L",
+    "meta": "Super_L",
+    "cmd": "Super_L",
+    "command": "Super_L",
+    "super": "Super_L",
+    "pageup": "Page_Up",
+    "pagedown": "Page_Down",
+    "home": "Home",
+    "end": "End",
+    "insert": "Insert",
+    "enter": "Return",
 }
 
 _SCREENSHOT_ACTIONS = {
@@ -79,190 +61,157 @@ _SCREENSHOT_ACTIONS = {
 }
 
 
-class OpenAIComputerTool(OpenAITool):
-    """Translate OpenAI native computer calls into generic environment calls."""
+class OpenAIComputerTool(RFBTool):
+    """Translate OpenAI native computer calls into RFBTool primitives."""
 
     name = "computer"
-    capability = "computer"
 
     @classmethod
     def default_spec(cls, model: str) -> OpenAIToolSpec | None:
-        if OPENAI_COMPUTER_SPEC.supports_model(model):
-            return OPENAI_COMPUTER_SPEC
-        return None
+        return OPENAI_COMPUTER_SPEC if OPENAI_COMPUTER_SPEC.supports_model(model) else None
 
-    def __init__(
-        self,
-        *,
-        env_tool_name: str,
-        spec: OpenAIToolSpec,
-    ) -> None:
-        del spec
-        super().__init__(env_tool_name=env_tool_name, spec=OPENAI_COMPUTER_SPEC)
+    def to_params(self) -> Any:
+        return {"type": "computer"}
 
-    def to_params(self) -> ComputerToolParam:
-        return cast("ComputerToolParam", {"type": "computer"})
-
-    def format_result(self, call: MCPToolCall, result: MCPToolResult) -> ResponseInputItemParam:
-        screenshot = last_image_data(result)
-        if not screenshot:
-            raise ValueError(
-                "Computer tool result missing screenshot. "
-                "The tool must always return a screenshot for computer_call_output."
-            )
-
-        output = ComputerCallOutput(
-            type="computer_call_output",
-            call_id=call.id,
-            output=cast(
-                "ResponseComputerToolCallOutputScreenshotParam",
-                {
-                    "type": "computer_screenshot",
-                    "image_url": f"data:image/png;base64,{screenshot}",
-                    "detail": "original",
-                },
-            ),
-        )
-
-        checks = (call.model_extra or {}).get("pending_safety_checks")
-        if isinstance(checks, list):
-            acknowledged: list[ComputerCallOutputAcknowledgedSafetyCheck] = []
-            for raw_check in cast("list[Any]", checks):
-                check: Any = raw_check
-                if hasattr(check, "model_dump"):
-                    acknowledged.append(
-                        cast("ComputerCallOutputAcknowledgedSafetyCheck", check.model_dump())
-                    )
-                elif isinstance(check, dict):
-                    acknowledged.append(cast("ComputerCallOutputAcknowledgedSafetyCheck", check))
-            if acknowledged:
-                output["acknowledged_safety_checks"] = acknowledged
-        return cast("ResponseInputItemParam", output)
-
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         actions = arguments.get("actions")
         if isinstance(actions, list):
             action_list = cast("list[Any]", actions)
             if not action_list:
-                return computer_error_result("actions list is empty")
+                return tool_err("actions list is empty")
             result = MCPToolResult(content=[], isError=False)
             for index, raw_action in enumerate(action_list):
-                action = cast("dict[str, Any]", raw_action)
                 if not isinstance(raw_action, dict):
-                    return computer_error_result("actions must be objects")
+                    return tool_err("actions must be objects")
+                action = cast("dict[str, Any]", raw_action)
                 result = await self._execute_one(
-                    call_tool,
                     action,
                     ensure_screenshot=index == len(action_list) - 1,
                 )
                 if result.isError:
                     return result
             return result
-
-        return await self._execute_one(call_tool, arguments, ensure_screenshot=True)
+        return await self._execute_one(arguments, ensure_screenshot=True)
 
     async def _execute_one(
         self,
-        call_tool: CallTool,
         arguments: dict[str, Any],
         *,
         ensure_screenshot: bool,
     ) -> MCPToolResult:
         action_type = arguments.get("type")
         if not isinstance(action_type, str):
-            return computer_error_result("type is required")
+            return tool_err("type is required")
 
         if action_type == "response":
             text = arguments.get("text")
             if not isinstance(text, str):
-                return computer_error_result("text is required for response")
-            return MCPToolResult(content=[TextContent(type="text", text=text)], isError=False)
+                return tool_err("text is required for response")
+            return MCPToolResult(
+                content=[mcp_types.TextContent(type="text", text=text)],
+            )
 
-        env_arguments = self._env_arguments(arguments)
-        return await execute_computer_calls(
-            call_tool,
-            env_tool_name=self.env_tool_name,
-            calls=[env_arguments],
-            ensure_screenshot=(
-                ensure_screenshot
-                and action_type in _SCREENSHOT_ACTIONS
-                and action_type != "screenshot"
-            ),
+        try:
+            await self._dispatch(action_type, arguments)
+        except Exception as exc:
+            logger.exception("OpenAIComputerTool action %s failed", action_type)
+            return tool_err(f"computer action {action_type!r} failed: {exc}")
+
+        needs_screenshot = (
+            ensure_screenshot and action_type in _SCREENSHOT_ACTIONS and action_type != "screenshot"
         )
+        if action_type == "screenshot" or needs_screenshot:
+            return await self.screenshot()
+        return MCPToolResult(content=[], isError=False)
 
-    def _env_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        action_type = arguments.get("type")
-
+    async def _dispatch(self, action_type: str, args: dict[str, Any]) -> None:
         if action_type == "screenshot":
-            return {"action": "screenshot"}
+            return
+
         if action_type == "click":
-            button = arguments.get("button")
-            if button == "wheel":
-                button_name = "middle"
-            elif isinstance(button, str):
-                button_name = button
+            button_raw = args.get("button")
+            if button_raw == "wheel":
+                button = "middle"
+            elif isinstance(button_raw, str):
+                button = button_raw  # type: ignore[assignment]
             else:
-                button_name = "left"
-            return {
-                "action": "click",
-                "x": arguments.get("x"),
-                "y": arguments.get("y"),
-                "button": button_name,
-                "hold_keys": _hold_keys(arguments.get("keys")),
-            }
-        if action_type == "double_click":
-            return {
-                "action": "click",
-                "x": arguments.get("x"),
-                "y": arguments.get("y"),
-                "button": "left",
-                "pattern": [100],
-                "hold_keys": _hold_keys(arguments.get("keys")),
-            }
-        if action_type == "scroll":
-            return {
-                "action": "scroll",
-                "x": arguments.get("x"),
-                "y": arguments.get("y"),
-                "scroll_x": arguments.get("scroll_x") or 0,
-                "scroll_y": arguments.get("scroll_y") or 0,
-                "hold_keys": _hold_keys(arguments.get("keys")),
-            }
-        if action_type == "type":
-            return {
-                "action": "write",
-                "text": arguments.get("text"),
-                "enter_after": False,
-            }
-        if action_type == "wait":
-            return {"action": "wait", "time": arguments.get("ms") or 1000}
-        if action_type == "move":
-            return {"action": "move", "x": arguments.get("x"), "y": arguments.get("y")}
-        if action_type == "keypress":
-            keys = arguments.get("keys")
-            if not isinstance(keys, list):
-                keys = []
-            return {
-                "action": "press",
-                "keys": [_map_key(str(key)) for key in cast("list[Any]", keys)],
-            }
-        if action_type == "drag":
-            return {
-                "action": "drag",
-                "path": arguments.get("path") or [],
-                "hold_keys": _hold_keys(arguments.get("keys")),
-            }
-        if action_type == "custom":
-            custom = arguments.get("action")
-            raise ValueError(f"Custom action not supported: {custom}")
-        raise ValueError(f"Invalid action type: {action_type}")
+                button = "left"
+            hold = _hold_keys(args.get("keys"))
+            await self.click(
+                args.get("x"),
+                args.get("y"),
+                button=button,  # type: ignore[arg-type]
+                hold_keys=hold,
+            )
+
+        elif action_type == "double_click":
+            hold = _hold_keys(args.get("keys"))
+            await self.click(
+                args.get("x"),
+                args.get("y"),
+                count=2,
+                interval_ms=100,
+                hold_keys=hold,
+            )
+
+        elif action_type == "scroll":
+            hold = _hold_keys(args.get("keys"))
+            sx = int(args.get("scroll_x") or 0)
+            sy = int(args.get("scroll_y") or 0)
+            await self.scroll(
+                args.get("x"),
+                args.get("y"),
+                scroll_x=sx,
+                scroll_y=sy,
+                hold_keys=hold,
+            )
+
+        elif action_type == "type":
+            text = args.get("text")
+            if isinstance(text, str):
+                await self.type_text(text)
+
+        elif action_type == "wait":
+            ms = int(args.get("ms") or 1000)
+            await self.wait(ms)
+
+        elif action_type == "move":
+            x, y = args.get("x"), args.get("y")
+            if x is not None and y is not None:
+                await self.move(int(x), int(y))
+
+        elif action_type == "keypress":
+            keys = args.get("keys")
+            if isinstance(keys, list):
+                mapped = [_map_key(str(k)) for k in cast("list[Any]", keys)]
+                await self.press_keys(mapped)
+
+        elif action_type == "drag":
+            path_raw = args.get("path") or []
+            if not isinstance(path_raw, list) or len(path_raw) < 2:
+                raise ValueError("drag requires a path with at least 2 points")
+            path = [
+                (int(p.get("x", 0)), int(p.get("y", 0)))
+                for p in cast("list[dict[str, Any]]", path_raw)
+            ]
+            hold = _hold_keys(args.get("keys"))
+            await self.drag(path, hold_keys=hold)
+
+        elif action_type == "custom":
+            raise ValueError(f"Custom action not supported: {args.get('action')}")
+
+        else:
+            raise ValueError(f"Invalid action type: {action_type}")
 
 
 def _map_key(key: str) -> str:
-    return OPENAI_KEY_ALIASES.get(key.lower(), key.lower())
+    return OPENAI_KEY_ALIASES.get(key.lower(), key)
 
 
 def _hold_keys(keys: Any) -> list[str] | None:
     if not isinstance(keys, list):
         return None
     return [_map_key(str(key)) for key in cast("list[Any]", keys)]
+
+
+__all__ = ["OPENAI_COMPUTER_SPEC", "OpenAIComputerTool"]

@@ -75,20 +75,20 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
     async def initialize(self, manifest: Any) -> None:
         await super().initialize(manifest)
         self.required_betas: set[str] = {
-            beta
-            for tool in self.tools.values()
-            if (beta := getattr(tool.spec, "beta", None))
+            beta for tool in self.tools.values() if (beta := getattr(tool.spec, "beta", None))
         }
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: str) -> RunState[BetaMessageParam]:
-        return RunState(messages=[
-            BetaMessageParam(
-                role="user",
-                content=[BetaTextBlockParam(type="text", text=prompt)],
-            ),
-        ])
+        return RunState(
+            messages=[
+                BetaMessageParam(
+                    role="user",
+                    content=[BetaTextBlockParam(type="text", text=prompt)],
+                ),
+            ]
+        )
 
     def _format_user_text(self, text: str) -> BetaMessageParam:
         return BetaMessageParam(
@@ -97,7 +97,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         )
 
     def _format_result(
-        self, call: MCPToolCall, result: MCPToolResult,
+        self,
+        call: MCPToolCall,
+        result: MCPToolResult,
     ) -> BetaMessageParam | list[BetaMessageParam] | None:
         tool_use_id = call.id
         if not tool_use_id:
@@ -242,19 +244,23 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
                 if invalid_json_failures == 2:
                     marker = "JSON: "
                     idx = message.find(marker)
-                    payload = "" if idx == -1 else message[idx + len(marker):].strip()
+                    payload = "" if idx == -1 else message[idx + len(marker) :].strip()
                     wrapped = json.dumps({"INVALID_JSON": payload}, ensure_ascii=True)
-                    state.messages.append(BetaMessageParam(
-                        role="user",
-                        content=[BetaTextBlockParam(
-                            type="text",
-                            text=(
-                                "Your previous tool-call arguments were invalid JSON. "
-                                "Retry the same tool call with valid JSON arguments.\n"
-                                f"Malformed payload (wrapped): {wrapped}"
-                            ),
-                        )],
-                    ))
+                    state.messages.append(
+                        BetaMessageParam(
+                            role="user",
+                            content=[
+                                BetaTextBlockParam(
+                                    type="text",
+                                    text=(
+                                        "Your previous tool-call arguments were invalid JSON. "
+                                        "Retry the same tool call with valid JSON arguments.\n"
+                                        f"Malformed payload (wrapped): {wrapped}"
+                                    ),
+                                )
+                            ],
+                        )
+                    )
                     continue
 
                 raise
@@ -271,14 +277,16 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
             match block.type:
                 case "tool_use":
                     arguments = dict(block.input) if block.input else {}
-                    result.tool_calls.append(MCPToolCall(
-                        id=block.id,
-                        name=block.name,
-                        arguments=arguments,
-                        _meta=mcp_types.RequestParams.Meta.model_validate(
-                            {"citations_enabled": citations_enabled},
-                        ),
-                    ))
+                    result.tool_calls.append(
+                        MCPToolCall(
+                            id=block.id,
+                            name=block.name,
+                            arguments=arguments,
+                            _meta=mcp_types.RequestParams.Meta.model_validate(
+                                {"citations_enabled": citations_enabled},
+                            ),
+                        )
+                    )
                     result.done = False
                 case "text":
                     text_block = cast("BetaTextBlock", block)
@@ -320,33 +328,48 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         match citation.type:
             case "char_location":
                 return Citation(
-                    type="document_citation", text=citation.cited_text,
-                    source=str(citation.document_index), title=citation.document_title,
-                    start_index=citation.start_char_index, end_index=citation.end_char_index,
+                    type="document_citation",
+                    text=citation.cited_text,
+                    source=str(citation.document_index),
+                    title=citation.document_title,
+                    start_index=citation.start_char_index,
+                    end_index=citation.end_char_index,
                 )
             case "page_location":
                 return Citation(
-                    type="document_citation", text=citation.cited_text,
-                    source=str(citation.document_index), title=citation.document_title,
-                    start_index=None, end_index=None,
+                    type="document_citation",
+                    text=citation.cited_text,
+                    source=str(citation.document_index),
+                    title=citation.document_title,
+                    start_index=None,
+                    end_index=None,
                 )
             case "content_block_location":
                 return Citation(
-                    type="document_citation", text=citation.cited_text,
-                    source=str(citation.document_index), title=citation.document_title,
-                    start_index=citation.start_block_index, end_index=citation.end_block_index,
+                    type="document_citation",
+                    text=citation.cited_text,
+                    source=str(citation.document_index),
+                    title=citation.document_title,
+                    start_index=citation.start_block_index,
+                    end_index=citation.end_block_index,
                 )
             case "search_result_location":
                 return Citation(
-                    type="search_result_location", text=citation.cited_text,
-                    source=citation.source, title=citation.title,
-                    start_index=citation.start_block_index, end_index=citation.end_block_index,
+                    type="search_result_location",
+                    text=citation.cited_text,
+                    source=citation.source,
+                    title=citation.title,
+                    start_index=citation.start_block_index,
+                    end_index=citation.end_block_index,
                 )
             case "web_search_result_location":
                 return Citation(
-                    type="web_search_result_location", text=citation.cited_text,
-                    source=citation.url, title=citation.title,
-                    start_index=None, end_index=None,
+                    type="web_search_result_location",
+                    text=citation.cited_text,
+                    source=citation.url,
+                    title=citation.title,
+                    start_index=None,
+                    end_index=None,
                 )
 
 

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any, cast
+from typing import Any
 
 from google.genai import types as genai_types
 
 from hud.agents.tools import RFBTool
+from hud.agents.tools.base import tool_err
 from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
@@ -70,12 +71,12 @@ class GeminiComputerTool(RFBTool):
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         if not isinstance(action, str):
-            return _err("action is required")
+            return tool_err("action is required")
         try:
             return await self._dispatch(action, arguments)
         except Exception as exc:
             logger.exception("GeminiComputerTool action %s failed", action)
-            return _err(f"computer action {action!r} failed: {exc}")
+            return tool_err(f"computer action {action!r} failed: {exc}")
 
     async def _dispatch(self, action: str, args: dict[str, Any]) -> MCPToolResult:
         if action == "open_web_browser":
@@ -125,7 +126,8 @@ class GeminiComputerTool(RFBTool):
             await self.scroll(
                 int(x) if x is not None else None,
                 int(y) if y is not None else None,
-                scroll_x=sx, scroll_y=sy,
+                scroll_x=sx,
+                scroll_y=sy,
             )
             return await self.screenshot()
 
@@ -162,7 +164,7 @@ class GeminiComputerTool(RFBTool):
         if action == "key_combination":
             keys_str = args.get("keys")
             if not isinstance(keys_str, str):
-                return _err("keys must be a '+'-separated string")
+                return tool_err("keys must be a '+'-separated string")
             aliases: dict[str, str] = {
                 "control": "Control_L",
                 "ctrl": "Control_L",
@@ -195,15 +197,7 @@ class GeminiComputerTool(RFBTool):
             await self.drag(path)
             return await self.screenshot()
 
-        return _err(f"Unknown Gemini computer action: {action}")
+        return tool_err(f"Unknown Gemini computer action: {action}")
 
 
-def _err(text: str) -> MCPToolResult:
-    import mcp.types as mcp_types
-    return MCPToolResult(
-        content=[mcp_types.TextContent(type="text", text=text)],
-        isError=True,
-    )
-
-
-__all__ = ["GEMINI_COMPUTER_SPEC", "GeminiComputerTool", "PREDEFINED_COMPUTER_USE_FUNCTIONS"]
+__all__ = ["GEMINI_COMPUTER_SPEC", "PREDEFINED_COMPUTER_USE_FUNCTIONS", "GeminiComputerTool"]

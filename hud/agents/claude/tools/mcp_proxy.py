@@ -39,4 +39,5 @@ class ClaudeMCPProxyTool(MCPTool):
             },
         )
 
+
 __all__ = ["ClaudeMCPProxyTool"]

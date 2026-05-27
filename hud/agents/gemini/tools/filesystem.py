@@ -47,8 +47,10 @@ class GeminiReadTool(SSHTool):
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         if isinstance(start, int) and start > 0:
-            from hud.agents.tools.ssh import result_text
             import mcp.types as mcp_types
+
+            from hud.agents.tools.ssh import result_text
+
             lines = result_text(result).splitlines(keepends=True)
             offset = start - 1
             limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
@@ -142,6 +144,7 @@ class GeminiListTool(SSHTool):
 
 def _shell_quote(s: str) -> str:
     import shlex
+
     return shlex.quote(s)
 
 

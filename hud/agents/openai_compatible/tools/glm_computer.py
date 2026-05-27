@@ -1,28 +1,14 @@
-"""Agent-side GLM computer tool for OpenAI-compatible chat models."""
+"""GLM computer tool — backed by RFBClient."""
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import Any, Literal, cast, get_args
 
-from hud.agents.tools import AgentToolSpec
-from hud.agents.tools.computer import (
-    computer_error_result,
-    computer_tool_info,
-    execute_computer_calls,
-)
-
-from .base import OpenAICompatibleTool
-from .settings import openai_compatible_tool_settings
-
-if TYPE_CHECKING:
-    import mcp.types as types
-    from openai.types.chat import ChatCompletionToolParam
-    from openai.types.shared_params.function_parameters import FunctionParameters
-
-    from hud.agents.tools.base import CallTool
-    from hud.types import MCPToolResult
+from hud.agents.tools import RFBTool
+from hud.agents.tools.base import AgentToolSpec, tool_err
+from hud.types import MCPToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +60,7 @@ Use this tool to interact with the computer via GLM's PC action space.
 * If a task cannot be completed, explain the failure in your final response.\
 """.strip()
 
-GLM_COMPUTER_PARAMETERS: FunctionParameters = {
+GLM_COMPUTER_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
         "action": {
@@ -104,56 +90,16 @@ GLM_COMPUTER_PARAMETERS: FunctionParameters = {
 }
 
 
-class GLMComputerTool(OpenAICompatibleTool):
-    """Translate GLM native GUI calls into generic environment computer calls."""
+class GLMComputerTool(RFBTool):
+    """Translate GLM computer calls into RFBTool primitives with normalized coordinates."""
 
     name = "computer"
-    capability = "computer"
 
     @classmethod
     def default_spec(cls, model: str) -> AgentToolSpec | None:
-        if GLM_COMPUTER_SPEC.supports_model(model):
-            return GLM_COMPUTER_SPEC
-        return None
+        return GLM_COMPUTER_SPEC if GLM_COMPUTER_SPEC.supports_model(model) else None
 
-    def __init__(
-        self,
-        *,
-        env_tool_name: str,
-        spec: AgentToolSpec,
-        display_width: int,
-        display_height: int,
-        coordinate_space: int | None,
-    ) -> None:
-        super().__init__(env_tool_name=env_tool_name, spec=spec)
-        self.display_width = display_width
-        self.display_height = display_height
-        self.coordinate_space = coordinate_space
-
-    @classmethod
-    def from_native_tool(
-        cls,
-        tool: types.Tool,
-        model: str,
-    ) -> GLMComputerTool | None:
-        spec = cls.default_spec(model)
-        if spec is None:
-            return None
-
-        computer_info = computer_tool_info(
-            tool,
-            default_width=openai_compatible_tool_settings.GLM_COMPUTER_WIDTH,
-            default_height=openai_compatible_tool_settings.GLM_COMPUTER_HEIGHT,
-        )
-        return cls(
-            env_tool_name=tool.name,
-            spec=spec,
-            display_width=computer_info.display_width,
-            display_height=computer_info.display_height,
-            coordinate_space=computer_info.coordinate_space,
-        )
-
-    def to_params(self) -> ChatCompletionToolParam:
+    def to_params(self) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {
@@ -166,27 +112,28 @@ class GLMComputerTool(OpenAICompatibleTool):
             },
         }
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         arguments = _normalize_glm_args(arguments)
         action = arguments.get("action")
         if not isinstance(action, str):
-            return computer_error_result("'action' is required")
+            return tool_err("'action' is required")
+        try:
+            return await self._dispatch(action, arguments)
+        except Exception as exc:
+            logger.exception("GLMComputerTool action %s failed", action)
+            return tool_err(f"computer action {action!r} failed: {exc}")
 
-        return await execute_computer_calls(
-            call_tool,
-            env_tool_name=self.env_tool_name,
-            calls=self._env_calls(action, arguments),
-            ensure_screenshot=action not in {"screenshot", "WAIT"},
-        )
-
-    def _env_calls(self, action: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-        start = _parse_glm_box(arguments.get("start_box"))
-        end = _parse_glm_box(arguments.get("end_box"))
+    async def _dispatch(self, action: str, args: dict[str, Any]) -> MCPToolResult:
+        start = _parse_glm_box(args.get("start_box"))
+        end = _parse_glm_box(args.get("end_box"))
 
         if action == "screenshot":
-            return [{"action": "screenshot"}]
+            return await self.screenshot()
+
         if action == "WAIT":
-            return [{"action": "wait", "time": 5000}]
+            await self.wait(5000)
+            return await self.screenshot()
+
         if action in ("left_click", "click", "right_click", "middle_click"):
             x, y = self._point(start, f"start_box required for {action}")
             button = {
@@ -195,48 +142,55 @@ class GLMComputerTool(OpenAICompatibleTool):
                 "right_click": "right",
                 "middle_click": "middle",
             }[action]
-            return [{"action": "click", "x": x, "y": y, "button": button}]
+            await self.click(x, y, button=button)  # type: ignore[arg-type]
+            return await self.screenshot()
+
         if action == "hover":
             x, y = self._point(start, "start_box required for hover")
-            return [{"action": "move", "x": x, "y": y}]
+            await self.move(x, y)
+            return await self.screenshot()
+
         if action == "left_double_click":
             x, y = self._point(start, "start_box required for left_double_click")
-            return [{"action": "click", "x": x, "y": y, "button": "left", "pattern": [100]}]
+            await self.click(x, y, count=2, interval_ms=100)
+            return await self.screenshot()
+
         if action == "left_drag":
-            start_x, start_y = self._point(start, "start_box required for left_drag")
-            end_x, end_y = self._point(end, "end_box required for left_drag")
-            return [
-                {
-                    "action": "drag",
-                    "path": [{"x": start_x, "y": start_y}, {"x": end_x, "y": end_y}],
-                }
-            ]
+            sx, sy = self._point(start, "start_box required for left_drag")
+            ex, ey = self._point(end, "end_box required for left_drag")
+            await self.drag([(sx, sy), (ex, ey)])
+            return await self.screenshot()
+
         if action == "key":
-            raw_keys = arguments.get("keys")
+            raw_keys = args.get("keys")
             if isinstance(raw_keys, list):
-                keys = [str(key).strip().lower() for key in cast("list[Any]", raw_keys)]
+                keys = [str(k).strip().lower() for k in cast("list[Any]", raw_keys)]
             else:
-                keys = [
-                    key.strip().lower() for key in str(raw_keys or "").split("+") if key.strip()
-                ]
+                keys = [k.strip().lower() for k in str(raw_keys or "").split("+") if k.strip()]
             if not keys:
-                raise ValueError("keys required for key action")
-            return [{"action": "press", "keys": keys}]
+                return tool_err("keys required for key action")
+            await self.press_keys(keys)
+            return await self.screenshot()
+
         if action == "type":
-            content = arguments.get("content")
+            content = args.get("content")
             if not isinstance(content, str) or not content:
-                raise ValueError("content required for type")
-            return [{"action": "write", "text": content, "enter_after": False}]
+                return tool_err("content required for type")
+            await self.type_text(content)
+            return await self.screenshot()
+
         if action == "scroll":
-            direction = arguments.get("direction")
-            if direction not in {"up", "down"}:
-                raise ValueError("direction must be 'up' or 'down'")
+            direction = args.get("direction")
+            if direction not in ("up", "down"):
+                return tool_err("direction must be 'up' or 'down'")
             point = start or (GLM_COORDINATE_SPACE // 2, GLM_COORDINATE_SPACE // 2)
             x, y = self._scale_normalized_point(point)
-            step = arguments.get("step") or 5
-            scroll_y = int(step) * 100 if direction == "down" else -int(step) * 100
-            return [{"action": "scroll", "x": x, "y": y, "scroll_y": scroll_y}]
-        raise ValueError(f"Unknown action: {action}")
+            step = int(args.get("step") or 5)
+            sy = step if direction == "down" else -step
+            await self.scroll(x, y, scroll_y=sy)
+            return await self.screenshot()
+
+        return tool_err(f"Unknown action: {action}")
 
     def _point(self, point: tuple[int, int] | None, message: str) -> tuple[int, int]:
         if point is None:
@@ -244,8 +198,6 @@ class GLMComputerTool(OpenAICompatibleTool):
         return self._scale_normalized_point(point)
 
     def _scale_normalized_point(self, point: tuple[int, int]) -> tuple[int, int]:
-        if self.coordinate_space == GLM_COORDINATE_SPACE:
-            return point
         x, y = point
         scaled_x = round(x / GLM_COORDINATE_SPACE * (self.display_width - 1))
         scaled_y = round(y / GLM_COORDINATE_SPACE * (self.display_height - 1))
@@ -292,3 +244,6 @@ def _normalize_glm_args(args: dict[str, Any]) -> dict[str, Any]:
             fixed[key] = value
         logger.warning("Fixed GLM XML args: %s -> %s", args, fixed)
     return fixed
+
+
+__all__ = ["GLM_SYSTEM_INSTRUCTIONS", "VALID_GLM_ACTIONS", "GLMComputerTool"]

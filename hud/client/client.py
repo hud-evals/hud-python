@@ -94,9 +94,7 @@ class HudClient:
         """Send ``hello``; return the parsed ``Manifest``."""
         result = await self._call("hello", {})
         env = result.get("env") or {}
-        bindings = [
-            Capability.from_manifest(b) for b in (result.get("bindings") or [])
-        ]
+        bindings = [Capability.from_manifest(b) for b in (result.get("bindings") or [])]
         return Manifest(
             session_id=result["session_id"],
             protocol_version=self.PROTOCOL_VERSION,
@@ -116,11 +114,14 @@ class HudClient:
         return scenarios
 
     async def start_scenario(
-        self, scenario_id: str, args: dict[str, Any] | None = None,
+        self,
+        scenario_id: str,
+        args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start a scenario; returns the first yield (``{"prompt": ...}``)."""
         return await self._call(
-            "scenarios.start", {"id": scenario_id, "args": args or {}},
+            "scenarios.start",
+            {"id": scenario_id, "args": args or {}},
         )
 
     async def evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:

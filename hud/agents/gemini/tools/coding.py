@@ -5,11 +5,10 @@ from __future__ import annotations
 import shlex
 from typing import Any, ClassVar
 
-import mcp.types as mcp_types
 from google.genai import types as genai_types
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.ssh import result_text
+from hud.agents.tools.base import result_text, tool_err
 from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
@@ -101,10 +100,7 @@ class GeminiEditTool(SSHTool):
             return existing
         text = result_text(existing)
         if str(old_string) not in text:
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text=f"old_string not found in {file_path}")],
-                isError=True,
-            )
+            return tool_err(f"old_string not found in {file_path}")
         return await self.file_write(file_path, text.replace(str(old_string), str(new_string), 1))
 
 

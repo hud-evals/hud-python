@@ -14,14 +14,31 @@ from __future__ import annotations
 import fnmatch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
+
+import mcp.types as mcp_types
 
 from hud.capabilities import CapabilityClient
-
-if TYPE_CHECKING:
-    from hud.types import MCPToolResult
+from hud.types import MCPToolResult
 
 ClientT = TypeVar("ClientT", bound=CapabilityClient)
+
+
+def tool_ok(text: str) -> MCPToolResult:
+    """Build a success MCPToolResult with one text block."""
+    return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)])
+
+
+def tool_err(text: str) -> MCPToolResult:
+    """Build an error MCPToolResult with one text block."""
+    return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)], isError=True)
+
+
+def result_text(result: MCPToolResult) -> str:
+    """Extract concatenated text from a MCPToolResult's TextContent blocks."""
+    return "".join(
+        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
+    )
 
 
 @dataclass(frozen=True)
@@ -73,4 +90,4 @@ class AgentTool(ABC, Generic[ClientT]):
     def to_params(self) -> Any: ...
 
 
-__all__ = ["AgentTool", "AgentToolSpec", "ClientT"]
+__all__ = ["AgentTool", "AgentToolSpec", "ClientT", "result_text", "tool_err", "tool_ok"]

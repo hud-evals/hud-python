@@ -80,7 +80,11 @@ class Capability:
 
     @classmethod
     def cdp(
-        cls, *, name: str = "browser", url: str, target_id: str | None = None,
+        cls,
+        *,
+        name: str = "browser",
+        url: str,
+        target_id: str | None = None,
     ) -> Capability:
         """``cdp/1.3`` — Chromium DevTools over WebSocket."""
         normalized = normalize_url(url, default_scheme="ws", default_port=9222)
@@ -91,7 +95,11 @@ class Capability:
 
     @classmethod
     def rfb(
-        cls, *, name: str = "screen", url: str, password: str | None = None,
+        cls,
+        *,
+        name: str = "screen",
+        url: str,
+        password: str | None = None,
     ) -> Capability:
         """``rfb/3.8`` — VNC/RFB pixel + HID server."""
         normalized = normalize_url(url, default_scheme="rfb", default_port=5900)
@@ -102,7 +110,11 @@ class Capability:
 
     @classmethod
     def mcp(
-        cls, *, name: str = "tools", url: str, auth_token: str | None = None,
+        cls,
+        *,
+        name: str = "tools",
+        url: str,
+        auth_token: str | None = None,
     ) -> Capability:
         """``mcp/2025-11-25`` — MCP server (ws/wss/http/https; no stdio)."""
         m = SCHEME_RE.match(url)

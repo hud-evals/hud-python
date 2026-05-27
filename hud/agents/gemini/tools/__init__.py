@@ -10,6 +10,7 @@ from .mcp_proxy import GeminiMCPProxyTool
 from .memory import GeminiMemoryTool
 
 __all__ = [
+    "PREDEFINED_COMPUTER_USE_FUNCTIONS",
     "GeminiComputerTool",
     "GeminiEditTool",
     "GeminiGlobTool",
@@ -21,5 +22,4 @@ __all__ = [
     "GeminiShellTool",
     "GeminiToolSpec",
     "GeminiWriteTool",
-    "PREDEFINED_COMPUTER_USE_FUNCTIONS",
 ]

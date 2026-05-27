@@ -537,9 +537,7 @@ class EvalContext(Environment):
 
         TODO: Port to ToolAgent protocol (agent.initialize + agent.run).
         """
-        raise NotImplementedError(
-            "_run needs to be ported to the new ToolAgent protocol"
-        )
+        raise NotImplementedError("_run needs to be ported to the new ToolAgent protocol")
 
     def prompt_messages(self) -> list[types.PromptMessage]:
         """Return raw MCP prompt messages for an agent run."""

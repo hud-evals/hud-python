@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import RFBTool
+from hud.agents.tools.base import tool_err, tool_ok
 from hud.types import MCPToolResult
 
 from .base import ClaudeToolSpec
@@ -150,7 +151,7 @@ class ClaudeComputerTool(RFBTool):
             return await self._dispatch(action, arguments)
         except Exception as exc:
             logger.exception("ClaudeComputerTool action %s failed", action)
-            return _err(f"computer action {action!r} failed: {exc}")
+            return tool_err(f"computer action {action!r} failed: {exc}")
 
     # ─── action dispatch ──────────────────────────────────────────────
 
@@ -173,19 +174,30 @@ class ClaudeComputerTool(RFBTool):
             case "middle_click":
                 x, y = _xy(arguments.get("coordinate"))
                 await self.click(
-                    x, y, button="middle", hold_keys=_hold_keys(arguments.get("text")),
+                    x,
+                    y,
+                    button="middle",
+                    hold_keys=_hold_keys(arguments.get("text")),
                 )
 
             case "double_click":
                 x, y = _xy(arguments.get("coordinate"))
                 await self.click(
-                    x, y, count=2, interval_ms=100, hold_keys=_hold_keys(arguments.get("text")),
+                    x,
+                    y,
+                    count=2,
+                    interval_ms=100,
+                    hold_keys=_hold_keys(arguments.get("text")),
                 )
 
             case "triple_click":
                 x, y = _xy(arguments.get("coordinate"))
                 await self.click(
-                    x, y, count=3, interval_ms=100, hold_keys=_hold_keys(arguments.get("text")),
+                    x,
+                    y,
+                    count=3,
+                    interval_ms=100,
+                    hold_keys=_hold_keys(arguments.get("text")),
                 )
 
             case "mouse_move" | "move":
@@ -201,13 +213,13 @@ class ClaudeComputerTool(RFBTool):
             case "type":
                 text = arguments.get("text")
                 if not isinstance(text, str):
-                    return _err("`text` is required for type")
+                    return tool_err("`text` is required for type")
                 await self.type_text(text)
 
             case "key":
                 keys = _split_keys(arguments.get("text"))
                 if not keys:
-                    return _err("`text` (key chord) is required for key")
+                    return tool_err("`text` (key chord) is required for key")
                 repeat = arguments.get("repeat")
                 count = repeat if isinstance(repeat, int) and repeat > 0 else 1
                 await self.press_keys(keys, count=min(count, 100))
@@ -215,7 +227,7 @@ class ClaudeComputerTool(RFBTool):
             case "hold_key":
                 keys = _split_keys(arguments.get("text"))
                 if not keys:
-                    return _err("`text` is required for hold_key")
+                    return tool_err("`text` is required for hold_key")
                 duration = _ms_from_seconds(arguments.get("duration"))
                 await self.hold_key(keys[0], duration_ms=duration)
 
@@ -223,7 +235,10 @@ class ClaudeComputerTool(RFBTool):
                 x, y = _xy(arguments.get("coordinate"))
                 sx, sy = _scroll(arguments)
                 await self.scroll(
-                    x, y, scroll_x=sx, scroll_y=sy,
+                    x,
+                    y,
+                    scroll_x=sx,
+                    scroll_y=sy,
                     hold_keys=_hold_keys(arguments.get("text")),
                 )
 
@@ -238,10 +253,10 @@ class ClaudeComputerTool(RFBTool):
 
             case "cursor_position":
                 mouse = self.client.conn.mouse
-                return _ok(f"({mouse.x}, {mouse.y})")
+                return tool_ok(f"({mouse.x}, {mouse.y})")
 
             case _:
-                return _err(f"unsupported computer action: {action!r}")
+                return tool_err(f"unsupported computer action: {action!r}")
 
         # Most actions return the post-action screenshot so the model can verify.
         return await self.screenshot()
@@ -251,22 +266,24 @@ class ClaudeComputerTool(RFBTool):
     async def _zoom(self, arguments: dict[str, Any]) -> MCPToolResult:
         region = arguments.get("region")
         if not isinstance(region, (list, tuple)):
-            return _err("region must be [x0, y0, x1, y1]")
+            return tool_err("region must be [x0, y0, x1, y1]")
         region_seq = cast("list[Any]", region)
         if len(region_seq) != 4:
-            return _err("region must be [x0, y0, x1, y1]")
+            return tool_err("region must be [x0, y0, x1, y1]")
         try:
             x0, y0, x1, y1 = (int(v) for v in region_seq)
         except (TypeError, ValueError):
-            return _err("region must contain 4 integers")
+            return tool_err("region must contain 4 integers")
         png = await self.client.screenshot_png()
         cropped = _crop_png(png, (x0, y0, x1, y1))
         return MCPToolResult(
-            content=[mcp_types.ImageContent(
-                type="image",
-                mimeType="image/png",
-                data=base64.b64encode(cropped).decode("ascii"),
-            )],
+            content=[
+                mcp_types.ImageContent(
+                    type="image",
+                    mimeType="image/png",
+                    data=base64.b64encode(cropped).decode("ascii"),
+                )
+            ],
         )
 
 
@@ -330,22 +347,12 @@ def _drag_path(arguments: dict[str, Any]) -> list[tuple[int, int]]:
 
 def _crop_png(png: bytes, region: tuple[int, int, int, int]) -> bytes:
     from PIL import Image
+
     image = Image.open(BytesIO(png))
     cropped = image.crop(region)
     buf = BytesIO()
     cropped.save(buf, format="PNG")
     return buf.getvalue()
-
-
-def _ok(text: str) -> MCPToolResult:
-    return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)])
-
-
-def _err(text: str) -> MCPToolResult:
-    return MCPToolResult(
-        content=[mcp_types.TextContent(type="text", text=text)],
-        isError=True,
-    )
 
 
 __all__ = ["CLAUDE_COMPUTER_SPECS", "ClaudeComputerTool"]

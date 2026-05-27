@@ -1,25 +1,18 @@
-"""Agent-side Qwen computer tool for OpenAI-compatible chat models."""
+"""Qwen computer tool — backed by RFBClient."""
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
-from hud.agents.tools import AgentToolSpec
-from hud.agents.tools.computer import (
-    computer_error_result,
-    computer_tool_info,
-    execute_computer_calls,
-)
-
-from .base import OpenAICompatibleTool
-from .settings import openai_compatible_tool_settings
+from hud.agents.tools import RFBTool
+from hud.agents.tools.base import AgentToolSpec, tool_err
+from hud.types import MCPToolResult
 
 if TYPE_CHECKING:
-    import mcp.types as types
     from openai.types.shared_params.function_parameters import FunctionParameters
 
-    from hud.agents.tools.base import CallTool
-    from hud.types import MCPToolResult
+logger = logging.getLogger(__name__)
 
 QWEN_COMPUTER_SPEC = AgentToolSpec(
     api_type="computer_use",
@@ -29,8 +22,6 @@ QWEN_COMPUTER_SPEC = AgentToolSpec(
 
 
 class QwenComputerUseToolParam(TypedDict):
-    """Qwen's OpenAI-compatible computer_use extension."""
-
     type: Literal["computer_use"]
     name: str
     display_width_px: int
@@ -39,143 +30,109 @@ class QwenComputerUseToolParam(TypedDict):
     parameters: FunctionParameters
 
 
-class QwenComputerTool(OpenAICompatibleTool):
-    """Translate Qwen computer_use calls into generic environment computer calls."""
+class QwenComputerTool(RFBTool):
+    """Translate Qwen computer_use calls into RFBTool primitives."""
 
     name = "computer_use"
-    capability = "computer"
 
     @classmethod
     def default_spec(cls, model: str) -> AgentToolSpec | None:
-        if QWEN_COMPUTER_SPEC.supports_model(model):
-            return QWEN_COMPUTER_SPEC
-        return None
-
-    def __init__(
-        self,
-        *,
-        env_tool_name: str,
-        spec: AgentToolSpec,
-        display_width: int,
-        display_height: int,
-        description: str,
-    ) -> None:
-        super().__init__(env_tool_name=env_tool_name, spec=spec)
-        self.display_width = display_width
-        self.display_height = display_height
-        self.description = description
-
-    @classmethod
-    def from_native_tool(
-        cls,
-        tool: types.Tool,
-        model: str,
-    ) -> QwenComputerTool | None:
-        spec = cls.default_spec(model)
-        if spec is None:
-            return None
-
-        computer_info = computer_tool_info(
-            tool,
-            default_width=openai_compatible_tool_settings.QWEN_COMPUTER_WIDTH,
-            default_height=openai_compatible_tool_settings.QWEN_COMPUTER_HEIGHT,
-        )
-        return cls(
-            env_tool_name=tool.name,
-            spec=spec,
-            display_width=computer_info.display_width,
-            display_height=computer_info.display_height,
-            description=_qwen_description(
-                computer_info.display_width, computer_info.display_height
-            ),
-        )
+        return QWEN_COMPUTER_SPEC if QWEN_COMPUTER_SPEC.supports_model(model) else None
 
     def to_params(self) -> QwenComputerUseToolParam:
-        tool: QwenComputerUseToolParam = {
+        return {
             "type": "computer_use",
             "name": self.name,
             "display_width_px": self.display_width,
             "display_height_px": self.display_height,
-            "description": self.description,
+            "description": _qwen_description(self.display_width, self.display_height),
             "parameters": QWEN_COMPUTER_PARAMETERS,
         }
-        return tool
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         if not isinstance(action, str):
-            return computer_error_result("action is required")
-        if action == "terminate":
-            return computer_error_result("terminate action is not supported for computer control.")
-        if action == "answer":
-            return computer_error_result("answer action is not supported for computer control.")
+            return tool_err("action is required")
+        if action in ("terminate", "answer"):
+            return tool_err(f"{action} action is not supported for computer control.")
+        try:
+            return await self._dispatch(action, arguments)
+        except Exception as exc:
+            logger.exception("QwenComputerTool action %s failed", action)
+            return tool_err(f"computer action {action!r} failed: {exc}")
 
-        return await execute_computer_calls(
-            call_tool,
-            env_tool_name=self.env_tool_name,
-            calls=self._env_calls(action, arguments),
-            ensure_screenshot=action not in {"screenshot", "wait"},
-        )
+    async def _dispatch(self, action: str, args: dict[str, Any]) -> MCPToolResult:
+        coordinate = _parse_coordinate(args.get("coordinate"))
 
-    def _env_calls(self, action: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-        coordinate = _parse_qwen_coordinate(arguments.get("coordinate"))
         if action == "screenshot":
-            return [{"action": "screenshot"}]
-        if action in {"left_click", "right_click", "middle_click"}:
-            x, y = _required_coordinate(coordinate, action)
+            return await self.screenshot()
+
+        if action in ("left_click", "right_click", "middle_click"):
+            x, y = _require_coord(coordinate, action)
             button = {"left_click": "left", "right_click": "right", "middle_click": "middle"}[
                 action
             ]
-            return [{"action": "click", "x": x, "y": y, "button": button}]
+            await self.click(x, y, button=button)  # type: ignore[arg-type]
+            return await self.screenshot()
+
         if action == "double_click":
-            x, y = _required_coordinate(coordinate, action)
-            return [{"action": "click", "x": x, "y": y, "pattern": [100]}]
+            x, y = _require_coord(coordinate, action)
+            await self.click(x, y, count=2, interval_ms=100)
+            return await self.screenshot()
+
         if action == "triple_click":
-            x, y = _required_coordinate(coordinate, action)
-            return [{"action": "click", "x": x, "y": y, "pattern": [100, 100]}]
+            x, y = _require_coord(coordinate, action)
+            await self.click(x, y, count=3, interval_ms=100)
+            return await self.screenshot()
+
         if action == "mouse_move":
-            x, y = _required_coordinate(coordinate, action)
-            return [{"action": "move", "x": x, "y": y}]
+            x, y = _require_coord(coordinate, action)
+            await self.move(x, y)
+            return await self.screenshot()
+
         if action == "type":
-            text = arguments.get("text")
+            text = args.get("text")
             if not isinstance(text, str):
-                raise ValueError("text is required for type")
-            return [{"action": "write", "text": text}]
+                return tool_err("text is required for type")
+            await self.type_text(text)
+            return await self.screenshot()
+
         if action == "key":
-            keys = arguments.get("keys")
+            keys = args.get("keys")
             if not isinstance(keys, list):
-                raise ValueError("keys is required for key")
-            return [{"action": "press", "keys": keys}]
-        if action in {"scroll", "hscroll"}:
-            pixels = arguments.get("pixels")
+                return tool_err("keys is required for key")
+            await self.press_keys(cast("list[str]", keys))
+            return await self.screenshot()
+
+        if action in ("scroll", "hscroll"):
+            pixels = args.get("pixels")
             if not isinstance(pixels, int | float):
-                raise ValueError("pixels is required for scroll")
-            call: dict[str, Any] = {"action": "scroll"}
-            if coordinate is not None:
-                call.update({"x": coordinate[0], "y": coordinate[1]})
-            if action == "scroll":
-                call["scroll_y"] = -int(pixels)
-            else:
-                call["scroll_x"] = int(pixels)
-            return [call]
+                return tool_err("pixels is required for scroll")
+            sx = int(pixels) if action == "hscroll" else 0
+            sy = -int(pixels) if action == "scroll" else 0
+            cx = coordinate[0] if coordinate else None
+            cy = coordinate[1] if coordinate else None
+            await self.scroll(cx, cy, scroll_x=sx, scroll_y=sy)
+            return await self.screenshot()
+
         if action == "left_click_drag":
-            x, y = _required_coordinate(coordinate, action)
-            return [
-                {"action": "mouse_down", "button": "left"},
-                {"action": "move", "x": x, "y": y},
-                {"action": "mouse_up", "button": "left"},
-            ]
+            x, y = _require_coord(coordinate, action)
+            mouse = self.client.conn.mouse
+            start = (mouse.x, mouse.y)
+            await self.drag([start, (x, y)])
+            return await self.screenshot()
+
         if action == "wait":
-            time = arguments.get("time")
-            if not isinstance(time, int | float):
-                raise ValueError("time is required for wait")
-            if time < 0:
-                raise ValueError("time must be non-negative")
-            return [{"action": "wait", "time": int(time * 1000)}]
-        raise ValueError(f"Invalid action: {action}")
+            time_val = args.get("time")
+            if not isinstance(time_val, int | float) or time_val < 0:
+                return tool_err("time must be a non-negative number")
+            await self.wait(int(time_val * 1000))
+            return await self.screenshot()
+
+        return tool_err(f"Unknown action: {action}")
 
 
-QWEN_COMPUTER_PARAMETERS: FunctionParameters = {
+QWEN_COMPUTER_PARAMETERS: dict[str, Any] = {
     "properties": {
         "action": {
             "description": """
@@ -248,7 +205,7 @@ moving the cursor.
 """.strip()
 
 
-def _parse_qwen_coordinate(coordinate: Any) -> tuple[int, int] | None:
+def _parse_coordinate(coordinate: Any) -> tuple[int, int] | None:
     if not isinstance(coordinate, list | tuple):
         return None
     coord = cast("list[Any] | tuple[Any, ...]", coordinate)
@@ -260,7 +217,10 @@ def _parse_qwen_coordinate(coordinate: Any) -> tuple[int, int] | None:
         return None
 
 
-def _required_coordinate(coordinate: tuple[int, int] | None, action: str) -> tuple[int, int]:
+def _require_coord(coordinate: tuple[int, int] | None, action: str) -> tuple[int, int]:
     if coordinate is None:
         raise ValueError(f"coordinate is required for {action}")
     return coordinate
+
+
+__all__ = ["QwenComputerTool", "QwenComputerUseToolParam"]

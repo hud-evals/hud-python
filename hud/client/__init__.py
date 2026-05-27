@@ -22,7 +22,7 @@ class Manifest:
     """Env welcome frame returned by ``HudClient.hello()``."""
 
     session_id: str
-    protocol_version: str             # e.g. "hud/1.0"
+    protocol_version: str  # e.g. "hud/1.0"
     server_info: ServerInfo
     bindings: list[Capability]
 

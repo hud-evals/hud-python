@@ -19,6 +19,7 @@ from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .settings import gemini_agent_settings
 from .tools import (
+    PREDEFINED_COMPUTER_USE_FUNCTIONS,
     GeminiComputerTool,
     GeminiEditTool,
     GeminiGlobTool,
@@ -29,7 +30,6 @@ from .tools import (
     GeminiSearchTool,
     GeminiShellTool,
     GeminiWriteTool,
-    PREDEFINED_COMPUTER_USE_FUNCTIONS,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,20 +77,26 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         self.thinking_level = config.thinking_level
         self.include_thoughts = config.include_thoughts
         self.excluded_predefined_functions = list(config.excluded_predefined_functions)
-        self.max_recent_turn_with_screenshots = gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
+        self.max_recent_turn_with_screenshots = (
+            gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
+        )
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: str) -> RunState[genai_types.Content]:
-        return RunState(messages=[
-            genai_types.Content(role="user", parts=[genai_types.Part(text=prompt)]),
-        ])
+        return RunState(
+            messages=[
+                genai_types.Content(role="user", parts=[genai_types.Part(text=prompt)]),
+            ]
+        )
 
     def _format_user_text(self, text: str) -> genai_types.Content:
         return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])
 
     def _format_result(
-        self, call: MCPToolCall, result: MCPToolResult,
+        self,
+        call: MCPToolCall,
+        result: MCPToolResult,
     ) -> genai_types.Content | None:
         text = next(
             (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
@@ -150,14 +156,12 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
                     turn_responses.append(fr)
             if turn_responses:
                 screenshot_turns.append(turn_responses)
-        for old_turn in screenshot_turns[self.max_recent_turn_with_screenshots:]:
+        for old_turn in screenshot_turns[self.max_recent_turn_with_screenshots :]:
             for fr in old_turn:
                 fr.parts = None
 
         provider_tools = cast("genai_types.ToolListUnion", list(self.params))
-        if citations_enabled and not any(
-            getattr(t, "google_search", None) for t in self.params
-        ):
+        if citations_enabled and not any(getattr(t, "google_search", None) for t in self.params):
             provider_tools = [
                 *list(provider_tools),
                 genai_types.Tool(google_search=genai_types.GoogleSearch()),
@@ -266,10 +270,16 @@ def _grounding_citations(grounding_meta: genai_types.GroundingMetadata) -> list[
         for idx in support.grounding_chunk_indices or []:
             seen_chunk_indices.add(idx)
             source, title = chunk_sources[idx] if 0 <= idx < len(chunk_sources) else ("", None)
-            citations.append(Citation(
-                type="grounding", text=segment_text, source=source, title=title,
-                start_index=start_idx, end_index=end_idx,
-            ))
+            citations.append(
+                Citation(
+                    type="grounding",
+                    text=segment_text,
+                    source=source,
+                    title=title,
+                    start_index=start_idx,
+                    end_index=end_idx,
+                )
+            )
 
     for idx, (source, title) in enumerate(chunk_sources):
         if idx not in seen_chunk_indices and source:

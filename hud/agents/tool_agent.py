@@ -212,7 +212,9 @@ class ToolAgent(Agent, Generic[MessageT]):
 
     @abstractmethod
     def _format_result(
-        self, call: MCPToolCall, result: MCPToolResult,
+        self,
+        call: MCPToolCall,
+        result: MCPToolResult,
     ) -> MessageT | list[MessageT] | None:
         """Convert a tool result into one or more provider messages, or None to skip."""
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 from .base import ClaudeToolSpec
 from .coding import CLAUDE_BASH_SPEC, CLAUDE_TEXT_EDITOR_SPEC, ClaudeBashTool, ClaudeTextEditorTool
 from .computer import CLAUDE_COMPUTER_SPECS, ClaudeComputerTool
+from .hosted import ClaudeHostedTool, ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 from .mcp_proxy import ClaudeMCPProxyTool
 
 __all__ = [
