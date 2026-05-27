@@ -25,7 +25,6 @@ from .tools import (
     GeminiGlobTool,
     GeminiListTool,
     GeminiMCPProxyTool,
-    GeminiMemoryTool,
     GeminiReadTool,
     GeminiSearchTool,
     GeminiShellTool,
@@ -46,7 +45,6 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         GeminiSearchTool,
         GeminiGlobTool,
         GeminiListTool,
-        GeminiMemoryTool,
         GeminiComputerTool,
         GeminiMCPProxyTool,
     )

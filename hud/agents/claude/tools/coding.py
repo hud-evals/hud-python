@@ -19,24 +19,14 @@ if TYPE_CHECKING:
     )
 
 
-_CLAUDE_4_MODELS = (
-    "*claude-opus-4-7*",
-    "*claude-opus-4-6*",
-    "*claude-sonnet-4-5*",
-    "*claude-sonnet-4-6*",
-    "*claude-haiku-4-5*",
-)
-
 CLAUDE_BASH_SPEC = ClaudeToolSpec(
     api_type="bash_20250124",
     api_name="bash",
-    supported_models=_CLAUDE_4_MODELS,
 )
 
 CLAUDE_TEXT_EDITOR_SPEC = ClaudeToolSpec(
     api_type="text_editor_20250728",
     api_name="str_replace_based_edit_tool",
-    supported_models=_CLAUDE_4_MODELS,
 )
 
 
@@ -47,7 +37,8 @@ class ClaudeBashTool(SSHTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
-        return CLAUDE_BASH_SPEC if CLAUDE_BASH_SPEC.supports_model(model) else None
+        del model
+        return CLAUDE_BASH_SPEC
 
     def to_params(self) -> BetaToolBash20250124Param:
         return cast(
@@ -82,7 +73,8 @@ class ClaudeTextEditorTool(SSHTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
-        return CLAUDE_TEXT_EDITOR_SPEC if CLAUDE_TEXT_EDITOR_SPEC.supports_model(model) else None
+        del model
+        return CLAUDE_TEXT_EDITOR_SPEC
 
     @property
     def provider_name(self) -> str:

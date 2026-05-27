@@ -16,12 +16,10 @@ from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .tools import (
-    GLMComputerTool,
     GlobTool,
     GrepTool,
     ListTool,
     OpenAICompatibleMCPProxyTool,
-    QwenComputerTool,
     ReadTool,
 )
 from .tools.base import format_chat_result
@@ -39,8 +37,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
     """OpenAI-compatible agent using the chat.completions protocol."""
 
     tool_catalog = (
-        GLMComputerTool,
-        QwenComputerTool,
         ReadTool,
         GrepTool,
         GlobTool,

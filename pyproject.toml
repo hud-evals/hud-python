@@ -33,6 +33,7 @@ dependencies = [
     "asyncssh>=2.23.0",
     "asyncvnc>=1.3.0",
     "pillow>=11.3.0",
+    "claude-agent-sdk>=0.2.87",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

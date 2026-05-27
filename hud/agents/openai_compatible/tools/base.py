@@ -13,10 +13,9 @@ from hud.agents.tools.base import AgentToolSpec
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
-    from hud.agents.openai_compatible.tools.qwen_computer import QwenComputerUseToolParam
     from hud.types import MCPToolCall, MCPToolResult
 
-OpenAICompatibleToolParam: TypeAlias = "ChatCompletionToolParam | QwenComputerUseToolParam"
+OpenAICompatibleToolParam: TypeAlias = "ChatCompletionToolParam"
 _TOOL_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 
 

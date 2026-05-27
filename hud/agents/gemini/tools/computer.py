@@ -16,11 +16,6 @@ from .base import GeminiToolSpec
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
-    "gemini-2.5-computer-use-preview-10-2025",
-    "gemini-3-flash-preview",
-)
-
 GEMINI_DRAG_INSET = 25
 IS_MAC = platform.system().lower() == "darwin"
 
@@ -43,7 +38,6 @@ PREDEFINED_COMPUTER_USE_FUNCTIONS = (
 GEMINI_COMPUTER_SPEC = GeminiToolSpec(
     api_type="computer_use",
     api_name="gemini_computer",
-    supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
 )
 
 
@@ -58,7 +52,8 @@ class GeminiComputerTool(RFBTool):
 
     @classmethod
     def default_spec(cls, model: str) -> GeminiToolSpec | None:
-        return GEMINI_COMPUTER_SPEC if GEMINI_COMPUTER_SPEC.supports_model(model) else None
+        del model
+        return GEMINI_COMPUTER_SPEC
 
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(

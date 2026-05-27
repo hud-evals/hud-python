@@ -220,10 +220,14 @@ class Workspace:
         cwd: str = "/workspace",
         env: Mapping[str, str] | None = None,
     ) -> list[str]:
-        """Per-session shell argv (bwrap'd if available, else host bash)."""
+        """Per-session shell argv (bwrap'd if available, else host shell)."""
         if self._bwrap is not None:
             inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
             return self.bwrap_argv(inner, cwd=cwd, env=env)
+        if sys.platform == "win32":
+            if command is not None:
+                return ["cmd.exe", "/c", command]
+            return ["cmd.exe"]
         if command is not None:
             return ["bash", "-lc", command]
         return ["bash", "-l"]
@@ -277,6 +281,7 @@ class Workspace:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=str(self.root),
             )
         except FileNotFoundError as exc:
             process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())

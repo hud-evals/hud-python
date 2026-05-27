@@ -108,6 +108,9 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ),
 )
 
+# Fallback for unknown models — use the latest version.
+_DEFAULT_COMPUTER_SPEC = CLAUDE_COMPUTER_SPECS[0]
+
 
 class ClaudeComputerTool(RFBTool):
     """Claude's native ``computer_use`` schema, executed over an RFB capability."""
@@ -119,7 +122,7 @@ class ClaudeComputerTool(RFBTool):
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
-        return None
+        return _DEFAULT_COMPUTER_SPEC
 
     def to_params(self) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
         if self.spec.api_type == "computer_20251124":

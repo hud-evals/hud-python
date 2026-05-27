@@ -19,12 +19,6 @@ class OpenAIHostedTool(HostedTool[ToolParam]):
 class OpenAICodeInterpreterTool(OpenAIHostedTool):
     """OpenAI code interpreter."""
 
-    supported_models: tuple[str, ...] | None = (
-        "gpt-5.4",
-        "gpt-5.4-*",
-        "gpt-5.5",
-        "gpt-5.5-*",
-    )
     container: dict[str, Any]
 
     def to_params(self) -> ToolParam:
@@ -36,12 +30,6 @@ class OpenAIToolSearchTool(OpenAIHostedTool):
     """OpenAI tool search for large tool sets."""
 
     threshold: int = 10
-    supported_models: tuple[str, ...] | None = (
-        "gpt-5.4",
-        "gpt-5.4-*",
-        "gpt-5.5",
-        "gpt-5.5-*",
-    )
 
     def to_params(self) -> ToolParam:
         return cast("ToolParam", {"type": "tool_search"})

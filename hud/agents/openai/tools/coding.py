@@ -20,7 +20,6 @@ except Exception:
 OPENAI_SHELL_SPEC = OpenAIToolSpec(
     api_type="shell",
     api_name="shell",
-    supported_models=("gpt-5.4", "gpt-5.4-*", "gpt-5.5", "gpt-5.5-*"),
 )
 
 
@@ -29,7 +28,8 @@ class OpenAIShellTool(SSHTool):
 
     @classmethod
     def default_spec(cls, model: str) -> OpenAIToolSpec | None:
-        return OPENAI_SHELL_SPEC if OPENAI_SHELL_SPEC.supports_model(model) else None
+        del model
+        return OPENAI_SHELL_SPEC
 
     def to_params(self) -> Any:
         return cast(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Self
@@ -70,10 +71,18 @@ class Capability:
         user: str = "agent",
         host_pubkey: str,
         client_key_path: str | os.PathLike[str] | None = None,
+        shell: str | None = None,
     ) -> Capability:
-        """``ssh/2`` — SSH daemon with publickey auth."""
+        """``ssh/2`` — SSH daemon with publickey auth.
+
+        ``shell`` declares the remote shell type (``bash``, ``powershell``,
+        ``cmd``). Defaults to auto-detect from ``sys.platform`` at
+        construction time. Agents read this to format commands correctly.
+        """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
-        params: dict[str, Any] = {"user": user, "host_pubkey": host_pubkey}
+        if shell is None:
+            shell = "cmd" if sys.platform == "win32" else "bash"
+        params: dict[str, Any] = {"user": user, "host_pubkey": host_pubkey, "shell": shell}
         if client_key_path is not None:
             params["client_key_path"] = os.fspath(client_key_path)
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
