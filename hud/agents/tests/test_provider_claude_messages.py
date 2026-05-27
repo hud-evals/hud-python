@@ -258,7 +258,10 @@ async def test_claude_native_computer_requests_required_beta_header() -> None:
         validate_api_key=False,
     )
     state = _user_state()
-    state.tools.prepare(model=agent.config.model, tools=[mcp_tool("computer")])
+    state.tools.prepare(
+        model=agent.config.model,
+        tools=[mcp_tool("computer", meta={"capability": "computer"})],
+    )
 
     response = await agent.get_response(state)
 

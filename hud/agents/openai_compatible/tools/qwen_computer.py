@@ -15,9 +15,9 @@ from .base import OpenAICompatibleTool
 from .settings import openai_compatible_tool_settings
 
 if TYPE_CHECKING:
+    import mcp.types as types
     from openai.types.shared_params.function_parameters import FunctionParameters
 
-    from hud.agents.tools import EnvironmentCapability
     from hud.agents.tools.base import CallTool
     from hud.types import MCPToolResult
 
@@ -66,9 +66,9 @@ class QwenComputerTool(OpenAICompatibleTool):
         self.description = description
 
     @classmethod
-    def from_capability(
+    def from_native_tool(
         cls,
-        capability: EnvironmentCapability,
+        tool: types.Tool,
         model: str,
     ) -> QwenComputerTool | None:
         spec = cls.default_spec(model)
@@ -76,12 +76,12 @@ class QwenComputerTool(OpenAICompatibleTool):
             return None
 
         computer_info = computer_tool_info(
-            capability.tool,
+            tool,
             default_width=openai_compatible_tool_settings.QWEN_COMPUTER_WIDTH,
             default_height=openai_compatible_tool_settings.QWEN_COMPUTER_HEIGHT,
         )
         return cls(
-            env_tool_name=capability.tool_name,
+            env_tool_name=tool.name,
             spec=spec,
             display_width=computer_info.display_width,
             display_height=computer_info.display_height,

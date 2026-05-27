@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from types import TracebackType
 
-    from hud.agents.tools import CapabilityEntry, ToolMetadata
     from hud.eval.task import Task
     from hud.tools.types import EvaluationResult
     from hud.types import MCPToolResult, Trace
@@ -542,7 +541,6 @@ class EvalContext(Environment):
         tool_client = ToolClient(
             tools=self.as_tools(),
             tool_handler=self.call_tool,
-            tool_metadata=self._tool_metadata(),
         )
 
         agent.enable_citations = bool(getattr(self, "enable_citations", False))
@@ -555,13 +553,6 @@ class EvalContext(Environment):
         )
         await self.submit_result(result)
         return result
-
-    def _tool_metadata(self) -> ToolMetadata | None:
-        if environment_capabilities := self.metadata.get("environment_capabilities"):
-            return cast("ToolMetadata", environment_capabilities)
-        if capabilities := self.metadata.get("capabilities"):
-            return {"capabilities": cast("dict[str, str | CapabilityEntry]", capabilities)}
-        return None
 
     def prompt_messages(self) -> list[types.PromptMessage]:
         """Return raw MCP prompt messages for an agent run."""

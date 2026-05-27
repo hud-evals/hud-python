@@ -214,7 +214,7 @@ class OpenAIChatAgent(
             tool_calls.append(
                 MCPToolCall(
                     id=tool_call.id,
-                    name=state.tools.name_map.get(provider_name, provider_name),
+                    name=provider_name,
                     arguments=arguments,
                 )
             )

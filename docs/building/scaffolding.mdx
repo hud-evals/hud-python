@@ -127,7 +127,7 @@ env.add_tool(EditTool())
 
 Claude gets native `computer_20250124` and `bash_20250124`. OpenAI gets native `computer`, `shell`, and `apply_patch`. Gemini gets its CLI-shaped function declarations. Same environment, provider-specific model interface.
 
-Provider agents infer the environment capabilities they need from the generic tool surface or environment-level capability metadata. Provider API versions, model gates, betas, and argument translation live in the agent harness.
+Provider agents read capability metadata from the environment tool surface or environment-level capability metadata. Provider API versions, model gates, betas, and argument translation live in the agent harness.
 
 **Match tools to your agent:**
 

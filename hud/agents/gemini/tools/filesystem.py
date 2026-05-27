@@ -8,8 +8,6 @@ if TYPE_CHECKING:
     from hud.agents.tools.base import CallTool
     from hud.types import MCPToolResult
 
-from hud.agents.tools import GroupedCapabilityMixin
-
 from .base import GeminiTool, GeminiToolSpec
 
 GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
@@ -18,18 +16,17 @@ GEMINI_GLOB_SPEC = GeminiToolSpec(api_type="glob", api_name="glob")
 GEMINI_LIST_SPEC = GeminiToolSpec(api_type="list_directory", api_name="list_directory")
 
 
-class GeminiFilesystemTool(GroupedCapabilityMixin, GeminiTool):
+class GeminiFilesystemTool(GeminiTool):
     """Gemini function tool backed by one filesystem environment primitive."""
 
-    capability = "filesystem"
-    env_tool_names: ClassVar[tuple[str, ...]]
+    capability: ClassVar[str]
 
 
 class GeminiReadTool(GeminiFilesystemTool):
     """Translate Gemini read_file calls into the generic read env primitive."""
 
     name = "read_file"
-    env_tool_names = ("read",)
+    capability = "filesystem.read"
     description = "Reads and returns the content of a specified file."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -67,7 +64,7 @@ class GeminiSearchTool(GeminiFilesystemTool):
     """Translate Gemini grep_search calls into the generic grep env primitive."""
 
     name = "grep_search"
-    env_tool_names = ("grep",)
+    capability = "filesystem.grep"
     description = "Searches file contents using a regular expression pattern."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -99,7 +96,7 @@ class GeminiGlobTool(GeminiFilesystemTool):
     """Translate Gemini glob calls into the generic glob env primitive."""
 
     name = "glob"
-    env_tool_names = ("glob",)
+    capability = "filesystem.glob"
     description = "Find files matching a glob pattern."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -134,7 +131,7 @@ class GeminiListTool(GeminiFilesystemTool):
     """Translate Gemini list_directory calls into the generic list env primitive."""
 
     name = "list_directory"
-    env_tool_names = ("list",)
+    capability = "filesystem.list"
     description = "Lists files and directories in a given path."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",

@@ -31,7 +31,7 @@ Swap `model="gpt-4o"` for `model="claude-sonnet-4-5"` and you're comparing provi
 
 `create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer`, `shell`, and `apply_patch`; Gemini has `ComputerUse`. Each is a provider-specific API the model was trained on.
 
-HUD agents infer or read environment capabilities and choose provider-native tools on the agent side:
+HUD agents read environment capability metadata and choose provider-native tools on the agent side:
 
 ```python
 from hud.agents import create_agent

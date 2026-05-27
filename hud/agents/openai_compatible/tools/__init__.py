@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -20,9 +20,6 @@ from .filesystem import (
 )
 from .glm_computer import GLMComputerTool
 from .qwen_computer import QwenComputerTool
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 
 class OpenAICompatibleAgentTools(
@@ -43,16 +40,6 @@ class OpenAICompatibleAgentTools(
         ListTool,
     )
     function_tool_class = OpenAICompatibleFunctionTool
-    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {
-        "computer": (
-            "computer",
-            "hud_computer",
-            "openai_computer",
-            "glm_computer",
-            "qwen_computer",
-        ),
-        "filesystem": ("read", "grep", "glob", "list"),
-    }
 
 
 __all__ = [

@@ -15,8 +15,6 @@ from .hosted import ClaudeHostedTool, ClaudeToolSearchTool, ClaudeWebFetchTool, 
 from .memory import ClaudeMemoryTool
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from hud.agents.tools import AgentTool
 
 
@@ -30,12 +28,6 @@ class ClaudeAgentTools(AgentTools[ClaudeTool, BetaToolUnionParam, BetaMessagePar
         ClaudeMemoryTool,
     )
     function_tool_class = ClaudeFunctionTool
-    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {
-        "computer": ("computer", "anthropic_computer", "computer_anthropic"),
-        "shell": ("bash",),
-        "editor": ("edit", "str_replace_based_edit_tool", "text_editor"),
-        "memory": ("memory",),
-    }
 
     def __init__(self) -> None:
         super().__init__()

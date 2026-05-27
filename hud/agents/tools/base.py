@@ -11,13 +11,9 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, cast
 
 import mcp.types as types
 
-from hud.agents.tools.capabilities import discover_environment_capabilities
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from hud.agents.tools.capabilities import EnvironmentCapability, ToolMetadata
     from hud.agents.tools.hosted import HostedTool
 
 AgentToolParamT_co = TypeVar("AgentToolParamT_co", covariant=True)
@@ -35,7 +31,6 @@ class ToolClient:
 
     tools: list[types.Tool] = field(default_factory=list[types.Tool])
     tool_handler: CallTool | None = None
-    tool_metadata: ToolMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -72,20 +67,15 @@ class AgentTool(ABC, Generic[AgentToolParamT_co, MessageT_co]):
         return self.name
 
     @classmethod
-    def env_tool_name_for_capability(cls, capability: EnvironmentCapability) -> str | None:
-        return capability.tool_name
-
-    @classmethod
-    def from_capability(
+    def from_native_tool(
         cls,
-        capability: EnvironmentCapability,
+        tool: types.Tool,
         model: str,
     ) -> Self | None:
         spec = cls.default_spec(model)
-        env_tool_name = cls.env_tool_name_for_capability(capability)
-        if spec is None or env_tool_name is None:
+        if spec is None:
             return None
-        return cls(env_tool_name=env_tool_name, spec=spec)
+        return cls(env_tool_name=tool.name, spec=spec)
 
     @classmethod
     def default_spec(cls, model: str) -> AgentToolSpec | None:
@@ -119,38 +109,36 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT, MessageT
 
     native_tool_classes: ClassVar[tuple[type[AgentTool[Any, Any]], ...]] = ()
     function_tool_class: ClassVar[type[AgentTool[Any, Any]] | None] = None
-    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {}
 
     def __init__(self) -> None:
         super().__init__()
         self.params: list[ToolParamT] = []
-        self.name_map: dict[str, str] = {}
         self.hosted_tools: list[HostedTool[object]] = []
 
     def select_tools(
         self,
         tools: list[types.Tool],
         model: str,
-        *,
-        tool_metadata: ToolMetadata | None = None,
     ) -> tuple[list[AgentToolT], list[types.Tool]]:
         """Split MCP tools into provider-owned and user-defined tools."""
         logger.info("Discovered %s tools: %s", len(tools), ", ".join(tool.name for tool in tools))
 
-        capabilities = discover_environment_capabilities(
-            tools,
-            tool_metadata=tool_metadata,
-            name_fallbacks=self.name_fallbacks,
-        )
+        tools_by_capability: dict[str, types.Tool] = {}
+        for tool in tools:
+            meta = tool.meta
+            capability = meta.get("capability") if isinstance(meta, dict) else None
+            if isinstance(capability, str) and capability:
+                tools_by_capability[capability] = tool
+
         agent_tools: list[AgentToolT] = []
-        for capability in capabilities.values():
-            for raw_tool_cls in self.native_tool_classes:
-                tool_cls = cast("type[AgentToolT]", raw_tool_cls)
-                if tool_cls.capability != capability.name:
-                    continue
-                tool = tool_cls.from_capability(capability, model)
-                if tool is not None:
-                    agent_tools.append(tool)
+        for raw_tool_cls in self.native_tool_classes:
+            tool_cls = cast("type[AgentToolT]", raw_tool_cls)
+            native_tool = tools_by_capability.get(tool_cls.capability)
+            if native_tool is None:
+                continue
+            agent_tool = tool_cls.from_native_tool(native_tool, model)
+            if agent_tool is not None:
+                agent_tools.append(agent_tool)
         agent_tool_names = {tool.env_tool_name for tool in agent_tools}
         user_tools = [tool for tool in tools if tool.name not in agent_tool_names]
         return agent_tools, user_tools
@@ -169,24 +157,20 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT, MessageT
         model: str,
         tools: list[types.Tool],
         hosted_tools: list[HostedTool[object]] | None = None,
-        tool_metadata: ToolMetadata | None = None,
     ) -> None:
         """Prepare a generic provider tool map for an agent run."""
         self.clear()
         self.params = []
-        self.name_map = {}
         self.hosted_tools = []
 
         provider_tools, user_tools = self.select_tools(
             tools,
             model,
-            tool_metadata=tool_metadata,
         )
         tools_by_name = {tool.provider_name: tool for tool in provider_tools}
         installed_names = set(tools_by_name)
         self.update(tools_by_name)
         self.params.extend(cast("ToolParamT", tool.to_params()) for tool in provider_tools)
-        self.name_map.update({name: name for name in tools_by_name})
 
         selected_hosted_tools: list[HostedTool[object]] = []
         for tool in hosted_tools or []:
@@ -204,14 +188,12 @@ class AgentTools(dict[str, AgentToolT], Generic[AgentToolT, ToolParamT, MessageT
                     continue
                 self[agent_tool.provider_name] = agent_tool
                 installed_names.add(agent_tool.provider_name)
-                self.name_map[agent_tool.provider_name] = agent_tool.provider_name
                 self.params.append(cast("ToolParamT", agent_tool.to_params()))
                 continue
             generic_tool = self.generic_tool(tool)
             if generic_tool is None:
                 continue
             installed_names.add(tool.name)
-            self.name_map[tool.name] = tool.name
             self.params.append(generic_tool)
 
         tool_names = sorted(installed_names)

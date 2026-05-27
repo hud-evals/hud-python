@@ -89,6 +89,7 @@ class ComputerTool(BaseTool):
 
         # Build metadata with resolution info
         meta: dict[str, object] = {
+            "capability": "computer",
             "resolution": {
                 "width": self.width,
                 "height": self.height,

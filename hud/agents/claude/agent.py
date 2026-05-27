@@ -249,11 +249,10 @@ class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]
             match block.type:
                 case "tool_use":
                     tool_use = block
-                    mcp_name = tools.name_map.get(tool_use.name, tool_use.name)
                     result.tool_calls.append(
                         MCPToolCall(
                             id=tool_use.id,
-                            name=mcp_name,
+                            name=tool_use.name,
                             arguments=dict(tool_use.input),
                             _meta=mcp_types.RequestParams.Meta.model_validate(
                                 {"enable_citations": self.enable_citations}

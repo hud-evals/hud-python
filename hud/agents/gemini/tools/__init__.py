@@ -30,11 +30,7 @@ from .hosted import (
 from .memory import GeminiMemoryTool
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     import mcp.types as types
-
-    from hud.agents.tools import ToolMetadata
 
 
 class GeminiAgentTools(
@@ -58,13 +54,6 @@ class GeminiAgentTools(
         GeminiMemoryTool,
     )
     function_tool_class = GeminiFunctionTool
-    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {
-        "computer": ("computer", "gemini_computer", "computer_gemini"),
-        "shell": ("bash",),
-        "editor": ("edit",),
-        "filesystem": ("read", "grep", "glob", "list"),
-        "memory": ("memory",),
-    }
 
     def __init__(self, *, excluded_predefined_functions: list[str] | None = None) -> None:
         super().__init__()
@@ -82,9 +71,6 @@ class GeminiAgentTools(
         name = function_call.name or ""
         arguments = dict(function_call.args) if function_call.args else {}
 
-        if mcp_tool_name := self.name_map.get(name):
-            return MCPToolCall(name=mcp_tool_name, arguments=arguments)
-
         if self.computer_tool_name and name in self.predefined_computer_functions:
             computer_tool = self.get(self.computer_tool_name)
             if isinstance(computer_tool, GeminiComputerTool):
@@ -97,13 +83,11 @@ class GeminiAgentTools(
         tools: list[types.Tool],
         model: str,
         *,
-        tool_metadata: ToolMetadata | None = None,
         excluded_predefined_functions: list[str] | None = None,
     ) -> tuple[list[AgentTool[genai_types.Tool, genai_types.Content]], list[types.Tool]]:
         provider_tools, user_tools = super().select_tools(
             tools,
             model,
-            tool_metadata=tool_metadata,
         )
         user_tool_names = {tool.name for tool in user_tools}
         configured_exclusions = (

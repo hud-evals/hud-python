@@ -41,6 +41,7 @@ class BashTool(BaseTool):
             name=name,
             title=title,
             description=description,
+            meta={"capability": "shell"},
         )
         self._timeout = session._timeout if session is not None else timeout
 

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import pytest
 from mcp import types
@@ -13,8 +13,6 @@ from hud.agents.tools import (
     AgentTool,
     AgentTools,
     AgentToolSpec,
-    GroupedCapabilityMixin,
-    ToolMetadata,
 )
 from hud.agents.tools.base import ToolClient
 from hud.agents.types import AgentConfig
@@ -32,11 +30,17 @@ class HarnessConfig(AgentConfig):
     model: str = "harness-model"
 
 
-def mcp_tool(name: str, *, description: str | None = None) -> types.Tool:
+def mcp_tool(
+    name: str,
+    *,
+    description: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> types.Tool:
     return types.Tool(
         name=name,
         description=description or f"{name} tool",
         inputSchema={"type": "object", "properties": {}},
+        _meta=meta,
     )
 
 
@@ -103,10 +107,9 @@ class HarnessNativeShellTool(HarnessTool):
         return AgentToolSpec(api_type="shell", api_name="shell")
 
 
-class HarnessFilesystemReadTool(GroupedCapabilityMixin, HarnessTool):
+class HarnessFilesystemReadTool(HarnessTool):
     name = "read_file"
-    capability = "filesystem"
-    env_tool_names: ClassVar[tuple[str, ...]] = ("read", "read_file")
+    capability = "filesystem.read"
 
     @property
     def provider_name(self) -> str:
@@ -121,7 +124,6 @@ class HarnessFilesystemReadTool(GroupedCapabilityMixin, HarnessTool):
 class RoutingHarnessTools(AgentTools[HarnessTool, dict[str, Any], dict[str, Any]]):
     native_tool_classes = (HarnessNativeShellTool, HarnessFilesystemReadTool)
     function_tool_class = HarnessTool
-    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {"shell": ("bash",)}
 
 
 HarnessAgentTools: TypeAlias = AgentTools[HarnessTool, dict[str, Any], dict[str, Any]]
@@ -181,11 +183,9 @@ class RecordingToolEnvironment:
         tools: list[types.Tool] | None = None,
         *,
         results: Mapping[str, MCPToolResult | Exception] | None = None,
-        tool_metadata: ToolMetadata | None = None,
     ) -> None:
         self.tools = tools or []
         self.results = dict(results or {})
-        self.tool_metadata = tool_metadata
         self.calls: list[MCPToolCall] = []
 
     @property
@@ -193,7 +193,6 @@ class RecordingToolEnvironment:
         return ToolClient(
             tools=self.tools,
             tool_handler=self.call_tool,
-            tool_metadata=self.tool_metadata,
         )
 
     async def call_tool(self, call: MCPToolCall) -> MCPToolResult:
@@ -253,9 +252,6 @@ class HarnessEvalContext(EvalContext):
             resource_uri="test-env:chat",
             prompt_messages=messages,
         )
-
-    def tool_metadata_for_run(self) -> ToolMetadata | None:
-        return self._tool_metadata()
 
     async def run_agent(self, agent: Any, *, max_steps: int = 10) -> Trace:
         return await self._run(agent, max_steps=max_steps)

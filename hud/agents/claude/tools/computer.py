@@ -25,12 +25,12 @@ from .base import ClaudeTool, ClaudeToolSpec
 from .settings import claude_tool_settings
 
 if TYPE_CHECKING:
+    import mcp.types as types
     from anthropic.types.beta import (
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
     )
 
-    from hud.agents.tools import EnvironmentCapability
     from hud.agents.tools.base import CallTool
 
 logger = logging.getLogger(__name__)
@@ -120,9 +120,9 @@ class ClaudeComputerTool(ClaudeTool):
         self.display_height = display_height
 
     @classmethod
-    def from_capability(
+    def from_native_tool(
         cls,
-        capability: EnvironmentCapability,
+        tool: types.Tool,
         model: str,
     ) -> ClaudeComputerTool | None:
         spec = cls.default_spec(model)
@@ -130,13 +130,13 @@ class ClaudeComputerTool(ClaudeTool):
             return None
 
         computer_info = computer_tool_info(
-            capability.tool,
+            tool,
             default_width=claude_tool_settings.COMPUTER_WIDTH,
             default_height=claude_tool_settings.COMPUTER_HEIGHT,
         )
 
         return cls(
-            env_tool_name=capability.tool_name,
+            env_tool_name=tool.name,
             spec=spec,
             display_width=computer_info.display_width,
             display_height=computer_info.display_height,

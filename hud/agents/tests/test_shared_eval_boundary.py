@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from mcp import types
 
@@ -139,11 +137,10 @@ async def test_eval_run_executes_environment_tool_and_submits_final_answer() -> 
 
 
 @pytest.mark.asyncio
-async def test_eval_tool_metadata_routes_native_provider_tool_to_environment_tool() -> None:
+async def test_eval_tool_capability_routes_native_provider_tool_to_environment_tool() -> None:
     ctx = HarnessEvalContext(
         prompt="Use shell",
-        tools=[mcp_tool("run_shell")],
-        metadata={"capabilities": {"shell": "run_shell"}},
+        tools=[mcp_tool("run_shell", meta={"capability": "shell"})],
     )
     agent = ScriptedAgent(
         [
@@ -203,29 +200,6 @@ async def test_submit_result_error_prefers_info_error_message() -> None:
 
     assert isinstance(ctx.error, Exception)
     assert str(ctx.error) == "specific"
-
-
-def test_tool_metadata_accepts_legacy_capabilities_shape() -> None:
-    ctx = HarnessEvalContext(
-        prompt="Do the task",
-        metadata={"capabilities": {"computer": "computer"}},
-    )
-
-    metadata = ctx.tool_metadata_for_run()
-
-    assert metadata == {"capabilities": {"computer": "computer"}}
-
-
-def test_tool_metadata_prefers_environment_capabilities_shape() -> None:
-    environment_capabilities: dict[str, Any] = {"capabilities": {"computer": {"tool": "computer"}}}
-    ctx = HarnessEvalContext(
-        prompt="Do the task",
-        metadata={"environment_capabilities": environment_capabilities},
-    )
-
-    metadata = ctx.tool_metadata_for_run()
-
-    assert metadata is environment_capabilities
 
 
 def test_prompt_falls_back_to_plain_user_message() -> None:

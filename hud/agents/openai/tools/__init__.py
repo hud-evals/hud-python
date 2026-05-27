@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 from openai.types.responses import ToolParam
 from openai.types.responses.response_input_param import ResponseInputItemParam
@@ -14,9 +14,6 @@ from .coding import OpenAIShellTool
 from .computer import OpenAIComputerTool
 from .hosted import OpenAICodeInterpreterTool, OpenAIHostedTool, OpenAIToolSearchTool
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
 
 class OpenAIAgentTools(AgentTools[OpenAITool, ToolParam, ResponseInputItemParam]):
     """Prepared OpenAI Responses tool state for a run."""
@@ -26,11 +23,6 @@ class OpenAIAgentTools(AgentTools[OpenAITool, ToolParam, ResponseInputItemParam]
         OpenAIShellTool,
     )
     function_tool_class = OpenAIFunctionTool
-    name_fallbacks: ClassVar[Mapping[str, tuple[str, ...]]] = {
-        "computer": ("computer", "openai_computer"),
-        "shell": ("bash",),
-        "editor": ("edit",),
-    }
 
     @property
     def tool_search_threshold(self) -> int | None:

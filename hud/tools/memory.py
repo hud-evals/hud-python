@@ -58,7 +58,12 @@ class BaseFileMemoryTool(BaseMemoryTool):
         """
         # Pass kwargs to parent for cooperative multiple inheritance
         # This allows EditTool + BaseFileMemoryTool to work together
-        super().__init__(env=kwargs.get("env"), name="memory", title="Memory")
+        super().__init__(
+            env=kwargs.get("env"),
+            name="memory",
+            title="Memory",
+            meta={"capability": "memory"},
+        )
         self._base_path = Path(base_path).resolve()
         self._memory_section_header = memory_section_header
 

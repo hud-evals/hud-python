@@ -103,6 +103,7 @@ class BaseFilesystemTool(BaseTool):
         name: str = "filesystem",
         title: str = "Filesystem",
         description: str = "Filesystem tool",
+        meta: dict[str, object] | None = None,
     ) -> None:
         """Initialize filesystem tool.
 
@@ -112,7 +113,7 @@ class BaseFilesystemTool(BaseTool):
             title: Tool title
             description: Tool description
         """
-        super().__init__(env=None, name=name, title=title, description=description)
+        super().__init__(env=None, name=name, title=title, description=description, meta=meta)
         self._base_path = Path(base_path).resolve()
 
     def resolve_path(self, path: str) -> Path:
@@ -266,7 +267,13 @@ class ReadTool(BaseFilesystemTool):
             title: Tool title
             description: Tool description
         """
-        super().__init__(base_path=base_path, name=name, title=title, description=description)
+        super().__init__(
+            base_path=base_path,
+            name=name,
+            title=title,
+            description=description,
+            meta={"capability": "filesystem.read"},
+        )
         self._max_lines = max_lines
         self._max_line_length = max_line_length
         self._max_bytes = max_bytes
@@ -390,7 +397,13 @@ class GrepTool(BaseFilesystemTool):
             title: Tool title
             description: Tool description
         """
-        super().__init__(base_path=base_path, name=name, title=title, description=description)
+        super().__init__(
+            base_path=base_path,
+            name=name,
+            title=title,
+            description=description,
+            meta={"capability": "filesystem.grep"},
+        )
         self._max_results = max_results
         self._max_files = max_files
 
@@ -525,7 +538,13 @@ class GlobTool(BaseFilesystemTool):
             title: Tool title
             description: Tool description
         """
-        super().__init__(base_path=base_path, name=name, title=title, description=description)
+        super().__init__(
+            base_path=base_path,
+            name=name,
+            title=title,
+            description=description,
+            meta={"capability": "filesystem.glob"},
+        )
         self._max_results = max_results
 
     def find_files(
@@ -642,7 +661,13 @@ class ListTool(BaseFilesystemTool):
             title: Tool title
             description: Tool description
         """
-        super().__init__(base_path=base_path, name=name, title=title, description=description)
+        super().__init__(
+            base_path=base_path,
+            name=name,
+            title=title,
+            description=description,
+            meta={"capability": "filesystem.list"},
+        )
         self._max_entries = max_entries
 
     def list_directory(

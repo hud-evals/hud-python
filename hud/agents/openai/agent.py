@@ -216,7 +216,7 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam, OpenAIAgentTools, OpenAIAgent
                     tool_name = item.name or ""
                     tool_calls.append(
                         MCPToolCall(
-                            name=tools.name_map.get(tool_name, tool_name),
+                            name=tool_name,
                             arguments=json.loads(item.arguments),
                             id=item.call_id,
                         )
@@ -229,7 +229,7 @@ class OpenAIAgent(MCPAgent[ResponseInputItemParam, OpenAIAgentTools, OpenAIAgent
                     else:
                         raise ValueError("OpenAI computer_call missing action")
                     call: dict[str, Any] = {
-                        "name": tools.name_map.get("computer", "computer"),
+                        "name": "computer",
                         "arguments": arguments,
                         "id": item.call_id,
                     }

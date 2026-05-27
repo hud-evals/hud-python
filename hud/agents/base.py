@@ -97,11 +97,9 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
 
         tool_handler: CallTool | None = None
         tools: list[types.Tool] = []
-        tool_metadata = None
         if ctx.tool_client is not None:
             tools = ctx.tool_client.tools
             tool_handler = ctx.tool_client.tool_handler
-            tool_metadata = ctx.tool_client.tool_metadata
 
         messages: list[MessageT] = []
         try:
@@ -111,7 +109,6 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
                 model=self.model,
                 tools=tools,
                 hosted_tools=self.config.hosted_tools,
-                tool_metadata=tool_metadata,
             )
             messages = state.messages
             logger.debug("Messages: %s", messages)

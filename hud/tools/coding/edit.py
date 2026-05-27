@@ -52,6 +52,7 @@ class EditTool(BaseTool):
             name=name,
             title=title,
             description=description,
+            meta={"capability": "editor"},
         )
         self.base_path = Path(base_path).resolve() if base_path is not None else None
 
