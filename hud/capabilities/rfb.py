@@ -60,7 +60,13 @@ class RFBClient(CapabilityClient):
                 password=cap.params.get("password"),
             ),
         )
-        return cls(cap, conn, stack)
+        client = cls(cap, conn, stack)
+        # Warm up the framebuffer — first screenshot() after connect always
+        # resets video.data and does a non-incremental refresh, which on large
+        # displays may return an incomplete (black) frame. Do one throwaway
+        # capture so subsequent calls get real content.
+        await conn.screenshot()
+        return client
 
     @property
     def conn(self) -> asyncvnc.Client:
@@ -78,7 +84,7 @@ class RFBClient(CapabilityClient):
     async def screenshot_png(self) -> bytes:
         """Capture the framebuffer and return PNG-encoded bytes."""
         rgba = await self._conn.screenshot()
-        image = Image.fromarray(rgba, mode="RGBA")
+        image = Image.fromarray(rgba)
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         return buf.getvalue()
