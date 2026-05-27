@@ -145,7 +145,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
             )
             output_list = structured.get("output")
             if not isinstance(output_list, list):
-                from hud.agents.tools.ssh import result_text
+                from hud.agents.tools.base import result_text
 
                 text = result_text(result)
                 output_list = [_shell_output("", text, 1 if result.isError else 0)]

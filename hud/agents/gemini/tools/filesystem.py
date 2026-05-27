@@ -49,7 +49,7 @@ class GeminiReadTool(SSHTool):
         if isinstance(start, int) and start > 0:
             import mcp.types as mcp_types
 
-            from hud.agents.tools.ssh import result_text
+            from hud.agents.tools.base import result_text
 
             lines = result_text(result).splitlines(keepends=True)
             offset = start - 1

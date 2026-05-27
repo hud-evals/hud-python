@@ -9,7 +9,7 @@ import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import AgentToolSpec
-from hud.agents.tools.ssh import result_text
+from hud.agents.tools.base import result_text
 from hud.types import MCPToolResult
 
 
