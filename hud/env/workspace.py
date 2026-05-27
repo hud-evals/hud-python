@@ -288,14 +288,23 @@ class Workspace:
             process.exit(127)
             return
 
-        await process.redirect(stdin=sub.stdin, stdout=sub.stdout, stderr=sub.stderr)
+        # On Windows, process.redirect + sub.wait() hangs because asyncio
+        # pipes don't signal EOF properly for cmd.exe subprocesses.
+        # Use communicate() which handles this correctly.
         try:
-            exit_code = await sub.wait()
+            stdout_data, stderr_data = await sub.communicate(
+                input=None,
+            )
         except asyncio.CancelledError:
             sub.kill()
             await sub.wait()
             raise
-        process.exit(exit_code)
+
+        if stdout_data:
+            process.stdout.write(stdout_data)
+        if stderr_data:
+            process.stderr.write(stderr_data)
+        process.exit(sub.returncode if sub.returncode is not None else 0)
 
     def _sftp_factory(self, chan: asyncssh.SSHServerChannel[bytes]) -> asyncssh.SFTPServer:
         return asyncssh.SFTPServer(chan, chroot=str(self.root).encode())

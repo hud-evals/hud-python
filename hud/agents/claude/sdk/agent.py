@@ -91,11 +91,8 @@ class ClaudeSDKAgent(Agent):
             mcp_config_path=mcp_config_path,
         )
 
-        if self._shell == "cmd":
-            # Write a .bat and call it — avoids cmd.exe inline quoting issues.
-            async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_run.bat", "wb") as f:
-                await f.write(f"@echo off\r\n{run_cmd}\r\nexit /b %ERRORLEVEL%\r\n".encode("utf-8"))
-            full_cmd = "call .hud_run.bat"
+        if self._shell in ("cmd", "powershell"):
+            full_cmd = run_cmd
         else:
             parts: list[str] = [
                 'command -v claude >/dev/null 2>&1 || '
@@ -112,11 +109,7 @@ class ClaudeSDKAgent(Agent):
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
         stderr = completed.stderr if isinstance(completed.stderr, str) else ""
 
-        logger.info("SSH exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
-        if stderr:
-            logger.info("Stderr: %s", stderr[:500])
-        if stdout:
-            logger.info("Stdout (first 500): %s", stdout[:500])
+        logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
 
         if completed.exit_status != 0 and not stdout.strip():
             return Trace(
@@ -175,10 +168,11 @@ class ClaudeSDKAgent(Agent):
         mcp_config_path: str | None = None,
     ) -> str:
         env_vars = self._build_env_vars()
-        is_cmd = self._shell == "cmd"
+        is_win = self._shell in ("cmd", "powershell")
+        self._win_redirect = False
 
         def q(s: str) -> str:
-            if is_cmd:
+            if is_win:
                 return f'"{s}"'
             return shlex.quote(s)
 
@@ -202,7 +196,7 @@ class ClaudeSDKAgent(Agent):
 
         cli_cmd = " ".join(cli_parts)
 
-        if is_cmd:
+        if is_win:
             set_parts = [f"set {k}={v}" for k, v in env_vars.items()]
             return " && ".join([*set_parts, cli_cmd])
 
