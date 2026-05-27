@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -78,6 +79,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
     return AsyncOpenAI(api_key=settings.api_key, base_url=settings.hud_gateway_url)
 
 
+@lru_cache(maxsize=1)
 def _fetch_gateway_models() -> list[GatewayModelInfo]:
     """Fetch available models from HUD API."""
     if not settings.api_key:
@@ -130,7 +132,10 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                 if not isinstance(agent_str, str):
                     raise ValueError(f"Model '{model}' has invalid agent type metadata")
 
-                agent_type = AgentType(agent_str)
+                try:
+                    agent_type = AgentType(agent_str)
+                except ValueError as exc:
+                    raise ValueError(f"Model '{model}' has invalid agent type metadata") from exc
                 model_id = gateway_model.model_name or model
                 provider_name = gateway_model.provider.name or "openai"
                 break

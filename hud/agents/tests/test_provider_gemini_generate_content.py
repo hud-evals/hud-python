@@ -9,7 +9,7 @@ import pytest
 from google.genai import types as genai_types
 
 from hud.agents.base import AgentContext
-from hud.agents.gemini import GeminiAgent
+from hud.agents.gemini import GeminiAgent, GeminiGoogleSearchTool
 from hud.agents.gemini.agent import GeminiAgentState
 from hud.agents.gemini.tools import GeminiAgentTools
 from hud.agents.tests.conftest import (
@@ -111,6 +111,44 @@ async def test_gemini_citations_enable_google_search_at_provider_boundary() -> N
 
 
 @pytest.mark.asyncio
+async def test_gemini_citations_do_not_duplicate_existing_google_search_tool() -> None:
+    client = _gemini_client(_gemini_response(genai_types.Part(text="answer")))
+    agent = GeminiAgent.create(model_client=client, validate_api_key=False)
+    state = provider_state()
+    state.tools.prepare(
+        model=agent.config.model,
+        tools=[],
+        hosted_tools=[GeminiGoogleSearchTool()],
+    )
+
+    response = await agent.get_response(state, citations_enabled=True)
+
+    assert response.content == "answer"
+    config = client.aio.models.generate_content.await_args.kwargs["config"]
+    google_search_tools = [tool for tool in config.tools if tool.google_search is not None]
+    assert len(google_search_tools) == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_sends_thinking_config_to_provider() -> None:
+    client = _gemini_client(_gemini_response(genai_types.Part(text="answer")))
+    agent = GeminiAgent.create(
+        model_client=client,
+        validate_api_key=False,
+        thinking_level="low",
+        include_thoughts=True,
+    )
+
+    response = await agent.get_response(provider_state())
+
+    assert response.content == "answer"
+    config = client.aio.models.generate_content.await_args.kwargs["config"]
+    assert config.thinking_config is not None
+    assert config.thinking_config.thinking_level == genai_types.ThinkingLevel.LOW
+    assert config.thinking_config.include_thoughts is True
+
+
+@pytest.mark.asyncio
 async def test_gemini_preserves_thought_parts_as_reasoning() -> None:
     client = _gemini_client(
         _gemini_response(
@@ -124,6 +162,58 @@ async def test_gemini_preserves_thought_parts_as_reasoning() -> None:
 
     assert response.content == "answer"
     assert response.reasoning == "private reasoning"
+
+
+@pytest.mark.asyncio
+async def test_gemini_extracts_grounding_citations() -> None:
+    grounding_metadata = genai_types.GroundingMetadata(
+        grounding_chunks=[
+            genai_types.GroundingChunk(
+                web=genai_types.GroundingChunkWeb(
+                    uri="https://example.com/source",
+                    title="Example Source",
+                )
+            )
+        ],
+        grounding_supports=[
+            genai_types.GroundingSupport(
+                grounding_chunk_indices=[0],
+                segment=genai_types.Segment(
+                    text="cited answer",
+                    start_index=0,
+                    end_index=12,
+                ),
+            )
+        ],
+    )
+    client = _gemini_client(
+        genai_types.GenerateContentResponse(
+            candidates=[
+                genai_types.Candidate(
+                    content=genai_types.Content(
+                        role="model",
+                        parts=[genai_types.Part(text="answer")],
+                    ),
+                    grounding_metadata=grounding_metadata,
+                )
+            ]
+        )
+    )
+    agent = GeminiAgent.create(model_client=client, validate_api_key=False)
+
+    response = await agent.get_response(provider_state())
+
+    assert response.content == "answer"
+    assert response.citations == [
+        {
+            "type": "grounding",
+            "text": "cited answer",
+            "source": "https://example.com/source",
+            "title": "Example Source",
+            "start_index": 0,
+            "end_index": 12,
+        }
+    ]
 
 
 @pytest.mark.asyncio

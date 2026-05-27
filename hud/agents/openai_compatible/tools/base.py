@@ -136,7 +136,7 @@ def openai_compatible_tool_param(
 ) -> OpenAICompatibleToolParam:
     parameters = tool.inputSchema
     sanitized_params: dict[str, Any] = (
-        _sanitize_schema_for_openai(parameters)
+        _sanitize_openai_compatible_schema(parameters)
         if parameters
         else {"type": "object", "properties": {}}
     )
@@ -154,8 +154,8 @@ def openai_compatible_tool_param(
     )
 
 
-def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
-    """Convert MCP JSON Schema to OpenAI-compatible format."""
+def _sanitize_openai_compatible_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Convert MCP JSON Schema to the OpenAI-compatible chat tool subset."""
     sanitized: dict[str, Any] = {}
 
     for key, value in schema.items():
@@ -167,7 +167,7 @@ def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(item, dict) and cast("dict[str, Any]", item).get("type") != "null"
             ]
             if non_null_types:
-                sanitized.update(_sanitize_schema_for_openai(non_null_types[0]))
+                sanitized.update(_sanitize_openai_compatible_schema(non_null_types[0]))
             else:
                 sanitized["type"] = "string"
 
@@ -185,13 +185,13 @@ def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
         elif key == "properties" and isinstance(value, dict):
             properties = cast("dict[str, Any]", value)
             sanitized[key] = {
-                prop_name: _sanitize_schema_for_openai(cast("dict[str, Any]", prop_schema))
+                prop_name: _sanitize_openai_compatible_schema(cast("dict[str, Any]", prop_schema))
                 for prop_name, prop_schema in properties.items()
                 if isinstance(prop_schema, dict)
             }
 
         elif key == "items" and isinstance(value, dict):
-            sanitized[key] = _sanitize_schema_for_openai(cast("dict[str, Any]", value))
+            sanitized[key] = _sanitize_openai_compatible_schema(cast("dict[str, Any]", value))
 
         elif key in (
             "type",

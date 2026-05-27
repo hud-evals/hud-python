@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import hud.agents.gateway as gateway_module
 from hud.agents import OpenAIAgent, create_agent
 from hud.agents.claude import ClaudeAgent
 from hud.agents.gateway import GatewayModelsResponse, build_gateway_client
@@ -148,6 +149,79 @@ def test_create_agent_rejects_gateway_model_with_invalid_agent_metadata() -> Non
         pytest.raises(ValueError, match="invalid agent type metadata"),
     ):
         create_agent("bad-model")
+
+
+def test_create_agent_rejects_gateway_model_with_unknown_agent_metadata() -> None:
+    models = GatewayModelsResponse.model_validate(
+        {
+            "models": [
+                {
+                    "id": "bad-model",
+                    "name": "Bad Model",
+                    "model_name": "bad-model",
+                    "sdk_agent_type": "not_a_provider",
+                    "provider": {"name": "OpenAI", "default_sdk_agent_type": "openai"},
+                }
+            ]
+        }
+    ).models
+
+    with (
+        patch("hud.agents.gateway._fetch_gateway_models", return_value=models),
+        pytest.raises(ValueError, match="invalid agent type metadata"),
+    ):
+        create_agent("bad-model")
+
+
+def _clear_gateway_model_cache() -> None:
+    fetch_models = getattr(gateway_module, "_fetch_gateway_models")
+    cache_clear = getattr(fetch_models, "cache_clear")
+    cache_clear()
+
+
+def test_create_agent_caches_gateway_model_lookup() -> None:
+    response = MagicMock()
+    response.json.return_value = {
+        "models": [
+            {
+                "id": "model-id",
+                "name": "Model",
+                "model_name": "provider-model",
+                "provider": {"name": "OpenAI", "default_sdk_agent_type": "openai"},
+            }
+        ]
+    }
+    expected = MagicMock()
+    client = MagicMock()
+
+    _clear_gateway_model_cache()
+    try:
+        with (
+            patch("hud.agents.gateway.settings") as settings,
+            patch("hud.agents.gateway.httpx.get", return_value=response) as get,
+            patch("hud.agents.gateway.build_gateway_client", return_value=client),
+            patch.object(OpenAIAgent, "create", return_value=expected) as create,
+        ):
+            settings.api_key = "hud-key"
+            settings.hud_api_url = "https://api.example"
+
+            first = create_agent("provider-model")
+            second = create_agent("model-id")
+    finally:
+        _clear_gateway_model_cache()
+
+    assert first is expected
+    assert second is expected
+    assert create.call_count == 2
+    assert [call.kwargs["model"] for call in create.call_args_list] == [
+        "provider-model",
+        "provider-model",
+    ]
+    get.assert_called_once_with(
+        "https://api.example/models/",
+        headers={"Authorization": "Bearer hud-key"},
+        timeout=10.0,
+    )
 
 
 def test_agent_type_config_and_gateway_metadata_do_not_import_optional_providers(
