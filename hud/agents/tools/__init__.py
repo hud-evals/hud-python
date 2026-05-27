@@ -14,6 +14,7 @@ from __future__ import annotations
 from .base import AgentTool, AgentToolSpec, ClientT
 from .hosted import HostedTool
 from .mcp import MCPTool
+from .rfb import RFBTool
 from .ssh import SSHTool
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "ClientT",
     "HostedTool",
     "MCPTool",
+    "RFBTool",
     "SSHTool",
 ]

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
+from hud.agents.tools.ssh import result_text
 from hud.types import MCPToolResult
 
 from .base import ClaudeToolSpec
@@ -122,7 +123,7 @@ class ClaudeTextEditorTool(SSHTool):
         existing = await self.file_read(path)
         if existing.isError:
             return existing
-        text = _text(existing)
+        text = result_text(existing)
         count = text.count(old)
         if count == 0:
             return _err(f"old_str not found in {path}")
@@ -134,7 +135,7 @@ class ClaudeTextEditorTool(SSHTool):
         existing = await self.file_read(path)
         if existing.isError:
             return existing
-        lines = _text(existing).splitlines(keepends=True)
+        lines = result_text(existing).splitlines(keepends=True)
         if line < 0 or line > len(lines):
             return _err(f"insert_line {line} out of range (file has {len(lines)} lines)")
         if text and not text.endswith("\n"):
@@ -147,12 +148,6 @@ def _err(message: str) -> MCPToolResult:
     return MCPToolResult(
         content=[mcp_types.TextContent(type="text", text=message)],
         isError=True,
-    )
-
-
-def _text(result: MCPToolResult) -> str:
-    return "".join(
-        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
     )
 
 

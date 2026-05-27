@@ -2,6 +2,7 @@
 
 from .base import Capability, CapabilityClient
 from .mcp import MCPClient
+from .rfb import RFBClient
 from .ssh import SSHClient
 
-__all__ = ["Capability", "CapabilityClient", "MCPClient", "SSHClient"]
+__all__ = ["Capability", "CapabilityClient", "MCPClient", "RFBClient", "SSHClient"]

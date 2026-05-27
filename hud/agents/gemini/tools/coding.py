@@ -1,27 +1,39 @@
-"""Agent-side Gemini coding tools."""
+"""Gemini coding tools — shell, edit, write — backed by SSHClient."""
 
 from __future__ import annotations
 
 import shlex
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
-if TYPE_CHECKING:
-    from hud.agents.tools.base import CallTool
-    from hud.types import MCPToolResult
+import mcp.types as mcp_types
+from google.genai import types as genai_types
 
-from .base import GeminiTool, GeminiToolSpec
+from hud.agents.tools import SSHTool
+from hud.agents.tools.ssh import result_text
+from hud.types import MCPToolResult
+
+from .base import GeminiToolSpec
 
 GEMINI_SHELL_SPEC = GeminiToolSpec(api_type="run_shell_command", api_name="run_shell_command")
 GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")
 GEMINI_WRITE_SPEC = GeminiToolSpec(api_type="write_file", api_name="write_file")
 
 
-class GeminiShellTool(GeminiTool):
-    """Translate Gemini CLI shell calls into the generic bash env primitive."""
+def _decl(name: str, description: str, parameters: dict[str, Any]) -> genai_types.Tool:
+    return genai_types.Tool(
+        function_declarations=[
+            genai_types.FunctionDeclaration(
+                name=name,
+                description=description,
+                parameters_json_schema=parameters,
+            ),
+        ],
+    )
 
+
+class GeminiShellTool(SSHTool):
     name = "run_shell_command"
-    capability = "shell"
-    description = (
+    description: ClassVar[str] = (
         "Execute a shell command. The command runs in the environment shell and may "
         "optionally be scoped to a directory."
     )
@@ -40,22 +52,22 @@ class GeminiShellTool(GeminiTool):
         del model
         return GEMINI_SHELL_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
         if not isinstance(command, str) or not command:
             raise ValueError("command is required")
         dir_path = arguments.get("dir_path")
         if isinstance(dir_path, str) and dir_path:
             command = f"cd {shlex.quote(dir_path)} && {command}"
-        return await super().execute(call_tool, {"command": command})
+        return await self.bash(command)
 
 
-class GeminiEditTool(GeminiTool):
-    """Translate Gemini CLI replace calls into the generic edit env primitive."""
-
+class GeminiEditTool(SSHTool):
     name = "replace"
-    capability = "editor"
-    description = (
+    description: ClassVar[str] = (
         "Replaces text within a file. Use old_string as exact literal context. "
         "Set old_string to an empty string to create a new file."
     )
@@ -75,36 +87,30 @@ class GeminiEditTool(GeminiTool):
         del model
         return GEMINI_EDIT_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         file_path = _required_str(arguments, "file_path")
-        old_string = arguments.get("old_string")
-        new_string = arguments.get("new_string")
+        old_string = arguments.get("old_string", "")
+        new_string = arguments.get("new_string", "")
         if old_string == "":
-            return await super().execute(
-                call_tool,
-                {
-                    "command": "create",
-                    "path": file_path,
-                    "file_text": new_string or "",
-                },
+            return await self.file_write(file_path, str(new_string))
+        existing = await self.file_read(file_path)
+        if existing.isError:
+            return existing
+        text = result_text(existing)
+        if str(old_string) not in text:
+            return MCPToolResult(
+                content=[mcp_types.TextContent(type="text", text=f"old_string not found in {file_path}")],
+                isError=True,
             )
-        return await super().execute(
-            call_tool,
-            {
-                "command": "replace",
-                "path": file_path,
-                "old_text": old_string,
-                "new_text": new_string,
-            },
-        )
+        return await self.file_write(file_path, text.replace(str(old_string), str(new_string), 1))
 
 
-class GeminiWriteTool(GeminiTool):
-    """Translate Gemini CLI write_file calls into the generic edit env primitive."""
-
+class GeminiWriteTool(SSHTool):
     name = "write_file"
-    capability = "editor"
-    description = "Creates or overwrites a file with the provided content."
+    description: ClassVar[str] = "Creates or overwrites a file with the provided content."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -119,14 +125,13 @@ class GeminiWriteTool(GeminiTool):
         del model
         return GEMINI_WRITE_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await super().execute(
-            call_tool,
-            {
-                "command": "write",
-                "path": _required_str(arguments, "file_path"),
-                "file_text": arguments.get("content") or "",
-            },
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+        return await self.file_write(
+            _required_str(arguments, "file_path"),
+            arguments.get("content") or "",
         )
 
 
@@ -135,3 +140,6 @@ def _required_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} is required")
     return value
+
+
+__all__ = ["GeminiEditTool", "GeminiShellTool", "GeminiWriteTool"]

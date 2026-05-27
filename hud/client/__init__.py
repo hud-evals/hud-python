@@ -1,4 +1,4 @@
-"""HUD wire client: ``Manifest`` and (soon) ``HudClient``."""
+"""HUD wire client: ``Manifest``, ``ServerInfo``, ``HudClient``."""
 
 from __future__ import annotations
 
@@ -27,4 +27,6 @@ class Manifest:
     bindings: list[Capability]
 
 
-__all__ = ["Manifest", "ServerInfo"]
+from .client import HudClient, HudProtocolError  # noqa: E402
+
+__all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo"]

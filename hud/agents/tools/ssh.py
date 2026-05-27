@@ -66,4 +66,11 @@ def _ok(text: str) -> MCPToolResult:
     return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)])
 
 
-__all__ = ["SSHTool"]
+def result_text(result: MCPToolResult) -> str:
+    """Extract concatenated text from a MCPToolResult's TextContent blocks."""
+    return "".join(
+        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
+    )
+
+
+__all__ = ["SSHTool", "result_text"]

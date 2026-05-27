@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import mcp.types as types
 
-from hud.agents.base import AgentContext
-from hud.agents.tools.base import ToolClient
 from hud.environment import Environment
 from hud.settings import settings
 from hud.shared import make_request
@@ -535,25 +533,13 @@ class EvalContext(Environment):
             await self.submit(result.content)
 
     async def _run(self, agent: Any, *, max_steps: int = 10) -> Trace:
-        """Run an agent against this eval context."""
-        await self.list_tools()
-        initial_messages = self.prompt_messages()
-        tool_client = ToolClient(
-            tools=self.as_tools(),
-            tool_handler=self.call_tool,
-        )
+        """Run an agent against this eval context.
 
-        result = await agent.run(
-            AgentContext(
-                prompt=initial_messages,
-                tool_client=tool_client,
-                system_prompt=self.system_prompt,
-                citations_enabled=bool(getattr(self, "enable_citations", False)),
-            ),
-            max_steps=max_steps,
+        TODO: Port to ToolAgent protocol (agent.initialize + agent.run).
+        """
+        raise NotImplementedError(
+            "_run needs to be ported to the new ToolAgent protocol"
         )
-        await self.submit_result(result)
-        return result
 
     def prompt_messages(self) -> list[types.PromptMessage]:
         """Return raw MCP prompt messages for an agent run."""

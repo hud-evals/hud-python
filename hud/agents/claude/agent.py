@@ -32,6 +32,7 @@ from hud.tools.types import Citation
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
+from .tools.computer import ClaudeComputerTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
 
 if TYPE_CHECKING:
@@ -44,11 +45,12 @@ ClaudeToolResultContent = BetaTextBlockParam | BetaImageBlockParam | BetaRequest
 
 
 class ClaudeAgent(ToolAgent[BetaMessageParam]):
-    """Anthropic Claude agent. Drives SSH (coding) and MCP capabilities."""
+    """Anthropic Claude agent. Drives SSH (coding), RFB (computer), and MCP capabilities."""
 
     tool_catalog = (
         ClaudeBashTool,
         ClaudeTextEditorTool,
+        ClaudeComputerTool,
         ClaudeMCPProxyTool,
     )
 

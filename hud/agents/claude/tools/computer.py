@@ -1,7 +1,8 @@
-"""Agent-side Claude native computer tool.
+"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC.
 
-The environment exposes a generic computer capability. Claude-specific native
-tool formatting and argument translation live here, on the agent side.
+Translates Claude's computer-use action vocabulary into ``RFBTool`` primitive
+calls. The same RFBTool helpers will back the future Gemini/OpenAI computer
+tools — only the LLM-facing schema differs.
 """
 
 from __future__ import annotations
@@ -11,65 +12,78 @@ import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
-from mcp.types import ImageContent
+import mcp.types as mcp_types
 
-from hud.agents.tools.computer import (
-    computer_error_result,
-    computer_tool_info,
-    execute_computer_calls,
-    first_image_data,
-)
+from hud.agents.tools import RFBTool
 from hud.types import MCPToolResult
 
-from .base import ClaudeTool, ClaudeToolSpec
-from .settings import claude_tool_settings
+from .base import ClaudeToolSpec
 
 if TYPE_CHECKING:
-    import mcp.types as types
     from anthropic.types.beta import (
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
     )
 
-    from hud.agents.tools.base import CallTool
+    from hud.agents.tools.rfb import Button
 
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_TO_CLA_KEYS = {
-    "Return": "enter",
-    "Escape": "escape",
-    "ArrowUp": "up",
-    "ArrowDown": "down",
-    "ArrowLeft": "left",
-    "ArrowRight": "right",
-    "Backspace": "backspace",
-    "Delete": "delete",
-    "Tab": "tab",
-    "Space": "space",
-    "Control": "ctrl",
-    "Alt": "alt",
-    "Shift": "shift",
-    "Meta": "win",
-    "Command": "cmd",
-    "Super": "win",
-    "PageUp": "pageup",
-    "PageDown": "pagedown",
-    "Home": "home",
-    "End": "end",
-    "Insert": "insert",
-    "F1": "f1",
-    "F2": "f2",
-    "F3": "f3",
-    "F4": "f4",
-    "F5": "f5",
-    "F6": "f6",
-    "F7": "f7",
-    "F8": "f8",
-    "F9": "f9",
-    "F10": "f10",
-    "F11": "f11",
-    "F12": "f12",
+
+# ─── Anthropic → X11 keysym translation ─────────────────────────────
+#
+# Claude emits keys in the xdotool / Anthropic vocabulary (``Return``,
+# ``Page_Down``, ``Control_L``, ``cmd``, etc.). asyncvnc's keysymdef table
+# accepts X11 names directly and already aliases common short forms (``Cmd``,
+# ``Alt``, ``Ctrl``, ``Super``, ``Shift``, ``Backspace``, ``Del``, ``Esc``).
+# This map covers the residual Anthropic-specific spellings.
+
+_ANTHROPIC_TO_X11: dict[str, str] = {
+    "alt": "Alt_L",
+    "ctrl": "Control_L",
+    "shift": "Shift_L",
+    "meta": "Super_L",
+    "super": "Super_L",
+    "win": "Super_L",
+    "cmd": "Super_L",
+    "command": "Super_L",
+    "option": "Alt_L",
+    "enter": "Return",
+    "return": "Return",
+    "esc": "Escape",
+    "del": "Delete",
+    "pageup": "Page_Up",
+    "pagedown": "Page_Down",
+    "arrowup": "Up",
+    "arrowdown": "Down",
+    "arrowleft": "Left",
+    "arrowright": "Right",
+    "space": "space",
+    "backspace": "BackSpace",
+    "capslock": "Caps_Lock",
+    "printscreen": "Print",
 }
+
+
+def _translate_key(token: str) -> str:
+    if "+" in token:
+        return "+".join(_translate_key(part) for part in token.split("+"))
+    return _ANTHROPIC_TO_X11.get(token.lower(), token)
+
+
+def _split_keys(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return [_translate_key(part.strip()) for part in text.split("+") if part.strip()]
+
+
+def _hold_keys(text: str | None) -> list[str] | None:
+    keys = _split_keys(text)
+    return keys or None
+
+
+# ─── Claude tool specs (per-model gating) ───────────────────────────
+
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ClaudeToolSpec(
@@ -94,11 +108,10 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
 )
 
 
-class ClaudeComputerTool(ClaudeTool):
-    """Translate Claude native computer calls into environment computer calls."""
+class ClaudeComputerTool(RFBTool):
+    """Claude's native ``computer_use`` schema, executed over an RFB capability."""
 
     name = "computer"
-    capability = "computer"
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
@@ -107,44 +120,7 @@ class ClaudeComputerTool(ClaudeTool):
                 return candidate
         return None
 
-    def __init__(
-        self,
-        *,
-        env_tool_name: str,
-        spec: ClaudeToolSpec,
-        display_width: int,
-        display_height: int,
-    ) -> None:
-        super().__init__(env_tool_name=env_tool_name, spec=spec)
-        self.display_width = display_width
-        self.display_height = display_height
-
-    @classmethod
-    def from_native_tool(
-        cls,
-        tool: types.Tool,
-        model: str,
-    ) -> ClaudeComputerTool | None:
-        spec = cls.default_spec(model)
-        if spec is None:
-            return None
-
-        computer_info = computer_tool_info(
-            tool,
-            default_width=claude_tool_settings.COMPUTER_WIDTH,
-            default_height=claude_tool_settings.COMPUTER_HEIGHT,
-        )
-
-        return cls(
-            env_tool_name=tool.name,
-            spec=spec,
-            display_width=computer_info.display_width,
-            display_height=computer_info.display_height,
-        )
-
-    def to_params(
-        self,
-    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
+    def to_params(self) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
         if self.spec.api_type == "computer_20251124":
             return cast(
                 "BetaToolComputerUse20251124Param",
@@ -168,215 +144,208 @@ class ClaudeComputerTool(ClaudeTool):
             },
         )
 
-    async def execute(
-        self,
-        call_tool: CallTool,
-        arguments: dict[str, Any],
-    ) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
-
-        if action == "zoom":
-            return await self._zoom(call_tool, arguments)
-
-        return await execute_computer_calls(
-            call_tool,
-            env_tool_name=self.env_tool_name,
-            calls=self._env_calls(arguments),
-            ensure_screenshot=False,
-        )
-
-    def _env_calls(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-        action = arguments.get("action")
-        coordinate = arguments.get("coordinate")
-        text = arguments.get("text")
-
-        def xy() -> tuple[int | None, int | None]:
-            if isinstance(coordinate, list):
-                coords = cast("list[Any]", coordinate)
-                if len(coords) >= 2:
-                    return int(coords[0]), int(coords[1])
-            return None, None
-
-        if action == "screenshot":
-            return [{"action": "screenshot"}]
-        if action in ("left_click", "click"):
-            x, y = xy()
-            return [{"action": "click", "x": x, "y": y, "hold_keys": self._hold_keys(text)}]
-        if action == "double_click":
-            x, y = xy()
-            return [
-                {
-                    "action": "click",
-                    "x": x,
-                    "y": y,
-                    "pattern": [100],
-                    "hold_keys": self._hold_keys(text),
-                }
-            ]
-        if action == "triple_click":
-            x, y = xy()
-            return [
-                {
-                    "action": "click",
-                    "x": x,
-                    "y": y,
-                    "pattern": [100, 100],
-                    "hold_keys": self._hold_keys(text),
-                }
-            ]
-        if action == "right_click":
-            x, y = xy()
-            return [
-                {
-                    "action": "click",
-                    "x": x,
-                    "y": y,
-                    "button": "right",
-                    "hold_keys": self._hold_keys(text),
-                }
-            ]
-        if action == "middle_click":
-            x, y = xy()
-            return [
-                {
-                    "action": "click",
-                    "x": x,
-                    "y": y,
-                    "button": "middle",
-                    "hold_keys": self._hold_keys(text),
-                }
-            ]
-        if action in ("mouse_move", "move"):
-            x, y = xy()
-            return [{"action": "move", "x": x, "y": y}]
-        if action == "type":
-            return [{"action": "write", "text": text}]
-        if action == "key":
-            keys = self._keys(text)
-            repeat = arguments.get("repeat")
-            repeat = repeat if isinstance(repeat, int) and repeat > 0 else 1
-            return [{"action": "press", "keys": keys} for _ in range(min(repeat, 100))]
-        if action == "scroll":
-            x, y = xy()
-            scroll_x, scroll_y = self._scroll(arguments)
-            return [
-                {
-                    "action": "scroll",
-                    "x": x,
-                    "y": y,
-                    "scroll_x": scroll_x,
-                    "scroll_y": scroll_y,
-                    "hold_keys": self._hold_keys(text),
-                }
-            ]
-        if action in ("left_click_drag", "drag"):
-            start = arguments.get("start_coordinate")
-            path: list[dict[str, Any]] = []
-            if isinstance(start, list):
-                start_coords = cast("list[Any]", start)
-                if len(start_coords) >= 2:
-                    path.append({"x": start_coords[0], "y": start_coords[1]})
-            if isinstance(coordinate, list):
-                end_coords = cast("list[Any]", coordinate)
-                if len(end_coords) >= 2:
-                    if not path:
-                        return [
-                            {"action": "mouse_down", "button": "left"},
-                            {"action": "move", "x": end_coords[0], "y": end_coords[1]},
-                            {"action": "mouse_up", "button": "left"},
-                        ]
-                    path.append({"x": end_coords[0], "y": end_coords[1]})
-            return [{"action": "drag", "path": path, "hold_keys": self._hold_keys(text)}]
-        if action == "wait":
-            duration = arguments.get("duration") or 0
-            return [{"action": "wait", "time": int(float(duration) * 1000)}]
-        if action == "hold_key":
-            keys = self._keys(text)
-            return [
-                {
-                    "action": "hold_key",
-                    "text": keys[0] if keys else text,
-                    "duration": arguments.get("duration"),
-                }
-            ]
-        if action == "left_mouse_down":
-            return [{"action": "mouse_down", "button": "left"}]
-        if action == "left_mouse_up":
-            return [{"action": "mouse_up", "button": "left"}]
-        if action == "cursor_position":
-            return [{"action": "position"}]
-        return [dict(arguments)]
-
-    async def _zoom(
-        self,
-        call_tool: CallTool,
-        arguments: dict[str, Any],
-    ) -> MCPToolResult:
-        region = arguments.get("region")
-        region_value = cast("list[Any] | tuple[Any, ...]", region)
-        if not isinstance(region, (list, tuple)) or len(region_value) != 4:
-            return computer_error_result("region must be [x0, y0, x1, y1]")
-
-        screenshot = await super().execute(call_tool, {"action": "screenshot"})
-        if screenshot.isError:
-            return screenshot
-        image_data = first_image_data(screenshot)
-        if image_data is None:
-            return computer_error_result("screenshot returned no image")
-
         try:
-            x0, y0, x1, y1 = (int(v) for v in region_value)
-            image = ImageContent(
+            return await self._dispatch(action, arguments)
+        except Exception as exc:
+            logger.exception("ClaudeComputerTool action %s failed", action)
+            return _err(f"computer action {action!r} failed: {exc}")
+
+    # ─── action dispatch ──────────────────────────────────────────────
+
+    async def _dispatch(self, action: str | None, arguments: dict[str, Any]) -> MCPToolResult:
+        match action:
+            case "screenshot":
+                return await self.screenshot()
+
+            case "zoom":
+                return await self._zoom(arguments)
+
+            case "left_click" | "click":
+                x, y = _xy(arguments.get("coordinate"))
+                await self.click(x, y, hold_keys=_hold_keys(arguments.get("text")))
+
+            case "right_click":
+                x, y = _xy(arguments.get("coordinate"))
+                await self.click(x, y, button="right", hold_keys=_hold_keys(arguments.get("text")))
+
+            case "middle_click":
+                x, y = _xy(arguments.get("coordinate"))
+                await self.click(
+                    x, y, button="middle", hold_keys=_hold_keys(arguments.get("text")),
+                )
+
+            case "double_click":
+                x, y = _xy(arguments.get("coordinate"))
+                await self.click(
+                    x, y, count=2, interval_ms=100, hold_keys=_hold_keys(arguments.get("text")),
+                )
+
+            case "triple_click":
+                x, y = _xy(arguments.get("coordinate"))
+                await self.click(
+                    x, y, count=3, interval_ms=100, hold_keys=_hold_keys(arguments.get("text")),
+                )
+
+            case "mouse_move" | "move":
+                x, y = _xy(arguments.get("coordinate"))
+                await self.move(_required(x, "coordinate.x"), _required(y, "coordinate.y"))
+
+            case "left_mouse_down":
+                await self.mouse_down("left")
+
+            case "left_mouse_up":
+                await self.mouse_up("left")
+
+            case "type":
+                text = arguments.get("text")
+                if not isinstance(text, str):
+                    return _err("`text` is required for type")
+                await self.type_text(text)
+
+            case "key":
+                keys = _split_keys(arguments.get("text"))
+                if not keys:
+                    return _err("`text` (key chord) is required for key")
+                repeat = arguments.get("repeat")
+                count = repeat if isinstance(repeat, int) and repeat > 0 else 1
+                await self.press_keys(keys, count=min(count, 100))
+
+            case "hold_key":
+                keys = _split_keys(arguments.get("text"))
+                if not keys:
+                    return _err("`text` is required for hold_key")
+                duration = _ms_from_seconds(arguments.get("duration"))
+                await self.hold_key(keys[0], duration_ms=duration)
+
+            case "scroll":
+                x, y = _xy(arguments.get("coordinate"))
+                sx, sy = _scroll(arguments)
+                await self.scroll(
+                    x, y, scroll_x=sx, scroll_y=sy,
+                    hold_keys=_hold_keys(arguments.get("text")),
+                )
+
+            case "left_click_drag" | "drag":
+                path = _drag_path(arguments)
+                button: Button = "left"
+                await self.drag(path, button=button, hold_keys=_hold_keys(arguments.get("text")))
+
+            case "wait":
+                duration = _ms_from_seconds(arguments.get("duration"))
+                await self.wait(duration)
+
+            case "cursor_position":
+                mouse = self.client.conn.mouse
+                return _ok(f"({mouse.x}, {mouse.y})")
+
+            case _:
+                return _err(f"unsupported computer action: {action!r}")
+
+        # Most actions return the post-action screenshot so the model can verify.
+        return await self.screenshot()
+
+    # ─── zoom ────────────────────────────────────────────────────────
+
+    async def _zoom(self, arguments: dict[str, Any]) -> MCPToolResult:
+        region = arguments.get("region")
+        if not isinstance(region, (list, tuple)):
+            return _err("region must be [x0, y0, x1, y1]")
+        region_seq = cast("list[Any]", region)
+        if len(region_seq) != 4:
+            return _err("region must be [x0, y0, x1, y1]")
+        try:
+            x0, y0, x1, y1 = (int(v) for v in region_seq)
+        except (TypeError, ValueError):
+            return _err("region must contain 4 integers")
+        png = await self.client.screenshot_png()
+        cropped = _crop_png(png, (x0, y0, x1, y1))
+        return MCPToolResult(
+            content=[mcp_types.ImageContent(
                 type="image",
                 mimeType="image/png",
-                data=_crop_png(image_data, (x0, y0, x1, y1)),
-            )
-            return MCPToolResult(content=[image], isError=False)
-        except Exception as exc:
-            logger.warning("Claude computer zoom failed: %s", exc)
-            return computer_error_result(str(exc))
-
-    @staticmethod
-    def _keys(text: str | None) -> list[str]:
-        if not text:
-            return []
-        mapped = _map_key(text)
-        return [k.strip() for k in mapped.split("+")] if "+" in mapped else [mapped]
-
-    @staticmethod
-    def _hold_keys(text: str | None) -> list[str] | None:
-        keys = ClaudeComputerTool._keys(text)
-        return keys or None
-
-    @staticmethod
-    def _scroll(arguments: dict[str, Any]) -> tuple[int | None, int | None]:
-        amount = arguments.get("scroll_amount")
-        amount = amount if isinstance(amount, int) and amount >= 0 else 0
-        pixels = amount * 100
-        match arguments.get("scroll_direction"):
-            case "down":
-                return None, pixels
-            case "up":
-                return None, -pixels
-            case "right":
-                return pixels, None
-            case "left":
-                return -pixels, None
-            case _:
-                return None, None
+                data=base64.b64encode(cropped).decode("ascii"),
+            )],
+        )
 
 
-def _map_key(key: str) -> str:
-    if "+" in key:
-        return "+".join(_map_key(part) for part in key.split("+"))
-    return ANTHROPIC_TO_CLA_KEYS.get(key, ANTHROPIC_TO_CLA_KEYS.get(key.capitalize(), key.lower()))
+# ─── helpers ─────────────────────────────────────────────────────────
 
 
-def _crop_png(image_data: str, region: tuple[int, int, int, int]) -> str:
-    from PIL import Image  # type: ignore[import-not-found]
+def _xy(coordinate: Any) -> tuple[int | None, int | None]:
+    if not isinstance(coordinate, (list, tuple)):
+        return None, None
+    seq = cast("list[Any]", coordinate)
+    if len(seq) < 2:
+        return None, None
+    try:
+        return int(seq[0]), int(seq[1])
+    except (TypeError, ValueError):
+        return None, None
 
-    image = Image.open(BytesIO(base64.b64decode(image_data)))
-    crop = image.crop(region)
-    buffer = BytesIO()
-    crop.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+def _required(value: int | None, name: str) -> int:
+    if value is None:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def _ms_from_seconds(duration: Any) -> int:
+    try:
+        return int(float(duration or 0) * 1000)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _scroll(arguments: dict[str, Any]) -> tuple[int, int]:
+    amount = arguments.get("scroll_amount")
+    amount = amount if isinstance(amount, int) and amount >= 0 else 0
+    match arguments.get("scroll_direction"):
+        case "down":
+            return 0, amount
+        case "up":
+            return 0, -amount
+        case "right":
+            return amount, 0
+        case "left":
+            return -amount, 0
+        case _:
+            return 0, 0
+
+
+def _drag_path(arguments: dict[str, Any]) -> list[tuple[int, int]]:
+    path: list[tuple[int, int]] = []
+    for key in ("start_coordinate", "coordinate"):
+        raw = arguments.get(key)
+        if not isinstance(raw, (list, tuple)):
+            continue
+        seq = cast("list[Any]", raw)
+        if len(seq) >= 2:
+            path.append((int(seq[0]), int(seq[1])))
+    if len(path) < 2:
+        raise ValueError("drag requires start_coordinate and coordinate")
+    return path
+
+
+def _crop_png(png: bytes, region: tuple[int, int, int, int]) -> bytes:
+    from PIL import Image
+    image = Image.open(BytesIO(png))
+    cropped = image.crop(region)
+    buf = BytesIO()
+    cropped.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _ok(text: str) -> MCPToolResult:
+    return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)])
+
+
+def _err(text: str) -> MCPToolResult:
+    return MCPToolResult(
+        content=[mcp_types.TextContent(type="text", text=text)],
+        isError=True,
+    )
+
+
+__all__ = ["CLAUDE_COMPUTER_SPECS", "ClaudeComputerTool"]

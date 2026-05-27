@@ -15,15 +15,11 @@ if TYPE_CHECKING:
     from typing import TypeAlias
 
     from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
-    from google.genai import Client as GenaiClient
 
     from hud.agents.claude import ClaudeAgent
-    from hud.agents.gemini import GeminiAgent
-    from hud.agents.openai import OpenAIAgent
-    from hud.agents.openai_compatible import OpenAIChatAgent
 
-    GatewayClient: TypeAlias = AsyncAnthropic | AsyncAnthropicBedrock | GenaiClient | AsyncOpenAI
-    GatewayAgent: TypeAlias = ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
+    GatewayClient: TypeAlias = AsyncAnthropic | AsyncAnthropicBedrock | AsyncOpenAI
+    GatewayAgent: TypeAlias = ClaudeAgent
 
 
 class GatewayProviderInfo(BaseModel):
