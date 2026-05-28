@@ -286,6 +286,7 @@ class ClaudeAgent(MCPAgent[BetaMessageParam, ClaudeAgentTools, ClaudeAgentState]
         if thinking_content:
             result.reasoning = thinking_content
 
+        result.finish_reason = response.stop_reason
         return result
 
     @staticmethod

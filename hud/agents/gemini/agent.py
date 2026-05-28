@@ -218,6 +218,9 @@ class GeminiAgent(MCPAgent[genai_types.Content, GeminiAgentTools, GeminiAgentSta
                 for citation in _grounding_citations(grounding_meta)
             ]
 
+        if candidate.finish_reason is not None:
+            result.finish_reason = candidate.finish_reason.name
+
         return result
 
 

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict
 
 from hud.agents.misc import auto_respond
+from hud.telemetry.instrument import instrument
 from hud.types import AgentResponse, Trace
 
 if TYPE_CHECKING:
@@ -126,7 +127,11 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
 
                 try:
                     # 1. Get model response
-                    response = await self.get_response(
+                    response = await instrument(
+                        self.get_response,
+                        category="inference-2",
+                        record_args=False,
+                    )(
                         state,
                         system_prompt=system_prompt,
                         citations_enabled=citations_enabled,
@@ -216,7 +221,6 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
     ) -> AgentResponse:
         """
         Get response from the model including any tool calls.
-
 
         Args:
             state: Current provider conversation state

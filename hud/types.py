@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+from hud.utils.serialization import json_safe_value
 
 if TYPE_CHECKING:
     from hud.agents.claude import ClaudeAgent
@@ -165,34 +167,35 @@ class MCPToolResult(CallToolResult):
 
 
 class AgentResponse(BaseModel):
-    """Result of a single agent inference call.
+    """Result of a single LLM inference call.
 
     Returned by provider agents' ``get_response()`` methods.  Carries the
     model's text output, any tool calls it wants to make, and provider-
     specific metadata like reasoning traces and citations.
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
     # --- FUNCTIONAL ---
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
     done: bool = Field(default=False)
 
-    # --- TELEMETRY [hud.ai] ---
-    # Responses
+    # --- RESPONSE ---
     content: str | None = Field(default=None)
     reasoning: str | None = Field(default=None)
-    info: dict[str, Any] = Field(default_factory=dict)
-    isError: bool = Field(default=False)
-    raw: Any | None = Field(default=None)  # Include raw response for access to Choice objects
-
-    # --- RESPONSE METADATA ---
-    # Populated by provider agents when citations are available.
-    # Uses dict form of Citation (provider-normalized) so AgentResponse
-    # doesn't depend on hud.tools.types at import time.
+    finish_reason: str | None = Field(default=None)
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    refusal: str | None = Field(default=None)
+    isError: bool = Field(default=False)
+    raw: Any | None = Field(default=None)
 
     # Timestamps
     start_timestamp: str | None = None
     end_timestamp: str | None = None
+
+    @field_serializer("raw", when_used="json")
+    def _serialize_raw(self, raw: Any | None) -> Any:
+        return json_safe_value(raw)
 
     def __str__(self) -> str:
         response = ""
@@ -204,8 +207,6 @@ class AgentResponse(BaseModel):
             response += f"""Tool Calls: {
                 ", ".join([f"{tc.name}: {tc.arguments}" for tc in self.tool_calls])
             }"""
-        if self.raw:
-            response += f"Raw: {self.raw}"
         return response
 
 

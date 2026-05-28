@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from unittest.mock import patch
 
 from mcp.types import ImageContent, TextContent
@@ -186,11 +187,31 @@ def test_agent_response_str_with_tool_calls():
     assert "tool2" in output
 
 
-def test_agent_response_str_with_raw():
-    """Test AgentResponse __str__ includes raw."""
+def test_agent_response_raw_serializes_safely():
+    """AgentResponse captures raw provider payloads in JSON-safe dumps."""
+
+    @dataclass
+    class RawResponse:
+        raw_data: str
+
+    response = AgentResponse(raw=RawResponse(raw_data="value"))
+    data = response.model_dump(mode="json")
+
+    assert response.raw == RawResponse(raw_data="value")
+    assert data["raw"] == {"raw_data": "value"}
+
+
+def test_agent_response_dump_uses_canonical_field_names():
+    """AgentResponse dumps use the normalized SDK field names."""
     response = AgentResponse(raw={"raw_data": "value"})
-    output = str(response)
-    assert "Raw:" in output
+    response.reasoning = "because"
+    response.citations = [{"source": "https://example.com"}]
+
+    data = response.model_dump(exclude_none=True, mode="json")
+
+    assert data["reasoning"] == "because"
+    assert data["citations"] == [{"source": "https://example.com"}]
+    assert data["raw"] == {"raw_data": "value"}
 
 
 def test_agent_response_citations_default_empty():
