@@ -109,10 +109,21 @@ class Capability:
         name: str = "screen",
         url: str,
         password: str | None = None,
+        display: int = 0,
     ) -> Capability:
-        """``rfb/3.8`` — VNC/RFB pixel + HID server."""
-        normalized = normalize_url(url, default_scheme="rfb", default_port=5900)
-        params: dict[str, Any] = {}
+        """``rfb/3.8`` — VNC/RFB pixel + HID server.
+
+        ``display`` selects the VNC display number (standard convention: display
+        ``N`` listens on port ``5900 + N``). When the URL omits an explicit port
+        the port defaults to ``5900 + display``; an explicit port in the URL
+        always wins. Envs hosting multiple screens publish one rfb capability
+        per display, e.g.::
+
+            Capability.rfb(name="screen-0", url="rfb://host", display=0)
+            Capability.rfb(name="screen-1", url="rfb://host", display=1)
+        """
+        normalized = normalize_url(url, default_scheme="rfb", default_port=5900 + display)
+        params: dict[str, Any] = {"display": display}
         if password is not None:
             params["password"] = password
         return cls(name=name, protocol="rfb/3.8", url=normalized, params=params)

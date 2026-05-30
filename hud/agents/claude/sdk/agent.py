@@ -13,30 +13,16 @@ from __future__ import annotations
 import json
 import logging
 import shlex
-import sys
-from dataclasses import dataclass, field
 from typing import Any
 
 from hud.agents.base import Agent
+from hud.agents.types import ClaudeSDKConfig
 from hud.capabilities import MCPClient, RFBClient, SSHClient
 from hud.client import Manifest
 from hud.settings import settings
 from hud.types import Trace
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ClaudeSDKConfig:
-    """Configuration for the Claude SDK agent."""
-
-    model: str = "claude-sonnet-4-5"
-    permission_mode: str = "bypassPermissions"
-    system_prompt: str | None = None
-    max_turns: int | None = None
-    allowed_tools: list[str] = field(default_factory=lambda: [
-        "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-    ])
 
 
 class ClaudeSDKAgent(Agent):

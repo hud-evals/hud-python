@@ -99,3 +99,44 @@ class OpenAIChatConfig(AgentConfig):
     api_key: str | None = None
     base_url: str | None = None
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+# -----------------------------------------------------------------------------
+# Claude Code (CLI over SSH)
+# -----------------------------------------------------------------------------
+
+
+class ClaudeSDKConfig(AgentConfig):
+    """Configuration for ClaudeSDKAgent (runs the ``claude`` CLI over SSH).
+
+    ``system_prompt`` is inherited from ``AgentConfig``.
+    """
+
+    model_name: str = "Claude Code"
+    model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
+    permission_mode: str = "bypassPermissions"
+    max_turns: int | None = None
+    allowed_tools: list[str] = Field(
+        default_factory=lambda: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+    )
+
+
+# -----------------------------------------------------------------------------
+# Browser Use
+# -----------------------------------------------------------------------------
+
+
+class BrowserUseConfig(AgentConfig):
+    """Configuration for BrowserUseAgent.
+
+    Lives here (not in the agent module) so it can be imported and serialized
+    without the optional ``browser-use`` dependency installed. The ``auto_respond``
+    / ``system_prompt`` / ``hosted_tools`` fields from ``AgentConfig`` do not apply
+    — browser-use runs its own agent loop.
+    """
+
+    model_name: str = "Browser Use"
+    model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
+    api_key: str | None = None
+    base_url: str | None = None
+    max_steps: int = 25

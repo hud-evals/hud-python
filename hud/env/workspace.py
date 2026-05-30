@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
+import socket
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,29 +109,42 @@ class Workspace:
                 "Install bubblewrap, or run inside a Linux container that has it.",
             )
 
-        # ssh state (set in start())
+        # ssh config
         self._ssh_host = host
-        self._ssh_port = port
         self._ssh_user = user
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
+        self._serve_task: asyncio.Task[None] | None = None
         self._client_key_path: Path | None = None
-        self._host_pubkey_str: str = ""
+
+        # ─── synchronous spinup ───
+        self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
+        self._authorized_keys_path = self._ensure_authorized_keys_file()
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind((host, port))
+        self._sock.listen(128)
+        self._bound_host, self._bound_port = self._sock.getsockname()[:2]
+
+        # Kick off the async accept loop if an event loop is running.
+        with contextlib.suppress(RuntimeError):
+            loop = asyncio.get_running_loop()
+            self._serve_task = loop.create_task(self._serve())
+
+        LOGGER.info(
+            "Workspace SSH bound on %s as user %r (client key: %s)",
+            self.ssh_url, self._ssh_user, self._client_key_path,
+        )
 
     # ─── lifecycle ────────────────────────────────────────────────────
 
-    async def start(self) -> None:
-        """Bind the SSH listener. Idempotent."""
-        if self._acceptor is not None:
-            return
-        host_key, self._host_pubkey_str = self._load_or_generate_host_key()
-        authorized_keys_path = self._ensure_authorized_keys_file()
+    async def _serve(self) -> None:
+        """Run the asyncssh accept loop on the pre-bound socket."""
         self._acceptor = await asyncssh.listen(
-            host=self._ssh_host,
-            port=self._ssh_port,
-            server_host_keys=[host_key],
-            authorized_client_keys=str(authorized_keys_path),
+            sock=self._sock,
+            server_host_keys=[self._host_key],
+            authorized_client_keys=str(self._authorized_keys_path),
             process_factory=self._handle_process,
             sftp_factory=self._sftp_factory,
             allow_scp=True,
@@ -137,22 +152,25 @@ class Workspace:
             keepalive_interval=30,
             encoding=None,
         )
-        LOGGER.info(
-            "Workspace SSH listening on %s as user %r (client key: %s)",
-            self.ssh_url,
-            self._ssh_user,
-            self._client_key_path,
-        )
+
+    async def start(self) -> None:
+        """Ensure the SSH accept loop is running. Idempotent.
+
+        The socket is already bound in ``__init__``; this just guarantees the
+        async acceptor exists (for callers that construct ``Workspace`` outside
+        a running loop).
+        """
+        if self._serve_task is None and self._acceptor is None:
+            self._serve_task = asyncio.get_event_loop().create_task(self._serve())
+        # Yield so the acceptor binds before first use.
+        await asyncio.sleep(0)
 
     # ─── ssh accessors / capability ───────────────────────────────────
 
     @property
     def ssh_url(self) -> str:
-        """``ssh://host:port`` once started."""
-        if self._acceptor is None:
-            raise RuntimeError("Workspace not started; call `await workspace.start()` first")
-        sock = self._acceptor.sockets[0].getsockname()
-        return f"ssh://{sock[0]}:{sock[1]}"
+        """``ssh://host:port`` — available immediately after construction."""
+        return f"ssh://{self._bound_host}:{self._bound_port}"
 
     @property
     def ssh_host_pubkey(self) -> str:
