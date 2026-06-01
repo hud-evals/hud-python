@@ -281,9 +281,7 @@ class Task(BaseModel):
         async with run_eval(self, trace=trace, quiet=quiet) as ctx:
             result = await ctx._run(agent, max_steps=max_steps)
 
-        if ctx.reward is not None:
-            result.reward = ctx.reward
-
+        # Reward lives on the eval context (the task lifecycle), not the Trace.
         return result
 
     def copy(

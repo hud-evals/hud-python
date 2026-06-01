@@ -5,10 +5,12 @@ A ``Taskset`` groups many of them so a single (stateless) agent can be evaluated
 across the set — optionally with GRPO-style grouping and a concurrency cap::
 
     ts = Taskset(fix_bug(difficulty=d) for d in range(1, 6))
-    traces = await ts.run(agent, group=8, max_concurrent=16)
+    runs = await ts.run(agent, group=8, max_concurrent=16)
+    await trainer.reward(runs)        # each Run carries reward + trace_id
 
-The contract is just ``agent(run) -> Trace``; the taskset owns launching each
-variant, grading it, and gathering the results.
+The contract is just ``agent(run)`` filling ``run.trace``; the taskset owns
+launching each variant, grading it, and gathering the resulting :class:`Run`s
+(the episode: prompt + trace + reward).
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from hud.types import Trace
+from hud.client import Run
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -30,14 +32,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.taskset")
 
 
-async def _rollout(variant: Variant, agent: Agent) -> Trace:
-    """Drive one variant to a graded ``Trace`` (the rollout atom).
+async def _rollout(variant: Variant, agent: Agent) -> Run:
+    """Drive one variant to a graded :class:`Run` (the rollout atom).
 
-    Launch the env, let ``agent(run)`` fill ``run.trace``, and grade it on exit. A
-    per-rollout ``trace_id`` is bound into the trace context so ``@instrument``
-    spans and Mode-B training key correctly, then stamped on the result. A failure
-    while launching/connecting is isolated into an ``isError`` trace so one bad
-    rollout never collapses a batch.
+    Launch the env, let ``agent(run)`` fill ``run.trace``, and grade it on exit
+    (``run.reward``). A per-rollout ``trace_id`` is bound into the trace context so
+    ``@instrument`` spans and Mode-B training key correctly, then stamped on the
+    trace. A failure while launching/connecting is isolated into a failed ``Run``
+    so one bad rollout never collapses a batch.
     """
     from hud.eval.context import set_trace_context  # lazy: avoid legacy import at module load
 
@@ -46,15 +48,13 @@ async def _rollout(variant: Variant, agent: Agent) -> Trace:
         with set_trace_context(trace_id):
             async with variant as run:
                 await agent(run)
-            trace = run.trace  # the live trace the agent filled, graded on exit
     except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
         raise
     except Exception as exc:
         logger.warning("rollout failed: %s", exc)
-        return Trace(done=True, isError=True, content=str(exc), info={"error": str(exc)},
-                     trace_id=trace_id)
-    trace.trace_id = trace_id
-    return trace
+        return Run.failed(str(exc), trace_id=trace_id)
+    run.trace.trace_id = trace_id
+    return run
 
 
 class Taskset:
@@ -75,11 +75,11 @@ class Taskset:
         *,
         group: int = 1,
         max_concurrent: int | None = None,
-    ) -> list[Trace]:
+    ) -> list[Run]:
         """Gather rollouts over every variant x ``group`` with an optional concurrency cap.
 
         One shared (stateless) ``agent`` drives every rollout; each rollout gets a
-        fresh env (via the variant) and its own ``Trace``. Returns traces in
+        fresh env (via the variant) and its own :class:`Run`. Returns the runs in
         expansion order (variant-major, then group).
         """
         if group < 1:
@@ -89,7 +89,7 @@ class Taskset:
         expanded = [replace(v) for v in self.variants for _ in range(group)]
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-        async def _one(v: Variant) -> Trace:
+        async def _one(v: Variant) -> Run:
             if sem is None:
                 return await _rollout(v, agent)
             async with sem:

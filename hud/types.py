@@ -274,26 +274,24 @@ class HudSpan(BaseModel):
 
 
 class Trace(BaseModel):
-    """The recorded outcome of one task rollout — a pure, serializable datum.
+    """The agent's trajectory for one rollout — a pure, serializable datum.
 
-    A ``Trace`` is what a rollout *produces*: the prompt the env handed out, the
-    agent's trajectory (``messages``), its final ``content``, and the env-assigned
-    ``reward``. It is the unit of training data — held by the thousands, dumped
-    for telemetry, collected by ``asyncio.gather``. The live connection and the
-    run lifecycle live on ``Run`` (hud.client), not here.
+    A ``Trace`` is everything the *agent* collects while running: its ``messages``,
+    token-level ``samples``, final ``content`` (the answer), and whether it errored.
+    It is the unit of training data — held by the thousands, dumped for telemetry,
+    collected by ``asyncio.gather``. The task lifecycle (prompt, reward, evaluation)
+    and the live connection live on ``Run`` (hud.client), not here.
 
     Fields:
-    - prompt: The task prompt produced by ``tasks.start``
-    - reward: The reward assigned by the env's ``tasks.evaluate``
-    - info: Additional metadata for the run
-    - content: The final content/response from the agent
+    - info: Additional metadata collected during the run
+    - content: The final content/response from the agent (the graded answer)
     - isError: Whether the execution resulted in an error
     - citations: Provider-normalized citations from the final inference
+    - messages: The agent's message history
+    - samples: Token-level samples for RL training (one per model call)
     - trace: The steps taken in the run (empty if not tracing)
     """
 
-    prompt: str | None = Field(default=None)
-    reward: float = Field(default=0.0)
     done: bool = Field(default=True)
     info: dict[str, Any] = Field(default_factory=dict)
     content: str | None = Field(default=None)

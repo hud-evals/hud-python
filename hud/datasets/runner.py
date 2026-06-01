@@ -253,9 +253,6 @@ async def run_single_task(
             ctx.metadata.update(metadata)
 
         result = await ctx._run(agent, max_steps=max_steps)
-        # Reward is computed by EvalContext.__aexit__ from the scenario evaluate phase.
-
-    # Propagate reward from EvalContext (set in __aexit__) to returned Trace
-    if ctx.reward is not None:
-        result.reward = ctx.reward
+        # Reward is computed by EvalContext.__aexit__ and lives on ctx (the task
+        # lifecycle), not on the returned Trace (the agent trajectory).
     return result

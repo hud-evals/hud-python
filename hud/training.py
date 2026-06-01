@@ -2,20 +2,20 @@
 
 Decoupled from the agent. The agent's inference runs through a backend that
 collects token-level logprobs server-side (keyed by ``trace_id``); this client
-takes the resulting rewarded ``Trace``s, computes **GRPO advantages** over the
-group (group-relative; the SDK owns the estimator), and sends
+takes the resulting rewarded rollouts (``Run``s), computes **GRPO advantages**
+over the group (group-relative; the SDK owns the estimator), and sends
 ``{trace_id, advantage}`` to the backend. The backend then attaches each
 self-contained advantage to its stored trajectory and runs
 ``forward_backward`` + ``optim_step`` in the background — no grouping needed
 server-side.
 
 (Contrast with Tinker, which *is* tied to the agent: there the agent samples from
-the very policy you train. Here the agent only produces ``Trace``s; training
+the very policy you train. Here the agent only produces rollouts; training
 consumes them.)
 
     trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
-    traces = await asyncio.gather(*(rollout(v) for v in expand(tasks, group=16)))
-    await trainer.reward(traces)          # this trace got this reward; group → backend (async)
+    runs = await Taskset(task(x) for x in xs).run(agent, group=16)
+    await trainer.reward(runs)            # this rollout got this reward; group → backend (async)
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ from hud.settings import settings
 
 @runtime_checkable
 class Rewarded(Protocol):
-    """The minimal surface ``reward`` needs — "this trace got this reward".
+    """The minimal surface ``reward`` needs — "this rollout got this reward".
 
-    Smaller than a full ``Trace``: anything carrying a ``trace_id`` and a
-    ``reward`` satisfies it (a ``Trace`` does, but so does a lightweight stand-in).
+    Anything carrying a ``trace_id`` and a ``reward`` satisfies it (a ``Run`` does,
+    but so does a lightweight stand-in).
     """
 
     trace_id: str | None
@@ -86,7 +86,7 @@ class HudTrainingClient:
         """Reward a group of rollouts; the model updates in the background.
 
         Each item just needs a ``trace_id`` and a ``reward`` (the ``Rewarded``
-        protocol — a ``Trace`` qualifies). Computes GRPO advantages over the group
+        protocol — a ``Run`` qualifies). Computes GRPO advantages over the group
         (group-relative; the SDK owns the estimator) and posts
         ``{trace_id, advantage}`` to the backend, which attaches each
         self-contained advantage to its stored trajectory and runs
