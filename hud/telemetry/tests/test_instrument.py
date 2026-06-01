@@ -6,7 +6,7 @@ import pytest
 from mcp import types
 
 from hud.telemetry.instrument import _serialize_value, instrument
-from hud.types import MCPToolResult
+from hud.types import AgentResponse, MCPToolResult
 
 
 def test_serialize_value_simple_types():
@@ -105,6 +105,23 @@ def test_serialize_value_tool_result_preserves_real_content():
     )
     assert isinstance(result, dict)
     assert result["content"][0]["text"] == "real output"
+
+
+def test_serialize_value_agent_response_uses_canonical_shape():
+    """AgentResponse trace serialization uses normalized SDK field names."""
+    result = _serialize_value(
+        AgentResponse(
+            content="answer",
+            reasoning="because",
+            citations=[{"source": "https://example.com"}],
+            raw={"provider": "payload"},
+        )
+    )
+
+    assert isinstance(result, dict)
+    assert result["reasoning"] == "because"
+    assert result["citations"] == [{"source": "https://example.com"}]
+    assert result["raw"] == {"provider": "payload"}
 
 
 @pytest.mark.asyncio

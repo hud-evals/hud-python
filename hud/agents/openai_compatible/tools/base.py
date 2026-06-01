@@ -89,6 +89,7 @@ def openai_compatible_tool_name(name: str) -> str:
 
 
 def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
+    """Convert MCP JSON Schema to the OpenAI-compatible chat tool subset."""
     sanitized: dict[str, Any] = {}
     for key, value in schema.items():
         if key == "anyOf" and isinstance(value, list):

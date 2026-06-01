@@ -303,6 +303,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         result.citations = citations
         if thinking_parts:
             result.reasoning = "\n".join(thinking_parts)
+        result.finish_reason = response.stop_reason
         return result
 
     @staticmethod

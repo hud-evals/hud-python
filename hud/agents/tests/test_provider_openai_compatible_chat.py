@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import mcp.types as mcp_types
 import pytest
 from openai.types.chat.chat_completion import ChatCompletion
 
@@ -13,12 +15,14 @@ from hud.agents.base import AgentContext
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.openai_compatible.agent import OpenAIChatAgentState
 from hud.agents.openai_compatible.tools import OpenAICompatibleAgentTools
+from hud.agents.openai_compatible.tools.base import OpenAICompatibleFunctionTool
 from hud.agents.tests.conftest import (
     RecordingToolEnvironment,
     mcp_tool,
     text_prompt,
     text_result,
 )
+from hud.types import MCPToolCall
 
 
 def _chat_completion(message: dict[str, Any], *, finish_reason: str = "stop") -> ChatCompletion:
@@ -52,6 +56,79 @@ def provider_state(messages: list[Any] | None = None) -> OpenAIChatAgentState:
         messages=[] if messages is None else messages,
         tools=OpenAICompatibleAgentTools(),
     )
+
+
+def test_openai_compatible_tool_name_keeps_provider_safe_names() -> None:
+    tool = OpenAICompatibleFunctionTool.from_tool(mcp_tool("lookup_tool-1"))
+
+    assert tool.provider_name == "lookup_tool-1"
+
+
+def test_openai_compatible_tool_name_sanitizes_invalid_or_long_names() -> None:
+    invalid = "lookup.tool/with spaces"
+    invalid_tool = OpenAICompatibleFunctionTool.from_tool(mcp_tool(invalid))
+    repeated_invalid_tool = OpenAICompatibleFunctionTool.from_tool(mcp_tool(invalid))
+    long_tool = OpenAICompatibleFunctionTool.from_tool(mcp_tool("a" * 65))
+    repeated_long_tool = OpenAICompatibleFunctionTool.from_tool(mcp_tool("a" * 65))
+
+    assert invalid_tool.provider_name != invalid
+    assert invalid_tool.provider_name.startswith("lookup_tool_with_spaces_")
+    assert repeated_invalid_tool.provider_name == invalid_tool.provider_name
+    assert len(long_tool.provider_name) == 64
+    assert repeated_long_tool.provider_name == long_tool.provider_name
+
+
+def test_openai_compatible_tool_param_sanitizes_schema_without_mutating_source() -> None:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "anyOf": [{"type": "string", "description": "Search query"}, {"type": "null"}]
+            },
+            "point": {
+                "type": "array",
+                "prefixItems": [{"type": "integer"}, {"type": "integer"}],
+                "minItems": 2,
+                "maxItems": 2,
+            },
+            "filters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                },
+            },
+            "scores": {
+                "type": "array",
+                "items": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    original = copy.deepcopy(schema)
+    tool = mcp_types.Tool(
+        name="lookup",
+        description="Lookup things",
+        inputSchema=schema,
+    )
+
+    agent_tool = OpenAICompatibleFunctionTool.from_tool(tool)
+    params = cast("dict[str, Any]", agent_tool.to_params())
+
+    assert schema == original
+    parameters = params["function"]["parameters"]
+    assert parameters["properties"]["query"] == {
+        "type": "string",
+        "description": "Search query",
+    }
+    assert parameters["properties"]["point"]["items"] == {"type": "integer"}
+    assert parameters["properties"]["point"]["minItems"] == 2
+    assert parameters["properties"]["filters"]["properties"]["limit"] == {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10,
+    }
+    assert parameters["properties"]["scores"]["items"] == {"type": "number"}
 
 
 def _chat_completion_with_token_ids(
@@ -232,6 +309,32 @@ async def test_openai_compatible_run_routes_sanitized_tool_names_to_environment(
     assert provider_tool_name != "lookup.tool"
     assert [(call.name, call.arguments) for call in environment.calls] == [
         ("lookup.tool", {"query": "hud"})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_registry_routes_filesystem_tool_by_capability() -> None:
+    environment = RecordingToolEnvironment(
+        [mcp_tool("read_file", meta={"capability": "filesystem.read"})],
+        results={"read_file": text_result("contents")},
+    )
+    tools = OpenAICompatibleAgentTools()
+    tools.prepare(model="test-model", tools=environment.tools)
+
+    outputs = await tools.execute(
+        environment.call_tool,
+        MCPToolCall(name="read", id="call_1", arguments={"filePath": "/tmp/file.txt"}),
+    )
+
+    assert [(call.name, call.arguments) for call in environment.calls] == [
+        ("read_file", {"filePath": "/tmp/file.txt"})
+    ]
+    assert outputs == [
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "contents",
+        }
     ]
 
 

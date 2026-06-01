@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from mcp import types
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
@@ -25,6 +26,7 @@ from hud.agents.tests.conftest import (
     text_prompt,
     text_result,
 )
+from hud.types import MCPToolResult
 
 
 def _message_response(text: str, *, response_id: str = "resp_final") -> SimpleNamespace:
@@ -39,6 +41,13 @@ def _message_response(text: str, *, response_id: str = "resp_final") -> SimpleNa
                 content=[ResponseOutputText(type="output_text", text=text, annotations=[])],
             )
         ],
+    )
+
+
+def _image_result(data: str = "screenshot") -> MCPToolResult:
+    return MCPToolResult(
+        content=[types.ImageContent(type="image", data=data, mimeType="image/png")],
+        isError=False,
     )
 
 
@@ -106,7 +115,13 @@ async def test_openai_get_response_preserves_reasoning_and_citations() -> None:
                     "title": "Example",
                     "start_index": 0,
                     "end_index": 7,
-                }
+                },
+                {
+                    "type": "file_citation",
+                    "file_id": "file_123",
+                    "filename": "report.pdf",
+                    "index": 0,
+                },
             ],
         }
     )
@@ -147,7 +162,13 @@ async def test_openai_get_response_preserves_reasoning_and_citations() -> None:
             "title": "Example",
             "start_index": 0,
             "end_index": 7,
-        }
+        },
+        {
+            "type": "file_citation",
+            "text": "report.pdf",
+            "source": "file_123",
+            "title": "report.pdf",
+        },
     ]
 
 
@@ -202,6 +223,65 @@ async def test_openai_get_response_parses_native_computer_and_shell_calls() -> N
     assert [(call.name, call.arguments, call.id) for call in response.tool_calls] == [
         ("computer", {"actions": [{"type": "click", "x": 1, "y": 2}]}, "computer_call_1"),
         ("shell", {"commands": ["pwd"]}, "shell_call_1"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openai_run_executes_native_computer_and_shell_calls() -> None:
+    def _action(payload: dict[str, Any]) -> SimpleNamespace:
+        return SimpleNamespace(to_dict=lambda: payload)
+
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=AsyncMock(
+                side_effect=[
+                    SimpleNamespace(
+                        id="resp_tool",
+                        output=[
+                            SimpleNamespace(
+                                type="computer_call",
+                                call_id="computer_call_1",
+                                actions=[_action({"type": "click", "x": 1, "y": 2})],
+                                action=None,
+                                pending_safety_checks=[],
+                            ),
+                            SimpleNamespace(
+                                type="shell_call",
+                                call_id="shell_call_1",
+                                action=_action({"commands": ["pwd"]}),
+                            ),
+                        ],
+                    ),
+                    _message_response("final answer"),
+                ]
+            )
+        )
+    )
+    environment = RecordingToolEnvironment(
+        [
+            mcp_tool("computer", meta={"capability": "computer"}),
+            mcp_tool("bash", meta={"capability": "shell"}),
+        ],
+        results={
+            "computer": _image_result("after"),
+            "bash": text_result("pwd output"),
+        },
+    )
+    agent = OpenAIAgent.create(model="gpt-5.4", model_client=client, validate_api_key=False)
+
+    result = await agent.run(
+        AgentContext(prompt=[text_prompt("use native tools")], tool_client=environment.client)
+    )
+
+    assert result.content == "final answer"
+    assert [(call.name, call.arguments) for call in environment.calls] == [
+        ("computer", {"action": "click", "x": 1, "y": 2, "button": "left", "hold_keys": None}),
+        ("bash", {"command": "pwd"}),
+    ]
+    second_input = client.responses.create.await_args_list[1].kwargs["input"]
+    assert [item["type"] for item in second_input[-2:]] == [
+        "computer_call_output",
+        "shell_call_output",
     ]
 
 

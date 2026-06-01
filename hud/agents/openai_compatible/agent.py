@@ -226,7 +226,8 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         return AgentResponse(
             content=message.content or "",
             reasoning=reasoning,
-            info={"finish_reason": choice.finish_reason},
+            finish_reason=choice.finish_reason,
+            refusal=message.refusal,
             tool_calls=tool_calls,
             done=not tool_calls,
             raw=response,

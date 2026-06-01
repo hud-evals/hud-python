@@ -226,6 +226,9 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
                 for c in _grounding_citations(grounding_meta)
             ]
 
+        if candidate.finish_reason is not None:
+            result.finish_reason = candidate.finish_reason.name
+
         return result
 
     def _find_computer_tool(

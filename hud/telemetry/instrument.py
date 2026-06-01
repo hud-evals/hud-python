@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 import pydantic_core
 
 from hud.telemetry.exporter import queue_span
-from hud.types import MCPToolResult, TraceStep
+from hud.types import AgentResponse, MCPToolResult, TraceStep
 from hud.utils.serialization import json_safe_value
 
 
@@ -53,6 +53,9 @@ def _serialize_value(value: Any, max_items: int = 10) -> Any:
     """Serialize a value for recording."""
     if isinstance(value, str | int | float | bool | type(None)):
         return value
+
+    if isinstance(value, AgentResponse):
+        return value.model_dump(exclude_none=True, mode="json")
 
     if isinstance(value, MCPToolResult):
         try:
@@ -215,6 +218,7 @@ def instrument(
             )
 
             # Record arguments as request
+            args_dict: dict[str, Any] = {}
             if record_args and sig:
                 try:
                     bound_args = sig.bind(*args, **kwargs)

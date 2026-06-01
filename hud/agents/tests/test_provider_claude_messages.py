@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import mcp.types as mcp_types
 import pytest
 
 from hud.agents.base import AgentContext
@@ -103,6 +104,41 @@ def _user_state() -> ClaudeAgentState:
 
 
 @pytest.mark.asyncio
+async def test_claude_formats_pdf_prompt_message() -> None:
+    agent = ClaudeAgent.create(model_client=MagicMock(), validate_api_key=False)
+
+    state = await agent.initialize_state(
+        [
+            mcp_types.PromptMessage(
+                role="user",
+                content=mcp_types.EmbeddedResource(
+                    type="resource",
+                    resource=mcp_types.BlobResourceContents.model_validate(
+                        {
+                            "uri": "file:///tmp/financials.pdf",
+                            "mimeType": "application/pdf",
+                            "blob": "JVBERi0=",
+                        }
+                    ),
+                ),
+            )
+        ]
+    )
+
+    message = cast("dict[str, Any]", state.messages[0])
+    content_blocks = cast("list[dict[str, Any]]", message["content"])
+    content = content_blocks[0]
+    assert content == {
+        "type": "document",
+        "source": {
+            "type": "base64",
+            "media_type": "application/pdf",
+            "data": "JVBERi0=",
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_claude_run_executes_model_tool_call_and_returns_final_answer() -> None:
     client = SimpleNamespace(
         beta=SimpleNamespace(
@@ -159,6 +195,49 @@ async def test_claude_retries_streamed_invalid_tool_json_once() -> None:
     assert response.content == "ok"
     assert response.done is True
     assert client.beta.messages.stream.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_claude_does_not_retry_unrelated_value_errors() -> None:
+    client = SimpleNamespace(
+        beta=SimpleNamespace(
+            messages=SimpleNamespace(
+                stream=MagicMock(side_effect=[ErrorStream(ValueError("provider failed"))])
+            )
+        )
+    )
+    agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
+
+    with pytest.raises(ValueError, match="provider failed"):
+        await agent.get_response(_user_state())
+
+    assert client.beta.messages.stream.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_claude_bedrock_does_not_retry_invalid_tool_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BedrockClient:
+        def __init__(self) -> None:
+            self.beta = SimpleNamespace(
+                messages=SimpleNamespace(
+                    create=AsyncMock(
+                        side_effect=ValueError(
+                            "Unable to parse tool parameter JSON from model. JSON: {bad"
+                        )
+                    )
+                )
+            )
+
+    client = BedrockClient()
+    monkeypatch.setattr("hud.agents.claude.agent.AsyncAnthropicBedrock", BedrockClient)
+    agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
+
+    with pytest.raises(ValueError, match="Unable to parse tool parameter JSON"):
+        await agent.get_response(_user_state())
+
+    assert client.beta.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio
