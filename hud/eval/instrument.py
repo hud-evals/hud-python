@@ -179,9 +179,22 @@ def _patch_aiohttp() -> None:
     logger.debug("aiohttp auto-instrumentation enabled")
 
 
-# Auto-patch on module import
-_patch_httpx()
-_patch_aiohttp()
+_http_patched = False
 
 
-__all__ = ["_patch_aiohttp", "_patch_httpx"]
+def patch_http_clients() -> None:
+    """Instrument httpx and aiohttp so HUD requests carry trace/auth headers.
+
+    Idempotent: each client class' ``__init__`` is wrapped at most once. Applied
+    via hud._runtime.activate_runtime() when the SDK runtime is first engaged,
+    rather than at import time.
+    """
+    global _http_patched
+    if _http_patched:
+        return
+    _patch_httpx()
+    _patch_aiohttp()
+    _http_patched = True
+
+
+__all__ = ["_patch_aiohttp", "_patch_httpx", "patch_http_clients"]

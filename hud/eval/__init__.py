@@ -29,17 +29,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-# Auto-instrument httpx on import
-import hud.eval.instrument  # noqa: F401
-
-# run_eval is safe to import (uses lazy imports internally)
+# run_eval is safe to import (uses lazy imports internally). HTTP
+# auto-instrumentation is applied lazily via hud._runtime.activate_runtime(),
+# not on import.
 from hud.eval.manager import run_eval
-
-# Task is safe to import
-from hud.eval.task import Task
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
+    from hud.eval.task import Task
 
 __all__ = [
     "EvalContext",
@@ -49,9 +46,19 @@ __all__ = [
 
 
 def __getattr__(name: str) -> object:
-    """Lazy import EvalContext to avoid circular imports."""
+    """Lazily import EvalContext / Task.
+
+    Keeping ``Task`` lazy avoids eagerly importing ``hud.eval.task`` during
+    ``hud.eval`` package import, which would otherwise re-enter the
+    ``hud.types`` <-> ``hud.eval.task`` cycle before ``hud.types`` finishes
+    initializing.
+    """
     if name == "EvalContext":
         from hud.eval.context import EvalContext
 
         return EvalContext
+    if name == "Task":
+        from hud.eval.task import Task
+
+        return Task
     raise AttributeError(f"module 'hud.eval' has no attribute {name!r}")

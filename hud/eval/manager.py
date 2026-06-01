@@ -174,7 +174,10 @@ async def run_eval(
             print(f"{e.variants}: reward={e.reward}")
         ```
     """
+    from hud._runtime import activate_runtime
     from hud.eval.task import Task
+
+    activate_runtime()
 
     if group <= 0:
         raise ValueError("group must be >= 1")

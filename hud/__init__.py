@@ -6,14 +6,21 @@ tools for building, evaluating, and training AI agents.
 from __future__ import annotations
 
 import warnings
+from importlib import import_module
+from typing import TYPE_CHECKING
 
-# Apply patches to third-party libraries early, before other imports
-from . import patches as _patches  # noqa: F401
-from .environment import Environment
-from .eval import EvalContext
-from .eval import run_eval as eval
-from .services import Chat
-from .telemetry.instrument import instrument
+# hud.eval() is the primary entry point and is light to import. Binding it
+# eagerly keeps `hud.eval(...)` callable even after the `hud.eval` submodule is
+# imported internally (a submodule import would otherwise shadow a lazy
+# attribute of the same name). Runtime patches are applied lazily inside
+# run_eval / the runtime packages, not here -- see hud/_runtime.py.
+from hud.eval import run_eval as eval
+
+if TYPE_CHECKING:
+    from hud.environment import Environment
+    from hud.eval import EvalContext
+    from hud.services import Chat
+    from hud.telemetry.instrument import instrument
 
 
 def trace(*args: object, **kwargs: object) -> EvalContext:
@@ -27,7 +34,31 @@ def trace(*args: object, **kwargs: object) -> EvalContext:
         DeprecationWarning,
         stacklevel=2,
     )
-    return eval(*args, **kwargs)  # type: ignore[arg-type]
+    return eval(*args, **kwargs)  # type: ignore[arg-type, return-value]
+
+
+# Heavy runtime symbols are imported lazily so that `import hud` (and importing
+# the data-model modules like `hud.types`) stays cheap and side-effect-free.
+# Importing the backing package applies the runtime patches via
+# activate_runtime() in that package's __init__.
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "Environment": ("hud.environment", "Environment"),
+    "EvalContext": ("hud.eval", "EvalContext"),
+    "Chat": ("hud.services", "Chat"),
+    "instrument": ("hud.telemetry.instrument", "instrument"),
+}
+
+
+def __getattr__(name: str) -> object:
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module 'hud' has no attribute {name!r}")
+    module_name, attr = target
+    return getattr(import_module(module_name), attr)
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_LAZY_EXPORTS})
 
 
 __all__ = [
@@ -43,10 +74,3 @@ try:
     from .version import __version__
 except ImportError:
     __version__ = "unknown"
-
-try:
-    from .utils.pretty_errors import install_pretty_errors
-
-    install_pretty_errors()
-except Exception:  # noqa: S110
-    pass
