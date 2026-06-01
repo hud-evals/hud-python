@@ -255,11 +255,17 @@ class HudSpan(BaseModel):
 
 
 class Trace(BaseModel):
-    """Unified result from agent execution (task or prompt).
+    """The recorded outcome of one task rollout — a pure, serializable datum.
+
+    A ``Trace`` is what a rollout *produces*: the prompt the env handed out, the
+    agent's trajectory (``messages``), its final ``content``, and the env-assigned
+    ``reward``. It is the unit of training data — held by the thousands, dumped
+    for telemetry, collected by ``asyncio.gather``. The live connection and the
+    run lifecycle live on ``Rollout`` (hud.client), not here.
 
     Fields:
-    - done: Whether the run is complete
-    - reward: The reward for the run
+    - prompt: The task prompt produced by ``tasks.start``
+    - reward: The reward assigned by the env's ``tasks.evaluate``
     - info: Additional metadata for the run
     - content: The final content/response from the agent
     - isError: Whether the execution resulted in an error
@@ -267,6 +273,7 @@ class Trace(BaseModel):
     - trace: The steps taken in the run (empty if not tracing)
     """
 
+    prompt: str | None = Field(default=None)
     reward: float = Field(default=0.0)
     done: bool = Field(default=True)
     info: dict[str, Any] = Field(default_factory=dict)

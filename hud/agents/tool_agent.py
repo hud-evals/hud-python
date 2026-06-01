@@ -10,7 +10,9 @@ Subclass contract::
         def _format_user_text(self, text) -> BetaMessageParam: ...
         def _format_result(self, call, result) -> BetaMessageParam | None: ...
 
-``ToolAgent.run`` creates a fresh ``RunState`` per call and is fully re-entrant.
+``RunState`` carries the messages *and* the tools/params built for one run, so a
+single agent instance can drive many concurrent ``rollout`` calls with no shared
+mutable state.
 """
 
 from __future__ import annotations
@@ -31,7 +33,8 @@ from hud.types import MCPToolCall, MCPToolResult, Trace
 if TYPE_CHECKING:
     from hud.agents.tools.base import AgentTool
     from hud.agents.tools.hosted import HostedTool
-    from hud.client import Manifest
+    from hud.capabilities import CapabilityClient
+    from hud.client import Rollout
     from hud.types import AgentResponse
 
 logger = logging.getLogger(__name__)
@@ -49,9 +52,15 @@ class ToolInvocation:
 
 @dataclass
 class RunState(Generic[MessageT]):
-    """Mutable state for one agent run. Created fresh per ``run()`` call."""
+    """Mutable per-run state: messages + the tools/params built for this run.
+
+    Created fresh per ``rollout`` (or ``run``) call, so one agent instance can
+    drive many concurrent rollouts without shared mutable state.
+    """
 
     messages: list[MessageT] = field(default_factory=list)
+    tools: dict[str, AgentTool[Any]] = field(default_factory=dict)
+    params: list[Any] = field(default_factory=list)
 
 
 class ToolAgent(Agent, Generic[MessageT]):
@@ -64,10 +73,6 @@ class ToolAgent(Agent, Generic[MessageT]):
     auto_respond: bool
     hosted_tools: list[HostedTool[Any]]
 
-    # populated by initialize
-    tools: dict[str, AgentTool[Any]]
-    params: list[Any]
-
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if "tool_catalog" in cls.__dict__:
@@ -76,14 +81,47 @@ class ToolAgent(Agent, Generic[MessageT]):
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
 
-    async def initialize(self, manifest: Manifest) -> None:
-        await super().initialize(manifest)
-        self.tools = {}
-        self.params = []
-        if not hasattr(self, "hosted_tools"):
-            self.hosted_tools = []
+    async def rollout(
+        self,
+        run: Rollout,
+        *,
+        max_steps: int = 10,
+        system_prompt: str | None = None,
+        citations_enabled: bool = False,
+    ) -> Trace:
+        """Drive this (stateless) agent over a live ``Rollout``; return the ``Trace``.
 
-        mcp_clients = [c for c in self.connections.values() if isinstance(c, MCPClient)]
+        Opens the capabilities this agent's catalog supports off the run
+        (``run.open(protocol)``), builds the tools into a fresh ``RunState``, then
+        runs the loop against ``run.prompt``. No per-rollout state is stored on
+        ``self``, so one instance may drive many concurrent rollouts.
+        """
+        connections: dict[str, CapabilityClient] = {}
+        manifest = run.manifest
+        if manifest is not None:
+            wanted = {cls.protocol for cls in type(self).clients}
+            for cap in manifest.bindings:
+                if cap.protocol in wanted and cap.protocol not in connections:
+                    connections[cap.protocol] = await run.open(cap.protocol)
+        state = await self._initialize_state(prompt=run.prompt or "")
+        state.tools, state.params = await self._build_tools(connections)
+        return await self._loop(
+            state,
+            max_steps=max_steps,
+            system_prompt=system_prompt,
+            citations_enabled=citations_enabled,
+        )
+
+    async def _build_tools(
+        self,
+        connections: dict[str, CapabilityClient],
+    ) -> tuple[dict[str, AgentTool[Any]], list[Any]]:
+        """Build the (tools, params) for one run from the given open connections."""
+        tools: dict[str, AgentTool[Any]] = {}
+        params: list[Any] = []
+        hosted_tools = getattr(self, "hosted_tools", [])
+
+        mcp_clients = [c for c in connections.values() if isinstance(c, MCPClient)]
         mcp_lists = await asyncio.gather(*(c.list_tools() for c in mcp_clients))
         mcp_by_client: dict[MCPClient, list[mcp_types.Tool]] = dict(
             zip(mcp_clients, mcp_lists, strict=False),
@@ -93,33 +131,34 @@ class ToolAgent(Agent, Generic[MessageT]):
             spec = tool_cls.default_spec(self.model)
             if spec is None:
                 continue
-            for client in self.connections.values():
+            for client in connections.values():
                 if not isinstance(client, tool_cls.client_type):
                     continue
                 if isinstance(client, MCPClient):
                     for mt in mcp_by_client[client]:
                         tool = tool_cls(spec=spec, client=client, mcp_tool=mt)  # type: ignore[call-arg]
-                        self.tools[tool.provider_name] = tool
-                        self.params.append(tool.to_params())
+                        tools[tool.provider_name] = tool
+                        params.append(tool.to_params())
                 else:
                     tool = tool_cls(spec=spec, client=client)
-                    self.tools[tool.provider_name] = tool
-                    self.params.append(tool.to_params())
+                    tools[tool.provider_name] = tool
+                    params.append(tool.to_params())
 
-        for hosted in self.hosted_tools:
+        for hosted in hosted_tools:
             if hosted.supports_model(self.model):
-                self.params.append(hosted.to_params())
+                params.append(hosted.to_params())
 
-    async def run(
+        return tools, params
+
+    async def _loop(
         self,
+        state: RunState[MessageT],
         *,
-        prompt: str,
         max_steps: int = 10,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
     ) -> Trace:
         try:
-            state = await self._initialize_state(prompt=prompt)
             response: AgentResponse | None = None
             hit_max = False
 
@@ -144,8 +183,8 @@ class ToolAgent(Agent, Generic[MessageT]):
                     break
 
                 for call in response.tool_calls:
-                    result = await self._dispatch_call(call)
-                    msg = self._format_result(call, result)
+                    result = await self._dispatch_call(call, state)
+                    msg = self._format_result(call, result, state)
                     if msg is None:
                         continue
                     if isinstance(msg, list):
@@ -168,11 +207,15 @@ class ToolAgent(Agent, Generic[MessageT]):
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as exc:
-            logger.exception("ToolAgent.run failed")
+            logger.exception("ToolAgent loop failed")
             return Trace(done=True, content=str(exc), isError=True, info={"error": str(exc)})
 
-    async def _dispatch_call(self, call: MCPToolCall) -> MCPToolResult:
-        tool = self.tools.get(call.name)
+    async def _dispatch_call(
+        self,
+        call: MCPToolCall,
+        state: RunState[MessageT],
+    ) -> MCPToolResult:
+        tool = state.tools.get(call.name)
         if tool is None:
             return MCPToolResult(
                 content=[mcp_types.TextContent(type="text", text=f"unknown tool: {call.name!r}")],
@@ -204,7 +247,7 @@ class ToolAgent(Agent, Generic[MessageT]):
         system_prompt: str | None = None,
         citations_enabled: bool = False,
     ) -> AgentResponse:
-        """Call the provider API with state.messages + self.params."""
+        """Call the provider API with ``state.messages`` + ``state.params``."""
 
     @abstractmethod
     def _format_user_text(self, text: str) -> MessageT:
@@ -215,6 +258,7 @@ class ToolAgent(Agent, Generic[MessageT]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
+        state: RunState[MessageT],
     ) -> MessageT | list[MessageT] | None:
         """Convert a tool result into one or more provider messages, or None to skip."""
 

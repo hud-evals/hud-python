@@ -13,63 +13,83 @@ from __future__ import annotations
 import json
 import logging
 import shlex
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.base import Agent
 from hud.agents.types import ClaudeSDKConfig
-from hud.capabilities import MCPClient, RFBClient, SSHClient
-from hud.client import Manifest
 from hud.settings import settings
 from hud.types import Trace
+
+if TYPE_CHECKING:
+    from hud.capabilities import RFBClient, SSHClient
+    from hud.client import Rollout
 
 logger = logging.getLogger(__name__)
 
 
-class ClaudeSDKAgent(Agent):
-    """Runs ``claude`` CLI over SSH inside the env workspace."""
+class ClaudeSDKAgent:
+    """Runs ``claude`` CLI over SSH inside the env workspace.
 
-    clients = (SSHClient, MCPClient, RFBClient)
+    Stateless w.r.t. the env: driven by ``run.rollout(agent)`` (or
+    ``await agent.rollout(run)``). SSH and RFB are opened live off the run (we
+    drive them); MCP servers are read as raw bindings and written into the CLI's
+    MCP config (the CLI connects to them itself).
+    """
 
     def __init__(self, config: ClaudeSDKConfig | None = None) -> None:
         self.config = config or ClaudeSDKConfig()
         self.model = self.config.model
         self._ssh: SSHClient | None = None
         self._mcp_servers: dict[str, dict[str, Any]] = {}
-
-    async def initialize(self, manifest: Manifest) -> None:
-        await super().initialize(manifest)
         self._shell = "bash"
-        for name, client in self.connections.items():
-            if isinstance(client, SSHClient) and self._ssh is None:
-                self._ssh = client
-                self._shell = client.capability.params.get("shell", "bash")
-            elif isinstance(client, MCPClient):
-                url = client.capability.url
-                token = client.capability.params.get("auth_token")
-                transport = "http" if url.startswith("http") else "sse"
-                server_config: dict[str, Any] = {"type": transport, "url": url}
+
+    async def rollout(
+        self,
+        run: Rollout,
+        *,
+        max_steps: int | None = None,
+        system_prompt: str | None = None,
+    ) -> Trace:
+        self._mcp_servers = {}
+        bindings = run.manifest.bindings if run.manifest is not None else []
+        families = {c.protocol.split("/", 1)[0] for c in bindings}
+
+        if "ssh" not in families:
+            raise RuntimeError("ClaudeSDKAgent requires an SSH capability")
+        self._ssh = cast("SSHClient", await run.open("ssh"))
+        self._shell = self._ssh.capability.params.get("shell", "bash")
+
+        for cap in bindings:
+            family = cap.protocol.split("/", 1)[0]
+            if family == "mcp":
+                token = cap.params.get("auth_token")
+                transport = "http" if cap.url.startswith("http") else "sse"
+                server_config: dict[str, Any] = {"type": transport, "url": cap.url}
                 if token:
                     server_config["headers"] = {"Authorization": f"Bearer {token}"}
-                self._mcp_servers[name] = server_config
-            elif isinstance(client, RFBClient):
+                self._mcp_servers[cap.name] = server_config
+            elif family == "rfb":
                 from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
-                port = await serve_computer_mcp(client)
+                rfb = cast("RFBClient", await run.open("rfb"))
+                port = await serve_computer_mcp(rfb)
                 self._mcp_servers["computer-use"] = {
                     "type": "http",
                     "url": f"http://127.0.0.1:{port}/mcp",
                 }
-        if self._ssh is None:
-            raise RuntimeError("ClaudeSDKAgent requires an SSH capability")
 
-    async def run(
+        return await self._exec(
+            prompt=run.prompt or "",
+            max_steps=max_steps if max_steps is not None else self.config.max_turns or -1,
+            system_prompt=system_prompt,
+        )
+
+    async def _exec(
         self,
         *,
         prompt: str,
         max_steps: int = -1,
         system_prompt: str | None = None,
-        **kwargs: Any,
     ) -> Trace:
-        assert self._ssh is not None  # noqa: S101
+        assert self._ssh is not None
 
         mcp_config_path = await self._write_mcp_config()
 

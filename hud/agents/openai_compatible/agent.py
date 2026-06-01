@@ -107,6 +107,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
+        state: RunState[ChatCompletionMessageParam],
     ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam] | None:
         return format_chat_result(call, result)
 
@@ -130,8 +131,8 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         provider_body: dict[str, Any] = dict(request_kwargs.pop("extra_body", None) or {})
         return_token_ids = bool(provider_body.get("return_token_ids"))
 
-        if self.params:
-            provider_body["tools"] = self.params
+        if state.params:
+            provider_body["tools"] = state.params
 
         if (
             return_token_ids

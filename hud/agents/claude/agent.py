@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import mcp.types as mcp_types
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
@@ -72,12 +72,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
             "No API key found for Claude. Set HUD_API_KEY (gateway) or ANTHROPIC_API_KEY.",
         )
 
-    async def initialize(self, manifest: Any) -> None:
-        await super().initialize(manifest)
-        self.required_betas: set[str] = {
-            beta for tool in self.tools.values() if (beta := getattr(tool.spec, "beta", None))
-        }
-
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: str) -> RunState[BetaMessageParam]:
@@ -100,6 +94,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
+        state: RunState[BetaMessageParam],
     ) -> BetaMessageParam | list[BetaMessageParam] | None:
         tool_use_id = call.id
         if not tool_use_id:
@@ -189,9 +184,12 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         system_prompt: str | None = None,
         citations_enabled: bool = False,
     ) -> AgentResponse:
-        betas: list[str] | Omit = list(self.required_betas) if self.required_betas else Omit()
+        required_betas = {
+            beta for tool in state.tools.values() if (beta := getattr(tool.spec, "beta", None))
+        }
+        betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
-        tools = cast("list[BetaToolUnionParam]", list(self.params))
+        tools = cast("list[BetaToolUnionParam]", list(state.params))
         system = system_prompt if system_prompt is not None else Omit()
         is_bedrock = isinstance(self.anthropic_client, AsyncAnthropicBedrock)
 

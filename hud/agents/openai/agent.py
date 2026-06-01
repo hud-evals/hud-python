@@ -105,8 +105,9 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
+        state: RunState[ResponseInputItemParam],
     ) -> ResponseInputItemParam | list[ResponseInputItemParam] | None:
-        tool = self.tools.get(call.name)
+        tool = state.tools.get(call.name)
 
         if isinstance(tool, OpenAIComputerTool):
             from hud.agents.tools.computer import last_image_data
@@ -187,7 +188,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         if citations_enabled:
             include_param = ["web_search_call.action.sources"]
 
-        effective_tools: list[ToolParam] = list(self.params)
+        effective_tools: list[ToolParam] = list(state.params)
 
         # tool_search: if a ToolSearchTool is configured and function count exceeds
         # its threshold, apply defer_loading to function tools.

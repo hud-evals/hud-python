@@ -1,4 +1,4 @@
-"""Env: declarative capabilities + scenarios behind the HUD wire protocol. Single-tenant."""
+"""Env: declarative capabilities + tasks behind the HUD wire protocol. Single-tenant."""
 
 from __future__ import annotations
 
@@ -7,23 +7,23 @@ import contextlib
 import inspect
 import logging
 import secrets
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec, cast
 
-from .scenario import Scenario, ScenarioRunner
+from .task import Task, TaskRunner
 from .utils import error, read_frame, reply, send_frame
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from hud.capabilities import Capability
 
-    from .scenario import ScenarioFn
-
 LOGGER = logging.getLogger("hud.env.env")
+
+P = ParamSpec("P")
 
 
 class Env:
-    """Capabilities + scenarios dispatched over the HUD wire protocol."""
+    """Capabilities + tasks dispatched over the HUD wire protocol."""
 
     def __init__(
         self,
@@ -35,35 +35,38 @@ class Env:
         self.name = name
         self.version = version
         self.capabilities: list[Capability] = list(capabilities or [])
-        self._scenarios: dict[str, Scenario] = {}
+        self._tasks: dict[str, Task[Any]] = {}
 
-    # ─── scenario registration ───────────────────────────────────────────
+    # ─── task registration ───────────────────────────────────────────
 
-    def scenario(
+    def task(
         self,
         *,
         id: str | None = None,
         description: str = "",
-    ) -> Callable[[ScenarioFn], ScenarioFn]:
-        """Register an async-generator scenario. ``id`` defaults to fn name."""
+    ) -> Callable[[Callable[P, AsyncGenerator[dict[str, Any], dict[str, Any]]]], Task[P]]:
+        """Register an async-generator task. ``id`` defaults to fn name.
 
-        def decorate(func: ScenarioFn) -> ScenarioFn:
+        Returns the :class:`~hud.env.task.Task` — calling it with the task's args
+        yields a runnable :class:`~hud.client.Variant`.
+        """
+
+        def decorate(
+            func: Callable[P, AsyncGenerator[dict[str, Any], dict[str, Any]]],
+        ) -> Task[P]:
             if not inspect.isasyncgenfunction(func):
                 raise TypeError(
-                    f"@env.scenario: {func.__qualname__} must be an async generator "
-                    "function (`async def ...:` with `yield`)",
+                    f"@env.task: {getattr(func, '__qualname__', func)} must be an async "
+                    "generator function (`async def ...:` with `yield`)",
                 )
-            scenario_id = id or func.__name__
-            if scenario_id in self._scenarios:
+            task_id = id or func.__name__
+            if task_id in self._tasks:
                 raise ValueError(
-                    f"scenario {scenario_id!r} already registered on env {self.name!r}",
+                    f"task {task_id!r} already registered on env {self.name!r}",
                 )
-            self._scenarios[scenario_id] = Scenario(
-                id=scenario_id,
-                description=description,
-                func=func,
-            )
-            return func
+            task = Task(self, task_id, description, func)
+            self._tasks[task_id] = cast("Task[Any]", task)
+            return task
 
         return decorate
 
@@ -72,11 +75,21 @@ class Env:
 
     # ─── control-channel server ──────────────────────────────────────────
 
-    async def serve(self, host: str = "127.0.0.1", port: int = 0) -> None:
-        """Accept HUD control-channel connections; cap daemons must already be running."""
+    async def bind(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
+        """Bind the control-channel socket (not yet serving). Returns the server.
+
+        Callers read the assigned port via ``server.sockets[0].getsockname()`` and
+        drive it with ``server.serve_forever()``. Used by ``hud.launch`` to bring
+        up a live env on an ephemeral loopback port.
+        """
         server = await asyncio.start_server(self._handle_session, host=host, port=port)
         sock = server.sockets[0].getsockname()
-        LOGGER.info("env %r listening on %s:%s", self.name, sock[0], sock[1])
+        LOGGER.info("env %r bound on %s:%s", self.name, sock[0], sock[1])
+        return server
+
+    async def serve(self, host: str = "127.0.0.1", port: int = 0) -> None:
+        """Accept HUD control-channel connections; cap daemons must already be running."""
+        server = await self.bind(host, port)
         async with server:
             await server.serve_forever()
 
@@ -88,7 +101,7 @@ class Env:
         writer: asyncio.StreamWriter,
     ) -> None:
         session_id = "sess-" + secrets.token_hex(4)
-        active_runner: ScenarioRunner | None = None
+        active_runner: TaskRunner | None = None
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -119,44 +132,44 @@ class Env:
                             },
                         )
 
-                    elif method == "scenarios.list":
+                    elif method == "tasks.list":
                         await reply_to(
                             msg_id,
                             {
-                                "scenarios": [s.manifest_entry() for s in self._scenarios.values()],
+                                "tasks": [t.manifest_entry() for t in self._tasks.values()],
                             },
                         )
 
-                    elif method == "scenarios.start":
-                        scenario_id = params.get("id")
-                        if not isinstance(scenario_id, str):
-                            await error_to(msg_id, -32602, "scenarios.start: 'id' must be a string")
+                    elif method == "tasks.start":
+                        task_id = params.get("id")
+                        if not isinstance(task_id, str):
+                            await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
                             continue
-                        scenario = self._scenarios.get(scenario_id)
-                        if scenario is None:
-                            await error_to(msg_id, -32602, f"unknown scenario: {scenario_id!r}")
+                        task = self._tasks.get(task_id)
+                        if task is None:
+                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
                             continue
                         args = params.get("args") or {}
                         if not isinstance(args, dict):
                             await error_to(
-                                msg_id, -32602, "scenarios.start: 'args' must be an object"
+                                msg_id, -32602, "tasks.start: 'args' must be an object"
                             )
                             continue
                         if active_runner is not None:
                             await active_runner.cancel()
-                        active_runner = ScenarioRunner(scenario, args)
+                        active_runner = TaskRunner(task, args)
                         prompt = await active_runner.start()
                         await reply_to(msg_id, prompt)
 
-                    elif method == "scenarios.evaluate":
+                    elif method == "tasks.evaluate":
                         if active_runner is None:
-                            await error_to(msg_id, -32600, "no scenario in progress")
+                            await error_to(msg_id, -32600, "no task in progress")
                             continue
                         evaluation = await active_runner.evaluate(params)
                         active_runner = None
                         await reply_to(msg_id, evaluation)
 
-                    elif method == "scenarios.cancel":
+                    elif method == "tasks.cancel":
                         if active_runner is not None:
                             await active_runner.cancel()
                             active_runner = None

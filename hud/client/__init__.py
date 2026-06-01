@@ -27,6 +27,18 @@ class Manifest:
     bindings: list[Capability]
 
 
-from .client import HudClient, HudProtocolError  # noqa: E402
+from .client import HudClient, HudProtocolError, connect  # noqa: E402
+from .launch import Variant, launch, variant  # noqa: E402
+from .rollout import Rollout  # noqa: E402
 
-__all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo"]
+__all__ = [
+    "HudClient",
+    "HudProtocolError",
+    "Manifest",
+    "Rollout",
+    "ServerInfo",
+    "Variant",
+    "connect",
+    "launch",
+    "variant",
+]

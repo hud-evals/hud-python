@@ -95,6 +95,7 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
+        state: RunState[genai_types.Content],
     ) -> genai_types.Content | None:
         text = next(
             (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
@@ -141,7 +142,7 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         messages = state.messages
 
         # Drop screenshots from older computer tool turns.
-        computer_tool = self._find_computer_tool()
+        computer_tool = self._find_computer_tool(state)
         predefined = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS)
         screenshot_turns: list[list[genai_types.FunctionResponse]] = []
         for content in reversed(messages):
@@ -158,8 +159,8 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
             for fr in old_turn:
                 fr.parts = None
 
-        provider_tools = cast("genai_types.ToolListUnion", list(self.params))
-        if citations_enabled and not any(getattr(t, "google_search", None) for t in self.params):
+        provider_tools = cast("genai_types.ToolListUnion", list(state.params))
+        if citations_enabled and not any(getattr(t, "google_search", None) for t in state.params):
             provider_tools = [
                 *list(provider_tools),
                 genai_types.Tool(google_search=genai_types.GoogleSearch()),
@@ -227,8 +228,11 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
 
         return result
 
-    def _find_computer_tool(self) -> GeminiComputerTool | None:
-        for tool in self.tools.values():
+    def _find_computer_tool(
+        self,
+        state: RunState[genai_types.Content],
+    ) -> GeminiComputerTool | None:
+        for tool in state.tools.values():
             if isinstance(tool, GeminiComputerTool):
                 return tool
         return None
