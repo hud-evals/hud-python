@@ -28,7 +28,7 @@ import mcp.types as mcp_types
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.capabilities import MCPClient
-from hud.types import MCPToolCall, MCPToolResult, Trace
+from hud.types import MCPToolCall, MCPToolResult, Sample, Trace
 
 if TYPE_CHECKING:
     from hud.agents.tools.base import AgentTool
@@ -161,6 +161,7 @@ class ToolAgent(Agent, Generic[MessageT]):
         try:
             response: AgentResponse | None = None
             hit_max = False
+            samples: list[Sample] = []
 
             for step in range(1, max_steps + 1):
                 logger.debug("step %d/%d", step, max_steps)
@@ -169,6 +170,8 @@ class ToolAgent(Agent, Generic[MessageT]):
                     system_prompt=system_prompt,
                     citations_enabled=citations_enabled,
                 )
+                if response.sample is not None:
+                    samples.append(response.sample)
 
                 if response.done or not response.tool_calls:
                     follow_up = await auto_respond(response.content, enabled=self.auto_respond)
@@ -203,6 +206,7 @@ class ToolAgent(Agent, Generic[MessageT]):
                 isError=bool(error) or (response.isError if response else False),
                 citations=(response.citations if response else None) or [],
                 info={"error": error} if error else {},
+                samples=samples,
             )
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise

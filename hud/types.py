@@ -164,6 +164,20 @@ class MCPToolResult(CallToolResult):
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
+class Sample(BaseModel):
+    """One model generation in a rollout: tokens conditioned on + tokens produced.
+
+    Token-level data for RL training (Tinker-shaped). ``output_logprobs`` are the
+    per-output-token logprobs under the *sampling* policy (q). Populated only when
+    the model backend is trainable (returns token ids + logprobs); closed/eval-only
+    backends leave it empty.
+    """
+
+    prompt_token_ids: list[int] = Field(default_factory=list)
+    output_token_ids: list[int] = Field(default_factory=list)
+    output_logprobs: list[float] = Field(default_factory=list)
+
+
 class AgentResponse(BaseModel):
     """Result of a single agent inference call.
 
@@ -175,6 +189,10 @@ class AgentResponse(BaseModel):
     # --- FUNCTIONAL ---
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
     done: bool = Field(default=False)
+
+    # --- TRAINING ---
+    # Token-level data for THIS turn; present iff the model backend is trainable.
+    sample: Sample | None = Field(default=None)
 
     # --- TELEMETRY [hud.ai] ---
     # Responses
@@ -289,6 +307,14 @@ class Trace(BaseModel):
     # Trace
     trace: list[TraceStep] = Field(default_factory=list)
     messages: list[Any] = Field(default_factory=list)
+
+    # Token-level samples for RL training — one per model call; empty for
+    # eval-only runs. Inline mode (Mode A) fills these; server-side mode (Mode B)
+    # leaves them empty and keys the trajectory by ``trace_id`` instead.
+    # Inline token-level samples (Mode A); empty for eval-only runs.
+    samples: list[Sample] = Field(default_factory=list)
+    # Keys server-side-collected logprobs (Mode B); None for eval-only runs.
+    trace_id: str | None = Field(default=None)
 
     def __len__(self) -> int:
         return len(self.trace)

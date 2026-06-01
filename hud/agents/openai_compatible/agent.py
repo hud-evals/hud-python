@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Sample
 
 from .tools import (
     GlobTool,
@@ -145,6 +145,10 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         if provider_body:
             request_kwargs["extra_body"] = provider_body
 
+        # Token ids imply training intent → also collect per-token sampling logprobs.
+        if return_token_ids:
+            request_kwargs.setdefault("logprobs", True)
+
         try:
             response: ChatCompletion = await self.oai.chat.completions.create(
                 model=self.model,
@@ -196,12 +200,19 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
             ]
         messages.append(cast("ChatCompletionMessageParam", assistant_message))
 
+        sample: Sample | None = None
         if return_token_ids:
             prompt_token_ids = getattr(choice, "prompt_token_ids", None)
             token_ids = getattr(choice, "token_ids", None)
             if prompt_token_ids is not None and token_ids is not None:
                 chat_state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
                 chat_state.continuation_message_count = len(messages)
+                content_lp = choice.logprobs.content if choice.logprobs else None
+                sample = Sample(
+                    prompt_token_ids=list(prompt_token_ids),
+                    output_token_ids=list(token_ids),
+                    output_logprobs=[tok.logprob for tok in content_lp] if content_lp else [],
+                )
 
         tool_calls: list[MCPToolCall] = []
         for tc in function_calls:
@@ -219,6 +230,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
             tool_calls=tool_calls,
             done=not tool_calls,
             raw=response,
+            sample=sample,
         )
 
 
