@@ -16,12 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from types import TracebackType
+    from types import ModuleType, TracebackType
 
     from hud.env import Env
 
@@ -205,6 +208,80 @@ def as_sandbox(ref: Sandbox | Env) -> Sandbox:
     )
 
 
+def load_module(path: str | Path) -> ModuleType:
+    """Import a Python file as a throwaway module and return it.
+
+    Shared by env-ref resolution (``module`` refs) and the CLI's variant
+    collector. The file's directory is on ``sys.path`` during import so sibling
+    imports resolve; the temporary module name is cleaned up afterward.
+    """
+    file = Path(path).resolve()
+    if not file.is_file():
+        raise FileNotFoundError(f"module not found: {path}")
+
+    mod_name = f"_hud_mod_{file.stem}_{abs(hash(str(file)))}"
+    spec = importlib.util.spec_from_file_location(mod_name, file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot import module: {file}")
+
+    parent = str(file.parent)
+    inserted = parent not in sys.path
+    if inserted:
+        sys.path.insert(0, parent)
+    try:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = module
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if inserted:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(parent)
+        sys.modules.pop(mod_name, None)
+
+
+def sandbox_from_ref(ref: dict[str, Any]) -> Sandbox:
+    """Resolve a serialized env reference to a :class:`Sandbox`.
+
+    The ref is tagged by ``type`` — the one place a stored env identity becomes a
+    runnable substrate:
+
+    - ``{"type": "module", "module": "env.py", "name": "my-env"?}`` →
+      :class:`LocalSandbox` over the ``Env`` imported from that file (local dev).
+    - ``{"type": "url", "url": "tcp://host:port", "params": {...}?}`` →
+      :class:`RemoteSandbox` attached to an already-running control channel.
+    - ``{"type": "hud", "name": "my-env", "opts": {...}?}`` →
+      :class:`HudSandbox` provisioned from the HUD registry by name (HUD-hosted).
+    """
+    from hud.env import Env  # local import: avoid import cycle at module load
+
+    kind = ref.get("type")
+    if kind == "module":
+        module = ref.get("module")
+        if not isinstance(module, str):
+            raise ValueError("env-ref type 'module' requires a string 'module' path")
+        wanted = ref.get("name")
+        envs = [v for v in vars(load_module(module)).values() if isinstance(v, Env)]
+        if wanted is not None:
+            envs = [e for e in envs if e.name == wanted]
+        if not envs:
+            raise ValueError(f"no Env{f' named {wanted!r}' if wanted else ''} found in {module}")
+        if len(envs) > 1:
+            raise ValueError(f"multiple Envs in {module}; add a 'name' to the env-ref")
+        return LocalSandbox(envs[0])
+    if kind == "url":
+        url = ref.get("url")
+        if not isinstance(url, str):
+            raise ValueError("env-ref type 'url' requires a string 'url'")
+        return RemoteSandbox(url, **(ref.get("params") or {}))
+    if kind == "hud":
+        name = ref.get("name") or ref.get("image")
+        if not isinstance(name, str):
+            raise ValueError("env-ref type 'hud' requires a string 'name'")
+        return HudSandbox(name, **(ref.get("opts") or {}))
+    raise ValueError(f"unknown env-ref type {kind!r} (expected 'module', 'url', or 'hud')")
+
+
 __all__ = [
     "HudSandbox",
     "LocalSandbox",
@@ -212,4 +289,6 @@ __all__ = [
     "Runtime",
     "Sandbox",
     "as_sandbox",
+    "load_module",
+    "sandbox_from_ref",
 ]

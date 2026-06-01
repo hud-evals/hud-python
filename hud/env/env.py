@@ -73,6 +73,37 @@ class Env:
     def add_capability(self, cap: Capability) -> None:
         self.capabilities.append(cap)
 
+    # ─── serialization ────────────────────────────────────────────────────
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the env descriptor: identity, capabilities, and task list.
+
+        Task generator *code* is not serializable; ``tasks`` carries id/description
+        metadata for discovery. :meth:`from_dict` restores identity + capabilities
+        (runnable task funcs come from the env's source/image when launched).
+        """
+        return {
+            "name": self.name,
+            "version": self.version,
+            "capabilities": [c.to_manifest() for c in self.capabilities],
+            "tasks": [t.manifest_entry() for t in self._tasks.values()],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Env:
+        """Rebuild an Env from :meth:`to_dict` output (identity + capabilities).
+
+        Tasks are not reconstructed — their generator code lives in the env's
+        source. A deserialized Env carries identity and capability metadata only.
+        """
+        from hud.capabilities import Capability
+
+        return cls(
+            name=data["name"],
+            version=data.get("version", "0.0.1"),
+            capabilities=[Capability.from_manifest(c) for c in data.get("capabilities") or []],
+        )
+
     # ─── control-channel server ──────────────────────────────────────────
 
     async def bind(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:

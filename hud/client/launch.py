@@ -109,6 +109,55 @@ class Variant:
             self._stack = None
         return False
 
+    # ─── serialization ────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Variant:
+        """Build a Variant from a serialized ``{env, task, args}`` entry.
+
+        ``env`` is a tagged env-ref resolved to a :class:`~hud.sandbox.Sandbox`
+        (see :func:`hud.sandbox.sandbox_from_ref`). The task *code* is not in the
+        data — it lives in the env the ref brings up.
+        """
+        from hud.sandbox import sandbox_from_ref
+
+        env_ref = data.get("env")
+        if not isinstance(env_ref, dict):
+            raise ValueError("variant entry needs an 'env' object (a tagged env-ref)")
+        task = data.get("task")
+        if not isinstance(task, str):
+            raise ValueError("variant entry needs a string 'task' (the task id)")
+        args = data.get("args") or {}
+        if not isinstance(args, dict):
+            raise ValueError("variant 'args' must be an object")
+        return cls(env=sandbox_from_ref(env_ref), task=task, args=args)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to ``{env, task, args}``. The env-ref is its portable identity:
+
+        a live ``Env`` (or ``LocalSandbox``) → ``{"type": "hud", "name": ...}``; a
+        ``RemoteSandbox`` → ``{"type": "url", ...}``; a ``HudSandbox`` →
+        ``{"type": "hud", ...}``.
+        """
+        from hud.env import Env
+        from hud.sandbox import HudSandbox, LocalSandbox, RemoteSandbox
+
+        env = self.env
+        if isinstance(env, LocalSandbox):
+            env = env._env  # the wrapped live Env
+        if isinstance(env, Env):
+            ref: dict[str, Any] = {"type": "hud", "name": env.name}
+        elif isinstance(env, RemoteSandbox):
+            ref = {"type": "url", "url": env._url, "params": env._params}
+        elif isinstance(env, HudSandbox):
+            ref = {"type": "hud", "name": env.image}
+        else:
+            raise TypeError(
+                f"cannot serialize a {type(env).__name__} env-ref; "
+                "use a live Env (→ hud name), RemoteSandbox (→ url), or HudSandbox",
+            )
+        return {"env": ref, "task": self.task, "args": self.args}
+
 
 def variant(env: Env | Sandbox, task: str, **args: Any) -> Variant:
     """Construct a :class:`Variant`: ``variant(env, "task", arg=...)``."""

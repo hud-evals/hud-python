@@ -12,7 +12,7 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import questionary
 import typer
@@ -34,9 +34,6 @@ def _is_bedrock_arn(model: str | None) -> bool:
     """Check if a model string is a Bedrock inference profile ARN."""
     return model is not None and bool(_BEDROCK_ARN_PATTERN.match(model))
 
-
-if TYPE_CHECKING:
-    from hud.agents.base import MCPAgent
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
@@ -126,9 +123,6 @@ _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
 
 class EvalConfig(BaseModel):
     """Configuration for hud eval command."""
-
-    # Class-level registry
-    _agent_classes: ClassVar[dict[AgentType, type["MCPAgent"]]] = {}
 
     # Fields loaded from [eval] section
     _EVAL_FIELDS: ClassVar[set[str]] = {
@@ -537,188 +531,127 @@ class EvalConfig(BaseModel):
 # =============================================================================
 
 
+def _build_agent(cfg: EvalConfig) -> Any:
+    """Construct a new-flow agent (``agent(run)``) from the eval config.
+
+    New agents are config-based: ``AgentType.cls(config=AgentType.config_cls(...))``.
+    Eval-config kwargs are mapped onto the agent's config (unknown keys ignored).
+    """
+    if cfg.agent_type is None:
+        raise ValueError("agent_type must be set")
+    agent_kwargs = cfg.get_agent_kwargs()
+    if cfg.auto_respond:
+        agent_kwargs["auto_respond"] = True
+    config = cfg.agent_type.config_cls.model_validate(agent_kwargs)
+    # cls/config_cls are matched unions; the pairing is correct by construction.
+    return cast("Any", cfg.agent_type.cls)(config=config)
+
+
 async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
-    """Run evaluation with the given config using run_dataset()."""
+    """Run evaluation on the new Env/Variant/Taskset/Run flow.
+
+    Loads runnable ``Variant``s from a Python source (a ``.py`` file or directory
+    defining a :class:`hud.env.Env` with ``@env.task``), builds a ``Taskset``, and
+    runs the agent. Legacy JSON/JSONL files, API tasksets, and remote submission
+    are not supported on this flow yet.
+    """
     from pathlib import Path
 
-    from hud.datasets import run_dataset
-    from hud.datasets.loader import _load_from_file
+    from hud.cli.utils.collect import collect_variants, load_variants_json
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    # Load tasks — supports Python files/dirs, JSON/JSONL, and API slugs
-    hud_console.info(f"Loading tasks from: {cfg.source}")
-    path = Path(cfg.source)
-    taskset_id: str | None = None
-    try:
-        if path.exists() and (path.suffix == ".py" or path.is_dir()):
-            from hud.cli.utils.collect import collect_tasks
-
-            tasks = collect_tasks(cfg.source)
-        elif path.exists() and path.suffix in {".json", ".jsonl"}:
-            tasks = _load_from_file(path)
-        else:
-            from hud.cli.utils.api import hud_headers
-            from hud.cli.utils.taskset import fetch_remote_tasks, resolve_taskset_id
-            from hud.settings import settings
-
-            resolved_id, _resolved_name, _ = resolve_taskset_id(
-                cfg.source,
-                settings.hud_api_url,
-                hud_headers(),
-                create=False,
-            )
-            if resolved_id:
-                taskset_id = resolved_id
-                raw_tasks = fetch_remote_tasks(resolved_id, settings.hud_api_url, hud_headers())
-                from hud.eval.task import Task
-
-                tasks = [Task(**{**t, "args": t.get("args") or {}}) for t in raw_tasks]
-            else:
-                tasks = []
-    except Exception as e:
-        hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
-        raise typer.Exit(1) from e
-
-    if not tasks:
-        hud_console.error(f"No tasks found in: {cfg.source}")
+    if cfg.remote:
+        hud_console.error(
+            "Remote execution is not supported on the new eval flow yet. "
+            "Run locally against a Python Env source or a JSON taskset."
+        )
         raise typer.Exit(1)
 
-    if cfg.taskset:
-        from hud.cli.utils.api import hud_headers as _hud_headers
-        from hud.cli.utils.taskset import resolve_taskset_id as _resolve_ts
-        from hud.settings import settings as _settings
+    path = Path(cfg.source)
+    if not path.exists():
+        hud_console.error(
+            "`hud eval` runs the new Env/Variant flow. Pass a Python source "
+            "(a .py file or directory defining a `hud.env.Env` with `@env.task`) or a "
+            f"JSON/JSONL taskset. API tasksets are not supported yet (got: {cfg.source})."
+        )
+        raise typer.Exit(1)
 
-        try:
-            taskset_id, _, _ = _resolve_ts(
-                cfg.taskset,
-                _settings.hud_api_url,
-                _hud_headers(),
-                create=False,
+    hud_console.info(f"Loading variants from: {cfg.source}")
+    try:
+        if path.suffix in {".json", ".jsonl"}:
+            variants = load_variants_json(path)
+        elif path.suffix == ".py" or path.is_dir():
+            variants = collect_variants(cfg.source)
+        else:
+            hud_console.error(
+                f"Unsupported source type: {path.suffix} (expected .py, .json, .jsonl, or a dir)."
             )
-        except Exception as e:
-            hud_console.error(f"Failed to resolve taskset '{cfg.taskset}': {e}")
-            raise typer.Exit(1) from e
-
-    # Filter by task slugs (or positional indices) if provided
-    if cfg.task_ids:
-        selector_set = set(cfg.task_ids)
-        filtered = []
-        for i, task in enumerate(tasks):
-            task_slug = getattr(task, "slug", None)
-            if (isinstance(task_slug, str) and task_slug in selector_set) or str(i) in selector_set:
-                filtered.append(task)
-        if not filtered:
-            hud_console.error(f"No tasks found matching slugs/indices: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
-        hud_console.info(f"Filtered to {len(filtered)} task(s) by slug/index")
-        tasks = filtered
+    except typer.Exit:
+        raise
+    except Exception as e:
+        hud_console.error(f"Failed to load variants from {cfg.source}: {e}")
+        raise typer.Exit(1) from e
+
+    if not variants:
+        hud_console.error(
+            f"No runnable Variants found in {cfg.source}. Define a `hud.env.Env` with "
+            "`@env.task` and expose Variants (e.g. `t = my_task(arg=...)`). "
+            "(Legacy env+scenario Tasks are not supported on the new flow.)"
+        )
+        raise typer.Exit(1)
+
+    # Filter by task name or positional index, or default to the first variant.
+    if cfg.task_ids:
+        selector = set(cfg.task_ids)
+        filtered = [
+            v
+            for i, v in enumerate(variants)
+            if getattr(v, "task", None) in selector or str(i) in selector
+        ]
+        if not filtered:
+            hud_console.error(f"No variants matching: {', '.join(cfg.task_ids)}")
+            raise typer.Exit(1)
+        hud_console.info(f"Filtered to {len(filtered)} variant(s)")
+        variants = filtered
     elif not cfg.all:
-        # Single task mode (no --all, --full, or --task-ids)
-        tasks = [tasks[0]]
-        hud_console.info("Using first task (run with --full or --task-ids for more)…")
+        variants = [variants[0]]
+        hud_console.info("Using first variant (run with --full or --task-ids for more)…")
 
-    hud_console.info(f"Loaded {len(tasks)} task(s)")
+    hud_console.info(f"Loaded {len(variants)} variant(s)")
 
-    # Prepare agent kwargs
-    agent_kwargs = cfg.get_agent_kwargs()
-    auto_respond = cfg.auto_respond
-    if auto_respond:
-        agent_kwargs = {**agent_kwargs, "auto_respond": True}
-
-    max_steps = cfg.max_steps
-
-    import uuid
-
-    from hud.eval.manager import _get_eval_name, _send_job_enter
-
-    # Remote execution - submit to HUD platform
-    if cfg.remote:
-        agent_kwargs = {
-            k: v for k, v in agent_kwargs.items() if k not in ("api_key", "model_client")
-        }
-        from hud.datasets.utils import submit_rollouts
-
-        job_id = str(uuid.uuid4())
-        hud_console.info(
-            f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
-        )
-
-        # Build a replayable eval config
-        eval_cfg_dict = cfg.model_dump(mode="json", exclude_none=True)
-        # Use exact key matching to avoid filtering legitimate fields like max_tokens
-        sensitive_keys = {"api_key", "api_secret", "token", "password", "secret"}
-        if isinstance(eval_cfg_dict, dict):
-            agent_cfg = eval_cfg_dict.get("agent_config")
-            if isinstance(agent_cfg, dict):
-                # Filter sensitive fields from nested agent configs
-                sanitized = {}
-                for agent_name, agent_settings in agent_cfg.items():
-                    if isinstance(agent_settings, dict):
-                        sanitized[agent_name] = {
-                            k: v
-                            for k, v in agent_settings.items()
-                            if k.lower() not in sensitive_keys
-                        }
-                    else:
-                        sanitized[agent_name] = agent_settings
-                eval_cfg_dict["agent_config"] = sanitized
-
-        await _send_job_enter(
-            job_id=job_id,
-            name=_get_eval_name(tasks=tasks, group=cfg.group_size),
-            variants=None,
-            group=cfg.group_size,
-            api_key=None,
-            taskset_id=taskset_id,
-            hud_eval_config=eval_cfg_dict,
-        )
-
-        trace_ids = await submit_rollouts(
-            tasks=tasks,
-            job_id=job_id,
-            agent_type=cfg.agent_type,
-            agent_params=agent_kwargs,
-            max_steps=max_steps,
-            group_size=cfg.group_size,
-        )
-
-        if not trace_ids:
-            raise ValueError("No tasks were accepted for execution. Check errors above.")
-
-        hud_console.success(f"Tasks submitted. View at: https://hud.ai/jobs/{job_id}")
-        return [], tasks
-
-    # Single task mode - show extra info
-    if len(tasks) == 1 and cfg.group_size == 1:
+    if len(variants) == 1 and cfg.group_size == 1:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
-        logging.getLogger("hud.agents.base").setLevel(logging.INFO)
-        if tasks[0].scenario:
-            hud_console.info(f"Scenario: {tasks[0].scenario}")
     else:
         hud_console.info(
             f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
             f"group_size: {cfg.group_size})…"
         )
 
-    # Run using run_dataset
-    results = await run_dataset(
-        tasks,
-        cfg.agent_type,
-        agent_params=agent_kwargs,
-        max_steps=max_steps,
+    from hud.taskset import Taskset
+
+    agent = _build_agent(cfg)
+    runs = await Taskset(variants).run(
+        agent,
+        group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
-        group_size=cfg.group_size,
-        quiet=cfg.quiet,
-        taskset_id=taskset_id,
     )
 
-    # Show reward for single task
-    if len(tasks) == 1 and cfg.group_size == 1 and results:
-        hud_console.success(f"Reward: {results[0].reward}")
+    if len(runs) == 1 and cfg.group_size == 1:
+        run = runs[0]
+        if run.trace.isError:
+            hud_console.warning(f"Error: {run.trace.content}")
+        hud_console.success(f"Reward: {run.reward}")
+    elif runs:
+        rewards = [r.reward for r in runs]
+        mean = sum(rewards) / len(rewards)
+        errored = sum(1 for r in runs if r.trace.isError)
+        suffix = f" ({errored} errored)" if errored else ""
+        hud_console.success(f"Mean reward: {mean:.3f} over {len(runs)} runs{suffix}")
 
-    return results, tasks
+    return runs, variants
 
 
 # =============================================================================
