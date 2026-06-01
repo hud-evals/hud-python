@@ -9,6 +9,14 @@ import warnings
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+# Initialize the foundational types module first. hud.types and hud.eval.task
+# form an intentional mutual re-export cycle (hud.types.Trace references Task;
+# hud.eval.task references MCPToolCall). That cycle only resolves cleanly when
+# hud.types is the entry point, so loading it here -- before any subpackage --
+# makes import order irrelevant for downstream code and guarantees Trace's
+# forward reference is resolved after `import hud`.
+import hud.types  # noqa: F401
+
 # hud.eval() is the primary entry point and is light to import. Binding it
 # eagerly keeps `hud.eval(...)` callable even after the `hud.eval` submodule is
 # imported internally (a submodule import would otherwise shadow a lazy
