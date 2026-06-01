@@ -127,25 +127,67 @@ class RemoteSandbox(Sandbox):
 
 
 class HudSandbox(Sandbox):
-    """A HUD-hosted sandbox: provision a box on HUD infra, return its ``Runtime``.
+    """A HUD-hosted sandbox, provisioned via the HUD control plane.
 
-    ``create`` will call the HUD control plane to spin up the given image/slug and
-    return the assigned control-channel url + auth token; ``terminate`` releases
-    it. The backend spinup API is not wired yet.
+    Lifecycle:
+      ``create``    — provision a box from ``image`` (``_provision``) and return
+                      its ``Runtime`` (control-channel url + auth token).
+      ``terminate`` — release the box (``_deprovision``).
+
+    The orchestration (provision → runtime, and teardown) is implemented here;
+    only the two HTTP calls to the HUD control plane (``_provision`` /
+    ``_deprovision``) are left as seams to wire to the backend. Waiting for the
+    control channel to accept connections is the client's job (``launch`` retries
+    the connect), not the sandbox's.
     """
 
-    def __init__(self, image: str, **opts: Any) -> None:
+    def __init__(
+        self,
+        image: str,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        **opts: Any,
+    ) -> None:
         self.image = image
+        self.base_url = base_url  # HUD control-plane base URL; defaults to settings
+        self.api_key = api_key
         self.opts = opts
+        self.sandbox_id: str | None = None
 
     async def create(self) -> Runtime:
-        raise NotImplementedError(
-            "HudSandbox: HUD infra spinup API not wired yet "
-            f"(image={self.image!r}, opts={self.opts})",
+        provisioned = await self._provision()
+        self.sandbox_id = provisioned["id"]
+        self._runtime = Runtime(
+            url=provisioned["control_url"],
+            params={"token": provisioned["token"], "sandbox_id": provisioned["id"]},
         )
+        return self._runtime
 
     async def terminate(self) -> None:
+        if self.sandbox_id is not None:
+            with contextlib.suppress(Exception):
+                await self._deprovision(self.sandbox_id)
+            self.sandbox_id = None
         self._runtime = None
+
+    # ─── HUD control-plane API (structure only — wire to the real endpoints) ───
+
+    async def _provision(self) -> dict[str, Any]:
+        """Provision a sandbox on HUD infra.
+
+        Intended call: ``POST {base_url}/sandboxes`` with
+        ``{"image": self.image, **self.opts}`` and a bearer ``api_key``, returning
+        ``{"id": str, "control_url": "tcp://host:port", "token": str}``.
+        """
+        raise NotImplementedError("HudSandbox._provision: HUD spinup API not wired yet")
+
+    async def _deprovision(self, sandbox_id: str) -> None:
+        """Release a provisioned sandbox.
+
+        Intended call: ``DELETE {base_url}/sandboxes/{sandbox_id}``.
+        """
+        raise NotImplementedError("HudSandbox._deprovision: HUD spinup API not wired yet")
 
 
 def as_sandbox(ref: Sandbox | Env) -> Sandbox:
