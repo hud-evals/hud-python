@@ -639,6 +639,10 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
     )
 
+    job_id = runs[0].job_id if runs else None
+    if job_id and settings.telemetry_enabled and settings.api_key:
+        hud_console.info(f"🔗 https://hud.ai/jobs/{job_id}")
+
     if len(runs) == 1 and cfg.group_size == 1:
         run = runs[0]
         if run.trace.isError:

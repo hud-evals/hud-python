@@ -44,6 +44,9 @@ class Run:
         self.reward: float = 0.0
         self.evaluation: dict[str, Any] = {}
         self.trace = Trace()
+        #: Batch this run belongs to (set by the runner); platform job + GRPO group.
+        self.job_id: str | None = None
+        self.group_id: str | None = None
 
     @property
     def trace_id(self) -> str | None:
@@ -84,6 +87,8 @@ class Run:
         run.reward = 0.0
         run.evaluation = {}
         run.trace = Trace(isError=True, content=error, info={"error": error}, trace_id=trace_id)
+        run.job_id = None
+        run.group_id = None
         return run
 
 
