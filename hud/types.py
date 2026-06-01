@@ -280,7 +280,7 @@ class Trace(BaseModel):
     agent's trajectory (``messages``), its final ``content``, and the env-assigned
     ``reward``. It is the unit of training data — held by the thousands, dumped
     for telemetry, collected by ``asyncio.gather``. The live connection and the
-    run lifecycle live on ``Rollout`` (hud.client), not here.
+    run lifecycle live on ``Run`` (hud.client), not here.
 
     Fields:
     - prompt: The task prompt produced by ``tasks.start``

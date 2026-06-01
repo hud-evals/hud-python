@@ -1,41 +1,29 @@
-"""Agent ABC."""
+"""Agent ABC: the rollout contract."""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import logging
-from abc import ABC
-from typing import TYPE_CHECKING, ClassVar
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hud.capabilities import CapabilityClient
-    from hud.client import Manifest
-
-logger = logging.getLogger(__name__)
+    from hud.client import Run
 
 
 class Agent(ABC):
-    """Minimal agent contract.
+    """An agent turns a live run into a ``Trace``.
 
-    * ``initialize(manifest)`` — open clients for every supported binding.
-    * ``run(...)`` — subclass-defined.
-    * ``close()`` — release opened clients.
+    Subclasses implement ``__call__(run)`` and callers drive an agent with
+    ``await agent(run)``. An agent is stateless with respect to any single run —
+    everything it needs comes from ``run`` (``run.prompt`` and capabilities via
+    ``run.client.open`` / ``run.client.binding``) — so one instance can drive many
+    concurrent rollouts safely.
+
+    ``run`` owns the trace (like an RL rollout buffer or an open telemetry span):
+    the agent *fills* ``run.trace`` in place — messages, samples, and the final
+    ``content`` (the answer the env grades on exit) — rather than returning a new
+    one. The caller reads the result back off ``run.trace``.
     """
 
-    clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
-    connections: dict[str, CapabilityClient]
-
-    async def initialize(self, manifest: Manifest) -> None:
-        by_protocol = {cls.protocol: cls for cls in type(self).clients}
-        pairs = [
-            (b, by_protocol[b.protocol]) for b in manifest.bindings if b.protocol in by_protocol
-        ]
-        opened = await asyncio.gather(*(cls.connect(b) for b, cls in pairs))
-        self.connections = {b.name: c for (b, _), c in zip(pairs, opened, strict=False)}
-
-    async def close(self) -> None:
-        for client in getattr(self, "connections", {}).values():
-            with contextlib.suppress(Exception):
-                await client.close()
-        self.connections = {}
+    @abstractmethod
+    async def __call__(self, run: Run) -> None:
+        """Drive ``run`` to completion, filling ``run.trace`` (answer is ``trace.content``)."""

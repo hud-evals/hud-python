@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from hud.env import Env
     from hud.sandbox import Sandbox
 
-    from .rollout import Rollout
+    from .run import Run
 
 
 async def _connect_ready(
@@ -73,13 +73,13 @@ async def launch(ref: Sandbox | Env) -> AsyncIterator[HudClient]:
 
 @dataclass
 class Variant:
-    """A parameterized task on a specific env/sandbox. Enter it for a ``Rollout``.
+    """A parameterized task on a specific env/sandbox. Enter it for a ``Run``.
 
     ``foo(x, y)`` (a ``Task`` call) returns one of these. Entering launches the
     env and starts the task::
 
         async with foo(difficulty=3) as run:        # launch(env) + client.task(...)
-            await run.rollout(agent)
+            await agent(run)                         # fills run.trace
         print(run.trace.reward)
     """
 
@@ -88,7 +88,7 @@ class Variant:
     args: dict[str, Any] = field(default_factory=dict)
     _stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
 
-    async def __aenter__(self) -> Rollout:
+    async def __aenter__(self) -> Run:
         self._stack = AsyncExitStack()
         try:
             client = await self._stack.enter_async_context(launch(self.env))

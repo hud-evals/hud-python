@@ -34,7 +34,7 @@ from hud.capabilities import (
 from hud.env.utils import read_frame, send_frame
 
 from . import Manifest, ServerInfo
-from .rollout import Rollout
+from .run import Run
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -65,11 +65,11 @@ class HudClient:
     ``manifest`` is ready immediately::
 
         async with await HudClient.connect("127.0.0.1", 9001) as client:
-            async with client.task("write_hello") as trace:
-                ssh = await client.open("shell")
+            async with client.task("write_hello") as run:
+                ssh = await run.client.open("shell")
                 ...
-                trace.submit("done")
-            print(trace.reward)
+                run.trace.content = "done"          # the answer, graded on exit
+            print(run.trace.reward)
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -189,14 +189,14 @@ class HudClient:
 
     # ─── tasks ────────────────────────────────────────────────────────
 
-    def task(self, task_id: str, **args: Any) -> Rollout:
-        """Return a ``Rollout`` run-handle for a task (async context manager).
+    def task(self, task_id: str, **args: Any) -> Run:
+        """Return a ``Run`` handle for a task (async context manager).
 
         ``async with client.task("sum_column", sheet="q3.xlsx") as run: ...``
-        starts the task on enter (populating ``run.prompt``) and grades it on
+        starts the task on enter (populating ``run.trace.prompt``) and grades it on
         exit (populating ``run.trace.reward``).
         """
-        return Rollout(self, task_id, args)
+        return Run(self, task_id, args)
 
     async def list_tasks(self) -> list[dict[str, Any]]:
         """Return ``[{id, description}, ...]`` for every registered task."""

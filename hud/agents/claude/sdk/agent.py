@@ -15,22 +15,23 @@ import logging
 import shlex
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.agents.base import Agent
 from hud.agents.types import ClaudeSDKConfig
 from hud.settings import settings
-from hud.types import Trace
 
 if TYPE_CHECKING:
     from hud.capabilities import RFBClient, SSHClient
-    from hud.client import Rollout
+    from hud.client import Run
+    from hud.types import Trace
 
 logger = logging.getLogger(__name__)
 
 
-class ClaudeSDKAgent:
+class ClaudeSDKAgent(Agent):
     """Runs ``claude`` CLI over SSH inside the env workspace.
 
-    Stateless w.r.t. the env: driven by ``run.rollout(agent)`` (or
-    ``await agent.rollout(run)``). SSH and RFB are opened live off the run (we
+    Stateless w.r.t. the env: driven by ``await agent(run)``. SSH and RFB are
+    opened live off the run (we
     drive them); MCP servers are read as raw bindings and written into the CLI's
     MCP config (the CLI connects to them itself).
     """
@@ -42,20 +43,21 @@ class ClaudeSDKAgent:
         self._mcp_servers: dict[str, dict[str, Any]] = {}
         self._shell = "bash"
 
-    async def rollout(
+    async def __call__(
         self,
-        run: Rollout,
+        run: Run,
         *,
         max_steps: int | None = None,
         system_prompt: str | None = None,
-    ) -> Trace:
+    ) -> None:
         self._mcp_servers = {}
-        bindings = run.manifest.bindings if run.manifest is not None else []
+        manifest = run.client.manifest
+        bindings = manifest.bindings if manifest is not None else []
         families = {c.protocol.split("/", 1)[0] for c in bindings}
 
         if "ssh" not in families:
             raise RuntimeError("ClaudeSDKAgent requires an SSH capability")
-        self._ssh = cast("SSHClient", await run.open("ssh"))
+        self._ssh = cast("SSHClient", await run.client.open("ssh"))
         self._shell = self._ssh.capability.params.get("shell", "bash")
 
         for cap in bindings:
@@ -69,14 +71,15 @@ class ClaudeSDKAgent:
                 self._mcp_servers[cap.name] = server_config
             elif family == "rfb":
                 from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
-                rfb = cast("RFBClient", await run.open("rfb"))
+                rfb = cast("RFBClient", await run.client.open("rfb"))
                 port = await serve_computer_mcp(rfb)
                 self._mcp_servers["computer-use"] = {
                     "type": "http",
                     "url": f"http://127.0.0.1:{port}/mcp",
                 }
 
-        return await self._exec(
+        await self._exec(
+            run.trace,
             prompt=run.prompt or "",
             max_steps=max_steps if max_steps is not None else self.config.max_turns or -1,
             system_prompt=system_prompt,
@@ -84,11 +87,12 @@ class ClaudeSDKAgent:
 
     async def _exec(
         self,
+        trace: Trace,
         *,
         prompt: str,
         max_steps: int = -1,
         system_prompt: str | None = None,
-    ) -> Trace:
+    ) -> None:
         assert self._ssh is not None
 
         mcp_config_path = await self._write_mcp_config()
@@ -127,14 +131,13 @@ class ClaudeSDKAgent:
         logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
 
         if completed.exit_status != 0 and not stdout.strip():
-            return Trace(
-                done=True,
-                content=stderr or f"claude CLI exited with status {completed.exit_status}",
-                isError=True,
-                info={"exit_status": completed.exit_status, "stderr": stderr},
-            )
+            trace.done = True
+            trace.content = stderr or f"claude CLI exited with status {completed.exit_status}"
+            trace.isError = True
+            trace.info.update({"exit_status": completed.exit_status, "stderr": stderr})
+            return
 
-        return self._parse_stream_json(stdout, stderr)
+        self._parse_stream_json(trace, stdout, stderr)
 
     def _build_env_vars(self) -> dict[str, str]:
         env: dict[str, str] = {}
@@ -220,7 +223,7 @@ class ClaudeSDKAgent:
         env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
         return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli_cmd}'
 
-    def _parse_stream_json(self, stdout: str, stderr: str) -> Trace:
+    def _parse_stream_json(self, trace: Trace, stdout: str, stderr: str) -> None:
         messages: list[dict[str, Any]] = []
         content_parts: list[str] = []
         is_error = False
@@ -261,13 +264,11 @@ class ClaudeSDKAgent:
         if stderr:
             info["stderr"] = stderr
 
-        return Trace(
-            done=True,
-            content="\n".join(content_parts),
-            isError=is_error,
-            messages=messages,
-            info=info,
-        )
+        trace.done = True
+        trace.content = "\n".join(content_parts)
+        trace.isError = is_error
+        trace.messages = messages
+        trace.info.update(info)
 
 
 __all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]

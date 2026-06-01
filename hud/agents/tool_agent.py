@@ -28,13 +28,14 @@ import mcp.types as mcp_types
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.capabilities import MCPClient
-from hud.types import MCPToolCall, MCPToolResult, Sample, Trace
+from hud.telemetry.instrument import instrument
+from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
     from hud.agents.tools.base import AgentTool
     from hud.agents.tools.hosted import HostedTool
     from hud.capabilities import CapabilityClient
-    from hud.client import Rollout
+    from hud.client import Run
     from hud.types import AgentResponse
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ class ToolAgent(Agent, Generic[MessageT]):
     """Catalog-driven provider tool-call loop."""
 
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
+    #: Capability-client types this agent can drive (derived from the catalog).
+    clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
 
     # set by subclass __init__
     model: str
@@ -81,31 +84,33 @@ class ToolAgent(Agent, Generic[MessageT]):
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
 
-    async def rollout(
+    async def __call__(
         self,
-        run: Rollout,
+        run: Run,
         *,
         max_steps: int = 10,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> Trace:
-        """Drive this (stateless) agent over a live ``Rollout``; return the ``Trace``.
+    ) -> None:
+        """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
 
-        Opens the capabilities this agent's catalog supports off the run
-        (``run.open(protocol)``), builds the tools into a fresh ``RunState``, then
-        runs the loop against ``run.prompt``. No per-rollout state is stored on
-        ``self``, so one instance may drive many concurrent rollouts.
+        Opens the capabilities this agent's catalog supports off the connection
+        (``run.client.open(protocol)``), builds the tools into a fresh ``RunState``,
+        then runs the loop against ``run.prompt``, accumulating the trajectory onto
+        ``run.trace``. No per-rollout state is stored on ``self``, so one instance
+        may drive many concurrent rollouts.
         """
         connections: dict[str, CapabilityClient] = {}
-        manifest = run.manifest
+        manifest = run.client.manifest
         if manifest is not None:
             wanted = {cls.protocol for cls in type(self).clients}
             for cap in manifest.bindings:
                 if cap.protocol in wanted and cap.protocol not in connections:
-                    connections[cap.protocol] = await run.open(cap.protocol)
+                    connections[cap.protocol] = await run.client.open(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt or "")
         state.tools, state.params = await self._build_tools(connections)
-        return await self._loop(
+        await self._loop(
+            run,
             state,
             max_steps=max_steps,
             system_prompt=system_prompt,
@@ -152,26 +157,31 @@ class ToolAgent(Agent, Generic[MessageT]):
 
     async def _loop(
         self,
+        run: Run,
         state: RunState[MessageT],
         *,
         max_steps: int = 10,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> Trace:
+    ) -> None:
+        trace = run.trace
         try:
             response: AgentResponse | None = None
             hit_max = False
-            samples: list[Sample] = []
 
             for step in range(1, max_steps + 1):
                 logger.debug("step %d/%d", step, max_steps)
-                response = await self.get_response(
+                response = await instrument(
+                    self.get_response,
+                    category="inference-2",
+                    record_args=False,
+                )(
                     state,
                     system_prompt=system_prompt,
                     citations_enabled=citations_enabled,
                 )
                 if response.sample is not None:
-                    samples.append(response.sample)
+                    trace.samples.append(response.sample)
 
                 if response.done or not response.tool_calls:
                     follow_up = await auto_respond(response.content, enabled=self.auto_respond)
@@ -199,20 +209,21 @@ class ToolAgent(Agent, Generic[MessageT]):
                     hit_max = True
 
             error: str | None = "max_steps_exceeded" if hit_max else None
-            return Trace(
-                done=True,
-                messages=state.messages,
-                content=response.content if response else (error or ""),
-                isError=bool(error) or (response.isError if response else False),
-                citations=(response.citations if response else None) or [],
-                info={"error": error} if error else {},
-                samples=samples,
-            )
+            trace.done = True
+            trace.messages = state.messages
+            trace.content = response.content if response else (error or "")
+            trace.isError = bool(error) or (response.isError if response else False)
+            trace.citations = (response.citations if response else None) or []
+            if error:
+                trace.info["error"] = error
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as exc:
             logger.exception("ToolAgent loop failed")
-            return Trace(done=True, content=str(exc), isError=True, info={"error": str(exc)})
+            trace.done = True
+            trace.content = str(exc)
+            trace.isError = True
+            trace.info["error"] = str(exc)
 
     async def _dispatch_call(
         self,

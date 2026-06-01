@@ -36,7 +36,7 @@ class Task(Generic[P]):
 
         variant_1 = fix_bug(difficulty=3, hint="line 42")   # -> Variant (type-checked)
         async with variant_1 as run:
-            await run.rollout(agent)
+            await agent(run)
     """
 
     def __init__(

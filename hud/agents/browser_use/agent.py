@@ -8,8 +8,8 @@ session — so this agent reaches for ``trace.binding(...)`` (raw declaration)
 rather than ``trace.open(...)`` (managed client).
 
 The agent is stateless w.r.t. the env: it holds only config and is driven by
-``trace.rollout(agent)`` (or ``await agent.rollout(trace)``), receiving the run
-handle per call. ``browser-use`` is an optional dependency
+``await agent(run)``, receiving the run handle per call. ``browser-use`` is an
+optional dependency
 (``hud-python[browseruse]``), imported lazily inside ``rollout``.
 """
 
@@ -20,35 +20,36 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
+from hud.agents.base import Agent
 from hud.agents.types import BrowserUseConfig
 from hud.settings import settings
-from hud.types import Trace
 
 if TYPE_CHECKING:
-    from hud.client import Rollout
+    from hud.client import Run
 
 LOGGER = logging.getLogger("hud.agents.browser_use")
 
 CDP_PROTOCOL = "cdp/1.3"
 
 
-class BrowserUseAgent:
+class BrowserUseAgent(Agent):
     """Run the ``browser-use`` agent against an env's ``cdp/1.3`` capability."""
 
     def __init__(self, config: BrowserUseConfig | None = None) -> None:
         self.config = config or BrowserUseConfig()
 
-    async def rollout(self, run: Rollout) -> Trace:
-        """Drive browser-use over the run's CDP capability; return its ``Trace``.
+    async def __call__(self, run: Run) -> None:
+        """Drive browser-use over the run's CDP capability, filling ``run.trace``.
 
         Reads ``run.prompt`` and the CDP binding off the run, runs the browser-use
-        loop, and returns a ``Trace`` carrying the final answer + trajectory
-        metadata (which ``Rollout.rollout`` submits for grading).
+        loop, and writes the final answer + trajectory metadata onto ``run.trace``
+        (graded on exit).
         """
         from browser_use import Agent as BrowserUseSdkAgent
         from browser_use import Browser, ChatAnthropic
 
-        cdp_url = _ws_to_http(run.binding(CDP_PROTOCOL).url)
+        trace = run.trace
+        cdp_url = _ws_to_http(run.client.binding(CDP_PROTOCOL).url)
         LOGGER.info("browser-use attaching to %s", cdp_url)
 
         api_key = self.config.api_key or settings.anthropic_api_key
@@ -63,22 +64,24 @@ class BrowserUseAgent:
             history: Any = await sdk_agent.run(max_steps=self.config.max_steps)
         except Exception as exc:
             LOGGER.exception("browser-use run failed")
-            return Trace(done=True, content=str(exc), isError=True, info={"error": str(exc)})
+            trace.done = True
+            trace.content = str(exc)
+            trace.isError = True
+            trace.info["error"] = str(exc)
+            return
         finally:
             with contextlib.suppress(Exception):
                 await browser.stop()
 
         successful = history.is_successful()
-        return Trace(
-            done=history.is_done(),
-            content=history.final_result() or "",
-            isError=successful is False,
-            info={
-                "is_successful": successful,
-                "steps": history.number_of_steps(),
-                "urls": history.urls(),
-            },
-        )
+        trace.done = history.is_done()
+        trace.content = history.final_result() or ""
+        trace.isError = successful is False
+        trace.info.update({
+            "is_successful": successful,
+            "steps": history.number_of_steps(),
+            "urls": history.urls(),
+        })
 
 
 def _ws_to_http(url: str) -> str:
