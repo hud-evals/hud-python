@@ -86,7 +86,7 @@ def build_lock_data(
     resolved_local_image_ref = local_image_ref or f"{image_name}:{version}"
 
     lock_content: dict[str, Any] = {
-        "version": "1.3",
+        "version": "2.0",
         "images": {
             "local": resolved_local_image_ref,
             "full": full_image_ref,
@@ -99,11 +99,7 @@ def build_lock_data(
             "version": version,
             "platform": platform,
         },
-        "environment": {
-            "initializeMs": int(analysis.get("initializeMs", 0) or 0),
-            "toolCount": int(analysis.get("toolCount", 0) or 0),
-            "internalToolCount": int(analysis.get("internalToolCount", 0) or 0),
-        },
+        "environment": {},
     }
     if build_id is not None:
         lock_content["build"]["buildId"] = build_id
@@ -140,30 +136,12 @@ def build_lock_data(
             variables["optional"] = optional_env
         lock_content["environment"]["variables"] = variables
 
-    tools = analysis.get("tools") or []
-    if tools:
-        tools_serialized: list[dict[str, Any]] = []
-        for tool in tools:
-            entry: dict[str, Any] = {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "inputSchema": tool.get("inputSchema", {}),
-            }
-            if tool.get("internalTools"):
-                entry["internalTools"] = tool["internalTools"]
-            tools_serialized.append(entry)
-        lock_content["tools"] = tools_serialized
-
-    hub_tools = analysis.get("hubTools")
-    if hub_tools:
-        lock_content["hubTools"] = hub_tools
-    prompts = analysis.get("prompts")
-    if prompts:
-        lock_content["prompts"] = prompts
-    resources = analysis.get("resources")
-    if resources:
-        lock_content["resources"] = resources
-    if "scenarios" in analysis:
-        lock_content["scenarios"] = analysis.get("scenarios") or []
+    # v6 manifest: the environment's capabilities + tasks (from ``Environment.to_dict``).
+    capabilities = analysis.get("capabilities") or []
+    if capabilities:
+        lock_content["capabilities"] = capabilities
+    tasks = analysis.get("tasks") or []
+    if tasks:
+        lock_content["tasks"] = tasks
 
     return lock_content

@@ -40,7 +40,9 @@ class Run:
         self.client = client
         self._task_id = task_id
         self._args = args
-        self.prompt: str | None = None
+        #: The task's opening prompt: plain text, or a list of message dicts
+        #: (``{"role", "content"}``) for chat-style / multi-turn prompts.
+        self.prompt: str | list[Any] | None = None
         self.reward: float = 0.0
         self.evaluation: dict[str, Any] = {}
         self.trace = Trace()
@@ -68,7 +70,10 @@ class Run:
             self.trace.isError = True
             await self.client.cancel()
             return False
-        self.evaluation = await self.client.evaluate({"answer": self.trace.content})
+        answer: dict[str, Any] = {"answer": self.trace.content}
+        if self.trace.citations:
+            answer["citations"] = self.trace.citations
+        self.evaluation = await self.client.evaluate(answer)
         self.reward = float(self.evaluation.get("score", 0.0))
         return False
 

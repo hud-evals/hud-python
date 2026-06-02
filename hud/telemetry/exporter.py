@@ -70,7 +70,7 @@ def _do_upload(
 
 def _get_api_key() -> str | None:
     """Get the API key - prefer context override, fallback to settings."""
-    from hud.eval.context import get_current_api_key
+    from hud.telemetry.context import get_current_api_key
     from hud.settings import settings
 
     return get_current_api_key() or settings.api_key

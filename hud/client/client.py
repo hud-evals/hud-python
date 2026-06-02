@@ -31,7 +31,7 @@ from hud.capabilities import (
     RFBClient,
     SSHClient,
 )
-from hud.env.utils import read_frame, send_frame
+from hud.environment.utils import read_frame, send_frame
 
 from . import Manifest, ServerInfo
 from .run import Run

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -13,7 +14,7 @@ import httpx
 import typer
 
 from hud.cli.utils.api import hud_headers, require_api_key
-from hud.cli.utils.collect import collect_tasks
+from hud.cli.utils.collect import collect_variants
 from hud.cli.utils.project_config import (
     get_taskset_id,
     load_project_config,
@@ -79,92 +80,68 @@ def _compute_signature(
     )
 
 
+def _variant_slug(task_id: str, args: dict[str, Any]) -> str:
+    """Stable slug for a Variant: its task id, disambiguated by args when present.
+
+    Variants (unlike legacy Tasks) carry no explicit ``slug``; the task id is the
+    natural identity, and parameterized variants of the same task get a short
+    args-hash suffix so they stay distinct in a taskset.
+    """
+    if not args:
+        return task_id
+    digest = hashlib.sha1(  # noqa: S324 - non-crypto, just a stable disambiguator
+        json.dumps(args, sort_keys=True, default=str).encode("utf-8"),
+    ).hexdigest()[:8]
+    return f"{task_id}-{digest}"
+
+
 def _build_local_specs(
-    tasks: list[Any],
+    variants: list[Any],
     hud_console: HUDConsole,
 ) -> list[dict[str, Any]]:
-    """Convert Task objects into local spec dicts for sync comparison."""
-    from hud.eval.task import Task
+    """Convert :class:`hud.eval.Variant`s into local spec dicts for sync comparison.
+
+    A Variant is ``(env-ref, task, args)`` — leaner than the legacy ``Task``: it has
+    no ``validation``/``agent_config``/``columns`` (those are sent as ``None``), and
+    its ``slug`` is derived from the task id + args (see :func:`_variant_slug`).
+    """
+    from hud.eval import Variant
 
     specs: list[dict[str, Any]] = []
-    missing_slugs: list[str] = []
-    missing_scenarios: list[str] = []
 
-    for i, task in enumerate(tasks):
-        if not isinstance(task, Task):
-            hud_console.warning(f"Item {i} is not a Task object, skipping")
+    for i, variant in enumerate(variants):
+        if not isinstance(variant, Variant):
+            hud_console.warning(f"Item {i} is not a Variant, skipping")
             continue
 
-        scenario_name = task.scenario
-        if not scenario_name:
-            missing_scenarios.append(f"task[{i}]")
-            continue
-
-        task_env = task.env
-        env_name = getattr(task_env, "name", None) if task_env else None
+        ref = variant.to_dict()["env"]  # {"type": ..., "name"|"url": ...}
+        env_name = ref.get("name")
+        scenario_name = variant.task
         if env_name and ":" not in scenario_name:
             scenario_name = f"{env_name}:{scenario_name}"
 
-        slug = task.slug
-        if not slug or not slug.strip():
-            label = scenario_name or f"task[{i}]"
-            missing_slugs.append(label)
-            continue
-        slug = slug.strip()
-
-        args_dict = task.args or {}
-        if not isinstance(args_dict, dict):
-            hud_console.warning(f"Task '{slug}' has non-dict args, skipping")
-            continue
-
-        validation_list: list[dict[str, Any]] | None = None
-        if task.validation:
-            validation_list = [
-                {"name": v.name, "arguments": v.arguments or {}} for v in task.validation
-            ]
-
-        agent_config_dict: dict[str, Any] | None = None
-        if task.agent_config is not None:
-            if isinstance(task.agent_config, dict):
-                agent_config_dict = task.agent_config
-            elif hasattr(task.agent_config, "model_dump"):
-                agent_config_dict = task.agent_config.model_dump(exclude_none=True)
-
-        env_config: dict[str, Any] = {}
-        if env_name:
-            env_config["name"] = env_name
-
-        columns_dict: dict[str, Any] | None = None
-        if hasattr(task, "columns") and task.columns:
-            columns_dict = dict(task.columns)
+        args_dict = variant.args or {}
+        slug = variant.slug.strip() if variant.slug else _variant_slug(variant.task, args_dict)
+        env_config: dict[str, Any] = {"name": env_name} if env_name else {}
 
         specs.append(
             {
                 "slug": slug,
                 "scenario_name": str(scenario_name),
                 "args": args_dict,
-                "validation": validation_list,
-                "agent_config": agent_config_dict,
+                "validation": variant.validation,
+                "agent_config": variant.agent_config,
                 "env": env_config,
-                "columns": columns_dict,
+                "columns": variant.columns,
                 "signature": _compute_signature(
                     scenario_name,
                     args_dict,
-                    validation_list,
-                    agent_config_dict,
-                    columns_dict,
+                    variant.validation,
+                    variant.agent_config,
+                    variant.columns,
                 ),
             }
         )
-
-    if missing_scenarios:
-        hud_console.error(f"Tasks missing scenario: {', '.join(missing_scenarios)}")
-        raise typer.Exit(1)
-
-    if missing_slugs:
-        hud_console.error(f"Tasks missing slug (required for sync): {', '.join(missing_slugs)}")
-        hud_console.hint("Set task.slug = 'my-slug' on each task")
-        raise typer.Exit(1)
 
     slug_counts: dict[str, int] = {}
     for spec in specs:
@@ -585,7 +562,7 @@ def sync_tasks_command(
     collection_failures: list[tuple[str, str]] = []
     hud_console.progress_message(f"Collecting tasks from {source}...")
     try:
-        raw_tasks = collect_tasks(source, failures=collection_failures)
+        raw_tasks = collect_variants(source)
     except (ImportError, FileNotFoundError, ValueError) as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from e
@@ -621,7 +598,7 @@ def sync_tasks_command(
                 if fixed:
                     hud_console.progress_message("Re-collecting tasks after name fix...")
                     collection_failures = []
-                    raw_tasks = collect_tasks(source, failures=collection_failures)
+                    raw_tasks = collect_variants(source)
                     local_specs = _build_local_specs(raw_tasks, hud_console)
 
     # Apply filters

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
-    from hud.eval.task import Task
+    from hud.eval import Variant
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class ChatService(AgentExecutor):
 
     def __init__(
         self,
-        task: Task,
+        variant: Variant,
         /,
         *,
         model: str,
@@ -48,11 +48,11 @@ class ChatService(AgentExecutor):
         trace: bool = True,
         quiet: bool = True,
     ) -> None:
-        self._task = task
+        self._variant = variant
         self._model = model
         self._max_steps = max_steps
-        self._name = name or task.scenario or "chat-service"
-        self._description = description or f"A2A service for {task.scenario or 'tasks'}"
+        self._name = name or variant.task or "chat-service"
+        self._description = description or f"A2A service for {variant.task or 'tasks'}"
         self._trace = trace
         self._quiet = quiet
 
@@ -66,7 +66,7 @@ class ChatService(AgentExecutor):
         chat = self._sessions.get(context_id)
         if chat is None:
             chat = Chat(
-                self._task,
+                self._variant,
                 model=self._model,
                 max_steps=self._max_steps,
                 trace=self._trace,

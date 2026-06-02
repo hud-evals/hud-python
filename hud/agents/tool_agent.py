@@ -7,7 +7,7 @@ Subclass contract::
 
         async def _initialize_state(self, *, prompt) -> RunState[BetaMessageParam]: ...
         async def get_response(self, state, *, system_prompt, citations_enabled): ...
-        def _format_user_text(self, text) -> BetaMessageParam: ...
+        def _format_message(self, role, text) -> BetaMessageParam: ...
         def _format_result(self, call, result) -> BetaMessageParam | None: ...
 
 ``RunState`` carries the messages *and* the tools/params built for one run, so a
@@ -41,6 +41,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MessageT = TypeVar("MessageT")
+
+
+def _message_text(message: mcp_types.PromptMessage) -> str:
+    """Best-effort plain text for a prompt message (text content only for now)."""
+    content = message.content
+    if isinstance(content, mcp_types.TextContent):
+        return content.text
+    return getattr(content, "text", "") or ""
+
+
+def to_prompt_messages(prompt: str | list[Any] | None) -> list[mcp_types.PromptMessage]:
+    """Normalize a task prompt into a list of ``PromptMessage`` turns.
+
+    Accepts the two shapes a ``Run.prompt`` can take: plain text (one user turn)
+    or a list of message dicts / ``PromptMessage`` objects (chat-style, multi-turn).
+    """
+    if prompt is None:
+        prompt = ""
+    if isinstance(prompt, str):
+        return [
+            mcp_types.PromptMessage(
+                role="user",
+                content=mcp_types.TextContent(type="text", text=prompt),
+            ),
+        ]
+    messages: list[mcp_types.PromptMessage] = []
+    for item in prompt:
+        if isinstance(item, mcp_types.PromptMessage):
+            messages.append(item)
+        elif isinstance(item, dict):
+            messages.append(mcp_types.PromptMessage.model_validate(item))
+        else:
+            messages.append(
+                mcp_types.PromptMessage(
+                    role="user",
+                    content=mcp_types.TextContent(type="text", text=str(item)),
+                ),
+            )
+    return messages
 
 
 @dataclass
@@ -107,7 +146,7 @@ class ToolAgent(Agent, Generic[MessageT]):
             for cap in manifest.bindings:
                 if cap.protocol in wanted and cap.protocol not in connections:
                     connections[cap.protocol] = await run.client.open(cap.protocol)
-        state = await self._initialize_state(prompt=run.prompt or "")
+        state = await self._initialize_state(prompt=run.prompt)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(
             run,
@@ -250,9 +289,16 @@ class ToolAgent(Agent, Generic[MessageT]):
 
     # ─── provider hooks ───────────────────────────────────────────────
 
+    def _initial_messages(self, prompt: str | list[Any] | None) -> list[MessageT]:
+        """Turn a run prompt (text or message list) into provider messages."""
+        return [
+            self._format_message(message.role, _message_text(message))
+            for message in to_prompt_messages(prompt)
+        ]
+
     @abstractmethod
-    async def _initialize_state(self, *, prompt: str) -> RunState[MessageT]:
-        """Build fresh run state from the prompt."""
+    async def _initialize_state(self, *, prompt: str | list[Any] | None) -> RunState[MessageT]:
+        """Build fresh run state from the prompt (use ``self._initial_messages``)."""
 
     @abstractmethod
     async def get_response(
@@ -264,9 +310,13 @@ class ToolAgent(Agent, Generic[MessageT]):
     ) -> AgentResponse:
         """Call the provider API with ``state.messages`` + ``state.params``."""
 
-    @abstractmethod
     def _format_user_text(self, text: str) -> MessageT:
         """Wrap a plain text string as a provider user message."""
+        return self._format_message("user", text)
+
+    @abstractmethod
+    def _format_message(self, role: str, text: str) -> MessageT:
+        """Wrap text as a provider message of the given role (``user``/``assistant``)."""
 
     @abstractmethod
     def _format_result(
@@ -278,4 +328,4 @@ class ToolAgent(Agent, Generic[MessageT]):
         """Convert a tool result into one or more provider messages, or None to skip."""
 
 
-__all__ = ["RunState", "ToolAgent", "ToolInvocation"]
+__all__ = ["RunState", "ToolAgent", "ToolInvocation", "to_prompt_messages"]

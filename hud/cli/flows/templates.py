@@ -11,9 +11,9 @@ COPY pyproject.toml uv.lock* ./
 RUN pip install uv && uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 COPY . .
 
-# Default: stdio for HUD platform. Override at runtime for external use:
-#   docker run my-image hud dev env:env --port 8080
-CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--stdio"]
+# Serve the Environment's control channel (tcp JSON-RPC) on 8765.
+EXPOSE 8765
+CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--port", "8765"]
 """
 
 # fmt: off
@@ -22,93 +22,68 @@ ENV_PY = '''\
 
 import asyncio
 
-import hud
-from hud.settings import settings
-from openai import AsyncOpenAI, Omit
 from hud.environment import Environment
 
-env = Environment("{env_name}")
+env = Environment(name="{env_name}")
 
 
 # =============================================================================
-# 1. TOOLS - Functions the agent can call
+# 1. TASKS - a prompt for the agent, then how to score its answer
 # =============================================================================
 
-@env.tool()
-def count_letter(text: str, letter: str) -> int:
-    """Count occurrences of a letter in text."""
-    return text.lower().count(letter.lower())
+@env.task(id="count")
+async def count(sentence: str, letter: str):
+    """Agent must count a letter; we check if it got the answer right."""
+    # Yield the prompt, receive the agent's final answer back via ``asend``.
+    answer = yield f"How many times does '{{letter}}' appear in: '{{sentence}}'?"
 
-
-# =============================================================================
-# 2. SCRIPTS - Define prompts and evaluation logic
-# =============================================================================
-
-@env.scenario("count")
-async def count_script(sentence: str, letter: str, fmt: str = "integer"):
-    """Agent must count a letter. We check if they got it right."""
-    # Yield the prompt, receive the agent's final answer
-    answer = yield f"How many times does '{{letter}}' appear in: '{{sentence}}'? Format: {{fmt}}."
-
-    # Score: 1.0 if correct, 0.0 otherwise
+    # Score: 1.0 if correct, else 0.0.
     correct = str(sentence.lower().count(letter.lower()))
-    yield correct in answer
+    yield 1.0 if correct in (answer or "") else 0.0
 
 
 # =============================================================================
-# 3. CONNECT EXISTING SERVERS (optional)
+# 2. CAPABILITIES (optional) - give the agent a way to act
 # =============================================================================
-
-# --- FastAPI app ---
-# from my_app import app
-# env.connect_fastapi(app)
-
-# --- FastMCP / MCPServer ---
-# from my_server import mcp
-# env.connect_server(mcp)
-
-# --- OpenAPI spec (URL or file path) ---
-# env.connect_openapi("https://api.example.com/openapi.json")
-
-# --- MCP config (stdio or SSE) ---
-# env.connect_mcp_config({{
-#     "my-server": {{"command": "uvx", "args": ["some-mcp-server"]}}
-# }})
-
-# --- HUD hub (requires deployment, see below) ---
-# env.connect_hub("my-org/my-env", prefix="remote")
+# Capabilities are how the agent interacts with the environment. For shell
+# access, expose an SSH capability (a sandboxed Workspace) — the agent drives
+# bash over SSH, no in-process "bash tool" required:
+#
+#   from hud.environment import Capability, Workspace
+#
+#   ws = Workspace()                              # bwrap-isolated SSH + SFTP
+#
+#   @env.initialize
+#   async def _serve_shell():
+#       await ws.start()
+#       env.add_capability(Capability.ssh(
+#           url=ws.ssh_url, user=ws.ssh_user,
+#           host_pubkey=ws.ssh_host_pubkey, client_key_path=ws.ssh_client_key_path,
+#       ))
+#
+# For arbitrary MCP tools, run them on your own MCPServer and attach it:
+#
+#   from hud.server import MCPServer
+#   from hud.native.tools import JupyterTool
+#   server = MCPServer(name="{env_name}-tools")
+#   server.add_tool(JupyterTool())
+#   env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8765/mcp"))
 
 
 # =============================================================================
-# TEST - Run with: python env.py
+# TEST - run with: python env.py
 # =============================================================================
 
 async def test():
-    client = AsyncOpenAI(
-        base_url=settings.hud_gateway_url,
-        api_key=settings.api_key,
-    )
+    from hud.agents.claude import ClaudeAgent
 
-    # Create a task from the scenario
-    task = env("count", sentence="Strawberry world", letter="r")
+    agent = ClaudeAgent()
 
-    # Test with and without tools
-    async with hud.eval(task, variants={{"tools": [True, False]}}) as ctx:
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{{"role": "user", "content": ctx.prompt}}],
-            tools=ctx.as_openai_chat_tools() if ctx.variants["tools"] else Omit(),
-        )
+    # Calling a scenario binds a runnable Variant; entering it launches the env.
+    async with count(sentence="Strawberry world", letter="r") as run:
+        await agent(run)          # fills run.trace; answer is run.trace.content
 
-        # Handle tool calls if present
-        message = response.choices[0].message
-        if message.tool_calls:
-            result = await ctx.call_tool(message.tool_calls[0])
-            answer = str(result["content"])
-        else:
-            answer = message.content
-
-        await ctx.submit(answer or "")
+    print("reward:", run.reward)
 
 
 if __name__ == "__main__":
@@ -116,25 +91,16 @@ if __name__ == "__main__":
 
 
 # =============================================================================
-# DEPLOYMENT
+# RUN AT SCALE
 # =============================================================================
-# To deploy this environment on HUD:
+# Group many parameterizations into a Taskset and evaluate one (stateless) agent
+# across them, with optional GRPO-style grouping + a concurrency cap:
 #
-# 1. Push this repo to GitHub
-# 2. Go to hud.ai -> New -> Environment
-# 3. Choose "From GitHub URL" and paste your repo URL
-# 4. This deploys the environment for remote connection
+#   from hud.eval import Taskset
+#   from hud.agents.claude import ClaudeAgent
 #
-# Once deployed, connect to it from other environments:
-#   env.connect_hub("{env_name}")
-#
-# Remote deployment enables:
-# - Parallelized evaluations (run many agents simultaneously)
-# - Training data collection at scale
-# - Shared environments across team members
-#
-# Note: The test() function above is just for local testing.
-# It's not required for the deployed environment.
+#   ts = Taskset(count(sentence=s, letter="r") for s in ["strawberry", "raspberry"])
+#   runs = await ts.run(ClaudeAgent(), group=4, max_concurrent=8)
 '''
 # fmt: on
 

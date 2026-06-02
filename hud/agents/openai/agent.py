@@ -82,21 +82,14 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: str) -> OpenAIRunState:
-        return OpenAIRunState(
-            messages=[
-                EasyInputMessageParam(
-                    role="user",
-                    content=[ResponseInputTextParam(type="input_text", text=prompt)],
-                ),
-            ]
-        )
+    async def _initialize_state(self, *, prompt: str | list[Any] | None) -> OpenAIRunState:
+        return OpenAIRunState(messages=self._initial_messages(prompt))
 
-    def _format_user_text(self, text: str) -> ResponseInputItemParam:
+    def _format_message(self, role: str, text: str) -> ResponseInputItemParam:
         return cast(
             "ResponseInputItemParam",
             EasyInputMessageParam(
-                role="user",
+                role="assistant" if role == "assistant" else "user",
                 content=[ResponseInputTextParam(type="input_text", text=text)],
             ),
         )

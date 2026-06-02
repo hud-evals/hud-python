@@ -95,7 +95,7 @@ def _adapt_harbor_dockerfile(content: str) -> str:
     for line in lines:
         stripped = line.strip().upper()
         if stripped.startswith(("CMD ", "CMD[", "ENTRYPOINT ", "ENTRYPOINT[")):
-            adapted.append(f"# [harbor original] {line}")
+            adapted.append(f"# [original] {line}")
         else:
             adapted.append(line)
     return "\n".join(adapted)
@@ -152,12 +152,12 @@ def _parse_task(task_dir: Path) -> HarborTask | None:
 
 # Header + shared body split so the scenario signature can vary.
 _ENV_PY_HEADER = '''\
-"""{env_name} - HUD environment converted from Harbor.
+"""{env_name} - HUD environment.
 
 Source: {source_path}
 Tasks: {task_count}
 
-This environment runs Harbor-format tasks. Each task has:
+This environment runs tasks from a tasks/ directory. Each task has:
 - instruction.md: the agent prompt
 - tests/test.sh: verification script that writes reward to /logs/verifier/
 
@@ -171,23 +171,36 @@ import subprocess
 from pathlib import Path
 {extra_imports}
 from hud import Environment
-from hud.tools import BashTool, EditTool
+from hud.environment import Capability, Workspace
 
 LOGGER = logging.getLogger(__name__)
 
-TASKS_DIR = Path("/harbor/tasks")
+TASKS_DIR = Path("/tasks")
 
-env = Environment("{env_name}")
+env = Environment(name="{env_name}")
 
-# Standard coding tools - agents interact via bash (matching Harbor's model)
-env.add_tool(BashTool())
-env.add_tool(EditTool())
+# Agents act via bash over SSH: expose a sandboxed Workspace as an ``ssh``
+# capability rather than an in-process bash tool.
+_workspace = Workspace()
+
+
+@env.initialize
+async def _serve_shell():
+    await _workspace.start()
+    env.add_capability(
+        Capability.ssh(
+            url=_workspace.ssh_url,
+            user=_workspace.ssh_user,
+            host_pubkey=_workspace.ssh_host_pubkey,
+            client_key_path=_workspace.ssh_client_key_path,
+        )
+    )
 
 '''
 
 # Single task: task_id is optional, defaults to the only task.
 _SCENARIO_SINGLE = """\
-@env.scenario("run-task")
+@env.task(id="run-task")
 async def run_task(task_id: str = "{default_task_id}"):
 """
 
@@ -196,14 +209,14 @@ _SCENARIO_MULTI = """\
 TaskId = Literal[{task_id_literal}]
 
 
-@env.scenario("run-task")
+@env.task(id="run-task")
 async def run_task(task_id: TaskId):
 """
 
 _SCENARIO_BODY = '''\
-    """Run a Harbor task by ID.
+    """Run a task by ID.
 
-    Reads /harbor/tasks/<task_id>/instruction.md as the prompt.
+    Reads /tasks/<task_id>/instruction.md as the prompt.
     After the agent works, runs tests/test.sh and parses
     /logs/verifier/reward.txt or reward.json for the reward.
     """
@@ -224,7 +237,7 @@ _SCENARIO_BODY = '''\
     logs_dir = Path("/logs/verifier")
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Harbor mounts the task's tests/ directory at /tests/ — replicate that
+    # Mount the task's tests/ directory at /tests/ so test.sh can find it.
     tests_link = Path("/tests")
     task_tests = task_dir / "tests"
     if task_tests.is_dir():
@@ -261,13 +274,13 @@ _SCENARIO_BODY = '''\
         LOGGER.warning("No test script found at %s", test_script)
 
     # Parse and yield reward
-    yield _parse_harbor_reward()
+    yield _parse_reward()
 
 
-def _parse_harbor_reward() -> float:
-    """Parse reward from Harbor standard output locations.
+def _parse_reward() -> float:
+    """Parse reward from standard output locations.
 
-    Harbor test scripts write results to /logs/verifier/ as either:
+    Test scripts write results to /logs/verifier/ as either:
     - reward.txt: a single float value
     - reward.json: {{"reward": float}} or just a float
     """
@@ -339,22 +352,23 @@ COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null || \\
     uv sync --no-dev --no-install-project
 
-# Harbor task data (instructions + test scripts baked into image)
-COPY tasks/ /harbor/tasks/
+# Task data (instructions + test scripts baked into image)
+COPY tasks/ /tasks/
 
 # Ensure standard directories exist and are writable at runtime
-# (MCP server may run as non-root; Harbor tasks expect /app writable)
+# (MCP server may run as non-root; tasks expect /app writable)
 RUN mkdir -p /logs/verifier /workspace /app && chmod 777 /logs/verifier /workspace /app
 
 COPY env.py ./
 
-CMD ["uv", "run", "--no-project", "python", "-m", "hud", "dev", "env:env", "--stdio"]
+EXPOSE 8765
+CMD ["uv", "run", "--no-project", "python", "-m", "hud", "dev", "env:env", "--port", "8765"]
 """
 
 DOCKERFILE_WITH_BASE_TEMPLATE = (
     """\
 # ============================================================
-# Harbor environment base
+# Environment base
 # Source: {source}
 # ============================================================
 {base_dockerfile}

@@ -630,7 +630,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             f"group_size: {cfg.group_size})…"
         )
 
-    from hud.taskset import Taskset
+    from hud.eval import Taskset
 
     agent = _build_agent(cfg)
     runs = await Taskset(variants).run(
@@ -642,18 +642,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     job_id = runs[0].job_id if runs else None
     if job_id and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"🔗 https://hud.ai/jobs/{job_id}")
-
-    if len(runs) == 1 and cfg.group_size == 1:
-        run = runs[0]
-        if run.trace.isError:
-            hud_console.warning(f"Error: {run.trace.content}")
-        hud_console.success(f"Reward: {run.reward}")
-    elif runs:
-        rewards = [r.reward for r in runs]
-        mean = sum(rewards) / len(rewards)
-        errored = sum(1 for r in runs if r.trace.isError)
-        suffix = f" ({errored} errored)" if errored else ""
-        hud_console.success(f"Mean reward: {mean:.3f} over {len(runs)} runs{suffix}")
 
     return runs, variants
 
@@ -807,5 +795,6 @@ def eval_command(
         return
 
     if results:
-        rate = len(results) / elapsed if elapsed > 0 else 0
-        hud_console.info(f"Completed {len(results)} evals in {elapsed:.1f}s ({rate:.1f}/s)")
+        from hud.cli.utils.display import display_runs
+
+        display_runs(results, name=cfg.source or "", elapsed=elapsed)

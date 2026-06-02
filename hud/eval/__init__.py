@@ -1,57 +1,48 @@
-"""HUD Eval - Evaluation context and management.
+"""HUD eval: the v6 execution surface.
 
-This module provides:
-- Task: A runnable evaluation unit (from env())
-- EvalContext: Environment with evaluation tracking (trace_id, reward, etc.)
-- eval(): Standalone context manager for task-based evaluation
+Define a :class:`Variant` (a parameterized task bound to an env/sandbox), group
+many into a :class:`Taskset`, ``launch`` a :class:`Sandbox`, and ship rewarded
+:class:`~hud.client.Run`s to the :class:`HudTrainingClient`.
 
-Usage:
-    # Using env() to create Task
-    env = Environment("my-env").connect_hub("browser")
+    from hud.eval import Taskset, Variant, launch
 
-    async with env() as ctx:
-        await ctx.call_tool("navigate", url="...")
-
-    async with env("checkout", user_id="alice") as ctx:
-        await ctx.submit("answer")
-
-    # Orchestrated with Task objects
-    tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
-    async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
-        await ctx._run(agent)
-
-    # Blank eval for manual reward
-    async with hud.eval() as ctx:
-        ctx.reward = compute_reward()
+    runs = await Taskset(task(d) for d in range(5)).run(agent, group=8)
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-# Auto-instrument httpx on import
-import hud.eval.instrument  # noqa: F401
-
-# run_eval is safe to import (uses lazy imports internally)
-from hud.eval.manager import run_eval
-
-# Task is safe to import
-from hud.eval.task import Task
-
-if TYPE_CHECKING:
-    from hud.eval.context import EvalContext
+from .launch import launch
+from .remote import submit_rollouts
+from .sandbox import (
+    HudSandbox,
+    LocalSandbox,
+    RemoteSandbox,
+    Runtime,
+    Sandbox,
+    as_sandbox,
+    load_module,
+    sandbox_from_ref,
+)
+from .taskset import Taskset
+from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relative
+from .variant import Variant, variant
 
 __all__ = [
-    "EvalContext",
-    "Task",
-    "run_eval",
+    "HudSandbox",
+    "HudTrainingClient",
+    "LocalSandbox",
+    "RemoteSandbox",
+    "Rewarded",
+    "Runtime",
+    "Sandbox",
+    "Taskset",
+    "TrainingConfig",
+    "Variant",
+    "as_sandbox",
+    "group_relative",
+    "launch",
+    "load_module",
+    "sandbox_from_ref",
+    "submit_rollouts",
+    "variant",
 ]
-
-
-def __getattr__(name: str) -> object:
-    """Lazy import EvalContext to avoid circular imports."""
-    if name == "EvalContext":
-        from hud.eval.context import EvalContext
-
-        return EvalContext
-    raise AttributeError(f"module 'hud.eval' has no attribute {name!r}")

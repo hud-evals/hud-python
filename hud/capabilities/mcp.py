@@ -52,11 +52,22 @@ class MCPClient(CapabilityClient):
         return await self._client.list_tools()
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        """Invoke a tool, returning the raw MCP ``CallToolResult``."""
+        """Invoke a tool, returning the raw MCP ``CallToolResult``.
+
+        FastMCP and mcp-python use slightly different result shapes; normalize the
+        alternate field names (``is_error`` / ``structured_content``) and a missing
+        ``content`` so callers always get a canonical ``CallToolResult``.
+        """
         from hud.types import MCPToolResult as _Result
 
         raw = await self._client.call_tool_mcp(name=name, arguments=arguments)
-        return _Result.model_validate(raw.model_dump())
+        data = raw.model_dump()
+        if "isError" not in data and "is_error" in data:
+            data["isError"] = data.pop("is_error")
+        if "structuredContent" not in data and "structured_content" in data:
+            data["structuredContent"] = data.pop("structured_content")
+        data.setdefault("content", [])
+        return _Result.model_validate(data)
 
     async def close(self) -> None:
         await self._exit_stack.aclose()

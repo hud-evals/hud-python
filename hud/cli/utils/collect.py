@@ -1,269 +1,23 @@
-"""Collect Task objects from various sources (Python files, directories, JSON/JSONL).
+"""Collect runnable ``Variant``s from a Python source or JSON/JSONL taskset.
 
-Shared utility used by both ``hud sync tasks`` and ``hud eval``.
+Used by ``hud eval`` to turn a source (a ``.py`` file/dir defining an
+``Environment`` and exposing ``Variant``s / a ``Taskset``, or a JSON/JSONL file of
+``{env, task, args}`` entries) into a list of runnable :class:`~hud.eval.Variant`s.
 """
 
 from __future__ import annotations
 
-import contextlib
-import importlib
-import importlib.util
+import json
 import logging
-import sys
 from pathlib import Path
 from typing import Any
-
-from hud.datasets.loader import _load_from_file
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _import_tasks_from_module(
-    module_path: Path, extra_sys_paths: list[str] | None = None
-) -> list[Any]:
-    """Import a Python module and extract all Task instances from it.
-
-    Looks for:
-    1. Module-level ``Task`` instances (e.g. ``task = bug_fix.task(...)``)
-    2. A module-level ``tasks`` list/dict containing ``Task`` instances
-    """
-    from hud.eval.task import Task
-
-    module_name = f"_hud_collect_{module_path.stem}"
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot import {module_path}: failed to create module spec")
-
-    paths_to_add = [str(module_path.parent)]
-    if extra_sys_paths:
-        paths_to_add.extend(extra_sys_paths)
-
-    inserted: list[str] = []
-    for p in paths_to_add:
-        if p not in sys.path:
-            sys.path.insert(0, p)
-            inserted.append(p)
-
-    try:
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-    except Exception as e:
-        raise ImportError(f"Failed to import {module_path.name}: {type(e).__name__}: {e}") from e
-    finally:
-        for p in inserted:
-            with contextlib.suppress(ValueError):
-                sys.path.remove(p)
-        sys.modules.pop(module_name, None)
-
-    found: list[Task] = []
-
-    # Check for a ``tasks`` attribute first (list or dict of Tasks)
-    tasks_attr = getattr(module, "tasks", None)
-    if isinstance(tasks_attr, dict):
-        found.extend(v for v in tasks_attr.values() if isinstance(v, Task))
-    elif isinstance(tasks_attr, (list, tuple)):
-        found.extend(v for v in tasks_attr if isinstance(v, Task))
-
-    if found:
-        return found
-
-    # Fall back to scanning all module-level attributes
-    for attr_name in dir(module):
-        if attr_name.startswith("_"):
-            continue
-        val = getattr(module, attr_name, None)
-        if isinstance(val, Task):
-            found.append(val)
-
-    return found
-
-
-def _collect_from_package(directory: Path) -> list[Any]:
-    """Import directory as a Python package and collect Task objects.
-
-    Used when the directory has an ``__init__.py``, which typically uses
-    ``pkgutil.iter_modules`` to discover sub-packages containing tasks
-    (the pattern used by ml-template-main and similar SDLC projects).
-
-    The package's parent directory is added to ``sys.path`` so that
-    sibling imports (``from env import ...``, ``from tasks.graders import ...``)
-    resolve correctly — matching the behavior of ``uv run sync-tasks``.
-    """
-    from hud.eval.task import Task
-
-    pkg_name = f"_hud_collect_pkg_{directory.name}"
-    init_path = directory / "__init__.py"
-    parent_dir = str(directory.parent)
-
-    spec = importlib.util.spec_from_file_location(
-        pkg_name,
-        init_path,
-        submodule_search_locations=[str(directory)],
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot import package '{directory.name}': failed to create module spec")
-
-    inserted = False
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
-        inserted = True
-
-    try:
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[pkg_name] = module
-        spec.loader.exec_module(module)
-    except Exception as e:
-        raise ImportError(
-            f"Failed to import package '{directory.name}': {type(e).__name__}: {e}"
-        ) from e
-    finally:
-        if inserted:
-            with contextlib.suppress(ValueError):
-                sys.path.remove(parent_dir)
-        sys.modules.pop(pkg_name, None)
-
-    found: list[Task] = []
-
-    tasks_attr = getattr(module, "tasks", None)
-    if isinstance(tasks_attr, dict):
-        found.extend(v for v in tasks_attr.values() if isinstance(v, Task))
-    elif isinstance(tasks_attr, (list, tuple)):
-        found.extend(v for v in tasks_attr if isinstance(v, Task))
-
-    if found:
-        return found
-
-    for attr_name in dir(module):
-        if attr_name.startswith("_"):
-            continue
-        val = getattr(module, attr_name, None)
-        if isinstance(val, Task):
-            found.append(val)
-
-    return found
-
-
-def _find_project_root(directory: Path) -> str | None:
-    """Walk up from directory to find the project root.
-
-    Looks for markers like ``pyproject.toml``, ``setup.py``, ``env.py``,
-    or ``.hud/`` that indicate the project root — the directory that
-    should be on ``sys.path`` for cross-module imports to work.
-    """
-    markers = {"pyproject.toml", "setup.py", "setup.cfg", "env.py"}
-    dir_markers = {".hud", ".git"}
-
-    current = directory
-    for _ in range(10):
-        if any((current / m).exists() for m in markers):
-            return str(current)
-        if any((current / d).is_dir() for d in dir_markers):
-            return str(current)
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return None
-
-
-def _collect_from_directory(
-    directory: Path,
-    *,
-    failures: list[tuple[str, str]] | None = None,
-) -> list[Any]:
-    """Walk a directory and collect Task objects from Python files.
-
-    Checks in this order:
-    0. If directory is a Python package (has ``__init__.py``), import it
-       as a package so its own discovery logic (e.g. ``pkgutil``) runs
-       with the correct import context.
-    1. ``tasks.py`` or ``task.py`` in the directory root
-    2. ``**/task.py`` in subdirectories (recursive SDLC convention)
-    3. All other ``.py`` files in root (excluding ``env.py``, ``__init__.py``, etc.)
-    """
-    from hud.eval.task import Task  # noqa: TC001 — runtime import needed
-
-    found: list[Task] = []
-    skip_names = {"env", "conftest", "setup", "__init__", "__main__"}
-
-    def _record_failure(rel_path: str, error: Exception) -> None:
-        LOGGER.warning("Failed to import %s: %s", rel_path, error)
-        if failures is not None:
-            cause = error.__cause__
-            if cause:
-                short = f"{type(cause).__name__}: {cause}"
-            else:
-                short = f"{type(error).__name__}: {error}"
-            failures.append((rel_path, short))
-
-    # Priority 0: directory is a Python package — use package imports
-    if (directory / "__init__.py").is_file():
-        try:
-            result = _collect_from_package(directory)
-            if result:
-                LOGGER.info("Collected %d task(s) from package %s/", len(result), directory.name)
-                return result
-        except ImportError as e:
-            LOGGER.debug(
-                "Package import of %s/ failed (%s), falling back to file scan", directory.name, e
-            )
-
-    project_root = _find_project_root(directory)
-    extra_paths = [project_root] if project_root else None
-
-    # Priority 1: tasks.py or task.py in root
-    for name in ("tasks.py", "task.py"):
-        candidate = directory / name
-        if candidate.is_file():
-            try:
-                result = _import_tasks_from_module(candidate, extra_sys_paths=extra_paths)
-                if result:
-                    LOGGER.info("Collected %d task(s) from %s", len(result), candidate.name)
-                    found.extend(result)
-            except Exception as e:
-                _record_failure(candidate.name, e)
-    if found:
-        return found
-
-    # Priority 2: **/task.py in subdirectories (recursive SDLC pattern)
-    for task_file in sorted(directory.rglob("task.py")):
-        if task_file.parent == directory:
-            continue
-        rel_parts = task_file.parent.relative_to(directory).parts
-        if any(part.startswith((".", "_")) for part in rel_parts):
-            continue
-        try:
-            result = _import_tasks_from_module(task_file, extra_sys_paths=extra_paths)
-            if result:
-                rel = task_file.relative_to(directory)
-                LOGGER.info("Collected %d task(s) from %s", len(result), rel)
-                found.extend(result)
-        except Exception as e:
-            rel = str(task_file.relative_to(directory))
-            _record_failure(rel, e)
-    if found:
-        return found
-
-    # Priority 3: any .py in root
-    for py_file in sorted(directory.glob("*.py")):
-        if py_file.stem in skip_names:
-            continue
-        try:
-            result = _import_tasks_from_module(py_file, extra_sys_paths=extra_paths)
-            if result:
-                LOGGER.info("Collected %d task(s) from %s", len(result), py_file.name)
-                found.extend(result)
-        except Exception as e:
-            LOGGER.debug("Skipping %s: %s", py_file.name, e)
-
-    return found
-
-
 def _scan_variants(module: Any) -> list[Any]:
-    """Gather new-flow ``Variant``s from an imported module."""
-    from hud.client import Variant
-    from hud.taskset import Taskset
+    """Gather new-flow ``Variant``s (and ``Taskset`` members) from an imported module."""
+    from hud.eval import Taskset, Variant
 
     variants: list[Any] = []
     for name in dir(module):
@@ -280,11 +34,10 @@ def _scan_variants(module: Any) -> list[Any]:
 def collect_variants(source: str) -> list[Any]:
     """Collect new-flow runnable ``Variant``s from a Python source (file or dir).
 
-    The source defines a :class:`hud.env.Env` with ``@env.task``s and exposes
-    runnable ``Variant``s (or a ``Taskset``, or just the ``Env``). Returns [] if
-    none are found (e.g. the file only defines legacy ``hud.eval.task.Task``s).
+    The source defines an :class:`hud.environment.Environment` with ``@env.task``s and
+    exposes runnable ``Variant``s (or a ``Taskset``). Returns [] if none are found.
     """
-    from hud.sandbox import load_module
+    from hud.eval import load_module
 
     path = Path(source).resolve()
     if path.is_file() and path.suffix == ".py":
@@ -302,20 +55,32 @@ def collect_variants(source: str) -> list[Any]:
     raise FileNotFoundError(f"Source not found: {source}")
 
 
+def _load_raw_entries(path: Path) -> list[dict[str, Any]]:
+    """Read a JSON (object or list) or JSONL file into a list of dict entries."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".jsonl":
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    data = json.loads(text)
+    if isinstance(data, dict):
+        return [data]
+    if isinstance(data, list):
+        return data
+    raise ValueError(f"{path}: expected a JSON object, list, or JSONL file")
+
+
 def load_variants_json(path: Path) -> list[Any]:
     """Load new-flow ``Variant``s from a JSON/JSONL taskset.
 
     Each entry is ``{"env": <env-ref>, "task": <id>, "args": {...}}`` (see
-    :meth:`hud.client.Variant.from_dict`). ``module`` env-refs with a relative path
+    :meth:`hud.eval.Variant.from_dict`). ``module`` env-refs with a relative path
     are resolved relative to the taskset file so tasksets are portable next to the
     env code they reference.
     """
-    from hud.client import Variant
-    from hud.datasets.loader import _load_raw_from_file
+    from hud.eval import Variant
 
     base = path.resolve().parent
     variants: list[Any] = []
-    for entry in _load_raw_from_file(path):
+    for entry in _load_raw_entries(path):
         env_ref = entry.get("env")
         if isinstance(env_ref, dict) and env_ref.get("type") == "module":
             module = env_ref.get("module")
@@ -325,33 +90,4 @@ def load_variants_json(path: Path) -> list[Any]:
     return variants
 
 
-def collect_tasks(
-    source: str,
-    *,
-    failures: list[tuple[str, str]] | None = None,
-) -> list[Any]:
-    """Collect Task objects from a source path.
-
-    Supports:
-    - Python file (``.py``): imports and finds Task instances
-    - Directory: walks for Python files containing Tasks
-    - JSON/JSONL file: loads task dicts and converts to Task objects
-
-    Returns an empty list if no tasks are found (caller should error).
-    If *failures* is provided, import errors are appended as ``(path, error)`` tuples.
-    """
-    path = Path(source).resolve()
-
-    if path.is_file():
-        if path.suffix in (".json", ".jsonl"):
-            return _load_from_file(path)
-        elif path.suffix == ".py":
-            return _import_tasks_from_module(path)
-        else:
-            raise ValueError(
-                f"Unsupported file type: {path.suffix} (expected .py, .json, or .jsonl)"
-            )
-    elif path.is_dir():
-        return _collect_from_directory(path, failures=failures)
-    else:
-        raise FileNotFoundError(f"Source not found: {source}")
+__all__ = ["collect_variants", "load_variants_json"]

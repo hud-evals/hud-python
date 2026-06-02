@@ -1,141 +1,81 @@
-"""HUD tools for computer control, file editing, and bash commands.
+"""Deprecated shim for the old ``hud.tools`` package.
 
-For coding tools, import from:
-    from hud.tools.coding import BashTool, EditTool
+The tools moved in the v6 teardown:
 
-For filesystem tools, import from:
-    from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
+- standalone tools (``BaseTool``, ``BashTool``, ``EditTool``, ``JupyterTool``,
+  ``MemoryTool``, ``PlaywrightTool``) → :mod:`hud.native.tools`
+- result/answer types (``Citation``, ``AgentAnswer``, ``ScenarioResult`` /
+  ``EvaluationResult``, ``ContentResult``, ``SubScore``, ``Coordinate``,
+  ``ToolError``) → :mod:`hud.agents.types`
 
-For legacy compatibility shims, import from:
-    from hud.tools import ShellTool, ApplyPatchTool
-
-For computer tools, import from:
-    from hud.tools.computer import ComputerTool
+Old ``hud.tools`` and ``hud.tools.*`` imports still resolve so existing code keeps
+importing, but every symbol is a **no-op stand-in** that emits a
+``DeprecationWarning``. Update imports to the locations above.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import importlib.abc
+import importlib.util
+import sys
+import types
+import warnings
+from typing import Any
 
-from ._legacy import install_legacy_aliases as _install_legacy_aliases
-
-# Base classes and types
-from .agent import AgentTool
-from .base import BaseHub, BaseTool
-from .memory import (
-    MemoryTool,
+_MSG = (
+    "hud.tools is deprecated: use hud.native.tools (tools) and hud.agents.types "
+    "(result types). The hud.tools symbols are now no-ops."
 )
-from .playwright import PlaywrightTool
-from .submit import SubmitTool
-
-if TYPE_CHECKING:
-    from ._legacy import (
-        AnthropicComputerTool,
-        ApplyPatchTool,
-        ClaudeMemoryTool,
-        GeminiComputerTool,
-        GeminiGlobTool,
-        GeminiListTool,
-        GeminiMemoryTool,
-        GeminiReadManyTool,
-        GeminiReadTool,
-        GeminiSearchTool,
-        GLMComputerTool,
-        HudComputerTool,
-        OpenAIComputerTool,
-        QwenComputerTool,
-        ShellTool,
-    )
-    from .coding import (
-        BashTool,
-        EditTool,
-    )
-    from .computer import (
-        ComputerTool,
-    )
-    from .filesystem import (
-        GlobTool,
-        GrepTool,
-        ListTool,
-        ReadTool,
-    )
-
-__all__ = [
-    "AgentTool",
-    "AnthropicComputerTool",
-    "ApplyPatchTool",
-    "BaseHub",
-    "BaseTool",
-    "BashTool",
-    "ClaudeMemoryTool",
-    "ComputerTool",
-    "EditTool",
-    "GLMComputerTool",
-    "GeminiComputerTool",
-    "GeminiGlobTool",
-    "GeminiListTool",
-    "GeminiMemoryTool",
-    "GeminiReadManyTool",
-    "GeminiReadTool",
-    "GeminiSearchTool",
-    "GlobTool",
-    "GrepTool",
-    "HudComputerTool",
-    "ListTool",
-    "MemoryTool",
-    "OpenAIComputerTool",
-    "PlaywrightTool",
-    "QwenComputerTool",
-    "ReadTool",
-    "ShellTool",
-    "SubmitTool",
-]
 
 
-def __getattr__(name: str) -> Any:
-    """Lazy import tools to avoid heavy imports unless needed."""
-    # Computer tools
-    if name == "ComputerTool":
-        from . import computer
+class _NoOp:
+    """No-op stand-in for a removed ``hud.tools`` symbol.
 
-        return getattr(computer, name)
+    Constructs, calls, and attribute-accesses all return a no-op so legacy code
+    importing ``hud.tools`` keeps importing (it just does nothing).
+    """
 
-    # Coding tools
-    if name in ("BashTool", "EditTool"):
-        from . import coding
+    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
 
-        return getattr(coding, name)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self
 
-    # Filesystem tools
-    if name in ("ReadTool", "GrepTool", "GlobTool", "ListTool"):
-        from . import filesystem
-
-        return getattr(filesystem, name)
-
-    # Compatibility shims
-    if name in (
-        "ApplyPatchTool",
-        "ShellTool",
-        "ClaudeMemoryTool",
-        "AnthropicComputerTool",
-        "GLMComputerTool",
-        "HudComputerTool",
-        "OpenAIComputerTool",
-        "GeminiComputerTool",
-        "QwenComputerTool",
-        "GeminiReadTool",
-        "GeminiReadManyTool",
-        "GeminiSearchTool",
-        "GeminiGlobTool",
-        "GeminiListTool",
-        "GeminiMemoryTool",
-    ):
-        from . import _legacy
-
-        return getattr(_legacy, name)
-
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    def __getattr__(self, _name: str) -> Any:
+        return self
 
 
-_install_legacy_aliases()
-del _install_legacy_aliases
+def _make_getattr(module_name: str) -> Any:
+    def __getattr__(name: str) -> Any:
+        warnings.warn(
+            f"{module_name}.{name} is a no-op ({_MSG})",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _NoOp
+
+    return __getattr__
+
+
+class _DeprecatedToolsFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Resolve any ``hud.tools.*`` submodule to a no-op module (at any depth)."""
+
+    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
+        if not fullname.startswith("hud.tools."):
+            return None
+        return importlib.util.spec_from_loader(fullname, self)
+
+    def create_module(self, spec: Any) -> types.ModuleType:
+        module = types.ModuleType(spec.name)
+        module.__path__ = []  # mark as package so deeper imports route back here
+        module.__getattr__ = _make_getattr(spec.name)  # type: ignore[attr-defined]
+        return module
+
+    def exec_module(self, module: types.ModuleType) -> None: ...
+
+
+if not any(isinstance(f, _DeprecatedToolsFinder) for f in sys.meta_path):
+    sys.meta_path.insert(0, _DeprecatedToolsFinder())
+    warnings.warn(_MSG, DeprecationWarning, stacklevel=2)
+
+
+__getattr__ = _make_getattr("hud.tools")

@@ -23,12 +23,12 @@ from typing import TYPE_CHECKING, Any
 from mcp.types import PromptMessage, TextContent
 
 from hud.environment import Environment
-from hud.tools.types import ScenarioResult
+from hud.agents.types import ScenarioResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-env = Environment("chat")
+env = Environment(name="chat")
 
 
 @env.scenario()

@@ -14,7 +14,7 @@ from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import GeminiConfig
 from hud.settings import settings
-from hud.tools.types import Citation
+from hud.agents.types import Citation
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .settings import gemini_agent_settings
@@ -81,15 +81,17 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: str) -> RunState[genai_types.Content]:
-        return RunState(
-            messages=[
-                genai_types.Content(role="user", parts=[genai_types.Part(text=prompt)]),
-            ]
-        )
+    async def _initialize_state(
+        self, *, prompt: str | list[Any] | None
+    ) -> RunState[genai_types.Content]:
+        return RunState(messages=self._initial_messages(prompt))
 
-    def _format_user_text(self, text: str) -> genai_types.Content:
-        return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])
+    def _format_message(self, role: str, text: str) -> genai_types.Content:
+        # Gemini uses "model" for the assistant role.
+        return genai_types.Content(
+            role="model" if role == "assistant" else "user",
+            parts=[genai_types.Part(text=text)],
+        )
 
     def _format_result(
         self,

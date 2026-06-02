@@ -87,20 +87,16 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: str) -> OpenAIChatRunState:
-        return OpenAIChatRunState(
-            messages=[
-                cast(
-                    "ChatCompletionMessageParam",
-                    {"role": "user", "content": [{"type": "text", "text": prompt}]},
-                ),
-            ]
-        )
+    async def _initialize_state(self, *, prompt: str | list[Any] | None) -> OpenAIChatRunState:
+        return OpenAIChatRunState(messages=self._initial_messages(prompt))
 
-    def _format_user_text(self, text: str) -> ChatCompletionMessageParam:
+    def _format_message(self, role: str, text: str) -> ChatCompletionMessageParam:
         return cast(
             "ChatCompletionMessageParam",
-            {"role": "user", "content": [{"type": "text", "text": text}]},
+            {
+                "role": "assistant" if role == "assistant" else "user",
+                "content": [{"type": "text", "text": text}],
+            },
         )
 
     def _format_result(

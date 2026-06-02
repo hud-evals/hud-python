@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import mcp.types as mcp_types
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
@@ -28,7 +28,7 @@ from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import ClaudeConfig
 from hud.settings import settings
-from hud.tools.types import Citation
+from hud.agents.types import Citation
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
@@ -74,19 +74,14 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: str) -> RunState[BetaMessageParam]:
-        return RunState(
-            messages=[
-                BetaMessageParam(
-                    role="user",
-                    content=[BetaTextBlockParam(type="text", text=prompt)],
-                ),
-            ]
-        )
+    async def _initialize_state(
+        self, *, prompt: str | list[Any] | None
+    ) -> RunState[BetaMessageParam]:
+        return RunState(messages=self._initial_messages(prompt))
 
-    def _format_user_text(self, text: str) -> BetaMessageParam:
+    def _format_message(self, role: str, text: str) -> BetaMessageParam:
         return BetaMessageParam(
-            role="user",
+            role="assistant" if role == "assistant" else "user",
             content=[BetaTextBlockParam(type="text", text=text)],
         )
 

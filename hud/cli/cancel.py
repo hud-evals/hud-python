@@ -64,7 +64,7 @@ def cancel_command(
         raise typer.Exit(0)
 
     async def _cancel() -> None:
-        from hud.datasets.utils import cancel_all_jobs, cancel_job, cancel_task
+        from hud.cli.utils.jobs import cancel_all_jobs, cancel_job, cancel_task
 
         if all_jobs:
             hud_console.info("Cancelling all active jobs...")

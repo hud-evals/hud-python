@@ -33,8 +33,7 @@ from hud.utils.serialization import json_safe_value
 
 
 def _get_trace_id() -> str | None:
-    """Lazy import to avoid circular dependency with eval.context."""
-    from hud.eval.context import get_current_trace_id
+    from hud.telemetry.context import get_current_trace_id
 
     return get_current_trace_id()
 

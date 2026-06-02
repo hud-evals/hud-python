@@ -300,9 +300,6 @@ class Trace(BaseModel):
     # Response metadata carried from the final AgentResponse
     citations: list[dict[str, Any]] = Field(default_factory=list)
 
-    # Metadata
-    task: Task | None = Field(default=None)
-
     # Trace
     trace: list[TraceStep] = Field(default_factory=list)
     messages: list[Any] = Field(default_factory=list)
@@ -326,15 +323,6 @@ class Trace(BaseModel):
         self.trace.append(step)
 
 
-# Re-export Task for backwards compatibility (after module defs to avoid circular import)
-from hud.eval.task import Task  # noqa: E402
-
-# Resolve Trace.task's forward reference now that Task is available.
-Trace.model_rebuild()
-
-# Type alias for functions that accept Task objects or raw task dicts.
-TaskInput = Task | dict[str, Any]
-
 __all__ = [
     "AgentResponse",
     "AgentType",
@@ -343,8 +331,6 @@ __all__ = [
     "JsonValue",
     "MCPToolCall",
     "MCPToolResult",
-    "Task",
-    "TaskInput",
     "Trace",
     "TraceStep",
 ]

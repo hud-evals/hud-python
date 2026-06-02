@@ -16,8 +16,6 @@ from fastmcp.server.server import FastMCP, Transport
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from hud.datasets import run_dataset
-from hud.eval.task import Task
 from hud.server.low_level import LowLevelServerWithInit
 
 if TYPE_CHECKING:
@@ -405,7 +403,7 @@ class MCPServer(FastMCP):
 
     # Tool registration helper -- appends BaseTool to FastMCP
     def add_tool(self, obj: Any, **kwargs: Any) -> None:
-        from hud.tools.base import BaseTool
+        from hud.native.tools.base import BaseTool
 
         if isinstance(obj, BaseTool):
             super().add_tool(obj.mcp, **kwargs)
@@ -424,7 +422,7 @@ class MCPServer(FastMCP):
         # Accept BaseTool / FastMCP Tool instances or callables in call-form
         if name_or_fn is not None and not isinstance(name_or_fn, str):
             try:
-                from hud.tools.base import BaseTool  # lazy import
+                from hud.native.tools.base import BaseTool  # lazy import
             except Exception:
                 BaseTool = tuple()  # type: ignore[assignment]
             try:
@@ -703,154 +701,6 @@ class MCPServer(FastMCP):
                             "items": items,
                             "next": len(items) - 1 if items else None,
                         }
-                    )
-
-            # Import existing types from the codebase
-            from pydantic import BaseModel
-
-            from hud.types import AgentType
-
-            class EvalRequest(BaseModel):
-                """Request model for /eval endpoint."""
-
-                tasks: list[dict[str, Any]] = []
-                agent: str = "claude"
-                model: str | None = None
-                max_steps: int = 10
-                verbose: bool = False
-                group_size: int = 1
-                name: str | None = None
-
-            @self.custom_route("/eval", methods=["POST"])
-            async def run_eval(request: Request) -> Response:
-                """Run evaluation on tasks using the current Docker environment."""
-                import asyncio
-                import json
-
-                try:
-                    body = await request.body()
-                    data = json.loads(body)
-
-                    # Validate request using Pydantic model
-                    try:
-                        eval_request = EvalRequest(**data)
-                    except Exception as e:
-                        return JSONResponse({"error": f"Invalid request: {e!s}"}, status_code=400)
-
-                    # Get the Docker MCP config from environment
-                    docker_mcp_config = os.environ.get("_HUD_DEV_DOCKER_MCP_CONFIG")
-                    if not docker_mcp_config:
-                        return JSONResponse(
-                            {"error": "Docker MCP config not available"}, status_code=500
-                        )
-
-                    docker_config = json.loads(docker_mcp_config)
-
-                    # Simplify Docker config for evaluation
-                    if "docker" in docker_config and "args" in docker_config["docker"]:
-                        original_args = docker_config["docker"]["args"]
-                        filtered_args = []
-                        i = 0
-
-                        while i < len(original_args):
-                            arg = original_args[i]
-
-                            # Skip volume mounts and their values
-                            if arg in ["-v", "--volume"]:
-                                i += 2  # Skip the flag and its value
-                                continue
-
-                            # Skip combined volume mount args
-                            if arg.startswith(("-v", "--volume=")):
-                                i += 1
-                                continue
-
-                            # Skip explicit container name to avoid collisions
-                            if arg == "--name" and i + 1 < len(original_args):
-                                i += 2  # Skip the --name and its value
-                                continue
-
-                            # Skip dev-specific environment variables
-                            if arg == "-e" and i + 1 < len(original_args):
-                                next_arg = original_args[i + 1]
-                                if next_arg in [
-                                    "PYTHONPATH=/app",
-                                    "HUD_DEV=1",
-                                    "PYTHONUNBUFFERED=1",
-                                ]:
-                                    i += 2  # Skip the -e and its value
-                                    continue
-
-                            filtered_args.append(arg)
-                            i += 1
-
-                        # Update the docker args with filtered version
-                        docker_config["docker"]["args"] = filtered_args
-
-                    try:
-                        agent_type = AgentType(eval_request.agent.lower())
-                    except ValueError:
-                        valid_agents = [a.value for a in AgentType]
-                        return JSONResponse(
-                            {
-                                "error": f"Invalid agent type: {eval_request.agent}",
-                                "valid_agents": valid_agents,
-                            },
-                            status_code=400,
-                        )
-
-                    # Run tasks against the current Docker MCP environment.
-                    from hud.environment import Environment
-
-                    task_objects: list[Task] = []
-                    try:
-                        for task_data in eval_request.tasks:
-                            env = Environment("dev").connect_mcp_config(docker_config)
-                            task_objects.append(Task.model_validate({**task_data, "env": env}))
-                    except Exception as e:
-                        return JSONResponse({"error": f"Invalid task: {e!s}"}, status_code=400)
-
-                    agent_params: dict[str, Any] = {}
-                    if eval_request.model:
-                        agent_params["checkpoint_name"] = eval_request.model
-
-                    # Fire and forget - launch evaluation in background
-                    async def run_eval_background() -> None:
-                        await run_dataset(
-                            task_objects,
-                            agent_type=agent_type,
-                            agent_params=agent_params,
-                            max_steps=eval_request.max_steps,
-                            group_size=eval_request.group_size,
-                        )
-
-                    # Start the evaluation in the background (fire and forget)
-                    asyncio.create_task(run_eval_background())  # noqa: RUF006
-
-                    # Return immediately
-                    response_data = {
-                        "status": "started",
-                        "message": f"Evaluation launched with {len(task_objects)} task(s)",
-                        "agent": eval_request.agent,
-                        "model": eval_request.model,
-                        "max_steps": eval_request.max_steps,
-                        "verbose": eval_request.verbose,
-                    }
-
-                    # Include group_size if > 1
-                    if eval_request.group_size > 1:
-                        response_data["group_size"] = eval_request.group_size
-                        response_data["total_episodes"] = (
-                            len(task_objects) * eval_request.group_size
-                        )
-
-                    return JSONResponse(response_data)
-
-                except json.JSONDecodeError:
-                    return JSONResponse({"error": "Invalid JSON in request body"}, status_code=400)
-                except Exception as e:
-                    return JSONResponse(
-                        {"error": f"Failed to run evaluation: {e!s}"}, status_code=500
                     )
 
         @self.custom_route("/openapi.json", methods=["GET"])

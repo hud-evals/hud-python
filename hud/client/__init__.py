@@ -28,7 +28,6 @@ class Manifest:
 
 
 from .client import HudClient, HudProtocolError, connect  # noqa: E402
-from .launch import Variant, launch, variant  # noqa: E402
 from .run import Run  # noqa: E402
 
 __all__ = [
@@ -37,8 +36,5 @@ __all__ = [
     "Manifest",
     "Run",
     "ServerInfo",
-    "Variant",
     "connect",
-    "launch",
-    "variant",
 ]
