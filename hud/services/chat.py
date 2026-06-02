@@ -203,27 +203,6 @@ class Chat(AgentExecutor):
         self.messages = [dict(m) for m in messages]
 
     # ------------------------------------------------------------------
-    # MCP tool surface
-    # ------------------------------------------------------------------
-
-    def as_tool(
-        self,
-        *,
-        name: str | None = None,
-        description: str | None = None,
-    ) -> Any:
-        """Return an AgentTool backed by this Chat's config.
-
-        Not available on the v6 stack yet: the MCP ``AgentTool`` wrapper was removed
-        in the teardown. Expose tools via your own ``MCPServer`` + an ``mcp``
-        capability instead (see ``hud.server.MCPServer`` / ``hud.native.tools``).
-        """
-        raise NotImplementedError(
-            "Chat.as_tool() is not available on the new stack; register tools on an "
-            "MCPServer and attach it as an `mcp` capability instead.",
-        )
-
-    # ------------------------------------------------------------------
     # A2A serving
     # ------------------------------------------------------------------
 

@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .analysis import BuildAnalysis
-
 import yaml
 
 from hud.cli.utils.environment import find_dockerfile
@@ -52,7 +50,7 @@ def dump_lock_data(lock_data: dict[str, Any], *, sort_keys: bool = False) -> str
 def build_lock_data(
     *,
     source_dir: Path | None,
-    analysis: BuildAnalysis | dict[str, Any],
+    analysis: dict[str, Any],
     version: str,
     image_name: str,
     full_image_ref: str | None = None,

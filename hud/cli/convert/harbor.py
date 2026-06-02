@@ -171,30 +171,22 @@ import subprocess
 from pathlib import Path
 {extra_imports}
 from hud import Environment
-from hud.environment import Capability, Workspace
+from hud.environment import Workspace
 
 LOGGER = logging.getLogger(__name__)
 
 TASKS_DIR = Path("/tasks")
 
-env = Environment(name="{env_name}")
+# Agents act via bash over SSH: a sandboxed Workspace, declared as an ``ssh``
+# capability at create time (the daemon is started in @env.initialize).
+_workspace = Workspace("/workspace")
 
-# Agents act via bash over SSH: expose a sandboxed Workspace as an ``ssh``
-# capability rather than an in-process bash tool.
-_workspace = Workspace()
+env = Environment(name="{env_name}", capabilities=[_workspace.capability()])
 
 
 @env.initialize
 async def _serve_shell():
     await _workspace.start()
-    env.add_capability(
-        Capability.ssh(
-            url=_workspace.ssh_url,
-            user=_workspace.ssh_user,
-            host_pubkey=_workspace.ssh_host_pubkey,
-            client_key_path=_workspace.ssh_client_key_path,
-        )
-    )
 
 '''
 

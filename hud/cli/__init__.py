@@ -30,16 +30,17 @@ SUPPORT_HINT = (
 
 from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
+from .client import client_app  # noqa: E402
 from .convert import convert_command  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
 from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
+from .harbor import harbor_command  # noqa: E402
 from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .login import login_command  # noqa: E402
 from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
-from .scenario import scenario_app  # noqa: E402
 from .sync import sync_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
@@ -50,6 +51,7 @@ app.command(name="deploy")(deploy_command)
 app.command(name="link", hidden=True)(link_command)
 app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)
+app.command(name="harbor")(harbor_command)
 app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)
 app.command(name="convert")(convert_command)
@@ -106,8 +108,8 @@ def version() -> None:
         console.print("HUD CLI version: [cyan]unknown[/cyan]")
 
 
-# Scenario subcommand group
-app.add_typer(scenario_app, name="scenario")
+# Client subcommand group (drive a running env control channel from the shell)
+app.add_typer(client_app, name="client")
 
 # Sync subcommand group (migrated to the Variant flow)
 app.add_typer(sync_app, name="sync")

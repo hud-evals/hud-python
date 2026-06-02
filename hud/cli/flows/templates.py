@@ -47,19 +47,17 @@ async def count(sentence: str, letter: str):
 # =============================================================================
 # Capabilities are how the agent interacts with the environment. For shell
 # access, expose an SSH capability (a sandboxed Workspace) — the agent drives
-# bash over SSH, no in-process "bash tool" required:
+# bash over SSH, no in-process "bash tool" required. Declare it at create time;
+# @env.initialize only starts the daemon:
 #
-#   from hud.environment import Capability, Workspace
+#   from hud.environment import Workspace
 #
-#   ws = Workspace()                              # bwrap-isolated SSH + SFTP
+#   ws = Workspace("/workspace")          # bwrap-isolated SSH + SFTP (binds at create)
+#   env = Environment(name="{env_name}", capabilities=[ws.capability()])
 #
 #   @env.initialize
 #   async def _serve_shell():
 #       await ws.start()
-#       env.add_capability(Capability.ssh(
-#           url=ws.ssh_url, user=ws.ssh_user,
-#           host_pubkey=ws.ssh_host_pubkey, client_key_path=ws.ssh_client_key_path,
-#       ))
 #
 # For arbitrary MCP tools, run them on your own MCPServer and attach it:
 #

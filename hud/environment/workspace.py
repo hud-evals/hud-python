@@ -18,7 +18,9 @@ import asyncssh
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-LOGGER = logging.getLogger("hud.env.workspace")
+    from hud.capabilities import Capability
+
+LOGGER = logging.getLogger("hud.environment.workspace")
 
 
 # ─────────────────────────── mount declarations ───────────────────────────
@@ -186,6 +188,22 @@ class Workspace:
     def ssh_user(self) -> str:
         """SSH username."""
         return self._ssh_user
+
+    def capability(self, name: str = "shell") -> Capability:
+        """The ``ssh`` capability for this workspace.
+
+        Available at construction (url/keys are generated synchronously), so an env
+        can declare it up front: ``Environment(..., capabilities=[ws.capability()])``.
+        """
+        from hud.capabilities import Capability
+
+        return Capability.ssh(
+            name=name,
+            url=self.ssh_url,
+            user=self.ssh_user,
+            host_pubkey=self.ssh_host_pubkey,
+            client_key_path=self.ssh_client_key_path,
+        )
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
 
