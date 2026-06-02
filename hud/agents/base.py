@@ -129,7 +129,7 @@ class MCPAgent(ABC, Generic[MessageT, ToolsT, StateT]):
                     # 1. Get model response
                     response = await instrument(
                         self.get_response,
-                        category="inference-2",
+                        category="agent",
                         record_args=False,
                     )(
                         state,

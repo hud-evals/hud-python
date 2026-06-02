@@ -477,22 +477,6 @@ class EvalContext(Environment):
             metadata=self.metadata if self.metadata else None,
         )
 
-    async def log(self, metrics: dict[str, Any]) -> None:
-        """Log metrics to the backend."""
-        api_key = self._get_eval_api_key()
-        if not settings.telemetry_enabled or not api_key:
-            return
-
-        try:
-            await make_request(
-                method="POST",
-                url=f"{settings.hud_telemetry_url}/traces/{self.trace_id}/log",
-                json={"metrics": metrics},
-                api_key=api_key,
-            )
-        except Exception as e:
-            logger.warning("Failed to log metrics: %s", e)
-
     async def submit(self, answer: str | dict[str, Any]) -> None:
         """Submit the agent's answer for scenario evaluation.
 
