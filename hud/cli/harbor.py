@@ -28,7 +28,7 @@ def harbor_command(
     ``environment/Dockerfile`` / ``tests/test.sh``. The generated ``test.sh`` grades
     via ``hud client run`` against the env control channel served in the container.
     """
-    from hud.harbor import export
+    from hud.eval.harbor import export
 
     hud_console.header("HUD → Harbor Export")
     try:
