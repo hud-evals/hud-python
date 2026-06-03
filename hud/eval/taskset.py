@@ -1,17 +1,10 @@
-"""Taskset: a collection of Variants you run an agent over.
+"""Taskset: a collection of ``Variant``s you evaluate one agent over.
 
-A :class:`~hud.eval.variant.Variant` is one parameterized task bound to an
-env/sandbox. A ``Taskset`` groups many of them so a single (stateless) agent can
-be evaluated across the set — optionally with GRPO-style grouping and a
-concurrency cap::
+Launches each variant, lets ``agent(run)`` fill ``run.trace``, grades it, and
+gathers the :class:`Run`s — with optional GRPO grouping + a concurrency cap. HUD
+job/trace reporting lives in :mod:`hud.telemetry.job`::
 
-    ts = Taskset(fix_bug(difficulty=d) for d in range(1, 6))
-    runs = await ts.run(agent, group=8, max_concurrent=16)
-    await trainer.reward(runs)        # each Run carries reward + trace_id
-
-The contract is just ``agent(run)`` filling ``run.trace``; the taskset launches
-each variant, grades it, and gathers the resulting :class:`Run`s. HUD job + trace
-reporting lives in :mod:`hud.telemetry.job`; the runner just wraps each rollout.
+    runs = await Taskset(fix_bug(difficulty=d) for d in range(5)).run(agent, group=8)
 """
 
 from __future__ import annotations

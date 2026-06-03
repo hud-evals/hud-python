@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import logging
 from pathlib import Path
@@ -80,21 +79,6 @@ def _compute_signature(
     )
 
 
-def _variant_slug(task_id: str, args: dict[str, Any]) -> str:
-    """Stable slug for a Variant: its task id, disambiguated by args when present.
-
-    Variants (unlike legacy Tasks) carry no explicit ``slug``; the task id is the
-    natural identity, and parameterized variants of the same task get a short
-    args-hash suffix so they stay distinct in a taskset.
-    """
-    if not args:
-        return task_id
-    digest = hashlib.sha1(  # noqa: S324 - non-crypto, just a stable disambiguator
-        json.dumps(args, sort_keys=True, default=str).encode("utf-8"),
-    ).hexdigest()[:8]
-    return f"{task_id}-{digest}"
-
-
 def _build_local_specs(
     variants: list[Any],
     hud_console: HUDConsole,
@@ -103,7 +87,7 @@ def _build_local_specs(
 
     A Variant is ``(env-ref, task, args)`` — leaner than the legacy ``Task``: it has
     no ``validation``/``agent_config``/``columns`` (those are sent as ``None``), and
-    its ``slug`` is derived from the task id + args (see :func:`_variant_slug`).
+    its ``slug`` defaults to ``Variant.default_slug()`` (task id + args hash).
     """
     from hud.eval import Variant
 
@@ -121,7 +105,7 @@ def _build_local_specs(
             scenario_name = f"{env_name}:{scenario_name}"
 
         args_dict = variant.args or {}
-        slug = variant.slug.strip() if variant.slug else _variant_slug(variant.task, args_dict)
+        slug = variant.slug.strip() if variant.slug else variant.default_slug()
         env_config: dict[str, Any] = {"name": env_name} if env_name else {}
 
         specs.append(

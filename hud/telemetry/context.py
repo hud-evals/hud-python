@@ -25,11 +25,6 @@ _current_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
-def get_current_trace_headers() -> dict[str, str] | None:
-    """Get the current trace headers from context."""
-    return _current_trace_headers.get()
-
-
 def get_current_trace_id() -> str | None:
     """Get the current trace ID (task_run_id) from context, or None.
 
@@ -58,7 +53,6 @@ def get_current_api_key() -> str | None:
 
 __all__ = [
     "get_current_api_key",
-    "get_current_trace_headers",
     "get_current_trace_id",
     "set_trace_context",
 ]

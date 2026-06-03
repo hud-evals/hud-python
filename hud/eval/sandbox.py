@@ -1,15 +1,12 @@
 """Sandbox: the substrate spinup layer, decoupled from the client/server.
 
-A ``Sandbox`` knows how to *bring up* a substrate that serves the HUD control
-channel and expose its ``runtime`` — the connectable thing (a control-channel
-url + params). It can do whatever it needs: run a local process, a container,
-or call HUD infra / a third party to provision a remote box. The transport
-(``HudClient``) and the env server know nothing about ``Sandbox``; the
-``launch`` helper sits on top and wires the two together.
+A ``Sandbox`` brings up a substrate that serves the HUD control channel and exposes
+its ``runtime`` (url + params) — a local process (``LocalSandbox``), an attached url
+(``RemoteSandbox``), or a HUD-hosted box (``HudSandbox``). ``launch`` wires it to a
+``HudClient``::
 
-    sandbox = LocalSandbox(env)          # or HudSandbox(...), RemoteSandbox(...)
-    async with sandbox as runtime:       # create() on enter, terminate() on exit
-        ...                              # connect a client to runtime.url
+    async with LocalSandbox(env) as runtime:  # create() on enter, terminate() on exit
+        ...                                   # connect a client to runtime.url
 """
 
 from __future__ import annotations
@@ -134,16 +131,9 @@ class RemoteSandbox(Sandbox):
 class HudSandbox(Sandbox):
     """A HUD-hosted sandbox, provisioned via the HUD control plane.
 
-    Lifecycle:
-      ``create``    — provision a box from ``image`` (``_provision``) and return
-                      its ``Runtime`` (control-channel url + auth token).
-      ``terminate`` — release the box (``_deprovision``).
-
-    The orchestration (provision → runtime, and teardown) is implemented here;
-    only the two HTTP calls to the HUD control plane (``_provision`` /
-    ``_deprovision``) are left as seams to wire to the backend. Waiting for the
-    control channel to accept connections is the client's job (``launch`` retries
-    the connect), not the sandbox's.
+    ``create`` provisions a box from ``image`` and returns its ``Runtime`` (url +
+    token); ``terminate`` releases it. Only the two control-plane HTTP calls
+    (``_provision`` / ``_deprovision``) are left as seams to wire to the backend.
     """
 
     def __init__(

@@ -5,8 +5,8 @@ The tools moved in the v6 teardown:
 - standalone tools (``BaseTool``, ``BashTool``, ``EditTool``, ``JupyterTool``,
   ``MemoryTool``, ``PlaywrightTool``) → :mod:`hud.native.tools`
 - result/answer types (``Citation``, ``AgentAnswer``, ``ScenarioResult`` /
-  ``EvaluationResult``, ``ContentResult``, ``SubScore``, ``Coordinate``,
-  ``ToolError``) → :mod:`hud.agents.types`
+  ``EvaluationResult``, ``ContentResult``, ``SubScore``, ``ToolError``)
+  → :mod:`hud.agents.types`
 
 Old ``hud.tools`` and ``hud.tools.*`` imports still resolve so existing code keeps
 importing, but every symbol is a **no-op stand-in** that emits a

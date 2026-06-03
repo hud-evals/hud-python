@@ -1,17 +1,9 @@
 """HudClient: JSON-RPC client for the HUD wire protocol.
 
-Transport + ergonomics for an ``Env.serve()`` endpoint. Drives the
-``hello`` / ``tasks.list`` / ``tasks.start`` / ``tasks.evaluate`` /
-``tasks.cancel`` / ``bye`` methods, and exposes capability access:
-
-* ``binding(name)`` — the raw ``Capability`` declaration (BYO connection).
-* ``open(name)``    — a live, cached ``CapabilityClient`` (we own the socket).
-* ``task(id, **args)`` — a ``Trace`` run-handle (async context manager).
-
-Two module-level entry points sit on top:
-
-* ``connect(endpoint)`` — attach to an already-running env (borrow; no teardown).
-* ``launch(ref)``       — provision + attach (own; tears down what it started).
+Transport for an ``Environment.serve()`` endpoint: drives ``hello`` / ``tasks.*`` /
+``bye`` and exposes capabilities via ``binding(name)`` (raw declaration) /
+``open(name)`` (live client) and ``task(id, **args)`` (a ``Run`` handle). Use the
+module-level ``connect`` to attach, or ``hud.eval.launch`` to provision + attach.
 """
 
 from __future__ import annotations
@@ -58,18 +50,14 @@ class HudProtocolError(RuntimeError):
 
 
 class HudClient:
-    """JSON-RPC client for an ``Env.serve()`` endpoint.
+    """JSON-RPC client for an ``Environment.serve()`` endpoint.
 
-    Prefer the module-level ``hud.connect`` / ``hud.launch`` helpers; this class
-    is the transport they sit on. ``hello`` runs on ``__aenter__`` so
-    ``manifest`` is ready immediately::
+    Prefer ``hud.connect`` / ``hud.eval.launch``; this is the transport they sit on.
+    ``hello`` runs on ``__aenter__`` so ``manifest`` is ready immediately::
 
         async with await HudClient.connect("127.0.0.1", 9001) as client:
             async with client.task("write_hello") as run:
-                ssh = await run.client.open("shell")
-                ...
-                run.trace.content = "done"          # the answer, graded on exit
-            print(run.trace.reward)
+                run.trace.content = "done"   # the answer, graded on exit
     """
 
     PROTOCOL_VERSION = "hud/1.0"

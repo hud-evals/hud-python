@@ -1,21 +1,14 @@
-"""Export HUD tasks to Harbor task folders (deterministic, build-time).
+"""Export HUD tasks to Harbor task folders (deterministic).
 
-:func:`export` turns a HUD task source (a ``Variant`` source, same as ``hud eval``)
-into Harbor task folders — ``task.toml`` + ``instruction.md`` + ``environment/`` +
-``tests/test.sh``. Driven by the ``hud harbor`` CLI command.
-
-Grading happens at run-time via ``hud client run`` (a CLI over the env control
-channel): the generated ``tests/test.sh`` connects to the env served in the
-container and submits the agent's answer. Because grading runs in the env that
-shares the agent's ``ssh`` workspace, state-based checks see the agent's changes.
-
-A HUD env is Harbor-convertible iff all its capabilities are ``ssh`` and/or ``mcp``
-(Harbor is shell/script-centric; ``rfb``/``cdp`` have no Harbor analogue).
+:func:`export` turns a task source (JSON/JSONL or ``.py``, like ``hud eval``) into
+Harbor folders (``task.toml`` + ``instruction.md`` + ``environment/`` +
+``tests/test.sh``). The generated ``test.sh`` grades via ``hud client run`` against
+the env's control channel in the container. Convertible iff the env's capabilities
+are ``ssh``/``mcp`` only (Harbor is shell-centric; ``rfb``/``cdp`` don't map).
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -26,16 +19,6 @@ if TYPE_CHECKING:
 
 #: Capability protocols that map onto Harbor's shell/tool model.
 ALLOWED_PROTOCOLS = ("ssh", "mcp")
-
-
-def _variant_slug(task: str, args: dict[str, Any]) -> str:
-    """Stable per-task folder name: task id, disambiguated by args when present."""
-    if not args:
-        return task
-    digest = hashlib.sha1(  # noqa: S324 - non-crypto, stable disambiguator
-        json.dumps(args, sort_keys=True, default=str).encode("utf-8"),
-    ).hexdigest()[:8]
-    return f"{task}-{digest}"
 
 
 def _check_capabilities(env: Environment) -> None:
@@ -126,7 +109,7 @@ async def export(source: str, out_dir: str | Path) -> list[Path]:
         env = _resolve_env(variant)
         _check_capabilities(env)
 
-        slug = variant.slug or _variant_slug(variant.task, variant.args)
+        slug = variant.slug or variant.default_slug()
         task_dir = out / slug
         (task_dir / "environment").mkdir(parents=True, exist_ok=True)
         (task_dir / "tests").mkdir(parents=True, exist_ok=True)

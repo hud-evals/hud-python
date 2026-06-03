@@ -11,23 +11,12 @@ if TYPE_CHECKING:
 
 
 class Agent(ABC):
-    """An agent turns a live run into a ``Trace``.
+    """Drives a live ``Run`` to completion by filling ``run.trace`` in place.
 
-    Subclasses implement ``__call__(run)`` and callers drive an agent with
-    ``await agent(run)``. An agent is stateless with respect to any single run —
-    everything it needs comes from ``run`` (``run.prompt`` and capabilities via
-    ``run.client.open`` / ``run.client.binding``) — so one instance can drive many
-    concurrent rollouts safely.
-
-    ``run`` owns the trace (like an RL rollout buffer or an open telemetry span):
-    the agent *fills* ``run.trace`` in place — messages, samples, and the final
-    ``content`` (the answer the env grades on exit) — rather than returning a new
-    one. The caller reads the result back off ``run.trace``.
-
-    ``native_tools`` are standalone :class:`hud.native.tools.BaseTool`s the agent
-    carries to *serve* (the catalog tools are capability proxies that forward to an
-    env, so they are not servable). :meth:`as_mcp_server` turns them into a running
-    server an ``Environment`` can attach as an ``mcp`` capability.
+    Subclasses implement ``__call__(run)``; callers do ``await agent(run)``. Stateless
+    per run — everything comes from ``run`` — so one instance drives many concurrent
+    rollouts. ``native_tools`` are standalone ``BaseTool``s the agent can *serve* via
+    :meth:`as_mcp_server` (catalog tools are capability proxies, not servable).
     """
 
     #: Standalone BaseTools (instances or classes) this agent exposes via MCP.

@@ -1,24 +1,11 @@
 """Run: the live handle for one task.
 
-``Run`` owns the *task lifecycle* — the things the env produces around a rollout:
-the ``prompt`` (from ``tasks.start`` on enter), and the ``reward`` + raw
-``evaluation`` (from ``tasks.evaluate`` on exit). It also holds the live ``trace``
-the agent fills in as it goes.
-
-The split mirrors who collects what:
-- ``Run``   → task lifecycle: ``prompt``, ``reward``, ``evaluation`` (+ the live client).
-- ``Trace`` → agent trajectory: ``messages``, ``samples``, ``content``, ``isError``.
-
-The agent acts *in* the run: it reads ``run.prompt``, reaches capabilities via
-``run.client.open(...)``, and accumulates onto ``run.trace`` (the answer is
-``run.trace.content``). Because the trace is live, a rollout that errors mid-flight
-still keeps whatever it gathered.
+``Run`` owns the task lifecycle — ``prompt`` (from ``tasks.start`` on enter),
+``reward`` + ``evaluation`` (from ``tasks.evaluate`` on exit) — and holds the live
+``trace`` the agent fills (its answer is ``run.trace.content``)::
 
     async with client.task("sum_column", sheet="q3.xlsx") as run:
-        ssh = await run.client.open("ssh")     # capabilities via the connection
-        ...
-        run.trace.content = answer              # graded on exit → run.reward
-    print(run.reward)
+        run.trace.content = answer   # graded on exit → run.reward
 """
 
 from __future__ import annotations

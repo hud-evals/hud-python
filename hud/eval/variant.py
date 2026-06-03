@@ -6,6 +6,8 @@ it launches the env and starts the task, yielding a live :class:`~hud.client.Run
 
 from __future__ import annotations
 
+import hashlib
+import json
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -42,6 +44,15 @@ class Variant:
     agent_config: dict[str, Any] | None = None
     columns: dict[str, Any] | None = None
     _stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
+
+    def default_slug(self) -> str:
+        """A stable slug from the task id, disambiguated by an args hash when present."""
+        if not self.args:
+            return self.task
+        digest = hashlib.sha1(  # noqa: S324 - non-crypto, stable disambiguator
+            json.dumps(self.args, sort_keys=True, default=str).encode("utf-8"),
+        ).hexdigest()[:8]
+        return f"{self.task}-{digest}"
 
     async def __aenter__(self) -> Run:
         self._stack = AsyncExitStack()

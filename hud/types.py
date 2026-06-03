@@ -252,44 +252,13 @@ class TraceStep(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
-class HudSpan(BaseModel):
-    """A telemetry span ready for export to HUD API."""
-
-    name: str
-    trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
-    span_id: str = Field(pattern=r"^[0-9a-fA-F]{16}$")
-    parent_span_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{16}$")
-
-    start_time: str  # ISO format
-    end_time: str  # ISO format
-
-    status_code: str  # "UNSET", "OK", "ERROR"
-    status_message: str | None = None
-
-    attributes: TraceStep
-    exceptions: list[dict[str, Any]] | None = None
-    internal_type: str | None = None
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class Trace(BaseModel):
     """The agent's trajectory for one rollout — a pure, serializable datum.
 
-    A ``Trace`` is everything the *agent* collects while running: its ``messages``,
-    token-level ``samples``, final ``content`` (the answer), and whether it errored.
-    It is the unit of training data — held by the thousands, dumped for telemetry,
-    collected by ``asyncio.gather``. The task lifecycle (prompt, reward, evaluation)
-    and the live connection live on ``Run`` (hud.client), not here.
-
-    Fields:
-    - info: Additional metadata collected during the run
-    - content: The final content/response from the agent (the graded answer)
-    - isError: Whether the execution resulted in an error
-    - citations: Provider-normalized citations from the final inference
-    - messages: The agent's message history
-    - samples: Token-level samples for RL training (one per model call)
-    - trace: The steps taken in the run (empty if not tracing)
+    Everything the *agent* collects while running: ``messages``, token-level
+    ``samples``, final ``content`` (the graded answer), ``citations``, and whether it
+    errored. The unit of training data. The task lifecycle (prompt, reward, evaluation)
+    and the live connection live on ``Run``, not here.
     """
 
     done: bool = Field(default=True)
@@ -326,7 +295,6 @@ class Trace(BaseModel):
 __all__ = [
     "AgentResponse",
     "AgentType",
-    "HudSpan",
     "JsonObject",
     "JsonValue",
     "MCPToolCall",

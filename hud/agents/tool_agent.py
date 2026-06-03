@@ -83,14 +83,6 @@ def to_prompt_messages(prompt: str | list[Any] | None) -> list[mcp_types.PromptM
 
 
 @dataclass
-class ToolInvocation:
-    """One tool call paired with its result."""
-
-    call: MCPToolCall
-    result: MCPToolResult
-
-
-@dataclass
 class RunState(Generic[MessageT]):
     """Mutable per-run state: messages + the tools/params built for this run.
 
@@ -328,4 +320,4 @@ class ToolAgent(Agent, Generic[MessageT]):
         """Convert a tool result into one or more provider messages, or None to skip."""
 
 
-__all__ = ["RunState", "ToolAgent", "ToolInvocation", "to_prompt_messages"]
+__all__ = ["RunState", "ToolAgent", "to_prompt_messages"]

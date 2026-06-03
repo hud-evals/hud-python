@@ -51,22 +51,14 @@ class Environment:
         input: Any = None,
         returns: Any = None,
     ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], Task[P]]:
-        """Register an async-generator task. ``id`` defaults to the function name.
+        """Register an async-generator task (``id`` defaults to the function name).
 
-        A task yields a prompt for the agent, then — once the answer is sent back —
-        yields a reward. The friendly form yields a raw prompt then a float /
-        ``EvaluationResult``; the explicit form yields ``{"prompt": ...}`` then
-        ``{"score": ...}``. Both are normalized to the wire protocol, so write
-        whichever reads better.
-
-        ``input`` declares the type(s) the agent is given (a model or union of
-        models; ``None`` = plain text); ``returns`` declares the type the agent
-        must produce (``None`` = plain text, else the answer is parsed into
-        ``AgentAnswer[returns]``). Both surface in the task manifest (as JSON
-        schemas) so an agent can inspect whether the task fits it.
-
-        Returns the :class:`~hud.environment.task.Task` — calling it with the task's
-        args yields a runnable :class:`~hud.eval.Variant`.
+        The task yields a prompt, then — once the answer is sent back — a reward.
+        Either form works (both normalized to the wire protocol): friendly (``yield
+        prompt`` → ``yield reward``) or explicit (``yield {"prompt": ...}`` → ``yield
+        {"score": ...}``). ``input``/``returns`` optionally declare the agent's I/O
+        types (surfaced in the manifest as JSON schemas). Returns a ``Task`` — call it
+        with the task's args to get a runnable :class:`~hud.eval.Variant`.
         """
         from .task import scenario_to_task_fn
 
@@ -106,18 +98,9 @@ class Environment:
     def initialize(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register an initializer, run once before the control channel serves.
 
-        Use it to bring up a backing daemon and publish its capability — e.g. start
-        a :class:`~hud.environment.Workspace` and ``add_capability`` its SSH endpoint::
-
-            ws = Workspace()
-
-            @env.initialize
-            async def _serve_shell() -> None:
-                await ws.start()
-                env.add_capability(Capability.ssh(
-                    url=ws.ssh_url, user=ws.ssh_user,
-                    host_pubkey=ws.ssh_host_pubkey, client_key_path=ws.ssh_client_key_path,
-                ))
+        Use it to start a backing daemon — e.g. a :class:`~hud.environment.Workspace`'s
+        SSH server — whose capability is declared at construction
+        (``Environment(..., capabilities=[ws.capability()])``).
         """
         self._on_start.append(fn)
         return fn

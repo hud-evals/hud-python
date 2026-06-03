@@ -4,8 +4,7 @@ Config classes are defined here separately from agent implementations
 to allow importing them without requiring SDK dependencies (anthropic, google-genai).
 This module also holds the agent-facing result/answer types (``Citation``,
 ``AgentAnswer``, ``ScenarioResult``/``EvaluationResult``, ``ContentResult``,
-``SubScore``, ``Coordinate``, ``ToolError``) — the serializable shapes agents and
-scenarios exchange.
+``SubScore``, ``ToolError``) — the serializable shapes agents and scenarios exchange.
 """
 
 from __future__ import annotations
@@ -154,18 +153,6 @@ class BrowserUseConfig(AgentConfig):
 # -----------------------------------------------------------------------------
 # Result / answer types (exchanged between agents, tools, and scenarios)
 # -----------------------------------------------------------------------------
-
-
-class Coordinate(BaseModel):
-    """A coordinate point with x and y values.
-
-    Used for path-based actions like drag operations.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    x: int = Field(..., description="X coordinate")
-    y: int = Field(..., description="Y coordinate")
 
 
 class SubScore(BaseModel):

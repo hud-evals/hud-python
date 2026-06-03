@@ -25,18 +25,14 @@ P = ParamSpec("P")
 
 
 class Task(Generic[P]):
-    """A registered challenge — and a typed factory for runnable variants.
+    """A registered challenge (returned by ``@env.task``) and a factory for variants.
 
-    Returned by ``@env.task``. Holds the async-generator ``func`` (prompt -> score),
-    identity (``id`` / ``description``), and the owning ``env``. ``TaskRunner`` drives
-    ``func`` server-side; calling the ``Task`` with the task's args binds a runnable
-    :class:`~hud.client.Variant`, type-checked against the signature via ``ParamSpec``::
+    ``TaskRunner`` drives its async-generator ``func`` (prompt → score) server-side;
+    calling the ``Task`` with the task's args binds a runnable
+    :class:`~hud.eval.Variant`::
 
-        @env.task(id="fix_bug")
-        async def fix_bug(difficulty: int = 1, hint: str | None = None): ...
-
-        variant_1 = fix_bug(difficulty=3, hint="line 42")   # -> Variant (type-checked)
-        async with variant_1 as run:
+        variant = fix_bug(difficulty=3)   # -> Variant
+        async with variant as run:
             await agent(run)
     """
 

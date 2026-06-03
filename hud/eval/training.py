@@ -1,21 +1,12 @@
 """HUD training client: turn rewarded rollouts into training signals.
 
-Decoupled from the agent. The agent's inference runs through a backend that
-collects token-level logprobs server-side (keyed by ``trace_id``); this client
-takes the resulting rewarded rollouts (``Run``s), computes **GRPO advantages**
-over the group (group-relative; the SDK owns the estimator), and sends
-``{trace_id, advantage}`` to the backend. The backend then attaches each
-self-contained advantage to its stored trajectory and runs
-``forward_backward`` + ``optim_step`` in the background — no grouping needed
-server-side.
-
-(Contrast with Tinker, which *is* tied to the agent: there the agent samples from
-the very policy you train. Here the agent only produces rollouts; training
-consumes them.)
+Agent-agnostic: take rewarded rollouts (``Run``s), compute **GRPO advantages** over
+the group, and POST ``{trace_id, advantage}`` to the backend (which holds the
+token-level trajectories keyed by ``trace_id`` and runs the optimizer)::
 
     trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
     runs = await Taskset(task(x) for x in xs).run(agent, group=16)
-    await trainer.reward(runs)            # this rollout got this reward; group → backend (async)
+    await trainer.reward(runs)
 """
 
 from __future__ import annotations
@@ -83,22 +74,12 @@ class HudTrainingClient:
     api_key: str | None = None
 
     async def reward(self, group: list[Rewarded]) -> None:
-        """Reward a group of rollouts; the model updates in the background.
+        """Reward a group of rollouts (the model updates in the background).
 
-        Each item just needs a ``trace_id`` and a ``reward`` (the ``Rewarded``
-        protocol — a ``Run`` qualifies). Computes GRPO advantages over the group
-        (group-relative; the SDK owns the estimator) and posts
-        ``{trace_id, advantage}`` to the backend, which attaches each
-        self-contained advantage to its stored trajectory and runs
-        ``forward_backward`` / ``optim_step`` per ``config`` — asynchronously.
-        Returns once the signals are enqueued; it does not wait for a step.
-
-        The group is structural: the rollouts you gathered for one task. Only
-        ``{trace_id, advantage}`` crosses the wire — never token data, and the
-        backend needs no grouping of its own.
-
-        Backend contract: ``POST {base_url}/train/advantages`` with
-        ``{"config": {...}, "signals": [{"trace_id", "advantage"}, ...]}``.
+        Computes GRPO advantages over the group and POSTs ``{trace_id, advantage}``
+        to ``{base_url}/train/advantages``. Each item just needs ``trace_id`` +
+        ``reward`` (a ``Run`` qualifies); only those signals cross the wire, never
+        token data. Returns once enqueued — it does not wait for an optim step.
         """
         advantages = group_relative(
             [r.reward for r in group],

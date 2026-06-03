@@ -200,7 +200,7 @@ def instrument(
             result: Any = None,
             error: str | None = None,
         ) -> dict[str, Any]:
-            """Build a HudSpan-compatible span record."""
+            """Build a span record for export."""
             is_mcp = effective_method is not None
 
             extra_attrs: dict[str, Any] = {}
