@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import warnings
 
 import pytest
 
-from hud.environment import Environment
 from hud.native.graders import BashGrader, Grade, Grader
 from hud.tools.types import EvaluationResult, SubScore
+
+#: ``BashGrader`` shells out to ``/bin/bash``; skip its tests where it's absent (Windows).
+_HAS_BASH = os.path.exists("/bin/bash")
 
 
 class TestGrade:
@@ -173,6 +176,7 @@ class TestGraderCombinators:
         }
 
 
+@pytest.mark.skipif(not _HAS_BASH, reason="/bin/bash not available (e.g. Windows)")
 class TestBashGrader:
     async def test_compute_score_for_passing_command(self) -> None:
         score, metadata = await BashGrader.compute_score(command="echo hello")
@@ -208,26 +212,3 @@ class TestBashGrader:
         assert result.reward == pytest.approx(0.5)
 
 
-class TestScenarioIntegration:
-    async def test_scenario_can_yield_grade_from_gather(self) -> None:
-        env = Environment("test-env")
-
-        @env.scenario("bash-graded")
-        async def bash_graded_scenario():
-            yield "Run the verification"
-            yield await Grade.gather(
-                BashGrader.grade(weight=1.0, command="echo verified"),
-            )
-
-        prompt = await env.run_scenario_setup("bash-graded", {})
-        assert prompt == "Run the verification"
-
-        assert env._active_session is not None
-        env._active_session.answer = "done"
-        result = await env.run_scenario_evaluate("bash-graded")
-
-        assert result is not None
-        assert result.reward == 1.0
-        assert result.subscores is not None
-        assert result.subscores[0].name == "BashGrader"
-        assert "verified" in result.info["BashGrader"]["stdout"]

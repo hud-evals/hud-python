@@ -107,10 +107,19 @@ class AgentTool(BaseTool):
         super().__init__(name=name or task_id, description=description or f"Run task: {task_id}")
 
     def _scenario_fn(self) -> Any:
+        """The original task generator, for deriving the tool's parameter schema.
+
+        Prefer the env's recorded ``@env.scenario`` source; otherwise fall back to
+        the ``Task``'s function (``__wrapped__`` unwraps the wire-protocol adapter
+        back to the author's generator, so its real parameters are visible).
+        """
         env = getattr(self._task, "env", None)
         task_id = getattr(self._task, "id", None)
         fns = getattr(env, "_scenario_fns", None)
-        return fns.get(task_id) if fns is not None and task_id is not None else None
+        if fns is not None and task_id in fns:
+            return fns[task_id]
+        func = getattr(self._task, "func", None)
+        return getattr(func, "__wrapped__", func)
 
     def _build_schema(self, params: dict[str, inspect.Parameter]) -> dict[str, Any]:
         from pydantic import TypeAdapter

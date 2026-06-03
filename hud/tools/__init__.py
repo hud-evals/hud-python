@@ -24,8 +24,11 @@ import importlib
 import importlib.abc
 import importlib.util
 import sys
-import types
 import warnings
+
+# Import ``ModuleType`` by name — a plain ``import types`` would be rebound to the
+# ``hud.tools.types`` submodule once it's imported, breaking ``create_module``.
+from types import ModuleType
 from typing import Any
 
 _MSG = (
@@ -128,6 +131,24 @@ def _make_getattr(module_name: str) -> Any:
     return __getattr__
 
 
+def _make_redirect_getattr(module_name: str, target_name: str) -> Any:
+    """Lazily resolve attributes from the redirect target on each access.
+
+    Resolving lazily (instead of copying attrs once at import time) avoids a
+    partial-import race: the target is fully imported by the time an attribute is
+    actually read. Names the target lacks (dropped v5 symbols) fall back to a
+    marker/no-op.
+    """
+
+    def __getattr__(name: str) -> Any:
+        target = importlib.import_module(target_name)
+        if hasattr(target, name):
+            return getattr(target, name)
+        return _resolve_name(module_name, name)
+
+    return __getattr__
+
+
 class _DeprecatedToolsFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     """Resolve ``hud.tools.*`` submodules: redirect, computer-marker, or no-op."""
 
@@ -136,23 +157,19 @@ class _DeprecatedToolsFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader)
             return None
         return importlib.util.spec_from_loader(fullname, self)
 
-    def create_module(self, spec: Any) -> types.ModuleType:
-        return types.ModuleType(spec.name)
+    def create_module(self, spec: Any) -> ModuleType:
+        return ModuleType(spec.name)
 
-    def exec_module(self, module: types.ModuleType) -> None:
+    def exec_module(self, module: ModuleType) -> None:
         name = module.__name__
         redirect = _MODULE_REDIRECTS.get(name)
         if redirect is not None:
             warnings.warn(
                 f"{name} moved to {redirect} ({_MSG})", DeprecationWarning, stacklevel=2,
             )
-            target = importlib.import_module(redirect)
-            for attr in dir(target):
-                if not attr.startswith("__"):
-                    setattr(module, attr, getattr(target, attr))
-            # Names that existed in v5 but were dropped (e.g. GeminiEditTool) fall
-            # back to a marker/no-op instead of an ImportError.
-            module.__getattr__ = _make_getattr(name)  # type: ignore[attr-defined]
+            # Resolve attributes lazily from the target (avoids a partial-import
+            # race); dropped v5 names fall back to a marker/no-op.
+            module.__getattr__ = _make_redirect_getattr(name, redirect)  # type: ignore[attr-defined]
             return
         # Non-redirected submodule: resolve names lazily (computer marker / no-op).
         module.__path__ = []  # mark as package so deeper imports route back here

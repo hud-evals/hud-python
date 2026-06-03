@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from openai import AsyncOpenAI
@@ -150,4 +150,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
         kwargs.setdefault("model_client", client)
         kwargs.setdefault("validate_api_key", False)
 
-    return agent_type.cls.create(**kwargs)
+    # The resolved kwargs (model + provider client + validate flag) are config
+    # fields; build the provider's config and construct the agent.
+    config = agent_type.config_cls(**kwargs)
+    return agent_type.cls(cast("Any", config))

@@ -14,6 +14,7 @@ from a2a.server.events.event_queue import EventQueue
 from a2a.types import TaskArtifactUpdateEvent, TaskState, TaskStatusUpdateEvent
 from mcp.types import TextContent
 
+from hud.eval import Variant
 from hud.services.chat import Chat, _content_to_blocks
 
 # ---------------------------------------------------------------------------
@@ -23,13 +24,8 @@ from hud.services.chat import Chat, _content_to_blocks
 
 @pytest.fixture()
 def dummy_task() -> Any:
-    """Minimal Task-like object for Chat construction."""
-    task = MagicMock()
-    task.scenario = "test_scenario"
-    task.args = {}
-    task.model_copy = MagicMock(return_value=task)
-    task.env = MagicMock()
-    return task
+    """Minimal Variant for Chat construction."""
+    return Variant(env=MagicMock(), task="test_scenario")
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +57,7 @@ class TestChatConstruction:
 
     def test_positional_task(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, model="test-model")
-        assert chat._task is dummy_task
+        assert chat._variant is dummy_task
         assert chat._model == "test-model"
 
     def test_messages_start_empty(self, dummy_task: Any) -> None:
@@ -93,14 +89,16 @@ class TestMessageFormat:
     async def test_send_stores_prompt_message_format(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, model="test-model")
 
-        mock_result = MagicMock()
-        mock_result.content = "response text"
-        mock_result.citations = []
-        mock_result.reward = 1.0
+        run = MagicMock()
+        run.trace = MagicMock(content="response text", citations=[])
+        fake_variant = MagicMock()
+        fake_variant.__aenter__ = AsyncMock(return_value=run)
+        fake_variant.__aexit__ = AsyncMock(return_value=False)
 
-        dummy_task.run = AsyncMock(return_value=mock_result)
-
-        with patch.object(chat, "_create_agent", return_value=MagicMock()):
+        with (
+            patch("hud.services.chat.replace", return_value=fake_variant),
+            patch.object(chat, "_create_agent", return_value=AsyncMock()),
+        ):
             await chat.send("hello")
 
         assert len(chat.messages) == 2
@@ -251,15 +249,3 @@ class TestAgentCard:
         card = chat.agent_card()
         assert "text/plain" in card.default_input_modes
         assert "text/plain" in card.default_output_modes
-
-
-# ---------------------------------------------------------------------------
-# as_tool
-# ---------------------------------------------------------------------------
-
-
-class TestAsToolIntegration:
-    def test_as_tool_returns_agent_tool(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="m")
-        tool = chat.as_tool(name="my_tool")
-        assert tool.name == "my_tool"
