@@ -9,6 +9,7 @@ import logging
 import secrets
 from typing import TYPE_CHECKING, Any, ParamSpec, cast
 
+from .legacy import LegacyEnvMixin
 from .task import Task, TaskRunner
 from .utils import error, read_frame, reply, send_frame
 
@@ -22,16 +23,32 @@ LOGGER = logging.getLogger("hud.environment.env")
 P = ParamSpec("P")
 
 
-class Environment:
-    """Capabilities + tasks dispatched over the HUD wire protocol."""
+class Environment(LegacyEnvMixin):
+    """Capabilities + tasks dispatched over the HUD wire protocol.
+
+    Also accepts the deprecated v5 env-authoring surface (positional ``name``,
+    ``@env.scenario``, ``@env.tool`` / ``env.add_tool``, ``env("scenario")``,
+    ``env.run``) via :class:`~hud.environment.legacy.LegacyEnvMixin`, so deployed
+    v5 envs keep running. Each legacy entry point warns and adapts to v6.
+    """
 
     def __init__(
         self,
+        name: str = "environment",
         *,
-        name: str,
         version: str = "0.0.1",
         capabilities: list[Capability] | None = None,
+        **legacy_kwargs: Any,
     ) -> None:
+        if legacy_kwargs:
+            import warnings
+
+            warnings.warn(
+                f"Environment(): ignoring v5 keyword(s) {sorted(legacy_kwargs)} "
+                "(no longer part of the v6 Environment surface).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.name = name
         self.version = version
         self.capabilities: list[Capability] = list(capabilities or [])
@@ -40,6 +57,7 @@ class Environment:
         # stands up). Run once by the substrate (LocalSandbox) around serving.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
+        self._init_legacy()
 
     # ─── task registration ───────────────────────────────────────────
 
@@ -82,15 +100,6 @@ class Environment:
             return task
 
         return decorate
-
-    def scenario(
-        self,
-        name: str | None = None,
-        *,
-        description: str = "",
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], Task[P]]:
-        """Deprecated alias for :meth:`task`. Prefer ``@env.task``."""
-        return self.task(id=name, description=description)
 
     def add_capability(self, cap: Capability) -> None:
         self.capabilities.append(cap)
