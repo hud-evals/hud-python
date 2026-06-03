@@ -102,6 +102,19 @@ if __name__ == "__main__":
 '''
 # fmt: on
 
+TASKS_PY = '''\
+"""Tasks for {env_name} — run with: hud eval tasks.py <agent>   (e.g. claude)."""
+
+from env import count
+
+# ``hud eval`` collects these Variants — each is the ``count`` task bound to
+# concrete args. Add your own, or build them in a loop.
+tasks = [
+    count(sentence="Strawberry world", letter="r"),
+    count(sentence="banana", letter="a"),
+]
+'''
+
 PYPROJECT_TOML = """\
 [project]
 name = "{name}"

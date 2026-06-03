@@ -10,7 +10,7 @@ import typer
 
 from hud.utils.hud_console import HUDConsole
 
-from .templates import DOCKERFILE_HUD, ENV_PY, PYPROJECT_TOML
+from .templates import DOCKERFILE_HUD, ENV_PY, PYPROJECT_TOML, TASKS_PY
 
 # Files that indicate this might be an existing project
 PROJECT_INDICATORS = {
@@ -144,6 +144,13 @@ def _init_in_existing_directory(
     else:
         hud_console.warning("env.py exists, skipping (use --force)")
 
+    tasks_py = target / "tasks.py"
+    if not tasks_py.exists() or force:
+        tasks_py.write_text(TASKS_PY.format(env_name=env_name))
+        created.append("tasks.py")
+    else:
+        hud_console.warning("tasks.py exists, skipping (use --force)")
+
     dep_result = _add_hud_dependency(target)
     if dep_result == "added":
         hud_console.success("Added hud-python dependency")
@@ -159,24 +166,23 @@ def _init_in_existing_directory(
 
     hud_console.section_title("Next Steps")
     hud_console.info("")
-    hud_console.info("1. Define your tools in env.py")
-    hud_console.info("   Tools are functions the agent can call. Wrap existing code")
-    hud_console.info("   with @env.tool() or connect FastAPI/OpenAPI servers.")
+    hud_console.info("1. Define tasks in env.py")
+    hud_console.info("   A @env.task is an async generator: it yields a prompt, then")
+    hud_console.info("   (after the agent answers) yields a reward.")
     hud_console.info("")
-    hud_console.info("2. Write scripts that test agent behavior")
-    hud_console.info("   Scripts define prompts and scoring. The agent runs between")
-    hud_console.info("   two yields: first sends the task, second scores the result.")
+    hud_console.info("2. List the tasks to run in tasks.py")
+    hud_console.info("   Call a task with args to bind a runnable Variant.")
     hud_console.info("")
-    hud_console.info("3. Run locally to iterate")
-    hud_console.command_example("python env.py", "Run the test script")
+    hud_console.info("3. Run an agent over them")
+    hud_console.command_example("hud eval tasks.py claude", "Evaluate locally")
     hud_console.info("")
     hud_console.info("4. Deploy for scale")
-    hud_console.info("   Push to GitHub, connect on hud.ai. Then run hundreds of")
-    hud_console.info("   evals in parallel and collect training data.")
+    hud_console.info("   hud build, hud deploy, then run many evals in parallel.")
     hud_console.info("")
     hud_console.section_title("Files")
-    hud_console.info("• env.py         Your tools, scripts, and test code")
-    hud_console.info("• Dockerfile.hud Container config for remote deployment")
+    hud_console.info("• env.py         Your environment: capabilities + @env.task tasks")
+    hud_console.info("• tasks.py       The Variants to evaluate (hud eval tasks.py <agent>)")
+    hud_console.info("• Dockerfile.hud Container config for deployment")
 
 
 def smart_init(

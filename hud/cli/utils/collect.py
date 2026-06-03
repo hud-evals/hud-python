@@ -16,7 +16,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _scan_variants(module: Any) -> list[Any]:
-    """Gather new-flow ``Variant``s (and ``Taskset`` members) from an imported module."""
+    """Gather new-flow ``Variant``s from an imported module.
+
+    Picks up module-level ``Variant`` instances, a ``Taskset``, or a ``list``/``tuple``
+    of ``Variant``s (e.g. ``tasks = [task(x) for x in ...]``).
+    """
     from hud.eval import Taskset, Variant
 
     variants: list[Any] = []
@@ -28,6 +32,8 @@ def _scan_variants(module: Any) -> list[Any]:
             variants.append(val)
         elif isinstance(val, Taskset):
             variants.extend(val.variants)
+        elif isinstance(val, (list, tuple)):
+            variants.extend(item for item in val if isinstance(item, Variant))
     return variants
 
 
