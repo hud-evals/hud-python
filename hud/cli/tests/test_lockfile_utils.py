@@ -12,24 +12,13 @@ def test_build_lock_data_builds_shared_lock_shape(tmp_path) -> None:
     controller_dir.mkdir()
     (controller_dir / "server.py").write_text("print('ok')\n", encoding="utf-8")
 
+    capability = {"name": "shell", "protocol": "ssh/2", "url": "ssh://host:22", "params": {}}
     lock_data = build_lock_data(
         source_dir=tmp_path,
+        # v6 analysis: the env's capabilities + tasks (from Environment.to_dict()).
         analysis={
-            "initializeMs": 123,
-            "toolCount": 1,
-            "internalToolCount": 1,
-            "tools": [
-                {
-                    "name": "setup",
-                    "description": "Calls internal functions.",
-                    "inputSchema": {"type": "object"},
-                    "internalTools": ["prepare"],
-                }
-            ],
-            "prompts": [],
-            "resources": [],
-            "scenarios": [],
-            "hubTools": {"setup": ["prepare"]},
+            "capabilities": [capability],
+            "tasks": [{"id": "solve", "description": "Solve the task"}],
         },
         version="1.2.3",
         image_name="acme/repo",
@@ -40,6 +29,7 @@ def test_build_lock_data_builds_shared_lock_shape(tmp_path) -> None:
         hud_version_value="modal-native",
     )
 
+    assert lock_data["version"] == "2.0"
     assert lock_data["images"] == {
         "local": "acme/repo:1.2.3",
         "full": "acme/repo:1.2.3@sha256:abc",
@@ -54,19 +44,10 @@ def test_build_lock_data_builds_shared_lock_shape(tmp_path) -> None:
         "Dockerfile.hud",
         "controller/server.py",
     ]
-    assert lock_data["environment"]["initializeMs"] == 123
-    assert lock_data["environment"]["toolCount"] == 1
-    assert lock_data["environment"]["internalToolCount"] == 1
     assert lock_data["environment"]["variables"]["required"] == [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
     ]
-    assert lock_data["tools"] == [
-        {
-            "name": "setup",
-            "description": "Calls internal functions.",
-            "inputSchema": {"type": "object"},
-            "internalTools": ["prepare"],
-        }
-    ]
-    assert lock_data["hubTools"] == {"setup": ["prepare"]}
+    # v6 manifest sections
+    assert lock_data["capabilities"] == [capability]
+    assert lock_data["tasks"] == [{"id": "solve", "description": "Solve the task"}]
