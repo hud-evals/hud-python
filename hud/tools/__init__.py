@@ -3,7 +3,7 @@
 The tools moved in the v6 teardown, but deployed v5 envs still import from here, so
 this shim keeps those imports working (each emits a ``DeprecationWarning``):
 
-- standalone tools (``BaseTool``/``BaseHub``, ``BashTool``/``EditTool``,
+- standalone tools (``BaseTool``, ``BashTool``/``EditTool``,
   ``JupyterTool``, ``MemoryTool``, ``PlaywrightTool``, ``AgentTool``)
   → redirected to the real classes in :mod:`hud.native.tools`
 - result/answer types (``AgentAnswer``, ``Citation``, ``EvaluationResult`` /
@@ -50,7 +50,6 @@ _MODULE_REDIRECTS: dict[str, str] = {
 #: Old top-level ``hud.tools`` symbol -> real v6 module to import it from.
 _NAME_REDIRECTS: dict[str, str] = {
     "AgentTool": "hud.native.tools.agent",
-    "BaseHub": "hud.native.tools.base",
     "BaseTool": "hud.native.tools.base",
     "BashTool": "hud.native.tools.coding",
     "EditTool": "hud.native.tools.coding",

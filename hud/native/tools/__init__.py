@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .agent import AgentTool as AgentTool
-    from .base import BaseHub as BaseHub
     from .base import BaseTool as BaseTool
     from .coding import BashTool as BashTool
     from .coding import EditTool as EditTool
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
 
 _LAZY: dict[str, str] = {
     "AgentTool": ".agent",
-    "BaseHub": ".base",
     "BaseTool": ".base",
     "BashTool": ".coding",
     "EditTool": ".coding",
@@ -38,7 +36,6 @@ _LAZY: dict[str, str] = {
 
 __all__ = [
     "AgentTool",
-    "BaseHub",
     "BaseTool",
     "BashTool",
     "EditTool",
