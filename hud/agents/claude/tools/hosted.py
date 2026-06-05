@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from anthropic.types.beta import (
     BetaCitationsConfigParam,
     BetaToolSearchToolBm25_20251119Param,
     BetaToolUnionParam,
-    BetaUserLocationParam,
     BetaWebFetchTool20250910Param,
     BetaWebSearchTool20250305Param,
 )
+
+if TYPE_CHECKING:
+    BetaUserLocationParam = Any
 
 from hud.agents.tools import HostedTool
 
@@ -24,13 +27,6 @@ class ClaudeHostedTool(HostedTool[BetaToolUnionParam]):
 @dataclass(frozen=True, kw_only=True)
 class ClaudeWebSearchTool(ClaudeHostedTool):
     """Claude web search."""
-
-    supported_models: tuple[str, ...] | None = (
-        "claude-opus-4-7*",
-        "claude-opus-4-6*",
-        "claude-sonnet-4-6*",
-        "claude-haiku-4-5*",
-    )
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
@@ -56,12 +52,6 @@ class ClaudeWebSearchTool(ClaudeHostedTool):
 @dataclass(frozen=True, kw_only=True)
 class ClaudeWebFetchTool(ClaudeHostedTool):
     """Claude web fetch."""
-
-    supported_models: tuple[str, ...] | None = (
-        "claude-opus-4-7*",
-        "claude-opus-4-6*",
-        "claude-sonnet-4-6*",
-    )
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
@@ -92,12 +82,6 @@ class ClaudeToolSearchTool(ClaudeHostedTool):
     """Claude tool search for large tool sets."""
 
     threshold: int = 10
-    supported_models: tuple[str, ...] | None = (
-        "claude-opus-4-7*",
-        "claude-opus-4-6*",
-        "claude-sonnet-4-6*",
-        "claude-haiku-4-5*",
-    )
 
     def to_params(self) -> BetaToolSearchToolBm25_20251119Param:
         return BetaToolSearchToolBm25_20251119Param(

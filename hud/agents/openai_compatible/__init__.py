@@ -1,4 +1,4 @@
-"""OpenAI-compatible agent harness support."""
+"""OpenAI-compatible agent."""
 
 from .agent import OpenAIChatAgent
 

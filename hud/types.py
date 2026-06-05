@@ -166,6 +166,20 @@ class MCPToolResult(CallToolResult):
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
+class Sample(BaseModel):
+    """One model generation in a rollout: tokens conditioned on + tokens produced.
+
+    Token-level data for RL training (Tinker-shaped). ``output_logprobs`` are the
+    per-output-token logprobs under the *sampling* policy (q). Populated only when
+    the model backend is trainable (returns token ids + logprobs); closed/eval-only
+    backends leave it empty.
+    """
+
+    prompt_token_ids: list[int] = Field(default_factory=list)
+    output_token_ids: list[int] = Field(default_factory=list)
+    output_logprobs: list[float] = Field(default_factory=list)
+
+
 class AgentResponse(BaseModel):
     """Result of a single LLM inference call.
 
@@ -179,6 +193,10 @@ class AgentResponse(BaseModel):
     # --- FUNCTIONAL ---
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
     done: bool = Field(default=False)
+
+    # --- TRAINING ---
+    # Token-level data for THIS turn; present iff the model backend is trainable.
+    sample: Sample | None = Field(default=None)
 
     # --- RESPONSE ---
     content: str | None = Field(default=None)
@@ -234,41 +252,15 @@ class TraceStep(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
-class HudSpan(BaseModel):
-    """A telemetry span ready for export to HUD API."""
-
-    name: str
-    trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
-    span_id: str = Field(pattern=r"^[0-9a-fA-F]{16}$")
-    parent_span_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{16}$")
-
-    start_time: str  # ISO format
-    end_time: str  # ISO format
-
-    status_code: str  # "UNSET", "OK", "ERROR"
-    status_message: str | None = None
-
-    attributes: TraceStep
-    exceptions: list[dict[str, Any]] | None = None
-    internal_type: str | None = None
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class Trace(BaseModel):
-    """Unified result from agent execution (task or prompt).
+    """The agent's trajectory for one rollout — a pure, serializable datum.
 
-    Fields:
-    - done: Whether the run is complete
-    - reward: The reward for the run
-    - info: Additional metadata for the run
-    - content: The final content/response from the agent
-    - isError: Whether the execution resulted in an error
-    - citations: Provider-normalized citations from the final inference
-    - trace: The steps taken in the run (empty if not tracing)
+    Everything the *agent* collects while running: ``messages``, token-level
+    ``samples``, final ``content`` (the graded answer), ``citations``, and whether it
+    errored. The unit of training data. The task lifecycle (prompt, reward, evaluation)
+    and the live connection live on ``Run``, not here.
     """
 
-    reward: float = Field(default=0.0)
     done: bool = Field(default=True)
     info: dict[str, Any] = Field(default_factory=dict)
     content: str | None = Field(default=None)
@@ -277,12 +269,17 @@ class Trace(BaseModel):
     # Response metadata carried from the final AgentResponse
     citations: list[dict[str, Any]] = Field(default_factory=list)
 
-    # Metadata
-    task: Task | None = Field(default=None)
-
     # Trace
     trace: list[TraceStep] = Field(default_factory=list)
     messages: list[Any] = Field(default_factory=list)
+
+    # Token-level samples for RL training — one per model call; empty for
+    # eval-only runs. Inline mode (Mode A) fills these; server-side mode (Mode B)
+    # leaves them empty and keys the trajectory by ``trace_id`` instead.
+    # Inline token-level samples (Mode A); empty for eval-only runs.
+    samples: list[Sample] = Field(default_factory=list)
+    # Keys server-side-collected logprobs (Mode B); None for eval-only runs.
+    trace_id: str | None = Field(default=None)
 
     def __len__(self) -> int:
         return len(self.trace)
@@ -295,25 +292,13 @@ class Trace(BaseModel):
         self.trace.append(step)
 
 
-# Re-export Task for backwards compatibility (after module defs to avoid circular import)
-from hud.eval.task import Task  # noqa: E402
-
-# Resolve Trace.task's forward reference now that Task is available.
-Trace.model_rebuild()
-
-# Type alias for functions that accept Task objects or raw task dicts.
-TaskInput = Task | dict[str, Any]
-
 __all__ = [
     "AgentResponse",
     "AgentType",
-    "HudSpan",
     "JsonObject",
     "JsonValue",
     "MCPToolCall",
     "MCPToolResult",
-    "Task",
-    "TaskInput",
     "Trace",
     "TraceStep",
 ]

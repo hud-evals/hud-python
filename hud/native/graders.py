@@ -8,7 +8,7 @@ Usage::
 
     from hud.native.graders import BashGrader, Grade, LLMJudgeGrader
     from hud.native.graders import exact_match, contains
-    from hud.tools.types import SubScore
+    from hud.agents.types import SubScore
 
     # Simple one-liner
     yield exact_match(answer, "France")
@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
-from hud.tools.types import EvaluationResult, SubScore
+from hud.agents.types import EvaluationResult, SubScore
 from hud.utils.serialization import json_safe_dict
 
 logger = logging.getLogger(__name__)

@@ -23,10 +23,11 @@ class TestInitModule:
         expected = [
             "Chat",
             "Environment",
-            "EvalContext",
-            "eval",
+            "Taskset",
+            "Variant",
             "instrument",
-            "trace",  # Deprecated alias for eval
+            "launch",
+            "variant",
         ]
 
         assert set(hud.__all__) == set(expected)

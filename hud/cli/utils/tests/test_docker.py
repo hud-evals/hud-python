@@ -1,93 +1,77 @@
+"""Pure helpers in ``hud.cli.utils.docker`` (no Docker daemon needed)."""
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
 
-import pytest
+from hud.cli.utils import docker
 
-from hud.cli.utils.docker import (
-    build_run_command,
-    generate_container_name,
-    get_docker_cmd,
-    image_exists,
-    remove_container,
-    require_docker_running,
-)
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
-def test_build_run_command_basic():
-    cmd = build_run_command("my-image:latest")
-    assert cmd[:4] == ["docker", "run", "--rm", "-i"]
-    assert cmd[-1] == "my-image:latest"
+def test_extract_name_and_tag() -> None:
+    assert docker.extract_name_and_tag("hudpython/myenv:v1.0") == ("hudpython/myenv", "v1.0")
+    assert docker.extract_name_and_tag("myorg/myapp") == ("myorg/myapp", "latest")
+    assert docker.extract_name_and_tag("docker.io/org/img:tag@sha256:abc") == ("org/img", "tag")
 
 
-def test_build_run_command_with_args():
-    cmd = build_run_command("img", ["-e", "K=V", "-p", "8080:8080"])
-    assert "-e" in cmd and "K=V" in cmd
-    assert "-p" in cmd and "8080:8080" in cmd
-    assert cmd[-1] == "img"
+def test_generate_container_name_sanitizes() -> None:
+    assert docker.generate_container_name("org/img:tag") == "hud-org-img-tag"
+    assert docker.generate_container_name("x", prefix="run") == "run-x"
 
 
-def test_generate_container_name():
-    assert generate_container_name("repo/name:tag") == "hud-repo-name-tag"
-    assert generate_container_name("a/b:c", prefix="x") == "x-a-b-c"
+def test_build_run_command() -> None:
+    assert docker.build_run_command("img") == ["docker", "run", "--rm", "-i", "img"]
+    assert docker.build_run_command("img", ["-e", "K=V"]) == [
+        "docker", "run", "--rm", "-i", "-e", "K=V", "img",
+    ]
 
 
-@patch("subprocess.run")
-def test_image_exists_true(mock_run):
-    mock_run.return_value = MagicMock(returncode=0)
-    assert image_exists("any") is True
+def test_build_env_flags() -> None:
+    assert docker.build_env_flags({"A": "1", "B": "2"}) == ["-e", "A=1", "-e", "B=2"]
 
 
-@patch("subprocess.run")
-def test_image_exists_false(mock_run):
-    mock_run.return_value = MagicMock(returncode=1)
-    assert image_exists("any") is False
+def test_normalize_cmd_handles_exec_and_shell_forms() -> None:
+    assert docker._normalize_cmd(["hud", "dev", "env:env"]) == ["hud", "dev", "env:env"]
+    assert docker._normalize_cmd(["sh", "-c", "hud dev env:env --port 8080"]) == [
+        "hud", "dev", "env:env", "--port", "8080",
+    ]
 
 
-@patch("subprocess.run")
-def test_get_docker_cmd_success(mock_run):
-    mock_run.return_value = MagicMock(
-        stdout='[{"Config": {"Cmd": ["python", "-m", "app"]}}]', returncode=0
+def test_detect_transport_http_with_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        docker, "get_docker_cmd", lambda _img: ["hud", "dev", "env:env", "--port", "9000"]
     )
-    assert get_docker_cmd("img") == ["python", "-m", "app"]
+    assert docker.detect_transport("img") == ("http", 9000)
 
 
-@patch("subprocess.run")
-def test_get_docker_cmd_none(mock_run):
-    mock_run.return_value = MagicMock(stdout="[]", returncode=0)
-    assert get_docker_cmd("img") is None
+def test_detect_transport_defaults_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(docker, "get_docker_cmd", lambda _img: ["python", "server.py"])
+    assert docker.detect_transport("img") == ("stdio", None)
 
 
-@patch("subprocess.run")
-def test_remove_container_ok(mock_run):
-    mock_run.return_value = MagicMock(returncode=0)
-    assert remove_container("x") is True
+def test_detect_transport_no_cmd_is_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(docker, "get_docker_cmd", lambda _img: None)
+    assert docker.detect_transport("img") == ("stdio", None)
 
 
-@patch("shutil.which", return_value=None)
-def test_require_docker_running_no_cli(_which):
-    import typer
-
-    with pytest.raises(typer.Exit):
-        require_docker_running()
+def test_detect_environment_dir_finds_lockfile(tmp_path: Path) -> None:
+    (tmp_path / "hud.lock.yaml").write_text("version: '2.0'\n", encoding="utf-8")
+    assert docker.detect_environment_dir(tmp_path) == tmp_path
 
 
-@patch("shutil.which", return_value="docker")
-@patch("subprocess.run")
-def test_require_docker_running_ok(mock_run, _which):
-    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-    require_docker_running()  # should not raise
+def test_detect_environment_dir_falls_back_to_dockerfile(tmp_path: Path) -> None:
+    (tmp_path / "Dockerfile").write_text("FROM python:3.11\n", encoding="utf-8")
+    assert docker.detect_environment_dir(tmp_path) == tmp_path
 
 
-@patch("shutil.which", return_value="docker")
-@patch("subprocess.run")
-def test_require_docker_running_error_emits_hints(mock_run, _which):
-    import typer
+def test_load_env_vars_for_dir(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("KEY=value\nOTHER=2\n", encoding="utf-8")
+    assert docker.load_env_vars_for_dir(tmp_path) == {"KEY": "value", "OTHER": "2"}
 
-    mock_run.return_value = MagicMock(
-        returncode=1,
-        stdout="Cannot connect to the Docker daemon",
-        stderr="",
-    )
-    with pytest.raises(typer.Exit):
-        require_docker_running()
+
+def test_load_env_vars_missing_is_empty(tmp_path: Path) -> None:
+    assert docker.load_env_vars_for_dir(tmp_path) == {}

@@ -70,8 +70,8 @@ def _do_upload(
 
 def _get_api_key() -> str | None:
     """Get the API key - prefer context override, fallback to settings."""
-    from hud.eval.context import get_current_api_key
     from hud.settings import settings
+    from hud.telemetry.context import get_current_api_key
 
     return get_current_api_key() or settings.api_key
 
@@ -111,7 +111,9 @@ def queue_span(span: dict[str, Any]) -> None:
             _ = f.exception()
         with contextlib.suppress(ValueError):
             _pending_futures.remove(f)
-        if not f.exception():
+        # Only drop the span once it has actually uploaded; a failed upload
+        # (``_do_upload`` -> False) or an exception keeps it pending for re-flush.
+        if not f.exception() and f.result():
             with contextlib.suppress(Exception):
                 if task_run_id in _pending_spans and span in _pending_spans[task_run_id]:
                     _pending_spans[task_run_id].remove(span)

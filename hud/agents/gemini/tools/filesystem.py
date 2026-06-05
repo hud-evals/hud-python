@@ -1,14 +1,16 @@
-"""Agent-side Gemini filesystem tools."""
+"""Gemini filesystem tools — read, search, glob, list — backed by SSHClient."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
-if TYPE_CHECKING:
-    from hud.agents.tools.base import CallTool
-    from hud.types import MCPToolResult
+from google.genai import types as genai_types
 
-from .base import GeminiTool, GeminiToolSpec
+from hud.agents.tools import SSHTool
+from hud.types import MCPToolResult
+
+from .base import GeminiToolSpec
+from .coding import _decl, _required_str
 
 GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
 GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")
@@ -16,18 +18,9 @@ GEMINI_GLOB_SPEC = GeminiToolSpec(api_type="glob", api_name="glob")
 GEMINI_LIST_SPEC = GeminiToolSpec(api_type="list_directory", api_name="list_directory")
 
 
-class GeminiFilesystemTool(GeminiTool):
-    """Gemini function tool backed by one filesystem environment primitive."""
-
-    capability: ClassVar[str]
-
-
-class GeminiReadTool(GeminiFilesystemTool):
-    """Translate Gemini read_file calls into the generic read env primitive."""
-
+class GeminiReadTool(SSHTool):
     name = "read_file"
-    capability = "filesystem.read"
-    description = "Reads and returns the content of a specified file."
+    description: ClassVar[str] = "Reads and returns the content of a specified file."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -43,29 +36,34 @@ class GeminiReadTool(GeminiFilesystemTool):
         del model
         return GEMINI_READ_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+        path = _required_str(arguments, "file_path")
+        result = await self.file_read(path)
+        if result.isError:
+            return result
         start = arguments.get("start_line")
         end = arguments.get("end_line")
-        offset = int(start) - 1 if isinstance(start, int) and start > 0 else None
-        limit = None
-        if offset is not None and isinstance(start, int) and isinstance(end, int) and end >= start:
-            limit = end - start + 1
-        return await super().execute(
-            call_tool,
-            {
-                "filePath": _required_str(arguments, "file_path"),
-                "offset": offset,
-                "limit": limit,
-            },
-        )
+        if isinstance(start, int) and start > 0:
+            import mcp.types as mcp_types
+
+            from hud.agents.tools.base import result_text
+
+            lines = result_text(result).splitlines(keepends=True)
+            offset = start - 1
+            limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
+            sliced = lines[offset : offset + limit]
+            return MCPToolResult(
+                content=[mcp_types.TextContent(type="text", text="".join(sliced))],
+            )
+        return result
 
 
-class GeminiSearchTool(GeminiFilesystemTool):
-    """Translate Gemini grep_search calls into the generic grep env primitive."""
-
+class GeminiSearchTool(SSHTool):
     name = "grep_search"
-    capability = "filesystem.grep"
-    description = "Searches file contents using a regular expression pattern."
+    description: ClassVar[str] = "Searches file contents using a regular expression pattern."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -81,32 +79,27 @@ class GeminiSearchTool(GeminiFilesystemTool):
         del model
         return GEMINI_SEARCH_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await super().execute(
-            call_tool,
-            {
-                "pattern": _required_str(arguments, "pattern"),
-                "path": arguments.get("dir_path"),
-                "include": arguments.get("include_pattern"),
-            },
-        )
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+        pattern = _required_str(arguments, "pattern")
+        dir_path = arguments.get("dir_path") or "."
+        include = arguments.get("include_pattern")
+        cmd = f"grep -rn {_shell_quote(pattern)} {_shell_quote(str(dir_path))}"
+        if isinstance(include, str) and include:
+            cmd += f" --include={_shell_quote(include)}"
+        return await self.bash(cmd)
 
 
-class GeminiGlobTool(GeminiFilesystemTool):
-    """Translate Gemini glob calls into the generic glob env primitive."""
-
+class GeminiGlobTool(SSHTool):
     name = "glob"
-    capability = "filesystem.glob"
-    description = "Find files matching a glob pattern."
+    description: ClassVar[str] = "Find files matching a glob pattern."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Glob pattern."},
             "dir_path": {"type": "string", "description": "Directory to search."},
-            "case_sensitive": {
-                "type": "boolean",
-                "description": "Whether matching is case-sensitive.",
-            },
         },
         "required": ["pattern"],
     }
@@ -116,32 +109,23 @@ class GeminiGlobTool(GeminiFilesystemTool):
         del model
         return GEMINI_GLOB_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await super().execute(
-            call_tool,
-            {
-                "pattern": _required_str(arguments, "pattern"),
-                "path": arguments.get("dir_path"),
-                "case_sensitive": arguments.get("case_sensitive", True),
-            },
-        )
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+        pattern = _required_str(arguments, "pattern")
+        dir_path = arguments.get("dir_path") or "."
+        cmd = f"find {_shell_quote(str(dir_path))} -name {_shell_quote(pattern)}"
+        return await self.bash(cmd)
 
 
-class GeminiListTool(GeminiFilesystemTool):
-    """Translate Gemini list_directory calls into the generic list env primitive."""
-
+class GeminiListTool(SSHTool):
     name = "list_directory"
-    capability = "filesystem.list"
-    description = "Lists files and directories in a given path."
+    description: ClassVar[str] = "Lists files and directories in a given path."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "dir_path": {"type": "string", "description": "Directory to list."},
-            "ignore": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Glob patterns to ignore.",
-            },
         },
         "required": ["dir_path"],
     }
@@ -151,18 +135,17 @@ class GeminiListTool(GeminiFilesystemTool):
         del model
         return GEMINI_LIST_SPEC
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
-        return await super().execute(
-            call_tool,
-            {
-                "path": _required_str(arguments, "dir_path"),
-                "ignore": arguments.get("ignore"),
-            },
-        )
+    def to_params(self) -> genai_types.Tool:
+        return _decl(self.name, self.description, self.parameters)
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+        return await self.file_list(_required_str(arguments, "dir_path"))
 
 
-def _required_str(arguments: dict[str, Any], key: str) -> str:
-    value = arguments.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{key} is required")
-    return value
+def _shell_quote(s: str) -> str:
+    import shlex
+
+    return shlex.quote(s)
+
+
+__all__ = ["GeminiGlobTool", "GeminiListTool", "GeminiReadTool", "GeminiSearchTool"]

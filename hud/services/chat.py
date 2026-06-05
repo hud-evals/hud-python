@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from a2a.server.agent_execution import AgentExecutor
@@ -54,8 +55,7 @@ if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
-    from hud.eval.task import Task
-    from hud.tools.agent import AgentTool
+    from hud.eval import Variant
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class Chat(AgentExecutor):
 
     def __init__(
         self,
-        task: Task,
+        variant: Variant,
         /,
         *,
         model: str,
@@ -113,22 +113,23 @@ class Chat(AgentExecutor):
         """Initialize Chat.
 
         Args:
-            task: Task template (env + scenario + default args).
-                Positional only. Use ``env("scenario")`` or
-                ``scenario_handle.task()`` to create one.
-            model: Model name string (e.g. "claude-sonnet-4-20250514").
-                Auto-resolves to the right agent class.
+            variant: A :class:`hud.eval.Variant` (env + task + default args).
+                Positional only. Create one by calling a task, e.g.
+                ``chat_simple(messages=[])``. Its ``messages`` arg is replaced with
+                the running conversation on each :meth:`send`.
+            model: Model name string (e.g. "claude-sonnet-4-5").
+                Auto-resolves to the right agent via the HUD gateway.
             agent_params: Extra kwargs forwarded to agent creation
             name: Human-readable name for AgentCard generation
             description: Description for AgentCard generation
             trace: Whether to record traces on the HUD platform
             quiet: When True, suppress banner/link output (default for chat)
         """
-        self._task = task
+        self._variant = variant
         self._model = model
         self._agent_params = agent_params or {}
-        self._name = name or task.scenario or "chat"
-        self._description = description or f"Chat agent for {task.scenario or 'tasks'}"
+        self._name = name or variant.task or "chat"
+        self._description = description or f"Chat agent for {variant.task or 'tasks'}"
         self._max_steps = max_steps
         self._trace = trace
         self._quiet = quiet
@@ -160,16 +161,17 @@ class Chat(AgentExecutor):
 
         self.messages.append({"role": "user", "content": content_data})
 
-        task_args = dict(self._task.args or {})
-        task_args["messages"] = list(self.messages)
-        task = self._task.model_copy(update={"args": task_args})
-
-        result = await task.run(
-            self._create_agent(),
-            max_steps=self._max_steps,
-            trace=self._trace,
-            quiet=self._quiet,
+        # Rebuild the variant with the running conversation as the ``messages`` arg,
+        # then drive the agent over a fresh run (the chat task yields these messages
+        # as the prompt; see the messages input modality).
+        variant = replace(
+            self._variant,
+            args={**self._variant.args, "messages": list(self.messages)},
         )
+        agent = self._create_agent()
+        async with variant as run:
+            await agent(run, max_steps=self._max_steps)
+        result = run.trace
 
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
@@ -201,27 +203,6 @@ class Chat(AgentExecutor):
         self.messages = [dict(m) for m in messages]
 
     # ------------------------------------------------------------------
-    # MCP tool surface
-    # ------------------------------------------------------------------
-
-    def as_tool(
-        self,
-        *,
-        name: str | None = None,
-        description: str | None = None,
-    ) -> AgentTool:
-        """Return an AgentTool backed by this Chat's config."""
-        from hud.tools.agent import AgentTool
-
-        return AgentTool(
-            self._task,
-            model=self._model,
-            agent_params=self._agent_params,
-            name=name,
-            description=description,
-        )
-
-    # ------------------------------------------------------------------
     # A2A serving
     # ------------------------------------------------------------------
 
@@ -229,10 +210,10 @@ class Chat(AgentExecutor):
         """Generate an AgentCard from this Chat's configuration."""
         skills = [
             AgentSkill(
-                id=self._task.scenario or "default",
+                id=self._variant.task or "default",
                 name=self._name,
                 description=self._description,
-                tags=[self._task.scenario or "chat"],
+                tags=[self._variant.task or "chat"],
             )
         ]
 

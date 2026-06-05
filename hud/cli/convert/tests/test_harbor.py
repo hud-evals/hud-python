@@ -62,11 +62,11 @@ class TestNormalizeName:
 class TestAdaptDockerfile:
     def test_comments_cmd(self) -> None:
         result = _adapt_harbor_dockerfile('CMD ["bash"]')
-        assert result == '# [harbor original] CMD ["bash"]'
+        assert result == '# [original] CMD ["bash"]'
 
     def test_comments_entrypoint(self) -> None:
         result = _adapt_harbor_dockerfile('ENTRYPOINT ["/bin/bash"]')
-        assert result == '# [harbor original] ENTRYPOINT ["/bin/bash"]'
+        assert result == '# [original] ENTRYPOINT ["/bin/bash"]'
 
     def test_preserves_other_lines(self) -> None:
         dockerfile = "FROM python:3.11\nRUN echo hi\nCMD bash"
@@ -74,12 +74,12 @@ class TestAdaptDockerfile:
         lines = result.splitlines()
         assert lines[0] == "FROM python:3.11"
         assert lines[1] == "RUN echo hi"
-        assert lines[2] == "# [harbor original] CMD bash"
+        assert lines[2] == "# [original] CMD bash"
 
     def test_case_insensitive_match(self) -> None:
         # The implementation uses .upper() so indented CMD should match
         result = _adapt_harbor_dockerfile("  CMD bash")
-        assert result == "# [harbor original]   CMD bash"
+        assert result == "# [original]   CMD bash"
 
     def test_no_cmd_or_entrypoint(self) -> None:
         dockerfile = "FROM python:3.11\nRUN apt-get update"
@@ -235,7 +235,7 @@ class TestHarborConverterConvertSingleTask:
     def test_env_py_contains_scenario(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
         env_py = result.environments[0].env_py
-        assert "@env.scenario" in env_py
+        assert "@env.task" in env_py
         assert "run-task" in env_py
 
     def test_env_py_has_correct_timeout(self, single_task: Path) -> None:
@@ -400,7 +400,7 @@ class TestHarborConverterConvertNoDockerfile:
     def test_no_harbor_original_comments(self, dataset_no_dockerfile: Path) -> None:
         result = self.converter.convert(dataset_no_dockerfile)
         # Fallback dockerfile should NOT have commented-out lines
-        assert "# [harbor original]" not in result.environments[0].dockerfile
+        assert "# [original]" not in result.environments[0].dockerfile
 
 
 class TestHarborConverterConvertWithSolutions:
@@ -495,7 +495,7 @@ class TestDockerfileGeneration:
         result = self.converter.convert(single_task)
         dockerfile = result.environments[0].dockerfile
         # Original CMD ["bash"] should be commented out
-        assert "# [harbor original]" in dockerfile
+        assert "# [original]" in dockerfile
 
     def test_hud_layer_present(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
@@ -507,7 +507,7 @@ class TestDockerfileGeneration:
     def test_tasks_copied_into_image(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
         dockerfile = result.environments[0].dockerfile
-        assert "COPY tasks/ /harbor/tasks/" in dockerfile
+        assert "COPY tasks/ /tasks/" in dockerfile
 
     def test_logs_dir_created(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
@@ -528,18 +528,19 @@ class TestEnvPyGeneration:
         result = self.converter.convert(single_task)
         env_py = result.environments[0].env_py
         assert "from hud import Environment" in env_py
-        assert "from hud.tools import BashTool" in env_py
+        assert "from hud.environment import Workspace" in env_py
 
-    def test_tools_added(self, single_task: Path) -> None:
+    def test_shell_capability_declared(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
         env_py = result.environments[0].env_py
-        assert "env.add_tool(BashTool())" in env_py
-        assert "env.add_tool(EditTool())" in env_py
+        # v6: bash/edit tools become an ``ssh`` capability over a Workspace.
+        assert 'Workspace("/workspace")' in env_py
+        assert "capabilities=[_workspace.capability()]" in env_py
 
     def test_reward_parsing_logic(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)
         env_py = result.environments[0].env_py
-        assert "_parse_harbor_reward" in env_py
+        assert "_parse_reward" in env_py
         assert "reward.txt" in env_py
         assert "reward.json" in env_py
 

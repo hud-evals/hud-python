@@ -1,29 +1,21 @@
-"""Agent-side Gemini Computer Use tool."""
+"""Gemini Computer Use tool — backed by RFBClient."""
 
 from __future__ import annotations
 
-import base64
+import logging
 import platform
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 from google.genai import types as genai_types
-from mcp.types import ImageContent, TextContent
 
-from hud.agents.tools import AgentTool
-from hud.agents.tools.computer import computer_error_result, execute_computer_calls
-from hud.types import MCPToolCall, MCPToolResult
+from hud.agents.tools import RFBTool
+from hud.agents.tools.base import tool_err
+from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
 
-if TYPE_CHECKING:
-    from hud.agents.tools.base import CallTool
+logger = logging.getLogger(__name__)
 
-SUPPORTED_GEMINI_COMPUTER_USE_MODELS = (
-    "gemini-2.5-computer-use-preview-10-2025",
-    "gemini-3-flash-preview",
-)
-
-GEMINI_COORDINATE_SPACE = 1000
 GEMINI_DRAG_INSET = 25
 IS_MAC = platform.system().lower() == "darwin"
 
@@ -42,251 +34,165 @@ PREDEFINED_COMPUTER_USE_FUNCTIONS = (
     "key_combination",
     "drag_and_drop",
 )
-GEMINI_URL_PREFIX = "__URL__:"
-GEMINI_SAFETY_BLOCKED_PREFIX = "__GEMINI_SAFETY_BLOCKED__:"
 
 GEMINI_COMPUTER_SPEC = GeminiToolSpec(
     api_type="computer_use",
     api_name="gemini_computer",
-    supported_models=SUPPORTED_GEMINI_COMPUTER_USE_MODELS,
 )
 
 
-class GeminiComputerTool(AgentTool[genai_types.Tool, genai_types.Content]):
-    """Translate Gemini Computer Use calls into generic environment computer calls."""
+class GeminiComputerTool(RFBTool):
+    """Translate Gemini predefined computer functions into RFBTool primitives."""
 
     name = "computer_use"
-    capability = "computer"
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.excluded_predefined_functions: list[str] = []
 
     @classmethod
     def default_spec(cls, model: str) -> GeminiToolSpec | None:
-        if GEMINI_COMPUTER_SPEC.supports_model(model):
-            return GEMINI_COMPUTER_SPEC
-        return None
-
-    def __init__(
-        self,
-        *,
-        env_tool_name: str,
-        spec: GeminiToolSpec,
-        excluded_predefined_functions: list[str] | None = None,
-    ) -> None:
-        super().__init__(env_tool_name=env_tool_name, spec=spec)
-        self.excluded_predefined_functions = excluded_predefined_functions or []
-
-    def with_excluded_predefined_functions(
-        self, excluded_predefined_functions: list[str]
-    ) -> GeminiComputerTool:
-        return GeminiComputerTool(
-            env_tool_name=self.env_tool_name,
-            spec=self.spec,
-            excluded_predefined_functions=excluded_predefined_functions,
-        )
+        del model
+        return GEMINI_COMPUTER_SPEC
 
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(
             computer_use=genai_types.ComputerUse(
                 environment=genai_types.Environment.ENVIRONMENT_BROWSER,
                 excluded_predefined_functions=self.excluded_predefined_functions,
-            )
-        )
-
-    def tool_call(self, function_name: str, raw_args: dict[str, Any]) -> MCPToolCall:
-        return MCPToolCall(
-            name=self.name,
-            arguments={"action": function_name, **raw_args},
-            provider_name=function_name,
-        )
-
-    def format_result(self, call: MCPToolCall, result: MCPToolResult) -> genai_types.Content:
-        text = next(
-            (
-                content.text
-                for content in result.content
-                if isinstance(content, TextContent)
-                and not content.text.startswith(GEMINI_URL_PREFIX)
             ),
-            None,
-        )
-        response: dict[str, Any] = (
-            {"error": text or "Tool execution failed"} if result.isError else {"success": True}
-        )
-        if text is not None and not result.isError:
-            response["output"] = text
-
-        url = None
-        parts: list[genai_types.FunctionResponsePart] = []
-        for content in result.content:
-            match content:
-                case ImageContent(data=data, mimeType=mime_type):
-                    parts.append(
-                        genai_types.FunctionResponsePart(
-                            inline_data=genai_types.FunctionResponseBlob(
-                                mime_type=mime_type or "image/png",
-                                data=base64.b64decode(data),
-                            )
-                        )
-                    )
-                case TextContent(text=text) if text.startswith(GEMINI_URL_PREFIX):
-                    url = text.removeprefix(GEMINI_URL_PREFIX)
-                case TextContent(text=text) if text.startswith(GEMINI_SAFETY_BLOCKED_PREFIX):
-                    response.pop("success", None)
-                    response["blocked"] = True
-                    response["reason"] = text.removeprefix(GEMINI_SAFETY_BLOCKED_PREFIX)
-                case _:
-                    continue
-
-        response["url"] = url or "about:blank"
-        safety_decision = call.arguments.get("safety_decision") if call.arguments else None
-        if safety_decision and not result.isError and not response.get("blocked"):
-            response["safety_acknowledgement"] = True
-
-        return genai_types.Content(
-            role="user",
-            parts=[
-                genai_types.Part(
-                    function_response=genai_types.FunctionResponse(
-                        name=call.provider_name or call.name,
-                        response=response,
-                        parts=parts or None,
-                    )
-                )
-            ],
         )
 
-    async def execute(self, call_tool: CallTool, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         if not isinstance(action, str):
-            return computer_error_result("action is required")
-        safety_decision = arguments.get("safety_decision")
-        if (
-            isinstance(safety_decision, dict)
-            and cast("dict[str, Any]", safety_decision).get("decision") == "require_confirmation"
-        ):
-            return MCPToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text=(
-                            f"{GEMINI_SAFETY_BLOCKED_PREFIX}"
-                            "Gemini Computer Use action requires user confirmation before "
-                            "execution."
-                        ),
-                    )
-                ],
-                isError=False,
-            )
+            return tool_err("action is required")
+        try:
+            return await self._dispatch(action, arguments)
+        except Exception as exc:
+            logger.exception("GeminiComputerTool action %s failed", action)
+            return tool_err(f"computer action {action!r} failed: {exc}")
 
-        return await execute_computer_calls(
-            call_tool,
-            env_tool_name=self.env_tool_name,
-            calls=self._computer_actions(action, arguments),
-            ensure_screenshot=action != "open_web_browser",
-        )
-
-    def _computer_actions(self, action: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _dispatch(self, action: str, args: dict[str, Any]) -> MCPToolResult:
         if action == "open_web_browser":
-            return [{"action": "screenshot"}]
+            return await self.screenshot()
+
         if action == "click_at":
-            return [{"action": "click", "x": arguments.get("x"), "y": arguments.get("y")}]
+            await self.click(args.get("x"), args.get("y"))
+            return await self.screenshot()
+
         if action == "hover_at":
-            return [{"action": "move", "x": arguments.get("x"), "y": arguments.get("y")}]
+            x, y = args.get("x"), args.get("y")
+            if x is not None and y is not None:
+                await self.move(int(x), int(y))
+            return await self.screenshot()
+
         if action == "type_text_at":
-            calls: list[dict[str, Any]] = []
-            if arguments.get("x") is not None and arguments.get("y") is not None:
-                calls.extend(
-                    [
-                        {"action": "move", "x": arguments.get("x"), "y": arguments.get("y")},
-                        {"action": "click", "x": arguments.get("x"), "y": arguments.get("y")},
-                    ]
-                )
-            if arguments.get("clear_before_typing", True):
-                calls.extend(
-                    [
-                        {"action": "press", "keys": ["cmd", "a"] if IS_MAC else ["ctrl", "a"]},
-                        {"action": "press", "keys": ["backspace" if IS_MAC else "delete"]},
-                    ]
-                )
-            calls.append(
-                {
-                    "action": "write",
-                    "text": arguments.get("text"),
-                    "enter_after": bool(arguments.get("press_enter")),
-                }
-            )
-            return calls
+            x, y = args.get("x"), args.get("y")
+            if x is not None and y is not None:
+                await self.move(int(x), int(y))
+                await self.click(int(x), int(y))
+            if args.get("clear_before_typing", True):
+                select_all = ["Super_L", "a"] if IS_MAC else ["Control_L", "a"]
+                delete_key = "BackSpace" if IS_MAC else "Delete"
+                await self.press_keys(select_all)
+                await self.press_keys([delete_key])
+            text = args.get("text")
+            if isinstance(text, str) and text:
+                await self.type_text(text)
+            if args.get("press_enter"):
+                await self.press_keys(["Return"])
+            return await self.screenshot()
+
         if action in ("scroll_document", "scroll_at"):
-            direction = arguments.get("direction")
-            magnitude = arguments.get("magnitude") or 800
+            direction = args.get("direction")
+            magnitude = int(args.get("magnitude") or 3)
+            sx, sy = 0, 0
             if direction == "down":
-                call = {"action": "scroll", "scroll_x": None, "scroll_y": magnitude}
+                sy = magnitude
             elif direction == "up":
-                call = {"action": "scroll", "scroll_x": None, "scroll_y": -magnitude}
+                sy = -magnitude
             elif direction == "right":
-                call = {"action": "scroll", "scroll_x": magnitude, "scroll_y": None}
+                sx = magnitude
             elif direction == "left":
-                call = {"action": "scroll", "scroll_x": -magnitude, "scroll_y": None}
-            else:
-                raise ValueError("direction must be one of up, down, left, right")
-            if action == "scroll_at":
-                call.update({"x": arguments.get("x"), "y": arguments.get("y")})
-            return [call]
-        if action == "wait_5_seconds":
-            return [{"action": "wait", "time": 5000}]
-        if action == "go_back":
-            return [{"action": "press", "keys": ["cmd", "["] if IS_MAC else ["alt", "left"]}]
-        if action == "go_forward":
-            return [{"action": "press", "keys": ["cmd", "]"] if IS_MAC else ["alt", "right"]}]
-        if action == "search":
-            target = arguments.get("url") or "https://www.google.com"
-            return [
-                {"action": "press", "keys": ["cmd", "l"] if IS_MAC else ["ctrl", "l"]},
-                {"action": "write", "text": target, "enter_after": True},
-            ]
-        if action == "navigate":
-            return [
-                {"action": "press", "keys": ["cmd", "l"] if IS_MAC else ["ctrl", "l"]},
-                {"action": "write", "text": arguments.get("url"), "enter_after": True},
-            ]
-        if action == "key_combination":
-            keys = arguments.get("keys")
-            if not isinstance(keys, str):
-                raise ValueError("keys must be a '+'-separated string")
-            aliases = {
-                "control": "ctrl",
-                "cmd": "cmd",
-                "command": "cmd",
-                "meta": "cmd" if IS_MAC else "ctrl",
-                "return": "enter",
-            }
-            normalized_keys = [
-                aliases.get(key, key) for part in keys.split("+") if (key := part.strip().lower())
-            ]
-            return [{"action": "press", "keys": normalized_keys}]
-        if action == "drag_and_drop":
-            max_drag_coordinate = max(
-                GEMINI_COORDINATE_SPACE - GEMINI_DRAG_INSET,
-                GEMINI_DRAG_INSET,
+                sx = -magnitude
+            x = args.get("x") if action == "scroll_at" else None
+            y = args.get("y") if action == "scroll_at" else None
+            await self.scroll(
+                int(x) if x is not None else None,
+                int(y) if y is not None else None,
+                scroll_x=sx,
+                scroll_y=sy,
             )
+            return await self.screenshot()
 
-            def drag_coordinate(value: Any) -> Any:
-                if not isinstance(value, int | float) or not 0 <= value <= GEMINI_COORDINATE_SPACE:
-                    return value
-                return min(max(int(value), GEMINI_DRAG_INSET), max_drag_coordinate)
+        if action == "wait_5_seconds":
+            await self.wait(5000)
+            return await self.screenshot()
 
-            return [
-                {
-                    "action": "drag",
-                    "path": [
-                        {
-                            "x": drag_coordinate(arguments.get("x")),
-                            "y": drag_coordinate(arguments.get("y")),
-                        },
-                        {
-                            "x": drag_coordinate(arguments.get("destination_x")),
-                            "y": drag_coordinate(arguments.get("destination_y")),
-                        },
-                    ],
-                }
+        if action == "go_back":
+            keys = ["Super_L", "bracketleft"] if IS_MAC else ["Alt_L", "Left"]
+            await self.press_keys(keys)
+            return await self.screenshot()
+
+        if action == "go_forward":
+            keys = ["Super_L", "bracketright"] if IS_MAC else ["Alt_L", "Right"]
+            await self.press_keys(keys)
+            return await self.screenshot()
+
+        if action == "search":
+            target = args.get("url") or "https://www.google.com"
+            keys = ["Super_L", "l"] if IS_MAC else ["Control_L", "l"]
+            await self.press_keys(keys)
+            await self.type_text(str(target))
+            await self.press_keys(["Return"])
+            return await self.screenshot()
+
+        if action == "navigate":
+            keys = ["Super_L", "l"] if IS_MAC else ["Control_L", "l"]
+            await self.press_keys(keys)
+            url = args.get("url") or ""
+            await self.type_text(str(url))
+            await self.press_keys(["Return"])
+            return await self.screenshot()
+
+        if action == "key_combination":
+            keys_str = args.get("keys")
+            if not isinstance(keys_str, str):
+                return tool_err("keys must be a '+'-separated string")
+            aliases: dict[str, str] = {
+                "control": "Control_L",
+                "ctrl": "Control_L",
+                "cmd": "Super_L",
+                "command": "Super_L",
+                "meta": "Super_L" if IS_MAC else "Control_L",
+                "alt": "Alt_L",
+                "shift": "Shift_L",
+                "return": "Return",
+                "enter": "Return",
+            }
+            normalized = [
+                aliases.get(k, k) for part in keys_str.split("+") if (k := part.strip().lower())
             ]
-        raise ValueError(f"Unknown Gemini computer action: {action}")
+            await self.press_keys(normalized)
+            return await self.screenshot()
+
+        if action == "drag_and_drop":
+            max_coord = max(self.display_width, self.display_height)
+
+            def clamp(v: Any) -> int:
+                if not isinstance(v, int | float):
+                    return 0
+                return min(max(int(v), GEMINI_DRAG_INSET), max_coord - GEMINI_DRAG_INSET)
+
+            path = [
+                (clamp(args.get("x")), clamp(args.get("y"))),
+                (clamp(args.get("destination_x")), clamp(args.get("destination_y"))),
+            ]
+            await self.drag(path)
+            return await self.screenshot()
+
+        return tool_err(f"Unknown Gemini computer action: {action}")
+
+
+__all__ = ["GEMINI_COMPUTER_SPEC", "PREDEFINED_COMPUTER_USE_FUNCTIONS", "GeminiComputerTool"]

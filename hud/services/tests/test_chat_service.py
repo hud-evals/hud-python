@@ -1,13 +1,35 @@
+"""``ChatService`` — per-session ``Chat`` management + A2A execute/cancel flow.
+
+``Chat`` and the reply-metadata builder are faked so no model/network is needed.
+"""
+
 from __future__ import annotations
 
-import asyncio
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-from hud.eval.task import Task
+from hud.services import chat_service as cs_mod
 from hud.services.chat_service import ChatService
-from hud.types import Trace
+
+
+class FakeChat:
+    def __init__(self, *_a: Any, **_k: Any) -> None:
+        self.cleared = False
+        self.loaded: Any = None
+
+    async def send(self, message: str) -> Any:
+        return SimpleNamespace(content=f"echo:{message}")
+
+    def clear(self) -> None:
+        self.cleared = True
+
+    def export_history(self) -> list[dict[str, Any]]:
+        return [{"role": "user"}]
+
+    def load_history(self, messages: list[dict[str, Any]]) -> None:
+        self.loaded = messages
 
 
 class FakeQueue:
@@ -18,135 +40,70 @@ class FakeQueue:
         self.events.append(event)
 
 
-class FakeContext:
-    def __init__(
-        self,
-        text: str,
-        *,
-        context_id: str = "ctx-1",
-        task_id: str = "task-1",
-        message_id: str = "msg-1",
-    ) -> None:
-        self.context_id = context_id
-        self.task_id = task_id
-        self.message = type("Msg", (), {"message_id": message_id})
-        self._text = text
-
-    def get_user_input(self) -> str:
-        return self._text
+@pytest.fixture(autouse=True)
+def _patch_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs_mod, "Chat", FakeChat)
+    monkeypatch.setattr(cs_mod, "build_reply_metadata_event", lambda **_k: None)
 
 
-def _task(scenario: str = "test-env:analysis_chat") -> Task:
-    return Task(env={"name": "test-env"}, scenario=scenario)
+def _service() -> ChatService:
+    variant = cast("Any", SimpleNamespace(task="demo"))
+    return ChatService(variant, model="gpt-test")
 
 
-def test_init_stores_task_and_model() -> None:
-    task = _task()
-    svc = ChatService(task, model="gpt-4o")
-    assert svc._task is task
-    assert svc._model == "gpt-4o"
-    assert svc._name == "test-env:analysis_chat"
+def test_agent_card() -> None:
+    card = _service().agent_card("http://host/")
+    assert card.name == "demo"
+    assert card.url == "http://host/"
 
 
-def test_init_uses_explicit_task_scenario() -> None:
-    svc = ChatService(_task("other-env:analysis_chat"), model="gpt-4o")
-    assert svc._task.scenario == "other-env:analysis_chat"
+async def test_send_reuses_session() -> None:
+    service = _service()
+    result = await service.send("hi", session_id="s1")
+    assert result.content == "echo:hi"
+    # Same session id reuses the same Chat instance.
+    chat_a = service._get_or_create_chat("s1")  # pyright: ignore[reportPrivateUsage]
+    chat_b = service._get_or_create_chat("s1")  # pyright: ignore[reportPrivateUsage]
+    assert chat_a is chat_b
 
 
-def test_init_defaults_description_from_task() -> None:
-    svc = ChatService(_task("other-env:analysis_chat"), model="gpt-4o")
-    assert svc._description == "A2A service for other-env:analysis_chat"
+def test_export_history_empty_then_populated() -> None:
+    service = _service()
+    assert service.export_history("none") == []
+    service.load_history([{"role": "user"}], session_id="s2")
+    assert service.export_history("s2") == [{"role": "user"}]
 
 
-def test_agent_card_basic_fields() -> None:
-    svc = ChatService(
-        _task(),
-        model="gpt-4o",
-        name="test",
-        description="desc",
+def test_clear_removes_session() -> None:
+    service = _service()
+    service.load_history([{"x": 1}], session_id="s3")
+    service.clear("s3")
+    assert service.export_history("s3") == []
+
+
+def test_cleanup_stale_sessions() -> None:
+    service = _service()
+    service.load_history([{"x": 1}], session_id="old")
+    service._session_ttl_seconds = -1  # pyright: ignore[reportPrivateUsage]
+    service._cleanup_stale_sessions()  # pyright: ignore[reportPrivateUsage]
+    assert service.export_history("old") == []
+
+
+async def test_execute_enqueues_final_status() -> None:
+    service = _service()
+    queue = FakeQueue()
+    context = cast(
+        "Any",
+        SimpleNamespace(context_id="c1", task_id="t1", get_user_input=lambda: "hello"),
     )
-    card = svc.agent_card()
-    assert card.name == "test"
-    assert card.description == "desc"
-    assert card.skills == []
+    await service.execute(context, cast("Any", queue))
+    assert len(queue.events) >= 2
+    assert queue.events[-1].final is True
 
 
-@pytest.mark.asyncio
-async def test_execute_emits_working_and_input_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = ChatService(_task(), model="gpt-4o")
+async def test_cancel_enqueues_canceled() -> None:
+    service = _service()
     queue = FakeQueue()
-    context = FakeContext("hello")
-
-    async def _fake_send(msg: Any) -> Trace:
-        return Trace(content="done")
-
-    chat = svc._get_or_create_chat("ctx-1")
-    monkeypatch.setattr(chat, "send", _fake_send)
-    svc._sessions["ctx-1"] = chat
-
-    await svc.execute(context, queue)  # type: ignore[arg-type]
-
-    assert len(queue.events) == 2
-    assert queue.events[0].status.state.value == "working"
-    assert queue.events[1].status.state.value == "input-required"
-
-
-@pytest.mark.asyncio
-async def test_execute_maps_errors_to_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = ChatService(_task(), model="gpt-4o")
-    queue = FakeQueue()
-    context = FakeContext("hello")
-
-    async def _fail(msg: Any) -> Trace:
-        raise RuntimeError("boom")
-
-    chat = svc._get_or_create_chat("ctx-1")
-    monkeypatch.setattr(chat, "send", _fail)
-    svc._sessions["ctx-1"] = chat
-
-    await svc.execute(context, queue)  # type: ignore[arg-type]
-
-    assert len(queue.events) == 2
-    assert queue.events[-1].status.state.value == "failed"
-    assert "boom" in queue.events[-1].status.message.parts[0].root.text
-
-
-@pytest.mark.asyncio
-async def test_cancel_clears_session() -> None:
-    svc = ChatService(_task(), model="gpt-4o")
-    svc._get_or_create_chat("ctx-1")
-    assert "ctx-1" in svc._sessions
-
-    queue = FakeQueue()
-    context = FakeContext("", context_id="ctx-1", task_id="t")
-    await svc.cancel(context, queue)  # type: ignore[arg-type]
-
-    assert "ctx-1" not in svc._sessions
-    assert queue.events[-1].status.state.value == "canceled"
-
-
-def test_get_or_create_reuses_session() -> None:
-    svc = ChatService(_task(), model="gpt-4o")
-    c1 = svc._get_or_create_chat("ctx-1")
-    c2 = svc._get_or_create_chat("ctx-1")
-    assert c1 is c2
-
-
-def test_remove_session_drops_unlocked_lock() -> None:
-    svc = ChatService(_task(), model="gpt-4o")
-    svc._session_locks["ctx-1"] = asyncio.Lock()
-    svc._remove_session("ctx-1")
-    assert "ctx-1" not in svc._session_locks
-
-
-@pytest.mark.asyncio
-async def test_remove_session_preserves_locked_lock() -> None:
-    svc = ChatService(_task(), model="gpt-4o")
-    svc._get_or_create_chat("ctx-1")
-    lock = svc._session_locks.setdefault("ctx-1", asyncio.Lock())
-    await lock.acquire()
-    try:
-        svc._remove_session("ctx-1")
-        assert "ctx-1" in svc._session_locks
-    finally:
-        lock.release()
+    context = cast("Any", SimpleNamespace(context_id="c1", task_id="t1"))
+    await service.cancel(context, cast("Any", queue))
+    assert queue.events[-1].final is True

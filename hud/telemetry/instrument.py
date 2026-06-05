@@ -33,8 +33,7 @@ from hud.utils.serialization import json_safe_value
 
 
 def _get_trace_id() -> str | None:
-    """Lazy import to avoid circular dependency with eval.context."""
-    from hud.eval.context import get_current_trace_id
+    from hud.telemetry.context import get_current_trace_id
 
     return get_current_trace_id()
 
@@ -201,7 +200,7 @@ def instrument(
             result: Any = None,
             error: str | None = None,
         ) -> dict[str, Any]:
-            """Build a HudSpan-compatible span record."""
+            """Build a span record for export."""
             is_mcp = effective_method is not None
 
             extra_attrs: dict[str, Any] = {}

@@ -1,4 +1,4 @@
-"""HUD CLI - Build, test, and deploy RL environments."""
+"""HUD CLI - build, test, and deploy environments; run evaluations."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-# Create the main Typer app
 app = typer.Typer(
     name="hud",
     help="HUD CLI - build, test, and deploy evaluation environments",
@@ -26,35 +25,33 @@ SUPPORT_HINT = (
 
 # ---------------------------------------------------------------------------
 # Register commands (each module owns its Typer args, docstring, and logic)
+# NOTE: `sync` is registered below once migrated to the Variant flow.
 # ---------------------------------------------------------------------------
 
-from .analyze import analyze_command  # noqa: E402
 from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
+from .client import client_app  # noqa: E402
 from .convert import convert_command  # noqa: E402
-from .debug import debug_command  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
 from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
+from .harbor import harbor_command  # noqa: E402
 from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .login import login_command  # noqa: E402
 from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
-from .rl import rl_run_command, rl_status_command  # noqa: E402
-from .scenario import scenario_app  # noqa: E402
 from .sync import sync_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
-app.command(name="analyze", context_settings=_EXTRA_ARGS)(analyze_command)
-app.command(name="debug", context_settings=_EXTRA_ARGS)(debug_command)
-app.command(name="dev", context_settings=_EXTRA_ARGS)(dev_command)
+app.command(name="dev")(dev_command)
 app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
 app.command(name="deploy")(deploy_command)
 app.command(name="link", hidden=True)(link_command)
 app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)
+app.command(name="harbor")(harbor_command)
 app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)
 app.command(name="convert")(convert_command)
@@ -111,17 +108,11 @@ def version() -> None:
         console.print("HUD CLI version: [cyan]unknown[/cyan]")
 
 
-# Scenario subcommand group
-app.add_typer(scenario_app, name="scenario")
+# Client subcommand group (drive a running env control channel from the shell)
+app.add_typer(client_app, name="client")
 
-# Sync subcommand group
+# Sync subcommand group (migrated to the Variant flow)
 app.add_typer(sync_app, name="sync")
-
-# RL subcommand group
-rl_app = typer.Typer(help="🚀 RL training commands\n\nExample: hud rl run my-taskset -m <model-id>")
-rl_app.command("run")(rl_run_command)
-rl_app.command("status")(rl_status_command)
-app.add_typer(rl_app, name="rl")
 
 
 # ---------------------------------------------------------------------------
@@ -154,13 +145,7 @@ def main() -> None:
                 )
             )
             console.print("\n[yellow]Quick Start:[/yellow]")
-            console.print(
-                "  1. Create a new environment: [cyan]hud init my-env && cd my-env[/cyan]"
-            )
-            console.print("  2. Start dev server:        [cyan]hud dev[/cyan]")
-            console.print("  3. Deploy to HUD platform:  [cyan]hud deploy[/cyan]")
-            console.print("  4. Sync tasks:              [cyan]hud sync tasks my-taskset[/cyan]")
-            console.print("  5. Run evaluations:         [cyan]hud eval tasks.py claude[/cyan]\n")
+            console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]\n")
 
         app()
     except typer.Exit as e:
@@ -172,8 +157,6 @@ def main() -> None:
             from hud.utils.hud_console import hud_console
 
             hud_console.info(SUPPORT_HINT)
-        raise
-    except Exception:
         raise
 
 

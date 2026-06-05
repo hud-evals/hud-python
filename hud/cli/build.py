@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import hashlib
 import os
 import re
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 
@@ -22,8 +20,27 @@ from hud.cli.utils.lockfile import (
 from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
 
-if TYPE_CHECKING:
-    from hud.cli.utils.analysis import BuildAnalysis
+
+def _read_env_manifest(env_dir: Path) -> dict[str, Any]:
+    """Read a v6 environment's manifest (capabilities + tasks) from its source.
+
+    Imports ``env.py`` from *env_dir* and returns ``Environment.to_dict()`` — the
+    declarative manifest (name, version, capabilities, tasks) baked into the lock.
+    No container run is needed: the manifest is declared, not introspected.
+    """
+    from hud.environment import Environment
+    from hud.eval import load_module
+
+    env_file = env_dir / "env.py"
+    if not env_file.exists():
+        raise FileNotFoundError(f"no env.py found in {env_dir}")
+    module = load_module(env_file)
+    envs = [v for v in vars(module).values() if isinstance(v, Environment)]
+    if not envs:
+        raise ValueError(f"no Environment instance defined in {env_file}")
+    if len(envs) > 1:
+        raise ValueError(f"multiple Environments in {env_file}; expected exactly one")
+    return envs[0].to_dict()
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -260,147 +277,6 @@ def _has_non_daemon_output(docker_args: list[str]) -> bool:
     return has_custom and "--load" not in docker_args
 
 
-async def analyze_mcp_environment(
-    image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
-) -> BuildAnalysis:
-    """Analyze an MCP environment to extract metadata.
-
-    Supports both stdio (default) and HTTP transport.  The transport is
-    auto-detected from the image's CMD directive.
-    """
-    from fastmcp import Client as FastMCPClient
-
-    from hud.cli.utils.analysis import analyze_environment
-    from hud.cli.utils.docker import (
-        DEFAULT_HTTP_PORT,
-        build_env_flags,
-        detect_transport,
-        stop_container,
-    )
-
-    hud_console = HUDConsole()
-    env_vars = env_vars or {}
-    transport_mode, container_port = detect_transport(image)
-    is_http = transport_mode == "http"
-    container_name: str | None = None
-    server_url: str | None = None
-    initialized = False
-    client: Any = None
-
-    try:
-        # --- transport-specific setup ---
-        if is_http:
-            from hud.cli.utils.analysis import wait_for_http_server
-            from hud.cli.utils.logging import find_free_port
-
-            port = container_port or DEFAULT_HTTP_PORT
-            host_port = find_free_port(port)
-            if host_port is None:
-                from hud.shared.exceptions import HudException
-
-                raise HudException(f"No free port found starting from {port}")
-
-            container_name = f"hud-build-analyze-{os.getpid()}"
-            docker_cmd = [
-                "docker",
-                "run",
-                "-d",
-                "--rm",
-                "--name",
-                container_name,
-                "-p",
-                f"{host_port}:{port}",
-                *build_env_flags(env_vars),
-                image,
-            ]
-            hud_console.dim_info("Command:", " ".join(docker_cmd))
-            hud_console.info(f"HTTP transport detected — mapping port {host_port}:{port}")
-
-            try:
-                proc = await asyncio.to_thread(
-                    subprocess.run,
-                    docker_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=30,
-                )
-            except subprocess.CalledProcessError as e:
-                from hud.shared.exceptions import HudException
-
-                hud_console.error(f"Failed to start container: {e.stderr.strip()}")
-                raise HudException("Failed to start Docker container for HTTP analysis") from e
-
-            if verbose:
-                hud_console.info(f"Container started: {proc.stdout.strip()[:12]}")
-
-            server_url = f"http://localhost:{host_port}/mcp"
-            if verbose:
-                hud_console.info(f"Waiting for server at {server_url} ...")
-
-            mcp_config: dict[str, Any] = {"hud": {"url": server_url, "auth": None}}
-            server_name = "hud"
-        else:
-            docker_cmd = ["docker", "run", "--rm", "-i", *build_env_flags(env_vars), image]
-            hud_console.dim_info("Command:", " ".join(docker_cmd))
-
-            from hud.cli.analyze import parse_docker_command
-
-            mcp_config = parse_docker_command(docker_cmd)
-            server_name = next(iter(mcp_config.keys()), None)
-
-        # --- shared: connect, analyze, build result ---
-        start_time = time.time()
-        client = FastMCPClient(transport=mcp_config)
-
-        if verbose:
-            hud_console.info("Initializing MCP client...")
-
-        if is_http:
-            assert server_url is not None
-            await wait_for_http_server(  # type: ignore[possibly-undefined]
-                server_url, timeout_seconds=60.0
-            )
-            await asyncio.wait_for(client.__aenter__(), timeout=60.0)
-        else:
-            await asyncio.wait_for(client.__aenter__(), timeout=60.0)
-
-        initialized = True
-        initialize_ms = int((time.time() - start_time) * 1000)
-
-        return await analyze_environment(
-            client,
-            verbose,
-            server_name=server_name,
-            initialize_ms=initialize_ms,
-        )
-    except TimeoutError:
-        from hud.shared.exceptions import HudException
-
-        if is_http:
-            hud_console.error("MCP server did not become ready/initialize within 60 seconds")
-            if container_name:
-                hud_console.info("Check container logs: docker logs " + container_name)
-            raise HudException("MCP server HTTP readiness timeout") from None
-        hud_console.error("MCP server initialization timed out after 60 seconds")
-        hud_console.info(
-            "The server likely crashed during startup - check stderr logs with 'hud debug'"
-        )
-        raise HudException("MCP server initialization timeout") from None
-    except Exception as e:
-        from hud.shared.exceptions import HudException
-
-        if isinstance(e, HudException):
-            raise
-        raise HudException from e
-    finally:
-        if initialized and client is not None:
-            with contextlib.suppress(Exception):
-                await client.close()
-        if container_name:
-            stop_container(container_name)
-
-
 def build_docker_image(
     directory: Path,
     tag: str,
@@ -602,47 +478,27 @@ def build_environment(
         analysis_image = build_tag
         hud_console.success(f"Built temporary image: {build_tag}")
 
-    # Analyze the environment (merge folder .env if present)
-    hud_console.progress_message("Analyzing MCP environment...")
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # Load .env from env_dir (used for env-var requirements in the lock).
     try:
-        # Merge .env from env_dir for analysis only
-        try:
-            from hud.cli.utils.docker import load_env_vars_for_dir
+        from hud.cli.utils.docker import load_env_vars_for_dir
 
-            env_from_file = load_env_vars_for_dir(env_dir)
-        except Exception:
-            env_from_file = {}
-        merged_env_for_analysis = {**env_from_file, **(env_vars or {})}
+        env_from_file = load_env_vars_for_dir(env_dir)
+    except Exception:
+        env_from_file = {}
 
-        analysis = loop.run_until_complete(
-            analyze_mcp_environment(analysis_image, verbose, merged_env_for_analysis)
-        )
+    # Read the v6 environment manifest (capabilities + tasks) from the env source.
+    hud_console.progress_message("Reading environment manifest...")
+    try:
+        analysis = _read_env_manifest(env_dir)
     except Exception as e:
-        hud_console.error(f"Failed to analyze MCP environment: {e}")
-        hud_console.info("")
-        hud_console.info("To debug this issue, run:")
-        hud_console.command_example(f"hud debug {analysis_image}")
-        hud_console.info("")
+        hud_console.error(f"Failed to read environment manifest: {e}")
         raise typer.Exit(1) from e
-    finally:
-        loop.close()
 
-    # Show analysis results including hub tools, prompts, resources
-    tool_count = analysis["toolCount"]
-    prompt_count = len(analysis.get("prompts") or [])
-    resource_count = len(analysis.get("resources") or [])
-
-    parts = [f"{tool_count} tools"]
-    if prompt_count:
-        parts.append(f"{prompt_count} prompts")
-    if resource_count:
-        parts.append(f"{resource_count} resources")
-
-    tool_msg = f"Analyzed environment: {', '.join(parts)} found"
-    hud_console.success(tool_msg)
+    cap_count = len(analysis.get("capabilities") or [])
+    task_count = len(analysis.get("tasks") or [])
+    hud_console.success(
+        f"Environment manifest: {cap_count} capability(ies), {task_count} task(s)"
+    )
 
     # Extract environment variables from Dockerfile
     dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"

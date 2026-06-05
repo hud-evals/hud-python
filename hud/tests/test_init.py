@@ -41,10 +41,13 @@ class TestHudInit:
         import hud
 
         expected_exports = [
+            "Chat",
             "Environment",
-            "EvalContext",
-            "eval",
+            "Taskset",
+            "Variant",
             "instrument",
+            "launch",
+            "variant",
         ]
 
         for export in expected_exports:

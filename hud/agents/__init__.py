@@ -1,17 +1,17 @@
+"""Agent implementations."""
+
 from __future__ import annotations
 
-from hud._runtime import activate_runtime
-
-from .base import MCPAgent
+from .claude import ClaudeAgent, ClaudeSDKAgent, ClaudeSDKConfig
 from .gateway import create_agent
+from .gemini import GeminiAgent
 from .openai import OpenAIAgent
 from .openai_compatible import OpenAIChatAgent
 
-# Agents drive the MCP runtime, which needs HUD's compatibility patches.
-activate_runtime()
-
 __all__ = [
-    "MCPAgent",
+    "ClaudeAgent",
+    "ClaudeSDKAgent",
+    "GeminiAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
     "create_agent",
