@@ -557,7 +557,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     """
     from pathlib import Path
 
-    from hud.cli.utils.collect import collect_variants, load_variants_json
+    from hud.cli.utils.collect import load_variants
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
@@ -580,17 +580,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     hud_console.info(f"Loading variants from: {cfg.source}")
     try:
-        if path.suffix in {".json", ".jsonl"}:
-            variants = load_variants_json(path)
-        elif path.suffix == ".py" or path.is_dir():
-            variants = collect_variants(cfg.source)
-        else:
-            hud_console.error(
-                f"Unsupported source type: {path.suffix} (expected .py, .json, .jsonl, or a dir)."
-            )
-            raise typer.Exit(1)
-    except typer.Exit:
-        raise
+        variants = load_variants(cfg.source)
     except Exception as e:
         hud_console.error(f"Failed to load variants from {cfg.source}: {e}")
         raise typer.Exit(1) from e

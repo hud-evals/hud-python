@@ -3,7 +3,7 @@
 A ``Task`` is the in-env challenge definition (formerly "scenario"): an async
 generator that yields a prompt for the agent, then — once an answer is sent
 back via ``asend`` — yields a score. ``TaskRunner`` drives one task through
-its ``start -> evaluate`` lifecycle.
+its ``start -> grade`` lifecycle.
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ def scenario_to_task_fn(scenario_fn: Any) -> Any:
 
 
 class TaskRunner:
-    """Drives one task through prompt -> evaluate."""
+    """Drives one task through prompt -> grade."""
 
     def __init__(self, task: Task[Any], args: dict[str, Any] | None = None) -> None:
         self.task = task
@@ -207,7 +207,7 @@ class TaskRunner:
             )
         return cast("dict[str, Any]", _jsonable(prompt))
 
-    async def evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._gen is None:
             raise RuntimeError("task not started")
         try:

@@ -40,8 +40,8 @@ from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .login import login_command  # noqa: E402
 from .models import models_command  # noqa: E402
-from .push import push_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
+from .task import task_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -52,7 +52,6 @@ app.command(name="link", hidden=True)(link_command)
 app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)
 app.command(name="harbor")(harbor_command)
-app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)
 app.command(name="convert")(convert_command)
 app.command(name="cancel")(cancel_command)
@@ -110,6 +109,9 @@ def version() -> None:
 
 # Client subcommand group (drive a running env control channel from the shell)
 app.add_typer(client_app, name="client")
+
+# Task subcommand group (start a task / grade an answer, direct from source or via --url)
+app.add_typer(task_app, name="task")
 
 # Sync subcommand group (migrated to the Variant flow)
 app.add_typer(sync_app, name="sync")

@@ -1,7 +1,7 @@
 """Run: the live handle for one task.
 
 ``Run`` owns the task lifecycle — ``prompt`` (from ``tasks.start`` on enter),
-``reward`` + ``evaluation`` (from ``tasks.evaluate`` on exit) — and holds the live
+``reward`` + ``evaluation`` (from ``tasks.grade`` on exit) — and holds the live
 ``trace`` the agent fills (its answer is ``run.trace.content``)::
 
     async with client.task("sum_column", sheet="q3.xlsx") as run:
@@ -60,7 +60,7 @@ class Run:
         answer: dict[str, Any] = {"answer": self.trace.content}
         if self.trace.citations:
             answer["citations"] = self.trace.citations
-        self.evaluation = await self.client.evaluate(answer)
+        self.evaluation = await self.client.grade(answer)
         self.reward = float(self.evaluation.get("score", 0.0))
         return False
 

@@ -40,7 +40,21 @@ def _read_env_manifest(env_dir: Path) -> dict[str, Any]:
         raise ValueError(f"no Environment instance defined in {env_file}")
     if len(envs) > 1:
         raise ValueError(f"multiple Environments in {env_file}; expected exactly one")
-    return envs[0].to_dict()
+    manifest = envs[0].to_dict()
+    # Bake the declared variant catalog (slug -> task + args) into the manifest, so the
+    # packaged image carries the runnable set, not just task definitions. Same collector
+    # `hud eval`/`hud task` use; empty if the source declares no Variants/Taskset.
+    import contextlib
+
+    from hud.cli.utils.collect import collect_variants
+
+    variants: list[Any] = []
+    with contextlib.suppress(Exception):
+        variants = collect_variants(str(env_dir))
+    manifest["variants"] = [
+        {"slug": v.slug or v.default_slug(), "task": v.task, "args": v.args} for v in variants
+    ]
+    return manifest
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
