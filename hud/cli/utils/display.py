@@ -59,7 +59,9 @@ def display_runs(
     if elapsed:
         rate = len(runs) / elapsed if elapsed > 0 else 0
         console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s ({rate:.1f}/s)")
-    console.print(f"  [dim]Mean reward:[/dim] [green]{mean_reward:.3f}[/green] +/- {std_reward:.3f}")
+    console.print(
+        f"  [dim]Mean reward:[/dim] [green]{mean_reward:.3f}[/green] +/- {std_reward:.3f}"
+    )
     console.print(f"  [dim]Success rate:[/dim] [yellow]{success_rate * 100:.1f}%[/yellow]")
     if errors:
         console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")

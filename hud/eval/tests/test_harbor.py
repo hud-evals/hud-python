@@ -112,8 +112,6 @@ async def test_dockerfile_neutralizes_cmd_and_bakes_boot(tmp_path: Path) -> None
 
 async def test_custom_answer_file(tmp_path: Path) -> None:
     _write_env(tmp_path)
-    created = await export(
-        str(tmp_path / "env.py"), tmp_path / "out", answer_file="/app/out.txt"
-    )
+    created = await export(str(tmp_path / "env.py"), tmp_path / "out", answer_file="/app/out.txt")
     assert "/app/out.txt" in (created[0] / "instruction.md").read_text(encoding="utf-8")
     assert "/app/out.txt" in (created[0] / "tests" / "test.sh").read_text(encoding="utf-8")

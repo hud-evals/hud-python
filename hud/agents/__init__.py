@@ -11,6 +11,7 @@ from .openai_compatible import OpenAIChatAgent
 __all__ = [
     "ClaudeAgent",
     "ClaudeSDKAgent",
+    "ClaudeSDKConfig",
     "GeminiAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",

@@ -247,9 +247,7 @@ class Environment(LegacyEnvMixin):
                             continue
                         args = params.get("args") or {}
                         if not isinstance(args, dict):
-                            await error_to(
-                                msg_id, -32602, "tasks.start: 'args' must be an object"
-                            )
+                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
                         if self._active_runner is not None:
                             await self._active_runner.cancel()  # a new start replaces it

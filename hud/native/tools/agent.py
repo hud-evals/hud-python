@@ -61,6 +61,7 @@ class AgentTool(BaseTool):
             yield f"Investigate {issue_id}"
             yield 1.0
 
+
         seer = AgentTool(env("investigate"), model="claude-haiku-4-5")
         env.add_tool(seer)
     """

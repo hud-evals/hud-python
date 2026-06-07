@@ -118,7 +118,9 @@ class Taskset:
 
         logger.info(
             "running %d rollouts (%d variants x %d group)%s",
-            len(expanded), len(self.variants), group,
+            len(expanded),
+            len(self.variants),
+            group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
         return list(await asyncio.gather(*(_one(v, gid) for v, gid in expanded)))

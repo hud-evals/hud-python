@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from google.genai import types as genai_types
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
-from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
+
+if TYPE_CHECKING:
+    from hud.types import MCPToolResult
 
 logger = logging.getLogger(__name__)
 

@@ -510,9 +510,7 @@ def build_environment(
 
     cap_count = len(analysis.get("capabilities") or [])
     task_count = len(analysis.get("tasks") or [])
-    hud_console.success(
-        f"Environment manifest: {cap_count} capability(ies), {task_count} task(s)"
-    )
+    hud_console.success(f"Environment manifest: {cap_count} capability(ies), {task_count} task(s)")
 
     # Extract environment variables from Dockerfile
     dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"

@@ -57,7 +57,7 @@ class HudClient:
 
         async with await HudClient.connect("127.0.0.1", 9001) as client:
             async with client.task("write_hello") as run:
-                run.trace.content = "done"   # the answer, graded on exit
+                run.trace.content = "done"  # the answer, graded on exit
     """
 
     PROTOCOL_VERSION = "hud/1.0"

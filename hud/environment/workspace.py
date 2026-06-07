@@ -142,7 +142,9 @@ class Workspace:
 
         LOGGER.info(
             "Workspace SSH bound on %s as user %r (client key: %s)",
-            self.ssh_url, self._ssh_user, self._client_key_path,
+            self.ssh_url,
+            self._ssh_user,
+            self._client_key_path,
         )
 
     # ─── lifecycle ────────────────────────────────────────────────────

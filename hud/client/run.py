@@ -5,7 +5,7 @@
 ``trace`` the agent fills (its answer is ``run.trace.content``)::
 
     async with client.task("sum_column", sheet="q3.xlsx") as run:
-        run.trace.content = answer   # graded on exit → run.reward
+        run.trace.content = answer  # graded on exit → run.reward
 """
 
 from __future__ import annotations

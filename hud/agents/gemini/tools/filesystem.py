@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
-
-from google.genai import types as genai_types
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools import SSHTool
 from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
 from .coding import _decl, _required_str
+
+if TYPE_CHECKING:
+    from google.genai import types as genai_types
 
 GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
 GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")

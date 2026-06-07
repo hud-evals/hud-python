@@ -61,9 +61,7 @@ def _write_text(path: Path, text: str) -> None:
 
 def _check_capabilities(env: Environment) -> None:
     bad = [
-        c.protocol
-        for c in env.capabilities
-        if c.protocol.split("/", 1)[0] not in ALLOWED_PROTOCOLS
+        c.protocol for c in env.capabilities if c.protocol.split("/", 1)[0] not in ALLOWED_PROTOCOLS
     ]
     if bad:
         raise ValueError(
@@ -178,7 +176,7 @@ def _adapt_env_dockerfile(content: str) -> str:
         "COPY hud_entrypoint.sh /hud_entrypoint.sh\n"
         "RUN chmod +x /hud_entrypoint.sh\n"
         'ENTRYPOINT ["/hud_entrypoint.sh"]\n'
-        '# Default command for standalone `docker run`; Harbor injects its own.\n'
+        "# Default command for standalone `docker run`; Harbor injects its own.\n"
         'CMD ["sh", "-c", "sleep infinity"]\n'
     )
     return "\n".join(lines) + "\n" + boot_layer

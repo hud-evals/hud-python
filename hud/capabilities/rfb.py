@@ -61,8 +61,9 @@ class RFBClient(CapabilityClient):
         if parts.hostname is None or parts.port is None:
             raise ValueError(f"rfb capability missing host or port: {cap.url!r}")
         stack = AsyncExitStack()
-        conn = await cls._open(stack, parts.hostname, parts.port,
-                               cap.params.get("user"), cap.params.get("password"))
+        conn = await cls._open(
+            stack, parts.hostname, parts.port, cap.params.get("user"), cap.params.get("password")
+        )
         return cls(cap, conn, stack)
 
     @staticmethod
@@ -88,7 +89,11 @@ class RFBClient(CapabilityClient):
             await self._exit_stack.aclose()
         self._exit_stack = AsyncExitStack()
         self._conn = await self._open(
-            self._exit_stack, self._host, self._port, self._user, self._password,
+            self._exit_stack,
+            self._host,
+            self._port,
+            self._user,
+            self._password,
         )
 
     @property

@@ -30,8 +30,8 @@ class Variant:
     ``foo(x, y)`` (a ``Task`` call) returns one of these. Entering launches the
     env and starts the task::
 
-        async with foo(difficulty=3) as run:        # launch(env) + client.task(...)
-            await agent(run)                         # fills run.trace
+        async with foo(difficulty=3) as run:  # launch(env) + client.task(...)
+            await agent(run)  # fills run.trace
         print(run.reward)
     """
 

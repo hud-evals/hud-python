@@ -77,11 +77,13 @@ class BrowserUseAgent(Agent):
         trace.done = history.is_done()
         trace.content = history.final_result() or ""
         trace.isError = successful is False
-        trace.info.update({
-            "is_successful": successful,
-            "steps": history.number_of_steps(),
-            "urls": history.urls(),
-        })
+        trace.info.update(
+            {
+                "is_successful": successful,
+                "steps": history.number_of_steps(),
+                "urls": history.urls(),
+            }
+        )
 
 
 def _ws_to_http(url: str) -> str:

@@ -31,7 +31,7 @@ class Task(Generic[P]):
     calling the ``Task`` with the task's args binds a runnable
     :class:`~hud.eval.Variant`::
 
-        variant = fix_bug(difficulty=3)   # -> Variant
+        variant = fix_bug(difficulty=3)  # -> Variant
         async with variant as run:
             await agent(run)
     """
@@ -134,8 +134,10 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     raw_citations = payload.get("citations", []) if isinstance(payload, dict) else []
     try:
         adapter = TypeAdapter(return_type)
-        content = adapter.validate_json(raw_text) if isinstance(raw_text, str) else (
-            adapter.validate_python(raw_text)
+        content = (
+            adapter.validate_json(raw_text)
+            if isinstance(raw_text, str)
+            else (adapter.validate_python(raw_text))
         )
     except Exception:
         content = raw_text

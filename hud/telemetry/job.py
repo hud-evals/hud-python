@@ -76,12 +76,16 @@ async def trace(
     key_token = _current_api_key.set(api_key)
     try:
         with set_trace_context(trace_id):
-            await _post(f"/trace/{trace_id}/enter", {"job_id": job_id, "group_id": group_id}, api_key)
+            await _post(
+                f"/trace/{trace_id}/enter", {"job_id": job_id, "group_id": group_id}, api_key
+            )
             try:
                 yield box
             finally:
                 if box:
-                    await _post(f"/trace/{trace_id}/exit", _exit_payload(box[0], job_id, group_id), api_key)
+                    await _post(
+                        f"/trace/{trace_id}/exit", _exit_payload(box[0], job_id, group_id), api_key
+                    )
                 flush(trace_id)
     finally:
         _current_api_key.reset(key_token)

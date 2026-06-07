@@ -34,8 +34,7 @@ def _build_requests(
         spec = variant.to_dict()  # {"env": <ref>, "task": ..., "args": {...}}
         group_id = (job_id + ":" + spec["task"]) if group > 1 else None
         requests.extend(
-            {**spec, "job_id": job_id, "group_id": group_id, "agent": agent}
-            for _ in range(group)
+            {**spec, "job_id": job_id, "group_id": group_id, "agent": agent} for _ in range(group)
         )
     return requests
 

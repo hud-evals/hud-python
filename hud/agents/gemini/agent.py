@@ -12,9 +12,8 @@ from google.genai import types as genai_types
 
 from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import GeminiConfig
+from hud.agents.types import Citation, GeminiConfig
 from hud.settings import settings
-from hud.agents.types import Citation
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .settings import gemini_agent_settings
@@ -109,17 +108,16 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         if text is not None and not result.isError:
             response["output"] = text
 
-        parts: list[genai_types.FunctionResponsePart] = []
-        for block in result.content:
-            if isinstance(block, mcp_types.ImageContent):
-                parts.append(
-                    genai_types.FunctionResponsePart(
-                        inline_data=genai_types.FunctionResponseBlob(
-                            mime_type=block.mimeType or "image/png",
-                            data=base64.b64decode(block.data),
-                        ),
-                    ),
-                )
+        parts: list[genai_types.FunctionResponsePart] = [
+            genai_types.FunctionResponsePart(
+                inline_data=genai_types.FunctionResponseBlob(
+                    mime_type=block.mimeType or "image/png",
+                    data=base64.b64decode(block.data),
+                ),
+            )
+            for block in result.content
+            if isinstance(block, mcp_types.ImageContent)
+        ]
 
         return genai_types.Content(
             role="user",

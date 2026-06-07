@@ -164,7 +164,9 @@ class _DeprecatedToolsFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader)
         redirect = _MODULE_REDIRECTS.get(name)
         if redirect is not None:
             warnings.warn(
-                f"{name} moved to {redirect} ({_MSG})", DeprecationWarning, stacklevel=2,
+                f"{name} moved to {redirect} ({_MSG})",
+                DeprecationWarning,
+                stacklevel=2,
             )
             # Resolve attributes lazily from the target (avoids a partial-import
             # race); dropped v5 names fall back to a marker/no-op.
