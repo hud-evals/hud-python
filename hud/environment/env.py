@@ -53,6 +53,9 @@ class Environment(LegacyEnvMixin):
         self.version = version
         self.capabilities: list[Capability] = list(capabilities or [])
         self._tasks: dict[str, Task[Any]] = {}
+        # One held task session, kept across disconnects so a client can start, drop
+        # the connection, and reconnect later to grade.
+        self._active_runner: TaskRunner | None = None
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
         # stands up). Run once by the substrate (LocalSandbox) around serving.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
@@ -195,7 +198,6 @@ class Environment(LegacyEnvMixin):
         writer: asyncio.StreamWriter,
     ) -> None:
         session_id = "sess-" + secrets.token_hex(4)
-        active_runner: TaskRunner | None = None
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -245,31 +247,33 @@ class Environment(LegacyEnvMixin):
                             continue
                         args = params.get("args") or {}
                         if not isinstance(args, dict):
-                            await error_to(
-                                msg_id, -32602, "tasks.start: 'args' must be an object"
-                            )
+                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
-                        if active_runner is not None:
-                            await active_runner.cancel()
-                        active_runner = TaskRunner(task, args)
-                        prompt = await active_runner.start()
+                        if self._active_runner is not None:
+                            await self._active_runner.cancel()  # a new start replaces it
+                        self._active_runner = TaskRunner(task, args)
+                        prompt = await self._active_runner.start()
                         await reply_to(msg_id, prompt)
 
-                    elif method == "tasks.evaluate":
-                        if active_runner is None:
+                    elif method == "tasks.grade":
+                        if self._active_runner is None:
                             await error_to(msg_id, -32600, "no task in progress")
                             continue
-                        evaluation = await active_runner.evaluate(params)
-                        active_runner = None
+                        evaluation = await self._active_runner.grade(params)
+                        self._active_runner = None
                         await reply_to(msg_id, evaluation)
 
                     elif method == "tasks.cancel":
-                        if active_runner is not None:
-                            await active_runner.cancel()
-                            active_runner = None
+                        if self._active_runner is not None:
+                            await self._active_runner.cancel()
+                            self._active_runner = None
                         await reply_to(msg_id, {"cancelled": True})
 
                     elif method == "bye":
+                        # Explicit end-of-session: tear the held task down (disconnect won't).
+                        if self._active_runner is not None:
+                            await self._active_runner.cancel()
+                            self._active_runner = None
                         await reply_to(msg_id, {"goodbye": True})
                         return
 
@@ -281,9 +285,8 @@ class Environment(LegacyEnvMixin):
                     await error_to(msg_id, -32000, str(exc))
 
         finally:
-            if active_runner is not None:
-                with contextlib.suppress(Exception):
-                    await active_runner.cancel()
+            # No cancel here: the held session survives disconnect (only `bye` or a
+            # replacing start tears it down) so a later connection can grade it.
             with contextlib.suppress(Exception):
                 writer.close()
                 await writer.wait_closed()

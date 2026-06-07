@@ -6,7 +6,7 @@ its ``runtime`` (url + params) — a local process (``LocalSandbox``), an attach
 ``HudClient``::
 
     async with LocalSandbox(env) as runtime:  # create() on enter, terminate() on exit
-        ...                                   # connect a client to runtime.url
+        ...  # connect a client to runtime.url
 """
 
 from __future__ import annotations

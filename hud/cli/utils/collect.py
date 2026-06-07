@@ -61,6 +61,21 @@ def collect_variants(source: str) -> list[Any]:
     raise FileNotFoundError(f"Source not found: {source}")
 
 
+def load_variants(source: str) -> list[Any]:
+    """Resolve a source to runnable ``Variant``s — JSON/JSONL taskset or ``.py``/dir.
+
+    The one place ``hud eval`` and ``hud task`` agree on how a source becomes variants:
+    JSON/JSONL → :func:`load_variants_json`; a ``.py`` file or directory →
+    :func:`collect_variants`. Raises ``FileNotFoundError`` if the source is missing.
+    """
+    path = Path(source)
+    if not path.exists():
+        raise FileNotFoundError(f"Source not found: {source}")
+    if path.suffix in {".json", ".jsonl"}:
+        return load_variants_json(path)
+    return collect_variants(source)
+
+
 def _load_raw_entries(path: Path) -> list[dict[str, Any]]:
     """Read a JSON (object or list) or JSONL file into a list of dict entries."""
     text = path.read_text(encoding="utf-8")
@@ -96,4 +111,4 @@ def load_variants_json(path: Path) -> list[Any]:
     return variants
 
 
-__all__ = ["collect_variants", "load_variants_json"]
+__all__ = ["collect_variants", "load_variants", "load_variants_json"]

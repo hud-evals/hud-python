@@ -30,9 +30,7 @@ def _host_port(url: str) -> tuple[str, int]:
 
 @client_app.command("info")
 def info_command(
-    url: str = typer.Option(
-        "tcp://127.0.0.1:8765", "--url", "-u", help="Env control-channel URL."
-    ),
+    url: str = typer.Option("tcp://127.0.0.1:8765", "--url", "-u", help="Env control-channel URL."),
 ) -> None:
     """Show the env's identity, capabilities, and tasks."""
     host, port = _host_port(url)

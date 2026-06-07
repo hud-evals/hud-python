@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import shlex
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from google.genai import types as genai_types
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
-from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
+
+if TYPE_CHECKING:
+    from hud.types import MCPToolResult
 
 GEMINI_SHELL_SPEC = GeminiToolSpec(api_type="run_shell_command", api_name="run_shell_command")
 GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")

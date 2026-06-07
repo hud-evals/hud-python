@@ -3,7 +3,7 @@
 A ``Task`` is the in-env challenge definition (formerly "scenario"): an async
 generator that yields a prompt for the agent, then — once an answer is sent
 back via ``asend`` — yields a score. ``TaskRunner`` drives one task through
-its ``start -> evaluate`` lifecycle.
+its ``start -> grade`` lifecycle.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class Task(Generic[P]):
     calling the ``Task`` with the task's args binds a runnable
     :class:`~hud.eval.Variant`::
 
-        variant = fix_bug(difficulty=3)   # -> Variant
+        variant = fix_bug(difficulty=3)  # -> Variant
         async with variant as run:
             await agent(run)
     """
@@ -134,8 +134,10 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     raw_citations = payload.get("citations", []) if isinstance(payload, dict) else []
     try:
         adapter = TypeAdapter(return_type)
-        content = adapter.validate_json(raw_text) if isinstance(raw_text, str) else (
-            adapter.validate_python(raw_text)
+        content = (
+            adapter.validate_json(raw_text)
+            if isinstance(raw_text, str)
+            else (adapter.validate_python(raw_text))
         )
     except Exception:
         content = raw_text
@@ -183,7 +185,7 @@ def scenario_to_task_fn(scenario_fn: Any) -> Any:
 
 
 class TaskRunner:
-    """Drives one task through prompt -> evaluate."""
+    """Drives one task through prompt -> grade."""
 
     def __init__(self, task: Task[Any], args: dict[str, Any] | None = None) -> None:
         self.task = task
@@ -207,7 +209,7 @@ class TaskRunner:
             )
         return cast("dict[str, Any]", _jsonable(prompt))
 
-    async def evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._gen is None:
             raise RuntimeError("task not started")
         try:

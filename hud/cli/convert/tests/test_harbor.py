@@ -19,6 +19,7 @@ from hud.cli.convert import detect_format, get_converter, list_formats, write_re
 from hud.cli.convert.harbor import (
     HarborConverter,
     _adapt_harbor_dockerfile,
+    _extract_workdir,
     _find_dockerfile,
     _hash_directory,
     _is_harbor_task,
@@ -119,6 +120,23 @@ class TestHashDirectory:
         result = _hash_directory(empty)
         assert isinstance(result, str)
         assert len(result) == 16
+
+
+class TestExtractWorkdir:
+    def test_default_when_no_workdir(self) -> None:
+        assert _extract_workdir("FROM python:3.11\nRUN echo hi") == "/app"
+
+    def test_default_when_empty(self) -> None:
+        assert _extract_workdir("") == "/app"
+
+    def test_reads_workdir(self) -> None:
+        assert _extract_workdir("FROM x\nWORKDIR /srv/app\nRUN echo") == "/srv/app"
+
+    def test_last_workdir_wins(self) -> None:
+        assert _extract_workdir("WORKDIR /first\nRUN x\nWORKDIR /second") == "/second"
+
+    def test_ignores_commented_workdir(self) -> None:
+        assert _extract_workdir("# WORKDIR /nope\nFROM x") == "/app"
 
 
 class TestFindDockerfile:
@@ -534,8 +552,21 @@ class TestEnvPyGeneration:
         result = self.converter.convert(single_task)
         env_py = result.environments[0].env_py
         # v6: bash/edit tools become an ``ssh`` capability over a Workspace.
-        assert 'Workspace("/workspace")' in env_py
+        # The workspace is rooted at the Harbor challenge WORKDIR so the agent's
+        # bwrap sandbox IS the challenge dir; the /tasks bundle stays outside it.
+        assert "_workspace = Workspace(AGENT_WORKDIR, guest_path=AGENT_WORKDIR)" in env_py
         assert "capabilities=[_workspace.capability()]" in env_py
+
+    def test_agent_workdir_from_dockerfile_workdir(self, task_with_build_context: Path) -> None:
+        # task_with_build_context's Dockerfile declares ``WORKDIR /app``.
+        result = self.converter.convert(task_with_build_context)
+        env_py = result.environments[0].env_py
+        assert "AGENT_WORKDIR = '/app'" in env_py
+
+    def test_verifier_runs_in_agent_workdir(self, single_task: Path) -> None:
+        result = self.converter.convert(single_task)
+        env_py = result.environments[0].env_py
+        assert "cwd=AGENT_WORKDIR" in env_py
 
     def test_reward_parsing_logic(self, single_task: Path) -> None:
         result = self.converter.convert(single_task)

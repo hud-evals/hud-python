@@ -71,6 +71,7 @@ class ClaudeSDKAgent(Agent):
                 self._mcp_servers[cap.name] = server_config
             elif family == "rfb":
                 from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
+
                 rfb = cast("RFBClient", await run.client.open("rfb"))
                 port = await serve_computer_mcp(rfb)
                 self._mcp_servers["computer-use"] = {
@@ -98,24 +99,32 @@ class ClaudeSDKAgent(Agent):
         mcp_config_path = await self._write_mcp_config()
 
         # Write prompt to file via SFTP — avoids all shell quoting issues.
-        async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_prompt.txt", "wb") as f:
+        async with (
+            self._ssh.conn.start_sftp_client() as sftp,
+            sftp.open(".hud_prompt.txt", "wb") as f,
+        ):
             await f.write(prompt.encode("utf-8"))
 
         run_cmd = self._build_cli_command(
-            prompt=prompt, max_steps=max_steps, system_prompt=system_prompt,
+            prompt=prompt,
+            max_steps=max_steps,
+            system_prompt=system_prompt,
             mcp_config_path=mcp_config_path,
         )
 
         if self._shell in ("cmd", "powershell"):
             # Write command to bat file — cmd.exe mangles inline quotes.
             bat_content = f"@echo off\r\n{run_cmd}\r\n"
-            async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_run.bat", "wb") as f:
+            async with (
+                self._ssh.conn.start_sftp_client() as sftp,
+                sftp.open(".hud_run.bat", "wb") as f,
+            ):
                 await f.write(bat_content.encode("utf-8"))
             full_cmd = ".hud_run.bat"
         else:
             parts: list[str] = [
-                'command -v claude >/dev/null 2>&1 || '
-                '{ curl -fsSL https://claude.ai/install.sh | bash -s -- 2>/dev/null; '
+                "command -v claude >/dev/null 2>&1 || "
+                "{ curl -fsSL https://claude.ai/install.sh | bash -s -- 2>/dev/null; "
                 'export PATH="$HOME/.local/bin:$PATH"; }',
                 run_cmd,
             ]

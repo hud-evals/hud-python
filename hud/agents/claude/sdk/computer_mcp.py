@@ -8,13 +8,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import fastmcp
 
-from hud.capabilities.rfb import RFBClient
+if TYPE_CHECKING:
+    from hud.capabilities.rfb import RFBClient
 
 logger = logging.getLogger(__name__)
+
+#: Keep references to background server tasks so they aren't garbage-collected.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
@@ -84,7 +88,9 @@ def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
             if isinstance(block, mcp_types.ImageContent):
                 blocks.append(
                     mcp_types.ImageContent(
-                        type="image", data=block.data, mimeType=block.mimeType,
+                        type="image",
+                        data=block.data,
+                        mimeType=block.mimeType,
                     ),
                 )
             elif isinstance(block, mcp_types.TextContent):
@@ -110,7 +116,9 @@ async def serve_computer_mcp(
         srv.close()
 
     mcp = create_computer_mcp(rfb)
-    asyncio.create_task(_run(mcp, host, port))
+    task = asyncio.create_task(_run(mcp, host, port))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
     await asyncio.sleep(0.5)
     logger.info("computer-use MCP server on %s:%d", host, port)
     return port

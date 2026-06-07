@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.types import PromptMessage, TextContent
 
-from hud.environment import Environment
 from hud.agents.types import ScenarioResult
+from hud.environment import Environment
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

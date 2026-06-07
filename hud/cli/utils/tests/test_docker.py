@@ -26,7 +26,13 @@ def test_generate_container_name_sanitizes() -> None:
 def test_build_run_command() -> None:
     assert docker.build_run_command("img") == ["docker", "run", "--rm", "-i", "img"]
     assert docker.build_run_command("img", ["-e", "K=V"]) == [
-        "docker", "run", "--rm", "-i", "-e", "K=V", "img",
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "K=V",
+        "img",
     ]
 
 
@@ -37,7 +43,11 @@ def test_build_env_flags() -> None:
 def test_normalize_cmd_handles_exec_and_shell_forms() -> None:
     assert docker._normalize_cmd(["hud", "dev", "env:env"]) == ["hud", "dev", "env:env"]
     assert docker._normalize_cmd(["sh", "-c", "hud dev env:env --port 8080"]) == [
-        "hud", "dev", "env:env", "--port", "8080",
+        "hud",
+        "dev",
+        "env:env",
+        "--port",
+        "8080",
     ]
 
 

@@ -57,7 +57,7 @@ class HudClient:
 
         async with await HudClient.connect("127.0.0.1", 9001) as client:
             async with client.task("write_hello") as run:
-                run.trace.content = "done"   # the answer, graded on exit
+                run.trace.content = "done"  # the answer, graded on exit
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -101,10 +101,8 @@ class HudClient:
             with contextlib.suppress(Exception):
                 await cap_client.close()
         self._opened.clear()
-        try:
-            await self._call("bye", {})
-        except Exception:
-            LOGGER.debug("bye failed (env may have already closed)", exc_info=True)
+        # No `bye`: a plain disconnect leaves the env's held session for a later
+        # connection to grade; `grade` itself clears the session when it completes.
         self._writer.close()
         with contextlib.suppress(Exception):
             await self._writer.wait_closed()
@@ -202,9 +200,9 @@ class HudClient:
         """Start a task; returns the first yield (``{"prompt": ...}``)."""
         return await self._call("tasks.start", {"id": task_id, "args": args or {}})
 
-    async def evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Send ``tasks.evaluate``; returns the final evaluation dict."""
-        return await self._call("tasks.evaluate", payload)
+    async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``)."""
+        return await self._call("tasks.grade", payload)
 
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})

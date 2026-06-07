@@ -210,5 +210,3 @@ class TestBashGrader:
             BashGrader.grade(weight=0.5, command="false"),
         )
         assert result.reward == pytest.approx(0.5)
-
-

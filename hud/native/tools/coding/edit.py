@@ -10,8 +10,7 @@ from typing import Literal, get_args
 from mcp.types import ContentBlock  # noqa: TC002 - used at runtime by FunctionTool
 
 from hud.agents.types import ContentResult, ToolError
-
-from ..base import BaseTool
+from hud.native.tools.base import BaseTool
 
 from .utils import SNIPPET_LINES, make_snippet, read_file_async, write_file_async
 
@@ -177,7 +176,7 @@ class EditTool(BaseTool):
                 )
             import shlex
 
-            from ..utils import run
+            from hud.native.tools.utils import run
 
             safe_path = shlex.quote(str(path))
             _, stdout, stderr = await run(rf"find {safe_path} -maxdepth 2 -not -path '*/\.*'")

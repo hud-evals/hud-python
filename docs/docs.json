@@ -50,7 +50,8 @@
             "group": "Get Started",
             "pages": [
               "index",
-              "llm-quickstart"
+              "llm-quickstart",
+              "migrate-v6"
             ]
           },
           {

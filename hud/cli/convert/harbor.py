@@ -76,6 +76,23 @@ def _normalize_name(name: str) -> str:
     return normalized.strip("-") or "converted"
 
 
+def _extract_workdir(content: str) -> str:
+    """Return the last Dockerfile ``WORKDIR``, defaulting to ``/app``.
+
+    This is the directory the Harbor challenge is built into and where the
+    agent should work; the converted env roots its isolated Workspace here.
+    """
+    workdir = "/app"
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split(maxsplit=1)
+        if parts[0].upper() == "WORKDIR" and len(parts) > 1 and parts[1].strip():
+            workdir = parts[1].strip()
+    return workdir
+
+
 def _find_dockerfile(env_dir: Path) -> str | None:
     """Read the Dockerfile from a Harbor environment directory."""
     for name in ("Dockerfile", "dockerfile"):
@@ -177,9 +194,15 @@ LOGGER = logging.getLogger(__name__)
 
 TASKS_DIR = Path("/tasks")
 
-# Agents act via bash over SSH: a sandboxed Workspace, declared as an ``ssh``
-# capability at create time (the daemon is started in @env.initialize).
-_workspace = Workspace("/workspace")
+# The Harbor challenge is built into this workdir. The agent works inside a
+# bubblewrap-isolated SSH Workspace rooted here, mounted at the same path so
+# in-sandbox and host paths match. Isolation is free: only this directory is
+# visible inside the sandbox, so the task bundle at /tasks (instructions +
+# tests) is outside the agent's filesystem entirely -- it cannot read the
+# grader or cheat, with no scoped tools or chmod needed.
+AGENT_WORKDIR = {agent_workdir!r}
+
+_workspace = Workspace(AGENT_WORKDIR, guest_path=AGENT_WORKDIR)
 
 env = Environment(name="{env_name}", capabilities=[_workspace.capability()])
 
@@ -243,7 +266,7 @@ _SCENARIO_BODY = '''\
         try:
             result = subprocess.run(
                 ["bash", str(test_script)],
-                cwd="/app",
+                cwd=AGENT_WORKDIR,
                 capture_output=True,
                 text=True,
                 timeout={verifier_timeout},
@@ -303,6 +326,7 @@ def _build_env_py(
     source_path: str,
     task_ids: list[str],
     verifier_timeout: int,
+    agent_workdir: str,
 ) -> str:
     """Build the env.py content, adapting the scenario signature to task count."""
     if len(task_ids) == 1:
@@ -318,6 +342,7 @@ def _build_env_py(
         source_path=source_path,
         task_count=len(task_ids),
         extra_imports=extra_imports,
+        agent_workdir=agent_workdir,
     )
     body = _SCENARIO_BODY.format(verifier_timeout=verifier_timeout)
     return header + scenario + body
@@ -472,6 +497,15 @@ class HarborConverter(BaseConverter):
             env_dir = rep_task.directory / "environment"
             dockerfile_content = _find_dockerfile(env_dir) if env_dir.exists() else None
 
+            # Where the challenge lives / the agent works. Prefer an explicit
+            # task.toml [environment].workdir, else the Dockerfile WORKDIR.
+            agent_workdir = _extract_workdir(dockerfile_content or "")
+            env_cfg = rep_task.config.get("environment", {})
+            if isinstance(env_cfg, dict):
+                configured = env_cfg.get("workdir")
+                if isinstance(configured, str) and configured:
+                    agent_workdir = configured
+
             # Extract verifier timeout from config
             verifier_timeout = 600
             verifier_cfg = rep_task.config.get("verifier", {})
@@ -488,6 +522,7 @@ class HarborConverter(BaseConverter):
                 source_path=path.as_posix(),
                 task_ids=task_ids,
                 verifier_timeout=verifier_timeout,
+                agent_workdir=agent_workdir,
             )
 
             # --- Generate Dockerfile.hud ---
