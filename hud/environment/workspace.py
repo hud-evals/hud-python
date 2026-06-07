@@ -87,6 +87,7 @@ class Workspace:
         network: bool = False,
         env: Mapping[str, str] | None = None,
         system_mounts: Sequence[Mount] | None = None,
+        guest_path: str = "/workspace",
         # ssh server configuration
         host: str = "127.0.0.1",
         port: int = 0,
@@ -96,6 +97,11 @@ class Workspace:
     ) -> None:
         self.root: Path = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+
+        # Path the root is mounted at inside the sandbox (and the default cwd).
+        # Defaults to /workspace; set to the root's real path for callers that
+        # need in-/out-of-sandbox paths to match (e.g. Harbor challenge dirs).
+        self._guest_path = guest_path
 
         # bwrap state
         self.mounts: tuple[Mount, ...] = tuple(mounts)
@@ -215,12 +221,13 @@ class Workspace:
         self,
         command: list[str] | str,
         *,
-        cwd: str = "/workspace",
+        cwd: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable."""
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
+        target_cwd = cwd if cwd is not None else self._guest_path
         full_env = {**os.environ, **self.env, **(env or {})}
         argv: list[str] = [
             self._bwrap,
@@ -235,10 +242,10 @@ class Workspace:
             argv.append("--unshare-net")
         for m in self._system_mounts:
             argv.extend(m.to_bwrap_args())
-        argv.extend(["--bind", str(self.root), "/workspace"])
+        argv.extend(["--bind", str(self.root), self._guest_path])
         for m in self.mounts:
             argv.extend(m.to_bwrap_args())
-        argv.extend(["--chdir", cwd])
+        argv.extend(["--chdir", target_cwd])
         argv.append("--clearenv")
         for k, v in full_env.items():
             argv.extend(["--setenv", k, v])
@@ -253,7 +260,7 @@ class Workspace:
         self,
         command: str | None = None,
         *,
-        cwd: str = "/workspace",
+        cwd: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> list[str]:
         """Per-session shell argv (bwrap'd if available, else host shell)."""

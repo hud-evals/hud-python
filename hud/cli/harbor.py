@@ -44,3 +44,10 @@ def harbor_command(
     hud_console.success(f"Exported {len(created)} Harbor task(s) to {out_dir}/")
     for task_dir in created:
         hud_console.info(f"  {task_dir.name}")
+
+    hud_console.hint(
+        "Grading uses the in-container HUD control channel, so these tasks need "
+        "Harbor's default same-container verifier. Don't set [verifier.environment] "
+        "in task.toml \u2014 a separate verifier container can't reach the parked run "
+        "on 127.0.0.1."
+    )

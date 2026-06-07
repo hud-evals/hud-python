@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from pathlib import Path  # noqa: TC003 - Typer resolves the `Path` option annotations at runtime
 from typing import Any
 from urllib.parse import urlsplit
@@ -25,7 +26,7 @@ from hud.utils.hud_console import HUDConsole
 hud_console = HUDConsole()
 
 task_app = typer.Typer(
-    help="Start a task or grade an answer (direct from source, or attach with --url).",
+    help="Start a task or grade an answer (attaches to a running env, or runs from source).",
     rich_markup_mode="rich",
 )
 
@@ -57,16 +58,34 @@ def _slug(variant: Any) -> str:
     return variant.slug or variant.default_slug()
 
 
-def _resolve_variant(task: str, source: str | None, url: str | None, args: dict[str, Any]) -> Any:
-    """Build a ``Variant`` for ``task``: attach to ``--url``, else introspect ``source``.
+def _local_env_url(port: int = 8765) -> str | None:
+    """Return a control-channel URL if an env is already serving locally on ``port``
+    (e.g. ``hud dev``, or a built image whose CMD serves on :8765), else ``None``."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+            return f"tcp://127.0.0.1:{port}"
+    except OSError:
+        return None
 
-    Matches by task id or slug among the collected variants; ``--args`` (when given)
-    mints a fresh variant on the same env so any parameterization is runnable.
+
+def _resolve_variant(task: str, source: str | None, url: str | None, args: dict[str, Any]) -> Any:
+    """Build a ``Variant`` for ``task``, choosing a substrate in priority order:
+
+    1. ``--url`` — attach to that control channel;
+    2. no ``--source`` and a local env already serving on :8765 — attach to it
+       (e.g. inside a built image, or alongside ``hud dev``);
+    3. otherwise — introspect local source, matching by task id or slug.
+
+    ``--args`` (when given) mints a fresh variant on the chosen env so any
+    parameterization is runnable.
     """
     from hud.eval import RemoteSandbox, Variant
 
-    if url is not None:
-        parts = urlsplit(url if "://" in url else f"tcp://{url}")
+    attach = url
+    if attach is None and source is None:
+        attach = _local_env_url()
+    if attach is not None:
+        parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
         endpoint = f"tcp://{parts.hostname or '127.0.0.1'}:{parts.port or 8765}"
         return Variant(env=RemoteSandbox(endpoint), task=task, args=args)
 
@@ -108,7 +127,7 @@ def list_command(
 def start_command(
     task: str = typer.Argument(..., help="Task id or slug."),
     source: str | None = typer.Option(
-        None, "--source", "-s", help="Env source (.py/dir/JSON). Defaults to the current dir."
+        None, "--source", "-s", help="Run from this env source (.py/dir/JSON) instead of attaching."
     ),
     args: str = typer.Option("{}", "--args", "-a", help="JSON object of task args."),
     url: str | None = typer.Option(
@@ -140,7 +159,7 @@ def grade_command(
         None, "--answer-file", help="Read the answer from a file instead of --answer."
     ),
     source: str | None = typer.Option(
-        None, "--source", "-s", help="Env source (.py/dir/JSON). Defaults to the current dir."
+        None, "--source", "-s", help="Run from this env source (.py/dir/JSON) instead of attaching."
     ),
     args: str = typer.Option("{}", "--args", "-a", help="JSON object of task args."),
     url: str | None = typer.Option(
