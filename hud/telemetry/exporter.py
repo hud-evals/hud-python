@@ -111,7 +111,15 @@ def queue_span(span: dict[str, Any]) -> None:
             _ = f.exception()
         with contextlib.suppress(ValueError):
             _pending_futures.remove(f)
-        if not f.exception():
+        # Only remove the span from the pending list when the upload actually
+        # succeeded (result is True).  _do_upload catches all exceptions
+        # internally and returns False on failure, so f.exception() is always
+        # None regardless of outcome.  Using f.result() == True is the only
+        # reliable way to distinguish a successful upload from a silent failure.
+        upload_succeeded = False
+        with contextlib.suppress(Exception):
+            upload_succeeded = f.result() is True
+        if upload_succeeded:
             with contextlib.suppress(Exception):
                 if task_run_id in _pending_spans and span in _pending_spans[task_run_id]:
                     _pending_spans[task_run_id].remove(span)
@@ -194,3 +202,4 @@ __all__ = [
     "queue_span",
     "shutdown",
 ]
+
