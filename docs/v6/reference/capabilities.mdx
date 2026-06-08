@@ -1,0 +1,132 @@
+---
+title: "Capabilities"
+description: "The connections an environment exposes, and the harness clients that attach to them."
+icon: "plug"
+---
+
+A **capability** is a connection the environment exposes; a harness attaches its own tools to it. The same environment serves a one-shot Q&A or a full computer-use rollout, depending on which capabilities a harness opens.
+
+```python
+from hud.capabilities import Capability
+```
+
+| Protocol | Wire id | What it exposes |
+|----------|---------|-----------------|
+| `ssh`  | `ssh/2` | Shell + files (bash, SFTP) in a sandboxed workspace |
+| `mcp`  | `mcp/2025-11-25` | Tools over the Model Context Protocol |
+| `cdp`  | `cdp/1.3` | Browser control over the Chrome DevTools Protocol |
+| `rfb`  | `rfb/3.8` | Full computer-use over VNC — screen + keyboard/mouse |
+| `ros2` | `ros2/2` | Robot control + sensor topics over ROS 2 |
+
+## The `Capability` dataclass
+
+A capability is `(name, protocol, url, params)` — declarative wire metadata for one slice of env access. The author runs the daemon; the capability publishes the URL and connection-time auth.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Capability name (e.g. `"shell"`, `"browser"`). |
+| `protocol` | `str` | Wire protocol id (e.g. `"ssh/2"`). |
+| `url` | `str` | Connection URL. |
+| `params` | `dict` | Protocol-specific connection params. |
+
+`cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it.
+
+## Protocol factories
+
+Build a capability with the factory for its protocol; each normalizes shorthand URLs and fills sane defaults.
+
+### `Capability.ssh`
+
+```python
+Capability.ssh(*, name="shell", url, user="agent", host_pubkey,
+               client_key_path=None, shell=None)
+```
+
+SSH with publickey auth. `shell` declares the remote shell (`bash`, `powershell`, `cmd`); defaults to auto-detect. Usually created via [`Workspace.capability()`](#workspace) rather than by hand.
+
+### `Capability.cdp`
+
+```python
+Capability.cdp(*, name="browser", url, target_id=None)
+```
+
+Chromium DevTools over WebSocket (default port `9222`).
+
+### `Capability.rfb`
+
+```python
+Capability.rfb(*, name="screen", url, password=None, display=0)
+```
+
+VNC/RFB pixel + HID server. Port defaults to `5900 + display`. Host multiple screens by publishing one `rfb` capability per display.
+
+### `Capability.mcp`
+
+```python
+Capability.mcp(*, name="tools", url, auth_token=None)
+```
+
+An MCP server. Only `ws` / `wss` / `http` / `https` URLs (no stdio).
+
+### `Capability.ros2`
+
+```python
+Capability.ros2(*, name="ros", url)
+```
+
+A rosbridge-compatible WebSocket (default port `9090`).
+
+## Workspace
+
+`Workspace` backs the `ssh` capability: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP).
+
+```python
+from hud.environment import Workspace
+
+ws = Workspace("/workspace")
+env = Environment(name="coder", capabilities=[ws.capability()])
+```
+
+Key parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `root` | — | Directory served (created if missing). |
+| `mounts` | `()` | Extra `Mount` entries for the bwrap namespace. |
+| `network` | `False` | Allow network inside the sandbox. |
+| `env` | `None` | Extra environment variables. |
+| `guest_path` | `"/workspace"` | Path the root mounts at inside the sandbox. |
+| `user` | `"agent"` | SSH username. |
+
+Key members:
+
+| Member | Description |
+|--------|-------------|
+| `ws.capability(name="shell")` | The `ssh` `Capability` (available immediately). |
+| `await ws.start()` | Ensure the SSH accept loop is running (idempotent). Call in `@env.initialize`. |
+| `ws.ssh_url` | `ssh://host:port`. |
+| `ws.bwrap_available` | Whether `bwrap` isolation is active. |
+
+<Note>
+`bwrap` (bubblewrap) provides isolation on Linux. Without it the SSH server still runs **without** isolation (a warning is logged) — fine for local iteration on macOS/Windows, isolated inside a built Linux image.
+</Note>
+
+## Harness clients
+
+A harness opens a capability to get a live client. The capability clients live in `hud.capabilities`:
+
+| Client | Protocol |
+|--------|----------|
+| `SSHClient` | `ssh/2` (raw `asyncssh` connection via `.conn`) |
+| `MCPClient` | `mcp/2025-11-25` |
+| `CDPClient` | `cdp/1.3` |
+| `RFBClient` | `rfb/3.8` |
+
+The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Environments & capabilities" icon="cube" href="/v6/build/environments" />
+<Card title="Agents" icon="robot" href="/v6/reference/agents" />
+</CardGroup>

@@ -1,0 +1,84 @@
+---
+title: "Integrations"
+description: "Use HUD with external agent frameworks and endpoints."
+icon: "puzzle-piece"
+---
+
+Because the protocol only exposes **capabilities**, plugging another framework into HUD is a thin adapter — *attach to a capability + produce an answer*. There's no protocol work. This page collects the integration points.
+
+## Bring your own harness
+
+Any agent framework becomes a HUD harness by subclassing `Agent` and implementing `__call__`. Open the capabilities you need off `run.client`, do your work, and write the answer to `run.trace.content`:
+
+```python harness.py
+from hud.agents.base import Agent
+from hud.client import Run
+
+class MyHarness(Agent):
+    async def __call__(self, run: Run) -> None:
+        prompt = run.prompt
+        # ... drive your framework against a capability ...
+        run.trace.content = "the final answer"
+```
+
+The result is graded on exit like any other run. See the [agent contract](/v6/reference/agents).
+
+## Wrap an existing framework: browser-use on `cdp`
+
+The bundled `BrowserUseAgent` is exactly this adapter — `browser-use` driving the `cdp` (browser) capability:
+
+```python run.py
+from hud.agents.browser_use import BrowserUseAgent
+from hud.agents.types import BrowserUseConfig
+
+agent = BrowserUseAgent(BrowserUseConfig(model="claude-sonnet-4-5", max_steps=25))
+async with my_browser_task() as run:
+    await agent(run)
+```
+
+Use it as a template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`, `rfb`, `ros2`).
+
+## Any OpenAI-compatible endpoint
+
+`OpenAIChatAgent` speaks the OpenAI Chat Completions API, so vLLM servers, local models, and hosted checkpoints all work — point `base_url` at the server:
+
+```python run.py
+from hud.agents import OpenAIChatAgent
+from hud.agents.types import OpenAIChatConfig
+
+agent = OpenAIChatAgent(OpenAIChatConfig(
+    model="my-model",
+    base_url="http://localhost:8000/v1",
+    api_key="local",
+))
+```
+
+## Serve an agent over A2A
+
+The [`Chat`](/v6/advanced/chat) runner is an A2A `AgentExecutor`. Serve it as an endpoint other systems can call:
+
+```python
+from hud.services import Chat
+
+chat = Chat(my_task(messages=[]), model="claude-sonnet-4-5")
+chat.serve(port=9999)   # blocks; publishes an AgentCard
+```
+
+## Expose tools as an MCP server
+
+An agent's standalone `native_tools` can be served over MCP for another agent to consume:
+
+```python
+server = agent.as_mcp_server(name="my-tools")
+```
+
+Attach that server to an environment as an `mcp` capability (`Capability.mcp(name=..., url=...)`) so any harness can open it. See [Capabilities](/v6/reference/capabilities).
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Agents" icon="robot" href="/v6/reference/agents" />
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Chat" icon="comments" href="/v6/advanced/chat" />
+<Card title="Patterns" icon="shapes" href="/v6/advanced/patterns" />
+</CardGroup>
