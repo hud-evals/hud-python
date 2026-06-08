@@ -99,10 +99,10 @@ class ClaudeTextEditorTool(SSHTool):
                 content = arguments.get("file_text", "")
                 return await self.file_write(path, str(content))
             case "str_replace":
-                return await self._str_replace(
+                return await self._str_replace_unique(
                     path,
-                    arguments.get("old_str", ""),
-                    arguments.get("new_str", ""),
+                    str(arguments.get("old_str", "")),
+                    str(arguments.get("new_str", "")),
                 )
             case "insert":
                 line = arguments.get("insert_line")
@@ -113,16 +113,16 @@ class ClaudeTextEditorTool(SSHTool):
             case _:
                 return tool_err(f"unknown editor command: {command!r}")
 
-    async def _str_replace(self, path: str, old: str, new: str) -> MCPToolResult:
+    async def _str_replace_unique(self, path: str, old: str, new: str) -> MCPToolResult:
         existing = await self.file_read(path)
         if existing.isError:
             return existing
         text = result_text(existing)
         count = text.count(old)
         if count == 0:
-            return tool_err(f"old_str not found in {path}")
+            return tool_err(f"old text not found in {path}")
         if count > 1:
-            return tool_err(f"old_str matches {count} times in {path}; must be unique")
+            return tool_err(f"old text matches {count} times in {path}; must be unique")
         return await self.file_write(path, text.replace(old, new, 1))
 
     async def _insert(self, path: str, line: int, text: str) -> MCPToolResult:

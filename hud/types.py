@@ -291,6 +291,40 @@ class Trace(BaseModel):
     def append(self, step: TraceStep) -> None:
         self.trace.append(step)
 
+    def finish(
+        self,
+        content: str | None = None,
+        *,
+        isError: bool = False,
+        error: str | None = None,
+        citations: list[dict[str, Any]] | None = None,
+        messages: list[Any] | None = None,
+        done: bool = True,
+        **info: Any,
+    ) -> None:
+        """Populate the terminal trace fields in one call.
+
+        Only the arguments that are passed are written, so callers can finalize a
+        trace without restating the unchanged defaults. ``error`` (when given) is
+        stored under ``info['error']``; extra ``info`` keywords are merged too.
+        """
+        self.done = done
+        self.isError = isError
+        if content is not None:
+            self.content = content
+        if citations is not None:
+            self.citations = citations
+        if messages is not None:
+            self.messages = messages
+        if error is not None:
+            self.info["error"] = error
+        if info:
+            self.info.update(info)
+
+    def fail(self, message: str, **info: Any) -> None:
+        """Mark the trace as a failure: ``message`` becomes the content and ``info['error']``."""
+        self.finish(message, isError=True, error=message, **info)
+
 
 __all__ = [
     "AgentResponse",

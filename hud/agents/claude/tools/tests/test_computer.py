@@ -13,7 +13,6 @@ from hud.agents.claude.tools.computer import (
     ClaudeComputerTool,
     _hold_keys,
     _split_keys,
-    _translate_key,
 )
 from hud.agents.tools.base import result_text, tool_ok
 
@@ -65,14 +64,9 @@ class RecordingComputer(ClaudeComputerTool):
 # ─── key translation helpers ──────────────────────────────────────────
 
 
-def test_translate_key_maps_anthropic_to_x11() -> None:
-    assert _translate_key("Return") == "Return"
-    assert _translate_key("ctrl") == "Control_L"
-    assert _translate_key("ctrl+c") == "Control_L+c"
-
-
 def test_split_and_hold_keys() -> None:
     assert _split_keys("ctrl+c") == ["Control_L", "c"]
+    assert _split_keys("Return") == ["Return"]
     assert _split_keys(None) == []
     assert _split_keys("") == []
     assert _hold_keys(None) is None

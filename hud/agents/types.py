@@ -27,12 +27,17 @@ _model_alias = AliasChoices("model", "checkpoint_name")
 class AgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    auto_respond: bool = False
     system_prompt: str | None = None
-    hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
 
     model_name: str = "Agent"
     model: str = Field(default="unknown", validation_alias=_model_alias)
+
+
+class ToolAgentConfig(AgentConfig):
+    """Config shared by agents that use HUD's provider tool-call loop."""
+
+    auto_respond: bool = False
+    hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
 
 
 # -----------------------------------------------------------------------------
@@ -40,13 +45,12 @@ class AgentConfig(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class ClaudeConfig(AgentConfig):
+class ClaudeConfig(ToolAgentConfig):
     model_name: str = "Claude"
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_tokens: int = 16384
     use_computer_beta: bool = True
-    validate_api_key: bool = True
+    model_client: Any = None
 
 
 # -----------------------------------------------------------------------------
@@ -54,20 +58,19 @@ class ClaudeConfig(AgentConfig):
 # -----------------------------------------------------------------------------
 
 
-class GeminiConfig(AgentConfig):
+class GeminiConfig(ToolAgentConfig):
     """Configuration for GeminiAgent."""
 
     model_name: str = "Gemini"
     model: str = Field(default="gemini-3-pro-preview", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 40
     max_output_tokens: int = 8192
-    validate_api_key: bool = True
     excluded_predefined_functions: list[str] = Field(default_factory=list)
     thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
     include_thoughts: bool = True
+    model_client: Any = None
 
 
 # -----------------------------------------------------------------------------
@@ -75,12 +78,11 @@ class GeminiConfig(AgentConfig):
 # -----------------------------------------------------------------------------
 
 
-class OpenAIConfig(AgentConfig):
+class OpenAIConfig(ToolAgentConfig):
     """Configuration for OpenAIAgent."""
 
     model_name: str = "OpenAI"
     model: str = Field(default="gpt-5.4", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Any = None  # openai Reasoning
@@ -88,10 +90,11 @@ class OpenAIConfig(AgentConfig):
     text: Any = None  # {"verbosity": "low"|"medium"|"high"}
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
-    validate_api_key: bool = True
+    tool_search_threshold: int | None = 10
+    model_client: Any = None
 
 
-class OpenAIChatConfig(AgentConfig):
+class OpenAIChatConfig(ToolAgentConfig):
     """Configuration for OpenAIChatAgent."""
 
     model_name: str = "OpenAI Chat"
@@ -138,9 +141,7 @@ class BrowserUseConfig(AgentConfig):
     """Configuration for BrowserUseAgent.
 
     Lives here (not in the agent module) so it can be imported and serialized
-    without the optional ``browser-use`` dependency installed. The ``auto_respond``
-    / ``system_prompt`` / ``hosted_tools`` fields from ``AgentConfig`` do not apply
-    — browser-use runs its own agent loop.
+    without the optional ``browser-use`` dependency installed.
     """
 
     model_name: str = "Browser Use"
@@ -311,6 +312,10 @@ class Citation(BaseModel):
     )
 
 
+def _empty_citations() -> list[Citation]:
+    return []
+
+
 class AgentAnswer(BaseModel, Generic[T]):
     """Wrapper holding an agent's structured answer alongside response metadata.
 
@@ -323,7 +328,7 @@ class AgentAnswer(BaseModel, Generic[T]):
 
     content: T = Field(description="The parsed structured answer")
     raw: str = Field(default="", description="Original answer string before parsing")
-    citations: list[Citation] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=_empty_citations)
     trace: Trace | None = Field(
         default=None,
         description="Full conversation transcript (multi-turn). "

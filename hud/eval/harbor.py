@@ -10,9 +10,12 @@ are ``ssh``/``mcp`` only (Harbor is shell-centric; ``rfb``/``cdp`` don't map).
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import toml
 
 if TYPE_CHECKING:
     from hud.environment import Environment
@@ -23,9 +26,7 @@ ALLOWED_PROTOCOLS = ("ssh", "mcp")
 
 def _check_capabilities(env: Environment) -> None:
     bad = [
-        c.protocol
-        for c in env.capabilities
-        if c.protocol.split("/", 1)[0] not in ALLOWED_PROTOCOLS
+        c.protocol for c in env.capabilities if c.protocol.split("/", 1)[0] not in ALLOWED_PROTOCOLS
     ]
     if bad:
         raise ValueError(
@@ -34,17 +35,17 @@ def _check_capabilities(env: Environment) -> None:
         )
 
 
-async def _materialize_prompt(env: Environment, task: str, args: dict[str, Any]) -> str:
-    """Run a task's first yield locally to get its concrete prompt (deterministic)."""
-    from hud.environment.task import TaskRunner
-
-    runner = TaskRunner(env._tasks[task], args)
-    try:
-        payload = await runner.start()
-    finally:
-        await runner.cancel()
-    prompt = payload.get("prompt")
-    return prompt if isinstance(prompt, str) else json.dumps(prompt, indent=2, default=str)
+def _static_instruction(env: Environment, task: str) -> str:
+    task_obj = env._tasks.get(task)
+    if task_obj is None:
+        raise KeyError(f"unknown task: {task!r}")
+    instruction = task_obj.description.strip()
+    if not instruction:
+        raise ValueError(
+            f"harbor export needs a static description for task {task!r}; "
+            "it will not execute task setup to discover a prompt",
+        )
+    return instruction
 
 
 _TEST_SH = """\
@@ -52,8 +53,8 @@ _TEST_SH = """\
 # Grade by driving the env control channel via `hud client run`.
 set -euo pipefail
 mkdir -p /logs/verifier
-hud client run '{task}' \\
-    --args '{args_json}' \\
+hud client run {task} \\
+    --args {args_json} \\
     --answer "$(cat /workspace/answer.txt 2>/dev/null || true)" \\
     > /logs/verifier/reward.txt
 """
@@ -89,16 +90,13 @@ async def export(source: str, out_dir: str | Path) -> list[Path]:
     ``task.toml`` / ``instruction.md`` / ``environment/Dockerfile`` / ``tests/test.sh``.
     Returns the created task directories. Deterministic: same env + args ⇒ same output.
     """
-    from hud.cli.utils.collect import collect_variants, load_variants_json
+    from hud.eval.source import load_variants
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     src = Path(source).resolve()
     source_dir = src.parent if src.is_file() else src
-    if src.suffix in (".json", ".jsonl"):
-        variants = load_variants_json(src)
-    else:
-        variants = collect_variants(source)
+    variants = load_variants(src)
     dockerfile = next(
         (source_dir / n for n in ("Dockerfile.hud", "Dockerfile") if (source_dir / n).exists()),
         None,
@@ -114,20 +112,19 @@ async def export(source: str, out_dir: str | Path) -> list[Path]:
         (task_dir / "environment").mkdir(parents=True, exist_ok=True)
         (task_dir / "tests").mkdir(parents=True, exist_ok=True)
 
-        prompt = await _materialize_prompt(env, variant.task, variant.args)
-        (task_dir / "instruction.md").write_text(prompt, encoding="utf-8")
+        instruction = _static_instruction(env, variant.task)
+        (task_dir / "instruction.md").write_text(instruction, encoding="utf-8")
 
-        task_toml = (
-            f'id = "{slug}"\n'
-            f'task = "{variant.task}"\n'
-            f"args = {json.dumps(variant.args)}\n"
-        )
+        task_toml = toml.dumps({"id": slug, "task": variant.task, "args": variant.args})
         (task_dir / "task.toml").write_text(task_toml, encoding="utf-8")
 
         if dockerfile is not None:
             shutil.copyfile(dockerfile, task_dir / "environment" / "Dockerfile")
 
-        test_sh = _TEST_SH.format(task=variant.task, args_json=json.dumps(variant.args))
+        test_sh = _TEST_SH.format(
+            task=shlex.quote(variant.task),
+            args_json=shlex.quote(json.dumps(variant.args)),
+        )
         (task_dir / "tests" / "test.sh").write_text(test_sh, encoding="utf-8")
 
         created.append(task_dir)

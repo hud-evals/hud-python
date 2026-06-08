@@ -1,12 +1,11 @@
 """Sandbox: the substrate spinup layer, decoupled from the client/server.
 
 A ``Sandbox`` brings up a substrate that serves the HUD control channel and exposes
-its ``runtime`` (url + params) — a local process (``LocalSandbox``), an attached url
-(``RemoteSandbox``), or a HUD-hosted box (``HudSandbox``). ``launch`` wires it to a
-``HudClient``::
+its ``runtime`` (url + params) — a local process (``LocalSandbox``) or an attached
+url (``RemoteSandbox``). ``launch`` wires it to a ``HudClient``::
 
     async with LocalSandbox(env) as runtime:  # create() on enter, terminate() on exit
-        ...                                   # connect a client to runtime.url
+        ...  # connect a client to runtime.url
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import contextlib
 import importlib.util
 import sys
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,12 +30,13 @@ class Runtime:
     """A created sandbox's connectable control channel.
 
     ``url`` is the control-channel address (``tcp://127.0.0.1:7000`` for a local
-    process, or a remote ``tcp://sandbox-abc.hud.so:443``). ``params`` carries
-    connection-time data a transport may need — e.g. an auth token or sandbox id.
+    process, or a remote ``tcp://sandbox-abc.hud.so:443``). ``auth_token`` is sent
+    during the control-channel hello when the sandbox requires it.
     """
 
     url: str
-    params: dict[str, Any] = field(default_factory=dict)
+    auth_token: str | None = None
+    sandbox_id: str | None = None
 
 
 class Sandbox(ABC):
@@ -116,73 +116,27 @@ class RemoteSandbox(Sandbox):
     ``Runtime``. Use this to point at a box you (or some other system) brought up.
     """
 
-    def __init__(self, url: str, **params: Any) -> None:
-        self._url = url
-        self._params = params
-
-    async def create(self) -> Runtime:
-        self._runtime = Runtime(url=self._url, params=self._params)
-        return self._runtime
-
-    async def terminate(self) -> None:
-        self._runtime = None
-
-
-class HudSandbox(Sandbox):
-    """A HUD-hosted sandbox, provisioned via the HUD control plane.
-
-    ``create`` provisions a box from ``image`` and returns its ``Runtime`` (url +
-    token); ``terminate`` releases it. Only the two control-plane HTTP calls
-    (``_provision`` / ``_deprovision``) are left as seams to wire to the backend.
-    """
-
     def __init__(
         self,
-        image: str,
+        url: str,
         *,
-        base_url: str | None = None,
-        api_key: str | None = None,
-        **opts: Any,
+        auth_token: str | None = None,
+        sandbox_id: str | None = None,
     ) -> None:
-        self.image = image
-        self.base_url = base_url  # HUD control-plane base URL; defaults to settings
-        self.api_key = api_key
-        self.opts = opts
-        self.sandbox_id: str | None = None
+        self._url = url
+        self._auth_token = auth_token
+        self._sandbox_id = sandbox_id
 
     async def create(self) -> Runtime:
-        provisioned = await self._provision()
-        self.sandbox_id = provisioned["id"]
         self._runtime = Runtime(
-            url=provisioned["control_url"],
-            params={"token": provisioned["token"], "sandbox_id": provisioned["id"]},
+            url=self._url,
+            auth_token=self._auth_token,
+            sandbox_id=self._sandbox_id,
         )
         return self._runtime
 
     async def terminate(self) -> None:
-        if self.sandbox_id is not None:
-            with contextlib.suppress(Exception):
-                await self._deprovision(self.sandbox_id)
-            self.sandbox_id = None
         self._runtime = None
-
-    # ─── HUD control-plane API (structure only — wire to the real endpoints) ───
-
-    async def _provision(self) -> dict[str, Any]:
-        """Provision a sandbox on HUD infra.
-
-        Intended call: ``POST {base_url}/sandboxes`` with
-        ``{"image": self.image, **self.opts}`` and a bearer ``api_key``, returning
-        ``{"id": str, "control_url": "tcp://host:port", "token": str}``.
-        """
-        raise NotImplementedError("HudSandbox._provision: HUD spinup API not wired yet")
-
-    async def _deprovision(self, sandbox_id: str) -> None:
-        """Release a provisioned sandbox.
-
-        Intended call: ``DELETE {base_url}/sandboxes/{sandbox_id}``.
-        """
-        raise NotImplementedError("HudSandbox._deprovision: HUD spinup API not wired yet")
 
 
 def as_sandbox(ref: Sandbox | Environment) -> Sandbox:
@@ -196,7 +150,7 @@ def as_sandbox(ref: Sandbox | Environment) -> Sandbox:
         return LocalSandbox(ref)
     raise TypeError(
         f"expected a Sandbox or a live Environment; got {type(ref).__name__}. "
-        "For HUD-hosted / image envs, pass a Sandbox (e.g. HudSandbox, RemoteSandbox).",
+        "For attached remote envs, pass a RemoteSandbox.",
     )
 
 
@@ -240,10 +194,9 @@ def sandbox_from_ref(ref: dict[str, Any]) -> Sandbox:
 
     - ``{"type": "module", "module": "env.py", "name": "my-env"?}`` →
       :class:`LocalSandbox` over the ``Environment`` imported from that file.
-    - ``{"type": "url", "url": "tcp://host:port", "params": {...}?}`` →
+    - ``{"type": "url", "url": "tcp://host:port", "auth_token": "...?"}`` →
       :class:`RemoteSandbox` attached to an already-running control channel.
-    - ``{"type": "hud", "name": "my-env", "opts": {...}?}`` →
-      :class:`HudSandbox` provisioned from the HUD registry by name (HUD-hosted).
+    ``hud`` refs are registry identities for sync/export, not runnable substrates.
     """
     from hud.environment import Environment  # local import: avoid import cycle at module load
 
@@ -267,17 +220,19 @@ def sandbox_from_ref(ref: dict[str, Any]) -> Sandbox:
         url = ref.get("url")
         if not isinstance(url, str):
             raise ValueError("env-ref type 'url' requires a string 'url'")
-        return RemoteSandbox(url, **(ref.get("params") or {}))
+        auth_token = ref.get("auth_token")
+        if auth_token is not None and not isinstance(auth_token, str):
+            raise ValueError("env-ref field 'auth_token' must be a string")
+        sandbox_id = ref.get("sandbox_id")
+        if sandbox_id is not None and not isinstance(sandbox_id, str):
+            raise ValueError("env-ref field 'sandbox_id' must be a string")
+        return RemoteSandbox(url, auth_token=auth_token, sandbox_id=sandbox_id)
     if kind == "hud":
-        name = ref.get("name") or ref.get("image")
-        if not isinstance(name, str):
-            raise ValueError("env-ref type 'hud' requires a string 'name'")
-        return HudSandbox(name, **(ref.get("opts") or {}))
-    raise ValueError(f"unknown env-ref type {kind!r} (expected 'module', 'url', or 'hud')")
+        raise ValueError("env-ref type 'hud' is not runnable locally; use 'module' or 'url'")
+    raise ValueError(f"unknown env-ref type {kind!r} (expected 'module' or 'url')")
 
 
 __all__ = [
-    "HudSandbox",
     "LocalSandbox",
     "RemoteSandbox",
     "Runtime",

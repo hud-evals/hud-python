@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
-
-from google.genai import types as genai_types
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools import SSHTool
-from hud.types import MCPToolResult
+from hud.agents.tools.base import result_text, tool_ok
 
-from .base import GeminiToolSpec
-from .coding import _decl, _required_str
+from .base import GeminiToolSpec, declaration, required_str
+
+if TYPE_CHECKING:
+    from google.genai import types as genai_types
+
+    from hud.types import MCPToolResult
 
 GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
 GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")
@@ -37,28 +39,30 @@ class GeminiReadTool(SSHTool):
         return GEMINI_READ_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        path = _required_str(arguments, "file_path")
-        result = await self.file_read(path)
-        if result.isError:
-            return result
+        path = required_str(arguments, "file_path")
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         if isinstance(start, int) and start > 0:
-            import mcp.types as mcp_types
+            limit = (end - start + 1) if isinstance(end, int) and end >= start else None
+            return await self._read_slice(path, offset=start - 1, limit=limit)
+        return await self._read_slice(path)
 
-            from hud.agents.tools.base import result_text
-
-            lines = result_text(result).splitlines(keepends=True)
-            offset = start - 1
-            limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
-            sliced = lines[offset : offset + limit]
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text="".join(sliced))],
-            )
-        return result
+    async def _read_slice(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> MCPToolResult:
+        result = await self.file_read(path)
+        if result.isError or (offset <= 0 and limit is None):
+            return result
+        lines = result_text(result).splitlines(keepends=True)
+        end = offset + limit if limit is not None and limit > 0 else len(lines)
+        return tool_ok("".join(lines[offset:end]))
 
 
 class GeminiSearchTool(SSHTool):
@@ -80,10 +84,10 @@ class GeminiSearchTool(SSHTool):
         return GEMINI_SEARCH_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        pattern = _required_str(arguments, "pattern")
+        pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         include = arguments.get("include_pattern")
         cmd = f"grep -rn {_shell_quote(pattern)} {_shell_quote(str(dir_path))}"
@@ -110,10 +114,10 @@ class GeminiGlobTool(SSHTool):
         return GEMINI_GLOB_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        pattern = _required_str(arguments, "pattern")
+        pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         cmd = f"find {_shell_quote(str(dir_path))} -name {_shell_quote(pattern)}"
         return await self.bash(cmd)
@@ -136,10 +140,10 @@ class GeminiListTool(SSHTool):
         return GEMINI_LIST_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        return await self.file_list(_required_str(arguments, "dir_path"))
+        return await self.file_list(required_str(arguments, "dir_path"))
 
 
 def _shell_quote(s: str) -> str:

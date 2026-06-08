@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
+import math
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, cast
 
@@ -97,8 +98,7 @@ def _coerce_args(func: TaskFn, args: dict[str, Any]) -> dict[str, Any]:
     """Coerce string wire args into the task fn's annotated param types.
 
     JSON-RPC sends args as JSON scalars/strings; a param annotated with a richer
-    type (Pydantic model, list, etc.) is validated via a ``TypeAdapter``. Values
-    that already match (or fail to coerce) are passed through unchanged.
+    type (Pydantic model, list, etc.) is validated via a ``TypeAdapter``.
     """
     from pydantic import TypeAdapter
 
@@ -110,10 +110,7 @@ def _coerce_args(func: TaskFn, args: dict[str, Any]) -> dict[str, Any]:
         if annotation in (inspect.Parameter.empty, str, Any) or not isinstance(value, str):
             coerced[name] = value
             continue
-        try:
-            coerced[name] = TypeAdapter(annotation).validate_json(value)
-        except Exception:
-            coerced[name] = value
+        coerced[name] = TypeAdapter(annotation).validate_json(value)
     return coerced
 
 
@@ -132,19 +129,27 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
 
     raw_text = payload.get("answer", "") if isinstance(payload, dict) else payload
     raw_citations = payload.get("citations", []) if isinstance(payload, dict) else []
-    try:
-        adapter = TypeAdapter(return_type)
-        content = adapter.validate_json(raw_text) if isinstance(raw_text, str) else (
-            adapter.validate_python(raw_text)
-        )
-    except Exception:
-        content = raw_text
+    adapter = TypeAdapter(return_type)
+    content = (
+        adapter.validate_json(raw_text)
+        if isinstance(raw_text, str)
+        else adapter.validate_python(raw_text)
+    )
     citations = [Citation(**c) for c in raw_citations if isinstance(c, dict)]
     return AgentAnswer(
         content=content,
         raw=raw_text if isinstance(raw_text, str) else str(raw_text),
         citations=citations,
     )
+
+
+def _numeric_score(value: Any) -> float:
+    if type(value) not in (int, float):
+        raise TypeError(f"legacy scenario reward must be numeric, got {value!r}")
+    score = float(value)
+    if not math.isfinite(score):
+        raise ValueError(f"legacy scenario reward must be finite, got {value!r}")
+    return score
 
 
 def scenario_to_task_fn(scenario_fn: Any) -> Any:
@@ -168,13 +173,13 @@ def scenario_to_task_fn(scenario_fn: Any) -> Any:
         answer = payload.get("answer") if isinstance(payload, dict) else payload
         try:
             result = await gen.asend(answer)
-        except StopAsyncIteration:
-            result = 0.0
+        except StopAsyncIteration as exc:
+            raise RuntimeError("legacy scenario ended without yielding a reward") from exc
         if isinstance(result, dict) and "score" in result:
             yield result
         else:
             score = getattr(result, "reward", result)
-            yield {"score": float(score) if isinstance(score, (int, float)) else 0.0}
+            yield {"score": _numeric_score(score)}
         with contextlib.suppress(Exception):
             await gen.aclose()
 

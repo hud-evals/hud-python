@@ -15,13 +15,6 @@ from hud.cli.utils.env_check import ensure_built
 from hud.utils.hud_console import HUDConsole
 
 
-def _get_response_text(response: httpx.Response) -> str:
-    try:
-        return response.json().get("detail", "No detail available")
-    except Exception:
-        return response.text
-
-
 def get_docker_username() -> str | None:
     """Get the current Docker username if logged in."""
     try:
@@ -414,9 +407,10 @@ def push_environment(
         if github_url:
             payload["github_url"] = github_url
 
-        from hud.cli.utils.api import hud_headers
+        from hud.cli.utils.api import hud_client
 
-        response = httpx.post(registry_url, json=payload, headers=hud_headers(), timeout=10)
+        with hud_client(timeout=10) as client:
+            response = client.post(registry_url, json=payload)
 
         if response.status_code in [200, 201]:
             hud_console.success("Metadata uploaded to HUD registry")
@@ -433,7 +427,9 @@ def push_environment(
             hud_console.info("Consider using a different tag if you want to update")
         else:
             hud_console.warning(f"Could not upload to registry: {response.status_code}")
-            hud_console.warning(_get_response_text(response))
+            from hud.cli.utils.api import response_detail
+
+            hud_console.warning(response_detail(response))
             hud_console.info("Share hud.lock.yaml manually\n")
     except httpx.TimeoutException:
         hud_console.warning("Registry upload timed out")

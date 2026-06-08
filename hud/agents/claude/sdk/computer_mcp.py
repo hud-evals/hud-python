@@ -6,23 +6,45 @@ Single tool ``computer`` backed by ``ClaudeComputerTool`` / ``RFBTool``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
 
 import fastmcp
+import mcp.types as mcp_types
 
-from hud.capabilities.rfb import RFBClient
+from hud.agents.claude.tools.computer import ClaudeComputerTool
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from hud.capabilities.rfb import RFBClient
 
 logger = logging.getLogger(__name__)
+
+#: ``computer`` params whose string value may be a JSON array (e.g. ``[x, y]``).
+_JSON_FIELDS = frozenset({"coordinate", "start_coordinate", "region"})
+
+
+def _maybe_json(value: str) -> Any:
+    """Parse a JSON-array-ish argument, falling back to the raw string."""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
     """Build a FastMCP server with one ``computer`` tool backed by ``rfb``."""
 
     mcp = fastmcp.FastMCP("computer-use")
+    spec = ClaudeComputerTool.default_spec("claude-sonnet-4-6")
+    if spec is None:
+        raise RuntimeError("Claude computer MCP requires a Claude computer spec")
+    computer_tool = ClaudeComputerTool(spec=spec, client=rfb)
 
-    @mcp.tool()
     async def computer(
         action: str,
         coordinate: str | None = None,
@@ -42,41 +64,26 @@ def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
 
         Returns the resulting screenshot image so you can see the screen state.
         """
-        import mcp.types as mcp_types
-
-        from hud.agents.claude.tools.computer import ClaudeComputerTool
-        from hud.agents.tools.base import AgentToolSpec
-
         arguments: dict[str, Any] = {"action": action}
-        if coordinate is not None:
-            try:
-                arguments["coordinate"] = json.loads(coordinate)
-            except json.JSONDecodeError:
-                arguments["coordinate"] = coordinate
-        if text is not None:
-            arguments["text"] = text
-        if scroll_direction is not None:
-            arguments["scroll_direction"] = scroll_direction
-        if scroll_amount is not None:
-            arguments["scroll_amount"] = scroll_amount
-        if start_coordinate is not None:
-            try:
-                arguments["start_coordinate"] = json.loads(start_coordinate)
-            except json.JSONDecodeError:
-                arguments["start_coordinate"] = start_coordinate
-        if duration is not None:
-            arguments["duration"] = duration
-        if repeat is not None:
-            arguments["repeat"] = repeat
-        if region is not None:
-            try:
-                arguments["region"] = json.loads(region)
-            except json.JSONDecodeError:
-                arguments["region"] = region
+        optional: dict[str, str | int | float | None] = {
+            "coordinate": coordinate,
+            "text": text,
+            "scroll_direction": scroll_direction,
+            "scroll_amount": scroll_amount,
+            "start_coordinate": start_coordinate,
+            "duration": duration,
+            "repeat": repeat,
+            "region": region,
+        }
+        for key, value in optional.items():
+            if value is None:
+                continue
+            if key in _JSON_FIELDS and isinstance(value, str):
+                arguments[key] = _maybe_json(value)
+            else:
+                arguments[key] = value
 
-        spec = AgentToolSpec(api_type="computer", api_name="computer")
-        tool = ClaudeComputerTool(spec=spec, client=rfb)
-        result = await tool.execute(arguments)
+        result = await computer_tool.execute(arguments)
 
         # Return content blocks directly so the CLI/model sees real images.
         blocks: list[Any] = []
@@ -95,34 +102,42 @@ def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
             blocks.insert(0, mcp_types.TextContent(type="text", text="ERROR"))
         return blocks
 
+    mcp.tool()(computer)
     return mcp
 
 
-async def serve_computer_mcp(
+@asynccontextmanager
+async def computer_mcp_server(
     rfb: RFBClient,
     host: str = "127.0.0.1",
-    port: int = 0,
-) -> int:
-    """Start the computer-use MCP server in the background, return the port."""
-    if port == 0:
-        srv = await asyncio.get_event_loop().create_server(lambda: asyncio.Protocol(), host, 0)
-        port = srv.sockets[0].getsockname()[1]
-        srv.close()
+) -> AsyncIterator[int]:
+    """Run the computer-use MCP server for the lifetime of the context.
+
+    Binds an ephemeral port, waits until uvicorn reports it has started (surfacing
+    any startup error instead of a fixed sleep), yields the bound port, then shuts
+    the server down on exit. Scoping the server to one rollout avoids the leaked
+    background task and TOCTOU port grab of the previous implementation.
+    """
+    import uvicorn
 
     mcp = create_computer_mcp(rfb)
-    asyncio.create_task(_run(mcp, host, port))
-    await asyncio.sleep(0.5)
-    logger.info("computer-use MCP server on %s:%d", host, port)
-    return port
-
-
-async def _run(mcp: fastmcp.FastMCP, host: str, port: int) -> None:
+    app = mcp.http_app(path="/mcp")
+    config = uvicorn.Config(app, host=host, port=0, log_level="warning")
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
     try:
-        await mcp.run_http_async(host=host, port=port)
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.exception("computer-use MCP server crashed")
+        while not server.started:
+            if task.done():
+                task.result()  # re-raise the startup failure
+                raise RuntimeError("computer-use MCP server exited before startup")
+            await asyncio.sleep(0.02)
+        port = int(server.servers[0].sockets[0].getsockname()[1])
+        logger.info("computer-use MCP server on %s:%d", host, port)
+        yield port
+    finally:
+        server.should_exit = True
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
-__all__ = ["create_computer_mcp", "serve_computer_mcp"]
+__all__ = ["computer_mcp_server", "create_computer_mcp"]

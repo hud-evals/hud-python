@@ -5,12 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hud.cli.build import (
-    extract_env_vars_from_dockerfile,
     get_existing_version,
     increment_version,
-    parse_base_image,
     parse_version,
 )
+from hud.cli.utils.environment import extract_env_vars_from_dockerfile, parse_base_image
 
 if TYPE_CHECKING:
     from pathlib import Path

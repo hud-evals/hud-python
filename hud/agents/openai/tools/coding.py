@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Any, cast
 
 import mcp.types as mcp_types
+from openai.types.responses import FunctionShellToolParam, ToolParam
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.base import result_text
 from hud.types import MCPToolResult
 
 from .base import OpenAIToolSpec
-
-try:
-    from openai.types.responses import FunctionShellToolParam, ToolParam
-except Exception:
-    ToolParam = Any  # type: ignore[assignment,misc]
 
 OPENAI_SHELL_SPEC = OpenAIToolSpec(
     api_type="shell",
     api_name="shell",
 )
+
+
+def _shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "outcome": {"type": "exit", "exit_code": exit_code},
+    }
 
 
 class OpenAIShellTool(SSHTool):
@@ -67,20 +71,23 @@ class OpenAIShellTool(SSHTool):
         if isinstance(timeout_ms, int):
             env_arguments["timeout_seconds"] = timeout_ms / 1000.0
 
+        timeout_s = env_arguments.get("timeout_seconds")
         for command in command_list:
-            if env_arguments.get("timeout_seconds"):
-                full_cmd = f"timeout {int(env_arguments['timeout_seconds'])} {command}"
+            if timeout_s:
+                # Wrap the whole command in `sh -c` so the timeout (and quoting)
+                # applies to the entire command, not just its first token.
+                full_cmd = f"timeout {timeout_s:g} sh -c {shlex.quote(command)}"
             else:
                 full_cmd = command
-            result = await self.bash(full_cmd)
-            text = result_text(result)
-            if result.isError:
-                outputs.append(_shell_output("", text, 1))
+            stdout, stderr, exit_code = await self.bash_structured(full_cmd)
+            outputs.append(_shell_output(stdout, stderr, exit_code))
+            if exit_code != 0:
                 is_error = True
-            else:
-                outputs.append(_shell_output(text, "", 0))
-            if text:
-                text_parts.append(text)
+            combined = stdout
+            if stderr:
+                combined = f"{combined}\nstderr:\n{stderr}" if combined else stderr
+            if combined:
+                text_parts.append(combined)
 
         return _shell_result(
             "\n".join(text_parts),
@@ -104,14 +111,6 @@ def _shell_result(
         isError=is_error,
         structuredContent=payload,
     )
-
-
-def _shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
-    return {
-        "stdout": stdout,
-        "stderr": stderr,
-        "outcome": {"type": "exit", "exit_code": exit_code},
-    }
 
 
 __all__ = ["OPENAI_SHELL_SPEC", "OpenAIShellTool"]

@@ -1,21 +1,9 @@
-"""Deprecated shim for the old ``hud.tools`` package.
+"""Deprecated redirects for moved ``hud.tools`` imports.
 
-The tools moved in the v6 teardown, but deployed v5 envs still import from here, so
-this shim keeps those imports working (each emits a ``DeprecationWarning``):
-
-- standalone tools (``BaseTool``, ``BashTool``/``EditTool``,
-  ``JupyterTool``, ``MemoryTool``, ``PlaywrightTool``, ``AgentTool``)
-  → redirected to the real classes in :mod:`hud.native.tools`
-- result/answer types (``AgentAnswer``, ``Citation``, ``EvaluationResult`` /
-  ``ScenarioResult``, ``ContentResult``, ``SubScore``, ``ToolError``)
-  → redirected to :mod:`hud.agents.types`
-- computer tools (``HudComputerTool``, ``AnthropicComputerTool``, …) were removed;
-  they resolve to a lightweight marker so an env that registers one still gets a
-  ``computer`` (rfb) capability synthesized at serve time (see
-  :mod:`hud.environment.legacy_capabilities`)
-- anything else resolves to a **no-op** stand-in
-
-Update imports to the locations above.
+Known moved modules and symbols emit a ``DeprecationWarning`` and redirect to
+their v6 location. Removed computer-tool names resolve to a marker used by the
+legacy env adapter to publish an ``rfb`` capability. Truly unknown names fail
+normally; this module does not fabricate no-op tools.
 """
 
 from __future__ import annotations
@@ -40,6 +28,10 @@ _MSG = (
 _MODULE_REDIRECTS: dict[str, str] = {
     "hud.tools.base": "hud.native.tools.base",
     "hud.tools.coding": "hud.native.tools.coding",
+    "hud.tools.coding.bash": "hud.native.tools.coding.bash",
+    "hud.tools.coding.edit": "hud.native.tools.coding.edit",
+    "hud.tools.coding.session": "hud.native.tools.coding.session",
+    "hud.tools.coding.utils": "hud.native.tools.coding.utils",
     "hud.tools.jupyter": "hud.native.tools.jupyter",
     "hud.tools.memory": "hud.native.tools.memory",
     "hud.tools.playwright": "hud.native.tools.playwright",
@@ -52,6 +44,7 @@ _NAME_REDIRECTS: dict[str, str] = {
     "AgentTool": "hud.native.tools.agent",
     "BaseTool": "hud.native.tools.base",
     "BashTool": "hud.native.tools.coding",
+    "ClaudeBashSession": "hud.native.tools.coding",
     "EditTool": "hud.native.tools.coding",
     "JupyterTool": "hud.native.tools.jupyter",
     "MemoryTool": "hud.native.tools.memory",
@@ -74,24 +67,11 @@ def _is_computer_module(fullname: str) -> bool:
     return fullname.startswith("hud.tools.computer")
 
 
-class _NoOp:
-    """No-op stand-in for a removed (non-redirected) ``hud.tools`` symbol."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self
-
-    def __getattr__(self, _name: str) -> Any:
-        return self
-
-
 class LegacyComputerTool:
-    """Marker for a removed computer tool.
+    """Marker for a removed v5 computer tool.
 
-    Carries ``_legacy_capability_kind = "computer"`` so the legacy env adapter
-    publishes a ``computer`` (rfb) capability when one is registered, instead of
-    silently no-op'ing it.
+    The legacy env adapter uses ``_legacy_capability_kind`` to publish an
+    ``rfb`` capability when an old env registers a computer tool class.
     """
 
     _legacy_capability_kind = "computer"
@@ -102,7 +82,7 @@ class LegacyComputerTool:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self
 
-    def __getattr__(self, _name: str) -> Any:
+    def __getattr__(self, _name: str) -> None:
         return None
 
 
@@ -119,11 +99,10 @@ def _resolve_name(module_name: str, name: str) -> Any:
     if _is_computer_name(name):
         _warn(f"{module_name}.{name} was removed; using a computer-capability marker")
         return LegacyComputerTool
-    _warn(f"{module_name}.{name} is a no-op")
-    return _NoOp
+    raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
 
 
-def _make_getattr(module_name: str) -> Any:
+def _make_marker_getattr(module_name: str) -> Any:
     def __getattr__(name: str) -> Any:
         return _resolve_name(module_name, name)
 
@@ -135,8 +114,7 @@ def _make_redirect_getattr(module_name: str, target_name: str) -> Any:
 
     Resolving lazily (instead of copying attrs once at import time) avoids a
     partial-import race: the target is fully imported by the time an attribute is
-    actually read. Names the target lacks (dropped v5 symbols) fall back to a
-    marker/no-op.
+    actually read.
     """
 
     def __getattr__(name: str) -> Any:
@@ -149,10 +127,12 @@ def _make_redirect_getattr(module_name: str, target_name: str) -> Any:
 
 
 class _DeprecatedToolsFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """Resolve ``hud.tools.*`` submodules: redirect, computer-marker, or no-op."""
+    """Resolve known ``hud.tools.*`` redirects and legacy computer markers."""
 
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
         if not fullname.startswith("hud.tools."):
+            return None
+        if fullname not in _MODULE_REDIRECTS and not _is_computer_module(fullname):
             return None
         return importlib.util.spec_from_loader(fullname, self)
 
@@ -164,15 +144,14 @@ class _DeprecatedToolsFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader)
         redirect = _MODULE_REDIRECTS.get(name)
         if redirect is not None:
             warnings.warn(
-                f"{name} moved to {redirect} ({_MSG})", DeprecationWarning, stacklevel=2,
+                f"{name} moved to {redirect} ({_MSG})",
+                DeprecationWarning,
+                stacklevel=2,
             )
-            # Resolve attributes lazily from the target (avoids a partial-import
-            # race); dropped v5 names fall back to a marker/no-op.
             module.__getattr__ = _make_redirect_getattr(name, redirect)  # type: ignore[attr-defined]
             return
-        # Non-redirected submodule: resolve names lazily (computer marker / no-op).
-        module.__path__ = []  # mark as package so deeper imports route back here
-        module.__getattr__ = _make_getattr(name)  # type: ignore[attr-defined]
+        module.__path__ = []
+        module.__getattr__ = _make_marker_getattr(name)  # type: ignore[attr-defined]
 
 
 if not any(isinstance(f, _DeprecatedToolsFinder) for f in sys.meta_path):

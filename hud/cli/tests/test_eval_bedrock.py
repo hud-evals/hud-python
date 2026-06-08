@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import typer
 
-from hud.cli.eval import EvalConfig
+from hud.cli.eval_config import EvalConfig
 from hud.types import AgentType
 
 

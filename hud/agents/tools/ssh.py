@@ -11,7 +11,7 @@ from typing import cast
 
 import mcp.types as mcp_types
 
-from hud.agents.tools.base import AgentTool
+from hud.agents.tools.base import AgentTool, tool_ok
 from hud.capabilities import SSHClient
 from hud.types import MCPToolResult
 
@@ -23,18 +23,29 @@ class SSHTool(AgentTool[SSHClient]):
 
     # ─── action helpers ───────────────────────────────────────────────
 
-    async def bash(self, command: str) -> MCPToolResult:
-        """Run a shell command. Returns combined stdout/stderr + exit code."""
+    async def bash_structured(self, command: str) -> tuple[str, str, int]:
+        """Run a shell command, returning raw ``(stdout, stderr, exit_code)``.
+
+        The canonical execution primitive; ``bash`` formats this into a single
+        human-readable block, while providers that need separate streams (e.g.
+        OpenAI's ``shell_call_output``) consume the tuple directly.
+        """
         completed = await self.client.conn.run(command, check=False)
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
         stderr = completed.stderr if isinstance(completed.stderr, str) else ""
+        exit_code = completed.exit_status if isinstance(completed.exit_status, int) else 1
+        return stdout, stderr, exit_code
+
+    async def bash(self, command: str) -> MCPToolResult:
+        """Run a shell command. Returns combined stdout/stderr + exit code."""
+        stdout, stderr, exit_code = await self.bash_structured(command)
         body = f"$ {command}\n{stdout}"
         if stderr:
             body += f"\nstderr:\n{stderr}"
-        body += f"\n(exit {completed.exit_status})"
+        body += f"\n(exit {exit_code})"
         return MCPToolResult(
             content=[mcp_types.TextContent(type="text", text=body)],
-            isError=bool(completed.exit_status),
+            isError=bool(exit_code),
         )
 
     async def file_read(self, path: str) -> MCPToolResult:
@@ -60,7 +71,5 @@ class SSHTool(AgentTool[SSHClient]):
         names = [n for n in names if n not in (".", "..")]
         return tool_ok("\n".join(names) if names else "(empty)")
 
-
-from hud.agents.tools.base import tool_ok  # noqa: E402
 
 __all__ = ["SSHTool"]

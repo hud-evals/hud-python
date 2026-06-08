@@ -11,7 +11,11 @@ if TYPE_CHECKING:
 
 import yaml
 
-from hud.cli.utils.environment import find_dockerfile
+from hud.cli.utils.environment import (
+    extract_env_vars_from_dockerfile,
+    find_dockerfile,
+    parse_base_image,
+)
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
 from hud.version import __version__ as hud_version
 
@@ -65,8 +69,6 @@ def build_lock_data(
     local_image_ref: str | None = None,
 ) -> dict[str, Any]:
     """Build a `hud.lock.yaml`-compatible dict from shared analysis data."""
-    from hud.cli.build import extract_env_vars_from_dockerfile, parse_base_image
-
     resolved_source_dir = source_dir.resolve() if source_dir is not None else None
     dockerfile_path = (
         find_dockerfile(resolved_source_dir) if resolved_source_dir is not None else None

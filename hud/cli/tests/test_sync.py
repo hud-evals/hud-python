@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 import pytest
 import typer
 
-from hud.cli import sync as sync_mod
-from hud.cli.sync import (
+from hud.cli import sync_helpers as sync_mod
+from hud.cli.sync_helpers import (
     _build_column_definitions,
     _build_local_specs,
     _compute_remote_signature,

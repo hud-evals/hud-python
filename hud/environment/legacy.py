@@ -172,8 +172,12 @@ class LegacyEnvMixin:
                     server.add_tool(tool)
                     added += 1
                 except Exception:
-                    LOGGER.warning("legacy env %r: skipping un-servable tool %r (likely a "
-                                   "removed v5 tool)", self.name, tool, exc_info=True)
+                    LOGGER.warning(
+                        "legacy env %r: skipping un-servable tool %r (likely a removed v5 tool)",
+                        self.name,
+                        tool,
+                        exc_info=True,
+                    )
             if added == 0:
                 return
             port = _free_port()
@@ -182,11 +186,18 @@ class LegacyEnvMixin:
             )
             self._legacy_bg_tasks.append(task)
             self.add_capability(Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp"))
-            LOGGER.info("legacy env %r: %d tool(s) -> mcp capability (port %d)",
-                        self.name, len(tools), port)
+            LOGGER.info(
+                "legacy env %r: %d tool(s) -> mcp capability (port %d)",
+                self.name,
+                len(tools),
+                port,
+            )
         except Exception:
-            LOGGER.warning("legacy env %r: failed to publish mcp tool capability; tasks still "
-                           "serve", self.name, exc_info=True)
+            LOGGER.warning(
+                "legacy env %r: failed to publish mcp tool capability; tasks still serve",
+                self.name,
+                exc_info=True,
+            )
 
     async def _ensure_ssh_capability(self) -> None:
         """Spin up a :class:`~hud.environment.Workspace` + publish its ``ssh`` capability."""
@@ -198,11 +209,17 @@ class LegacyEnvMixin:
             await ws.start()
             self._legacy_workspaces.append(ws)
             self.add_capability(ws.capability())
-            LOGGER.info("legacy env %r: shell tool(s) -> ssh capability at %s",
-                        self.name, ws.ssh_url)
+            LOGGER.info(
+                "legacy env %r: shell tool(s) -> ssh capability at %s",
+                self.name,
+                ws.ssh_url,
+            )
         except Exception:
-            LOGGER.warning("legacy env %r: could not start an SSH workspace for shell tool(s)",
-                           self.name, exc_info=True)
+            LOGGER.warning(
+                "legacy env %r: could not start an SSH workspace for shell tool(s)",
+                self.name,
+                exc_info=True,
+            )
             warnings.warn(
                 "Legacy shell tools could not be converted to an ssh capability. Declare one "
                 "explicitly: Environment(..., capabilities=[Workspace(root).capability()]).",
@@ -343,6 +360,8 @@ class LegacyEnvMixin:
             stacklevel=2,
         )
         if transport is not None and transport != "tcp":
-            LOGGER.warning("env.run: transport %r ignored in v6 (serving tcp control channel)",
-                           transport)
+            LOGGER.warning(
+                "env.run: transport %r ignored in v6 (serving tcp control channel)",
+                transport,
+            )
         asyncio.run(cast("Any", self).serve(host, port or 8765))

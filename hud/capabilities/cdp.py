@@ -38,6 +38,10 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.capabilities.cdp")
 
+#: Bound on how long a single CDP command waits for its result frame, so a lost
+#: reply never hangs the caller forever.
+_COMMAND_TIMEOUT_S = 30.0
+
 
 class CDPError(RuntimeError):
     """Raised when Chrome returns a CDP error frame for a command."""
@@ -64,17 +68,24 @@ class CDPClient(CapabilityClient):
 
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
+        if cap.protocol != cls.protocol:
+            raise ValueError(f"CDPClient cannot open protocol {cap.protocol!r}")
         parts = urlsplit(cap.url)
         host = parts.hostname or "127.0.0.1"
         port = parts.port or 9222
         ws_url = await cls._resolve_ws_url(host, port, cap.params.get("target_id"), cap.url)
         ws = await ws_connect(ws_url, max_size=None)
         client = cls(cap, ws)
-        client._reader = asyncio.create_task(client._read_loop())
-        # Enable the domains every browser-driving tool relies on.
-        await client.send("Page.enable")
-        await client.send("Runtime.enable")
-        await client.send("DOM.enable")
+        try:
+            client._reader = asyncio.create_task(client._read_loop())
+            # Enable the domains every browser-driving tool relies on.
+            await client.send("Page.enable")
+            await client.send("Runtime.enable")
+            await client.send("DOM.enable")
+        except Exception:
+            # Don't leak the websocket / reader task if the handshake fails.
+            await client.close()
+            raise
         return client
 
     @staticmethod
@@ -105,20 +116,24 @@ class CDPClient(CapabilityClient):
     # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Issue one CDP command and await its result frame."""
+        """Issue one CDP command and await its result frame (bounded by a timeout)."""
         msg_id = next(self._ids)
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = future
         await self._ws.send(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
         try:
-            return await future
+            return await asyncio.wait_for(future, _COMMAND_TIMEOUT_S)
         finally:
             self._pending.pop(msg_id, None)
 
     async def _read_loop(self) -> None:
         try:
             async for raw in self._ws:
-                msg = json.loads(raw)
+                try:
+                    msg = json.loads(raw)
+                except (ValueError, TypeError):
+                    LOGGER.warning("CDP: dropping non-JSON frame")
+                    continue
                 msg_id = msg.get("id")
                 future = self._pending.get(msg_id) if msg_id is not None else None
                 if future is None or future.done():

@@ -2,7 +2,7 @@
 
 Launches each variant, lets ``agent(run)`` fill ``run.trace``, grades it, and
 gathers the :class:`Run`s — with optional GRPO grouping + a concurrency cap. HUD
-job/trace reporting lives in :mod:`hud.telemetry.job`::
+job/trace reporting lives in :mod:`hud.eval.job`::
 
     runs = await Taskset(fix_bug(difficulty=d) for d in range(5)).run(agent, group=8)
 """
@@ -13,7 +13,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from hud.client import Run
 
@@ -33,22 +33,23 @@ async def _rollout(
     *,
     job_id: str | None = None,
     group_id: str | None = None,
+    max_steps: int | None = None,
 ) -> Run:
     """Drive one variant to a graded :class:`Run` (the rollout atom).
 
     Launch the env, let ``agent(run)`` fill ``run.trace``, and grade it on exit
-    (``run.reward``). The rollout is wrapped in :func:`hud.telemetry.job.trace`,
+    (``run.reward``). The rollout is wrapped in :func:`hud.eval.job.trace`,
     which binds the per-rollout ``trace_id`` into the trace context (so ``@instrument``
     spans upload to it) and reports the trace to HUD. A launch/connect failure is
     isolated into a failed ``Run`` so one bad rollout never collapses a batch.
     """
-    from hud.telemetry.job import trace as report_trace
+    from hud.eval.job import trace as report_trace
 
     trace_id = uuid.uuid4().hex
     async with report_trace(trace_id, job_id=job_id, group_id=group_id) as recorded:
         try:
             async with variant as run:
-                await agent(run)
+                await agent(run, max_steps=max_steps)
             run.trace.trace_id = trace_id
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise
@@ -82,10 +83,11 @@ class Taskset:
 
     async def run(
         self,
-        agent: Any,
+        agent: Agent,
         *,
         group: int = 1,
         max_concurrent: int | None = None,
+        max_steps: int | None = None,
     ) -> list[Run]:
         """Gather rollouts over every variant x ``group`` with an optional concurrency cap.
 
@@ -96,7 +98,7 @@ class Taskset:
         """
         if group < 1:
             raise ValueError("group must be >= 1")
-        from hud.telemetry.job import job_enter
+        from hud.eval.job import job_enter
 
         # Fresh Variant per rollout (the Variant CM holds per-enter state); the
         # ``group`` repeats of one variant share a group_id (the GRPO group).
@@ -112,13 +114,27 @@ class Taskset:
 
         async def _one(variant: Variant, group_id: str) -> Run:
             if sem is None:
-                return await _rollout(variant, agent, job_id=job_id, group_id=group_id)
+                return await _rollout(
+                    variant,
+                    agent,
+                    job_id=job_id,
+                    group_id=group_id,
+                    max_steps=max_steps,
+                )
             async with sem:
-                return await _rollout(variant, agent, job_id=job_id, group_id=group_id)
+                return await _rollout(
+                    variant,
+                    agent,
+                    job_id=job_id,
+                    group_id=group_id,
+                    max_steps=max_steps,
+                )
 
         logger.info(
             "running %d rollouts (%d variants x %d group)%s",
-            len(expanded), len(self.variants), group,
+            len(expanded),
+            len(self.variants),
+            group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
         return list(await asyncio.gather(*(_one(v, gid) for v, gid in expanded)))

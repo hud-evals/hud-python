@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""``ToolAgent`` plumbing: prompt normalization, catalog→clients, dispatch + loop.
+"""``ToolAgent`` plumbing: prompt normalization, explicit clients, dispatch + loop.
 
 The provider-specific bits are abstract; this drives a tiny concrete subclass with a
 scripted ``get_response`` so the loop, dispatch, and message formatting run offline.
@@ -14,26 +14,29 @@ import mcp.types as mcp_types
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.tool_agent import RunState, ToolAgent, to_prompt_messages
-from hud.capabilities import SSHClient
+from hud.agents.types import ToolAgentConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
 
 _Msg = dict[str, Any]
+_Param = dict[str, Any]
 
 
-class DictAgent(ToolAgent[_Msg]):
+class DictAgent(ToolAgent[_Msg, _Param, ToolAgentConfig]):
     """Minimal concrete ToolAgent over plain-dict messages."""
 
     def __init__(self, responses: list[AgentResponse]) -> None:
-        self.model = "test-model"
-        self.auto_respond = False
-        self.hosted_tools = []
+        self.config = ToolAgentConfig(model="test-model")
         self._responses = list(responses)
 
-    async def _initialize_state(self, *, prompt: Any) -> RunState[_Msg]:
+    async def _initialize_state(self, *, prompt: Any) -> RunState[_Msg, _Param]:
         return RunState(messages=self._initial_messages(prompt))
 
     async def get_response(
-        self, state: RunState[_Msg], *, system_prompt: Any = None, citations_enabled: bool = False
+        self,
+        state: RunState[_Msg, _Param],
+        *,
+        system_prompt: Any = None,
+        citations_enabled: bool = False,
     ) -> AgentResponse:
         return self._responses.pop(0)
 
@@ -41,7 +44,7 @@ class DictAgent(ToolAgent[_Msg]):
         return {"role": role, "content": text}
 
     def _format_result(
-        self, call: MCPToolCall, result: MCPToolResult, state: RunState[_Msg]
+        self, call: MCPToolCall, result: MCPToolResult, state: RunState[_Msg, _Param]
     ) -> _Msg:
         return {"role": "tool", "name": call.name, "isError": result.isError}
 
@@ -72,14 +75,14 @@ def test_to_prompt_messages_normalizes_dicts_and_passthrough() -> None:
     assert msgs[1] is existing
 
 
-# ─── catalog → clients derivation ─────────────────────────────────────
+# ─── provider-declared tools ──────────────────────────────────────────
 
 
-def test_init_subclass_derives_clients_from_catalog() -> None:
-    class WithCatalog(DictAgent):
-        tool_catalog = (OpenAIShellTool,)
+def test_provider_declares_tools() -> None:
+    class WithTools(DictAgent):
+        tools = (OpenAIShellTool,)
 
-    assert WithCatalog.clients == (SSHClient,)
+    assert WithTools.tools == (OpenAIShellTool,)
 
 
 # ─── initial messages / user text formatting ──────────────────────────

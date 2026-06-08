@@ -24,15 +24,12 @@ def models_command(
         hud models              # List all models
         hud models --json       # Output as JSON[/not dim]
     """
-    from hud.cli.utils.api import hud_headers
+    from hud.cli.utils.api import hud_client
     from hud.settings import settings
 
     try:
-        response = httpx.get(
-            f"{settings.hud_gateway_url}/models",
-            headers=hud_headers(),
-            timeout=30.0,
-        )
+        with hud_client(timeout=30.0) as client:
+            response = client.get(f"{settings.hud_gateway_url}/models")
         response.raise_for_status()
         data = response.json()
 

@@ -42,6 +42,7 @@ def test_format_message_shapes_user_text() -> None:
 async def test_get_response_parses_text_and_function_call() -> None:
     response = SimpleNamespace(
         id="resp_1",
+        status="completed",
         output=[
             SimpleNamespace(
                 type="message",
@@ -64,11 +65,35 @@ async def test_get_response_parses_text_and_function_call() -> None:
     assert [tc.name for tc in result.tool_calls] == ["shell"]
     assert result.tool_calls[0].arguments == {"command": ["ls"]}
     assert result.done is False
+    assert result.finish_reason == "completed"
     assert state.last_response_id == "resp_1"
 
 
+async def test_get_response_tolerates_invalid_function_call_json() -> None:
+    response = SimpleNamespace(
+        id="resp_bad",
+        status="completed",
+        output=[
+            SimpleNamespace(
+                type="function_call",
+                name="shell",
+                arguments="{not json",
+                call_id="call_bad",
+            ),
+        ],
+    )
+    agent = _agent(response)
+    state = OpenAIRunState(messages=[agent._format_message("user", "go")])
+
+    result = await agent.get_response(state)
+
+    # Malformed argument JSON must not crash the rollout; args fall back to empty.
+    assert [tc.name for tc in result.tool_calls] == ["shell"]
+    assert result.tool_calls[0].arguments == {}
+
+
 async def test_get_response_done_when_no_tool_calls() -> None:
-    response = SimpleNamespace(id="resp_2", output=[])
+    response = SimpleNamespace(id="resp_2", status="completed", output=[])
     agent = _agent(response)
     state = OpenAIRunState(messages=[agent._format_message("user", "hi")])
 
@@ -94,6 +119,7 @@ async def test_get_response_short_circuits_on_consumed_messages() -> None:
 async def test_get_response_parses_shell_call() -> None:
     response = SimpleNamespace(
         id="resp_3",
+        status="completed",
         output=[
             SimpleNamespace(
                 type="shell_call",

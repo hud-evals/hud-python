@@ -80,11 +80,15 @@ class _FakeSSH:
         self,
         *,
         stdout: str = "ok",
+        stderr: str = "",
         exit_status: int = 0,
         files: dict[str, bytes] | None = None,
     ) -> None:
         self.files: dict[str, bytes] = files or {}
-        self.conn = _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)
+        self.conn = _Conn(
+            _Completed(stdout=stdout, stderr=stderr, exit_status=exit_status),
+            self.files,
+        )
 
 
 def _commands(tool: Any) -> list[str]:
@@ -99,11 +103,29 @@ async def test_openai_shell_wraps_command_with_timeout() -> None:
 
     result = await tool.execute({"commands": ["pwd"], "timeout_ms": 2500})
 
-    assert _commands(tool) == ["timeout 2 pwd"]
+    # Sub-second precision is preserved and the whole command runs under `sh -c`
+    # so the timeout covers more than the first token.
+    assert _commands(tool) == ["timeout 2.5 sh -c pwd"]
     assert result.isError is False
     assert result.structuredContent is not None
     assert result.structuredContent["provider_tool"] == "shell"
     assert len(result.structuredContent["output"]) == 1
+
+
+async def test_openai_shell_separates_stdout_and_stderr() -> None:
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.4"),
+        client=_FakeSSH(stdout="out", stderr="err", exit_status=1),
+    )
+
+    result = await tool.execute({"commands": ["bad"]})
+
+    assert result.isError is True
+    assert result.structuredContent is not None
+    output = result.structuredContent["output"][0]
+    assert output["stdout"] == "out"
+    assert output["stderr"] == "err"
+    assert output["outcome"]["exit_code"] == 1
 
 
 async def test_openai_shell_runs_each_command_without_timeout() -> None:
@@ -233,3 +255,15 @@ async def test_gemini_edit_creates_file_when_old_string_empty() -> None:
     await tool.execute({"file_path": "/n.txt", "old_string": "", "new_string": "fresh"})
 
     assert ssh.files["/n.txt"] == b"fresh"
+
+
+async def test_gemini_edit_errors_when_old_string_not_unique() -> None:
+    ssh = _FakeSSH(files={"/f.txt": b"a a a"})
+    tool = GeminiEditTool(spec=GeminiEditTool.default_spec("gemini"), client=ssh)
+
+    result = await tool.execute(
+        {"file_path": "/f.txt", "old_string": "a", "new_string": "b"},
+    )
+
+    assert result.isError is True  # ambiguous match must not write
+    assert ssh.files["/f.txt"] == b"a a a"

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from hud.agents.claude.agent import ClaudeAgent
+from hud.agents.types import ClaudeConfig
 
 
 class FakeStream:
@@ -46,9 +47,7 @@ class FakeAnthropic:
 
 def _agent(final: Any) -> ClaudeAgent:
     agent = ClaudeAgent.__new__(ClaudeAgent)
-    agent.model = "claude-test"
-    agent.max_tokens = 1024
-    agent.hosted_tools = []
+    agent.config = ClaudeConfig(model="claude-test", max_tokens=1024)
     agent.anthropic_client = FakeAnthropic(final)  # type: ignore[assignment]
     return agent
 
@@ -56,7 +55,7 @@ def _agent(final: Any) -> ClaudeAgent:
 def _state(agent: ClaudeAgent) -> Any:
     from hud.agents.tool_agent import RunState
 
-    return RunState(messages=[agent._format_message("user", "go")])
+    return RunState[Any, Any](messages=[agent._format_message("user", "go")])
 
 
 def test_format_message_shape() -> None:

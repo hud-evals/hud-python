@@ -3,11 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest import mock
 
-from hud.cli.build import (
-    extract_env_vars_from_dockerfile,
-    get_docker_image_digest,
-    get_docker_image_id,
-)
+from hud.cli.build import get_docker_image_id
+from hud.cli.utils.environment import extract_env_vars_from_dockerfile
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,12 +33,6 @@ ENV WITH_DEFAULT=val
     assert "DEFAULTED" not in required
     assert "WITH_DEFAULT" not in required
     assert optional == []
-
-
-@mock.patch("subprocess.run")
-def test_get_docker_image_digest_none(mock_run):
-    mock_run.return_value = mock.Mock(stdout="[]", returncode=0)
-    assert get_docker_image_digest("img") is None
 
 
 @mock.patch("subprocess.run")

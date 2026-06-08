@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from hud.environment import Environment
-from hud.eval import HudSandbox, RemoteSandbox, Variant, variant
+from hud.eval import RemoteSandbox, Variant, variant
 from hud.eval.sandbox import LocalSandbox
 
 
@@ -51,9 +51,9 @@ def test_local_sandbox_unwraps_to_underlying_env_ref() -> None:
 
 
 def test_remote_sandbox_serializes_to_url_ref() -> None:
-    v = Variant(env=RemoteSandbox("tcp://host:7000", token="abc"), task="t")
+    v = Variant(env=RemoteSandbox("tcp://host:7000", auth_token="abc"), task="t")
     data = v.to_dict()
-    assert data["env"] == {"type": "url", "url": "tcp://host:7000", "params": {"token": "abc"}}
+    assert data["env"] == {"type": "url", "url": "tcp://host:7000"}
 
 
 def test_to_dict_only_includes_set_metadata() -> None:
@@ -66,19 +66,19 @@ def test_to_dict_only_includes_set_metadata() -> None:
 
 
 def test_roundtrip_is_stable_through_from_dict() -> None:
-    original = variant(
-        Environment("team-intel"),
-        "ask",
+    original = Variant(
+        env=RemoteSandbox("tcp://host:7000", auth_token="secret"),
+        task="ask",
+        args={"difficulty": 3},
         slug="ask-v1",
         validation=[{"name": "submit", "arguments": {"answer": "x"}}],
         agent_config={"system_prompt": "be precise"},
         columns={"tier": "hard"},
-        difficulty=3,
     ).to_dict()
 
     rebuilt = Variant.from_dict(original)
 
-    assert isinstance(rebuilt.env, HudSandbox)  # hud ref -> HudSandbox
+    assert isinstance(rebuilt.env, RemoteSandbox)
     assert rebuilt.task == "ask"
     assert rebuilt.args == {"difficulty": 3}
     assert rebuilt.slug == "ask-v1"
@@ -87,6 +87,11 @@ def test_roundtrip_is_stable_through_from_dict() -> None:
     assert rebuilt.columns == {"tier": "hard"}
     # ...and re-serializing yields the same portable dict.
     assert rebuilt.to_dict() == original
+
+
+def test_hud_ref_is_registry_identity_not_runnable_sandbox() -> None:
+    with pytest.raises(ValueError, match="not runnable locally"):
+        Variant.from_dict({"env": {"type": "hud", "name": "e"}, "task": "t"})
 
 
 def test_to_dict_rejects_unserializable_env() -> None:

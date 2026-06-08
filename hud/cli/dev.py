@@ -64,7 +64,7 @@ def _serve_environment(env: Any, port: int) -> None:
         highlight=False,
     )
     hud_console.console.print(
-        f"{hud_console.sym.ITEM} {len(env._tasks)} task(s), "
+        f"{hud_console.sym.ITEM} {len(env.tasks_manifest())} task(s), "
         f"{len(env.capabilities)} capability(ies)",
         highlight=False,
     )

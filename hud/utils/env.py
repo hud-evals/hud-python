@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
-from collections import defaultdict
 from string import Template
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +23,7 @@ def resolve_env_vars(obj: Any, extra_mapping: Mapping[str, Any] | None = None) -
     Uppercase aliases are automatically added for settings keys,
     so both ${api_key} and ${API_KEY} work.
 
-    Missing variables resolve to empty strings.
+    Missing variables raise ``KeyError``.
 
     Args:
         obj: The object to resolve (string, dict, list, or other).
@@ -43,10 +41,8 @@ def resolve_env_vars(obj: Any, extra_mapping: Mapping[str, Any] | None = None) -
     settings_dict = settings.model_dump()
     mapping.update(settings_dict)
 
-    # Add UPPERCASE aliases for settings keys
     for key, val in settings_dict.items():
-        with contextlib.suppress(Exception):
-            mapping[key.upper()] = val
+        mapping[key.upper()] = val
 
     if settings.api_key:
         mapping["HUD_API_KEY"] = settings.api_key
@@ -56,8 +52,7 @@ def resolve_env_vars(obj: Any, extra_mapping: Mapping[str, Any] | None = None) -
 
     def substitute(value: Any) -> Any:
         if isinstance(value, str):
-            safe_mapping = defaultdict(str, mapping)
-            return Template(value).substitute(safe_mapping)
+            return Template(value).substitute(mapping)
         elif isinstance(value, dict):
             return {k: substitute(v) for k, v in value.items()}
         elif isinstance(value, list):

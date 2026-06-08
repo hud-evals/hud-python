@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 import pytest
 import typer
 
-from hud.cli import eval as eval_mod
-from hud.cli.eval import EvalConfig, _is_bedrock_arn
+from hud.cli import eval_config as eval_mod
+from hud.cli.eval_config import EvalConfig, _is_bedrock_arn
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,7 +48,6 @@ def test_get_agent_kwargs_model_precedence_and_flags() -> None:
     assert kwargs["model"] == "gpt-cli"  # CLI model wins over config model
     assert kwargs["temperature"] == 0.5
     assert kwargs["verbose"] is True
-    assert kwargs["validate_api_key"] is False
 
 
 def test_get_agent_kwargs_requires_agent_type() -> None:

@@ -6,6 +6,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from hud.agents.openai_compatible.agent import OpenAIChatAgent, OpenAIChatRunState
 from hud.agents.types import OpenAIChatConfig
 
@@ -67,9 +69,15 @@ async def test_get_response_with_tool_call() -> None:
     assert result.done is False
 
 
-async def test_get_response_error_path() -> None:
+async def test_get_response_propagates_api_errors() -> None:
+    # API failures must surface (and end the rollout via the loop's handler), not be
+    # silently turned into a successful-looking terminal AgentResponse.
     agent = _agent(None, error=RuntimeError("boom"))
-    result = await agent.get_response(_state(agent))
-    assert result.isError is True
-    assert result.done is True
-    assert "boom" in result.content
+    with pytest.raises(RuntimeError, match="boom"):
+        await agent.get_response(_state(agent))
+
+
+async def test_get_response_raises_on_empty_choices() -> None:
+    agent = _agent(SimpleNamespace(choices=[]))
+    with pytest.raises(ValueError, match="no choices"):
+        await agent.get_response(_state(agent))

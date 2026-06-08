@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 
 from hud.utils.hud_console import HUDConsole
+
+if TYPE_CHECKING:
+    import httpx
 
 
 def require_api_key(action: str = "perform this action") -> str:
@@ -36,3 +41,24 @@ def hud_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     if extra:
         headers.update(extra)
     return headers
+
+
+def hud_client(
+    *, timeout: float = 30.0, extra_headers: dict[str, str] | None = None
+) -> httpx.Client:
+    """Return an ``httpx.Client`` preconfigured with HUD auth headers.
+
+    Centralizes the ``httpx.Client(headers=hud_headers(...), timeout=...)`` setup
+    that CLI commands otherwise repeat. Use as a context manager.
+    """
+    import httpx
+
+    return httpx.Client(timeout=timeout, headers=hud_headers(extra_headers))
+
+
+def response_detail(response: httpx.Response) -> str:
+    """Best-effort error detail from a HUD API response: JSON ``detail`` else raw text."""
+    try:
+        return response.json().get("detail", "No detail available")
+    except Exception:
+        return response.text

@@ -22,6 +22,20 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.workspace")
 
+#: Non-secret host env vars passed into the sandbox so the shell stays usable.
+#: Everything else (notably credentials) must be declared explicitly via env.
+_SANDBOX_ENV_PASSTHROUGH = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "USER",
+    "SHELL",
+    "TZ",
+)
+
 
 # ─────────────────────────── mount declarations ───────────────────────────
 
@@ -134,10 +148,8 @@ class Workspace:
             loop = asyncio.get_running_loop()
             self._serve_task = loop.create_task(self._serve())
 
-        LOGGER.info(
-            "Workspace SSH bound on %s as user %r (client key: %s)",
-            self.ssh_url, self._ssh_user, self._client_key_path,
-        )
+        # Never log the client key path; key material/location stays out of logs.
+        LOGGER.info("Workspace SSH bound on %s as user %r", self.ssh_url, self._ssh_user)
 
     # ─── lifecycle ────────────────────────────────────────────────────
 
@@ -166,6 +178,25 @@ class Workspace:
             self._serve_task = asyncio.get_event_loop().create_task(self._serve())
         # Yield so the acceptor binds before first use.
         await asyncio.sleep(0)
+
+    async def close(self) -> None:
+        """Tear down the SSH acceptor, accept-loop task, and listening socket.
+
+        Idempotent. Without this the acceptor, ``_serve`` task, and bound socket
+        leak for the lifetime of the process.
+        """
+        if self._acceptor is not None:
+            self._acceptor.close()
+            with contextlib.suppress(Exception):
+                await self._acceptor.wait_closed()
+            self._acceptor = None
+        if self._serve_task is not None:
+            self._serve_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._serve_task
+            self._serve_task = None
+        with contextlib.suppress(OSError):
+            self._sock.close()
 
     # ─── ssh accessors / capability ───────────────────────────────────
 
@@ -221,7 +252,12 @@ class Workspace:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable."""
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
-        full_env = {**os.environ, **self.env, **(env or {})}
+        # Pass through only a minimal, non-secret base from the host; the env's
+        # declared vars (self.env) and explicit per-call overrides win. Copying the
+        # full host os.environ leaked host secrets (API keys, cloud creds) into the
+        # sandbox via --setenv. Envs that need extra vars must declare them in env.
+        base = {k: os.environ[k] for k in _SANDBOX_ENV_PASSTHROUGH if k in os.environ}
+        full_env = {**base, **self.env, **(env or {})}
         argv: list[str] = [
             self._bwrap,
             "--die-with-parent",
@@ -286,6 +322,7 @@ class Workspace:
                 key = asyncssh.generate_private_key("ssh-ed25519")
                 key.write_private_key(str(key_path))
                 key.write_public_key(str(key_path.with_suffix(".pub")))
+                os.chmod(key_path, 0o600)
         return key, key.export_public_key().decode("ascii").strip()
 
     def _ensure_authorized_keys_file(self) -> Path:
@@ -303,6 +340,7 @@ class Workspace:
                 client = asyncssh.generate_private_key("ssh-ed25519")
                 client.write_private_key(str(priv_path))
                 client.write_public_key(str(pub_path))
+                os.chmod(priv_path, 0o600)
             pub_lines.append(pub_path.read_text().strip())
             self._client_key_path = priv_path
 

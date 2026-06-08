@@ -49,8 +49,10 @@ class HiddenRouter(FastMCP):
 
                 try:
                     arguments = json.loads(arguments)
-                except json.JSONDecodeError:
-                    arguments = {}
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid JSON arguments for internal tool {name!r}") from exc
+                if not isinstance(arguments, dict):
+                    raise TypeError("Internal tool arguments JSON must decode to an object")
 
             prefixed = hidden_self._prefix_fn(name)
             tool = await hidden_self._local_provider.get_tool(prefixed)

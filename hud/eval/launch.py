@@ -28,6 +28,7 @@ async def _connect_ready(
     host: str,
     port: int,
     *,
+    auth_token: str | None = None,
     ready_timeout: float = 120.0,
     interval: float = 0.5,
 ) -> HudClient:
@@ -40,7 +41,7 @@ async def _connect_ready(
     deadline = loop.time() + ready_timeout
     while True:
         try:
-            return await HudClient.connect(host, port)
+            return await HudClient.connect(host, port, auth_token=auth_token)
         except OSError:
             if loop.time() >= deadline:
                 raise
@@ -63,7 +64,11 @@ async def launch(ref: Sandbox | Environment) -> AsyncIterator[HudClient]:
             raise NotImplementedError(
                 f"control transport {parts.scheme!r} not supported yet (only tcp://)",
             )
-        client = await _connect_ready(parts.hostname or "127.0.0.1", parts.port or 0)
+        client = await _connect_ready(
+            parts.hostname or "127.0.0.1",
+            parts.port or 0,
+            auth_token=runtime.auth_token,
+        )
         async with client:
             yield client
 

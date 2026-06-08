@@ -38,7 +38,7 @@ class BrowserUseAgent(Agent):
     def __init__(self, config: BrowserUseConfig | None = None) -> None:
         self.config = config or BrowserUseConfig()
 
-    async def __call__(self, run: Run) -> None:
+    async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
         """Drive browser-use over the run's CDP capability, filling ``run.trace``.
 
         Reads ``run.prompt`` and the CDP binding off the run, runs the browser-use
@@ -61,27 +61,26 @@ class BrowserUseAgent(Agent):
         sdk_agent = cast("Any", BrowserUseSdkAgent(task=run.prompt or "", llm=llm, browser=browser))
 
         try:
-            history: Any = await sdk_agent.run(max_steps=self.config.max_steps)
+            history: Any = await sdk_agent.run(max_steps=max_steps or self.config.max_steps)
         except Exception as exc:
             LOGGER.exception("browser-use run failed")
-            trace.done = True
-            trace.content = str(exc)
-            trace.isError = True
-            trace.info["error"] = str(exc)
+            trace.fail(str(exc))
             return
         finally:
             with contextlib.suppress(Exception):
                 await browser.stop()
 
         successful = history.is_successful()
-        trace.done = history.is_done()
-        trace.content = history.final_result() or ""
-        trace.isError = successful is False
-        trace.info.update({
-            "is_successful": successful,
-            "steps": history.number_of_steps(),
-            "urls": history.urls(),
-        })
+        # is_successful() is tri-state: True / False / None (unknown). Treat anything
+        # that is not an explicit success as an error so ambiguous runs aren't scored OK.
+        trace.finish(
+            history.final_result() or "",
+            isError=successful is not True,
+            done=history.is_done(),
+            is_successful=successful,
+            steps=history.number_of_steps(),
+            urls=history.urls(),
+        )
 
 
 def _ws_to_http(url: str) -> str:

@@ -23,11 +23,10 @@ class TestInitModule:
         expected = [
             "Chat",
             "Environment",
-            "Taskset",
-            "Variant",
+            "EvalContext",
+            "eval",
             "instrument",
-            "launch",
-            "variant",
+            "trace",
         ]
 
         assert set(hud.__all__) == set(expected)

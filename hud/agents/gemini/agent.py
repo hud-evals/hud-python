@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import logging
 from typing import Any, cast
 
@@ -12,9 +13,8 @@ from google.genai import types as genai_types
 
 from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import GeminiConfig
+from hud.agents.types import Citation, GeminiConfig
 from hud.settings import settings
-from hud.agents.types import Citation
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .settings import gemini_agent_settings
@@ -34,10 +34,10 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
-class GeminiAgent(ToolAgent[genai_types.Content]):
+class GeminiAgent(ToolAgent[genai_types.Content, genai_types.Tool, GeminiConfig]):
     """Gemini agent. Drives SSH (coding/filesystem), RFB (computer), and MCP capabilities."""
 
-    tool_catalog = (
+    tools = (
         GeminiShellTool,
         GeminiEditTool,
         GeminiWriteTool,
@@ -50,31 +50,17 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
     )
 
     def __init__(self, config: GeminiConfig | None = None) -> None:
-        config = config or GeminiConfig()
-        self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
-
-        model_client = config.model_client
-        if model_client is None:
-            if settings.api_key:
-                model_client = gateway.build_gateway_client("gemini")
-            elif settings.gemini_api_key:
-                model_client = genai.Client(api_key=settings.gemini_api_key)
-            else:
-                raise ValueError(
-                    "No API key for Gemini. Set HUD_API_KEY or GEMINI_API_KEY.",
-                )
-
-        self.gemini_client: genai.Client = cast("genai.Client", model_client)
-        self.temperature = config.temperature
-        self.top_p = config.top_p
-        self.top_k = config.top_k
-        self.max_output_tokens = config.max_output_tokens
-        self.thinking_level = config.thinking_level
-        self.include_thoughts = config.include_thoughts
-        self.excluded_predefined_functions = list(config.excluded_predefined_functions)
+        self.config = config or GeminiConfig()
+        self.gemini_client: genai.Client = cast(
+            "genai.Client",
+            self.config.model_client
+            or gateway.resolve_model_client(
+                "gemini",
+                direct_key=settings.gemini_api_key,
+                build_direct=lambda: genai.Client(api_key=settings.gemini_api_key),
+                direct_key_name="GEMINI_API_KEY",
+            ),
+        )
         self.max_recent_turn_with_screenshots = (
             gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
@@ -83,7 +69,7 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
 
     async def _initialize_state(
         self, *, prompt: str | list[Any] | None
-    ) -> RunState[genai_types.Content]:
+    ) -> RunState[genai_types.Content, genai_types.Tool]:
         return RunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> genai_types.Content:
@@ -97,7 +83,7 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
-        state: RunState[genai_types.Content],
+        state: RunState[genai_types.Content, genai_types.Tool],
     ) -> genai_types.Content | None:
         text = next(
             (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
@@ -109,17 +95,16 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         if text is not None and not result.isError:
             response["output"] = text
 
-        parts: list[genai_types.FunctionResponsePart] = []
-        for block in result.content:
-            if isinstance(block, mcp_types.ImageContent):
-                parts.append(
-                    genai_types.FunctionResponsePart(
-                        inline_data=genai_types.FunctionResponseBlob(
-                            mime_type=block.mimeType or "image/png",
-                            data=base64.b64decode(block.data),
-                        ),
-                    ),
-                )
+        parts: list[genai_types.FunctionResponsePart] = [
+            genai_types.FunctionResponsePart(
+                inline_data=genai_types.FunctionResponseBlob(
+                    mime_type=block.mimeType or "image/png",
+                    data=base64.b64decode(block.data),
+                ),
+            )
+            for block in result.content
+            if isinstance(block, mcp_types.ImageContent)
+        ]
 
         return genai_types.Content(
             role="user",
@@ -136,60 +121,51 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
 
     async def get_response(
         self,
-        state: RunState[genai_types.Content],
+        state: RunState[genai_types.Content, genai_types.Tool],
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
     ) -> AgentResponse:
         messages = state.messages
 
-        # Drop screenshots from older computer tool turns.
-        computer_tool = self._find_computer_tool(state)
-        predefined = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS)
-        screenshot_turns: list[list[genai_types.FunctionResponse]] = []
-        for content in reversed(messages):
-            if content.role != "user":
-                continue
-            turn_responses: list[genai_types.FunctionResponse] = []
-            for part in content.parts or []:
-                fr = part.function_response
-                if fr is not None and fr.parts and fr.name in predefined:
-                    turn_responses.append(fr)
-            if turn_responses:
-                screenshot_turns.append(turn_responses)
-        for old_turn in screenshot_turns[self.max_recent_turn_with_screenshots :]:
-            for fr in old_turn:
-                fr.parts = None
+        # Send a trimmed copy (old screenshots stripped) but keep the canonical
+        # RunState.messages trajectory intact for retries/logging/training.
+        request_contents = copy.deepcopy(messages)
+        self._trim_old_screenshots(
+            request_contents,
+            frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS),
+        )
 
-        provider_tools = cast("genai_types.ToolListUnion", list(state.params))
-        if citations_enabled and not any(getattr(t, "google_search", None) for t in state.params):
+        provider_tools = self._request_tools(state.params)
+        if citations_enabled and not any(t.google_search for t in provider_tools):
             provider_tools = [
-                *list(provider_tools),
+                *provider_tools,
                 genai_types.Tool(google_search=genai_types.GoogleSearch()),
             ]
 
         thinking_config = None
-        if self.thinking_level is not None or self.include_thoughts:
+        if self.config.thinking_level is not None or self.config.include_thoughts:
             thinking_config = genai_types.ThinkingConfig(
-                thinking_level=genai_types.ThinkingLevel(self.thinking_level.upper())
-                if self.thinking_level is not None
+                thinking_level=genai_types.ThinkingLevel(self.config.thinking_level.upper())
+                if self.config.thinking_level is not None
                 else None,
-                include_thoughts=self.include_thoughts,
+                include_thoughts=self.config.include_thoughts,
             )
 
         generate_config = genai_types.GenerateContentConfig(
-            temperature=self.temperature,
-            top_p=self.top_p,
-            top_k=self.top_k,
-            max_output_tokens=self.max_output_tokens,
-            tools=provider_tools,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            top_k=self.config.top_k,
+            max_output_tokens=self.config.max_output_tokens,
+            # list invariance: list[Tool] -> ToolListUnion (list of a wider union).
+            tools=cast("genai_types.ToolListUnion", provider_tools),
             system_instruction=system_prompt,
             thinking_config=thinking_config,
         )
 
         api_response = await self.gemini_client.aio.models.generate_content(
             model=self.model,
-            contents=cast("Any", messages),
+            contents=cast("Any", request_contents),
             config=generate_config,
         )
         if not api_response.candidates:
@@ -207,7 +183,7 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         for part in (content.parts or []) if content else []:
             function_call = part.function_call
             if function_call is not None:
-                tc = self._make_tool_call(function_call, computer_tool)
+                tc = self._make_tool_call(function_call, state)
                 result.tool_calls.append(tc)
                 result.done = False
                 continue
@@ -233,26 +209,53 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
 
         return result
 
-    def _find_computer_tool(
+    def _trim_old_screenshots(
         self,
-        state: RunState[genai_types.Content],
-    ) -> GeminiComputerTool | None:
-        for tool in state.tools.values():
-            if isinstance(tool, GeminiComputerTool):
-                return tool
-        return None
+        contents: list[genai_types.Content],
+        image_response_names: frozenset[str],
+    ) -> None:
+        """Strip screenshot bytes from all but the most recent computer-tool turns.
+
+        Mutates ``contents`` in place; callers pass a copy so the canonical
+        ``RunState.messages`` trajectory keeps its screenshots.
+        """
+        screenshot_turns: list[list[genai_types.FunctionResponse]] = []
+        for content in reversed(contents):
+            if content.role != "user":
+                continue
+            turn_responses: list[genai_types.FunctionResponse] = []
+            for part in content.parts or []:
+                fr = part.function_response
+                if fr is not None and fr.parts and fr.name in image_response_names:
+                    turn_responses.append(fr)
+            if turn_responses:
+                screenshot_turns.append(turn_responses)
+        for old_turn in screenshot_turns[self.max_recent_turn_with_screenshots :]:
+            for fr in old_turn:
+                fr.parts = None
+
+    def _request_tools(self, params: list[genai_types.Tool]) -> list[genai_types.Tool]:
+        tools = copy.deepcopy(params)
+        excluded = self.config.excluded_predefined_functions
+        if not excluded:
+            return tools
+        for tool in tools:
+            computer_use = tool.computer_use
+            if computer_use is not None:
+                computer_use.excluded_predefined_functions = list(excluded)
+        return tools
 
     def _make_tool_call(
         self,
         function_call: genai_types.FunctionCall,
-        computer_tool: GeminiComputerTool | None,
+        state: RunState[genai_types.Content, genai_types.Tool],
     ) -> MCPToolCall:
         name = function_call.name or ""
         arguments = dict(function_call.args) if function_call.args else {}
-        predefined = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS)
-        if computer_tool is not None and name in predefined:
+        computer_tool = state.tools.get(GeminiComputerTool.name)
+        if computer_tool is not None and name in PREDEFINED_COMPUTER_USE_FUNCTIONS:
             return MCPToolCall(
-                name=computer_tool.name,
+                name=computer_tool.provider_name,
                 arguments={"action": name, **arguments},
                 provider_name=name,
             )

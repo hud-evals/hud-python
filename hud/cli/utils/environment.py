@@ -192,6 +192,55 @@ def find_dockerfile(directory: Path) -> Path | None:
     return None
 
 
+def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], list[str]]:
+    """Extract required runtime env vars from Dockerfile ENV declarations."""
+    required: list[str] = []
+    optional: list[str] = []
+    if not dockerfile_path.exists():
+        return required, optional
+
+    arg_vars: set[str] = set()
+    for raw_line in dockerfile_path.read_text().splitlines():
+        line = raw_line.strip()
+        if line.startswith("ARG "):
+            name, has_default = _docker_assignment(line[4:])
+            if name and not has_default:
+                arg_vars.add(name)
+        elif line.startswith("ENV "):
+            name, has_value = _docker_assignment(line[4:])
+            if name and (not has_value or _env_references_arg(line[4:], arg_vars)):
+                required.append(name)
+
+    return list(dict.fromkeys(required)), optional
+
+
+def parse_base_image(dockerfile_path: Path) -> str | None:
+    """Return the first FROM image, stripped of an optional stage alias."""
+    try:
+        if not dockerfile_path.exists():
+            return None
+        for raw_line in dockerfile_path.read_text().splitlines():
+            line = raw_line.strip()
+            if line and not line.startswith("#") and line.upper().startswith("FROM "):
+                rest = line[5:].strip()
+                lower = rest.lower()
+                return rest[: lower.index(" as ")] if " as " in lower else rest
+    except Exception:
+        return None
+    return None
+
+
+def _docker_assignment(text: str) -> tuple[str, bool]:
+    name, sep, value = text.strip().partition("=")
+    return name.strip(), bool(sep and value.strip())
+
+
+def _env_references_arg(text: str, arg_vars: set[str]) -> bool:
+    _, sep, value = text.strip().partition("=")
+    value = value.strip()
+    return bool(sep and value.startswith("$") and value[1:] in arg_vars)
+
+
 def is_environment_directory(path: str | Path) -> bool:
     """Check if a path looks like an environment directory.
 

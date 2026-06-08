@@ -9,9 +9,10 @@ import logging
 import secrets
 from typing import TYPE_CHECKING, Any, ParamSpec, cast
 
+from hud._wire import WireProtocolError, error, read_frame, reply, send_frame
+
 from .legacy import LegacyEnvMixin
 from .task import Task, TaskRunner
-from .utils import error, read_frame, reply, send_frame
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -38,6 +39,7 @@ class Environment(LegacyEnvMixin):
         *,
         version: str = "0.0.1",
         capabilities: list[Capability] | None = None,
+        auth_token: str | None = None,
         **legacy_kwargs: Any,
     ) -> None:
         if legacy_kwargs:
@@ -52,6 +54,10 @@ class Environment(LegacyEnvMixin):
         self.name = name
         self.version = version
         self.capabilities: list[Capability] = list(capabilities or [])
+        # When set, a client must present this token in ``hello`` before it can
+        # drive tasks (and before it sees capability bindings / their secrets).
+        # Default ``None`` keeps the control channel open (loopback dev).
+        self._auth_token = auth_token
         self._tasks: dict[str, Task[Any]] = {}
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
         # stands up). Run once by the substrate (LocalSandbox) around serving.
@@ -104,6 +110,15 @@ class Environment(LegacyEnvMixin):
     def add_capability(self, cap: Capability) -> None:
         self.capabilities.append(cap)
 
+    def _task_runner(self, task_id: str, args: dict[str, Any] | None = None) -> TaskRunner:
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise KeyError(f"unknown task: {task_id!r}")
+        return TaskRunner(task, args)
+
+    def tasks_manifest(self) -> list[dict[str, Any]]:
+        return [task.manifest_entry() for task in self._tasks.values()]
+
     def initialize(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register an initializer, run once before the control channel serves.
 
@@ -125,30 +140,14 @@ class Environment(LegacyEnvMixin):
         """Serialize the env descriptor: identity, capabilities, and task list.
 
         Task generator *code* is not serializable; ``tasks`` carries id/description
-        metadata for discovery. :meth:`from_dict` restores identity + capabilities
-        (runnable task funcs come from the env's source/image when launched).
+        metadata for discovery.
         """
         return {
             "name": self.name,
             "version": self.version,
             "capabilities": [c.to_manifest() for c in self.capabilities],
-            "tasks": [t.manifest_entry() for t in self._tasks.values()],
+            "tasks": self.tasks_manifest(),
         }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Environment:
-        """Rebuild an Environment from :meth:`to_dict` output (identity + capabilities).
-
-        Tasks are not reconstructed — their generator code lives in the env's
-        source. A deserialized Environment carries identity + capability metadata only.
-        """
-        from hud.capabilities import Capability
-
-        return cls(
-            name=data["name"],
-            version=data.get("version", "0.0.1"),
-            capabilities=[Capability.from_manifest(c) for c in data.get("capabilities") or []],
-        )
 
     # ─── control-channel server ──────────────────────────────────────────
 
@@ -196,6 +195,8 @@ class Environment(LegacyEnvMixin):
     ) -> None:
         session_id = "sess-" + secrets.token_hex(4)
         active_runner: TaskRunner | None = None
+        # No configured token => open channel; otherwise hello must authenticate.
+        authenticated = self._auth_token is None
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -207,7 +208,11 @@ class Environment(LegacyEnvMixin):
 
         try:
             while True:
-                msg = await read_frame(reader)
+                try:
+                    msg = await read_frame(reader)
+                except WireProtocolError as exc:
+                    LOGGER.warning("closing %s: %s", session_id, exc)
+                    return
                 if msg is None:
                     return
 
@@ -217,6 +222,12 @@ class Environment(LegacyEnvMixin):
 
                 try:
                     if method == "hello":
+                        if self._auth_token is not None and not secrets.compare_digest(
+                            str(params.get("token", "")), self._auth_token
+                        ):
+                            await error_to(msg_id, -32001, "unauthorized")
+                            return
+                        authenticated = True
                         await reply_to(
                             msg_id,
                             {
@@ -226,32 +237,29 @@ class Environment(LegacyEnvMixin):
                             },
                         )
 
+                    elif not authenticated:
+                        await error_to(msg_id, -32001, "unauthorized: authenticate via hello")
+                        continue
+
                     elif method == "tasks.list":
-                        await reply_to(
-                            msg_id,
-                            {
-                                "tasks": [t.manifest_entry() for t in self._tasks.values()],
-                            },
-                        )
+                        await reply_to(msg_id, {"tasks": self.tasks_manifest()})
 
                     elif method == "tasks.start":
                         task_id = params.get("id")
                         if not isinstance(task_id, str):
                             await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
                             continue
-                        task = self._tasks.get(task_id)
-                        if task is None:
-                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
-                            continue
                         args = params.get("args") or {}
                         if not isinstance(args, dict):
-                            await error_to(
-                                msg_id, -32602, "tasks.start: 'args' must be an object"
-                            )
+                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
                         if active_runner is not None:
                             await active_runner.cancel()
-                        active_runner = TaskRunner(task, args)
+                        try:
+                            active_runner = self._task_runner(task_id, args)
+                        except KeyError as exc:
+                            await error_to(msg_id, -32602, str(exc.args[0]))
+                            continue
                         prompt = await active_runner.start()
                         await reply_to(msg_id, prompt)
 
@@ -259,8 +267,10 @@ class Environment(LegacyEnvMixin):
                         if active_runner is None:
                             await error_to(msg_id, -32600, "no task in progress")
                             continue
-                        evaluation = await active_runner.evaluate(params)
-                        active_runner = None
+                        # Take ownership before evaluating so a failing evaluate
+                        # doesn't leave the session pinned to a spent runner.
+                        runner, active_runner = active_runner, None
+                        evaluation = await runner.evaluate(params)
                         await reply_to(msg_id, evaluation)
 
                     elif method == "tasks.cancel":

@@ -139,7 +139,7 @@ class TestPushEnvironment:
 
         assert exc_info.value.exit_code == 1
 
-    @mock.patch("httpx.post")
+    @mock.patch("hud.cli.utils.api.hud_client")
     @mock.patch("subprocess.Popen")
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.push.get_docker_username")
@@ -152,7 +152,7 @@ class TestPushEnvironment:
         mock_get_username,
         mock_run,
         mock_popen,
-        mock_post,
+        mock_hud_client,
         tmp_path,
     ):
         """Test auto-detecting Docker username and pushing."""
@@ -189,8 +189,10 @@ class TestPushEnvironment:
         mock_process.returncode = 0
         mock_popen.return_value = mock_process
 
-        # Mock registry upload
-        mock_post.return_value = mock.Mock(status_code=201)
+        # Mock registry upload (push.py uses `with hud_client(...) as client: client.post(...)`)
+        mock_client = mock.Mock()
+        mock_client.post.return_value = mock.Mock(status_code=201)
+        mock_hud_client.return_value.__enter__.return_value = mock_client
 
         # Run push
         push_environment(str(tmp_path), yes=True)
@@ -200,8 +202,8 @@ class TestPushEnvironment:
         mock_popen.assert_called_once()
 
         # Verify registry upload
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
         assert "testuser/image%3A0.1.0" in call_args[0][0]
 
     @mock.patch("subprocess.run")

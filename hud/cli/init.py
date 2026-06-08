@@ -12,7 +12,7 @@ import httpx
 import questionary
 import typer
 
-from hud.cli.utils.api import hud_headers
+from hud.cli.utils.api import hud_client
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
@@ -100,11 +100,8 @@ def _fetch_available_templates() -> tuple[list[dict], list[dict]]:
         return [], []
 
     try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.get(
-                f"{settings.hud_api_url}/templates/available",
-                headers=hud_headers(),
-            )
+        with hud_client(timeout=10) as client:
+            resp = client.get(f"{settings.hud_api_url}/templates/available")
             if resp.status_code != 200:
                 return [], []
             data = resp.json()
@@ -174,8 +171,8 @@ def _download_private_template(template_id: str, dest_dir: Path, files_created: 
 
     with (
         tempfile.NamedTemporaryFile(delete=False) as tmp_file,
-        httpx.Client(timeout=120) as client,
-        client.stream("GET", url, headers=hud_headers()) as resp,
+        hud_client(timeout=120) as client,
+        client.stream("GET", url) as resp,
     ):
         if resp.status_code == 403:
             raise RuntimeError("Access denied: your team does not have access to this template.")

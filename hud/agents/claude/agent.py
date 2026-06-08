@@ -26,9 +26,8 @@ from anthropic.types.beta import (
 
 from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import ClaudeConfig
+from hud.agents.types import Citation, ClaudeConfig
 from hud.settings import settings
-from hud.agents.types import Citation
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
@@ -44,39 +43,29 @@ ClaudeImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/we
 ClaudeToolResultContent = BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
 
 
-class ClaudeAgent(ToolAgent[BetaMessageParam]):
+class ClaudeAgent(ToolAgent[BetaMessageParam, BetaToolUnionParam, ClaudeConfig]):
     """Anthropic Claude agent. Drives SSH (coding), RFB (computer), and MCP capabilities."""
 
-    tool_catalog = (
-        ClaudeBashTool,
-        ClaudeTextEditorTool,
-        ClaudeComputerTool,
-        ClaudeMCPProxyTool,
-    )
+    tools = (ClaudeBashTool, ClaudeTextEditorTool, ClaudeComputerTool, ClaudeMCPProxyTool)
 
     def __init__(self, config: ClaudeConfig | None = None) -> None:
         self.config = config or ClaudeConfig()
-        self.model = self.config.model
-        self.auto_respond = self.config.auto_respond
-        self.hosted_tools = list(self.config.hosted_tools)
-        self.max_tokens = self.config.max_tokens
-        self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = self._resolve_client()
-
-    @staticmethod
-    def _resolve_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
-        if settings.api_key:
-            return cast("AsyncAnthropic", gateway.build_gateway_client("anthropic"))
-        if settings.anthropic_api_key:
-            return AsyncAnthropic(api_key=settings.anthropic_api_key)
-        raise ValueError(
-            "No API key found for Claude. Set HUD_API_KEY (gateway) or ANTHROPIC_API_KEY.",
+        self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = cast(
+            "AsyncAnthropic | AsyncAnthropicBedrock",
+            self.config.model_client
+            or gateway.resolve_model_client(
+                "anthropic",
+                direct_key=settings.anthropic_api_key,
+                build_direct=lambda: AsyncAnthropic(api_key=settings.anthropic_api_key),
+                direct_key_name="ANTHROPIC_API_KEY",
+            ),
         )
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(
         self, *, prompt: str | list[Any] | None
-    ) -> RunState[BetaMessageParam]:
+    ) -> RunState[BetaMessageParam, BetaToolUnionParam]:
         return RunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> BetaMessageParam:
@@ -89,7 +78,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
-        state: RunState[BetaMessageParam],
+        state: RunState[BetaMessageParam, BetaToolUnionParam],
     ) -> BetaMessageParam | list[BetaMessageParam] | None:
         tool_use_id = call.id
         if not tool_use_id:
@@ -174,7 +163,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
 
     async def get_response(
         self,
-        state: RunState[BetaMessageParam],
+        state: RunState[BetaMessageParam, BetaToolUnionParam],
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
@@ -184,7 +173,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
         }
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
-        tools = cast("list[BetaToolUnionParam]", list(state.params))
+        tools = list(state.params)
         system = system_prompt if system_prompt is not None else Omit()
         is_bedrock = isinstance(self.anthropic_client, AsyncAnthropicBedrock)
 
@@ -198,7 +187,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
                     response = await self.anthropic_client.beta.messages.create(
                         model=self.model,
                         system=system,
-                        max_tokens=self.max_tokens,
+                        max_tokens=self.config.max_tokens,
                         messages=messages_cached,
                         tools=tools,
                         tool_choice=tool_choice,
@@ -209,7 +198,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
                     async with client.beta.messages.stream(
                         model=self.model,
                         system=system,
-                        max_tokens=self.max_tokens,
+                        max_tokens=self.config.max_tokens,
                         messages=messages_cached,
                         tools=tools,
                         tool_choice=tool_choice,

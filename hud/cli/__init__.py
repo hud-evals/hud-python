@@ -122,6 +122,13 @@ app.add_typer(sync_app, name="sync")
 
 def main() -> None:
     """Main entry point for the CLI."""
+    from hud.patches import apply_all_patches, apply_default_warning_filters
+    from hud.utils.pretty_errors import install_pretty_errors
+
+    apply_all_patches()
+    apply_default_warning_filters(verbose="--verbose" in sys.argv)
+    install_pretty_errors()
+
     if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
         from .utils.version_check import display_update_prompt
 

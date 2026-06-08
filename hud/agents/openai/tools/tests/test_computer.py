@@ -12,7 +12,7 @@ from typing import Any
 from hud.agents.openai.tools.computer import (
     OpenAIComputerTool,
     _hold_keys,
-    _map_key,
+    _map_keys,
 )
 from hud.agents.tools.base import result_text, tool_ok
 
@@ -51,8 +51,8 @@ class RecordingOpenAI(OpenAIComputerTool):
 
 
 def test_key_mapping() -> None:
-    assert _map_key("ctrl") == "Control_L"
-    assert _map_key("x") == "x"
+    assert _map_keys(["ctrl"]) == ["Control_L"]
+    assert _map_keys(["x"]) == ["x"]
     assert _hold_keys(["ctrl", "c"]) == ["Control_L", "c"]
     assert _hold_keys("notalist") is None
 

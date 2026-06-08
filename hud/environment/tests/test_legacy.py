@@ -14,6 +14,7 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel
 
+from hud.agents.base import Agent
 from hud.agents.types import AgentAnswer
 from hud.client import HudProtocolError
 from hud.environment import Environment
@@ -25,7 +26,7 @@ def _silence_deprecation() -> None:
     warnings.simplefilter("ignore", DeprecationWarning)
 
 
-class _FnAgent:
+class _FnAgent(Agent):
     """Stateless agent: answers each run by applying ``fn`` to ``run.prompt``.
 
     One instance drives many concurrent rollouts (the contract ``Taskset`` relies on).
@@ -34,7 +35,8 @@ class _FnAgent:
     def __init__(self, fn: Any) -> None:
         self._fn = fn
 
-    async def __call__(self, run: Any) -> None:
+    async def __call__(self, run: Any, *, max_steps: int | None = None) -> None:
+        del max_steps
         run.trace.content = self._fn(run.prompt)
 
 
@@ -210,6 +212,40 @@ async def test_typed_returns_delivers_agent_answer() -> None:
     async with launch(env) as client, client.task("typed") as run:
         run.trace.content = '{"value": 42}'
     assert run.reward == 1.0
+
+
+async def test_invalid_typed_args_raise_protocol_error() -> None:
+    env = Environment("typed-args")
+    with warnings.catch_warnings():
+        _silence_deprecation()
+
+        @env.scenario("sum-list")
+        async def sum_list(values: list[int]):
+            yield f"sum {values}"
+            yield 1.0
+
+    async with launch(env) as client:
+        with pytest.raises(HudProtocolError):
+            await client.start_task("sum-list", {"values": "not-json"})
+
+
+async def test_invalid_typed_answer_raises_protocol_error() -> None:
+    class Answer(BaseModel):
+        value: int
+
+    env = Environment("typed-answer")
+    with warnings.catch_warnings():
+        _silence_deprecation()
+
+        @env.scenario("typed", returns=Answer)
+        async def typed():
+            yield "give me 42"
+            yield 1.0
+
+    async with launch(env) as client:
+        with pytest.raises(HudProtocolError):
+            async with client.task("typed") as run:
+                run.trace.content = "not-json"
 
 
 # ─── on-serve capability synthesis (real launch, real manifest) ───────

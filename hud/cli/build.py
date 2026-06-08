@@ -12,7 +12,7 @@ from typing import Any
 
 import typer
 
-from hud.cli.utils.environment import find_dockerfile
+from hud.cli.utils.environment import extract_env_vars_from_dockerfile, find_dockerfile
 from hud.cli.utils.lockfile import (
     build_lock_data,
     dump_lock_data,
@@ -85,27 +85,25 @@ def get_existing_version(lock_path: Path) -> str | None:
         return None
 
 
-def get_docker_image_digest(image: str) -> str | None:
-    """Get the digest of a Docker image."""
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.RepoDigests}}", image],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # Parse the output - it's in format [repo@sha256:digest]
-        digests = result.stdout.strip()
-        if digests and digests != "[]":
-            # Extract the first digest
-            digest_list = eval(digests)  # noqa: S307 # Safe since it's from docker
-            if digest_list:
-                # Return full image reference with digest
-                return digest_list[0]
-    except Exception:  # noqa: S110
-        # Don't print error here, let calling code handle it
-        pass
-    return None
+def _redacted_cmd(cmd: list[str]) -> str:
+    """Render a docker command for logging with --build-arg/--secret values masked.
+
+    Build args and secrets can carry credentials; keep the arg key for readability
+    but never echo its value (or a secret spec) into logs.
+    """
+    parts: list[str] = []
+    redact_next = False
+    for token in cmd:
+        if redact_next:
+            key = token.split("=", 1)[0]
+            parts.append(f"{key}=***" if "=" in token else "***")
+            redact_next = False
+        elif token in ("--build-arg", "--secret"):
+            parts.append(token)
+            redact_next = True
+        else:
+            parts.append(token)
+    return " ".join(parts)
 
 
 def get_docker_image_id(image: str) -> str | None:
@@ -124,91 +122,6 @@ def get_docker_image_id(image: str) -> str | None:
     except Exception:
         # Don't log here to avoid import issues
         return None
-
-
-def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], list[str]]:
-    """Extract required and optional RUNTIME environment variables from Dockerfile.
-
-    Only ENV directives are considered for runtime env vars.
-    ARG directives are build-time only and are NOT added to required env vars
-    (those should be passed via --build-arg during build).
-
-    ARG variables are tracked only to detect patterns like:
-        ARG MY_VAR
-        ENV MY_VAR=$MY_VAR
-    where the ARG value is exposed as a runtime ENV.
-    """
-    required = []
-    optional = []
-
-    if not dockerfile_path.exists():
-        return required, optional
-
-    # Parse both ENV and ARG directives
-    content = dockerfile_path.read_text()
-    arg_vars = set()  # Track ARG variables (for detecting ENV $ARG patterns)
-
-    for line in content.splitlines():
-        line = line.strip()
-
-        # Look for ARG directives (build-time variables)
-        # These are NOT runtime env vars - only track them to detect ENV $ARG patterns
-        if line.startswith("ARG "):
-            parts = line[4:].strip().split("=", 1)
-            var_name = parts[0].strip()
-            if len(parts) == 1 or not parts[1].strip():
-                # No default value - track it but DON'T add to required
-                # ARG is build-time only, not runtime
-                arg_vars.add(var_name)
-
-        # Look for ENV directives (runtime variables)
-        elif line.startswith("ENV "):
-            parts = line[4:].strip().split("=", 1)
-            var_name = parts[0].strip()
-
-            # Check if it references an ARG variable (e.g., ENV MY_VAR=$MY_VAR)
-            # This pattern exposes the build-time ARG as a runtime ENV
-            if len(parts) == 2 and parts[1].strip().startswith("$"):
-                ref_var = parts[1].strip()[1:]
-                if ref_var in arg_vars and var_name not in required:
-                    required.append(var_name)
-            elif len(parts) == 2 and not parts[1].strip():
-                # No default value = required
-                if var_name not in required:
-                    required.append(var_name)
-            elif len(parts) == 1:
-                # No equals sign = required
-                if var_name not in required:
-                    required.append(var_name)
-
-    return required, optional
-
-
-def parse_base_image(dockerfile_path: Path) -> str | None:
-    """Extract the base image from the first FROM directive in Dockerfile.
-
-    For multi-stage builds, returns the image from the first FROM. Strips any
-    trailing AS <stage> segment.
-    """
-    try:
-        if not dockerfile_path.exists():
-            return None
-        for raw_line in dockerfile_path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.upper().startswith("FROM "):
-                rest = line[5:].strip()
-                # Remove stage alias if present
-                lower = rest.lower()
-                if " as " in lower:
-                    # Split using the original case string at the index of lower-case match
-                    idx = lower.index(" as ")
-                    rest = rest[:idx]
-                return rest.strip()
-    except Exception:
-        return None
-    return None
 
 
 def check_dockerfile_for_secrets(directory: Path, dockerfile: Path) -> list[str]:
@@ -334,7 +247,7 @@ def build_docker_image(
 
     cmd.append(str(directory))
 
-    hud_console.info(f"Running: {' '.join(cmd)}")
+    hud_console.info(f"Running: {_redacted_cmd(cmd)}")
 
     try:
         env = os.environ.copy()
@@ -496,9 +409,7 @@ def build_environment(
 
     cap_count = len(analysis.get("capabilities") or [])
     task_count = len(analysis.get("tasks") or [])
-    hud_console.success(
-        f"Environment manifest: {cap_count} capability(ies), {task_count} task(s)"
-    )
+    hud_console.success(f"Environment manifest: {cap_count} capability(ies), {task_count} task(s)")
 
     # Extract environment variables from Dockerfile
     dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"
@@ -669,7 +580,8 @@ def build_environment(
 
     hud_console.status_item("Version", new_version)
     hud_console.status_item("Lock file", "hud.lock.yaml")
-    hud_console.status_item("Tools found", str(analysis["toolCount"]))
+    hud_console.status_item("Tasks", str(task_count))
+    hud_console.status_item("Capabilities", str(cap_count))
 
     if image_id:
         hud_console.dim_info("\nImage digest", image_id)

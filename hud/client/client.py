@@ -15,6 +15,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
 
+from hud._wire import WireProtocolError, read_frame, send_frame
 from hud.capabilities import (
     Capability,
     CapabilityClient,
@@ -23,7 +24,6 @@ from hud.capabilities import (
     RFBClient,
     SSHClient,
 )
-from hud.environment.utils import read_frame, send_frame
 
 from . import Manifest, ServerInfo
 from .run import Run
@@ -49,6 +49,35 @@ class HudProtocolError(RuntimeError):
         self.message = message
 
 
+def _response_result(method: str, msg_id: int, frame: dict[str, Any]) -> dict[str, Any]:
+    if frame.get("jsonrpc") != "2.0":
+        raise HudProtocolError(-32603, f"{method!r}: response missing jsonrpc='2.0'")
+
+    frame_id = frame.get("id")
+    if not isinstance(frame_id, int) or isinstance(frame_id, bool) or frame_id != msg_id:
+        raise HudProtocolError(-32603, f"{method!r}: response id mismatch")
+
+    has_result = "result" in frame
+    has_error = "error" in frame
+    if has_error == has_result:
+        raise HudProtocolError(-32603, f"{method!r}: response must contain result or error")
+
+    if has_error:
+        error = frame["error"]
+        if not isinstance(error, dict):
+            raise HudProtocolError(-32603, f"{method!r}: error was not an object")
+        code = error.get("code")
+        message = error.get("message")
+        if not isinstance(code, int) or isinstance(code, bool) or not isinstance(message, str):
+            raise HudProtocolError(-32603, f"{method!r}: malformed error object")
+        raise HudProtocolError(code, message)
+
+    result = frame["result"]
+    if not isinstance(result, dict):
+        raise HudProtocolError(-32603, f"{method!r}: result was not an object")
+    return result
+
+
 class HudClient:
     """JSON-RPC client for an ``Environment.serve()`` endpoint.
 
@@ -57,7 +86,7 @@ class HudClient:
 
         async with await HudClient.connect("127.0.0.1", 9001) as client:
             async with client.task("write_hello") as run:
-                run.trace.content = "done"   # the answer, graded on exit
+                run.trace.content = "done"  # the answer, graded on exit
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -66,20 +95,32 @@ class HudClient:
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
+        *,
+        auth_token: str | None = None,
     ) -> None:
         self._reader = reader
         self._writer = writer
+        self._auth_token = auth_token
         self._ids = itertools.count(1)
         self._closed = False
         self.manifest: Manifest | None = None
         self._opened: dict[str, CapabilityClient] = {}
+        # One in-flight request at a time: a single reader/writer pair can't
+        # interleave concurrent RPCs without mismatching replies.
+        self._rpc_lock = asyncio.Lock()
 
     # ─── lifecycle ────────────────────────────────────────────────────
 
     @classmethod
-    async def connect(cls, host: str = "127.0.0.1", port: int = 0) -> Self:
+    async def connect(
+        cls,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        *,
+        auth_token: str | None = None,
+    ) -> Self:
         reader, writer = await asyncio.open_connection(host, port)
-        return cls(reader, writer)
+        return cls(reader, writer, auth_token=auth_token)
 
     async def __aenter__(self) -> Self:
         await self.hello()
@@ -112,8 +153,9 @@ class HudClient:
     # ─── handshake ────────────────────────────────────────────────────
 
     async def hello(self) -> Manifest:
-        """Send ``hello``; cache and return the parsed ``Manifest``."""
-        result = await self._call("hello", {})
+        """Send ``hello`` (with the auth token if configured); cache the ``Manifest``."""
+        params: dict[str, Any] = {"token": self._auth_token} if self._auth_token else {}
+        result = await self._call("hello", params)
         env = result.get("env") or {}
         bindings = [Capability.from_manifest(b) for b in (result.get("bindings") or [])]
         self.manifest = Manifest(
@@ -212,30 +254,33 @@ class HudClient:
     # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
     async def _call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        msg_id = next(self._ids)
-        await send_frame(
-            self._writer,
-            {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
-        )
-        reply = await read_frame(self._reader)
+        async with self._rpc_lock:
+            msg_id = next(self._ids)
+            await send_frame(
+                self._writer,
+                {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
+            )
+            try:
+                reply = await read_frame(self._reader)
+            except WireProtocolError as exc:
+                raise HudProtocolError(-32700, str(exc)) from exc
         if reply is None:
             raise HudProtocolError(-32000, f"env closed connection during {method!r}")
-        if "error" in reply:
-            err = reply["error"]
-            raise HudProtocolError(int(err.get("code", -32000)), str(err.get("message", "")))
-        result = reply.get("result")
-        if not isinstance(result, dict):
-            raise HudProtocolError(-32603, f"{method!r}: result was not an object")
-        return result
+        return _response_result(method, msg_id, reply)
 
 
 # ─── module-level entry points ────────────────────────────────────────
 
 
 @asynccontextmanager
-async def connect(host: str = "127.0.0.1", port: int = 0) -> AsyncIterator[HudClient]:
+async def connect(
+    host: str = "127.0.0.1",
+    port: int = 0,
+    *,
+    auth_token: str | None = None,
+) -> AsyncIterator[HudClient]:
     """Attach to an already-running env (borrow; does not tear down the substrate)."""
-    client = await HudClient.connect(host, port)
+    client = await HudClient.connect(host, port, auth_token=auth_token)
     async with client:
         yield client
 

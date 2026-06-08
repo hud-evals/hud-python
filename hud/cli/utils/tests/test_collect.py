@@ -87,8 +87,13 @@ def test_collect_variants_missing_source_raises(tmp_path: Path) -> None:
 
 def test_load_variants_json_list(tmp_path: Path) -> None:
     entries = [
-        {"env": {"type": "hud", "name": "demo"}, "task": "solve", "args": {"n": 1}},
-        {"env": {"type": "hud", "name": "demo"}, "task": "solve", "args": {"n": 2}, "slug": "two"},
+        {"env": {"type": "url", "url": "tcp://host:7000"}, "task": "solve", "args": {"n": 1}},
+        {
+            "env": {"type": "url", "url": "tcp://host:7000"},
+            "task": "solve",
+            "args": {"n": 2},
+            "slug": "two",
+        },
     ]
     path = _write(tmp_path / "tasks.json", json.dumps(entries))
 
@@ -100,7 +105,7 @@ def test_load_variants_json_list(tmp_path: Path) -> None:
 
 
 def test_load_variants_json_single_object(tmp_path: Path) -> None:
-    entry = {"env": {"type": "hud", "name": "demo"}, "task": "solve", "args": {}}
+    entry = {"env": {"type": "url", "url": "tcp://host:7000"}, "task": "solve", "args": {}}
     path = _write(tmp_path / "one.json", json.dumps(entry))
 
     variants = load_variants_json(path)

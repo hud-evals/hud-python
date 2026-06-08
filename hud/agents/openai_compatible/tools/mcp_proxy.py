@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from hud.agents.tools import MCPTool
+from hud.agents.tools.base import AgentToolSpec
 
 from .base import openai_compatible_tool_name, openai_compatible_tool_param
 
@@ -13,10 +14,8 @@ class OpenAICompatibleMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as an OpenAI-compatible function tool."""
 
     @classmethod
-    def default_spec(cls, model: str) -> Any:
+    def default_spec(cls, model: str) -> AgentToolSpec | None:
         del model
-        from hud.agents.tools.base import AgentToolSpec
-
         return AgentToolSpec(api_type="function", api_name="function")
 
     @property

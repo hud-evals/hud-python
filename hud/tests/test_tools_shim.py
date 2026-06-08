@@ -1,4 +1,4 @@
-"""The deprecated ``hud.tools`` shim: redirects, computer markers, and no-ops.
+"""The deprecated ``hud.tools`` shim redirects known moved imports only.
 
 Lives outside ``hud.tools`` because the shim's meta-path finder intercepts every
 ``hud.tools.*`` submodule (so test modules can't live under that package).
@@ -6,6 +6,7 @@ Lives outside ``hud.tools`` because the shim's meta-path finder intercepts every
 
 from __future__ import annotations
 
+import importlib
 import warnings
 
 import pytest
@@ -16,18 +17,20 @@ def test_tool_redirects_to_native_location() -> None:
     # result rather than the one-shot warning.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools.agent import AgentTool
+        module = importlib.import_module("hud.tools.agent")
+        agent_tool = module.AgentTool
 
-    assert AgentTool.__module__ == "hud.native.tools.agent"
+    assert agent_tool.__module__ == "hud.native.tools.agent"
 
 
 def test_result_types_redirect_to_agents_types() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools.types import EvaluationResult
+        module = importlib.import_module("hud.tools.types")
+        evaluation_result = module.EvaluationResult
 
     # The real type (has the ``from_float`` constructor), not a no-op.
-    assert EvaluationResult.from_float(0.5).reward == 0.5
+    assert evaluation_result.from_float(0.5).reward == 0.5
 
 
 def test_top_level_tool_name_redirects() -> None:
@@ -39,7 +42,7 @@ def test_top_level_tool_name_redirects() -> None:
     assert bash.__module__.startswith("hud.native.tools")
 
 
-def test_computer_tool_resolves_to_capability_marker() -> None:
+def test_removed_computer_tool_resolves_to_capability_marker() -> None:
     import hud.tools
 
     with pytest.warns(DeprecationWarning):
@@ -49,20 +52,25 @@ def test_computer_tool_resolves_to_capability_marker() -> None:
     assert getattr(instance, "_legacy_capability_kind", None) == "computer"
 
 
-def test_removed_name_from_redirected_module_falls_back_to_noop() -> None:
-    # ``GeminiEditTool`` was dropped in v6; importing it must not raise ImportError.
+def test_removed_computer_module_resolves_to_capability_marker() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools.coding import GeminiEditTool
+        module = importlib.import_module("hud.tools.computer")
+        computer_cls = module.AnthropicComputerTool
 
-        # No-op stand-in: constructs and calls without error.
-        assert GeminiEditTool(anything=1)() is not None
+    assert getattr(computer_cls(), "_legacy_capability_kind", None) == "computer"
 
 
-def test_unknown_symbol_is_noop_not_error() -> None:
+def test_removed_name_from_redirected_module_raises_import_error() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        with pytest.raises(AttributeError):
+            module = importlib.import_module("hud.tools.coding")
+            _ = module.GeminiEditTool
+
+
+def test_unknown_symbol_raises_attribute_error() -> None:
     import hud.tools
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        noop = hud.tools.SomethingThatNeverExisted
-        assert noop() is not None
+    with pytest.raises(AttributeError):
+        _ = hud.tools.SomethingThatNeverExisted

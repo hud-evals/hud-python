@@ -30,11 +30,18 @@ class OpenAIMCPProxyTool(MCPTool):
             raise ValueError(f"MCP tool {self.mcp_tool.name!r} requires a description.")
         try:
             parameters = ensure_strict_json_schema(copy.deepcopy(self.mcp_tool.inputSchema))
+            strict = True
         except Exception as e:
+            # Don't advertise strict mode for a schema we couldn't make strict —
+            # that mismatch is exactly what OpenAI rejects. Fall back to non-strict
+            # so the tool still works instead of silently sending a bad request.
             logger.warning(
-                "Failed to convert tool '%s' schema to strict: %s", self.mcp_tool.name, e
+                "tool %r schema not strict-convertible; advertising non-strict: %s",
+                self.mcp_tool.name,
+                e,
             )
             parameters = self.mcp_tool.inputSchema
+            strict = False
         return cast(
             "ToolParam",
             cast(
@@ -44,7 +51,7 @@ class OpenAIMCPProxyTool(MCPTool):
                     "name": self.provider_name,
                     "description": self.mcp_tool.description,
                     "parameters": parameters,
-                    "strict": True,
+                    "strict": strict,
                 },
             ),
         )

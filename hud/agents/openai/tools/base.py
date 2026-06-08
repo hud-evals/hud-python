@@ -14,7 +14,10 @@ from openai.types.responses import (
     ResponseInputTextContentParam,
     ResponseInputTextParam,
 )
-from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputItemParam
+from openai.types.responses.response_input_param import (
+    FunctionCallOutput,
+    ResponseInputItemParam,
+)
 
 from hud.agents.tools.base import AgentToolSpec
 

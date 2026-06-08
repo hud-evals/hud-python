@@ -53,12 +53,50 @@ class Capability:
 
     @classmethod
     def from_manifest(cls, data: dict[str, Any]) -> Capability:
+        if not isinstance(data, dict):
+            raise TypeError("capability manifest must be an object")
+        name = data.get("name")
+        protocol = data.get("protocol")
+        url = data.get("url")
+        params = data.get("params", {})
+        if not isinstance(name, str) or not name:
+            raise ValueError("capability manifest requires non-empty string 'name'")
+        if not isinstance(protocol, str) or not protocol:
+            raise ValueError("capability manifest requires non-empty string 'protocol'")
+        if not isinstance(url, str) or not url:
+            raise ValueError("capability manifest requires non-empty string 'url'")
+        if not isinstance(params, dict):
+            raise TypeError("capability manifest 'params' must be an object")
+
+        cls._validate_manifest_params(protocol, params)
         return cls(
-            name=data["name"],
-            protocol=data["protocol"],
-            url=data["url"],
-            params=dict(data.get("params") or {}),
+            name=name,
+            protocol=protocol,
+            url=url,
+            params=dict(params),
         )
+
+    @staticmethod
+    def _validate_manifest_params(protocol: str, params: dict[str, Any]) -> None:
+        family = protocol.split("/", 1)[0]
+        if family == "ssh":
+            for key in ("user", "host_pubkey", "client_key_path", "shell"):
+                if key in params and not isinstance(params[key], str):
+                    raise TypeError(f"ssh capability param {key!r} must be a string")
+            return
+        if family == "cdp":
+            if "target_id" in params and not isinstance(params["target_id"], str):
+                raise TypeError("cdp capability param 'target_id' must be a string")
+            return
+        if family == "rfb":
+            display = params.get("display")
+            if display is not None and (not isinstance(display, int) or isinstance(display, bool)):
+                raise TypeError("rfb capability param 'display' must be an integer")
+            if "password" in params and not isinstance(params["password"], str):
+                raise TypeError("rfb capability param 'password' must be a string")
+            return
+        if family == "mcp" and "auth_token" in params and not isinstance(params["auth_token"], str):
+            raise TypeError("mcp capability param 'auth_token' must be a string")
 
     # ─── well-known protocol factories ─────────────────────────────────
 
@@ -116,11 +154,10 @@ class Capability:
         ``display`` selects the VNC display number (standard convention: display
         ``N`` listens on port ``5900 + N``). When the URL omits an explicit port
         the port defaults to ``5900 + display``; an explicit port in the URL
-        always wins. Envs hosting multiple screens publish one rfb capability
-        per display, e.g.::
+        always wins.
 
-            Capability.rfb(name="screen-0", url="rfb://host", display=0)
-            Capability.rfb(name="screen-1", url="rfb://host", display=1)
+        Note: the client currently resolves one binding per protocol, so a single
+        ``rfb`` capability is supported per env (multi-screen is not yet wired).
         """
         normalized = normalize_url(url, default_scheme="rfb", default_port=5900 + display)
         params: dict[str, Any] = {"display": display}

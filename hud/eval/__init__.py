@@ -12,9 +12,7 @@ many into a :class:`Taskset`, ``launch`` a :class:`Sandbox`, and ship rewarded
 from __future__ import annotations
 
 from .launch import launch
-from .remote import submit_rollouts
 from .sandbox import (
-    HudSandbox,
     LocalSandbox,
     RemoteSandbox,
     Runtime,
@@ -23,12 +21,12 @@ from .sandbox import (
     load_module,
     sandbox_from_ref,
 )
+from .source import collect_variants, load_variants, load_variants_json
 from .taskset import Taskset
 from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relative
 from .variant import Variant, variant
 
 __all__ = [
-    "HudSandbox",
     "HudTrainingClient",
     "LocalSandbox",
     "RemoteSandbox",
@@ -39,10 +37,12 @@ __all__ = [
     "TrainingConfig",
     "Variant",
     "as_sandbox",
+    "collect_variants",
     "group_relative",
     "launch",
     "load_module",
+    "load_variants",
+    "load_variants_json",
     "sandbox_from_ref",
-    "submit_rollouts",
     "variant",
 ]

@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from hud.agents.gemini.agent import GeminiAgent, _grounding_citations
+from hud.agents.tool_agent import RunState
+from hud.agents.types import GeminiConfig
 
 
 class FakeModels:
@@ -27,16 +29,8 @@ class FakeGenai:
 def _agent(response: Any) -> GeminiAgent:
     agent = GeminiAgent.__new__(GeminiAgent)
     a = cast("Any", agent)
-    a.model = "gemini-test"
-    a.hosted_tools = []
+    a.config = GeminiConfig(model="gemini-test", include_thoughts=False)
     a.gemini_client = FakeGenai(response)
-    a.temperature = None
-    a.top_p = None
-    a.top_k = None
-    a.max_output_tokens = None
-    a.thinking_level = None
-    a.include_thoughts = False
-    a.excluded_predefined_functions = []
     a.max_recent_turn_with_screenshots = 3
     return agent
 
@@ -44,7 +38,7 @@ def _agent(response: Any) -> GeminiAgent:
 def _state(agent: GeminiAgent) -> Any:
     from hud.agents.tool_agent import RunState
 
-    return RunState(messages=[agent._format_message("user", "go")])
+    return RunState[Any, Any](messages=[agent._format_message("user", "go")])
 
 
 def test_format_message_uses_model_role() -> None:
@@ -113,7 +107,10 @@ async def test_get_response_no_candidates_raises() -> None:
 def test_make_tool_call_maps_predefined_to_computer() -> None:
     agent = _agent(SimpleNamespace(candidates=[]))
     fc = SimpleNamespace(name="click_at", args={"x": 1})
-    tc = agent._make_tool_call(cast("Any", fc), cast("Any", SimpleNamespace(name="computer_use")))
+    state = RunState[Any, Any](
+        tools=cast("Any", {"computer_use": SimpleNamespace(provider_name="computer_use")}),
+    )
+    tc = agent._make_tool_call(cast("Any", fc), state)
     assert tc.name == "computer_use"
     assert tc.arguments == {"action": "click_at", "x": 1}
     assert tc.provider_name == "click_at"
@@ -122,7 +119,7 @@ def test_make_tool_call_maps_predefined_to_computer() -> None:
 def test_make_tool_call_plain_function() -> None:
     agent = _agent(SimpleNamespace(candidates=[]))
     fc = cast("Any", SimpleNamespace(name="bash", args={"command": "ls"}))
-    tc = agent._make_tool_call(fc, None)
+    tc = agent._make_tool_call(fc, RunState())
     assert tc.name == "bash"
     assert tc.arguments == {"command": "ls"}
 

@@ -11,8 +11,11 @@ from .mcp_proxy import OpenAIMCPProxyTool
 __all__ = [
     "OPENAI_COMPUTER_SPEC",
     "OPENAI_SHELL_SPEC",
+    "OpenAICodeInterpreterTool",
     "OpenAIComputerTool",
+    "OpenAIHostedTool",
     "OpenAIMCPProxyTool",
     "OpenAIShellTool",
+    "OpenAIToolSearchTool",
     "OpenAIToolSpec",
 ]

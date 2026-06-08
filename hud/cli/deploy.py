@@ -222,7 +222,7 @@ def deploy_environment(
     if not validation_issues:
         hud_console.success("Validation passed")
 
-    # Load existing config for registry_id (config.json, auto-migrates deploy.json)
+    # Load existing config for registry_id
     from hud.cli.utils.project_config import load_project_config
 
     project_config = load_project_config(env_dir)

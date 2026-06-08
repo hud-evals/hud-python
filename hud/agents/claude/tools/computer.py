@@ -31,56 +31,56 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ─── Anthropic → X11 keysym translation ─────────────────────────────
-#
-# Claude emits keys in the xdotool / Anthropic vocabulary (``Return``,
-# ``Page_Down``, ``Control_L``, ``cmd``, etc.). asyncvnc's keysymdef table
-# accepts X11 names directly and already aliases common short forms (``Cmd``,
-# ``Alt``, ``Ctrl``, ``Super``, ``Shift``, ``Backspace``, ``Del``, ``Esc``).
-# This map covers the residual Anthropic-specific spellings.
-
-_ANTHROPIC_TO_X11: dict[str, str] = {
-    "alt": "Alt_L",
+_CLAUDE_KEY_ALIASES: dict[str, str] = {
     "ctrl": "Control_L",
+    "control": "Control_L",
+    "alt": "Alt_L",
+    "option": "Alt_L",
     "shift": "Shift_L",
     "meta": "Super_L",
     "super": "Super_L",
     "win": "Super_L",
     "cmd": "Super_L",
     "command": "Super_L",
-    "option": "Alt_L",
     "enter": "Return",
     "return": "Return",
     "esc": "Escape",
+    "escape": "Escape",
     "del": "Delete",
-    "pageup": "Page_Up",
-    "pagedown": "Page_Down",
+    "delete": "Delete",
+    "backspace": "BackSpace",
+    "tab": "Tab",
+    "space": "space",
+    "up": "Up",
+    "down": "Down",
+    "left": "Left",
+    "right": "Right",
     "arrowup": "Up",
     "arrowdown": "Down",
     "arrowleft": "Left",
     "arrowright": "Right",
-    "space": "space",
-    "backspace": "BackSpace",
+    "pageup": "Page_Up",
+    "pagedown": "Page_Down",
+    "home": "Home",
+    "end": "End",
+    "insert": "Insert",
     "capslock": "Caps_Lock",
     "printscreen": "Print",
 }
 
 
-def _translate_key(token: str) -> str:
-    if "+" in token:
-        return "+".join(_translate_key(part) for part in token.split("+"))
-    return _ANTHROPIC_TO_X11.get(token.lower(), token)
-
-
 def _split_keys(text: str | None) -> list[str]:
     if not text:
         return []
-    return [_translate_key(part.strip()) for part in text.split("+") if part.strip()]
+    return [
+        _CLAUDE_KEY_ALIASES.get(part.strip().lower(), part.strip())
+        for part in text.split("+")
+        if part.strip()
+    ]
 
 
 def _hold_keys(text: str | None) -> list[str] | None:
-    keys = _split_keys(text)
-    return keys or None
+    return _split_keys(text) or None
 
 
 # ─── Claude tool specs (per-model gating) ───────────────────────────
@@ -267,16 +267,10 @@ class ClaudeComputerTool(RFBTool):
     # ─── zoom ────────────────────────────────────────────────────────
 
     async def _zoom(self, arguments: dict[str, Any]) -> MCPToolResult:
-        region = arguments.get("region")
-        if not isinstance(region, (list, tuple)):
+        region = _int_seq(arguments.get("region"))
+        if region is None or len(region) != 4:
             return tool_err("region must be [x0, y0, x1, y1]")
-        region_seq = cast("list[Any]", region)
-        if len(region_seq) != 4:
-            return tool_err("region must be [x0, y0, x1, y1]")
-        try:
-            x0, y0, x1, y1 = (int(v) for v in region_seq)
-        except (TypeError, ValueError):
-            return tool_err("region must contain 4 integers")
+        x0, y0, x1, y1 = region
         png = await self.client.screenshot_png()
         cropped = _crop_png(png, (x0, y0, x1, y1))
         return MCPToolResult(
@@ -293,16 +287,21 @@ class ClaudeComputerTool(RFBTool):
 # ─── helpers ─────────────────────────────────────────────────────────
 
 
-def _xy(coordinate: Any) -> tuple[int | None, int | None]:
-    if not isinstance(coordinate, (list, tuple)):
-        return None, None
-    seq = cast("list[Any]", coordinate)
-    if len(seq) < 2:
-        return None, None
+def _int_seq(value: Any) -> list[int] | None:
+    """Coerce a coordinate-ish value (``[x, y, ...]``) to a list of ints, or ``None``."""
+    if not isinstance(value, (list, tuple)):
+        return None
     try:
-        return int(seq[0]), int(seq[1])
+        return [int(v) for v in cast("list[Any]", value)]
     except (TypeError, ValueError):
+        return None
+
+
+def _xy(coordinate: Any) -> tuple[int | None, int | None]:
+    seq = _int_seq(coordinate)
+    if seq is None or len(seq) < 2:
         return None, None
+    return seq[0], seq[1]
 
 
 def _required(value: int | None, name: str) -> int:
@@ -337,12 +336,9 @@ def _scroll(arguments: dict[str, Any]) -> tuple[int, int]:
 def _drag_path(arguments: dict[str, Any]) -> list[tuple[int, int]]:
     path: list[tuple[int, int]] = []
     for key in ("start_coordinate", "coordinate"):
-        raw = arguments.get(key)
-        if not isinstance(raw, (list, tuple)):
-            continue
-        seq = cast("list[Any]", raw)
-        if len(seq) >= 2:
-            path.append((int(seq[0]), int(seq[1])))
+        seq = _int_seq(arguments.get(key))
+        if seq is not None and len(seq) >= 2:
+            path.append((seq[0], seq[1]))
     if len(path) < 2:
         raise ValueError("drag requires start_coordinate and coordinate")
     return path

@@ -29,7 +29,5 @@ class OpenAICodeInterpreterTool(OpenAIHostedTool):
 class OpenAIToolSearchTool(OpenAIHostedTool):
     """OpenAI tool search for large tool sets."""
 
-    threshold: int = 10
-
     def to_params(self) -> ToolParam:
         return cast("ToolParam", {"type": "tool_search"})

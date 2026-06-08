@@ -3,31 +3,21 @@
 from __future__ import annotations
 
 import shlex
-from typing import Any, ClassVar
-
-from google.genai import types as genai_types
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
-from hud.types import MCPToolResult
 
-from .base import GeminiToolSpec
+from .base import GeminiToolSpec, declaration, required_str
+
+if TYPE_CHECKING:
+    from google.genai import types as genai_types
+
+    from hud.types import MCPToolResult
 
 GEMINI_SHELL_SPEC = GeminiToolSpec(api_type="run_shell_command", api_name="run_shell_command")
 GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")
 GEMINI_WRITE_SPEC = GeminiToolSpec(api_type="write_file", api_name="write_file")
-
-
-def _decl(name: str, description: str, parameters: dict[str, Any]) -> genai_types.Tool:
-    return genai_types.Tool(
-        function_declarations=[
-            genai_types.FunctionDeclaration(
-                name=name,
-                description=description,
-                parameters_json_schema=parameters,
-            ),
-        ],
-    )
 
 
 class GeminiShellTool(SSHTool):
@@ -52,7 +42,7 @@ class GeminiShellTool(SSHTool):
         return GEMINI_SHELL_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
@@ -87,21 +77,27 @@ class GeminiEditTool(SSHTool):
         return GEMINI_EDIT_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        file_path = _required_str(arguments, "file_path")
+        file_path = required_str(arguments, "file_path")
         old_string = arguments.get("old_string", "")
         new_string = arguments.get("new_string", "")
         if old_string == "":
             return await self.file_write(file_path, str(new_string))
-        existing = await self.file_read(file_path)
+        return await self._str_replace_unique(file_path, str(old_string), str(new_string))
+
+    async def _str_replace_unique(self, path: str, old: str, new: str) -> MCPToolResult:
+        existing = await self.file_read(path)
         if existing.isError:
             return existing
         text = result_text(existing)
-        if str(old_string) not in text:
-            return tool_err(f"old_string not found in {file_path}")
-        return await self.file_write(file_path, text.replace(str(old_string), str(new_string), 1))
+        count = text.count(old)
+        if count == 0:
+            return tool_err(f"old text not found in {path}")
+        if count > 1:
+            return tool_err(f"old text matches {count} times in {path}; must be unique")
+        return await self.file_write(path, text.replace(old, new, 1))
 
 
 class GeminiWriteTool(SSHTool):
@@ -122,20 +118,13 @@ class GeminiWriteTool(SSHTool):
         return GEMINI_WRITE_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return declaration(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         return await self.file_write(
-            _required_str(arguments, "file_path"),
+            required_str(arguments, "file_path"),
             arguments.get("content") or "",
         )
-
-
-def _required_str(arguments: dict[str, Any], key: str) -> str:
-    value = arguments.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{key} is required")
-    return value
 
 
 __all__ = ["GeminiEditTool", "GeminiShellTool", "GeminiWriteTool"]

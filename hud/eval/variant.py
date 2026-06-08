@@ -30,8 +30,8 @@ class Variant:
     ``foo(x, y)`` (a ``Task`` call) returns one of these. Entering launches the
     env and starts the task::
 
-        async with foo(difficulty=3) as run:        # launch(env) + client.task(...)
-            await agent(run)                         # fills run.trace
+        async with foo(difficulty=3) as run:  # launch(env) + client.task(...)
+            await agent(run)  # fills run.trace
         print(run.reward)
     """
 
@@ -109,28 +109,12 @@ class Variant:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to ``{env, task, args}``. The env-ref is its portable identity:
 
-        a live ``Environment`` (or ``LocalSandbox``) → ``{"type": "hud", "name": ...}``;
-        a ``RemoteSandbox`` → ``{"type": "url", ...}``; a ``HudSandbox`` →
-        ``{"type": "hud", ...}``.
+        a live ``Environment`` (or ``LocalSandbox``) → registry identity
+        ``{"type": "hud", "name": ...}``; a ``RemoteSandbox`` →
+        ``{"type": "url", ...}``. Runtime credentials are intentionally not
+        serialized into portable task specs.
         """
-        from hud.environment import Environment
-
-        from .sandbox import HudSandbox, LocalSandbox, RemoteSandbox
-
-        env = self.env
-        if isinstance(env, LocalSandbox):
-            env = env._env  # the wrapped live Environment
-        if isinstance(env, Environment):
-            ref: dict[str, Any] = {"type": "hud", "name": env.name}
-        elif isinstance(env, RemoteSandbox):
-            ref = {"type": "url", "url": env._url, "params": env._params}
-        elif isinstance(env, HudSandbox):
-            ref = {"type": "hud", "name": env.image}
-        else:
-            raise TypeError(
-                f"cannot serialize a {type(env).__name__} env-ref; "
-                "use a live Environment (→ hud name), RemoteSandbox (→ url), or HudSandbox",
-            )
+        ref = _env_ref(self.env)
         out: dict[str, Any] = {"env": ref, "task": self.task, "args": self.args}
         for key in ("slug", "validation", "agent_config", "columns"):
             value = getattr(self, key)
@@ -162,6 +146,23 @@ def variant(
         validation=validation,
         agent_config=agent_config,
         columns=columns,
+    )
+
+
+def _env_ref(env: Environment | Sandbox) -> dict[str, Any]:
+    from hud.environment import Environment
+
+    from .sandbox import LocalSandbox, RemoteSandbox
+
+    if isinstance(env, LocalSandbox):
+        env = env._env
+    if isinstance(env, Environment):
+        return {"type": "hud", "name": env.name}
+    if isinstance(env, RemoteSandbox):
+        return {"type": "url", "url": env._url}
+    raise TypeError(
+        f"cannot serialize a {type(env).__name__} env-ref; "
+        "use a live Environment, LocalSandbox, or RemoteSandbox",
     )
 
 

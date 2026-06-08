@@ -1,10 +1,9 @@
-"""``BaseTool`` — name derivation, cached ``.mcp``, before/after callbacks, register."""
+"""``BaseTool`` — name derivation, cached ``.mcp``, and register."""
 
 from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from mcp.types import TextContent
 
 from hud.native.tools.base import BaseTool
@@ -31,33 +30,12 @@ def test_mcp_property_is_cached() -> None:
     assert tool.mcp is tool.mcp
 
 
-async def test_before_callback_rewrites_kwargs_and_after_observes_result() -> None:
+async def test_mcp_runs_tool_call() -> None:
     tool = EchoTool()
-    seen: list[Any] = []
-
-    @tool.before
-    async def upcase(value: str = "", **_: Any) -> dict[str, Any]:
-        return {"value": value.upper()}
-
-    @tool.after
-    async def record(result: Any = None, **_: Any) -> None:
-        seen.append(result)
 
     result = await tool.mcp.run({"value": "hi"})
 
-    assert "HI" in _result_text(result)  # before-callback rewrote the args
-    assert seen  # after-callback ran
-
-
-async def test_before_callback_can_block_execution() -> None:
-    tool = EchoTool()
-
-    @tool.before
-    async def guard(**_: Any) -> dict[str, Any]:
-        raise ValueError("blocked")
-
-    with pytest.raises(Exception, match="blocked"):
-        await tool.mcp.run({"value": "x"})
+    assert "hi" in _result_text(result)
 
 
 async def test_register_adds_tool_to_server() -> None:

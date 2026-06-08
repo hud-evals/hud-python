@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, cast
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionMessageParam,
+    ChatCompletionToolParam,
+)
 
 from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tools.base import parse_tool_arguments
 from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Sample
@@ -28,28 +32,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class OpenAIChatRunState(RunState[ChatCompletionMessageParam]):
+class OpenAIChatRunState(RunState[ChatCompletionMessageParam, ChatCompletionToolParam]):
     continuation_token_ids: list[int] | None = None
     continuation_message_count: int | None = None
 
 
-class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
+class OpenAIChatAgent(
+    ToolAgent[ChatCompletionMessageParam, ChatCompletionToolParam, OpenAIChatConfig]
+):
     """OpenAI-compatible agent using the chat.completions protocol."""
 
-    tool_catalog = (
-        ReadTool,
-        GrepTool,
-        GlobTool,
-        ListTool,
-        OpenAICompatibleMCPProxyTool,
-    )
+    tools = (ReadTool, GrepTool, GlobTool, ListTool, OpenAICompatibleMCPProxyTool)
 
     def __init__(self, config: OpenAIChatConfig | None = None) -> None:
         config = config or OpenAIChatConfig()
         self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
 
         if (
             config.api_key
@@ -103,13 +100,13 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
-        state: RunState[ChatCompletionMessageParam],
+        state: RunState[ChatCompletionMessageParam, ChatCompletionToolParam],
     ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam] | None:
         return format_chat_result(call, result)
 
     async def get_response(
         self,
-        state: RunState[ChatCompletionMessageParam],
+        state: RunState[ChatCompletionMessageParam, ChatCompletionToolParam],
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
@@ -145,30 +142,19 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         if return_token_ids:
             request_kwargs.setdefault("logprobs", True)
 
-        try:
-            response: ChatCompletion = await self.oai.chat.completions.create(
-                model=self.model,
-                messages=(
-                    [{"role": "system", "content": system_prompt}, *messages]
-                    if system_prompt is not None
-                    else messages
-                ),
-                stream=False,
-                **request_kwargs,
-            )
-        except Exception as e:
-            error_content = f"Error getting response {e}"
-            if "Invalid JSON" in str(e):
-                error_content = "Invalid JSON, response was truncated"
-            logger.warning(error_content)
-            return AgentResponse(
-                content=error_content,
-                tool_calls=[],
-                done=True,
-                isError=True,
-                raw=None,
-            )
+        response: ChatCompletion = await self.oai.chat.completions.create(
+            model=self.model,
+            messages=(
+                [{"role": "system", "content": system_prompt}, *messages]
+                if system_prompt is not None
+                else messages
+            ),
+            stream=False,
+            **request_kwargs,
+        )
 
+        if not response.choices:
+            raise ValueError("chat completion returned no choices")
         choice = response.choices[0]
         message = choice.message
         function_calls = [tc for tc in message.tool_calls or [] if tc.type == "function"]
@@ -200,21 +186,25 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         if return_token_ids:
             prompt_token_ids = getattr(choice, "prompt_token_ids", None)
             token_ids = getattr(choice, "token_ids", None)
-            if prompt_token_ids is not None and token_ids is not None:
-                chat_state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
-                chat_state.continuation_message_count = len(messages)
-                content_lp = choice.logprobs.content if choice.logprobs else None
-                sample = Sample(
-                    prompt_token_ids=list(prompt_token_ids),
-                    output_token_ids=list(token_ids),
-                    output_logprobs=[tok.logprob for tok in content_lp] if content_lp else [],
+            if prompt_token_ids is None or token_ids is None:
+                raise ValueError(
+                    "return_token_ids was requested but the response is missing "
+                    "prompt_token_ids/token_ids; the endpoint does not support token-id "
+                    "continuation required for training.",
                 )
+            chat_state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
+            chat_state.continuation_message_count = len(messages)
+            content_lp = choice.logprobs.content if choice.logprobs else None
+            sample = Sample(
+                prompt_token_ids=list(prompt_token_ids),
+                output_token_ids=list(token_ids),
+                output_logprobs=[tok.logprob for tok in content_lp] if content_lp else [],
+            )
 
         tool_calls: list[MCPToolCall] = []
         for tc in function_calls:
             provider_name = tc.function.name
-            raw_args = json.loads(tc.function.arguments or "{}")
-            arguments = cast("dict[str, Any]", raw_args) if isinstance(raw_args, dict) else {}
+            arguments = parse_tool_arguments(tc.function.arguments, provider_name)
             tool_calls.append(
                 MCPToolCall(id=tc.id, name=provider_name, arguments=arguments),
             )

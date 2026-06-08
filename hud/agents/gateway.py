@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
+import logging
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -12,7 +12,10 @@ from pydantic import BaseModel, Field
 from hud.settings import settings
 from hud.types import AgentType
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import TypeAlias
 
     from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
@@ -79,9 +82,32 @@ def build_gateway_client(provider: str) -> GatewayClient:
     return AsyncOpenAI(api_key=settings.api_key, base_url=settings.hud_gateway_url)
 
 
-@lru_cache(maxsize=1)
+def resolve_model_client(
+    provider: str,
+    *,
+    direct_key: str | None,
+    build_direct: Callable[[], Any],
+    direct_key_name: str,
+) -> Any:
+    """Resolve a provider client: HUD gateway, else BYOK, else fail.
+
+    Routes through the HUD gateway when ``HUD_API_KEY`` is set; otherwise builds a
+    direct (BYOK) client via ``build_direct``; otherwise raises. Shared by the
+    Claude/OpenAI/Gemini agents so the gateway-vs-BYOK policy lives in one place.
+    """
+    if settings.api_key:
+        return build_gateway_client(provider)
+    if direct_key:
+        return build_direct()
+    raise ValueError(f"No API key for {provider}. Set HUD_API_KEY (gateway) or {direct_key_name}.")
+
+
 def _fetch_gateway_models() -> list[GatewayModelInfo]:
-    """Fetch available models from HUD API."""
+    """Fetch available models from the HUD API.
+
+    Not cached: a transient failure must not poison later lookups (an earlier
+    ``lru_cache`` here permanently pinned an empty list after the first error).
+    """
     if not settings.api_key:
         return []
 
@@ -97,6 +123,7 @@ def _fetch_gateway_models() -> list[GatewayModelInfo]:
             return []
         return GatewayModelsResponse.model_validate(payload).models
     except Exception:
+        logger.warning("Failed to fetch gateway models", exc_info=True)
         return []
 
 
@@ -148,7 +175,6 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
         kwargs.setdefault("openai_client", client)
     else:
         kwargs.setdefault("model_client", client)
-        kwargs.setdefault("validate_api_key", False)
 
     # The resolved kwargs (model + provider client + validate flag) are config
     # fields; build the provider's config and construct the agent.

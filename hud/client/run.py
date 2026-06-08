@@ -5,11 +5,12 @@
 ``trace`` the agent fills (its answer is ``run.trace.content``)::
 
     async with client.task("sum_column", sheet="q3.xlsx") as run:
-        run.trace.content = answer   # graded on exit → run.reward
+        run.trace.content = answer  # graded on exit → run.reward
 """
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any, Self, cast
 
 from hud.types import Trace
@@ -18,6 +19,22 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.client.client import HudClient
+
+
+def _parse_score(value: Any) -> float:
+    """Return a finite numeric score, accepting numeric strings from the wire."""
+    if type(value) in (int, float):
+        score = float(value)
+        if math.isfinite(score):
+            return score
+    if isinstance(value, str):
+        try:
+            score = float(value)
+        except ValueError as e:
+            raise ValueError(f"evaluation score must be numeric, got {value!r}") from e
+        if math.isfinite(score):
+            return score
+    raise TypeError(f"evaluation score must be a finite number, got {value!r}")
 
 
 class Run:
@@ -61,7 +78,7 @@ class Run:
         if self.trace.citations:
             answer["citations"] = self.trace.citations
         self.evaluation = await self.client.evaluate(answer)
-        self.reward = float(self.evaluation.get("score", 0.0))
+        self.reward = _parse_score(self.evaluation.get("score"))
         return False
 
     @classmethod

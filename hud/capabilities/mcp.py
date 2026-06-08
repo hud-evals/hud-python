@@ -38,6 +38,10 @@ class MCPClient(CapabilityClient):
 
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
+        from hud.patches import apply_all_patches
+
+        apply_all_patches()
+
         token = cap.params.get("auth_token")
         client: fastmcp.Client[Any] = fastmcp.Client(
             cap.url,

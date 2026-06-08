@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from openai import AsyncOpenAI, Omit
 from openai.types.responses import (
@@ -16,71 +15,146 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.easy_input_message_param import EasyInputMessageParam
-from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
     Message,
     ResponseInputItemParam,
 )
-from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tools.base import last_image_data, parse_tool_arguments, result_text
 from hud.agents.types import OpenAIConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
-from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
+from .tools import (
+    OpenAIComputerTool,
+    OpenAIMCPProxyTool,
+    OpenAIShellTool,
+)
 from .tools.base import format_openai_result
-from .tools.coding import _shell_output
+
+if TYPE_CHECKING:
+    from hud.agents.tools.base import AgentTool
+    from hud.capabilities import CapabilityClient
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
+
+def _omit_none(value: _T | None) -> _T | Omit:
+    """Pass a value through, or OpenAI's ``Omit`` sentinel when it is ``None``."""
+    return value if value is not None else Omit()
+
+
+def _shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "outcome": {"type": "exit", "exit_code": exit_code},
+    }
+
+
+def _format_shell_result(call: MCPToolCall, result: MCPToolResult) -> ResponseInputItemParam:
+    structured = result.structuredContent if isinstance(result.structuredContent, dict) else {}
+    output = structured.get("output")
+    if not isinstance(output, list):
+        output = [_shell_output("", result_text(result), 1 if result.isError else 0)]
+    response: dict[str, Any] = {
+        "type": "shell_call_output",
+        "call_id": call.id,
+        "status": "completed",
+        "output": output,
+    }
+    max_output_length = structured.get("max_output_length")
+    if isinstance(max_output_length, int):
+        response["max_output_length"] = max_output_length
+    return cast("ResponseInputItemParam", response)
+
+
+def _format_computer_result(
+    call: MCPToolCall,
+    result: MCPToolResult,
+) -> ResponseInputItemParam | None:
+    screenshot = last_image_data(result)
+    if not screenshot:
+        logger.warning("Computer tool result missing screenshot for call %s", call.name)
+        return None
+    output = ComputerCallOutput(
+        type="computer_call_output",
+        call_id=call.id,
+        output=cast(
+            "Any",
+            {
+                "type": "computer_screenshot",
+                "image_url": f"data:image/png;base64,{screenshot}",
+                "detail": "original",
+            },
+        ),
+    )
+    checks = (call.model_extra or {}).get("pending_safety_checks")
+    if checks:
+        output["acknowledged_safety_checks"] = checks
+    return cast("ResponseInputItemParam", output)
+
+
+def _apply_tool_search_policy(
+    params: list[ToolParam],
+    threshold: int | None,
+) -> list[ToolParam]:
+    if threshold is None or not any(tool.get("type") == "tool_search" for tool in params):
+        return params
+    fn_count = sum(1 for tool in params if tool.get("type") == "function")
+    if fn_count <= threshold:
+        return params
+    logger.debug(
+        "tool_search: %d function tools > threshold %d, applying defer_loading",
+        fn_count,
+        threshold,
+    )
+    # `defer_loading` is accepted by Responses but not modeled by the installed SDK.
+    return [
+        cast("ToolParam", {**tool, "defer_loading": True})
+        if tool.get("type") == "function"
+        else tool
+        for tool in params
+    ]
+
 
 @dataclass
-class OpenAIRunState(RunState[ResponseInputItemParam]):
+class OpenAIRunState(RunState[ResponseInputItemParam, ToolParam]):
     last_response_id: str | None = None
     message_cursor: int = 0
 
 
-class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
+class OpenAIAgent(ToolAgent[ResponseInputItemParam, ToolParam, OpenAIConfig]):
     """OpenAI agent using the Responses API. Drives SSH, RFB, and MCP capabilities."""
 
-    tool_catalog = (
-        OpenAIShellTool,
-        OpenAIComputerTool,
-        OpenAIMCPProxyTool,
-    )
+    tools = (OpenAIShellTool, OpenAIComputerTool, OpenAIMCPProxyTool)
 
     def __init__(self, config: OpenAIConfig | None = None) -> None:
-        config = config or OpenAIConfig()
-        self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
-
-        model_client = config.model_client
-        if model_client is None:
-            if settings.api_key:
-                model_client = gateway.build_gateway_client("openai")
-            elif settings.openai_api_key:
-                model_client = AsyncOpenAI(api_key=settings.openai_api_key)
-            else:
-                raise ValueError(
-                    "No API key for OpenAI. Set HUD_API_KEY or OPENAI_API_KEY.",
-                )
-
-        self.openai_client: AsyncOpenAI = cast("AsyncOpenAI", model_client)
-        self._model = config.model
-        self.max_output_tokens = config.max_output_tokens
-        self.temperature = config.temperature
-        self.reasoning: Reasoning | None = config.reasoning
-        self.tool_choice: ToolChoice | None = config.tool_choice
-        self.parallel_tool_calls = config.parallel_tool_calls
-        self.text = config.text
-        self.truncation: Literal["auto", "disabled"] | None = config.truncation
+        self.config = config or OpenAIConfig()
+        self.openai_client: AsyncOpenAI = cast(
+            "AsyncOpenAI",
+            self.config.model_client
+            or gateway.resolve_model_client(
+                "openai",
+                direct_key=settings.openai_api_key,
+                build_direct=lambda: AsyncOpenAI(api_key=settings.openai_api_key),
+                direct_key_name="OPENAI_API_KEY",
+            ),
+        )
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
+
+    async def _build_tools(
+        self,
+        connections: dict[str, CapabilityClient],
+    ) -> tuple[dict[str, AgentTool[Any]], list[ToolParam]]:
+        tools, params = await super()._build_tools(connections)
+        return tools, _apply_tool_search_policy(params, self.config.tool_search_threshold)
 
     async def _initialize_state(self, *, prompt: str | list[Any] | None) -> OpenAIRunState:
         return OpenAIRunState(messages=self._initial_messages(prompt))
@@ -98,67 +172,19 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         self,
         call: MCPToolCall,
         result: MCPToolResult,
-        state: RunState[ResponseInputItemParam],
+        state: RunState[ResponseInputItemParam, ToolParam],
     ) -> ResponseInputItemParam | list[ResponseInputItemParam] | None:
         tool = state.tools.get(call.name)
-
-        if isinstance(tool, OpenAIComputerTool):
-            from hud.agents.tools.computer import last_image_data
-
-            screenshot = last_image_data(result)
-            if not screenshot:
-                logger.warning("Computer tool result missing screenshot for call %s", call.name)
-                return None
-            output = ComputerCallOutput(
-                type="computer_call_output",
-                call_id=call.id,
-                output=cast(
-                    "Any",
-                    {
-                        "type": "computer_screenshot",
-                        "image_url": f"data:image/png;base64,{screenshot}",
-                        "detail": "original",
-                    },
-                ),
-            )
-            checks = (call.model_extra or {}).get("pending_safety_checks")
-            if isinstance(checks, list):
-                acknowledged = []
-                for raw_check in cast("list[Any]", checks):
-                    if hasattr(raw_check, "model_dump"):
-                        acknowledged.append(raw_check.model_dump())
-                    elif isinstance(raw_check, dict):
-                        acknowledged.append(raw_check)
-                if acknowledged:
-                    output["acknowledged_safety_checks"] = acknowledged
-            return cast("ResponseInputItemParam", output)
-
-        if isinstance(tool, OpenAIShellTool):
-            structured = (
-                result.structuredContent if isinstance(result.structuredContent, dict) else {}
-            )
-            output_list = structured.get("output")
-            if not isinstance(output_list, list):
-                from hud.agents.tools.base import result_text
-
-                text = result_text(result)
-                output_list = [_shell_output("", text, 1 if result.isError else 0)]
-            response: dict[str, Any] = {
-                "type": "shell_call_output",
-                "call_id": call.id,
-                "status": "completed",
-                "output": output_list,
-            }
-            max_output_length = structured.get("max_output_length")
-            if isinstance(max_output_length, int):
-                response["max_output_length"] = max_output_length
-            return cast("ResponseInputItemParam", response)
-
+        api_type = tool.spec.api_type if tool else None
+        if api_type == "computer":
+            return _format_computer_result(call, result)
+        if api_type == "shell":
+            return _format_shell_result(call, result)
         return format_openai_result(call, result)
 
     async def get_response(
         self,
-        state: RunState[ResponseInputItemParam],
+        state: RunState[ResponseInputItemParam, ToolParam],
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
@@ -181,48 +207,22 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         if citations_enabled:
             include_param = ["web_search_call.action.sources"]
 
-        effective_tools: list[ToolParam] = list(state.params)
-
-        # tool_search: if a ToolSearchTool is configured and function count exceeds
-        # its threshold, apply defer_loading to function tools.
-        from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
-
-        tool_search_threshold: int | None = None
-        for hosted in self.hosted_tools:
-            if isinstance(hosted, OpenAIToolSearchTool):
-                tool_search_threshold = hosted.threshold
-                break
-        if tool_search_threshold is not None:
-            fn_count = sum(1 for t in effective_tools if t.get("type") == "function")
-            if fn_count > tool_search_threshold:
-                logger.debug(
-                    "tool_search: %d function tools > threshold %d, applying defer_loading",
-                    fn_count,
-                    tool_search_threshold,
-                )
-                effective_tools = cast(
-                    "list[ToolParam]",
-                    [
-                        {**t, "defer_loading": True} if t.get("type") == "function" else t
-                        for t in effective_tools
-                    ],
-                )
+        # Hosted-tool transforms such as defer_loading are applied at tool-build time.
+        effective_tools = list(state.params)
 
         response = await self.openai_client.responses.create(
-            model=self._model,
+            model=self.model,
             input=new_items,
             instructions=system_prompt,
-            max_output_tokens=self.max_output_tokens,
-            temperature=self.temperature,
-            text=self.text if self.text is not None else Omit(),
-            tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
-            parallel_tool_calls=self.parallel_tool_calls,
-            reasoning=self.reasoning if self.reasoning is not None else Omit(),
+            max_output_tokens=self.config.max_output_tokens,
+            temperature=self.config.temperature,
+            text=_omit_none(self.config.text),
+            tool_choice=_omit_none(self.config.tool_choice),
+            parallel_tool_calls=self.config.parallel_tool_calls,
+            reasoning=_omit_none(self.config.reasoning),
             tools=effective_tools if effective_tools else Omit(),
-            previous_response_id=(
-                oai_state.last_response_id if oai_state.last_response_id is not None else Omit()
-            ),
-            truncation=self.truncation if self.truncation is not None else Omit(),
+            previous_response_id=_omit_none(oai_state.last_response_id),
+            truncation=_omit_none(self.config.truncation),
             include=include_param,
         )
 
@@ -274,7 +274,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
                     tool_calls.append(
                         MCPToolCall(
                             name=item.name or "",
-                            arguments=json.loads(item.arguments),
+                            arguments=parse_tool_arguments(item.arguments, item.name),
                             id=item.call_id,
                         )
                     )
@@ -292,8 +292,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
                     }
                     if item.pending_safety_checks:
                         call_dict["pending_safety_checks"] = [
-                            check.model_dump() if hasattr(check, "model_dump") else check
-                            for check in item.pending_safety_checks
+                            check.model_dump() for check in item.pending_safety_checks
                         ]
                     tool_calls.append(MCPToolCall.model_validate(call_dict))
                 case "shell_call":
@@ -305,6 +304,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
                         )
                     )
                 case _:
+                    logger.debug("Unhandled OpenAI response item type: %s", item.type)
                     continue
 
         return AgentResponse(
@@ -313,6 +313,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
             citations=citations,
             tool_calls=tool_calls,
             done=not tool_calls,
+            finish_reason=response.status,
         )
 
 

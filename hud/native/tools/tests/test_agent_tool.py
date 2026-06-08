@@ -15,7 +15,8 @@ class _FakeAgent:
 
     def __init__(self, **_: Any) -> None: ...
 
-    async def __call__(self, run: Any) -> None:
+    async def __call__(self, run: Any, *, max_steps: int | None = None) -> None:
+        del max_steps
         run.trace.content = f"answer for {run.prompt}"
 
 

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import shlex
-from typing import Any, ClassVar
-
-import mcp.types as mcp_types
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.base import AgentToolSpec
-from hud.agents.tools.base import result_text
-from hud.types import MCPToolResult
+from hud.agents.tools.base import AgentToolSpec, result_text, tool_ok
+
+if TYPE_CHECKING:
+    from hud.types import MCPToolResult
 
 
 class _FilesystemTool(SSHTool):
@@ -53,19 +52,29 @@ class ReadTool(_FilesystemTool):
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
-        result = await self.file_read(path)
-        if result.isError:
-            return result
         offset = arguments.get("offset")
-        limit = arguments.get("limit")
         if isinstance(offset, int) and offset >= 0:
-            lines = result_text(result).splitlines(keepends=True)
-            end = offset + limit if isinstance(limit, int) and limit > 0 else len(lines)
-            sliced = lines[offset:end]
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text="".join(sliced))],
+            limit = arguments.get("limit")
+            return await self._read_slice(
+                path,
+                offset=offset,
+                limit=limit if isinstance(limit, int) and limit > 0 else None,
             )
-        return result
+        return await self._read_slice(path)
+
+    async def _read_slice(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> MCPToolResult:
+        result = await self.file_read(path)
+        if result.isError or (offset <= 0 and limit is None):
+            return result
+        lines = result_text(result).splitlines(keepends=True)
+        end = offset + limit if limit is not None and limit > 0 else len(lines)
+        return tool_ok("".join(lines[offset:end]))
 
 
 class GrepTool(_FilesystemTool):
@@ -123,11 +132,6 @@ class ListTool(_FilesystemTool):
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Directory to list."},
-            "ignore": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Glob patterns to ignore.",
-            },
         },
     }
 

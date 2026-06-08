@@ -352,6 +352,10 @@ class MCPServer(FastMCP):
         **transport_kwargs: Any,
     ) -> None:
         """Run the server with HUD enhancements."""
+        from hud.patches import apply_all_patches
+
+        apply_all_patches()
+
         if transport is None:
             transport = "stdio"
 

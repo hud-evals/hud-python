@@ -81,8 +81,6 @@ class ClaudeWebFetchTool(ClaudeHostedTool):
 class ClaudeToolSearchTool(ClaudeHostedTool):
     """Claude tool search for large tool sets."""
 
-    threshold: int = 10
-
     def to_params(self) -> BetaToolSearchToolBm25_20251119Param:
         return BetaToolSearchToolBm25_20251119Param(
             type="tool_search_tool_bm25_20251119",

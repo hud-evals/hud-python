@@ -13,9 +13,12 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.base import Agent
+from hud.agents.tool_agent import to_prompt_messages
 from hud.agents.types import ClaudeSDKConfig
 from hud.settings import settings
 
@@ -25,6 +28,29 @@ if TYPE_CHECKING:
     from hud.types import Trace
 
 logger = logging.getLogger(__name__)
+
+
+def _prompt_text(prompt: str | list[Any] | None) -> str:
+    """Flatten a run prompt (text or chat-style message list) into CLI prompt text."""
+    parts: list[str] = []
+    for message in to_prompt_messages(prompt):
+        text = getattr(message.content, "text", "")
+        if isinstance(text, str) and text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+@dataclass
+class _SDKRun:
+    """Per-rollout state: the live SSH client, remote shell, and MCP server config.
+
+    Held in a local (never on ``self``) so one agent instance can drive many
+    concurrent rollouts without races.
+    """
+
+    ssh: SSHClient
+    shell: str
+    mcp_servers: dict[str, dict[str, Any]]
 
 
 class ClaudeSDKAgent(Agent):
@@ -39,9 +65,6 @@ class ClaudeSDKAgent(Agent):
     def __init__(self, config: ClaudeSDKConfig | None = None) -> None:
         self.config = config or ClaudeSDKConfig()
         self.model = self.config.model
-        self._ssh: SSHClient | None = None
-        self._mcp_servers: dict[str, dict[str, Any]] = {}
-        self._shell = "bash"
 
     async def __call__(
         self,
@@ -50,66 +73,75 @@ class ClaudeSDKAgent(Agent):
         max_steps: int | None = None,
         system_prompt: str | None = None,
     ) -> None:
-        self._mcp_servers = {}
         manifest = run.client.manifest
         bindings = manifest.bindings if manifest is not None else []
         families = {c.protocol.split("/", 1)[0] for c in bindings}
 
         if "ssh" not in families:
             raise RuntimeError("ClaudeSDKAgent requires an SSH capability")
-        self._ssh = cast("SSHClient", await run.client.open("ssh"))
-        self._shell = self._ssh.capability.params.get("shell", "bash")
+        ssh = cast("SSHClient", await run.client.open("ssh"))
+        shell = ssh.capability.params.get("shell", "bash")
+        mcp_servers: dict[str, dict[str, Any]] = {}
 
-        for cap in bindings:
-            family = cap.protocol.split("/", 1)[0]
-            if family == "mcp":
-                token = cap.params.get("auth_token")
-                transport = "http" if cap.url.startswith("http") else "sse"
-                server_config: dict[str, Any] = {"type": transport, "url": cap.url}
-                if token:
-                    server_config["headers"] = {"Authorization": f"Bearer {token}"}
-                self._mcp_servers[cap.name] = server_config
-            elif family == "rfb":
-                from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
-                rfb = cast("RFBClient", await run.client.open("rfb"))
-                port = await serve_computer_mcp(rfb)
-                self._mcp_servers["computer-use"] = {
-                    "type": "http",
-                    "url": f"http://127.0.0.1:{port}/mcp",
-                }
+        async with AsyncExitStack() as stack:
+            for cap in bindings:
+                family = cap.protocol.split("/", 1)[0]
+                if family == "mcp":
+                    token = cap.params.get("auth_token")
+                    transport = "http" if cap.url.startswith("http") else "sse"
+                    server_config: dict[str, Any] = {"type": transport, "url": cap.url}
+                    if token:
+                        server_config["headers"] = {"Authorization": f"Bearer {token}"}
+                    mcp_servers[cap.name] = server_config
+                elif family == "rfb":
+                    from hud.agents.claude.sdk.computer_mcp import computer_mcp_server
 
-        await self._exec(
-            run.trace,
-            prompt=run.prompt or "",
-            max_steps=max_steps if max_steps is not None else self.config.max_turns or -1,
-            system_prompt=system_prompt,
-        )
+                    rfb = cast("RFBClient", await run.client.open("rfb"))
+                    # Scope the local computer-use MCP server to this rollout: the
+                    # exit stack tears it down when __call__ returns.
+                    port = await stack.enter_async_context(computer_mcp_server(rfb))
+                    mcp_servers["computer-use"] = {
+                        "type": "http",
+                        "url": f"http://127.0.0.1:{port}/mcp",
+                    }
+
+            sdk_run = _SDKRun(ssh=ssh, shell=shell, mcp_servers=mcp_servers)
+            await self._exec(
+                run.trace,
+                sdk_run,
+                prompt=_prompt_text(run.prompt),
+                max_steps=max_steps if max_steps is not None else self.config.max_turns or -1,
+                system_prompt=system_prompt,
+            )
 
     async def _exec(
         self,
         trace: Trace,
+        sdk_run: _SDKRun,
         *,
         prompt: str,
         max_steps: int = -1,
         system_prompt: str | None = None,
     ) -> None:
-        assert self._ssh is not None
-
-        mcp_config_path = await self._write_mcp_config()
+        ssh = sdk_run.ssh
+        mcp_config_path = await self._write_mcp_config(sdk_run)
 
         # Write prompt to file via SFTP — avoids all shell quoting issues.
-        async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_prompt.txt", "wb") as f:
+        async with ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_prompt.txt", "wb") as f:
             await f.write(prompt.encode("utf-8"))
 
         run_cmd = self._build_cli_command(
-            prompt=prompt, max_steps=max_steps, system_prompt=system_prompt,
+            sdk_run.shell,
+            prompt=prompt,
+            max_steps=max_steps,
+            system_prompt=system_prompt,
             mcp_config_path=mcp_config_path,
         )
 
-        if self._shell in ("cmd", "powershell"):
+        if sdk_run.shell in ("cmd", "powershell"):
             # Write command to bat file — cmd.exe mangles inline quotes.
             bat_content = f"@echo off\r\n{run_cmd}\r\n"
-            async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_run.bat", "wb") as f:
+            async with ssh.conn.start_sftp_client() as sftp, sftp.open(".hud_run.bat", "wb") as f:
                 await f.write(bat_content.encode("utf-8"))
             full_cmd = ".hud_run.bat"
         else:
@@ -121,20 +153,22 @@ class ClaudeSDKAgent(Agent):
             ]
             full_cmd = " && ".join(parts)
 
+        # Do not log full_cmd: it embeds ANTHROPIC_API_KEY / HUD_API_KEY in the env prefix.
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
-        logger.info("Full command: %s", full_cmd)
 
-        completed = await self._ssh.conn.run(full_cmd, check=False)
+        completed = await ssh.conn.run(full_cmd, check=False)
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
         stderr = completed.stderr if isinstance(completed.stderr, str) else ""
 
         logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
 
         if completed.exit_status != 0 and not stdout.strip():
-            trace.done = True
-            trace.content = stderr or f"claude CLI exited with status {completed.exit_status}"
-            trace.isError = True
-            trace.info.update({"exit_status": completed.exit_status, "stderr": stderr})
+            trace.finish(
+                stderr or f"claude CLI exited with status {completed.exit_status}",
+                isError=True,
+                exit_status=completed.exit_status,
+                stderr=stderr,
+            )
             return
 
         self._parse_stream_json(trace, stdout, stderr)
@@ -164,14 +198,14 @@ class ClaudeSDKAgent(Agent):
 
         return env
 
-    async def _write_mcp_config(self) -> str | None:
+    async def _write_mcp_config(self, sdk_run: _SDKRun) -> str | None:
         """Write MCP config via SFTP and return the file path, or None."""
-        if not self._mcp_servers or self._ssh is None:
+        if not sdk_run.mcp_servers:
             return None
-        mcp_json = json.dumps({"mcpServers": self._mcp_servers}, indent=2)
+        mcp_json = json.dumps({"mcpServers": sdk_run.mcp_servers}, indent=2)
         # Write into the workspace root (SFTP is chrooted there).
         sftp_path = ".hud_mcp_config.json"
-        async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(sftp_path, "wb") as f:
+        async with sdk_run.ssh.conn.start_sftp_client() as sftp, sftp.open(sftp_path, "wb") as f:
             await f.write(mcp_json.encode("utf-8"))
         # Return the absolute path the CLI will see (cwd = workspace root).
         logger.info("Wrote MCP config via SFTP")
@@ -179,6 +213,7 @@ class ClaudeSDKAgent(Agent):
 
     def _build_cli_command(
         self,
+        shell: str,
         *,
         prompt: str,
         max_steps: int,
@@ -186,8 +221,7 @@ class ClaudeSDKAgent(Agent):
         mcp_config_path: str | None = None,
     ) -> str:
         env_vars = self._build_env_vars()
-        is_win = self._shell in ("cmd", "powershell")
-        self._win_redirect = False
+        is_win = shell in ("cmd", "powershell")
 
         def q(s: str) -> str:
             if is_win:
@@ -242,10 +276,14 @@ class ClaudeSDKAgent(Agent):
             msg_type = msg.get("type")
 
             if msg_type == "assistant" and isinstance(msg.get("message"), dict):
-                for block in msg["message"].get("content", []):
-                    if isinstance(block, dict) and block.get("type") == "text":
+                message = cast("dict[str, Any]", msg["message"])
+                for raw_block in cast("list[Any]", message.get("content", [])):
+                    if not isinstance(raw_block, dict):
+                        continue
+                    block = cast("dict[str, Any]", raw_block)
+                    if block.get("type") == "text":
                         text = block.get("text", "")
-                        if text:
+                        if isinstance(text, str) and text:
                             content_parts.append(text)
 
             elif msg_type == "result":
@@ -264,11 +302,12 @@ class ClaudeSDKAgent(Agent):
         if stderr:
             info["stderr"] = stderr
 
-        trace.done = True
-        trace.content = "\n".join(content_parts)
-        trace.isError = is_error
-        trace.messages = messages
-        trace.info.update(info)
+        trace.finish(
+            "\n".join(content_parts),
+            isError=is_error,
+            messages=messages,
+            **info,
+        )
 
 
 __all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]

@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 ResponseType = Literal["STOP", "CONTINUE"]
 
+#: Affirmative reply injected when the classifier decides to continue. The agent
+#: paused asking for confirmation; this stands in for the user saying "yes".
+CONTINUE_MESSAGE = "Yes, please continue."
+
 DEFAULT_SYSTEM_PROMPT = """\
 You are an assistant that helps determine the appropriate response to an agent's message.
 
@@ -44,10 +48,18 @@ async def auto_respond(
     if not enabled or not content:
         return None
 
+    # The continue/stop classifier runs through the HUD gateway, so a HUD key is
+    # required. Fail loud instead of silently no-opping under BYOK-only configs.
+    if not settings.api_key:
+        raise ValueError(
+            "auto_respond requires HUD_API_KEY: its continue/stop classifier runs "
+            "through the HUD gateway.",
+        )
+
     try:
         decision = await _determine_response(content)
     except Exception as exc:
-        logger.warning("Auto-respond failed: %s", exc)
+        logger.warning("Auto-respond classifier call failed: %s", exc)
         return None
 
     if decision == "STOP":
@@ -55,7 +67,7 @@ async def auto_respond(
 
     return types.PromptMessage(
         role="user",
-        content=types.TextContent(text=decision, type="text"),
+        content=types.TextContent(text=CONTINUE_MESSAGE, type="text"),
     )
 
 
@@ -105,9 +117,7 @@ async def _determine_response(
                 content.text for content in item.content if isinstance(content, ResponseOutputText)
             )
 
-    response_text = "".join(text_parts)
-    if not response_text:
-        return "CONTINUE"
-
-    response_text = response_text.strip().upper()
-    return "STOP" if "STOP" in response_text else "CONTINUE"
+    # The classifier is instructed to reply with exactly STOP or CONTINUE. Treat
+    # only an exact CONTINUE as continue; empty/ambiguous output is fail-safe STOP.
+    response_text = "".join(text_parts).strip().upper()
+    return "CONTINUE" if response_text == "CONTINUE" else "STOP"
