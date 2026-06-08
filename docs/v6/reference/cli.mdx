@@ -1,0 +1,147 @@
+---
+title: "CLI"
+description: "The hud command reference across the environment lifecycle."
+icon: "terminal"
+---
+
+Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate once with `hud set HUD_API_KEY=...`.
+
+## Build & iterate
+
+### `hud init`
+
+Scaffold a new environment from a preset.
+
+```bash
+hud init my-env                 # choose a preset interactively
+hud init --preset browser       # blank | deep-research | browser | rubrics
+```
+
+| Option | Description |
+|--------|-------------|
+| `--dir`, `-d` | Target directory (default `.`). |
+| `--preset`, `-p` | Preset to download. |
+| `--force`, `-f` | Overwrite existing files. |
+
+### `hud dev`
+
+Serve an environment's control channel locally (tcp JSON-RPC).
+
+```bash
+hud dev               # auto-detect env.py
+hud dev env:env       # explicit module:attribute
+hud dev env.py -p 9000
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--port`, `-p` | `8765` | Port to serve on. |
+| `--verbose`, `-v` | — | Detailed logs. |
+
+### `hud build`
+
+Build a Docker image from your environment and write `hud.lock.yaml`.
+
+```bash
+hud build .
+```
+
+| Option | Description |
+|--------|-------------|
+| `--tag`, `-t` | Image tag (default from `pyproject.toml`). |
+| `--no-cache` | Build without Docker cache. |
+| `--platform` | Target platform (e.g. `linux/amd64`). |
+| `--secret` | Build secret, e.g. `--secret id=TOKEN,env=TOKEN`. |
+
+### `hud deploy`
+
+Build **and** publish to HUD infra in one step.
+
+```bash
+hud deploy
+```
+
+| Option | Description |
+|--------|-------------|
+| `--name`, `-n` | Display name (defaults to directory). |
+| `--all`, `-a` | Deploy all environments in the directory. |
+| `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
+| `--env-file` | Path to a `.env` file. |
+
+## Evaluate
+
+### `hud eval`
+
+Run an agent over a task source (a `.py`, directory, JSON/JSONL file, or platform taskset).
+
+```bash
+hud eval tasks.py claude
+hud eval tasks.py claude --gateway --full
+hud eval "My Tasks" claude --remote
+```
+
+| Option | Description |
+|--------|-------------|
+| `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |
+| `--all` | Run every variant instead of just the first. |
+| `--model`, `-m` | Model id. |
+| `--gateway`, `-g` | Route LLM calls through the HUD gateway (only needs `HUD_API_KEY`). |
+| `--remote` | Submit to the platform for hosted execution. |
+| `--group-size` | Runs per task. |
+| `--max-concurrent` | Cap parallel rollouts. |
+| `--max-steps` | Cap steps per task. |
+| `--task-ids` | Comma-separated slugs or 0-based indices. |
+| `--config`, `-c` | Agent config `key=value` (repeatable). |
+| `--taskset`, `-t` | Associate the job with a named taskset. |
+
+## Run a packaged image
+
+Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or load from source with `--source`.
+
+```bash
+hud task-list                          # what variants are exposed
+hud task-start fix_bug                 # -> the prompt (stdout)
+hud task-grade fix_bug --answer "…"    # -> the reward (stdout)
+```
+
+| Command | Key options |
+|---------|-------------|
+| `hud task-start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o` |
+| `hud task-grade <task>` | `--answer`, `--answer-file`, `--source`, `--args`, `--url`, `--out` |
+| `hud task-list` | `--source`/`-s` |
+
+The same commands exist as the `hud task start` / `hud task grade` / `hud task list` subgroup.
+
+## Platform
+
+```bash
+hud sync tasks my-taskset      # publish variants as a named taskset
+hud sync env                   # sync environment metadata
+```
+
+## Convert
+
+```bash
+hud convert ./tasks                  # auto-detect format
+hud convert ./tasks --from harbor    # explicit
+hud convert ./tasks --output ./out   # custom output dir
+```
+
+Brings external benchmark formats (currently Harbor) into a HUD environment + taskset. See [Import Harbor tasks](/v6/advanced/harbor-convert).
+
+## Other commands
+
+| Command | Description |
+|---------|-------------|
+| `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
+| `hud login` | Authenticate with HUD. |
+| `hud models` | List gateway models. |
+| `hud cancel` | Cancel a running job. |
+| `hud version` | Show the CLI version. |
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Quickstart" icon="bolt" href="/v6/quickstart" />
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy" />
+</CardGroup>

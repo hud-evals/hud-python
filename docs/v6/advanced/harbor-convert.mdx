@@ -1,0 +1,66 @@
+---
+title: "Harbor conversion"
+description: "Import existing Harbor tasks into a HUD environment."
+icon: "ship"
+---
+
+Already have tasks in the **Harbor** format? `hud convert` turns a Harbor task (or dataset) into a HUD environment plus a taskset, so you can run, deploy, and train on it like any other.
+
+## Prerequisites
+
+- A Harbor task directory — each task has `task.toml` + `instruction.md`, and usually an `environment/` (with a `Dockerfile`) and `tests/`.
+
+## Convert
+
+```bash
+hud convert ./tasks                  # auto-detect the format
+hud convert ./tasks --from harbor    # force the Harbor converter
+hud convert ./tasks --output ./out   # custom output directory
+```
+
+By default the converted environment is written to `./hud_converted`.
+
+## What Harbor maps to
+
+The converter reads each Harbor task and generates the HUD equivalent:
+
+| Harbor input | HUD output |
+|--------------|------------|
+| `instruction.md` | the task **prompt** |
+| `tests/test.sh` | the **grader** (runs the verifier, parses the reward) |
+| `environment/Dockerfile` | folded into `Dockerfile.hud` (Harbor image + HUD layer) |
+| `task.toml` (timeouts, metadata) | task config + metadata |
+| each task dir | one task in the generated `env.py`, plus a `tasks/<id>/` bundle |
+
+The generated environment exposes the task bundle inside the sandbox and runs the verification script to produce the reward — the same prompt → work → grade loop as a hand-written task.
+
+## Generated layout
+
+```
+hud_converted/
+├── env.py            # Environment + a task per Harbor task
+├── Dockerfile.hud    # Harbor Dockerfile + HUD layer
+└── tasks/
+    └── <task_id>/
+        ├── instruction.md
+        └── tests/test.sh
+```
+
+## Review, then deploy
+
+The conversion is mechanical, so **review the result** before relying on it — confirm the prompt reads naturally, the grader scores what the prompt asks for, and there's no leftover answer leakage (see [Designing tasks for signal](/v6/advanced/signal)). Then build and run it like any HUD environment:
+
+```bash
+cd hud_converted
+hud build .                 # or: hud deploy
+hud eval tasks.py claude    # if a tasks file is present, else use hud task-start
+```
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy" />
+<Card title="CLI: hud convert" icon="terminal" href="/v6/reference/cli#convert" />
+<Card title="Tasks & grading" icon="list-check" href="/v6/build/tasks" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/advanced/signal" />
+</CardGroup>

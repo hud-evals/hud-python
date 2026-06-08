@@ -1,0 +1,81 @@
+---
+title: "Chat"
+description: "Multi-turn conversational tasks and the Chat runner."
+icon: "comments"
+---
+
+Most tasks yield a single text prompt. A **chat-style task** yields a *list of messages* instead, so the agent works against a multi-turn conversation. The `Chat` runner drives that conversation turn by turn and keeps the history for you.
+
+## Prerequisites
+
+- An environment and a task (see [Tasks](/v6/build/tasks)).
+- A model id for `Chat` (routed through the HUD gateway).
+
+## A chat-style task
+
+A task's prompt can be plain text **or** a list of `PromptMessage`s. To accept a running conversation, take a `messages` parameter and yield it as the prompt:
+
+```python tasks.py
+from hud import Environment
+from mcp.types import PromptMessage
+
+env = Environment(name="assistant")
+
+@env.task()
+async def assistant(messages: list[PromptMessage]):
+    answer = yield messages          # the conversation so far is the prompt
+    yield 1.0 if answer else 0.0     # grade the final turn however you like
+```
+
+`run.prompt` becomes the message list, and the bundled agents normalize it into provider turns automatically.
+
+## Driving it with `Chat`
+
+`Chat` wraps a **variant** (a called task) plus a model. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
+
+```python chat.py
+import asyncio
+from hud.services import Chat
+from tasks import assistant
+
+async def main():
+    chat = Chat(assistant(messages=[]), model="claude-sonnet-4-5")
+    r1 = await chat.send("Book me a flight")
+    r2 = await chat.send("SFO to JFK")
+    print(r2.content)            # the assistant's latest reply
+
+asyncio.run(main())
+```
+
+`Chat` is imported from `hud.services` (also re-exported as `hud.Chat`). The variant's `messages` argument is replaced with the running conversation on every `send`.
+
+### Managing history
+
+| Method | Description |
+|--------|-------------|
+| `await chat.send(message)` | Send a user turn; returns the reply `Trace`. |
+| `chat.clear()` | Reset the conversation. |
+| `chat.export_history()` | JSON-serializable history for persistence. |
+| `chat.load_history(messages)` | Restore a prior conversation. |
+
+### Serving over A2A
+
+`Chat` is also an A2A `AgentExecutor`, so you can serve it as an endpoint:
+
+```python
+chat.serve(port=9999)   # blocks; serves an A2A agent with an AgentCard
+```
+
+## When to use chat vs. a single-turn task
+
+- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/build/tasks)).
+- **Chat task** — when the *interaction itself* is the thing: assistants, tool-use dialogues, or anything where the agent needs prior turns. The grading model is the same — you still yield a reward.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Tasks & variants" icon="list-check" href="/v6/build/tasks" />
+<Card title="Run on any model" icon="robot" href="/v6/run/models" />
+<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
+<Card title="Types: Trace" icon="code" href="/v6/reference/types" />
+</CardGroup>

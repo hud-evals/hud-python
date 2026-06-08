@@ -1,0 +1,82 @@
+---
+title: "Train on rewards"
+description: "Turn rewarded rollouts into training signal for any model."
+icon: "dumbbell"
+---
+
+**Train** is the second verb: the rewards are the signal. The tasks you evaluate are already training data — every rollout returns a `Run` carrying a `trace_id` and a `reward`. Run a **group** per task and turn the rewards into **GRPO advantages**.
+
+## Prerequisites
+
+- A task and an agent (see [Tasks](/v6/build/tasks) and [Models](/v6/run/models)).
+- A `HUD_API_KEY` for the managed training backend.
+- A task with **spread** in its rewards — a group that all scores `0.0` (or all `1.0`) produces zero advantage and teaches nothing. See [Designing tasks for signal](/v6/advanced/signal).
+
+## The managed path
+
+`HudTrainingClient` is agent-agnostic: collect a group of rewarded rollouts, and it computes group-relative advantages and POSTs `{trace_id, advantage}` to the backend, which holds the token-level trajectories keyed by `trace_id` and runs the optimizer.
+
+```python train.py
+import asyncio
+from hud.agents import create_agent
+from hud.eval import HudTrainingClient, Taskset, TrainingConfig
+from tasks import count_letter
+
+async def main():
+    agent = create_agent("claude-sonnet-4-5")
+    trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
+
+    words = ["strawberry", "raspberry", "blueberry", "blackberry"]
+    runs = await Taskset(count_letter(word=w) for w in words).run(agent, group=16)
+    await trainer.reward(runs)
+
+asyncio.run(main())
+```
+
+`group=16` runs each task 16 times; the repeats share a GRPO group. `trainer.reward(runs)` computes advantages over each group and enqueues them — it returns once enqueued, without waiting for an optimizer step. Only the reward signals cross the wire, never token data.
+
+### Tuning the run
+
+`TrainingConfig` carries the managed-tier knobs:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `learning_rate` | `1e-5` | Optimizer step size |
+| `kl_coef` | `0.0` | KL penalty coefficient |
+| `max_grad_norm` | `1.0` | Gradient clipping |
+| `batch_groups` | `1` | Groups to accumulate before one optimizer step |
+| `normalize_advantage` | `True` | Divide group advantages by their std (GRPO) |
+
+## Plug into your own trainer
+
+HUD can be purely the environment-and-reward source for your own GRPO/PPO loop. The signal is just the `Rewarded` protocol — anything carrying a `trace_id` and a `reward` (a `Run` qualifies) — plus the `group_relative()` helper:
+
+```python advantages.py
+from hud.eval import group_relative
+
+rewards = [r.reward for r in runs]
+advantages = group_relative(rewards, normalize_std=True)  # reward - mean, then / std
+```
+
+Feed those advantages into whatever optimizer you run. The same environment trains any model, text or multimodal, unchanged — you only swap the agent.
+
+## Why grouping matters
+
+GRPO advantages are *relative within a group*: `reward - mean`, optionally divided by the group's std. If every rollout in a group earns the same reward, the advantage is zero and the model learns nothing from that task. A good training task produces a **spread** of rewards across the group — some attempts better than others. That property is a task-design concern, covered in [Designing tasks for signal](/v6/advanced/signal).
+
+## Next steps
+
+<CardGroup cols={2}>
+<Card title="Designing tasks for signal" icon="signal" href="/v6/advanced/signal">
+  Build tasks that produce within-group spread and resist reward hacking.
+</Card>
+<Card title="Reference: types" icon="brackets-curly" href="/v6/reference/types">
+  `Run`, `Rewarded`, `TrainingConfig`, and the result shapes.
+</Card>
+<Card title="Run on any model" icon="robot" href="/v6/run/models">
+  Choose the policy you're training.
+</Card>
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
+  Scale the rollouts that feed training.
+</Card>
+</CardGroup>

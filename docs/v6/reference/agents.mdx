@@ -1,0 +1,98 @@
+---
+title: "Agents"
+description: "Built-in agents, their configs, create_agent, and the Run contract."
+icon: "robot"
+---
+
+An **agent** drives one run to completion. The whole contract is a single method:
+
+```python
+async def __call__(self, run: Run) -> None
+```
+
+It fills `run.trace` in place; the answer it produces is `run.trace.content`, graded when the run exits. Agents are **stateless per run**, so one instance can drive many concurrent rollouts.
+
+```python
+from hud.agents import create_agent, ClaudeAgent, OpenAIAgent, GeminiAgent, OpenAIChatAgent
+```
+
+## `create_agent`
+
+```python
+create_agent(model: str, **kwargs) -> Agent
+```
+
+Builds an agent routed through the HUD gateway for any model id the gateway knows (`claude-...`, `gpt-...`, `gemini-...`, `grok-...`). Extra `kwargs` pass through to the provider config.
+
+```python
+agent = create_agent("claude-sonnet-4-5")
+```
+
+For direct provider access with your own API key, construct a provider agent instead.
+
+## Provider agents
+
+Each provider agent takes an optional config from `hud.agents.types`:
+
+| Agent | Config | Default model |
+|-------|--------|---------------|
+| `ClaudeAgent` | `ClaudeConfig` | `claude-sonnet-4-6` |
+| `OpenAIAgent` | `OpenAIConfig` | `gpt-5.4` |
+| `GeminiAgent` | `GeminiConfig` | `gemini-3-pro-preview` |
+| `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5-mini` |
+| `ClaudeSDKAgent` | `ClaudeSDKConfig` | `claude-sonnet-4-5` |
+
+```python
+from hud.agents import ClaudeAgent
+from hud.agents.types import ClaudeConfig
+
+agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_tokens=16384))
+```
+
+- **`OpenAIChatAgent`** speaks OpenAI Chat Completions — point `base_url` at any compatible server (vLLM, local models).
+- **`ClaudeSDKAgent`** runs the `claude` CLI (Claude Code) over an `ssh` capability.
+
+## How an agent uses capabilities
+
+The bundled agents are catalog-driven: on each run they read the environment's manifest, open the capabilities they support (`run.client.open(protocol)`), build their provider tools into fresh per-run state, then loop against `run.prompt`. You don't wire tools — declaring the capability on the environment is enough.
+
+`__call__` accepts optional tuning:
+
+```python
+await agent(run, max_steps=10, system_prompt=None, citations_enabled=False)
+```
+
+## Bring your own harness
+
+Subclass `Agent` and implement `__call__`. Write the answer to `run.trace.content`:
+
+```python
+from hud.agents.base import Agent
+from hud.client import Run
+
+class MyAgent(Agent):
+    async def __call__(self, run: Run) -> None:
+        # open a capability, do work, then:
+        run.trace.content = "the answer"
+```
+
+`BrowserUseAgent` (in `hud.agents.browser_use`, config `BrowserUseConfig`) is this pattern wrapping `browser-use` on the `cdp` capability.
+
+### Serving an agent's tools
+
+An agent's standalone `native_tools` can be exposed as an MCP server:
+
+```python
+server = agent.as_mcp_server(name="my-tools")
+```
+
+(Catalog tools are capability proxies and are not servable.)
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Run on any model" icon="robot" href="/v6/run/models" />
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
+<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
+</CardGroup>

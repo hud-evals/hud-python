@@ -1,0 +1,101 @@
+---
+title: "Tasks & variants"
+description: "The Task, Variant, and Taskset API."
+icon: "list-check"
+---
+
+A **`Task`** is what `@env.task` returns (the registered definition). Calling it mints a **`Variant`** — a parameterized, runnable, serializable instance. A **`Taskset`** groups variants you evaluate one agent over.
+
+```python
+from hud.eval import Variant, Taskset, variant
+```
+
+## Task
+
+Returned by [`@env.task`](/v6/reference/environment#registering-tasks). You rarely construct one directly.
+
+| Attribute / method | Description |
+|--------------------|-------------|
+| `task.id` | The task id. |
+| `task.description` | Human-readable description. |
+| `task.env` | The owning `Environment`. |
+| `task.input_type` / `task.return_type` | The declared `input=` / `returns=` types. |
+| `task.manifest_entry()` | The manifest dict (id, description, JSON schemas). |
+| `task(*args, **kwargs)` | **Binds a `Variant`** with those arguments. |
+
+```python
+v = count_letter(word="raspberry")   # -> Variant, runs nothing yet
+```
+
+## Variant
+
+A parameterized task bound to an env or sandbox. It's a dataclass:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `env` | `Environment \| Sandbox` | Where it runs. |
+| `task` | `str` | The task id. |
+| `args` | `dict` | Bound arguments. |
+| `slug` | `str \| None` | Stable id for sync/registry. |
+| `columns` | `dict \| None` | Arbitrary metadata for filtering/leaderboards. |
+| `validation` | `list[dict] \| None` | Sync metadata. |
+| `agent_config` | `dict \| None` | Sync metadata. |
+
+### Running a variant
+
+Enter it as an async context manager to get a live [`Run`](/v6/reference/types#run); exit grades it:
+
+```python
+async with count_letter(word="strawberry") as run:
+    await agent(run)         # agent fills run.trace
+print(run.reward)            # graded on exit
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `variant.default_slug()` | Stable slug from the task id + an args hash. |
+| `variant.to_dict()` | Serialize to `{env, task, args, ...}` (env becomes a portable ref). |
+| `Variant.from_dict(data)` | Rebuild from a serialized entry. |
+
+### The `variant()` helper
+
+Construct a variant explicitly (e.g. against a sandbox) with metadata:
+
+```python
+from hud.eval import variant, RemoteSandbox
+
+v = variant(RemoteSandbox("tcp://127.0.0.1:8765"), "count_letter",
+            slug="count-straw", columns={"difficulty": "easy"}, word="strawberry")
+```
+
+## Taskset
+
+A collection of variants you evaluate one agent over.
+
+```python
+Taskset(variants: Iterable[Variant])
+```
+
+| Method | Description |
+|--------|-------------|
+| `len(taskset)` / `iter(taskset)` | Count / iterate variants. |
+| `await taskset.run(agent, *, group=1, max_concurrent=None)` | Gather rollouts; returns `list[Run]`. |
+
+`run` expands each variant `group` times (the repeats share a GRPO `group_id`), launches a fresh env per rollout, lets `agent(run)` fill the trace, grades on exit, and reports each trace under one HUD job. A failed launch is isolated into a failed `Run` so one bad rollout never collapses the batch.
+
+```python
+from hud.eval import Taskset
+
+runs = await Taskset(count_letter(word=w) for w in words).run(
+    agent, group=8, max_concurrent=10,
+)
+```
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
+</CardGroup>

@@ -1,0 +1,109 @@
+---
+title: "Environment"
+description: "The Environment class: tasks, capabilities, initializers, and serving."
+icon: "cube"
+---
+
+`hud.environment.Environment` is the control channel that exposes **capabilities** and **tasks**. Import it from the top level or the subpackage:
+
+```python
+from hud import Environment
+# or: from hud.environment import Environment, Workspace
+```
+
+## Constructor
+
+```python
+Environment(name="environment", *, version="0.0.1", capabilities=None)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
+| `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
+| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish. |
+
+<Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
+
+## Registering tasks
+
+```python
+@env.task(*, id=None, description="", input=None, returns=None)
+```
+
+Registers an async-generator task. The decorated function **must** be an async generator (`async def` with `yield`) or `@env.task` raises `TypeError`. Returns a [`Task`](/v6/reference/tasks); calling it mints a `Variant`.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | `str \| None` | Task id (defaults to the function name). |
+| `description` | `str` | Human-readable description, surfaced in the manifest. |
+| `input` | `Any` | Optional type for the agent's input (JSON schema in the manifest). |
+| `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `AgentAnswer[T]`. See [Types](/v6/reference/types). |
+
+```python
+@env.task(id="count", description="Count a letter", returns=int)
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s in '{word}'?"
+    yield 1.0 if str(word.count(letter)) in str(answer.content) else 0.0
+```
+
+## Capabilities
+
+```python
+env.add_capability(cap)   # append a Capability after construction
+```
+
+Capabilities are normally passed to the constructor. See [Capabilities](/v6/reference/capabilities).
+
+## Lifecycle hooks
+
+```python
+@env.initialize    # async fn, runs once before serving (start backing daemons)
+@env.shutdown      # async fn, runs on stop, in reverse order
+```
+
+```python
+@env.initialize
+async def _start():
+    await ws.start()
+```
+
+## Serving
+
+| Method | Description |
+|--------|-------------|
+| `await env.serve(host="127.0.0.1", port=0)` | Start daemons and accept control-channel connections (blocks). |
+| `await env.bind(host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
+| `await env.start()` | Run `@env.initialize` hooks (idempotent). |
+| `await env.stop()` | Run `@env.shutdown` hooks (best-effort). |
+
+In practice you serve with `hud dev` and launch with `hud eval` or a `Variant` context manager rather than calling these directly.
+
+## Serialization
+
+| Method | Description |
+|--------|-------------|
+| `env.to_dict()` | Serialize identity + capabilities + task metadata (task code is not serializable). |
+| `Environment.from_dict(data)` | Rebuild identity + capabilities (tasks come from source when launched). |
+
+## The wire protocol
+
+An environment answers a small JSON-RPC control channel over tcp:
+
+| Method | Returns |
+|--------|---------|
+| `hello` | session id, env identity, capability `bindings` |
+| `tasks.list` | task id/description metadata |
+| `tasks.start` | the task's prompt (holds the session across disconnect) |
+| `tasks.grade` | the evaluation (`score` + metadata) |
+| `tasks.cancel` | cancels the held task |
+| `bye` | ends the session and tears the held task down |
+
+The held task survives a dropped connection, so a client can `tasks.start`, disconnect, then reconnect to `tasks.grade` — which is how `hud task-start` / `hud task-grade` work against a packaged image.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Tasks & variants" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+</CardGroup>

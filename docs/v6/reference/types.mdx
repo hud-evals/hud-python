@@ -1,0 +1,108 @@
+---
+title: "Types"
+description: "Run, Trace, answer and result types, and typed task I/O."
+icon: "code"
+---
+
+The serializable shapes agents, tasks, and graders exchange.
+
+```python
+from hud.client import Run
+from hud.types import Trace
+from hud.agents.types import AgentAnswer, Citation, EvaluationResult, SubScore, ContentResult
+```
+
+## `Run`
+
+The live handle for one task — the lifecycle plus the agent's `Trace`. You get one by entering a `Variant` (`async with variant as run`).
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `run.prompt` | `str \| list \| None` | The task's opening prompt (text, or chat-style message list). |
+| `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
+| `run.reward` | `float` | The graded reward (set on exit). |
+| `run.evaluation` | `dict` | The full grade payload (`score` + metadata). |
+| `run.trace_id` | `str \| None` | Keys the trajectory; satisfies `Rewarded`. |
+| `run.job_id` / `run.group_id` | `str \| None` | Batch + GRPO group, set by the runner. |
+
+`Run.failed(error, *, trace_id=None)` builds a spent run for an isolated failure.
+
+## `Trace`
+
+The agent's trajectory for one rollout — the unit of training data.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `content` | `str \| None` | The final answer (graded). |
+| `messages` | `list` | The conversation messages. |
+| `citations` | `list[dict]` | Normalized citations. |
+| `samples` | `list[Sample]` | Token-level samples (inline RL mode). |
+| `trace_id` | `str \| None` | Keys server-side trajectories. |
+| `isError` / `done` | `bool` | Status flags. |
+
+## Answer & result types
+
+### `AgentAnswer[T]`
+
+When a task declares `returns=T`, the answer arrives wrapped:
+
+| Field | Description |
+|-------|-------------|
+| `content` | The parsed structured answer (type `T`). |
+| `raw` | The original answer string. |
+| `citations` | Normalized `Citation`s. |
+
+```python
+@env.task(returns=int)
+async def count(word: str = "strawberry"):
+    answer = yield f"How many letters in '{word}'?"
+    yield 1.0 if answer.content == len(word) else 0.0
+```
+
+### `SubScore`
+
+One component of a grade: `name`, `value` (0–1), `weight` (default `1.0`; negative = penalty), optional `metadata`.
+
+### `EvaluationResult`
+
+Alias of `ScenarioResult` — the combined grade you can yield from a task:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `reward` | `0.0` | Final score. |
+| `done` | `True` | Episode complete. |
+| `subscores` | `None` | Optional breakdown (shown in the trace). |
+| `info` | `{}` | Extra metadata. |
+| `content` | `None` | Human-readable explanation. |
+| `isError` | `False` | Whether grading itself failed. |
+
+`EvaluationResult.from_float(value)` wraps a bare reward.
+
+### `Citation`
+
+A normalized citation across providers: `type`, `text`, `source`, `title`, `start_index`, `end_index`, `provider_data`.
+
+### `ContentResult`
+
+Intermediate tool-execution output: `output`, `error`, `base64_image`, `system`, `url` (combinable with `+`).
+
+## Training types
+
+```python
+from hud.eval import TrainingConfig, group_relative
+```
+
+- **`Rewarded`** — the protocol `reward()` needs: anything with `trace_id: str | None` and `reward: float` (a `Run` qualifies).
+- **`TrainingConfig`** — `learning_rate`, `kl_coef`, `max_grad_norm`, `batch_groups`, `normalize_advantage`. See [Training](/v6/run/training).
+- **`group_relative(rewards, *, normalize_std=True)`** — GRPO advantages over one group.
+
+## Typed task I/O
+
+Declare `input=` / `returns=` on `@env.task` to surface JSON schemas in the manifest and parse the agent's answer into a typed `AgentAnswer[T]`. Any Pydantic model or standard type works.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Tasks & variants" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+</CardGroup>
