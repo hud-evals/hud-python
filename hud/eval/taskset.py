@@ -2,7 +2,7 @@
 
 Launches each variant, lets ``agent(run)`` fill ``run.trace``, grades it, and
 gathers the :class:`Run`s — with optional GRPO grouping + a concurrency cap. HUD
-job/trace reporting lives in :mod:`hud.telemetry.job`::
+job/trace reporting lives in :mod:`hud.eval.job`::
 
     runs = await Taskset(fix_bug(difficulty=d) for d in range(5)).run(agent, group=8)
 """
@@ -37,12 +37,12 @@ async def _rollout(
     """Drive one variant to a graded :class:`Run` (the rollout atom).
 
     Launch the env, let ``agent(run)`` fill ``run.trace``, and grade it on exit
-    (``run.reward``). The rollout is wrapped in :func:`hud.telemetry.job.trace`,
+    (``run.reward``). The rollout is wrapped in :func:`hud.eval.job.trace`,
     which binds the per-rollout ``trace_id`` into the trace context (so ``@instrument``
     spans upload to it) and reports the trace to HUD. A launch/connect failure is
     isolated into a failed ``Run`` so one bad rollout never collapses a batch.
     """
-    from hud.telemetry.job import trace as report_trace
+    from hud.eval.job import trace as report_trace
 
     trace_id = uuid.uuid4().hex
     async with report_trace(trace_id, job_id=job_id, group_id=group_id) as recorded:
@@ -96,7 +96,7 @@ class Taskset:
         """
         if group < 1:
             raise ValueError("group must be >= 1")
-        from hud.telemetry.job import job_enter
+        from hud.eval.job import job_enter
 
         # Fresh Variant per rollout (the Variant CM holds per-enter state); the
         # ``group`` repeats of one variant share a group_id (the GRPO group).
