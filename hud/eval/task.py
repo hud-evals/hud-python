@@ -99,21 +99,17 @@ class Task:
         """Serialize to ``{env, task, args}`` with a portable env ref."""
         from hud.environment import Environment
 
-        from .sandbox import HudSandbox, LocalSandbox, RemoteSandbox
+        from .sandbox import Sandbox
 
         env = self.env
-        if isinstance(env, LocalSandbox):
-            env = env._env
         if isinstance(env, Environment):
             ref: dict[str, Any] = {"type": "hud", "name": env.name}
-        elif isinstance(env, RemoteSandbox):
-            ref = {"type": "url", "url": env._url, "params": env._params}
-        elif isinstance(env, HudSandbox):
-            ref = {"type": "hud", "name": env.image}
+        elif isinstance(env, Sandbox):
+            ref = env.to_ref()
         else:
             raise TypeError(
                 f"cannot serialize a {type(env).__name__} env-ref; "
-                "use a live Environment, RemoteSandbox, or HudSandbox",
+                "expected an Environment or Sandbox",
             )
         out: dict[str, Any] = {"env": ref, "task": self.id, "args": self.args}
         for key in ("slug", "validation", "agent_config", "columns"):

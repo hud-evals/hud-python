@@ -29,6 +29,7 @@ class TestInitModule:
             "SyncPlan",
             "Task",
             "Taskset",
+            "Trace",
             "instrument",
             "launch",
             "task",

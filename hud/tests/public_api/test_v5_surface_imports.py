@@ -25,6 +25,7 @@ TOP_LEVEL_DOCS_EXAMPLES_SURFACE = (
     "SyncPlan",
     "Task",
     "Taskset",
+    "Trace",
     "launch",
     "task",
 )
@@ -44,6 +45,7 @@ TOP_LEVEL_EXPORTS = (
     "SyncPlan",
     "Task",
     "Taskset",
+    "Trace",
     "instrument",
     "launch",
     "task",
@@ -52,6 +54,7 @@ TOP_LEVEL_EXPORTS = (
 
 DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents": (
+        "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
         "create_agent",
@@ -60,6 +63,7 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.native": (
         "BashGrader",
         "Grade",
+        "GradeCombiner",
         "Grader",
         "LLMJudgeGrader",
         "contains",
@@ -111,10 +115,13 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.environment": ("Environment",),
     "hud.eval": (
         "Channel",
+        "Grade",
         "Job",
+        "Run",
         "SyncPlan",
         "Task",
         "Taskset",
+        "Trace",
         "launch",
         "task",
     ),
@@ -189,6 +196,7 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.native.graders": (
         "BashGrader",
         "Grade",
+        "GradeCombiner",
         "Grader",
     ),
     "hud.server.context": (

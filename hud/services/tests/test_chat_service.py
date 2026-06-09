@@ -47,7 +47,7 @@ def _patch_chat(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _service() -> ChatService:
-    task = cast("Any", SimpleNamespace(task="demo"))
+    task = cast("Any", SimpleNamespace(id="demo"))
     return ChatService(task, model="gpt-test")
 
 

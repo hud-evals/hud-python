@@ -21,7 +21,7 @@ from a2a.types import (
     TextPart,
 )
 
-from hud.services.chat import Chat, _task_id
+from hud.services.chat import Chat
 from hud.services.reply_metadata import build_reply_metadata_event
 
 if TYPE_CHECKING:
@@ -51,12 +51,9 @@ class ChatService(AgentExecutor):
         self._task = task
         self._model = model
         self._max_steps = max_steps
-        task_id = _task_id(task)
+        task_id = task.id
         self._name = name or task_id or "chat-service"
         self._description = description or f"A2A service for {task_id or 'tasks'}"
-        self._trace = trace
-        self._quiet = quiet
-
         self._sessions: dict[str, Chat] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._session_last_active: dict[str, float] = {}
@@ -70,8 +67,6 @@ class ChatService(AgentExecutor):
                 self._task,
                 model=self._model,
                 max_steps=self._max_steps,
-                trace=self._trace,
-                quiet=self._quiet,
             )
             self._sessions[context_id] = chat
         self._session_last_active[context_id] = time.monotonic()

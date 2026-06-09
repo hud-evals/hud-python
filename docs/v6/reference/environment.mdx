@@ -104,7 +104,7 @@ An environment answers a small JSON-RPC control channel over tcp:
 | `tasks.cancel` | cancels the held task |
 | `bye` | ends the session and tears the held task down |
 
-The held task survives a dropped connection, so a client can `tasks.start`, disconnect, then reconnect to `tasks.grade` — which is how `hud task-start` / `hud task-grade` work against a packaged image.
+The held task survives a dropped connection, so a client can `tasks.start`, disconnect, then reconnect to `tasks.grade` — which is how `hud task start` / `hud task grade` work against a packaged image.
 
 ## See also
 

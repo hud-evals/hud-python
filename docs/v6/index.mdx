@@ -16,7 +16,7 @@ A few beliefs shape everything in the SDK:
 
 ## The protocol
 
-HUD is protocol-first. An agent and an environment exchange just three things: a manifest (the environment's capabilities and tasks), a task-start that returns the prompt, and a task-grade that returns the reward. In between, the agent just works, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
+HUD is protocol-first. An agent and an environment exchange just three things: a manifest (the environment's capabilities and tasks), `tasks.start` that returns the prompt, and `tasks.grade` that returns the reward. In between, the agent just works, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
 
 ```mermaid
 sequenceDiagram
@@ -25,14 +25,14 @@ sequenceDiagram
     participant Caps as Capabilities (ssh · mcp · cdp · rfb · ros2)
     Agent->>Env: manifest exchange
     Env-->>Agent: capabilities + tasks
-    Agent->>Env: task-start
+    Agent->>Env: tasks.start
     Env-->>Agent: prompt
     rect rgb(238,238,238)
     Note over Agent,Caps: the agent works, driving capabilities directly
     Agent->>Caps: shell · browser · GUI · tools · robot
     Caps-->>Agent: observations
     end
-    Agent->>Env: task-grade
+    Agent->>Env: tasks.grade
     Env-->>Agent: reward
 ```
 

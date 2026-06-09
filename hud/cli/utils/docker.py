@@ -16,8 +16,8 @@ from pathlib import Path
 
 from .config import parse_env_file
 
-# Note: we deliberately avoid the stricter is_environment_directory() check here
-# to allow folder mode with only a Dockerfile or only a pyproject.toml.
+# Folder mode is intentionally looser than EnvironmentSource.is_environment: a Dockerfile,
+# pyproject.toml, or hud.lock.yaml is enough to infer a usable environment root.
 
 
 def extract_name_and_tag(image_ref: str) -> tuple[str, str]:
@@ -221,8 +221,7 @@ def detect_environment_dir(start_dir: Path | None = None) -> Path | None:
     Detection order:
     - Current directory containing `hud.lock.yaml`
     - Parent directory containing `hud.lock.yaml`
-    - Current directory that looks like an environment if it has either a
-      `Dockerfile.hud`, `Dockerfile`, or a `pyproject.toml` (looser than `is_environment_directory`)
+    - Current directory with `Dockerfile.hud`, `Dockerfile`, or `pyproject.toml`
 
     Returns the detected directory path or None if not found.
     """

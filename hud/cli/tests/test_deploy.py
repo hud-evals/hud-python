@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import typer
 
 
 class TestCollectEnvironmentVariables:
@@ -89,8 +90,6 @@ class TestDeployEnvironment:
 
     def test_no_api_key_error(self, tmp_path: Path) -> None:
         """Test error when no API key is set."""
-        import click
-
         from hud.cli.deploy import deploy_environment
 
         # Create a Dockerfile
@@ -98,7 +97,7 @@ class TestDeployEnvironment:
 
         with (
             patch("hud.settings.settings") as mock_settings,
-            pytest.raises(click.exceptions.Exit) as exc_info,
+            pytest.raises(typer.Exit) as exc_info,
         ):
             mock_settings.api_key = None
 
@@ -108,13 +107,11 @@ class TestDeployEnvironment:
 
     def test_no_dockerfile_error(self, tmp_path: Path) -> None:
         """Test error when no Dockerfile found."""
-        import click
-
         from hud.cli.deploy import deploy_environment
 
         with (
             patch("hud.settings.settings") as mock_settings,
-            pytest.raises(click.exceptions.Exit) as exc_info,
+            pytest.raises(typer.Exit) as exc_info,
         ):
             mock_settings.api_key = "test-key"
 
@@ -124,17 +121,15 @@ class TestDeployEnvironment:
 
     def test_validation_errors_exit(self, tmp_path: Path) -> None:
         """Test that validation errors cause exit."""
-        import click
-
         from hud.cli.deploy import deploy_environment
-        from hud.cli.utils.validation import ValidationIssue
+        from hud.environment.source import ValidationIssue
 
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
 
         with (
             patch("hud.settings.settings") as mock_settings,
-            patch("hud.cli.deploy.validate_environment") as mock_validate,
-            pytest.raises(click.exceptions.Exit) as exc_info,
+            patch("hud.environment.source.EnvironmentSource.validate") as mock_validate,
+            pytest.raises(typer.Exit) as exc_info,
         ):
             mock_settings.api_key = "test-key"
             mock_validate.return_value = [
@@ -159,7 +154,8 @@ class TestDeployAsync:
         """Test handling of upload URL failure."""
         import httpx
 
-        from hud.cli.deploy import _deploy_async
+        from hud._platform import PlatformClient
+        from hud.cli.deploy import _deploy_async, _DeployPlan
         from hud.utils.hud_console import HUDConsole
 
         console = HUDConsole()
@@ -178,21 +174,25 @@ class TestDeployAsync:
 
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
-                name="test-env",
-                env_vars={},
-                build_args={},
-                build_secrets={},
                 no_cache=False,
-                registry_id=None,
+                plan=_DeployPlan(
+                    name="test-env",
+                    registry_id=None,
+                    env_vars={},
+                    build_args={},
+                    build_secrets={},
+                ),
+                platform=PlatformClient("https://api.example", {}),
                 console=console,
             )
 
-        assert result["success"] is False
+        assert result.success is False
 
     @pytest.mark.asyncio
     async def test_upload_url_network_error(self) -> None:
         """Test handling of network error during upload URL fetch."""
-        from hud.cli.deploy import _deploy_async
+        from hud._platform import PlatformClient
+        from hud.cli.deploy import _deploy_async, _DeployPlan
         from hud.utils.hud_console import HUDConsole
 
         console = HUDConsole()
@@ -206,16 +206,19 @@ class TestDeployAsync:
 
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
-                name="test-env",
-                env_vars={},
-                build_args={},
-                build_secrets={},
                 no_cache=False,
-                registry_id=None,
+                plan=_DeployPlan(
+                    name="test-env",
+                    registry_id=None,
+                    env_vars={},
+                    build_args={},
+                    build_secrets={},
+                ),
+                platform=PlatformClient("https://api.example", {}),
                 console=console,
             )
 
-        assert result["success"] is False
+        assert result.success is False
 
 
 class TestSaveDeployLink:
@@ -227,12 +230,8 @@ class TestSaveDeployLink:
         from hud.utils.hud_console import HUDConsole
 
         console = HUDConsole()
-        result = {
-            "registry_id": "test-registry-id-12345",
-            "version": "1.0.0",
-        }
 
-        _save_deploy_link(tmp_path, result, console)
+        _save_deploy_link(tmp_path, "test-registry-id-12345", console)
 
         config_path = tmp_path / ".hud" / "config.json"
         assert config_path.exists()
@@ -248,22 +247,10 @@ class TestSaveDeployLink:
         from hud.utils.hud_console import HUDConsole
 
         console = HUDConsole()
-        result = {"registry_id": "test-id"}
 
-        _save_deploy_link(tmp_path, result, console)
+        _save_deploy_link(tmp_path, "test-id", console)
 
         assert (tmp_path / ".hud").is_dir()
-
-    def test_handles_missing_registry_id(self, tmp_path: Path) -> None:
-        """Test handling when registry_id is None."""
-        from hud.cli.deploy import _save_deploy_link
-        from hud.utils.hud_console import HUDConsole
-
-        console = HUDConsole()
-        result = {"registry_id": None, "version": "1.0.0"}
-
-        # Should not raise
-        _save_deploy_link(tmp_path, result, console)
 
 
 class TestDeployCommand:

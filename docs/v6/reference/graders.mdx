@@ -1,6 +1,6 @@
 ---
 title: "Graders"
-description: "Native graders, comparison helpers, and the native Grade combiner."
+description: "Native graders, comparison helpers, and the native grade combiner."
 icon: "scale-balanced"
 ---
 
@@ -8,7 +8,7 @@ Graders turn an agent's answer into a reward. HUD ships reusable ones so you don
 
 ```python
 from hud.native.graders import (
-    BashGrader, LLMJudgeGrader, Grade, Grader,
+    BashGrader, LLMJudgeGrader, GradeCombiner, Grader,
     exact_match, contains, contains_any, contains_all,
     numeric_match, f1_score, normalize,
 )
@@ -71,15 +71,15 @@ result = await LLMJudgeGrader.grade(
 
 `criteria` items are strings, or `(requirement, weight)` tuples.
 
-## `hud.native.graders.Grade` — compose multiple graders
+## `hud.native.graders.GradeCombiner` — compose multiple graders
 
-`Grade.gather` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
+`GradeCombiner.gather` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
 
 ```python
 @env.task()
 async def composed(answer: str = ""):
     answer = yield "Solve the task."
-    yield await Grade.gather(
+    yield await GradeCombiner.gather(
         BashGrader.grade(weight=0.5, command="pytest -q"),
         LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Matches the spec"]),
         SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
@@ -88,8 +88,8 @@ async def composed(answer: str = ""):
 
 | Method | Description |
 |--------|-------------|
-| `await Grade.gather(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
-| `Grade.from_subscores(list)` | Combine already-resolved subscores. |
+| `await GradeCombiner.gather(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
+| `GradeCombiner.from_subscores(list)` | Combine already-resolved subscores. |
 
 The subscores appear in the trace, so a partial reward is legible.
 

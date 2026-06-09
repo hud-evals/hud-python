@@ -77,7 +77,7 @@ Run an agent over a task source (a `.py`, directory, JSON/JSONL file, or platfor
 ```bash
 hud eval tasks.py claude
 hud eval tasks.py claude --gateway --full
-hud eval "My Tasks" claude --remote
+hud eval "My Tasks" claude --full
 ```
 
 | Option | Description |
@@ -86,7 +86,6 @@ hud eval "My Tasks" claude --remote
 | `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
 | `--gateway`, `-g` | Route LLM calls through the HUD gateway (only needs `HUD_API_KEY`). |
-| `--remote` | Submit to the platform for hosted execution. |
 | `--group-size` | Runs per task. |
 | `--max-concurrent` | Cap parallel rollouts. |
 | `--max-steps` | Cap steps per task. |
@@ -99,18 +98,16 @@ hud eval "My Tasks" claude --remote
 Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or load from source with `--source`.
 
 ```bash
-hud task-list                          # what tasks are exposed
-hud task-start fix_bug                 # -> the prompt (stdout)
-hud task-grade fix_bug --answer "…"    # -> the reward (stdout)
+hud task list                          # what tasks are exposed
+hud task start fix_bug                 # -> the prompt (stdout)
+hud task grade fix_bug --answer "…"    # -> the reward (stdout)
 ```
 
 | Command | Key options |
 |---------|-------------|
-| `hud task-start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o` |
-| `hud task-grade <task>` | `--answer`, `--answer-file`, `--source`, `--args`, `--url`, `--out` |
-| `hud task-list` | `--source`/`-s` |
-
-The same commands exist as the `hud task start` / `hud task grade` / `hud task list` subgroup.
+| `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o` |
+| `hud task grade <task>` | `--answer`, `--answer-file`, `--source`, `--args`, `--url`, `--out` |
+| `hud task list` | `--source`/`-s` |
 
 ## Platform
 

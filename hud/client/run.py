@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, Self
 
 from hud.types import Trace
 
@@ -47,10 +47,14 @@ class Grade:
 
 
 class Run:
-    """Live handle for one task: the task lifecycle plus the agent's ``Trace``."""
+    """Live handle for one task: the task lifecycle plus the agent's ``Trace``.
 
-    def __init__(self, client: HudClient, task_id: str, args: dict[str, Any]) -> None:
-        self.client = client
+    ``client`` is absent only on a :meth:`failed` run (a rollout that never
+    launched); accessing it there raises instead of half-working.
+    """
+
+    def __init__(self, client: HudClient | None, task_id: str, args: dict[str, Any]) -> None:
+        self._client = client
         self._task_id = task_id
         self._args = args
         #: The task's opening prompt: plain text, or a list of message dicts
@@ -63,6 +67,13 @@ class Run:
         #: Batch this run belongs to (set by the runner); platform job + GRPO group.
         self.job_id: str | None = None
         self.group_id: str | None = None
+
+    @property
+    def client(self) -> HudClient:
+        """The live client driving this run."""
+        if self._client is None:
+            raise RuntimeError("this run failed before launch; it has no live client")
+        return self._client
 
     @property
     def trace_id(self) -> str | None:
@@ -99,17 +110,8 @@ class Run:
         Carries no live client; used for error isolation so one bad rollout never
         collapses a batch.
         """
-        run = cls.__new__(cls)
-        run.client = cast("HudClient", None)
-        run._task_id = ""
-        run._args = {}
-        run.prompt = None
-        run.reward = 0.0
-        run.evaluation = {}
-        run.grade = Grade()
+        run = cls(None, "", {})
         run.trace = Trace(isError=True, content=error, info={"error": error}, trace_id=trace_id)
-        run.job_id = None
-        run.group_id = None
         return run
 
 

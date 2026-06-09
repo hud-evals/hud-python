@@ -10,6 +10,7 @@ Includes:
 from hud.native.graders import (
     BashGrader,
     Grade,
+    GradeCombiner,
     Grader,
     LLMJudgeGrader,
     contains,
@@ -24,6 +25,7 @@ from hud.native.graders import (
 __all__ = [
     "BashGrader",
     "Grade",
+    "GradeCombiner",
     "Grader",
     "LLMJudgeGrader",
     "contains",

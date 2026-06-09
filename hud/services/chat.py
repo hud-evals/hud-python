@@ -31,7 +31,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from a2a.server.agent_execution import AgentExecutor
 from a2a.types import (
@@ -67,7 +67,7 @@ def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     if isinstance(content, str):
         return [TextContent(type="text", text=content)]
     if isinstance(content, list):
-        return content  # type: ignore[return-value]
+        return cast("list[ContentBlock]", content)
     return list(content)
 
 
@@ -81,14 +81,6 @@ def _blocks_to_message_content(
     if len(blocks) == 1:
         return blocks[0].model_dump()
     return [block.model_dump() for block in blocks]
-
-
-def _task_id(task: object) -> str | None:
-    task_id = getattr(task, "id", None)
-    if isinstance(task_id, str):
-        return task_id
-    legacy_task_id = getattr(task, "task", None)
-    return legacy_task_id if isinstance(legacy_task_id, str) else None
 
 
 class Chat(AgentExecutor):
@@ -136,12 +128,10 @@ class Chat(AgentExecutor):
         self._task = task
         self._model = model
         self._agent_params = agent_params or {}
-        task_id = _task_id(task)
+        task_id = task.id
         self._name = name or task_id or "chat"
         self._description = description or f"Chat agent for {task_id or 'tasks'}"
         self._max_steps = max_steps
-        self._trace = trace
-        self._quiet = quiet
         self.messages: list[dict[str, Any]] = []
 
     def _create_agent(self) -> Any:
@@ -217,7 +207,7 @@ class Chat(AgentExecutor):
 
     def agent_card(self, url: str = "http://localhost:9999/") -> AgentCard:
         """Generate an AgentCard from this Chat's configuration."""
-        task_id = _task_id(self._task)
+        task_id = self._task.id
         skills = [
             AgentSkill(
                 id=task_id or "default",

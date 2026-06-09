@@ -12,6 +12,7 @@ from .environment import Environment
 from .eval import Job, SyncPlan, Task, Taskset, launch, task
 from .services import Chat
 from .telemetry.instrument import instrument
+from .types import Trace
 
 __all__ = [
     "Chat",
@@ -22,6 +23,7 @@ __all__ = [
     "SyncPlan",
     "Task",
     "Taskset",
+    "Trace",
     "instrument",
     "launch",
     "task",

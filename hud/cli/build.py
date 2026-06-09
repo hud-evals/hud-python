@@ -2,58 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import subprocess
-import time
 from pathlib import Path
-from typing import Any
 
 import typer
 
-from hud.cli.utils.environment import find_dockerfile
-from hud.cli.utils.lockfile import (
-    build_lock_data,
-    dump_lock_data,
-)
+from hud.environment import lock
+from hud.environment.source import EnvironmentSource
 from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
-
-
-def _read_env_manifest(env_dir: Path) -> dict[str, Any]:
-    """Read a v6 environment's manifest (capabilities + tasks) from its source.
-
-    Imports ``env.py`` from *env_dir* and returns ``Environment.to_dict()`` — the
-    declarative manifest (name, version, capabilities, tasks) baked into the lock.
-    No container run is needed: the manifest is declared, not introspected.
-    """
-    from hud.environment import Environment
-    from hud.eval import load_module
-
-    env_file = env_dir / "env.py"
-    if not env_file.exists():
-        raise FileNotFoundError(f"no env.py found in {env_dir}")
-    module = load_module(env_file)
-    envs = [v for v in vars(module).values() if isinstance(v, Environment)]
-    if not envs:
-        raise ValueError(f"no Environment instance defined in {env_file}")
-    if len(envs) > 1:
-        raise ValueError(f"multiple Environments in {env_file}; expected exactly one")
-    manifest = envs[0].to_dict()
-
-    import contextlib
-
-    from hud.eval import Taskset
-
-    tasks: list[Any] = []
-    with contextlib.suppress(Exception):
-        tasks = list(Taskset.from_module(env_dir))
-    manifest["tasks"] = [
-        {"slug": task.slug or task.default_slug(), "task": task.id, "args": task.args}
-        for task in tasks
-    ]
-    return manifest
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -90,35 +49,10 @@ def get_existing_version(lock_path: Path) -> str | None:
         return None
 
     try:
-        from hud.cli.utils.lockfile import load_lock
-
-        lock_data = load_lock(lock_path)
+        lock_data = lock.read_lock(lock_path)
         return lock_data.get("build", {}).get("version", None)
     except Exception:
         return None
-
-
-def get_docker_image_digest(image: str) -> str | None:
-    """Get the digest of a Docker image."""
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.RepoDigests}}", image],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # Parse the output - it's in format [repo@sha256:digest]
-        digests = result.stdout.strip()
-        if digests and digests != "[]":
-            # Extract the first digest
-            digest_list = eval(digests)  # noqa: S307 # Safe since it's from docker
-            if digest_list:
-                # Return full image reference with digest
-                return digest_list[0]
-    except Exception:  # noqa: S110
-        # Don't print error here, let calling code handle it
-        pass
-    return None
 
 
 def get_docker_image_id(image: str) -> str | None:
@@ -139,89 +73,12 @@ def get_docker_image_id(image: str) -> str | None:
         return None
 
 
-def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], list[str]]:
-    """Extract required and optional RUNTIME environment variables from Dockerfile.
-
-    Only ENV directives are considered for runtime env vars.
-    ARG directives are build-time only and are NOT added to required env vars
-    (those should be passed via --build-arg during build).
-
-    ARG variables are tracked only to detect patterns like:
-        ARG MY_VAR
-        ENV MY_VAR=$MY_VAR
-    where the ARG value is exposed as a runtime ENV.
-    """
-    required = []
-    optional = []
-
-    if not dockerfile_path.exists():
-        return required, optional
-
-    # Parse both ENV and ARG directives
-    content = dockerfile_path.read_text()
-    arg_vars = set()  # Track ARG variables (for detecting ENV $ARG patterns)
-
-    for line in content.splitlines():
-        line = line.strip()
-
-        # Look for ARG directives (build-time variables)
-        # These are NOT runtime env vars - only track them to detect ENV $ARG patterns
-        if line.startswith("ARG "):
-            parts = line[4:].strip().split("=", 1)
-            var_name = parts[0].strip()
-            if len(parts) == 1 or not parts[1].strip():
-                # No default value - track it but DON'T add to required
-                # ARG is build-time only, not runtime
-                arg_vars.add(var_name)
-
-        # Look for ENV directives (runtime variables)
-        elif line.startswith("ENV "):
-            parts = line[4:].strip().split("=", 1)
-            var_name = parts[0].strip()
-
-            # Check if it references an ARG variable (e.g., ENV MY_VAR=$MY_VAR)
-            # This pattern exposes the build-time ARG as a runtime ENV
-            if len(parts) == 2 and parts[1].strip().startswith("$"):
-                ref_var = parts[1].strip()[1:]
-                if ref_var in arg_vars and var_name not in required:
-                    required.append(var_name)
-            elif len(parts) == 2 and not parts[1].strip():
-                # No default value = required
-                if var_name not in required:
-                    required.append(var_name)
-            elif len(parts) == 1:
-                # No equals sign = required
-                if var_name not in required:
-                    required.append(var_name)
-
-    return required, optional
-
-
-def parse_base_image(dockerfile_path: Path) -> str | None:
-    """Extract the base image from the first FROM directive in Dockerfile.
-
-    For multi-stage builds, returns the image from the first FROM. Strips any
-    trailing AS <stage> segment.
-    """
-    try:
-        if not dockerfile_path.exists():
-            return None
-        for raw_line in dockerfile_path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.upper().startswith("FROM "):
-                rest = line[5:].strip()
-                # Remove stage alias if present
-                lower = rest.lower()
-                if " as " in lower:
-                    # Split using the original case string at the index of lower-case match
-                    idx = lower.index(" as ")
-                    rest = rest[:idx]
-                return rest.strip()
-    except Exception:
-        return None
-    return None
+def _image_ref_with_digest(image_ref: str) -> tuple[str | None, str | None]:
+    image_id = get_docker_image_id(image_ref)
+    if not image_id:
+        return None, None
+    digest = image_id if image_id.startswith("sha256:") else f"sha256:{image_id}"
+    return f"{image_ref}@{digest}", image_id
 
 
 def check_dockerfile_for_secrets(directory: Path, dockerfile: Path) -> list[str]:
@@ -290,74 +147,56 @@ def _has_non_daemon_output(docker_args: list[str]) -> bool:
     return has_custom and "--load" not in docker_args
 
 
-def build_docker_image(
+def _docker_buildx_cmd(
     directory: Path,
-    tag: str,
+    dockerfile: Path,
+    *,
+    tags: list[str],
+    labels: dict[str, str] | None = None,
     no_cache: bool = False,
-    verbose: bool = False,
-    build_args: dict[str, str] | None = None,
     platform: str | None = None,
+    build_args: dict[str, str] | None = None,
     secrets: list[str] | None = None,
     docker_args: list[str] | None = None,
-) -> bool:
-    """Build a Docker image from a directory.
-
-    Wraps ``docker buildx build``. Any flags that Docker understands
-    (``--cache-from``, ``--push``, ``--load``, etc.) belong in *docker_args*
-    and are appended to the command as-is. Unless the caller explicitly picks
-    an output mode, the result is loaded into the host daemon for local
-    analysis/debugging.
-    """
-    hud_console = HUDConsole()
-    build_args = build_args or {}
-    secrets = secrets or []
-    docker_args = docker_args or []
-
-    dockerfile = find_dockerfile(directory)
-    if dockerfile is None:
-        hud_console.error(f"No Dockerfile found in {directory}")
-        hud_console.info("Expected: Dockerfile.hud or Dockerfile")
-        return False
-
-    effective_platform = platform if platform is not None else "linux/amd64"
+) -> list[str]:
     cmd = ["docker", "buildx", "build"]
-
     if dockerfile.name != "Dockerfile":
         cmd.extend(["-f", str(dockerfile)])
-
-    if effective_platform:
-        cmd.extend(["--platform", effective_platform])
-    cmd.extend(["-t", tag])
+    if platform:
+        cmd.extend(["--platform", platform])
+    for tag in tags:
+        cmd.extend(["-t", tag])
     if no_cache:
         cmd.append("--no-cache")
 
-    # Passthrough: cache, push, and any other Docker-native flags
-    cmd.extend(docker_args)
-
-    # Local hud build expects a daemon-loaded image unless the caller explicitly
-    # selects another buildx output mode such as --push/--output.
-    if not _has_build_output_arg(docker_args):
+    passthrough = docker_args or []
+    cmd.extend(passthrough)
+    if not _has_build_output_arg(passthrough):
         cmd.append("--load")
 
-    for key, value in build_args.items():
+    for key, value in (labels or {}).items():
+        cmd.extend(["--label", f"{key}={value}"])
+    for key, value in (build_args or {}).items():
         cmd.extend(["--build-arg", f"{key}={value}"])
-
-    for secret in secrets:
+    for secret in secrets or []:
         cmd.extend(["--secret", secret])
 
     cmd.append(str(directory))
+    return cmd
 
-    hud_console.info(f"Running: {' '.join(cmd)}")
 
-    try:
-        env = os.environ.copy()
-        if secrets:
-            env["DOCKER_BUILDKIT"] = "1"
-        result = subprocess.run(cmd, check=False, env=env)
-        return result.returncode == 0
-    except Exception as e:
-        hud_console.error(f"Build error: {e}")
-        return False
+def _docker_env(secrets: list[str] | None) -> dict[str, str]:
+    env = os.environ.copy()
+    if secrets:
+        env["DOCKER_BUILDKIT"] = "1"
+    return env
+
+
+def _restore_lock(lock_path: Path, previous: str | None) -> None:
+    if previous is None:
+        lock_path.unlink(missing_ok=True)
+    else:
+        lock_path.write_text(previous, encoding="utf-8")
 
 
 def build_environment(
@@ -379,6 +218,7 @@ def build_environment(
 
     # Resolve directory
     env_dir = Path(directory).resolve()
+    env_source = EnvironmentSource.open(env_dir)
     if not env_dir.exists():
         hud_console.error(f"Directory not found: {directory}")
         raise typer.Exit(1)
@@ -388,15 +228,13 @@ def build_environment(
     require_docker_running()
 
     # Step 1: Check for hud.lock.yaml (previous build)
-    from hud.cli.utils.lockfile import LOCK_FILENAME, get_local_image, load_lock
-
-    lock_path = env_dir / LOCK_FILENAME
+    lock_path = env_source.lock_path
     base_name = None
 
     if lock_path.exists():
         try:
-            lock_data = load_lock(lock_path)
-            lock_image = get_local_image(lock_data)
+            lock_data = lock.read_lock(lock_path)
+            lock_image = lock.local_image(lock_data)
             if lock_image:
                 # Remove @sha256:... digest if present
                 if "@" in lock_image:
@@ -409,7 +247,7 @@ def build_environment(
 
     # Step 2: If no lock, check for Dockerfile
     if not base_name:
-        dockerfile_path = find_dockerfile(env_dir)
+        dockerfile_path = env_source.dockerfile
         if dockerfile_path is None:
             hud_console.error(f"Not a valid environment directory: {directory}")
             hud_console.info("Expected: Dockerfile.hud, Dockerfile, or hud.lock.yaml")
@@ -421,14 +259,8 @@ def build_environment(
         if dockerfile_path.name == "Dockerfile.hud":
             hud_console.info("Using Dockerfile.hud")
 
-    # If user provides --tag, respect it; otherwise use base name only (version added later)
     if tag:
-        # User explicitly provided a tag
-        image_tag = tag
-        base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
-    else:
-        # No tag provided - we'll add version later
-        image_tag = None
+        base_name = tag.split(":")[0] if ":" in tag else tag
 
     # Compute version before building (needed for image tags when --push is used)
     existing_version = get_existing_version(lock_path)
@@ -450,48 +282,10 @@ def build_environment(
         hud_console.info("Add --load alongside your --output flag, or use --push instead.")
         raise typer.Exit(1)
 
-    # Set up build tags
-    if pushing:
-        if not tag:
-            hud_console.error("--push requires --tag with a registry-qualified image name")
-            raise typer.Exit(1)
-        build_tag = tag
-        hud_console.progress_message("Building and pushing Docker image...")
-    else:
-        build_tag = f"hud-build-temp:{int(time.time())}"
-        hud_console.progress_message(f"Building Docker image: {build_tag}")
-
-    # Build the image (env vars are for runtime, not build time)
-    if not build_docker_image(
-        env_dir,
-        build_tag,
-        no_cache,
-        verbose,
-        build_args=build_args or None,
-        platform=platform,
-        secrets=secrets,
-        docker_args=docker_args,
-    ):
-        hud_console.error("Docker build failed")
+    if pushing and not tag:
+        hud_console.error("--push requires --tag with a registry-qualified image name")
         raise typer.Exit(1)
 
-    # Get image locally for analysis
-    if pushing:
-        hud_console.success(f"Pushed image: {build_tag}")
-        hud_console.progress_message("Pulling image for analysis...")
-        pull_result = subprocess.run(
-            ["docker", "pull", build_tag],  # noqa: S607
-            check=False,
-        )
-        if pull_result.returncode != 0:
-            hud_console.error(f"Failed to pull image: {build_tag}")
-            raise typer.Exit(1)
-        analysis_image = build_tag
-    else:
-        analysis_image = build_tag
-        hud_console.success(f"Built temporary image: {build_tag}")
-
-    # Load .env from env_dir (used for env-var requirements in the lock).
     try:
         from hud.cli.utils.docker import load_env_vars_for_dir
 
@@ -502,7 +296,7 @@ def build_environment(
     # Read the v6 environment manifest (capabilities + tasks) from the env source.
     hud_console.progress_message("Reading environment manifest...")
     try:
-        analysis = _read_env_manifest(env_dir)
+        analysis = env_source.manifest()
     except Exception as e:
         hud_console.error(f"Failed to read environment manifest: {e}")
         raise typer.Exit(1) from e
@@ -511,9 +305,12 @@ def build_environment(
     task_count = len(analysis.get("tasks") or [])
     hud_console.success(f"Environment manifest: {cap_count} capability(ies), {task_count} task(s)")
 
-    # Extract environment variables from Dockerfile
-    dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"
-    required_env, _optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
+    dockerfile_path = env_source.dockerfile
+    if dockerfile_path is None:
+        hud_console.error(f"Not a valid environment directory: {directory}")
+        hud_console.info("Expected: Dockerfile.hud, Dockerfile, or hud.lock.yaml")
+        raise typer.Exit(1)
+    required_env = env_source.dockerfile_env_vars()
 
     # Show env vars detected from .env file
     if env_from_file:
@@ -539,143 +336,113 @@ def build_environment(
     if secret_vars:
         display_secrets_warning(secret_vars)
 
-    # Determine base name for image references
-    if image_tag:
-        base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
-
     effective_platform = platform if platform is not None else "linux/amd64"
-
-    env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
-    lock_content = build_lock_data(
-        source_dir=env_dir,
-        analysis=analysis,
-        version=new_version,
-        image_name=base_name,
-        full_image_ref=None,
-        pushed_image_ref=build_tag if pushing else None,
-        env_vars=env_vars or None,
-        additional_required_env_vars=env_vars_from_file,
-        platform=effective_platform,
-        local_image_ref=build_tag if pushing else None,
-    )
-
-    # Write lock file
-    lock_path = env_dir / "hud.lock.yaml"
-    with open(lock_path, "w") as f:
-        f.write(dump_lock_data(lock_content))
-
-    hud_console.success("Created lock file: hud.lock.yaml")
-
-    # Calculate lock file hash
-    lock_content_str = dump_lock_data(lock_content, sort_keys=True)
-    lock_hash = hashlib.sha256(lock_content_str.encode()).hexdigest()
-    lock_size = len(lock_content_str)
-
     version_tag = f"{base_name}:{new_version}"
     latest_tag = f"{base_name}:latest"
-
     if pushing:
-        # Image already pushed — get digest from pulled image
-        image_id = get_docker_image_id(analysis_image)
-        if image_id:
-            if image_id.startswith("sha256:"):
-                lock_content["images"]["full"] = f"{analysis_image}@{image_id}"
-            else:
-                lock_content["images"]["full"] = f"{analysis_image}@sha256:{image_id}"
-            with open(lock_path, "w") as f:
-                f.write(dump_lock_data(lock_content))
-            hud_console.success("Updated lock file with image digest")
-        else:
-            hud_console.warning("Could not retrieve image digest")
-        subprocess.run(["docker", "rmi", "-f", analysis_image], capture_output=True)  # noqa: S607
+        assert tag is not None
+        primary_tag = tag
     else:
-        # Rebuild with label containing lock file hash
-        hud_console.progress_message("Rebuilding with lock file metadata...")
+        primary_tag = version_tag
 
-        # Reuse Docker flags for the label rebuild, but never --push.
-        label_docker_args = [a for a in (docker_args or []) if a != "--push"]
-        label_cmd = ["docker", "buildx", "build"]
+    lock_content = lock.build_lock_data(
+        env_source,
+        analysis=analysis,
+        version=new_version,
+        local_image_ref=primary_tag if pushing else version_tag,
+        pushed_image_ref=primary_tag if pushing else None,
+        env_vars=env_vars or None,
+        extra_required_env=env_from_file.keys(),
+        platform=effective_platform,
+    )
 
-        if dockerfile_path and dockerfile_path.name != "Dockerfile":
-            label_cmd.extend(["-f", str(dockerfile_path)])
+    previous_lock = lock_path.read_text(encoding="utf-8") if lock_path.exists() else None
+    lock.write_lock(lock_path, lock_content)
+    hud_console.success("Created lock file: hud.lock.yaml")
 
-        label_platform = platform if platform is not None else "linux/amd64"
-        if label_platform:
-            label_cmd.extend(["--platform", label_platform])
+    lock_hash, lock_size = lock.lock_fingerprint(lock_content)
+    tags = [primary_tag] if pushing else [version_tag, latest_tag]
+    if tag and tag not in tags:
+        tags.append(tag)
+    labels = (
+        {}
+        if pushing
+        else {
+            "org.hud.manifest.head": f"{lock_hash}:{lock_size}",
+            "org.hud.version": new_version,
+        }
+    )
 
-        label_cmd.extend(label_docker_args)
-        if not _has_build_output_arg(label_docker_args):
-            label_cmd.append("--load")
+    build_cmd = _docker_buildx_cmd(
+        env_dir,
+        dockerfile_path,
+        tags=tags,
+        labels=labels,
+        no_cache=no_cache,
+        platform=effective_platform,
+        build_args=build_args,
+        secrets=secrets,
+        docker_args=docker_args,
+    )
+    hud_console.progress_message(
+        f"{'Building and pushing' if pushing else 'Building'} Docker image: {primary_tag}"
+    )
+    hud_console.info(f"Running: {' '.join(build_cmd)}")
 
-        label_cmd.extend(
-            [
-                "--label",
-                f"org.hud.manifest.head={lock_hash}:{lock_size}",
-                "--label",
-                f"org.hud.version={new_version}",
-                "-t",
-                version_tag,
-                "-t",
-                latest_tag,
-            ]
+    if verbose:
+        result = subprocess.run(build_cmd, check=False, env=_docker_env(secrets))
+    else:
+        result = subprocess.run(
+            build_cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=_docker_env(secrets),
         )
 
-        if image_tag and image_tag not in [version_tag, latest_tag]:
-            label_cmd.extend(["-t", image_tag])
+    if result.returncode != 0:
+        _restore_lock(lock_path, previous_lock)
+        hud_console.error("Docker build failed")
+        if not verbose and result.stderr:
+            hud_console.info("Error output:")
+            hud_console.info(str(result.stderr))
+        if not verbose:
+            hud_console.info("")
+            hud_console.info("Run with --verbose to see full build output:")
+            hud_console.command_example("hud build --verbose")
+        raise typer.Exit(1)
 
-        for key, value in build_args.items():
-            label_cmd.extend(["--build-arg", f"{key}={value}"])
-
-        for secret in secrets or []:
-            label_cmd.extend(["--secret", secret])
-
-        label_cmd.append(str(env_dir))
-
-        env = os.environ.copy()
-        if secrets:
-            env["DOCKER_BUILDKIT"] = "1"
-        if verbose:
-            result = subprocess.run(label_cmd, check=False, env=env)
-        else:
-            result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
-
-        if result.returncode != 0:
-            hud_console.error("Failed to rebuild with label")
-            if not verbose and result.stderr:
-                hud_console.info("Error output:")
-                hud_console.info(str(result.stderr))
-            if not verbose:
-                hud_console.info("")
-                hud_console.info("Run with --verbose to see full build output:")
-                hud_console.command_example("hud build --verbose")
+    if pushing:
+        hud_console.success(f"Pushed image: {primary_tag}")
+        hud_console.progress_message("Pulling image for digest...")
+        pull_result = subprocess.run(["docker", "pull", primary_tag], check=False)  # noqa: S607
+        if pull_result.returncode != 0:
+            _restore_lock(lock_path, previous_lock)
+            hud_console.error(f"Failed to pull image: {primary_tag}")
             raise typer.Exit(1)
+        full_ref, image_id = _image_ref_with_digest(primary_tag)
+        subprocess.run(["docker", "rmi", "-f", primary_tag], capture_output=True)  # noqa: S607
+    else:
+        hud_console.success("Built image with lock file metadata")
+        full_ref, image_id = _image_ref_with_digest(version_tag)
 
-        hud_console.success("Built final image with lock file metadata")
-
-        image_id = get_docker_image_id(version_tag)
-        if image_id:
-            if image_id.startswith("sha256:"):
-                lock_content["images"]["full"] = f"{version_tag}@{image_id}"
-            else:
-                lock_content["images"]["full"] = f"{version_tag}@sha256:{image_id}"
-            with open(lock_path, "w") as f:
-                f.write(dump_lock_data(lock_content))
-            hud_console.success("Updated lock file with image digest")
-        else:
-            hud_console.warning("Could not retrieve image digest")
-
-        subprocess.run(["docker", "rmi", "-f", build_tag], capture_output=True)  # noqa: S607
+    if full_ref:
+        lock_content["images"]["full"] = full_ref
+        lock.write_lock(lock_path, lock_content)
+        hud_console.success("Updated lock file with image digest")
+    else:
+        hud_console.warning("Could not retrieve image digest")
 
     # Print summary
     hud_console.section_title("Build Complete")
 
     if pushing:
-        hud_console.status_item("Pushed image", build_tag, primary=True)
+        hud_console.status_item("Pushed image", primary_tag, primary=True)
     else:
         hud_console.status_item("Built image", version_tag, primary=True)
         additional_tags = [latest_tag]
-        if image_tag and image_tag not in [version_tag, latest_tag]:
-            additional_tags.append(image_tag)
+        if tag and tag not in [version_tag, latest_tag]:
+            additional_tags.append(tag)
         hud_console.status_item("Also tagged", ", ".join(additional_tags))
 
     hud_console.status_item("Version", new_version)
@@ -689,7 +456,7 @@ def build_environment(
     hud_console.section_title("Next Steps")
     if pushing:
         hud_console.info("Test the pushed image:")
-        hud_console.command_example(f"hud debug {build_tag}", "Test MCP compliance")
+        hud_console.command_example(f"hud debug {primary_tag}", "Test MCP compliance")
     else:
         hud_console.info("Test locally:")
         hud_console.command_example("hud dev", "Hot-reload development")

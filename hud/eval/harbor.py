@@ -72,13 +72,7 @@ def _check_capabilities(env: Environment) -> None:
 
 async def _materialize_prompt(env: Environment, task: str, args: dict[str, Any]) -> str:
     """Run a task's first yield locally to get its concrete prompt (deterministic)."""
-    from hud.environment.task import TaskRunner
-
-    runner = TaskRunner(env._tasks[task], args)
-    try:
-        payload = await runner.start()
-    finally:
-        await runner.cancel()
+    payload = await env.task_prompt(task, args)
     prompt = payload.get("prompt")
     return prompt if isinstance(prompt, str) else json.dumps(prompt, indent=2, default=str)
 

@@ -7,22 +7,25 @@ import warnings
 
 import pytest
 
-from hud.native.graders import BashGrader, Grade, Grader
-from hud.tools.types import EvaluationResult, SubScore
+from hud.agents.types import EvaluationResult, SubScore
+from hud.native.graders import BashGrader, Grade, GradeCombiner, Grader
 
 #: ``BashGrader`` shells out to ``/bin/bash``; skip its tests where it's absent (Windows).
 _HAS_BASH = os.path.exists("/bin/bash")
 
 
-class TestGrade:
+class TestGradeCombiner:
+    def test_grade_alias_points_to_grade_combiner(self) -> None:
+        assert Grade is GradeCombiner
+
     def test_from_subscores_returns_evaluation_result(self) -> None:
-        result = Grade.from_subscores([SubScore(name="alpha", value=1.0, weight=1.0)])
+        result = GradeCombiner.from_subscores([SubScore(name="alpha", value=1.0, weight=1.0)])
         assert isinstance(result, EvaluationResult)
         assert result.reward == 1.0
         assert result.done is True
 
     def test_from_subscores_normalizes_positive_weights(self) -> None:
-        result = Grade.from_subscores(
+        result = GradeCombiner.from_subscores(
             [
                 SubScore(name="alpha", value=1.0, weight=2.0),
                 SubScore(name="beta", value=0.0, weight=1.0),
@@ -35,7 +38,7 @@ class TestGrade:
         assert by_name["beta"].weight == pytest.approx(1.0 / 3.0)
 
     def test_from_subscores_preserves_negative_penalties(self) -> None:
-        result = Grade.from_subscores(
+        result = GradeCombiner.from_subscores(
             [
                 SubScore(name="correct", value=1.0, weight=1.0),
                 SubScore(name="penalty", value=1.0, weight=-0.2),
@@ -48,7 +51,7 @@ class TestGrade:
         assert by_name["penalty"].weight == pytest.approx(-0.2)
 
     def test_from_subscores_duplicate_names_are_deduped(self) -> None:
-        result = Grade.from_subscores(
+        result = GradeCombiner.from_subscores(
             [
                 SubScore(name="same", value=1.0, weight=0.5),
                 SubScore(name="same", value=0.0, weight=0.5),
@@ -60,7 +63,7 @@ class TestGrade:
     def test_from_subscores_duplicate_names_avoid_existing_suffix_collisions(self) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            result = Grade.from_subscores(
+            result = GradeCombiner.from_subscores(
                 [
                     SubScore(name="x-1", value=1.0, weight=0.3),
                     SubScore(name="x", value=1.0, weight=0.4),
@@ -77,7 +80,7 @@ class TestGrade:
 
     def test_from_subscores_propagates_metadata(self) -> None:
         metadata = {"stdout": "ok"}
-        result = Grade.from_subscores(
+        result = GradeCombiner.from_subscores(
             [SubScore(name="grader", value=1.0, weight=1.0, metadata=metadata)]
         )
         assert result.info["grader"] == metadata
@@ -87,7 +90,7 @@ class TestGrade:
     def test_from_subscores_preserves_negative_reward_without_validator_warning(self) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            result = Grade.from_subscores(
+            result = GradeCombiner.from_subscores(
                 [
                     SubScore(name="correct", value=0.0, weight=1.0),
                     SubScore(name="penalty", value=1.0, weight=-0.2),
@@ -199,13 +202,13 @@ class TestBashGrader:
     async def test_grade_and_from_subscores_compose(self) -> None:
         passing = await BashGrader.grade(weight=0.5, command="true")
         failing = await BashGrader.grade(weight=0.5, command="false")
-        result = Grade.from_subscores([passing, failing])
+        result = GradeCombiner.from_subscores([passing, failing])
         assert result.reward == pytest.approx(0.5)
         assert result.info["BashGrader-1"]["exit_code"] == 0
         assert result.info["BashGrader-2"]["exit_code"] != 0
 
     async def test_grade_and_gather_compose(self) -> None:
-        result = await Grade.gather(
+        result = await GradeCombiner.gather(
             BashGrader.grade(weight=0.5, command="true"),
             BashGrader.grade(weight=0.5, command="false"),
         )

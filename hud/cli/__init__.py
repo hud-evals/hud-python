@@ -41,7 +41,7 @@ from .link import link_command  # noqa: E402
 from .login import login_command  # noqa: E402
 from .models import models_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
-from .task import grade_command, list_command, start_command, task_app  # noqa: E402
+from .task import task_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -56,11 +56,6 @@ app.command(name="init")(init_command)
 app.command(name="convert")(convert_command)
 app.command(name="cancel")(cancel_command)
 app.command(name="models")(models_command)
-
-# Top-level aliases for the `task` subgroup (cleaner: `hud task-start` / `hud task-grade`).
-app.command(name="task-start")(start_command)
-app.command(name="task-grade")(grade_command)
-app.command(name="task-list")(list_command)
 
 
 @app.command(name="set")

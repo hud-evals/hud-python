@@ -157,10 +157,10 @@ class TestF1Score:
 
 class TestGradeGather:
     async def test_gather_sync_subscores(self) -> None:
-        from hud.native.graders import Grade
-        from hud.tools.types import SubScore
+        from hud.agents.types import SubScore
+        from hud.native.graders import GradeCombiner
 
-        result = await Grade.gather(
+        result = await GradeCombiner.gather(
             SubScore(name="a", value=1.0, weight=0.5),
             SubScore(name="b", value=0.0, weight=0.5),
         )
@@ -169,8 +169,8 @@ class TestGradeGather:
     async def test_gather_with_awaitables(self) -> None:
         import asyncio
 
-        from hud.native.graders import Grade
-        from hud.tools.types import SubScore
+        from hud.agents.types import SubScore
+        from hud.native.graders import GradeCombiner
 
         order: list[str] = []
 
@@ -186,21 +186,21 @@ class TestGradeGather:
             order.append("b_end")
             return SubScore(name="b", value=0.0, weight=0.5)
 
-        result = await Grade.gather(slow_check_a(), slow_check_b())
+        result = await GradeCombiner.gather(slow_check_a(), slow_check_b())
         assert result.reward == pytest.approx(0.5)
         assert order.index("b_start") < order.index("a_end")
 
     async def test_gather_mixed(self) -> None:
         import asyncio
 
-        from hud.native.graders import Grade
-        from hud.tools.types import SubScore
+        from hud.agents.types import SubScore
+        from hud.native.graders import GradeCombiner
 
         async def async_score() -> SubScore:
             await asyncio.sleep(0.01)
             return SubScore(name="async", value=1.0, weight=0.5)
 
-        result = await Grade.gather(
+        result = await GradeCombiner.gather(
             SubScore(name="sync", value=0.0, weight=0.5),
             async_score(),
         )

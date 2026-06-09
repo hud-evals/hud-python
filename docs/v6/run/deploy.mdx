@@ -9,7 +9,7 @@ icon: "rocket"
 ## Prerequisites
 
 - An environment with tasks (see [Environments](/v6/reference/environment) and [Tasks](/v6/reference/tasks)).
-- A `HUD_API_KEY` for publishing and remote runs.
+- A `HUD_API_KEY` for publishing.
 - Docker, for the local build path.
 
 ## The recommended path: `hud deploy`
@@ -19,12 +19,12 @@ icon: "rocket"
 ```bash
 hud deploy
 hud sync tasks my-taskset
-hud eval my-taskset --remote
+hud eval my-taskset --full
 ```
 
 - `hud deploy` builds the image and registers the environment.
 - `hud sync tasks my-taskset` publishes your tasks as a named taskset.
-- `hud eval my-taskset --remote` runs the taskset on hosted infra; inspect every rollout from the [platform UI](https://hud.ai).
+- `hud eval my-taskset --full` runs the taskset with the selected local agent.
 
 Pass environment variables with `--env KEY=VALUE` (repeatable) or `--env-file .env`.
 
@@ -44,15 +44,15 @@ Once built, the image is a self-contained box that serves the control channel. R
 
 ```bash
 docker run -d --name run1 my-env
-docker exec run1 hud task-start fix_bug
-docker exec run1 hud task-grade fix_bug --answer "…"
+docker exec run1 hud task start fix_bug
+docker exec run1 hud task grade fix_bug --answer "…"
 docker rm -f run1
 ```
 
-`hud task-start` returns the task's prompt; `hud task-grade` returns the reward. Inside the image they attach to the env serving locally — no source needed.
+`hud task start` returns the task's prompt; `hud task grade` returns the reward. Inside the image they attach to the env serving locally — no source needed.
 
 <Note>
-`hud task-start` / `hud task-grade` are the top-level aliases. The same commands exist as the `hud task start` / `hud task grade` subgroup, plus `hud task list` to see what tasks an image or source exposes.
+Use `hud task list` to see what tasks an image or source exposes.
 </Note>
 
 ## Driving a packaged box from code
@@ -98,8 +98,6 @@ job = await taskset.run(
 )
 rewards = [run.reward for run in job.runs]
 ```
-
-On the platform, `hud eval my-taskset --remote --full` runs the entire taskset on hosted sandboxes and reports each trace under one job.
 
 ## Next steps
 

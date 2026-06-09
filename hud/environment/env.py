@@ -23,6 +23,51 @@ LOGGER = logging.getLogger("hud.environment.env")
 P = ParamSpec("P")
 
 
+class _NoTaskInProgress(RuntimeError):
+    pass
+
+
+class _TaskSession:
+    """Per-control-connection task state.
+
+    A connection owns its active runner while connected. If the connection drops
+    after ``tasks.start`` but before ``tasks.grade``, the runner is parked on the
+    environment so a later ``tasks.grade`` can resume it. This keeps the
+    disconnect/resume rule in one place instead of repeating local-vs-parked
+    branches across every protocol method.
+    """
+
+    def __init__(self, env: Environment) -> None:
+        self._env = env
+        self._runner: TaskRunner | None = None
+
+    async def start(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        await self.cancel()
+        self._runner = TaskRunner(self._env._task_factory(task_id), args)
+        return await self._runner.start()
+
+    async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
+        runner = self._runner or self._env._claim_parked_runner()
+        if runner is None:
+            raise _NoTaskInProgress("no task in progress")
+        try:
+            return await runner.grade(payload)
+        finally:
+            if runner is self._runner:
+                self._runner = None
+
+    async def cancel(self) -> None:
+        if self._runner is not None:
+            await self._runner.cancel()
+            self._runner = None
+        await self._env._cancel_parked_runner()
+
+    async def detach(self) -> None:
+        if self._runner is not None:
+            await self._env._park_runner(self._runner)
+            self._runner = None
+
+
 class Environment(LegacyEnvMixin):
     """Capabilities + tasks dispatched over the HUD wire protocol.
 
@@ -54,7 +99,7 @@ class Environment(LegacyEnvMixin):
         self.capabilities: list[Capability] = list(capabilities or [])
         self._tasks: dict[str, _TaskFactory[Any]] = {}
         # A disconnected task start can be resumed by a later grade request.
-        self._active_runner: TaskRunner | None = None
+        self._parked_runner: TaskRunner | None = None
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
         # stands up). Run once by the substrate (LocalSandbox) around serving.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
@@ -80,7 +125,6 @@ class Environment(LegacyEnvMixin):
         types (surfaced in the manifest as JSON schemas). The decorated callable
         returns a concrete :class:`~hud.eval.Task` when called with task args.
         """
-        from .task import scenario_to_task_fn
 
         def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
             if not inspect.isasyncgenfunction(func):
@@ -93,15 +137,11 @@ class Environment(LegacyEnvMixin):
                 raise ValueError(
                     f"task {task_id!r} already registered on env {self.name!r}",
                 )
-            normalized = cast(
-                "Callable[P, AsyncGenerator[dict[str, Any], dict[str, Any]]]",
-                scenario_to_task_fn(func),
-            )
             task = _TaskFactory(
                 self,
                 task_id,
                 description,
-                normalized,
+                func,
                 input=input,
                 returns=returns,
             )
@@ -112,6 +152,18 @@ class Environment(LegacyEnvMixin):
 
     def add_capability(self, cap: Capability) -> None:
         self.capabilities.append(cap)
+
+    def task_entries(self) -> list[dict[str, Any]]:
+        """Return manifest entries for registered tasks."""
+        return [task.manifest_entry() for task in self._tasks.values()]
+
+    async def task_prompt(self, task_id: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Materialize a task's first yield without parking a resumable run."""
+        runner = TaskRunner(self._task_factory(task_id), args or {})
+        try:
+            return await runner.start()
+        finally:
+            await runner.cancel()
 
     def initialize(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register an initializer, run once before the control channel serves.
@@ -141,7 +193,7 @@ class Environment(LegacyEnvMixin):
             "name": self.name,
             "version": self.version,
             "capabilities": [c.to_manifest() for c in self.capabilities],
-            "tasks": [t.manifest_entry() for t in self._tasks.values()],
+            "tasks": self.task_entries(),
         }
 
     @classmethod
@@ -198,13 +250,33 @@ class Environment(LegacyEnvMixin):
 
     # ─── per-connection protocol dispatch (transport-agnostic) ───────────
 
+    def _task_factory(self, task_id: str) -> _TaskFactory[Any]:
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise KeyError(f"unknown task: {task_id!r}")
+        return task
+
+    async def _park_runner(self, runner: TaskRunner) -> None:
+        await self._cancel_parked_runner()
+        self._parked_runner = runner
+
+    def _claim_parked_runner(self) -> TaskRunner | None:
+        runner = self._parked_runner
+        self._parked_runner = None
+        return runner
+
+    async def _cancel_parked_runner(self) -> None:
+        if self._parked_runner is not None:
+            await self._parked_runner.cancel()
+            self._parked_runner = None
+
     async def _handle_session(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
         session_id = "sess-" + secrets.token_hex(4)
-        active_runner: TaskRunner | None = None
+        task_session = _TaskSession(self)
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -239,7 +311,7 @@ class Environment(LegacyEnvMixin):
                         await reply_to(
                             msg_id,
                             {
-                                "tasks": [t.manifest_entry() for t in self._tasks.values()],
+                                "tasks": self.task_entries(),
                             },
                         )
 
@@ -248,51 +320,31 @@ class Environment(LegacyEnvMixin):
                         if not isinstance(task_id, str):
                             await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
                             continue
-                        task = self._tasks.get(task_id)
-                        if task is None:
-                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
-                            continue
                         args = params.get("args") or {}
                         if not isinstance(args, dict):
                             await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
-                        if active_runner is not None:
-                            await active_runner.cancel()
-                        if self._active_runner is not None:
-                            await self._active_runner.cancel()
-                            self._active_runner = None
-                        active_runner = TaskRunner(task, args)
-                        prompt = await active_runner.start()
+                        try:
+                            prompt = await task_session.start(task_id, args)
+                        except KeyError:
+                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
+                            continue
                         await reply_to(msg_id, prompt)
 
                     elif method == "tasks.grade":
-                        runner = active_runner or self._active_runner
-                        if runner is None:
+                        try:
+                            evaluation = await task_session.grade(params)
+                        except _NoTaskInProgress:
                             await error_to(msg_id, -32600, "no task in progress")
                             continue
-                        evaluation = await runner.grade(params)
-                        if runner is active_runner:
-                            active_runner = None
-                        else:
-                            self._active_runner = None
                         await reply_to(msg_id, evaluation)
 
                     elif method == "tasks.cancel":
-                        if active_runner is not None:
-                            await active_runner.cancel()
-                            active_runner = None
-                        if self._active_runner is not None:
-                            await self._active_runner.cancel()
-                            self._active_runner = None
+                        await task_session.cancel()
                         await reply_to(msg_id, {"cancelled": True})
 
                     elif method == "bye":
-                        if active_runner is not None:
-                            await active_runner.cancel()
-                            active_runner = None
-                        if self._active_runner is not None:
-                            await self._active_runner.cancel()
-                            self._active_runner = None
+                        await task_session.cancel()
                         await reply_to(msg_id, {"goodbye": True})
                         return
 
@@ -304,8 +356,7 @@ class Environment(LegacyEnvMixin):
                     await error_to(msg_id, -32000, str(exc))
 
         finally:
-            if active_runner is not None:
-                self._active_runner = active_runner
+            await task_session.detach()
             with contextlib.suppress(Exception):
                 writer.close()
                 await writer.wait_closed()

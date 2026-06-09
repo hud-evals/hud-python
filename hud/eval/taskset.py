@@ -1,8 +1,8 @@
 """Taskset: a named, ordered collection of concrete tasks.
 
 Launches each task, lets ``agent(run)`` fill ``run.trace``, grades it, and
-gathers the :class:`Run`s — with optional GRPO grouping + a concurrency cap. HUD
-job/trace reporting lives in :mod:`hud.eval.job`::
+returns a :class:`Job` receipt containing the resulting :class:`Run`s. HUD
+job/trace reporting lives in :mod:`hud._platform`::
 
     job = await Taskset.from_tasks("bugs", [fix_bug(difficulty=d) for d in range(5)]).run(agent)
 """
@@ -10,6 +10,7 @@ job/trace reporting lives in :mod:`hud.eval.job`::
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
 import uuid
@@ -18,6 +19,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hud.client import Run
+
+from .job import Job
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -39,15 +42,18 @@ async def _rollout(
     """Drive one task to a graded :class:`Run` (the rollout atom).
 
     Launch the env, let ``agent(run)`` fill ``run.trace``, and grade it on exit
-    (``run.reward``). The rollout is wrapped in :func:`hud.eval.job.trace`,
-    which binds the per-rollout ``trace_id`` into the trace context (so ``@instrument``
-    spans upload to it) and reports the trace to HUD. A launch/connect failure is
-    isolated into a failed ``Run`` so one bad rollout never collapses a batch.
+    (``run.reward``). The per-rollout ``trace_id`` is bound into the trace
+    context (so ``@instrument`` spans attribute to it — always, even with
+    telemetry off, for local training) and the trace is reported to HUD. A
+    launch/connect failure is isolated into a failed ``Run`` so one bad rollout
+    never collapses a batch.
     """
-    from hud.eval.job import trace as report_trace
+    from hud._platform import trace_enter, trace_exit
+    from hud.telemetry.context import set_trace_context
 
     trace_id = uuid.uuid4().hex
-    async with report_trace(trace_id, job_id=job_id, group_id=group_id) as recorded:
+    with set_trace_context(trace_id):
+        await trace_enter(trace_id, job_id=job_id, group_id=group_id)
         try:
             async with task as run:
                 await agent(run)
@@ -59,7 +65,7 @@ async def _rollout(
             run = Run.failed(str(exc), trace_id=trace_id)
         run.job_id = job_id
         run.group_id = group_id
-        recorded.append(run)
+        await trace_exit(run)
     return run
 
 
@@ -71,25 +77,6 @@ def _job_name(tasks: list[Task], group: int) -> str:
 
 
 @dataclass(slots=True)
-class Job:
-    """One execution of a taskset."""
-
-    id: str
-    name: str
-    runs: list[Run]
-    group: int = 1
-
-    def __len__(self) -> int:
-        return len(self.runs)
-
-    def __iter__(self) -> Iterator[Run]:
-        return iter(self.runs)
-
-    def __getitem__(self, index: int) -> Run:
-        return self.runs[index]
-
-
-@dataclass(slots=True)
 class SyncPlan:
     """Diff between a local taskset and a remote taskset."""
 
@@ -98,9 +85,6 @@ class SyncPlan:
     unchanged: list[Task] = field(default_factory=list)
     remote_only: list[Task] = field(default_factory=list)
     taskset_name: str = ""
-    api_url: str | None = None
-    headers: dict[str, str] = field(default_factory=dict)
-    column_definitions: dict[str, dict[str, Any]] | None = None
 
     @property
     def to_apply(self) -> list[Task]:
@@ -113,37 +97,6 @@ class SyncPlan:
         lines.append(f"  Unchanged: {len(self.unchanged)}")
         lines.append(f"  Remote-only: {len(self.remote_only)}")
         return "\n".join(lines)
-
-    def apply(
-        self,
-        *,
-        taskset_name: str | None = None,
-        api_url: str | None = None,
-        headers: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        import httpx
-
-        name = taskset_name or self.taskset_name
-        target_url = api_url or self.api_url
-        target_headers = headers or self.headers
-        if not name:
-            raise ValueError("taskset name is required to apply a sync plan")
-        if not target_url:
-            raise ValueError("api_url is required to apply a sync plan")
-        payload: dict[str, Any] = {
-            "name": name,
-            "tasks": [_task_upload_payload(task) for task in self.to_apply],
-        }
-        if self.column_definitions:
-            payload["columns"] = self.column_definitions
-        response = httpx.post(
-            f"{target_url}/tasks/upload",
-            json=payload,
-            headers=target_headers,
-            timeout=60.0,
-        )
-        response.raise_for_status()
-        return response.json()
 
 
 class Taskset:
@@ -158,8 +111,7 @@ class Taskset:
     ) -> None:
         self.name = name or "taskset"
         self.origin = origin
-        self.tasks: list[Task] = list(tasks)
-        self._by_slug = self._index_by_slug(self.tasks)
+        self.tasks: dict[str, Task] = self._index_by_slug(list(tasks))
 
     @classmethod
     def from_tasks(cls, name: str, tasks: Iterable[Task]) -> Taskset:
@@ -176,12 +128,17 @@ class Taskset:
 
     @classmethod
     def from_module(cls, source: str | Path) -> Taskset:
+        return cls._from_module(source, preloaded={})
+
+    @classmethod
+    def _from_module(cls, source: str | Path, *, preloaded: dict[Path, Any]) -> Taskset:
         from .sandbox import load_module
 
         path = Path(source).resolve()
         if path.is_file() and path.suffix == ".py":
+            module = preloaded.get(path) or load_module(path)
             return cls(
-                cls._scan_tasks(load_module(path)),
+                cls._scan_tasks(module),
                 name=path.stem,
                 origin=f"module:{path}",
             )
@@ -191,7 +148,8 @@ class Taskset:
                 if py_file.stem in {"conftest", "setup", "__init__", "__main__"}:
                     continue
                 try:
-                    found.extend(cls._scan_tasks(load_module(py_file)))
+                    module = preloaded.get(py_file.resolve()) or load_module(py_file)
+                    found.extend(cls._scan_tasks(module))
                 except ImportError:
                     logger.debug("skipping %s during taskset collection", py_file.name)
             return cls(found, name=path.name, origin=f"module:{path}")
@@ -217,41 +175,34 @@ class Taskset:
 
     @classmethod
     def from_api(cls, name: str) -> Taskset:
-        from hud.settings import settings
+        """Load a platform taskset by name or id (uses ``HUD_API_KEY`` settings)."""
+        from hud._platform import PlatformClient
 
-        if not settings.api_key:
-            raise ValueError("HUD_API_KEY is required to load tasksets from the API")
-        headers = {"Authorization": f"Bearer {settings.api_key}"}
-        taskset_id, display, _created = _resolve_taskset_id(
-            name,
-            settings.hud_api_url,
-            headers,
-            create=False,
-        )
-        if not taskset_id:
-            raise ValueError(f"taskset not found: {name}")
-        remote = _fetch_remote_tasks(taskset_id, settings.hud_api_url, headers)
+        taskset_id, display, remote = PlatformClient.from_settings().fetch_taskset_records(name)
         return cls(
             (_remote_task_to_task(t) for t in remote),
             name=display,
             origin=f"api:{taskset_id}",
         )
 
-    @classmethod
-    def from_remote_tasks(cls, name: str, tasks: Iterable[dict[str, Any]]) -> Taskset:
-        """Build a taskset from platform task records."""
-        return cls(
-            (_remote_task_to_task(task) for task in tasks),
-            name=name,
-            origin=f"api:{name}",
-        )
+    def to_file(self, path: str | Path) -> Path:
+        """Write this taskset to JSON, JSONL, or CSV."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        suffix = target.suffix.lower()
+        data = [task.to_dict() for task in self]
 
-    @classmethod
-    def from_source(cls, source: str | Path) -> Taskset:
-        path = Path(source)
-        if path.exists():
-            return cls.from_file(path)
-        return cls.from_api(str(source))
+        if suffix == ".json":
+            target.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
+            return target
+        if suffix == ".jsonl":
+            lines = (json.dumps(entry, default=str) for entry in data)
+            target.write_text("\n".join(lines) + ("\n" if data else ""), encoding="utf-8")
+            return target
+        if suffix == ".csv":
+            self._write_csv(target, data)
+            return target
+        raise ValueError(f"unsupported taskset export format: {suffix}; use .json, .jsonl, or .csv")
 
     @staticmethod
     def _scan_tasks(module: Any) -> list[Task]:
@@ -265,7 +216,7 @@ class Taskset:
             if isinstance(value, Task):
                 tasks.append(value)
             elif isinstance(value, Taskset):
-                tasks.extend(value.tasks)
+                tasks.extend(value)
             elif isinstance(value, (list, tuple)):
                 tasks.extend(item for item in value if isinstance(item, Task))
         return tasks
@@ -300,6 +251,58 @@ class Taskset:
         return tasks
 
     @staticmethod
+    def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
+        arg_keys = sorted(
+            {
+                key
+                for entry in entries
+                for key in (entry.get("args") or {})
+                if isinstance(entry.get("args"), dict)
+            }
+        )
+        col_keys = sorted(
+            {
+                key
+                for entry in entries
+                for key in (entry.get("columns") or {})
+                if isinstance(entry.get("columns"), dict)
+            }
+        )
+        fieldnames = [
+            "slug",
+            "task",
+            "env",
+            *[f"arg:{key}" for key in arg_keys],
+            *[f"col:{key}" for key in col_keys],
+        ]
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for entry in entries:
+                env_value = entry.get("env")
+                args_value = entry.get("args")
+                cols_value = entry.get("columns")
+                env_ref: dict[str, Any] = env_value if isinstance(env_value, dict) else {}
+                args: dict[str, Any] = args_value if isinstance(args_value, dict) else {}
+                cols: dict[str, Any] = cols_value if isinstance(cols_value, dict) else {}
+                row: dict[str, Any] = {
+                    "slug": entry.get("slug") or "",
+                    "task": entry.get("task") or "",
+                    "env": env_ref.get("name") or env_ref.get("url") or "",
+                }
+                for key in arg_keys:
+                    value = args.get(key)
+                    row[f"arg:{key}"] = (
+                        json.dumps(value, default=str) if isinstance(value, (dict, list)) else value
+                    )
+                for key in col_keys:
+                    value = cols.get(key)
+                    row[f"col:{key}"] = (
+                        json.dumps(value, default=str) if isinstance(value, (dict, list)) else value
+                    )
+                writer.writerow(row)
+
+    @staticmethod
     def _index_by_slug(tasks: list[Task]) -> dict[str, Task]:
         by_slug: dict[str, Task] = {}
         duplicates: set[str] = set()
@@ -316,15 +319,18 @@ class Taskset:
         return len(self.tasks)
 
     def __iter__(self) -> Iterator[Task]:
-        return iter(self.tasks)
+        return iter(self.tasks.values())
 
     def __getitem__(self, slug: str) -> Task:
-        return self._by_slug[slug]
+        return self.tasks[slug]
+
+    def items(self) -> Iterator[tuple[str, Task]]:
+        return iter(self.tasks.items())
 
     def filter(self, slugs: Iterable[str]) -> Taskset:
         selected = set(slugs)
         return Taskset(
-            (task for task in self.tasks if _task_slug(task) in selected),
+            (task for slug, task in self.tasks.items() if slug in selected),
             name=self.name,
             origin=self.origin,
         )
@@ -332,25 +338,27 @@ class Taskset:
     def exclude(self, slugs: Iterable[str]) -> Taskset:
         excluded = set(slugs)
         return Taskset(
-            (task for task in self.tasks if _task_slug(task) not in excluded),
+            (task for slug, task in self.tasks.items() if slug not in excluded),
             name=self.name,
             origin=self.origin,
         )
 
-    def diff(
-        self,
-        remote: Taskset,
-        *,
-        api_url: str | None = None,
-        headers: dict[str, str] | None = None,
-    ) -> SyncPlan:
-        remote_by_slug = {_task_slug(task): task for task in remote.tasks}
+    def environment_names(self) -> set[str]:
+        """Return HUD environment names referenced by tasks in this taskset."""
+        names: set[str] = set()
+        for task in self:
+            env_name = task.to_dict()["env"].get("name")
+            if isinstance(env_name, str) and env_name:
+                names.add(env_name)
+        return names
+
+    def diff(self, remote: Taskset) -> SyncPlan:
+        remote_by_slug = dict(remote.tasks)
         to_create: list[Task] = []
         to_update: list[Task] = []
         unchanged: list[Task] = []
 
-        for task in self.tasks:
-            slug = _task_slug(task)
+        for slug, task in self.tasks.items():
             existing = remote_by_slug.pop(slug, None)
             if existing is None:
                 to_create.append(task)
@@ -366,23 +374,7 @@ class Taskset:
             unchanged=unchanged,
             remote_only=list(remote_by_slug.values()),
             taskset_name=remote.name or self.name,
-            api_url=api_url,
-            headers=headers or {},
-            column_definitions=_build_column_definitions(self.tasks),
         )
-
-    def sync_to(
-        self,
-        remote: Taskset,
-        *,
-        dry_run: bool = False,
-        api_url: str | None = None,
-        headers: dict[str, str] | None = None,
-    ) -> SyncPlan:
-        plan = self.diff(remote, api_url=api_url, headers=headers)
-        if not dry_run:
-            plan.apply()
-        return plan
 
     async def run(
         self,
@@ -393,24 +385,25 @@ class Taskset:
     ) -> Job:
         """Run every task x ``group`` with an optional concurrency cap.
 
-        One shared (stateless) ``agent`` drives every rollout; each rollout gets a
-        fresh env (via the task) and its own :class:`Run`. Registers one HUD job
-        for the batch and reports each rollout's trace under it. Returns a Job whose
-        runs preserve expansion order (task-major, then group).
+        One shared (stateless) ``agent`` drives every run; each run gets a fresh
+        env via the task. Registers one HUD job as the batch/platform receipt and
+        reports each run's trace under it. Returned ``job.runs`` preserves
+        expansion order (task-major, then group).
         """
         if group < 1:
             raise ValueError("group must be >= 1")
-        from hud.eval.job import job_enter
+        from hud._platform import job_enter
 
         # Fresh Task per rollout (the Task CM holds per-enter state); the ``group``
         # repeats of one task share a group_id (the GRPO group).
         expanded: list[tuple[Task, str]] = []
-        for task in self.tasks:
+        task_list = list(self)
+        for task in task_list:
             group_id = uuid.uuid4().hex
             expanded.extend((replace(task), group_id) for _ in range(group))
 
         job_id = uuid.uuid4().hex
-        name = _job_name(self.tasks, group)
+        name = _job_name(task_list, group)
         await job_enter(job_id, name=name, group=group)
 
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
@@ -424,79 +417,12 @@ class Taskset:
         logger.info(
             "running %d rollouts (%d tasks x %d group)%s",
             len(expanded),
-            len(self.tasks),
+            len(task_list),
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
         runs = list(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
         return Job(id=job_id, name=name, runs=runs, group=group)
-
-
-def _resolve_taskset_id(
-    name_or_id: str,
-    api_url: str,
-    headers: dict[str, str],
-    *,
-    create: bool,
-) -> tuple[str, str, bool]:
-    import uuid as _uuid
-    from urllib import parse
-
-    import httpx
-
-    try:
-        _uuid.UUID(name_or_id)
-        return name_or_id, name_or_id, False
-    except ValueError:
-        pass
-
-    if create:
-        response = httpx.post(
-            f"{api_url}/tasks/resolve-evalset",
-            json={"name": name_or_id},
-            headers=headers,
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return (
-            str(data.get("evalset_id", "")),
-            str(data.get("name", name_or_id)),
-            bool(data.get("created", False)),
-        )
-
-    response = httpx.get(
-        f"{api_url}/tasks/evalset/{parse.quote(name_or_id, safe='')}",
-        headers=headers,
-        timeout=30.0,
-    )
-    if response.status_code == 404:
-        return "", name_or_id, False
-    response.raise_for_status()
-    data = response.json()
-    return str(data.get("evalset_id", "")), str(data.get("evalset_name", name_or_id)), False
-
-
-def _fetch_remote_tasks(
-    taskset_id: str,
-    api_url: str,
-    headers: dict[str, str],
-) -> list[dict[str, Any]]:
-    import httpx
-
-    response = httpx.get(
-        f"{api_url}/tasks/evalsets/{taskset_id}/tasks-by-id",
-        headers=headers,
-        timeout=30.0,
-    )
-    if response.status_code == 404:
-        return []
-    response.raise_for_status()
-    data = response.json()
-    tasks_payload = data.get("tasks") or {}
-    if not isinstance(tasks_payload, dict):
-        return []
-    return [entry for entry in tasks_payload.values() if isinstance(entry, dict)]
 
 
 def _remote_task_to_task(remote: dict[str, Any]) -> Task:
@@ -519,24 +445,8 @@ def _remote_task_to_task(remote: dict[str, Any]) -> Task:
     )
 
 
-def _short_task_id(task_id: str) -> str:
-    return task_id.rsplit(":", 1)[-1] if ":" in task_id else task_id
-
-
 def _task_slug(task: Task) -> str:
     return task.slug or task.default_slug()
-
-
-def _task_env_ref(task: Task) -> dict[str, Any]:
-    return task.to_dict()["env"]
-
-
-def _platform_task_id(task: Task) -> str:
-    env_ref = _task_env_ref(task)
-    env_name = env_ref.get("name")
-    if env_name and ":" not in task.id:
-        return f"{env_name}:{task.id}"
-    return task.id
 
 
 def _task_signature(task: Task) -> str:
@@ -555,59 +465,8 @@ def _task_signature(task: Task) -> str:
     )
 
 
-def _task_upload_payload(task: Task) -> dict[str, Any]:
-    env_ref = _task_env_ref(task)
-    payload: dict[str, Any] = {
-        "slug": _task_slug(task),
-        "env": {"name": env_ref["name"]} if env_ref.get("name") else {},
-        "scenario": _platform_task_id(task),
-        "args": task.args,
-    }
-    if task.validation is not None:
-        payload["validation"] = task.validation
-    if task.agent_config:
-        payload["agent_config"] = task.agent_config
-    if task.columns:
-        payload["column_values"] = task.columns
-    return payload
-
-
-def _infer_column_type(values: list[Any]) -> str:
-    non_none = [v for v in values if v is not None]
-    if not non_none:
-        return "text"
-    if any(isinstance(v, list) for v in non_none):
-        return "multi-select"
-    if all(isinstance(v, (int, float)) for v in non_none):
-        return "number"
-    return "text"
-
-
-def _build_column_definitions(tasks: list[Task]) -> dict[str, dict[str, Any]] | None:
-    values_by_col: dict[str, list[Any]] = {}
-    for task in tasks:
-        if not task.columns:
-            continue
-        for col_name, col_val in task.columns.items():
-            values_by_col.setdefault(col_name, []).append(col_val)
-
-    if not values_by_col:
-        return None
-
-    definitions: dict[str, dict[str, Any]] = {}
-    for col_name, vals in values_by_col.items():
-        col_type = _infer_column_type(vals)
-        col_def: dict[str, Any] = {"type": col_type}
-        if col_type == "multi-select":
-            all_opts: set[str] = set()
-            for v in vals:
-                if isinstance(v, list):
-                    all_opts.update(str(item) for item in v)
-                elif v is not None:
-                    all_opts.add(str(v))
-            col_def["options"] = sorted(all_opts)
-        definitions[col_name] = col_def
-    return definitions
+def _short_task_id(task_id: str) -> str:
+    return task_id.rsplit(":", 1)[-1] if ":" in task_id else task_id
 
 
 __all__ = ["Job", "SyncPlan", "Taskset"]

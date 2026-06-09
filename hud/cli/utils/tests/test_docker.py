@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 from hud.cli.utils import docker
 
@@ -85,3 +86,9 @@ def test_load_env_vars_for_dir(tmp_path: Path) -> None:
 
 def test_load_env_vars_missing_is_empty(tmp_path: Path) -> None:
     assert docker.load_env_vars_for_dir(tmp_path) == {}
+
+
+def test_image_exists_true() -> None:
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        assert docker.image_exists("img") is True

@@ -94,7 +94,7 @@ taskset = Taskset.from_tasks("letters", [
 | `Taskset.from_module(path)` | Load public `Task` or `Taskset` objects from Python source. |
 | `Taskset.from_package(package)` | Discover tasks from package submodules. |
 | `Taskset.from_api(name)` | Load a platform taskset by name or id. |
-| `Taskset.from_source(source)` | File/directory if it exists, otherwise platform taskset. |
+| `taskset.to_file(path)` | Write `.json`, `.jsonl`, or `.csv`. |
 
 ### Collection Operations
 
@@ -131,8 +131,6 @@ One execution of a taskset.
 | `runs` | `list[Run]` | Runs in expansion order. |
 | `group` | `int` | Runs per task. |
 
-`Job` is iterable over `runs`, so `for run in job:` works.
-
 ## Sync
 
 `Taskset.diff()` compares local tasks to remote tasks and returns a `SyncPlan`.
@@ -143,7 +141,6 @@ remote = Taskset.from_api("SheetBench-50")
 
 plan = local.diff(remote)
 print(plan.summary())
-plan.apply()
 ```
 
 | Type / method | Description |
@@ -152,7 +149,8 @@ plan.apply()
 | `SyncPlan.to_update` | Local tasks whose signature differs. |
 | `SyncPlan.unchanged` | Matching tasks. |
 | `SyncPlan.remote_only` | Remote tasks not present locally. |
-| `SyncPlan.apply()` | Upload create/update payloads. |
+
+Use `hud sync tasks` to upload a taskset to the platform.
 
 ## See Also
 

@@ -129,8 +129,8 @@ hud dev tasks.py
 This serves the environment on `tcp://127.0.0.1:8765`. In another terminal, drive a single task end-to-end without a model:
 
 ```bash
-hud task-start count_letter            # prints the prompt
-hud task-grade count_letter --answer 3 # prints the reward
+hud task start count_letter            # prints the prompt
+hud task grade count_letter --answer 3 # prints the reward
 ```
 
 That's the fastest way to check a grader by hand before pointing an agent at it.

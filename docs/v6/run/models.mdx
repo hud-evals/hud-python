@@ -37,7 +37,6 @@ Useful flags:
 | `--group-size N` | Run each task `N` times (for GRPO / variance) |
 | `--max-concurrent N` | Cap parallel rollouts |
 | `--max-steps N` | Cap agent steps per task |
-| `--remote` | Submit to the platform for hosted execution |
 
 ## In code: the agent contract
 
@@ -109,7 +108,7 @@ class EchoAgent(Agent):
 
 <CardGroup cols={2}>
 <Card title="Deploy & scale" icon="layer-group" href="/v6/run/deploy">
-  Package once, run anywhere — and run batches on hosted infra.
+  Package once, run anywhere.
 </Card>
 <Card title="Train on your tasks" icon="dumbbell" href="/v6/run/training">
   Turn a group of rewards into GRPO advantages.

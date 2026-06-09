@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from .env import Environment
 
-TaskFn = Callable[..., AsyncGenerator[dict[str, Any], dict[str, Any]]]
+TaskFn = Callable[..., AsyncGenerator[Any, Any]]
 
 P = ParamSpec("P")
 
@@ -39,7 +39,7 @@ class _TaskFactory(Generic[P]):
         env: Environment,
         id: str,
         description: str,
-        func: Callable[P, AsyncGenerator[dict[str, Any], dict[str, Any]]],
+        func: Callable[P, AsyncGenerator[Any, Any]],
         *,
         input: Any = None,
         returns: Any = None,
@@ -118,12 +118,12 @@ def _coerce_args(func: TaskFn, args: dict[str, Any]) -> dict[str, Any]:
 def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     """Build the value sent into the task gen for evaluation.
 
-    Without a declared ``return_type`` the raw evaluate payload is forwarded
-    unchanged. With one, the agent's answer is parsed into an ``AgentAnswer[T]``
+    Without a declared ``return_type`` the answer value is forwarded unchanged.
+    With one, the agent's answer is parsed into an ``AgentAnswer[T]``
     (typed ``content`` + citations) — the structured-answer contract.
     """
     if return_type is None:
-        return payload
+        return payload.get("answer") if isinstance(payload, dict) else payload
     from pydantic import TypeAdapter
 
     from hud.agents.types import AgentAnswer, Citation
@@ -147,48 +147,13 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     )
 
 
-def scenario_to_task_fn(scenario_fn: Any) -> Any:
-    """Wrap a legacy-style scenario gen (``yield prompt`` then ``yield reward``) as
-    a new task gen (``yield {"prompt": ...}`` then ``yield {"score": ...}``).
-
-    Lets ``@env.scenario`` be a thin alias for ``@env.task``: the raw prompt is
-    normalized to ``{"prompt": ...}``, the answer is unwrapped from the evaluate
-    payload, and a float / ``EvaluationResult`` reward becomes ``{"score": ...}``.
-    """
-
-    async def task_fn(**args: Any) -> AsyncGenerator[dict[str, Any], dict[str, Any]]:
-        gen = scenario_fn(**args)
-        prompt = await gen.__anext__()
-        # Pass the prompt through unchanged (str, dict, or a PromptMessage list for
-        # chat-style scenarios); only wrap a bare value into the {"prompt": ...} frame.
-        if isinstance(prompt, dict) and "prompt" in prompt:
-            payload = yield prompt
-        else:
-            payload = yield {"prompt": prompt}
-        answer = payload.get("answer") if isinstance(payload, dict) else payload
-        try:
-            result = await gen.asend(answer)
-        except StopAsyncIteration:
-            result = 0.0
-        if isinstance(result, dict) and "score" in result:
-            yield result
-        else:
-            score = getattr(result, "reward", result)
-            yield {"score": float(score) if isinstance(score, (int, float)) else 0.0}
-        with contextlib.suppress(Exception):
-            await gen.aclose()
-
-    functools.update_wrapper(task_fn, scenario_fn)
-    return task_fn
-
-
 class TaskRunner:
     """Drives one task through prompt -> grade."""
 
     def __init__(self, task: _TaskFactory[Any], args: dict[str, Any] | None = None) -> None:
         self.task = task
         self._args = args or {}
-        self._gen: AsyncGenerator[dict[str, Any], dict[str, Any]] | None = None
+        self._gen: AsyncGenerator[Any, Any] | None = None
 
         # Fail fast on bad args (TypeError before any side-effects run).
         try:
@@ -201,28 +166,24 @@ class TaskRunner:
     async def start(self) -> dict[str, Any]:
         self._gen = self.task.func(**_coerce_args(self.task.func, self._args))
         prompt = await self._gen.__anext__()
-        if not isinstance(prompt, dict) or "prompt" not in prompt:
-            raise RuntimeError(
-                f"task {self.task.id!r}: first yield must be a dict with 'prompt'",
-            )
-        return cast("dict[str, Any]", _jsonable(prompt))
+        frame = prompt if isinstance(prompt, dict) and "prompt" in prompt else {"prompt": prompt}
+        return cast("dict[str, Any]", _jsonable(frame))
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._gen is None:
             raise RuntimeError("task not started")
         try:
             evaluation = await self._gen.asend(_build_answer(self.task.return_type, payload))
-        except StopAsyncIteration as exc:
-            raise RuntimeError(
-                f"task {self.task.id!r}: ended without yielding an evaluation",
-            ) from exc
-        if not isinstance(evaluation, dict) or "score" not in evaluation:
-            raise RuntimeError(
-                f"task {self.task.id!r}: second yield must be a dict with 'score'",
-            )
+        except StopAsyncIteration:
+            evaluation = 0.0
+        frame = (
+            evaluation
+            if isinstance(evaluation, dict) and "score" in evaluation
+            else {"score": _score_value(evaluation)}
+        )
         with contextlib.suppress(Exception):
             await self._gen.aclose()
-        return evaluation
+        return frame
 
     async def cancel(self) -> None:
         if self._gen is not None:
@@ -231,4 +192,9 @@ class TaskRunner:
             self._gen = None
 
 
-__all__ = ["TaskFn", "TaskRunner", "scenario_to_task_fn"]
+def _score_value(result: Any) -> float:
+    score = getattr(result, "reward", result)
+    return float(score) if isinstance(score, (int, float)) else 0.0
+
+
+__all__ = ["TaskFn", "TaskRunner"]

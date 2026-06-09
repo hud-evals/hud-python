@@ -43,19 +43,15 @@ def _parse_args(args: str) -> dict[str, Any]:
     return parsed
 
 
-def _collect(source: str) -> list[Any]:
-    """Collect ``Task``s from a source (``.py``/dir or JSON/JSONL), like ``hud eval``."""
+def _collect(source: str) -> Any:
+    """Collect a Taskset from a source (``.py``/dir or JSON/JSONL), like ``hud eval``."""
     from hud.eval import Taskset
 
     try:
-        return list(Taskset.from_file(source))
+        return Taskset.from_file(source)
     except FileNotFoundError as exc:
         hud_console.error(str(exc))
         raise typer.Exit(1) from None
-
-
-def _slug(task: Any) -> str:
-    return task.slug or task.default_slug()
 
 
 def _local_env_url(port: int = 8765) -> str | None:
@@ -89,13 +85,17 @@ def _resolve_task(task: str, source: str | None, url: str | None, args: dict[str
         endpoint = f"tcp://{parts.hostname or '127.0.0.1'}:{parts.port or 8765}"
         return Task(env=RemoteSandbox(endpoint), id=task, args=args)
 
-    tasks = _collect(source or ".")
-    if not tasks:
+    taskset = _collect(source or ".")
+    if not taskset:
         hud_console.error(f"No tasks found in {source or '.'}")
         raise typer.Exit(1)
-    matches = [t for t in tasks if t.id == task or _slug(t) == task]
+    matches = [
+        candidate
+        for index, (slug, candidate) in enumerate(taskset.items())
+        if task in (slug, candidate.id, str(index))
+    ]
     if not matches:
-        available = ", ".join(sorted({t.id for t in tasks}))
+        available = ", ".join(sorted({t.id for t in taskset}))
         hud_console.error(f"No task matching {task!r} (available: {available})")
         raise typer.Exit(1)
     selected = matches[0]
@@ -118,9 +118,9 @@ def list_command(
     source: str = typer.Option(".", "--source", "-s", help="Env source (.py/dir/JSON)."),
 ) -> None:
     """List the tasks (slug + task id + args) exposed by a source."""
-    for task in _collect(source):
+    for slug, task in _collect(source).items():
         args = f" {json.dumps(task.args)}" if task.args else ""
-        typer.echo(f"{_slug(task)}\t{task.id}{args}")
+        typer.echo(f"{slug}\t{task.id}{args}")
 
 
 @task_app.command("start")

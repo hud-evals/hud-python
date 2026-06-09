@@ -130,8 +130,10 @@ def test_taskset_from_tasks_is_ordered_and_keyed_by_slug() -> None:
 
     assert list(tasks) == [first, second]
     assert tasks["first"] is first
-    assert tasks.filter(["second"]).tasks == [second]
-    assert tasks.exclude(["first"]).tasks == [second]
+    assert list(tasks.filter(["second"])) == [second]
+    assert list(tasks.exclude(["first"])) == [second]
+    assert list(tasks.items()) == [("first", first), ("second", second)]
+    assert tasks.environment_names() == {"e"}
 
 
 def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:
@@ -148,6 +150,31 @@ def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:
 
     assert [t.slug for t in Taskset.from_file(json_path)] == ["one", "two"]
     assert [t.slug for t in Taskset.from_file(jsonl_path)] == ["one", "two"]
+
+
+def test_taskset_to_file_writes_json_jsonl_and_csv(tmp_path) -> None:
+    env = Environment("e")
+    taskset = Taskset.from_tasks(
+        "demo",
+        [
+            task(env, "solve", slug="one", columns={"tier": "easy"}, n=1),
+            task(env, "solve", slug="two", columns={"tier": "hard"}, n={"x": 2}),
+        ],
+    )
+
+    json_path = taskset.to_file(tmp_path / "tasks.json")
+    jsonl_path = taskset.to_file(tmp_path / "tasks.jsonl")
+    csv_path = taskset.to_file(tmp_path / "tasks.csv")
+
+    assert [entry["slug"] for entry in json.loads(json_path.read_text())] == ["one", "two"]
+    assert [json.loads(line)["slug"] for line in jsonl_path.read_text().splitlines()] == [
+        "one",
+        "two",
+    ]
+    csv_text = csv_path.read_text()
+    assert "slug,task,env,arg:n,col:tier" in csv_text
+    assert "one,solve,e,1,easy" in csv_text
+    assert 'two,solve,e,"{""x"": 2}",hard' in csv_text
 
 
 def test_taskset_from_module_and_package_collect_public_tasks(
@@ -185,6 +212,49 @@ example = task(env, "solve", slug="alpha", n=2)
     assert Taskset.from_package("cases")["alpha"].args == {"n": 2}
 
 
+def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        def __init__(self, payload: dict[str, object], status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_get(url: str, **kwargs: object) -> Response:
+        if url.endswith("/tasks/evalset/demo"):
+            return Response({"evalset_id": "ts_123", "evalset_name": "Demo"})
+        if url.endswith("/tasks/evalsets/ts_123/tasks-by-id"):
+            return Response(
+                {
+                    "evalset_name": "Demo",
+                    "tasks": {
+                        "1": {
+                            "env": {"name": "e"},
+                            "scenario": "e:solve",
+                            "args": {"n": 1},
+                            "slug": "one",
+                            "column_values": {"tier": "easy"},
+                        }
+                    },
+                }
+            )
+        raise AssertionError(url)
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+
+    taskset = Taskset.from_api("demo")
+
+    assert taskset.name == "Demo"
+    assert taskset["one"].id == "e:solve"
+    assert taskset["one"].args == {"n": 1}
+    assert taskset["one"].columns == {"tier": "easy"}
+
+
 def test_taskset_diff_classifies_create_update_unchanged_and_remote_only() -> None:
     env = Environment("e")
     local_a = task(env, "solve", slug="a", n=1)
@@ -205,7 +275,9 @@ def test_taskset_diff_classifies_create_update_unchanged_and_remote_only() -> No
     assert "Create: 1" in plan.summary()
 
 
-def test_sync_plan_apply_posts_upload_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud._platform import PlatformClient, taskset_column_definitions
+
     env = Environment("e")
     upload = task(env, "solve", slug="solve-one", columns={"tier": "easy"}, n=1)
     posted: dict[str, object] = {}
@@ -229,15 +301,8 @@ def test_sync_plan_apply_posts_upload_payload(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    result = (
-        Taskset.from_tasks("demo", [upload])
-        .diff(
-            Taskset.from_tasks("demo", []),
-            api_url="https://api.example",
-            headers={"Authorization": "Bearer token"},
-        )
-        .apply()
-    )
+    platform = PlatformClient("https://api.example", {"Authorization": "Bearer token"})
+    result = platform.upload_taskset("demo", [upload], columns=taskset_column_definitions([upload]))
 
     assert result == {"ok": True}
     assert posted["url"] == "https://api.example/tasks/upload"

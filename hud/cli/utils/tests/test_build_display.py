@@ -28,11 +28,9 @@ def test_display_build_summary_succeeded_with_lock() -> None:
         "duration_seconds": 125,
         "uri": "org/img:1.0.0",
         "lock": {
-            "prompts": [
-                {"name": "solve", "arguments": [{"name": "n", "type": "int", "required": True}]}
-            ],
+            "tasks": [{"slug": "solve-one", "task": "solve", "args": {"n": 1}}],
             "environment": {"variables": {"required": ["API_KEY"], "optional": ["DEBUG"]}},
-            "tools": [{"name": "bash"}, "computer"],
+            "capabilities": [{"name": "ssh"}, "browser"],
         },
     }
     display_build_summary(status_response, "org/img", env_name="demo")

@@ -58,6 +58,10 @@ class Sandbox(ABC):
     async def terminate(self) -> None:
         """Release the substrate (stop the process / container / remote box)."""
 
+    def to_ref(self) -> dict[str, Any]:
+        """Serialize to a portable env-ref (inverse of :func:`sandbox_from_ref`)."""
+        raise TypeError(f"cannot serialize a {type(self).__name__} env-ref")
+
     @property
     def channel(self) -> Channel:
         """The connectable ``Channel`` (after ``create``)."""
@@ -108,6 +112,9 @@ class LocalSandbox(Sandbox):
         await self._env.stop()
         self._channel = None
 
+    def to_ref(self) -> dict[str, Any]:
+        return {"type": "hud", "name": self._env.name}
+
 
 class RemoteSandbox(Sandbox):
     """Attach to a control channel provisioned elsewhere (an already-known url).
@@ -126,6 +133,9 @@ class RemoteSandbox(Sandbox):
 
     async def terminate(self) -> None:
         self._channel = None
+
+    def to_ref(self) -> dict[str, Any]:
+        return {"type": "url", "url": self._url, "params": self._params}
 
 
 class HudSandbox(Sandbox):
@@ -165,6 +175,9 @@ class HudSandbox(Sandbox):
                 await self._deprovision(self.sandbox_id)
             self.sandbox_id = None
         self._channel = None
+
+    def to_ref(self) -> dict[str, Any]:
+        return {"type": "hud", "name": self.image}
 
     # ─── HUD control-plane API (structure only — wire to the real endpoints) ───
 

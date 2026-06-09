@@ -1,12 +1,12 @@
 """Native graders for HUD evaluation.
 
-All graders are async. ``Grade.gather`` runs them in parallel and
+All graders are async. ``GradeCombiner.gather`` runs them in parallel and
 combines the results into an ``EvaluationResult`` you can yield
 directly from a scenario.
 
 Usage::
 
-    from hud.native.graders import BashGrader, Grade, LLMJudgeGrader
+    from hud.native.graders import BashGrader, GradeCombiner, LLMJudgeGrader
     from hud.native.graders import exact_match, contains
     from hud.agents.types import SubScore
 
@@ -14,7 +14,7 @@ Usage::
     yield exact_match(answer, "France")
 
     # Composed — all graders run in parallel
-    yield await Grade.gather(
+    yield await GradeCombiner.gather(
         BashGrader.grade(weight=0.5, command="pytest -q"),
         LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Correct"]),
         SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Grade — the combiner
+# GradeCombiner — the native subscore combiner
 # =============================================================================
 
 
@@ -75,7 +75,7 @@ def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
     return final_names
 
 
-class Grade:
+class GradeCombiner:
     """Combine ``SubScore`` items into a yieldable ``EvaluationResult``."""
 
     @staticmethod
@@ -131,7 +131,7 @@ class Grade:
 
         Example::
 
-            yield await Grade.gather(
+            yield await GradeCombiner.gather(
                 BashGrader.grade(weight=0.3, command="pytest -q"),
                 LLMJudgeGrader.grade(weight=0.4, answer=answer, criteria=[...]),
                 SubScore(name="answer", value=exact_match(answer, "42"), weight=0.3),
@@ -158,7 +158,7 @@ class Grade:
             for (slot, _), result in zip(pending, results, strict=True):
                 resolved[slot] = result
 
-        return Grade.from_subscores(resolved)
+        return GradeCombiner.from_subscores(resolved)
 
 
 # =============================================================================
@@ -328,7 +328,7 @@ class LLMJudgeGrader(Grader):
 
     Example::
 
-        yield await Grade.gather(
+        yield await GradeCombiner.gather(
             BashGrader.grade(weight=0.4, command="pytest -q"),
             LLMJudgeGrader.grade(
                 weight=0.6,
@@ -566,9 +566,13 @@ def f1_score(
     return 2 * precision * recall / (precision + recall)
 
 
+Grade = GradeCombiner
+
+
 __all__ = [
     "BashGrader",
     "Grade",
+    "GradeCombiner",
     "Grader",
     "LLMJudgeGrader",
     "contains",
