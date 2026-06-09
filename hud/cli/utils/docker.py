@@ -1,246 +1,16 @@
-"""Docker utilities for HUD CLI.
-
-This module centralizes helpers for constructing Docker commands and
-standardizes environment variable handling for "folder mode" (environment
-directories that include a `.env` file and/or `hud.lock.yaml`).
-"""
+"""Docker helpers for the HUD CLI: daemon availability and per-env ``.env`` loading."""
 
 from __future__ import annotations
 
-import json
 import platform
 import shutil
 import subprocess
-from contextlib import suppress
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import parse_env_file
 
-# Folder mode is intentionally looser than EnvironmentSource.is_environment: a Dockerfile,
-# pyproject.toml, or hud.lock.yaml is enough to infer a usable environment root.
-
-
-def extract_name_and_tag(image_ref: str) -> tuple[str, str]:
-    """Extract organization/name and tag from Docker image reference.
-
-    Examples:
-        docker.io/hudpython/test_init:latest@sha256:... -> (hudpython/test_init, latest)
-        hudpython/myenv:v1.0 -> (hudpython/myenv, v1.0)
-        myorg/myapp -> (myorg/myapp, latest)
-    """
-    if "@" in image_ref:
-        image_ref = image_ref.split("@")[0]
-
-    if image_ref.startswith(("docker.io/", "registry-1.docker.io/", "index.docker.io/")):
-        image_ref = "/".join(image_ref.split("/")[1:])
-
-    if ":" in image_ref:
-        name, tag = image_ref.rsplit(":", 1)
-    else:
-        name = image_ref
-        tag = "latest"
-
-    return name, tag
-
-
-def get_docker_cmd(image: str) -> list[str] | None:
-    """
-    Extract the CMD from a Docker image.
-
-    Args:
-        image: Docker image name
-
-    Returns:
-        List of command parts or None if not found
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", image],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        inspect_data = json.loads(result.stdout)
-        if inspect_data and len(inspect_data) > 0 and isinstance(inspect_data[0], dict):
-            config = inspect_data[0].get("Config", {})
-            cmd = config.get("Cmd", [])
-            return cmd if cmd else None
-
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, FileNotFoundError):
-        return None
-
-
-DEFAULT_HTTP_PORT = 8765
-
-
-def _normalize_cmd(raw: list[str]) -> list[str]:
-    """Flatten a Docker CMD into a flat token list for scanning.
-
-    Handles all common CMD shapes:
-    - Proper exec form:  ``["hud", "dev", "env:env", "--port", "8080"]``
-    - Shell wrapper:     ``["sh", "-c", "hud dev env:env --port 8080"]``
-    - Single string:     ``["hud dev env:env --port 8080"]``
-    - Chained commands:  ``["sh", "-c", "setup.sh && hud dev env:env"]``
-
-    For shell-form strings we use :func:`shlex.split` so that quoted
-    arguments are kept together.
-    """
-    import shlex
-
-    tokens: list[str] = []
-
-    for arg in raw:
-        if arg in ("sh", "bash", "/bin/sh", "/bin/bash", "-c"):
-            continue
-        if " " in arg:
-            try:
-                tokens.extend(shlex.split(arg))
-            except ValueError:
-                tokens.extend(arg.split())
-        else:
-            tokens.append(arg)
-
-    return tokens
-
-
-def detect_transport(image: str) -> tuple[str, int | None]:
-    """Detect whether a Docker image's CMD runs in stdio or HTTP mode.
-
-    Returns ``("stdio", None)`` for stdio images, ``("http", port)`` for HTTP.
-
-    Detection scans the image's CMD for the pattern ``hud dev`` (with or
-    without ``python -m`` prefix).  If found without ``--stdio``, the
-    image is assumed to start an HTTP server.  The port is extracted from
-    ``--port N`` / ``-p N`` if present, otherwise defaults to 8765.
-
-    All other CMD patterns default to stdio (matching ``MCPServer.run()``).
-    """
-    cmd = get_docker_cmd(image)
-    if not cmd:
-        return ("stdio", None)
-
-    tokens = _normalize_cmd(cmd)
-
-    has_hud_dev = False
-    has_stdio = False
-    port: int | None = None
-
-    for i, tok in enumerate(tokens):
-        if tok == "hud" and i + 1 < len(tokens) and tokens[i + 1] == "dev":
-            has_hud_dev = True
-        if tok == "--stdio":
-            has_stdio = True
-        if tok in ("--port", "-p") and i + 1 < len(tokens):
-            with suppress(ValueError):
-                port = int(tokens[i + 1])
-
-    if has_hud_dev and not has_stdio:
-        return ("http", port or DEFAULT_HTTP_PORT)
-
-    return ("stdio", None)
-
-
-def stop_container(name: str) -> None:
-    """Best-effort stop and remove a Docker container."""
-    for action in (["docker", "stop", name], ["docker", "rm", "-f", name]):
-        with suppress(Exception):
-            subprocess.run(action, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-
-
-def image_exists(image_name: str) -> bool:
-    """Check if a Docker image exists locally."""
-    result = subprocess.run(
-        ["docker", "image", "inspect", image_name],  # noqa: S607
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
-
-
-def remove_container(container_name: str) -> bool:
-    """Remove a Docker container by name.
-
-    Args:
-        container_name: Name of the container to remove
-
-    Returns:
-        True if successful or container doesn't exist, False on error
-    """
-    try:
-        subprocess.run(
-            ["docker", "rm", "-f", container_name],  # noqa: S607
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,  # Don't raise error if container doesn't exist
-        )
-        return True
-    except Exception:
-        return False
-
-
-def generate_container_name(identifier: str, prefix: str = "hud") -> str:
-    """Generate a safe container name from an identifier.
-
-    Args:
-        identifier: Image name or other identifier
-        prefix: Prefix for the container name
-
-    Returns:
-        Safe container name with special characters replaced
-    """
-    # Replace special characters with hyphens
-    safe_name = identifier.replace(":", "-").replace("/", "-").replace("\\", "-")
-    return f"{prefix}-{safe_name}"
-
-
-def build_run_command(image: str, docker_args: list[str] | None = None) -> list[str]:
-    """Construct a standard docker run command used across CLI commands.
-
-    Args:
-        image: Docker image name to run
-        docker_args: Additional docker args to pass before the image
-
-    Returns:
-        The docker run command list
-    """
-    args = docker_args or []
-    return [
-        "docker",
-        "run",
-        "--rm",
-        "-i",
-        *args,
-        image,
-    ]
-
-
-def detect_environment_dir(start_dir: Path | None = None) -> Path | None:
-    """Detect an environment directory for folder mode.
-
-    Detection order:
-    - Current directory containing `hud.lock.yaml`
-    - Parent directory containing `hud.lock.yaml`
-    - Current directory with `Dockerfile.hud`, `Dockerfile`, or `pyproject.toml`
-
-    Returns the detected directory path or None if not found.
-    """
-    base = (start_dir or Path.cwd()).resolve()
-
-    # Check current then parent for lock file
-    for candidate in [base, base.parent]:
-        if (candidate / "hud.lock.yaml").exists():
-            return candidate
-
-    # Fallback: treat as env if it has Dockerfile.hud, Dockerfile, or pyproject.toml
-    if (
-        (base / "Dockerfile.hud").exists()
-        or (base / "Dockerfile").exists()
-        or (base / "pyproject.toml").exists()
-    ):
-        return base
-
-    return None
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def load_env_vars_for_dir(env_dir: Path) -> dict[str, str]:
@@ -256,74 +26,6 @@ def load_env_vars_for_dir(env_dir: Path) -> dict[str, str]:
         return parse_env_file(contents)
     except Exception:
         return {}
-
-
-def build_env_flags(env_vars: dict[str, str]) -> list[str]:
-    """Convert an env dict into a flat list of `-e KEY=VALUE` flags."""
-    flags: list[str] = []
-    for key, value in env_vars.items():
-        flags.extend(["-e", f"{key}={value}"])
-    return flags
-
-
-def create_docker_run_command(
-    image: str,
-    docker_args: list[str] | None = None,
-    env_dir: Path | str | None = None,
-    extra_env: dict[str, str] | None = None,
-    name: str | None = None,
-    interactive: bool = True,
-    remove: bool = True,
-) -> list[str]:
-    """Create a standardized `docker run` command with folder-mode envs.
-
-    - If `env_dir` is provided (or auto-detected), `.env` entries are injected as
-      `-e KEY=VALUE` flags before the image.
-    - `extra_env` allows callers to provide additional env pairs that override
-      variables from `.env`.
-
-    Args:
-        image: Docker image to run
-        docker_args: Additional docker args (volumes, ports, etc.)
-        env_dir: Environment directory to load `.env` from; if None, auto-detect
-        extra_env: Additional env variables to inject (takes precedence)
-        name: Optional container name
-        interactive: Include `-i` flag (default True)
-        remove: Include `--rm` flag (default True)
-
-    Returns:
-        Fully constructed docker run command
-    """
-    cmd: list[str] = ["docker", "run"]
-    if remove:
-        cmd.append("--rm")
-    if interactive:
-        cmd.append("-i")
-    if name:
-        cmd.extend(["--name", name])
-
-    # Load env from `.env` in detected env directory
-    env_dir_path: Path | None = (
-        Path(env_dir).resolve() if isinstance(env_dir, str | Path) else detect_environment_dir()
-    )
-
-    merged_env: dict[str, str] = {}
-    if env_dir_path is not None:
-        merged_env.update(load_env_vars_for_dir(env_dir_path))
-    if extra_env:
-        # Caller-provided values override .env
-        merged_env.update(extra_env)
-
-    # Insert env flags before other args
-    if merged_env:
-        cmd.extend(build_env_flags(merged_env))
-
-    # Add remaining args (volumes, ports, etc.)
-    if docker_args:
-        cmd.extend(docker_args)
-
-    cmd.append(image)
-    return cmd
 
 
 def _emit_docker_hints(error_text: str) -> None:
@@ -345,6 +47,10 @@ def _emit_docker_hints(error_text: str) -> None:
         "/var/run/docker.sock",
     ]
 
+    trimmed = error_text.strip()
+    if len(trimmed) > 300:
+        trimmed = trimmed[:300] + "..."
+
     if any(m in text for m in markers):
         hud_console.error("Docker does not appear to be running or accessible")
         if system == "Windows":
@@ -359,19 +65,11 @@ def _emit_docker_hints(error_text: str) -> None:
             hud_console.hint("Open Docker Desktop and wait until it shows 'Running'")
         else:
             hud_console.hint("Start Docker and ensure the daemon is reachable")
-        trimmed = error_text.strip()
-        if len(trimmed) > 300:
-            trimmed = trimmed[:300] + "..."
         hud_console.dim_info("Details", trimmed)
     else:
-        from hud.utils.hud_console import hud_console as _hc
-
-        _hc.error("Docker returned an error")
-        trimmed = error_text.strip()
-        if len(trimmed) > 300:
-            trimmed = trimmed[:300] + "..."
-        _hc.dim_info("Details", trimmed)
-        _hc.hint("Is Docker running and accessible?")
+        hud_console.error("Docker returned an error")
+        hud_console.dim_info("Details", trimmed)
+        hud_console.hint("Is Docker running and accessible?")
 
 
 def require_docker_running() -> None:

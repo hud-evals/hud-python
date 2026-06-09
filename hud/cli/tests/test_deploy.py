@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import typer
@@ -152,26 +152,15 @@ class TestDeployAsync:
     @pytest.mark.asyncio
     async def test_upload_url_failure(self) -> None:
         """Test handling of upload URL failure."""
-        import httpx
-
-        from hud._platform import PlatformClient
         from hud.cli.deploy import _deploy_async, _DeployPlan
+        from hud.shared.exceptions import HudRequestError
+        from hud.shared.platform import PlatformClient
         from hud.utils.hud_console import HUDConsole
 
         console = HUDConsole()
+        error = HudRequestError("Unauthorized", status_code=401)
 
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value.__aenter__.return_value = mock_client
-
-            # Simulate HTTP error
-            mock_response = MagicMock()
-            mock_response.status_code = 401
-            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "Unauthorized", request=MagicMock(), response=mock_response
-            )
-            mock_client.post.return_value = mock_response
-
+        with patch("hud.shared.platform.make_request", AsyncMock(side_effect=error)):
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
                 no_cache=False,
@@ -182,7 +171,7 @@ class TestDeployAsync:
                     build_args={},
                     build_secrets={},
                 ),
-                platform=PlatformClient("https://api.example", {}),
+                platform=PlatformClient("https://api.example", "key"),
                 console=console,
             )
 
@@ -191,19 +180,16 @@ class TestDeployAsync:
     @pytest.mark.asyncio
     async def test_upload_url_network_error(self) -> None:
         """Test handling of network error during upload URL fetch."""
-        from hud._platform import PlatformClient
         from hud.cli.deploy import _deploy_async, _DeployPlan
+        from hud.shared.platform import PlatformClient
         from hud.utils.hud_console import HUDConsole
 
         console = HUDConsole()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value.__aenter__.return_value = mock_client
-
-            # Simulate network error
-            mock_client.post.side_effect = Exception("Network error")
-
+        with patch(
+            "hud.shared.platform.make_request",
+            AsyncMock(side_effect=Exception("Network error")),
+        ):
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
                 no_cache=False,
@@ -214,7 +200,7 @@ class TestDeployAsync:
                     build_args={},
                     build_secrets={},
                 ),
-                platform=PlatformClient("https://api.example", {}),
+                platform=PlatformClient("https://api.example", "key"),
                 console=console,
             )
 

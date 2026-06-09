@@ -213,38 +213,26 @@ example = task(env, "solve", slug="alpha", n=2)
 
 
 def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Response:
-        def __init__(self, payload: dict[str, object], status_code: int = 200) -> None:
-            self._payload = payload
-            self.status_code = status_code
-
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> dict[str, object]:
-            return self._payload
-
-    def fake_get(url: str, **kwargs: object) -> Response:
+    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, object]:
+        assert method == "GET"
         if url.endswith("/tasks/evalset/demo"):
-            return Response({"evalset_id": "ts_123", "evalset_name": "Demo"})
+            return {"evalset_id": "ts_123", "evalset_name": "Demo"}
         if url.endswith("/tasks/evalsets/ts_123/tasks-by-id"):
-            return Response(
-                {
-                    "evalset_name": "Demo",
-                    "tasks": {
-                        "1": {
-                            "env": {"name": "e"},
-                            "scenario": "e:solve",
-                            "args": {"n": 1},
-                            "slug": "one",
-                            "column_values": {"tier": "easy"},
-                        }
-                    },
-                }
-            )
+            return {
+                "evalset_name": "Demo",
+                "tasks": {
+                    "1": {
+                        "env": {"name": "e"},
+                        "scenario": "e:solve",
+                        "args": {"n": 1},
+                        "slug": "one",
+                        "column_values": {"tier": "easy"},
+                    }
+                },
+            }
         raise AssertionError(url)
 
-    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr("hud.shared.platform.make_request_sync", fake_request)
     monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
 
     taskset = Taskset.from_api("demo")
@@ -276,37 +264,28 @@ def test_taskset_diff_classifies_create_update_unchanged_and_remote_only() -> No
 
 
 def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    from hud._platform import PlatformClient, taskset_column_definitions
+    from hud.eval.taskset import taskset_column_definitions, upload_taskset
+    from hud.shared.platform import PlatformClient
 
     env = Environment("e")
     upload = task(env, "solve", slug="solve-one", columns={"tier": "easy"}, n=1)
     posted: dict[str, object] = {}
 
-    class Response:
-        def raise_for_status(self) -> None:
-            return None
+    def fake_request(method: str, url: str, json: object = None, **kwargs: object) -> dict:
+        posted.update(method=method, url=url, json=json, api_key=kwargs.get("api_key"))
+        return {"ok": True}
 
-        def json(self) -> dict[str, bool]:
-            return {"ok": True}
+    monkeypatch.setattr("hud.shared.platform.make_request_sync", fake_request)
 
-    def fake_post(
-        url: str,
-        *,
-        json: dict[str, object],
-        headers: dict[str, str],
-        timeout: float,
-    ) -> Response:
-        posted.update(url=url, json=json, headers=headers, timeout=timeout)
-        return Response()
-
-    monkeypatch.setattr("httpx.post", fake_post)
-
-    platform = PlatformClient("https://api.example", {"Authorization": "Bearer token"})
-    result = platform.upload_taskset("demo", [upload], columns=taskset_column_definitions([upload]))
+    platform = PlatformClient("https://api.example", "token")
+    result = upload_taskset(
+        platform, "demo", [upload], columns=taskset_column_definitions([upload])
+    )
 
     assert result == {"ok": True}
+    assert posted["method"] == "POST"
     assert posted["url"] == "https://api.example/tasks/upload"
-    assert posted["headers"] == {"Authorization": "Bearer token"}
+    assert posted["api_key"] == "token"
     assert posted["json"] == {
         "name": "demo",
         "tasks": [

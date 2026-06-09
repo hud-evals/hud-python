@@ -2,7 +2,7 @@
 
 Launches each task, lets ``agent(run)`` fill ``run.trace``, grades it, and
 returns a :class:`Job` receipt containing the resulting :class:`Run`s. HUD
-job/trace reporting lives in :mod:`hud._platform`::
+job/trace reporting lives in :mod:`hud.eval.job`::
 
     job = await Taskset.from_tasks("bugs", [fix_bug(difficulty=d) for d in range(5)]).run(agent)
 """
@@ -17,10 +17,13 @@ import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from hud.client import Run
+from hud.shared.exceptions import HudRequestError
+from hud.shared.platform import PlatformClient
 
-from .job import Job
+from .job import Job, job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -48,7 +51,6 @@ async def _rollout(
     launch/connect failure is isolated into a failed ``Run`` so one bad rollout
     never collapses a batch.
     """
-    from hud._platform import trace_enter, trace_exit
     from hud.telemetry.context import set_trace_context
 
     trace_id = uuid.uuid4().hex
@@ -176,12 +178,14 @@ class Taskset:
     @classmethod
     def from_api(cls, name: str) -> Taskset:
         """Load a platform taskset by name or id (uses ``HUD_API_KEY`` settings)."""
-        from hud._platform import PlatformClient
-
-        taskset_id, display, remote = PlatformClient.from_settings().fetch_taskset_records(name)
+        platform = PlatformClient.from_settings()
+        taskset_id, display = resolve_taskset_id(platform, name)
+        if not taskset_id:
+            raise ValueError(f"taskset not found: {name}")
+        fetched_display, remote = _fetch_task_records(platform, taskset_id)
         return cls(
             (_remote_task_to_task(t) for t in remote),
-            name=display,
+            name=fetched_display or display,
             origin=f"api:{taskset_id}",
         )
 
@@ -392,7 +396,6 @@ class Taskset:
         """
         if group < 1:
             raise ValueError("group must be >= 1")
-        from hud._platform import job_enter
 
         # Fresh Task per rollout (the Task CM holds per-enter state); the ``group``
         # repeats of one task share a group_id (the GRPO group).
@@ -423,6 +426,129 @@ class Taskset:
         )
         runs = list(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
         return Job(id=job_id, name=name, runs=runs, group=group)
+
+
+# ─── platform wire format ──────────────────────────────────────────────
+#
+# Taskset endpoints ("evalsets" on the backend) and the upload payload shape.
+# Transport (auth, retries, errors) is hud.shared.platform; the shapes live
+# here because Taskset owns them.
+
+
+def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, str]:
+    """Resolve a taskset name to ``(uuid, display_name)``; uuid is "" if not found."""
+    try:
+        uuid.UUID(name_or_id)
+        return name_or_id, name_or_id
+    except ValueError:
+        pass
+
+    try:
+        data = platform.get(f"/tasks/evalset/{quote(name_or_id, safe='')}")
+    except HudRequestError as e:
+        if e.status_code == 404:
+            return "", name_or_id
+        raise
+    return str(data.get("evalset_id", "")), str(data.get("evalset_name", name_or_id))
+
+
+def _fetch_task_records(
+    platform: PlatformClient,
+    taskset_id: str,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    try:
+        data = platform.get(f"/tasks/evalsets/{taskset_id}/tasks-by-id")
+    except HudRequestError as e:
+        if e.status_code == 404:
+            return None, []
+        raise
+    tasks_payload = data.get("tasks") or {}
+    display = data.get("evalset_name")
+    taskset_name = display if isinstance(display, str) else None
+    if not isinstance(tasks_payload, dict):
+        return taskset_name, []
+    return taskset_name, [entry for entry in tasks_payload.values() if isinstance(entry, dict)]
+
+
+def upload_taskset(
+    platform: PlatformClient,
+    name: str,
+    tasks: list[Task],
+    *,
+    columns: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Upload tasks to a platform taskset, creating it if needed."""
+    payload: dict[str, Any] = {
+        "name": name,
+        "tasks": [task_upload_payload(task) for task in tasks],
+    }
+    if columns:
+        payload["columns"] = columns
+    data = platform.post("/tasks/upload", json=payload)
+    return data if isinstance(data, dict) else {}
+
+
+def task_upload_payload(task: Task) -> dict[str, Any]:
+    env_ref = task.to_dict()["env"]
+    payload: dict[str, Any] = {
+        "slug": task.slug or task.default_slug(),
+        "env": {"name": env_ref["name"]} if env_ref.get("name") else {},
+        "scenario": platform_task_id(task),
+        "args": task.args,
+    }
+    if task.validation is not None:
+        payload["validation"] = task.validation
+    if task.agent_config:
+        payload["agent_config"] = task.agent_config
+    if task.columns:
+        payload["column_values"] = task.columns
+    return payload
+
+
+def platform_task_id(task: Task) -> str:
+    env_ref = task.to_dict()["env"]
+    env_name = env_ref.get("name")
+    if env_name and ":" not in task.id:
+        return f"{env_name}:{task.id}"
+    return task.id
+
+
+def taskset_column_definitions(tasks: list[Task]) -> dict[str, dict[str, Any]] | None:
+    values_by_col: dict[str, list[Any]] = {}
+    for task in tasks:
+        if not task.columns:
+            continue
+        for col_name, col_val in task.columns.items():
+            values_by_col.setdefault(col_name, []).append(col_val)
+
+    if not values_by_col:
+        return None
+
+    definitions: dict[str, dict[str, Any]] = {}
+    for col_name, vals in values_by_col.items():
+        col_type = _infer_column_type(vals)
+        col_def: dict[str, Any] = {"type": col_type}
+        if col_type == "multi-select":
+            all_opts: set[str] = set()
+            for value in vals:
+                if isinstance(value, list):
+                    all_opts.update(str(item) for item in value)
+                elif value is not None:
+                    all_opts.add(str(value))
+            col_def["options"] = sorted(all_opts)
+        definitions[col_name] = col_def
+    return definitions
+
+
+def _infer_column_type(values: list[Any]) -> str:
+    non_none = [value for value in values if value is not None]
+    if not non_none:
+        return "text"
+    if any(isinstance(value, list) for value in non_none):
+        return "multi-select"
+    if all(isinstance(value, (int, float)) for value in non_none):
+        return "number"
+    return "text"
 
 
 def _remote_task_to_task(remote: dict[str, Any]) -> Task:

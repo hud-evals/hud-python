@@ -13,15 +13,14 @@ from typing import Any
 import httpx
 import typer
 
-from hud._platform import (
-    PlatformClient,
-    upload_build_context,
-)
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file
 from hud.cli.utils.context import create_build_context_tarball, format_size
+from hud.cli.utils.registry import get_registry_environment
 from hud.environment.source import EnvironmentSource
+from hud.shared.exceptions import HudRequestError
+from hud.shared.platform import PlatformClient
 from hud.utils.hud_console import HUDConsole
 
 LOGGER = logging.getLogger(__name__)
@@ -47,18 +46,13 @@ def _peek_env_keys(env_path: Path) -> list[str]:
 
 
 def _handle_name_conflict(
-    error: Any,
+    error: HudRequestError,
     console: HUDConsole,
 ) -> str | None:
     """Handle a 409 name conflict from build trigger. Returns registry_id or None."""
-    try:
-        detail = error.response.json().get("detail", {})
-    except Exception:
-        console.error("Environment name already exists on your team")
-        return None
-
+    detail = (error.response_json or {}).get("detail")
     if not isinstance(detail, dict):
-        console.error(f"Environment name conflict: {detail}")
+        console.error("Environment name already exists on your team")
         return None
 
     existing_name = detail.get("existing_name", "unknown")
@@ -174,7 +168,7 @@ def _resolve_deploy_name(
 ) -> str:
     name = requested_name or env_source.environment_name()
     if registry_id:
-        registry_env = platform.get_registry_environment(registry_id)
+        registry_env = get_registry_environment(platform, registry_id)
         if registry_env:
             if requested_name and requested_name != registry_env.name:
                 console.warning(
@@ -433,6 +427,28 @@ class _DeployResult:
     status: str = ""
 
 
+@dataclass(frozen=True)
+class _BuildUpload:
+    upload_url: str
+    build_id: str
+
+
+async def _create_build_upload(platform: PlatformClient) -> _BuildUpload:
+    data = await platform.apost("/builds/upload-url")
+    return _BuildUpload(upload_url=data["upload_url"], build_id=data["build_id"])
+
+
+async def _upload_build_context(upload_url: str, tarball_path: Path) -> None:
+    """PUT the tarball to the presigned S3 URL (not a platform API call)."""
+    async with httpx.AsyncClient(timeout=300.0) as s3_client:
+        response = await s3_client.put(
+            upload_url,
+            content=tarball_path.read_bytes(),
+            headers={"Content-Type": "application/gzip"},
+        )
+        response.raise_for_status()
+
+
 async def _trigger_build(
     platform: PlatformClient,
     *,
@@ -444,27 +460,30 @@ async def _trigger_build(
     """Trigger the direct build, resolving a 409 name conflict interactively."""
 
     async def attempt(registry_id: str | None) -> dict[str, Any]:
-        return await platform.trigger_direct_build(
-            build_id=build_id,
-            name=plan.name,
-            no_cache=no_cache,
-            registry_id=registry_id,
-            env_vars=plan.env_vars,
-            build_args=plan.build_args,
-            build_secrets=plan.build_secrets,
-        )
+        payload: dict[str, Any] = {
+            "source": "direct",
+            "build_id": build_id,
+            "name": plan.name,
+            "no_cache": no_cache,
+        }
+        if registry_id:
+            payload["registry_id"] = registry_id
+        if plan.env_vars:
+            payload["environment_variables"] = plan.env_vars
+        if plan.build_args:
+            payload["build_args"] = plan.build_args
+        if plan.build_secrets:
+            payload["build_secrets"] = plan.build_secrets
+        return await platform.apost("/builds/trigger", json=payload)
 
     try:
         return await attempt(plan.registry_id)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code != 409:
-            console.error(f"Failed to trigger build: {e.response.status_code}")
-            try:
-                error_detail = e.response.json().get("detail", "")
-                if error_detail:
-                    console.error(f"Error: {error_detail}")
-            except Exception:  # noqa: S110
-                pass
+    except HudRequestError as e:
+        if e.status_code != 409:
+            console.error(f"Failed to trigger build: {e.status_code or e}")
+            detail = (e.response_json or {}).get("detail", "")
+            if detail:
+                console.error(f"Error: {detail}")
             return None
         conflict = _handle_name_conflict(e, console)
         if not conflict:
@@ -491,10 +510,10 @@ async def _deploy_async(
     step_start = time.time()
 
     try:
-        upload = await platform.create_build_upload()
-    except httpx.HTTPStatusError as e:
-        console.error(f"Failed to get upload URL: {e.response.status_code}")
-        if e.response.status_code == 401:
+        upload = await _create_build_upload(platform)
+    except HudRequestError as e:
+        console.error(f"Failed to get upload URL: {e.status_code or e}")
+        if e.status_code == 401:
             console.error("Invalid API key. Get a new one at https://hud.ai/settings")
         return _DeployResult(success=False)
     except Exception as e:
@@ -508,7 +527,7 @@ async def _deploy_async(
     step_start = time.time()
 
     try:
-        await upload_build_context(upload.upload_url, tarball_path)
+        await _upload_build_context(upload.upload_url, tarball_path)
         console.success(f"Upload complete [{time.time() - step_start:.1f}s]")
     except Exception as e:
         console.error(f"Failed to upload build context: {e}")
@@ -540,11 +559,11 @@ async def _deploy_async(
     except Exception as e:
         console.warning(f"WebSocket streaming failed: {e}")
         console.info("Falling back to polling...")
-        status_response = await poll_build_status(build_id=build_id, console=console)
+        status_response = await poll_build_status(platform, build_id, console=console)
         final_status = status_response.get("status", "UNKNOWN")
 
     try:
-        status_data = await platform.fetch_build_status(build_id)
+        status_data = await platform.aget(f"/builds/{build_id}/status")
     except Exception as e:
         console.warning(f"Failed to get final status: {e}")
         status_data = {"status": final_status}

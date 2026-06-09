@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from pathlib import Path
 
-import httpx
 import typer
 
-from hud._platform import (
-    PlatformClient,
-    RegistryEnvironment,
-    taskset_column_definitions,
-)
 from hud.cli.utils.api import require_api_key
+from hud.cli.utils.registry import (
+    RegistryEnvironment,
+    get_registry_environment,
+    list_registry_environments,
+    resolve_registry_environments,
+)
 from hud.environment.source import EnvironmentSource
 from hud.eval import Taskset
+from hud.eval.taskset import resolve_taskset_id, taskset_column_definitions, upload_taskset
+from hud.shared.exceptions import HudException, HudRequestError
+from hud.shared.platform import PlatformClient
 from hud.utils.hud_console import HUDConsole
 
 LOGGER = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ def _export_taskset(
             console.warning("No tasks found in taskset")
             return
         out = remote_taskset.to_file(output_path)
-    except (httpx.HTTPError, ValueError) as e:
+    except (HudException, ValueError) as e:
         console.error(str(e))
         raise typer.Exit(1) from e
     console.success(f"Exported {len(remote_taskset)} tasks to {out}")
@@ -109,8 +111,8 @@ def _warn_on_linked_environment_mismatch(
         return
 
     try:
-        registry_env = platform.get_registry_environment(stored_registry_id)
-    except httpx.HTTPError as e:
+        registry_env = get_registry_environment(platform, stored_registry_id)
+    except HudException as e:
         console.warning(f"Could not verify linked environment: {e}")
         return
 
@@ -151,7 +153,7 @@ def _fetch_remote_taskset(
     if force:
         return Taskset.from_tasks(target_ref, [])
 
-    taskset_uuid, display = platform.resolve_taskset_id(target_ref)
+    taskset_uuid, display = resolve_taskset_id(platform, target_ref)
     if taskset_uuid:
         return Taskset.from_api(taskset_uuid)
     if allow_create:
@@ -175,11 +177,9 @@ def _confirm_sync(console: HUDConsole) -> bool:
     return True
 
 
-def _show_upload_error(error: httpx.HTTPStatusError, console: HUDConsole) -> None:
-    detail = ""
-    with contextlib.suppress(Exception):
-        detail = error.response.json().get("detail", "")
-    if error.response.status_code == 400 and detail:
+def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
+    detail = (error.response_json or {}).get("detail", "")
+    if error.status_code == 400 and isinstance(detail, str) and detail:
         console.error("Upload rejected by platform:")
         for detail_line in detail.split("\n"):
             stripped = detail_line.strip()
@@ -191,7 +191,7 @@ def _show_upload_error(error: httpx.HTTPStatusError, console: HUDConsole) -> Non
                 "the environment manifest."
             )
         return
-    console.error(f"Upload failed ({error.response.status_code}): {detail or error}")
+    console.error(f"Upload failed ({error.status_code}): {detail or error}")
 
 
 def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
@@ -303,7 +303,7 @@ def sync_tasks_command(
     except ValueError as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from e
-    except httpx.HTTPError as e:
+    except HudException as e:
         hud_console.error(f"Failed to fetch taskset: {e}")
         raise typer.Exit(1) from e
 
@@ -327,12 +327,13 @@ def sync_tasks_command(
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = platform.upload_taskset(
+        result = upload_taskset(
+            platform,
             plan.taskset_name,
             plan.to_apply,
             columns=taskset_column_definitions(list(local_taskset)),
         )
-    except httpx.HTTPStatusError as e:
+    except HudRequestError as e:
         _show_upload_error(e, hud_console)
         return
 
@@ -390,9 +391,9 @@ def sync_env_command(
         # Interactive: list environments and let user pick
         hud_console.info("Fetching your environments...")
         try:
-            envs = platform.list_registry_environments()
-        except httpx.HTTPStatusError as e:
-            hud_console.error(f"Failed to fetch environments: {e.response.status_code}")
+            envs = list_registry_environments(platform)
+        except HudRequestError as e:
+            hud_console.error(f"Failed to fetch environments: {e.status_code or e}")
             raise typer.Exit(1) from e
 
         if not envs:
@@ -431,9 +432,9 @@ def sync_env_command(
         hud_console.progress_message(f"Looking up '{name}'...")
 
         try:
-            matching = platform.resolve_registry_environments(name)
-        except httpx.HTTPStatusError as e:
-            hud_console.error(f"Failed to search environments: {e.response.status_code}")
+            matching = resolve_registry_environments(platform, name)
+        except HudRequestError as e:
+            hud_console.error(f"Failed to search environments: {e.status_code or e}")
             raise typer.Exit(1) from e
 
         if not matching:

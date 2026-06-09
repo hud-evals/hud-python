@@ -25,34 +25,6 @@ def _parse_kv_flag(args: list[str], i: int, short: str, long: str) -> tuple[str,
     return None
 
 
-def parse_env_flags(args: list[str]) -> dict[str, str]:
-    """Extract ``-e`` / ``--env`` KEY=VALUE pairs from an argument list."""
-    result: dict[str, str] = {}
-    i = 0
-    while i < len(args):
-        parsed = _parse_kv_flag(args, i, "-e", "--env")
-        if parsed:
-            result[parsed[0]] = parsed[1]
-            i = parsed[2]
-        else:
-            i += 1
-    return result
-
-
-def parse_build_args(args: list[str]) -> dict[str, str]:
-    """Extract ``--build-arg`` KEY=VALUE pairs from an argument list."""
-    result: dict[str, str] = {}
-    i = 0
-    while i < len(args):
-        parsed = _parse_kv_flag(args, i, "--build-arg", "--build-arg")
-        if parsed:
-            result[parsed[0]] = parsed[1]
-            i = parsed[2]
-        else:
-            i += 1
-    return result
-
-
 def split_docker_passthrough(
     args: list[str],
 ) -> tuple[dict[str, str], dict[str, str], list[str]]:

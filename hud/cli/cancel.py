@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
 import questionary
 import typer
 
+from hud.shared.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 
 
@@ -112,8 +112,8 @@ def cancel_command(
 
     try:
         asyncio.run(_cancel())
-    except httpx.HTTPStatusError as e:
-        hud_console.error(f"API error: {e.response.status_code} - {e.response.text}")
+    except HudRequestError as e:
+        hud_console.error(f"API error: {e}")
         raise typer.Exit(1) from e
     except Exception as e:
         hud_console.error(f"Failed to cancel: {e}")
