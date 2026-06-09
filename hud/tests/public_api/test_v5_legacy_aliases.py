@@ -8,50 +8,6 @@ surface tests.
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any
-
-import pytest
-
-
-def test_trace_warns_and_delegates_to_eval(monkeypatch: pytest.MonkeyPatch) -> None:
-    import hud
-
-    sentinel = object()
-    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-    def fake_eval(*args: Any, **kwargs: Any) -> object:
-        calls.append((args, kwargs))
-        return sentinel
-
-    monkeypatch.setattr(hud, "eval", fake_eval)
-
-    with pytest.warns(DeprecationWarning, match=r"hud\.trace\(\) is deprecated"):
-        result = hud.trace("task", variants={"model": ["test"]}, group=2)
-
-    assert result is sentinel
-    assert calls == [(("task",), {"variants": {"model": ["test"]}, "group": 2})]
-
-
-def test_load_dataset_warns_and_delegates_to_load_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import hud.datasets as datasets
-    import hud.datasets.loader as loader
-
-    sentinel = [{"slug": "task"}]
-    calls: list[tuple[str, bool]] = []
-
-    def fake_load_tasks(source: str, *, raw: bool = False) -> list[dict[str, str]]:
-        calls.append((source, raw))
-        return sentinel
-
-    monkeypatch.setattr(loader, "load_tasks", fake_load_tasks)
-
-    with pytest.warns(DeprecationWarning, match=r"load_dataset\(\) is deprecated"):
-        result = datasets.load_dataset("local-or-remote-source", raw=True)
-
-    assert result is sentinel
-    assert calls == [("local-or-remote-source", True)]
 
 
 def test_tool_router_aliases_environment_mcp_router() -> None:
@@ -61,12 +17,10 @@ def test_tool_router_aliases_environment_mcp_router() -> None:
 
 
 def test_task_reexport_paths_share_the_same_task_model() -> None:
-    import hud.types as types
-
     eval_module = import_module("hud.eval")
     task_module = import_module("hud.eval.task")
 
-    assert types.Task is eval_module.Task is task_module.Task
+    assert eval_module.Task is task_module.Task
 
 
 def test_server_mcp_server_public_and_deep_paths_match() -> None:

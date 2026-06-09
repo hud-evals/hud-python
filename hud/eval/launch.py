@@ -1,8 +1,8 @@
 """launch: connect a ``HudClient`` to a spun-up ``Sandbox``.
 
 A client-side convenience on top of the (decoupled) sandbox layer: ``launch``
-brings up a sandbox and attaches a client to its runtime, tearing both down on
-exit. ``Variant`` (see :mod:`hud.eval.variant`) sits on top of this.
+brings up a sandbox and attaches a client to its channel, tearing both down on
+exit. ``Task`` (see :mod:`hud.eval.task`) sits on top of this.
 """
 
 from __future__ import annotations
@@ -53,12 +53,12 @@ async def launch(ref: Sandbox | Environment) -> AsyncIterator[HudClient]:
 
     ``ref`` is a :class:`~hud.eval.sandbox.Sandbox` (local, container, HUD-hosted, …)
     or a live ``Environment`` (wrapped in a ``LocalSandbox``). ``launch`` *owns* what
-    it spins up; the client connects to the sandbox's runtime url, retrying until the
+    it spins up; the client connects to the sandbox's channel url, retrying until the
     control channel is ready.
     """
     sandbox = as_sandbox(ref)
-    async with sandbox as runtime:
-        parts = urlsplit(runtime.url)
+    async with sandbox as channel:
+        parts = urlsplit(channel.url)
         if parts.scheme not in ("", "tcp"):
             raise NotImplementedError(
                 f"control transport {parts.scheme!r} not supported yet (only tcp://)",

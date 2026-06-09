@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
-    from hud.eval import Variant
+    from hud.eval import Task
 
 LOGGER = logging.getLogger(__name__)
 
@@ -83,13 +83,21 @@ def _blocks_to_message_content(
     return [block.model_dump() for block in blocks]
 
 
+def _task_id(task: object) -> str | None:
+    task_id = getattr(task, "id", None)
+    if isinstance(task_id, str):
+        return task_id
+    legacy_task_id = getattr(task, "task", None)
+    return legacy_task_id if isinstance(legacy_task_id, str) else None
+
+
 class Chat(AgentExecutor):
     """Unified agent runner: multi-turn chat, MCP tool, and A2A executor.
 
     Each ``send()`` call:
     1. Appends the user message to history
-    2. Creates a Task copy with the full history as scenario args
-    3. Runs ``hud.eval(task)`` -> scenario setup -> ``ctx._run(agent)`` -> evaluate
+    2. Creates a Task copy with the full history as task args
+    3. Enters the Task, lets the agent drive the Run, then grades on exit
     4. Appends the assistant response to history
     5. Returns the Trace
 
@@ -99,7 +107,7 @@ class Chat(AgentExecutor):
 
     def __init__(
         self,
-        variant: Variant,
+        task: Task,
         /,
         *,
         model: str,
@@ -113,7 +121,7 @@ class Chat(AgentExecutor):
         """Initialize Chat.
 
         Args:
-            variant: A :class:`hud.eval.Variant` (env + task + default args).
+            task: A :class:`hud.eval.Task` (env + task id + default args).
                 Positional only. Create one by calling a task, e.g.
                 ``chat_simple(messages=[])``. Its ``messages`` arg is replaced with
                 the running conversation on each :meth:`send`.
@@ -125,11 +133,12 @@ class Chat(AgentExecutor):
             trace: Whether to record traces on the HUD platform
             quiet: When True, suppress banner/link output (default for chat)
         """
-        self._variant = variant
+        self._task = task
         self._model = model
         self._agent_params = agent_params or {}
-        self._name = name or variant.task or "chat"
-        self._description = description or f"Chat agent for {variant.task or 'tasks'}"
+        task_id = _task_id(task)
+        self._name = name or task_id or "chat"
+        self._description = description or f"Chat agent for {task_id or 'tasks'}"
         self._max_steps = max_steps
         self._trace = trace
         self._quiet = quiet
@@ -161,15 +170,15 @@ class Chat(AgentExecutor):
 
         self.messages.append({"role": "user", "content": content_data})
 
-        # Rebuild the variant with the running conversation as the ``messages`` arg,
+        # Rebuild the task with the running conversation as the ``messages`` arg,
         # then drive the agent over a fresh run (the chat task yields these messages
         # as the prompt; see the messages input modality).
-        variant = replace(
-            self._variant,
-            args={**self._variant.args, "messages": list(self.messages)},
+        task = replace(
+            self._task,
+            args={**self._task.args, "messages": list(self.messages)},
         )
         agent = self._create_agent()
-        async with variant as run:
+        async with task as run:
             await agent(run, max_steps=self._max_steps)
         result = run.trace
 
@@ -208,12 +217,13 @@ class Chat(AgentExecutor):
 
     def agent_card(self, url: str = "http://localhost:9999/") -> AgentCard:
         """Generate an AgentCard from this Chat's configuration."""
+        task_id = _task_id(self._task)
         skills = [
             AgentSkill(
-                id=self._variant.task or "default",
+                id=task_id or "default",
                 name=self._name,
                 description=self._description,
-                tags=[self._variant.task or "chat"],
+                tags=[task_id or "chat"],
             )
         ]
 

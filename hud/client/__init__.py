@@ -28,9 +28,10 @@ class Manifest:
 
 
 from .client import HudClient, HudProtocolError, connect  # noqa: E402
-from .run import Run  # noqa: E402
+from .run import Grade, Run  # noqa: E402
 
 __all__ = [
+    "Grade",
     "HudClient",
     "HudProtocolError",
     "Manifest",

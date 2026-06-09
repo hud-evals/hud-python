@@ -547,17 +547,15 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
-async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
-    """Run evaluation on the new Env/Variant/Taskset/Run flow.
+async def _run_evaluation(cfg: EvalConfig) -> tuple[Any, list[Any]]:
+    """Run evaluation on the Env/Task/Taskset/Job/Run flow.
 
-    Loads runnable ``Variant``s from a Python source (a ``.py`` file or directory
-    defining a :class:`hud.env.Env` with ``@env.task``), builds a ``Taskset``, and
-    runs the agent. Legacy JSON/JSONL files, API tasksets, and remote submission
-    are not supported on this flow yet.
+    Loads a ``Taskset`` from a Python source, JSON/JSONL taskset, or API taskset
+    name, then runs the agent locally. Remote submission is not wired yet.
     """
     from pathlib import Path
 
-    from hud.cli.utils.collect import load_variants
+    from hud.eval import Taskset
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
@@ -569,50 +567,46 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         )
         raise typer.Exit(1)
 
-    path = Path(cfg.source)
-    if not path.exists():
-        hud_console.error(
-            "`hud eval` runs the new Env/Variant flow. Pass a Python source "
-            "(a .py file or directory defining a `hud.env.Env` with `@env.task`) or a "
-            f"JSON/JSONL taskset. API tasksets are not supported yet (got: {cfg.source})."
-        )
-        raise typer.Exit(1)
-
-    hud_console.info(f"Loading variants from: {cfg.source}")
+    hud_console.info(f"Loading tasks from: {cfg.source}")
     try:
-        variants = load_variants(cfg.source)
+        path = Path(cfg.source)
+        taskset = Taskset.from_file(path) if path.exists() else Taskset.from_api(cfg.source)
     except Exception as e:
-        hud_console.error(f"Failed to load variants from {cfg.source}: {e}")
+        hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
         raise typer.Exit(1) from e
 
-    if not variants:
+    if not taskset:
         hud_console.error(
-            f"No runnable Variants found in {cfg.source}. Define a `hud.env.Env` with "
-            "`@env.task` and expose Variants (e.g. `t = my_task(arg=...)`). "
+            f"No runnable Tasks found in {cfg.source}. Define a `hud.env.Env` with "
+            "`@env.task` and expose Tasks (e.g. `t = my_task(arg=...)`). "
             "(Legacy env+scenario Tasks are not supported on the new flow.)"
         )
         raise typer.Exit(1)
 
-    # Filter by task name or positional index, or default to the first variant.
+    tasks = list(taskset)
+
+    # Filter by slug, task id, or positional index, or default to the first task.
     if cfg.task_ids:
         selector = set(cfg.task_ids)
         filtered = [
-            v
-            for i, v in enumerate(variants)
-            if getattr(v, "task", None) in selector or str(i) in selector
+            task
+            for i, task in enumerate(tasks)
+            if task.id in selector
+            or (task.slug or task.default_slug()) in selector
+            or str(i) in selector
         ]
         if not filtered:
-            hud_console.error(f"No variants matching: {', '.join(cfg.task_ids)}")
+            hud_console.error(f"No tasks matching: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
-        hud_console.info(f"Filtered to {len(filtered)} variant(s)")
-        variants = filtered
+        hud_console.info(f"Filtered to {len(filtered)} task(s)")
+        taskset = Taskset.from_tasks(taskset.name, filtered)
     elif not cfg.all:
-        variants = [variants[0]]
-        hud_console.info("Using first variant (run with --full or --task-ids for more)…")
+        taskset = Taskset.from_tasks(taskset.name, [tasks[0]])
+        hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
-    hud_console.info(f"Loaded {len(variants)} variant(s)")
+    hud_console.info(f"Loaded {len(taskset)} task(s)")
 
-    if len(variants) == 1 and cfg.group_size == 1:
+    if len(taskset) == 1 and cfg.group_size == 1:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
     else:
         hud_console.info(
@@ -620,20 +614,18 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             f"group_size: {cfg.group_size})…"
         )
 
-    from hud.eval import Taskset
-
     agent = _build_agent(cfg)
-    runs = await Taskset(variants).run(
+    job = await taskset.run(
         agent,
         group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
     )
 
-    job_id = runs[0].job_id if runs else None
+    job_id = job.id if job.runs else None
     if job_id and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"🔗 https://hud.ai/jobs/{job_id}")
 
-    return runs, variants
+    return job, list(taskset)
 
 
 # =============================================================================

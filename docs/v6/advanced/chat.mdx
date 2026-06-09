@@ -8,7 +8,7 @@ Most tasks yield a single text prompt. A **chat-style task** yields a *list of m
 
 ## Prerequisites
 
-- An environment and a task (see [Tasks](/v6/build/tasks)).
+- An environment and a task (see [Tasks](/v6/reference/tasks)).
 - A model id for `Chat` (routed through the HUD gateway).
 
 ## A chat-style task
@@ -31,7 +31,7 @@ async def assistant(messages: list[PromptMessage]):
 
 ## Driving it with `Chat`
 
-`Chat` wraps a **variant** (a called task) plus a model. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
+`Chat` wraps a concrete **Task** plus a model. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
 
 ```python chat.py
 import asyncio
@@ -47,7 +47,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud.services` (also re-exported as `hud.Chat`). The variant's `messages` argument is replaced with the running conversation on every `send`.
+`Chat` is imported from `hud.services` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`.
 
 ### Managing history
 
@@ -68,13 +68,13 @@ chat.serve(port=9999)   # blocks; serves an A2A agent with an AgentCard
 
 ## When to use chat vs. a single-turn task
 
-- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/build/tasks)).
+- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/reference/tasks)).
 - **Chat task** — when the *interaction itself* is the thing: assistants, tool-use dialogues, or anything where the agent needs prior turns. The grading model is the same — you still yield a reward.
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & variants" icon="list-check" href="/v6/build/tasks" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
 <Card title="Run on any model" icon="robot" href="/v6/run/models" />
 <Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
 <Card title="Types: Trace" icon="code" href="/v6/reference/types" />

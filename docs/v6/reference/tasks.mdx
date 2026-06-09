@@ -1,49 +1,53 @@
 ---
-title: "Tasks & variants"
-description: "The Task, Variant, and Taskset API."
+title: "Tasks & Tasksets"
+description: "The Task, Taskset, Job, and SyncPlan API."
 icon: "list-check"
 ---
 
-A **`Task`** is what `@env.task` returns (the registered definition). Calling it mints a **`Variant`** — a parameterized, runnable, serializable instance. A **`Taskset`** groups variants you evaluate one agent over.
+A **`Task`** is a concrete, runnable data point: an environment plus a task id,
+arguments, slug, and metadata. Calling an `@env.task()` function returns a
+`Task`. A **`Taskset`** is a named, ordered collection of tasks.
 
 ```python
-from hud.eval import Variant, Taskset, variant
+from hud import Environment, Taskset
+from hud.eval import Task, task
 ```
 
-## Task
+## Authoring Tasks
 
-Returned by [`@env.task`](/v6/reference/environment#registering-tasks). You rarely construct one directly.
-
-| Attribute / method | Description |
-|--------------------|-------------|
-| `task.id` | The task id. |
-| `task.description` | Human-readable description. |
-| `task.env` | The owning `Environment`. |
-| `task.input_type` / `task.return_type` | The declared `input=` / `returns=` types. |
-| `task.manifest_entry()` | The manifest dict (id, description, JSON schemas). |
-| `task(*args, **kwargs)` | **Binds a `Variant`** with those arguments. |
+`@env.task()` registers an async-generator task on an `Environment`. The returned
+callable is the authoring handle; call it with arguments to create a public
+`Task`.
 
 ```python
-v = count_letter(word="raspberry")   # -> Variant, runs nothing yet
+env = Environment("letter-count")
+
+@env.task()
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s are in '{word}'?"
+    yield 1.0 if answer == str(word.count(letter)) else 0.0
+
+task = count_letter(word="raspberry")  # -> hud.eval.Task
 ```
 
-## Variant
+## `Task`
 
-A parameterized task bound to an env or sandbox. It's a dataclass:
+`Task` is a dataclass:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `env` | `Environment \| Sandbox` | Where it runs. |
-| `task` | `str` | The task id. |
+| `id` | `str` | The task id registered on the environment. |
 | `args` | `dict` | Bound arguments. |
-| `slug` | `str \| None` | Stable id for sync/registry. |
-| `columns` | `dict \| None` | Arbitrary metadata for filtering/leaderboards. |
-| `validation` | `list[dict] \| None` | Sync metadata. |
-| `agent_config` | `dict \| None` | Sync metadata. |
+| `slug` | `str \| None` | Stable id for sync/filtering/registry. |
+| `columns` | `dict \| None` | Metadata for filtering and leaderboards. |
+| `validation` | `list[dict] \| None` | Sync/platform metadata. |
+| `agent_config` | `dict \| None` | Sync/platform metadata. |
 
-### Running a variant
+### Running a Task
 
-Enter it as an async context manager to get a live [`Run`](/v6/reference/types#run); exit grades it:
+Enter a task as an async context manager to get a live [`Run`](/v6/reference/types#run).
+Exiting the context grades it:
 
 ```python
 async with count_letter(word="strawberry") as run:
@@ -51,51 +55,110 @@ async with count_letter(word="strawberry") as run:
 print(run.reward)            # graded on exit
 ```
 
-### Methods
+### Task Methods
 
 | Method | Description |
 |--------|-------------|
-| `variant.default_slug()` | Stable slug from the task id + an args hash. |
-| `variant.to_dict()` | Serialize to `{env, task, args, ...}` (env becomes a portable ref). |
-| `Variant.from_dict(data)` | Rebuild from a serialized entry. |
+| `task.default_slug()` | Stable slug from the task id and, when present, an args hash. |
+| `task.to_dict()` | Serialize to `{env, task, args, ...}` with a portable env ref. |
+| `Task.from_dict(data)` | Rebuild from a serialized task entry. |
 
-### The `variant()` helper
+### The `task()` Helper
 
-Construct a variant explicitly (e.g. against a sandbox) with metadata:
+Construct a task explicitly when you already have an env or sandbox object:
 
 ```python
-from hud.eval import variant, RemoteSandbox
+from hud.eval import RemoteSandbox, task
 
-v = variant(RemoteSandbox("tcp://127.0.0.1:8765"), "count_letter",
-            slug="count-straw", columns={"difficulty": "easy"}, word="strawberry")
+remote = RemoteSandbox("tcp://127.0.0.1:8765")
+t = task(remote, "count_letter", slug="count-straw", word="strawberry")
 ```
 
-## Taskset
+## `Taskset`
 
-A collection of variants you evaluate one agent over.
+A named, ordered collection of tasks.
 
 ```python
-Taskset(variants: Iterable[Variant])
+taskset = Taskset.from_tasks("letters", [
+    count_letter(word="strawberry"),
+    count_letter(word="raspberry"),
+])
+```
+
+### Sources
+
+| Constructor | Description |
+|-------------|-------------|
+| `Taskset.from_tasks(name, tasks)` | Wrap an existing iterable of `Task`s. |
+| `Taskset.from_file(path)` | Load `.py`, directory, `.json`, or `.jsonl` sources. |
+| `Taskset.from_module(path)` | Load public `Task` or `Taskset` objects from Python source. |
+| `Taskset.from_package(package)` | Discover tasks from package submodules. |
+| `Taskset.from_api(name)` | Load a platform taskset by name or id. |
+| `Taskset.from_source(source)` | File/directory if it exists, otherwise platform taskset. |
+
+### Collection Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `len(taskset)` / `iter(taskset)` | Count / iterate tasks. |
+| `taskset["slug"]` | Lookup by slug. |
+| `taskset.filter(slugs)` | Keep matching slugs. |
+| `taskset.exclude(slugs)` | Drop matching slugs. |
+
+### Running
+
+`Taskset.run()` expands each task `group` times, launches a fresh environment per
+rollout, lets `agent(run)` fill the trace, grades on exit, and returns a `Job`.
+
+```python
+job = await taskset.run(agent, group=8, max_concurrent=10)
+for run in job.runs:
+    print(run.reward)
 ```
 
 | Method | Description |
 |--------|-------------|
-| `len(taskset)` / `iter(taskset)` | Count / iterate variants. |
-| `await taskset.run(agent, *, group=1, max_concurrent=None)` | Gather rollouts; returns `list[Run]`. |
+| `await taskset.run(agent, group=1, max_concurrent=None)` | Run the taskset and return `Job`. |
 
-`run` expands each variant `group` times (the repeats share a GRPO `group_id`), launches a fresh env per rollout, lets `agent(run)` fill the trace, grades on exit, and reports each trace under one HUD job. A failed launch is isolated into a failed `Run` so one bad rollout never collapses the batch.
+## `Job`
+
+One execution of a taskset.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | HUD job id. |
+| `name` | `str` | Display name. |
+| `runs` | `list[Run]` | Runs in expansion order. |
+| `group` | `int` | Runs per task. |
+
+`Job` is iterable over `runs`, so `for run in job:` works.
+
+## Sync
+
+`Taskset.diff()` compares local tasks to remote tasks and returns a `SyncPlan`.
 
 ```python
-from hud.eval import Taskset
+local = Taskset.from_file("tasks.py")
+remote = Taskset.from_api("SheetBench-50")
 
-runs = await Taskset(count_letter(word=w) for w in words).run(
-    agent, group=8, max_concurrent=10,
-)
+plan = local.diff(remote)
+print(plan.summary())
+plan.apply()
 ```
 
-## See also
+| Type / method | Description |
+|---------------|-------------|
+| `SyncPlan.to_create` | Local tasks not present remotely. |
+| `SyncPlan.to_update` | Local tasks whose signature differs. |
+| `SyncPlan.unchanged` | Matching tasks. |
+| `SyncPlan.remote_only` | Remote tasks not present locally. |
+| `SyncPlan.apply()` | Upload create/update payloads. |
+
+## See Also
 
 <CardGroup cols={2}>
+<Card title="Environment" icon="cube" href="/v6/reference/environment" />
+<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
 <Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
 <Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
 </CardGroup>

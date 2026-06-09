@@ -83,7 +83,7 @@ hud eval "My Tasks" claude --remote
 | Option | Description |
 |--------|-------------|
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |
-| `--all` | Run every variant instead of just the first. |
+| `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
 | `--gateway`, `-g` | Route LLM calls through the HUD gateway (only needs `HUD_API_KEY`). |
 | `--remote` | Submit to the platform for hosted execution. |
@@ -99,7 +99,7 @@ hud eval "My Tasks" claude --remote
 Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or load from source with `--source`.
 
 ```bash
-hud task-list                          # what variants are exposed
+hud task-list                          # what tasks are exposed
 hud task-start fix_bug                 # -> the prompt (stdout)
 hud task-grade fix_bug --answer "…"    # -> the reward (stdout)
 ```
@@ -115,7 +115,7 @@ The same commands exist as the `hud task start` / `hud task grade` / `hud task l
 ## Platform
 
 ```bash
-hud sync tasks my-taskset      # publish variants as a named taskset
+hud sync tasks my-taskset      # publish tasks as a named taskset
 hud sync env                   # sync environment metadata
 ```
 

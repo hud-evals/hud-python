@@ -1,19 +1,20 @@
-"""HUD environment runtime: Workspace + Environment + Task."""
+"""HUD environment authoring runtime."""
 
 from hud.capabilities import Capability
+from hud.server import MCPRouter
 
 from .env import Environment
-from .task import Task, TaskFn, TaskRunner
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
+
+ToolRouter = MCPRouter
 
 __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
     "Capability",
     "Environment",
+    "MCPRouter",
     "Mount",
     "MountKind",
-    "Task",
-    "TaskFn",
-    "TaskRunner",
+    "ToolRouter",
     "Workspace",
 ]

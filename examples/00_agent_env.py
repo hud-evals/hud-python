@@ -1,19 +1,10 @@
-"""Tiny agent-environment demo in one file.
+"""Tiny task lifecycle demo in one file.
 
-┌───────────────┐  tool call (MCP)  ┌───────────────┐
-│   Agent       │ ────────────────► │  Environment  │
-│ (client)      │   hud.eval()      │  (hud.Env)    │
-└───────────────┘                   └───────────────┘
+Environment = hud.Environment with one @env.task.
+Agent side = enter the concrete Task, read its prompt, write the answer to the Run.
 
-Environment = hud.Environment with @env.tool
-• Exposes one tool `sum(a, b)` using the @env.tool decorator.
-• In real projects this would be a Docker image or remote service.
-
-Agent = the client side
-• Uses `hud.eval(env())` to connect and call tools.
-• The environment handles tool routing automatically.
-
-Run `python examples/00_agent_env.py` → prints `3 + 4 = 7`.
+Run:
+    uv run python examples/00_agent_env.py
 """
 
 from __future__ import annotations
@@ -22,31 +13,22 @@ import asyncio
 
 import hud
 
-# ------------------------------------------------------------------
-# Environment (with local tools)
-# ------------------------------------------------------------------
 
 env = hud.Environment("calculator")
 
 
-@env.tool()
-def sum(a: int, b: int) -> int:
-    """Add two numbers together."""
-    return a + b
-
-
-# ------------------------------------------------------------------
-# Agent (client) – connects to env and calls tools
-# ------------------------------------------------------------------
+@env.task()
+async def add(a: int, b: int):
+    answer = yield f"What is {a} + {b}? Reply with just the number."
+    yield 1.0 if answer == str(a + b) else 0.0
 
 
 async def main() -> None:
-    """Connect to the environment and call the sum tool."""
-    # Use hud.eval() with env() to create a task and run it
-    async with hud.eval(env(), trace=False) as ctx:
-        # call_tool accepts: string + kwargs, tuple, or MCPToolCall
-        result = await ctx.call_tool("sum", a=3, b=4)
-        print("3 + 4 =", result)
+    task = add(a=3, b=4)
+    async with task as run:
+        print(run.prompt)
+        run.trace.content = "7"
+    print(f"reward={run.reward}")
 
 
 if __name__ == "__main__":

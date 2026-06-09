@@ -10,7 +10,7 @@ import secrets
 from typing import TYPE_CHECKING, Any, ParamSpec, cast
 
 from .legacy import LegacyEnvMixin
-from .task import Task, TaskRunner
+from .task import TaskRunner, _TaskFactory
 from .utils import error, read_frame, reply, send_frame
 
 if TYPE_CHECKING:
@@ -52,9 +52,8 @@ class Environment(LegacyEnvMixin):
         self.name = name
         self.version = version
         self.capabilities: list[Capability] = list(capabilities or [])
-        self._tasks: dict[str, Task[Any]] = {}
-        # One held task session, kept across disconnects so a client can start, drop
-        # the connection, and reconnect later to grade.
+        self._tasks: dict[str, _TaskFactory[Any]] = {}
+        # A disconnected task start can be resumed by a later grade request.
         self._active_runner: TaskRunner | None = None
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
         # stands up). Run once by the substrate (LocalSandbox) around serving.
@@ -71,19 +70,19 @@ class Environment(LegacyEnvMixin):
         description: str = "",
         input: Any = None,
         returns: Any = None,
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], Task[P]]:
+    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
         """Register an async-generator task (``id`` defaults to the function name).
 
         The task yields a prompt, then — once the answer is sent back — a reward.
         Either form works (both normalized to the wire protocol): friendly (``yield
         prompt`` → ``yield reward``) or explicit (``yield {"prompt": ...}`` → ``yield
         {"score": ...}``). ``input``/``returns`` optionally declare the agent's I/O
-        types (surfaced in the manifest as JSON schemas). Returns a ``Task`` — call it
-        with the task's args to get a runnable :class:`~hud.eval.Variant`.
+        types (surfaced in the manifest as JSON schemas). The decorated callable
+        returns a concrete :class:`~hud.eval.Task` when called with task args.
         """
         from .task import scenario_to_task_fn
 
-        def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> Task[P]:
+        def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
             if not inspect.isasyncgenfunction(func):
                 raise TypeError(
                     f"@env.task: {getattr(func, '__qualname__', func)} must be an async "
@@ -98,8 +97,15 @@ class Environment(LegacyEnvMixin):
                 "Callable[P, AsyncGenerator[dict[str, Any], dict[str, Any]]]",
                 scenario_to_task_fn(func),
             )
-            task = Task(self, task_id, description, normalized, input=input, returns=returns)
-            self._tasks[task_id] = cast("Task[Any]", task)
+            task = _TaskFactory(
+                self,
+                task_id,
+                description,
+                normalized,
+                input=input,
+                returns=returns,
+            )
+            self._tasks[task_id] = cast("_TaskFactory[Any]", task)
             return task
 
         return decorate
@@ -198,6 +204,7 @@ class Environment(LegacyEnvMixin):
         writer: asyncio.StreamWriter,
     ) -> None:
         session_id = "sess-" + secrets.token_hex(4)
+        active_runner: TaskRunner | None = None
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -249,28 +256,40 @@ class Environment(LegacyEnvMixin):
                         if not isinstance(args, dict):
                             await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
+                        if active_runner is not None:
+                            await active_runner.cancel()
                         if self._active_runner is not None:
-                            await self._active_runner.cancel()  # a new start replaces it
-                        self._active_runner = TaskRunner(task, args)
-                        prompt = await self._active_runner.start()
+                            await self._active_runner.cancel()
+                            self._active_runner = None
+                        active_runner = TaskRunner(task, args)
+                        prompt = await active_runner.start()
                         await reply_to(msg_id, prompt)
 
                     elif method == "tasks.grade":
-                        if self._active_runner is None:
+                        runner = active_runner or self._active_runner
+                        if runner is None:
                             await error_to(msg_id, -32600, "no task in progress")
                             continue
-                        evaluation = await self._active_runner.grade(params)
-                        self._active_runner = None
+                        evaluation = await runner.grade(params)
+                        if runner is active_runner:
+                            active_runner = None
+                        else:
+                            self._active_runner = None
                         await reply_to(msg_id, evaluation)
 
                     elif method == "tasks.cancel":
+                        if active_runner is not None:
+                            await active_runner.cancel()
+                            active_runner = None
                         if self._active_runner is not None:
                             await self._active_runner.cancel()
                             self._active_runner = None
                         await reply_to(msg_id, {"cancelled": True})
 
                     elif method == "bye":
-                        # Explicit end-of-session: tear the held task down (disconnect won't).
+                        if active_runner is not None:
+                            await active_runner.cancel()
+                            active_runner = None
                         if self._active_runner is not None:
                             await self._active_runner.cancel()
                             self._active_runner = None
@@ -285,8 +304,8 @@ class Environment(LegacyEnvMixin):
                     await error_to(msg_id, -32000, str(exc))
 
         finally:
-            # No cancel here: the held session survives disconnect (only `bye` or a
-            # replacing start tears it down) so a later connection can grade it.
+            if active_runner is not None:
+                self._active_runner = active_runner
             with contextlib.suppress(Exception):
                 writer.close()
                 await writer.wait_closed()

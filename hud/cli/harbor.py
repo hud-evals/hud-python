@@ -14,7 +14,7 @@ hud_console = HUDConsole()
 def harbor_command(
     source: str = typer.Argument(
         ...,
-        help="Tasks file (.json/.jsonl of {env, task, args}) or a .py source exposing Variants.",
+        help="Tasks file (.json/.jsonl of {env, task, args}) or a .py source exposing Tasks.",
     ),
     out_dir: str = typer.Option(
         "harbor_tasks", "--out", "-o", help="Output directory for the Harbor task folders."
@@ -38,7 +38,7 @@ def harbor_command(
         raise typer.Exit(1) from e
 
     if not created:
-        hud_console.warning(f"No variants found in {source}")
+        hud_console.warning(f"No tasks found in {source}")
         raise typer.Exit(1)
 
     hud_console.success(f"Exported {len(created)} Harbor task(s) to {out_dir}/")

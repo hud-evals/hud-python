@@ -1,12 +1,12 @@
 """Sandbox: the substrate spinup layer, decoupled from the client/server.
 
 A ``Sandbox`` brings up a substrate that serves the HUD control channel and exposes
-its ``runtime`` (url + params) — a local process (``LocalSandbox``), an attached url
+its ``channel`` (url + params) — a local process (``LocalSandbox``), an attached url
 (``RemoteSandbox``), or a HUD-hosted box (``HudSandbox``). ``launch`` wires it to a
 ``HudClient``::
 
-    async with LocalSandbox(env) as runtime:  # create() on enter, terminate() on exit
-        ...  # connect a client to runtime.url
+    async with LocalSandbox(env) as channel:  # create() on enter, terminate() on exit
+        ...  # connect a client to channel.url
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class Runtime:
+class Channel:
     """A created sandbox's connectable control channel.
 
     ``url`` is the control-channel address (``tcp://127.0.0.1:7000`` for a local
@@ -42,30 +42,30 @@ class Runtime:
 class Sandbox(ABC):
     """A spinnable substrate that exposes a HUD control channel.
 
-    Subclasses implement ``create`` (provision + return the ``Runtime``) and
+    Subclasses implement ``create`` (provision + return the ``Channel``) and
     ``terminate`` (release it) — they may do anything to get there. Use as an
     async context manager so teardown is guaranteed. Whoever creates it owns
     termination.
     """
 
-    _runtime: Runtime | None = None
+    _channel: Channel | None = None
 
     @abstractmethod
-    async def create(self) -> Runtime:
-        """Bring the substrate up and return its connectable ``Runtime``."""
+    async def create(self) -> Channel:
+        """Bring the substrate up and return its connectable ``Channel``."""
 
     @abstractmethod
     async def terminate(self) -> None:
         """Release the substrate (stop the process / container / remote box)."""
 
     @property
-    def runtime(self) -> Runtime:
-        """The connectable ``Runtime`` (after ``create``)."""
-        if self._runtime is None:
+    def channel(self) -> Channel:
+        """The connectable ``Channel`` (after ``create``)."""
+        if self._channel is None:
             raise RuntimeError("sandbox not created; call create() first")
-        return self._runtime
+        return self._channel
 
-    async def __aenter__(self) -> Runtime:
+    async def __aenter__(self) -> Channel:
         return await self.create()
 
     async def __aexit__(
@@ -86,13 +86,13 @@ class LocalSandbox(Sandbox):
         self._server: asyncio.Server | None = None
         self._serve_task: asyncio.Task[None] | None = None
 
-    async def create(self) -> Runtime:
+    async def create(self) -> Channel:
         await self._env.start()  # bring up backing cap daemons before publishing the manifest
         self._server = await self._env.bind(self._host, 0)
         host, port = self._server.sockets[0].getsockname()[:2]
         self._serve_task = asyncio.create_task(self._server.serve_forever())
-        self._runtime = Runtime(url=f"tcp://{host}:{port}")
-        return self._runtime
+        self._channel = Channel(url=f"tcp://{host}:{port}")
+        return self._channel
 
     async def terminate(self) -> None:
         if self._serve_task is not None:
@@ -106,32 +106,32 @@ class LocalSandbox(Sandbox):
                 await self._server.wait_closed()
             self._server = None
         await self._env.stop()
-        self._runtime = None
+        self._channel = None
 
 
 class RemoteSandbox(Sandbox):
     """Attach to a control channel provisioned elsewhere (an already-known url).
 
     Does not provision anything — ``create`` just returns the configured
-    ``Runtime``. Use this to point at a box you (or some other system) brought up.
+    ``Channel``. Use this to point at a box you (or some other system) brought up.
     """
 
     def __init__(self, url: str, **params: Any) -> None:
         self._url = url
         self._params = params
 
-    async def create(self) -> Runtime:
-        self._runtime = Runtime(url=self._url, params=self._params)
-        return self._runtime
+    async def create(self) -> Channel:
+        self._channel = Channel(url=self._url, params=self._params)
+        return self._channel
 
     async def terminate(self) -> None:
-        self._runtime = None
+        self._channel = None
 
 
 class HudSandbox(Sandbox):
     """A HUD-hosted sandbox, provisioned via the HUD control plane.
 
-    ``create`` provisions a box from ``image`` and returns its ``Runtime`` (url +
+    ``create`` provisions a box from ``image`` and returns its ``Channel`` (url +
     token); ``terminate`` releases it. Only the two control-plane HTTP calls
     (``_provision`` / ``_deprovision``) are left as seams to wire to the backend.
     """
@@ -150,21 +150,21 @@ class HudSandbox(Sandbox):
         self.opts = opts
         self.sandbox_id: str | None = None
 
-    async def create(self) -> Runtime:
+    async def create(self) -> Channel:
         provisioned = await self._provision()
         self.sandbox_id = provisioned["id"]
-        self._runtime = Runtime(
+        self._channel = Channel(
             url=provisioned["control_url"],
             params={"token": provisioned["token"], "sandbox_id": provisioned["id"]},
         )
-        return self._runtime
+        return self._channel
 
     async def terminate(self) -> None:
         if self.sandbox_id is not None:
             with contextlib.suppress(Exception):
                 await self._deprovision(self.sandbox_id)
             self.sandbox_id = None
-        self._runtime = None
+        self._channel = None
 
     # ─── HUD control-plane API (structure only — wire to the real endpoints) ───
 
@@ -203,7 +203,7 @@ def as_sandbox(ref: Sandbox | Environment) -> Sandbox:
 def load_module(path: str | Path) -> ModuleType:
     """Import a Python file as a throwaway module and return it.
 
-    Shared by env-ref resolution (``module`` refs) and the CLI's variant
+    Shared by env-ref resolution (``module`` refs) and the CLI's task
     collector. The file's directory is on ``sys.path`` during import so sibling
     imports resolve; the temporary module name is cleaned up afterward.
     """
@@ -277,10 +277,10 @@ def sandbox_from_ref(ref: dict[str, Any]) -> Sandbox:
 
 
 __all__ = [
+    "Channel",
     "HudSandbox",
     "LocalSandbox",
     "RemoteSandbox",
-    "Runtime",
     "Sandbox",
     "as_sandbox",
     "load_module",

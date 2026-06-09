@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 
 from hud.types import Trace
@@ -18,6 +19,31 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.client.client import HudClient
+
+
+@dataclass(slots=True)
+class Grade:
+    """Structured result from grading one run."""
+
+    reward: float = 0.0
+    done: bool = True
+    content: str | None = None
+    info: dict[str, Any] = field(default_factory=dict)
+    is_error: bool = False
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Grade:
+        raw_reward = data.get("score", data.get("reward", 0.0))
+        raw_info = data.get("info")
+        return cls(
+            reward=float(raw_reward or 0.0),
+            done=bool(data.get("done", True)),
+            content=data.get("content") if isinstance(data.get("content"), str) else None,
+            info=raw_info if isinstance(raw_info, dict) else {},
+            is_error=bool(data.get("isError", data.get("is_error", False))),
+            raw=data,
+        )
 
 
 class Run:
@@ -32,6 +58,7 @@ class Run:
         self.prompt: str | list[Any] | None = None
         self.reward: float = 0.0
         self.evaluation: dict[str, Any] = {}
+        self.grade = Grade()
         self.trace = Trace()
         #: Batch this run belongs to (set by the runner); platform job + GRPO group.
         self.job_id: str | None = None
@@ -61,7 +88,8 @@ class Run:
         if self.trace.citations:
             answer["citations"] = self.trace.citations
         self.evaluation = await self.client.grade(answer)
-        self.reward = float(self.evaluation.get("score", 0.0))
+        self.grade = Grade.from_dict(self.evaluation)
+        self.reward = self.grade.reward
         return False
 
     @classmethod
@@ -78,10 +106,11 @@ class Run:
         run.prompt = None
         run.reward = 0.0
         run.evaluation = {}
+        run.grade = Grade()
         run.trace = Trace(isError=True, content=error, info={"error": error}, trace_id=trace_id)
         run.job_id = None
         run.group_id = None
         return run
 
 
-__all__ = ["Run"]
+__all__ = ["Grade", "Run"]

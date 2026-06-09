@@ -7,25 +7,39 @@ icon: "code"
 The serializable shapes agents, tasks, and graders exchange.
 
 ```python
-from hud.client import Run
+from hud.client import Grade, Run
 from hud.types import Trace
 from hud.agents.types import AgentAnswer, Citation, EvaluationResult, SubScore, ContentResult
 ```
 
 ## `Run`
 
-The live handle for one task — the lifecycle plus the agent's `Trace`. You get one by entering a `Variant` (`async with variant as run`).
+The live handle for one task — the lifecycle plus the agent's `Trace`. You get one by entering a `Task` (`async with task as run`).
 
 | Member | Type | Description |
 |--------|------|-------------|
 | `run.prompt` | `str \| list \| None` | The task's opening prompt (text, or chat-style message list). |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
+| `run.grade` | `Grade` | Structured grade result. |
 | `run.reward` | `float` | The graded reward (set on exit). |
 | `run.evaluation` | `dict` | The full grade payload (`score` + metadata). |
 | `run.trace_id` | `str \| None` | Keys the trajectory; satisfies `Rewarded`. |
 | `run.job_id` / `run.group_id` | `str \| None` | Batch + GRPO group, set by the runner. |
 
 `Run.failed(error, *, trace_id=None)` builds a spent run for an isolated failure.
+
+## `Grade`
+
+Structured result from grading one run.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reward` | `float` | Convenience score. |
+| `done` | `bool` | Whether the task is complete. |
+| `content` | `str \| None` | Human-readable grade content. |
+| `info` | `dict` | Extra metadata. |
+| `is_error` | `bool` | Whether grading failed. |
+| `raw` | `dict` | Original grade payload. |
 
 ## `Trace`
 
@@ -65,7 +79,7 @@ One component of a grade: `name`, `value` (0–1), `weight` (default `1.0`; nega
 
 ### `EvaluationResult`
 
-Alias of `ScenarioResult` — the combined grade you can yield from a task:
+The combined grade payload you can yield from a task:
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -103,6 +117,6 @@ Declare `input=` / `returns=` on `@env.task` to surface JSON schemas in the mani
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & variants" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
 <Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
 </CardGroup>

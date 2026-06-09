@@ -1,4 +1,4 @@
-"""The v6 ``AgentTool``: schema derivation + sub-agent execution over a Variant."""
+"""The v6 ``AgentTool``: schema derivation + sub-agent execution over a Task."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def test_schema_hides_eval_only_params() -> None:
     assert tool.name == "inv"
 
 
-async def test_call_runs_subagent_over_variant() -> None:
+async def test_call_runs_subagent_over_task() -> None:
     env = _env_with_task()
     task = env._tasks["investigate"]
     tool = AgentTool(task, agent=_FakeAgent)

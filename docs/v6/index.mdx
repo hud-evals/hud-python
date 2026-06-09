@@ -10,7 +10,7 @@ A few beliefs shape everything in the SDK:
 
 1. **Environments should outlast the agents that run them.** The systems an agent works on (a shell, a browser, a filesystem) have barely changed in a decade, and the tasks built on them are just as stable. Writing an environment is nothing new: you expose the system as it already is, through a capability like an `ssh` shell, and that same environment still runs in five years when the next real-time harness or model ships. Nothing to rebuild.
 
-2. **Tasks should be generative, not declarative.** A task defines a *space* of challenges over a substrate, which is exactly the structure a synthetic pipeline needs to generate from. An entire benchmark like SWE-bench or Terminal-Bench can live as one generative task whose variants cover every instance, served from a single image. One environment holds any number of tasks; there's no separate image per task.
+2. **Tasks should be generative, not declarative.** A task definition should span a *space* of challenges over a substrate, which is exactly the structure a synthetic pipeline needs to generate from. An entire benchmark like SWE-bench or Terminal-Bench can live as one generative task definition whose concrete tasks cover every instance, served from a single image. One environment holds any number of tasks; there's no separate image per task.
 
 3. **HUD owns the environment and the reward, and nothing else.** That minimalism is what lets everything around it vary. The same reward-from-rollout loop trains a coding, computer-use, browser, or robotics agent, so an environment exposes a bounded connection the agent drives directly: `ssh` into a sandboxed workspace, `cdp` for a browser, `rfb` for a screen, `ros2` for a robot, at action rates that discrete calls or MCP round-trips can't carry. The environment ships as one standardized image that runs on any rollout infra like [Daytona](https://www.daytona.io/), [Modal](https://modal.com/), or [E2B](https://e2b.dev/), and a trainer needs only the rewards and a model API, so feeding rollouts into your own GRPO/PPO loop or a stack like [Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or [Fireworks](https://fireworks.ai/) takes no environment-side glue.
 
@@ -74,10 +74,10 @@ Every rollout is traced on the [hud.ai](https://hud.ai) platform when your `HUD_
 <Card title="Quickstart" icon="bolt" href="/v6/quickstart">
   From install to your first graded run in a few minutes.
 </Card>
-<Card title="Environments & capabilities" icon="cube" href="/v6/build/environments">
+<Card title="Environments & capabilities" icon="cube" href="/v6/reference/environment">
   Give the agent shell, browser, GUI, tools, or a robot to act on.
 </Card>
-<Card title="Tasks, variants & grading" icon="list-check" href="/v6/build/tasks">
+<Card title="Tasks, tasksets & grading" icon="list-check" href="/v6/reference/tasks">
   Turn one task definition into a whole dataset.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">

@@ -171,7 +171,7 @@ def _init_in_existing_directory(
     hud_console.info("   (after the agent answers) yields a reward.")
     hud_console.info("")
     hud_console.info("2. List the tasks to run in tasks.py")
-    hud_console.info("   Call a task with args to bind a runnable Variant.")
+    hud_console.info("   Call a task with args to bind a runnable Task.")
     hud_console.info("")
     hud_console.info("3. Run an agent over them")
     hud_console.command_example("hud eval tasks.py claude", "Evaluate locally")
@@ -181,7 +181,7 @@ def _init_in_existing_directory(
     hud_console.info("")
     hud_console.section_title("Files")
     hud_console.info("• env.py         Your environment: capabilities + @env.task tasks")
-    hud_console.info("• tasks.py       The Variants to evaluate (hud eval tasks.py <agent>)")
+    hud_console.info("• tasks.py       The Tasks to evaluate (hud eval tasks.py <agent>)")
     hud_console.info("• Dockerfile.hud Container config for deployment")
 
 

@@ -43,11 +43,15 @@ class TestHudInit:
         expected_exports = [
             "Chat",
             "Environment",
+            "Grade",
+            "Job",
+            "Run",
+            "SyncPlan",
+            "Task",
             "Taskset",
-            "Variant",
             "instrument",
             "launch",
-            "variant",
+            "task",
         ]
 
         for export in expected_exports:

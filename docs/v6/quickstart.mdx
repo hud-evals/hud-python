@@ -75,7 +75,7 @@ Three things are happening:
 
 - `Environment(name=...)` declares **where** the agent acts. This one needs no capabilities — it's a pure prompt-and-grade task.
 - `@env.task()` registers an async-generator task. The **first yield** is the prompt; the value sent back is the agent's answer; the **second yield** is the reward.
-- Calling `count_letter(word=...)` mints a **variant** — one runnable, parameterized instance. The `tasks` list is a three-variant dataset from a single definition.
+- Calling `count_letter(word=...)` creates a concrete **Task** — one runnable, parameterized instance. The `tasks` list is a three-task dataset from a single definition.
 
 ## 4. Run it
 
@@ -83,7 +83,7 @@ Three things are happening:
 hud eval tasks.py claude --gateway
 ```
 
-`hud eval` collects the variants from `tasks.py`, launches the environment, hands each run to the `claude` agent, and grades it. `--gateway` routes the model through HUD using your `HUD_API_KEY` — no provider key needed.
+`hud eval` collects the tasks from `tasks.py`, launches the environment, hands each run to the `claude` agent, and grades it. `--gateway` routes the model through HUD using your `HUD_API_KEY` — no provider key needed.
 
 By default `hud eval` runs a single task. Add `--full` to run the whole dataset:
 
@@ -97,17 +97,17 @@ The CLI prints each task's reward and a link to the trace on [hud.ai](https://hu
 
 ## What you just built
 
-You wrote one task definition, turned it into three variants, and evaluated a model on each — producing graded, traced data points. That same loop scales up without changing the task:
+You wrote one task definition, turned it into three concrete tasks, and evaluated a model on each — producing graded, traced data points. That same loop scales up without changing the task definition:
 
 <Note>
 This letter-count task is a **minimal illustration** — a single prompt-and-grade turn. A task you intend to *train* on should be multi-step and produce a spread of rewards across a group; see [Designing tasks for signal](/v6/advanced/signal).
 </Note>
 
 <CardGroup cols={2}>
-<Card title="Add capabilities" icon="cube" href="/v6/build/environments">
+<Card title="Add capabilities" icon="cube" href="/v6/reference/environment">
   Give the agent a shell, browser, GUI, tools, or a robot to act on.
 </Card>
-<Card title="Design tasks & variants" icon="list-check" href="/v6/build/tasks">
+<Card title="Design tasks & tasksets" icon="list-check" href="/v6/reference/tasks">
   Compose graders and turn one definition into a dataset.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">

@@ -626,7 +626,7 @@ class TestScenarioSignature:
         assert "task_id: TaskId):" in env_py
         assert "= " not in env_py.split("def run_task(")[1].split("):")[0]
 
-    # --- multi-env dataset: each env gets the right variant ---
+    # --- multi-env dataset: each env gets the right task ---
 
     def test_multi_env_single_task_per_env(self, dataset_multi_env: Path) -> None:
         result = self.converter.convert(dataset_multi_env)

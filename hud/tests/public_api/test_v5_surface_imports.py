@@ -20,30 +20,38 @@ import pytest
 TOP_LEVEL_DOCS_EXAMPLES_SURFACE = (
     "Chat",
     "Environment",
-    "EvalContext",
-    "eval",
+    "Grade",
+    "Job",
+    "SyncPlan",
+    "Task",
+    "Taskset",
+    "launch",
+    "task",
 )
 
 TOP_LEVEL_ENVIRONMENT_SURFACE = (
     "Environment",
-    "eval",
+    "Run",
     "instrument",
-    "trace",
 )
 
 TOP_LEVEL_EXPORTS = (
     "Chat",
     "Environment",
-    "EvalContext",
-    "eval",
+    "Grade",
+    "Job",
+    "Run",
+    "SyncPlan",
+    "Task",
+    "Taskset",
     "instrument",
-    "trace",
+    "launch",
+    "task",
 )
 
 
 DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents": (
-        "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
         "create_agent",
@@ -95,21 +103,21 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
 
 ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents": (
-        "MCPAgent",
         "OpenAIAgent",
         "OpenAIChatAgent",
         "create_agent",
     ),
     "hud.agents.claude": ("ClaudeAgent",),
-    "hud.datasets": (
-        "display_results",
-        "load_tasks",
-        "run_dataset",
-        "run_single_task",
-        "save_tasks",
-        "submit_rollouts",
-    ),
     "hud.environment": ("Environment",),
+    "hud.eval": (
+        "Channel",
+        "Job",
+        "SyncPlan",
+        "Task",
+        "Taskset",
+        "launch",
+        "task",
+    ),
     "hud.server": (
         "MCPRouter",
         "MCPServer",
@@ -177,24 +185,7 @@ DOCS_EXAMPLES_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
 
 
 ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
-    "hud.datasets.loader": ("resolve_taskset_id",),
-    "hud.environment.connection": (
-        "ConnectionConfig",
-        "ConnectionType",
-        "Connector",
-    ),
-    "hud.eval.manager": ("_send_job_enter",),
-    "hud.eval.context": (
-        "EvalContext",
-        "get_current_trace_id",
-        "set_trace_context",
-    ),
     "hud.eval.task": ("Task",),
-    "hud.datasets.utils": (
-        "BatchRequest",
-        "SingleTaskRequest",
-        "submit_rollouts",
-    ),
     "hud.native.graders": (
         "BashGrader",
         "Grade",

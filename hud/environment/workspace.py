@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import shutil
@@ -28,7 +27,7 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 
 MountKind = Literal["ro", "rw", "tmpfs", "symlink", "proc", "dev"]
 
-# kind -> (normal-flag, optional-variant or None, takes-src)
+# kind -> (normal flag, optional modifier, takes source)
 _MOUNT_FLAGS: dict[MountKind, tuple[str, str | None, bool]] = {
     "ro": ("--ro-bind", "--ro-bind-try", True),
     "rw": ("--bind", "--bind-try", True),
@@ -96,7 +95,6 @@ class Workspace:
         authorized_client_keys: list[Path] | None = None,
     ) -> None:
         self.root: Path = Path(root).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
 
         # Path the root is mounted at inside the sandbox (and the default cwd).
         # Defaults to /workspace; set to the root's real path for callers that
@@ -119,27 +117,32 @@ class Workspace:
 
         # ssh config
         self._ssh_host = host
+        self._ssh_port = port
         self._ssh_user = user
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
         self._serve_task: asyncio.Task[None] | None = None
         self._client_key_path: Path | None = None
+        self._host_key: asyncssh.SSHKey | None = None
+        self._host_pubkey_str: str | None = None
+        self._authorized_keys_path: Path | None = None
+        self._sock: socket.socket | None = None
+        self._bound_host: str | None = None
+        self._bound_port: int | None = None
 
-        # ─── synchronous spinup ───
+    def _prepare_runtime(self) -> None:
+        """Materialize filesystem credentials and bind the SSH socket."""
+        if self._sock is not None:
+            return
+        self.root.mkdir(parents=True, exist_ok=True)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind((host, port))
+        self._sock.bind((self._ssh_host, self._ssh_port))
         self._sock.listen(128)
         self._bound_host, self._bound_port = self._sock.getsockname()[:2]
-
-        # Kick off the async accept loop if an event loop is running.
-        with contextlib.suppress(RuntimeError):
-            loop = asyncio.get_running_loop()
-            self._serve_task = loop.create_task(self._serve())
-
         LOGGER.info(
             "Workspace SSH bound on %s as user %r (client key: %s)",
             self.ssh_url,
@@ -151,6 +154,10 @@ class Workspace:
 
     async def _serve(self) -> None:
         """Run the asyncssh accept loop on the pre-bound socket."""
+        self._prepare_runtime()
+        assert self._sock is not None
+        assert self._host_key is not None
+        assert self._authorized_keys_path is not None
         self._acceptor = await asyncssh.listen(
             sock=self._sock,
             server_host_keys=[self._host_key],
@@ -166,10 +173,10 @@ class Workspace:
     async def start(self) -> None:
         """Ensure the SSH accept loop is running. Idempotent.
 
-        The socket is already bound in ``__init__``; this just guarantees the
-        async acceptor exists (for callers that construct ``Workspace`` outside
-        a running loop).
+        The first start prepares credentials and binds the socket, then ensures
+        the async acceptor exists.
         """
+        self._prepare_runtime()
         if self._serve_task is None and self._acceptor is None:
             self._serve_task = asyncio.get_event_loop().create_task(self._serve())
         # Yield so the acceptor binds before first use.
@@ -179,17 +186,23 @@ class Workspace:
 
     @property
     def ssh_url(self) -> str:
-        """``ssh://host:port`` — available immediately after construction."""
+        """``ssh://host:port`` — prepared lazily on first access."""
+        self._prepare_runtime()
+        assert self._bound_host is not None
+        assert self._bound_port is not None
         return f"ssh://{self._bound_host}:{self._bound_port}"
 
     @property
     def ssh_host_pubkey(self) -> str:
         """OpenSSH-format public host key (for harness ``known_hosts``)."""
+        self._prepare_runtime()
+        assert self._host_pubkey_str is not None
         return self._host_pubkey_str
 
     @property
     def ssh_client_key_path(self) -> Path | None:
         """Ephemeral client private key path (None if external keys supplied)."""
+        self._prepare_runtime()
         return self._client_key_path
 
     @property
@@ -200,8 +213,7 @@ class Workspace:
     def capability(self, name: str = "shell") -> Capability:
         """The ``ssh`` capability for this workspace.
 
-        Available at construction (url/keys are generated synchronously), so an env
-        can declare it up front: ``Environment(..., capabilities=[ws.capability()])``.
+        Prepares url/keys lazily, so ``Workspace(...)`` itself remains declarative.
         """
         from hud.capabilities import Capability
 

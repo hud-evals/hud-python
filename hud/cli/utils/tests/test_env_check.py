@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_parse_generated_at_variants():
+def test_parse_generated_at_build_timestamp():
     ts = _parse_generated_at({"build": {"generatedAt": datetime.now(UTC).isoformat()}})
     assert isinstance(ts, float)
     assert _parse_generated_at({}) is None

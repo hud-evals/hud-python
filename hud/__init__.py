@@ -7,19 +7,24 @@ from __future__ import annotations
 
 # Apply patches to third-party libraries early, before other imports
 from . import patches as _patches  # noqa: F401
+from .client import Grade, Run
 from .environment import Environment
-from .eval import Taskset, Variant, launch, variant
+from .eval import Job, SyncPlan, Task, Taskset, launch, task
 from .services import Chat
 from .telemetry.instrument import instrument
 
 __all__ = [
     "Chat",
     "Environment",
+    "Grade",
+    "Job",
+    "Run",
+    "SyncPlan",
+    "Task",
     "Taskset",
-    "Variant",
     "instrument",
     "launch",
-    "variant",
+    "task",
 ]
 
 try:

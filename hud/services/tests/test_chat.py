@@ -14,7 +14,7 @@ from a2a.server.events.event_queue import EventQueue
 from a2a.types import TaskArtifactUpdateEvent, TaskState, TaskStatusUpdateEvent
 from mcp.types import TextContent
 
-from hud.eval import Variant
+from hud.eval import Task
 from hud.services.chat import Chat, _content_to_blocks
 
 # ---------------------------------------------------------------------------
@@ -24,8 +24,8 @@ from hud.services.chat import Chat, _content_to_blocks
 
 @pytest.fixture()
 def dummy_task() -> Any:
-    """Minimal Variant for Chat construction."""
-    return Variant(env=MagicMock(), task="test_scenario")
+    """Minimal Task for Chat construction."""
+    return Task(env=MagicMock(), id="test_scenario")
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ class TestChatConstruction:
 
     def test_positional_task(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, model="test-model")
-        assert chat._variant is dummy_task
+        assert chat._task is dummy_task
         assert chat._model == "test-model"
 
     def test_messages_start_empty(self, dummy_task: Any) -> None:
@@ -91,12 +91,12 @@ class TestMessageFormat:
 
         run = MagicMock()
         run.trace = MagicMock(content="response text", citations=[])
-        fake_variant = MagicMock()
-        fake_variant.__aenter__ = AsyncMock(return_value=run)
-        fake_variant.__aexit__ = AsyncMock(return_value=False)
+        fake_task = MagicMock()
+        fake_task.__aenter__ = AsyncMock(return_value=run)
+        fake_task.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch("hud.services.chat.replace", return_value=fake_variant),
+            patch("hud.services.chat.replace", return_value=fake_task),
             patch.object(chat, "_create_agent", return_value=AsyncMock()),
         ):
             await chat.send("hello")

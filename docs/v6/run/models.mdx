@@ -8,7 +8,7 @@ An **evaluation** is one run: an agent works the protocol against an environment
 
 ## Prerequisites
 
-- A task to run (see [Tasks](/v6/build/tasks)).
+- A task to run (see [Tasks](/v6/reference/tasks)).
 - A `HUD_API_KEY` for gateway routing + tracing, **or** a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) to call a provider directly.
 
 ## The fastest path: `hud eval`
@@ -32,7 +32,7 @@ Useful flags:
 | Flag | Effect |
 |------|--------|
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`) |
-| `--all` | Run every variant instead of just the first |
+| `--all` | Run every task instead of just the first |
 | `--model`, `-m` | Pin a specific model id |
 | `--group-size N` | Run each task `N` times (for GRPO / variance) |
 | `--max-concurrent N` | Cap parallel rollouts |

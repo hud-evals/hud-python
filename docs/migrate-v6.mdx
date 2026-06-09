@@ -11,7 +11,7 @@ v6 is a leaner spec. The environment is no longer an MCP server that hands tools
 **Environments are mostly backwards compatible.** The v6 SDK still runs environments written against the v5 surface: `@env.scenario`, `@env.tool` / `env.add_tool`, `env("scenario")`, and `env.run(...)` all keep working — each emits a `DeprecationWarning` and adapts to v6 under the hood. New (v6) agents can evaluate your existing environments unchanged.
 
 <Warning>
-**The break is on the agent/runtime side.** v6 serves a new control channel instead of MCP stdio/http, so **old (v5) agents cannot run old or new environments** — once an environment is served by the v6 SDK (whether authored in the v5 or v6 style), only a v6 client can drive it. Upgrade the side that *runs* agents to v6.
+**The break is on the agent side.** v6 serves a new control channel instead of MCP stdio/http, so **old (v5) agents cannot run old or new environments** — once an environment is served by the v6 SDK (whether authored in the v5 or v6 style), only a v6 client can drive it. Upgrade the side that *runs* agents to v6.
 </Warning>
 
 So you can upgrade the SDK first and keep your environments as-is, then convert at your own pace. Converting is worth it: the v6 spec removes most of the tool-wiring boilerplate.
@@ -23,10 +23,10 @@ So you can upgrade the SDK first and keep your environments as-is, then convert 
 | `Environment("name")` | `Environment(name="name", capabilities=[...])` | positional name still works; declare capabilities up front |
 | `@env.scenario("count")` | `@env.task()` | same `yield prompt` then `yield reward` generator |
 | `@env.tool` / `env.add_tool(ComputerTool())` | a **capability** (`ssh` / `mcp` / `cdp` / `rfb` / `ros2`) | the agent's harness brings the tools now |
-| `env("count", word=...)` | `count(word=...)` | keep the `@env.task` return value; calling it builds a `Variant` |
-| `task.run("claude")` / `hud.eval(task)` | `async with variant as run: await agent(run)` | or just `hud eval tasks.py claude` |
+| `env("count", word=...)` | `count(word=...)` | keep the `@env.task` return value; calling it builds a `Task` |
+| `task.run("claude")` / `hud.eval(task)` | `async with task as run: await agent(run)` | or just `hud eval tasks.py claude` |
 | `env.run(transport=...)` | `await env.serve()` / `hud dev` / `hud deploy` | v6 serves a control channel, not MCP |
-| `.slug`, `.columns` on a task | `.slug`, `.columns` on the `Variant` | unchanged |
+| `.slug`, `.columns` on a task | `.slug`, `.columns` on the `Task` | unchanged |
 
 The CLI you already use is stable: `hud init`, `hud dev`, `hud build`, `hud deploy`, `hud eval`, and `hud sync tasks` all carry over.
 
@@ -83,8 +83,8 @@ async def fix_tests(target: str = "tests/"):
 `@env.task()` also accepts `id=`, `description=`, and optional `input=` / `returns=` types (surfaced as JSON schemas in the manifest). The v5 scenario options (`chat`, `returns`, `exclude_tools`, ...) still parse through the compatibility layer if you keep `@env.scenario`.
 </Step>
 
-<Step title="Build variants by calling the task">
-`env("fix-tests", target="tests/")` becomes a direct call on the task function. It returns a `Variant` — the runnable unit — and `.slug` / `.columns` work exactly as before:
+<Step title="Build tasks by calling the task function">
+`env("fix-tests", target="tests/")` becomes a direct call on the task function. It returns a `Task` — the runnable unit — and `.slug` / `.columns` work exactly as before:
 
 ```python title="tasks.py (v6)"
 from env import fix_tests
@@ -102,7 +102,7 @@ Locally, `hud eval` is unchanged:
 hud eval tasks.py claude
 ```
 
-Programmatically, the `hud.eval(task)` context manager and `task.run(model)` are replaced by entering the variant and handing the run to an agent:
+Programmatically, the `hud.eval(task)` context manager and `task.run(model)` are replaced by entering the task and handing the run to an agent:
 
 ```python
 from hud.agents import create_agent
@@ -124,7 +124,7 @@ v5 served an MCP server via `env.run(transport=...)`. v6 serves its control chan
 
 ## Converting with an agent
 
-The conversion is mechanical, so the fastest path is to let your coding agent do it. Add the HUD docs to your agent — they're available as an MCP server at `docs.hud.ai/mcp`, or use the **Copy / Claude / ChatGPT** buttons at the top of any docs page — then point it at this guide and the [Environment reference](/reference/environments) and ask it to adapt your `env.py`. A prompt like:
+The conversion is mechanical, so the fastest path is to let your coding agent do it. Add the HUD docs to your agent — they're available as an MCP server at `docs.hud.ai/mcp`, or use the **Copy / Claude / ChatGPT** buttons at the top of any docs page — then point it at this guide and the [Environment reference](/v6/reference/environment) and ask it to adapt your `env.py`. A prompt like:
 
 > Convert this v5 HUD environment to v6 using the migration guide at docs.hud.ai. Rename scenarios to tasks, replace registered tools with the capability they imply (shell/files → `ssh`, browser → `cdp`, computer-use → `rfb`, custom tools → `mcp`), switch `env("name", ...)` to calling the task, and fix the `hud.tools` imports below.
 
@@ -147,16 +147,16 @@ The rule of thumb: **result types move to `hud.agents.types`, tools become capab
 ## Next steps
 
 <CardGroup cols={2}>
-<Card title="Scaffolding" icon="hammer" href="/building/scaffolding">
-  The full environment authoring guide.
+<Card title="Environment reference" icon="hammer" href="/v6/reference/environment">
+  Define capabilities, lifecycle hooks, and tasks.
 </Card>
-<Card title="Environment Reference" icon="desktop" href="/reference/environments">
+<Card title="Environment reference" icon="desktop" href="/v6/reference/environment">
   Tasks, capabilities, and serving.
 </Card>
-<Card title="Tasks & Evaluation" icon="flask-vial" href="/building/tasks-and-evaluation">
-  Define tasks, run them, iterate.
+<Card title="Tasks & Tasksets" icon="flask-vial" href="/v6/reference/tasks">
+  Define tasks, collect tasksets, and grade runs.
 </Card>
-<Card title="Deploy & Go Remote" icon="rocket" href="/building/running-at-scale">
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
   Publish with hud deploy and run at scale.
 </Card>
 </CardGroup>

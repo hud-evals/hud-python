@@ -77,7 +77,7 @@ async def test():
 
     agent = ClaudeAgent()
 
-    # Calling a scenario binds a runnable Variant; entering it launches the env.
+    # Calling a task binds a runnable Task; entering it launches the env.
     async with count(sentence="Strawberry world", letter="r") as run:
         await agent(run)          # fills run.trace; answer is run.trace.content
 
@@ -97,8 +97,11 @@ if __name__ == "__main__":
 #   from hud.eval import Taskset
 #   from hud.agents.claude import ClaudeAgent
 #
-#   ts = Taskset(count(sentence=s, letter="r") for s in ["strawberry", "raspberry"])
-#   runs = await ts.run(ClaudeAgent(), group=4, max_concurrent=8)
+#   ts = Taskset.from_tasks(
+#       "letters",
+#       [count(sentence=s, letter="r") for s in ["strawberry", "raspberry"]],
+#   )
+#   job = await ts.run(ClaudeAgent(), group=4, max_concurrent=8)
 '''
 # fmt: on
 
@@ -107,7 +110,7 @@ TASKS_PY = '''\
 
 from env import count
 
-# ``hud eval`` collects these Variants — each is the ``count`` task bound to
+# ``hud eval`` collects these Tasks — each is the ``count`` task bound to
 # concrete args. Add your own, or build them in a loop.
 tasks = [
     count(sentence="Strawberry world", letter="r"),

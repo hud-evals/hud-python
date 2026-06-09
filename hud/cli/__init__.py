@@ -25,7 +25,7 @@ SUPPORT_HINT = (
 
 # ---------------------------------------------------------------------------
 # Register commands (each module owns its Typer args, docstring, and logic)
-# NOTE: `sync` is registered below once migrated to the Variant flow.
+# NOTE: `sync` is registered below once migrated to the Taskset flow.
 # ---------------------------------------------------------------------------
 
 from .build import build_command  # noqa: E402
@@ -118,7 +118,7 @@ app.add_typer(client_app, name="client")
 # Task subcommand group (start a task / grade an answer, direct from source or via --url)
 app.add_typer(task_app, name="task")
 
-# Sync subcommand group (migrated to the Variant flow)
+# Sync subcommand group (migrated to the Taskset flow)
 app.add_typer(sync_app, name="sync")
 
 

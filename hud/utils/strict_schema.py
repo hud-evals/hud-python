@@ -155,8 +155,8 @@ def _ensure_strict_json_schema(
     any_of = json_schema.get("anyOf")
     if _is_list(any_of):
         json_schema["anyOf"] = [
-            _ensure_strict_json_schema(variant, path=(*path, "anyOf", str(i)), root=root)
-            for i, variant in enumerate(any_of)
+            _ensure_strict_json_schema(option, path=(*path, "anyOf", str(i)), root=root)
+            for i, option in enumerate(any_of)
         ]
 
     # --- oneOf → anyOf (oneOf unsupported in nested contexts) ---
@@ -166,8 +166,8 @@ def _ensure_strict_json_schema(
         if not _is_list(existing_any_of):
             existing_any_of = []
         json_schema["anyOf"] = existing_any_of + [
-            _ensure_strict_json_schema(variant, path=(*path, "oneOf", str(i)), root=root)
-            for i, variant in enumerate(one_of)
+            _ensure_strict_json_schema(option, path=(*path, "oneOf", str(i)), root=root)
+            for i, option in enumerate(one_of)
         ]
         json_schema.pop("oneOf")
 

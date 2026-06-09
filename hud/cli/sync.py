@@ -13,7 +13,6 @@ import httpx
 import typer
 
 from hud.cli.utils.api import hud_headers, require_api_key
-from hud.cli.utils.collect import collect_variants
 from hud.cli.utils.project_config import (
     get_taskset_id,
     load_project_config,
@@ -31,295 +30,6 @@ sync_app = typer.Typer(
     add_completion=False,
     rich_markup_mode="rich",
 )
-
-
-def _short_scenario_name(name: str) -> str:
-    """Strip env prefix from scenario name: 'my-env:echo' → 'echo'."""
-    return name.rsplit(":", 1)[-1] if ":" in name else name
-
-
-def _compute_remote_signature(remote_task: dict[str, Any]) -> str:
-    """Compute signature from a remote task dict (from platform API)."""
-    scenario: str = remote_task.get("scenario") or ""
-    raw_args = remote_task.get("args")
-    args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
-    validation: list[dict[str, Any]] | None = remote_task.get("validation")
-    agent_config: dict[str, Any] | None = remote_task.get("agent_config") or None
-    columns: dict[str, Any] | None = remote_task.get("column_values") or None
-    return _compute_signature(scenario, args, validation, agent_config, columns)
-
-
-def _compute_signature(
-    scenario_name: str,
-    args: dict[str, Any],
-    validation: list[dict[str, Any]] | None,
-    agent_config: dict[str, Any] | None,
-    columns: dict[str, Any] | None = None,
-) -> str:
-    """Compute a deterministic signature for diff comparison.
-
-    Uses the short scenario name (after colon) so that env-prefix
-    renames don't cause unnecessary updates. The prefix is an MCP
-    namespacing artifact — the actual scenario identity within a
-    registry is the short name.
-    """
-    short = _short_scenario_name(scenario_name)
-    sig_data: dict[str, Any] = {"args": args}
-    if validation is not None:
-        sig_data["validation"] = validation
-    if agent_config:
-        sig_data["agent_config"] = agent_config
-    if columns:
-        sig_data["columns"] = columns
-    return f"{short}|" + json.dumps(
-        sig_data,
-        sort_keys=True,
-        default=str,
-        separators=(",", ":"),
-    )
-
-
-def _build_local_specs(
-    variants: list[Any],
-    hud_console: HUDConsole,
-) -> list[dict[str, Any]]:
-    """Convert :class:`hud.eval.Variant`s into local spec dicts for sync comparison.
-
-    A Variant is ``(env-ref, task, args)`` — leaner than the legacy ``Task``: it has
-    no ``validation``/``agent_config``/``columns`` (those are sent as ``None``), and
-    its ``slug`` defaults to ``Variant.default_slug()`` (task id + args hash).
-    """
-    from hud.eval import Variant
-
-    specs: list[dict[str, Any]] = []
-
-    for i, variant in enumerate(variants):
-        if not isinstance(variant, Variant):
-            hud_console.warning(f"Item {i} is not a Variant, skipping")
-            continue
-
-        ref = variant.to_dict()["env"]  # {"type": ..., "name"|"url": ...}
-        env_name = ref.get("name")
-        scenario_name = variant.task
-        if env_name and ":" not in scenario_name:
-            scenario_name = f"{env_name}:{scenario_name}"
-
-        args_dict = variant.args or {}
-        slug = variant.slug.strip() if variant.slug else variant.default_slug()
-        env_config: dict[str, Any] = {"name": env_name} if env_name else {}
-
-        specs.append(
-            {
-                "slug": slug,
-                "scenario_name": str(scenario_name),
-                "args": args_dict,
-                "validation": variant.validation,
-                "agent_config": variant.agent_config,
-                "env": env_config,
-                "columns": variant.columns,
-                "signature": _compute_signature(
-                    scenario_name,
-                    args_dict,
-                    variant.validation,
-                    variant.agent_config,
-                    variant.columns,
-                ),
-            }
-        )
-
-    slug_counts: dict[str, int] = {}
-    for spec in specs:
-        s = spec["slug"]
-        slug_counts[s] = slug_counts.get(s, 0) + 1
-    duplicates = sorted(s for s, c in slug_counts.items() if c > 1)
-    if duplicates:
-        hud_console.error(f"Duplicate slugs: {', '.join(duplicates)}")
-        raise typer.Exit(1)
-
-    return specs
-
-
-def _diff_and_display(
-    local_specs: list[dict[str, Any]],
-    remote_tasks: list[dict[str, Any]],
-    taskset_display: str,
-    taskset_id: str,
-    taskset_exists: bool,
-    hud_console: HUDConsole,
-    *,
-    collection_failures: list[tuple[str, str]] | None = None,
-    switching_from: str | None = None,
-) -> list[dict[str, Any]]:
-    """Diff local vs remote, display plan, return tasks to upload."""
-    remote_by_slug: dict[str, dict[str, Any]] = {}
-    for rt in remote_tasks:
-        remote_slug = rt.get("slug") or rt.get("external_id")
-        if isinstance(remote_slug, str) and remote_slug:
-            remote_by_slug[remote_slug] = rt
-
-    to_create: list[dict[str, Any]] = []
-    to_update: list[dict[str, Any]] = []
-    unchanged = 0
-
-    for spec in local_specs:
-        slug = spec["slug"]
-        existing = remote_by_slug.pop(slug, None)
-        if existing is None:
-            to_create.append(spec)
-            continue
-
-        remote_sig = _compute_remote_signature(existing)
-
-        if remote_sig == spec["signature"]:
-            unchanged += 1
-        else:
-            to_update.append(spec)
-
-    remote_only = len(remote_by_slug)
-
-    hud_console.info("")
-    hud_console.section_title(f"Sync plan for '{taskset_display}'")
-
-    if not taskset_exists:
-        hud_console.info("  Taskset will be created")
-    if switching_from:
-        hud_console.warning(f"  Switching from previously stored taskset ({switching_from[:8]}...)")
-
-    if collection_failures:
-        hud_console.info(f"\n  Skipped ({len(collection_failures)}):")
-        for rel_path, error in collection_failures:
-            hud_console.info(f"    ! {rel_path}: {error}")
-
-    if to_create:
-        hud_console.info(f"\n  Create ({len(to_create)}):")
-        for spec in sorted(to_create, key=lambda s: s["slug"]):
-            hud_console.info(f"    + {spec['slug']}")
-        _detect_slug_renames(remote_by_slug, to_create, hud_console)
-    if to_update:
-        hud_console.info(f"\n  Update ({len(to_update)}):")
-        for spec in sorted(to_update, key=lambda s: s["slug"]):
-            hud_console.info(f"    ~ {spec['slug']}")
-    if unchanged:
-        hud_console.info(f"\n  Unchanged: {unchanged}")
-    if remote_only:
-        hud_console.info(f"\n  Remote-only (not in local source): {remote_only}")
-
-    return sorted(
-        [*to_create, *to_update],
-        key=lambda s: s["slug"],
-    )
-
-
-def _detect_slug_renames(
-    remote_by_slug: dict[str, dict[str, Any]],
-    to_create: list[dict[str, Any]],
-    hud_console: HUDConsole,
-) -> None:
-    """Detect possible slug renames: new local slug with same signature as orphaned remote."""
-    if not to_create or not remote_by_slug:
-        return
-
-    for spec in to_create:
-        for remote_slug, remote_task in remote_by_slug.items():
-            remote_sig = _compute_remote_signature(remote_task)
-            if remote_sig == spec["signature"]:
-                hud_console.info(
-                    f"    (looks like '{remote_slug}' was renamed to '{spec['slug']}')"
-                )
-                break
-
-
-def _infer_column_type(values: list[Any]) -> str:
-    """Infer a column type from observed values across tasks.
-
-    Returns one of: "text", "number", "single-select", "multi-select".
-    Heuristic: if all non-None values are numeric -> "number";
-    if any value is a list -> "multi-select";
-    otherwise -> "text".
-    """
-    non_none = [v for v in values if v is not None]
-    if not non_none:
-        return "text"
-    if any(isinstance(v, list) for v in non_none):
-        return "multi-select"
-    if all(isinstance(v, (int, float)) for v in non_none):
-        return "number"
-    return "text"
-
-
-def _build_column_definitions(
-    all_specs: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]] | None:
-    """Auto-infer evalset column definitions from all local task column values.
-
-    Scans column values across every spec (not just to_upload) so that
-    definitions reflect the full taskset even on partial uploads.
-    """
-    values_by_col: dict[str, list[Any]] = {}
-    for spec in all_specs:
-        cols = spec.get("columns")
-        if not cols:
-            continue
-        for col_name, col_val in cols.items():
-            values_by_col.setdefault(col_name, []).append(col_val)
-
-    if not values_by_col:
-        return None
-
-    definitions: dict[str, dict[str, Any]] = {}
-    for col_name, vals in values_by_col.items():
-        col_type = _infer_column_type(vals)
-        col_def: dict[str, Any] = {"type": col_type}
-        if col_type == "single-select":
-            col_def["options"] = sorted({str(v) for v in vals if v is not None})
-        elif col_type == "multi-select":
-            all_opts: set[str] = set()
-            for v in vals:
-                if isinstance(v, list):
-                    all_opts.update(v)
-                elif v is not None:
-                    all_opts.add(str(v))
-            col_def["options"] = sorted(all_opts)
-        definitions[col_name] = col_def
-    return definitions
-
-
-def _upload_tasks(
-    to_upload: list[dict[str, Any]],
-    taskset_name: str,
-    api_url: str,
-    headers: dict[str, str],
-    column_definitions: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """POST tasks to /tasks/upload and return the response."""
-    payload: dict[str, Any] = {
-        "name": taskset_name,
-        "tasks": [
-            {
-                "slug": spec["slug"],
-                "env": spec["env"],
-                "scenario": spec["scenario_name"],
-                "args": spec["args"],
-                **(
-                    {"validation": spec["validation"]} if spec.get("validation") is not None else {}
-                ),
-                **({"agent_config": spec["agent_config"]} if spec.get("agent_config") else {}),
-                **({"column_values": spec["columns"]} if spec.get("columns") else {}),
-            }
-            for spec in to_upload
-        ],
-    }
-    if column_definitions:
-        payload["columns"] = column_definitions
-
-    response = httpx.post(
-        f"{api_url}/tasks/upload",
-        json=payload,
-        headers=headers,
-        timeout=60.0,
-    )
-    response.raise_for_status()
-    return response.json()
 
 
 def _export_remote_tasks(
@@ -543,63 +253,58 @@ def sync_tasks_command(
             pass
 
     # Collect local tasks
-    collection_failures: list[tuple[str, str]] = []
     hud_console.progress_message(f"Collecting tasks from {source}...")
     try:
-        raw_tasks = collect_variants(source)
+        from hud.eval import Taskset
+
+        local_taskset = Taskset.from_file(source)
     except (ImportError, FileNotFoundError, ValueError) as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from e
 
+    raw_tasks = list(local_taskset)
     if not raw_tasks:
         hud_console.error(f"No Task objects found in: {source}")
         raise typer.Exit(1)
 
     hud_console.success(f"Found {len(raw_tasks)} task(s)")
 
-    # Build local specs (validates slugs, scenarios, etc.)
-    local_specs = _build_local_specs(raw_tasks, hud_console)
-
-    # Cross-check: resolve current env name from platform, check local refs match
+    # Cross-check: resolve current env name from platform, check local refs match.
+    # Do not rewrite Python source here; registry identity belongs in project config.
     stored_registry_id = config.get("registryId")
-    if stored_registry_id and local_specs:
-        from hud.cli.utils.name_check import check_and_fix_env_name, resolve_registry_name
+    if stored_registry_id and raw_tasks:
+        from hud.cli.utils.name_check import resolve_registry_name
 
         platform_env_name = resolve_registry_name(stored_registry_id, api_url, headers)
         if platform_env_name:
             if platform_env_name != config.get("registryName"):
                 save_project_config({"registryName": platform_env_name})
 
-            task_env_names = {
-                s["env"].get("name") for s in local_specs if s.get("env") and s["env"].get("name")
-            }
+            task_env_names = set()
+            for task in raw_tasks:
+                env_name = task.to_dict()["env"].get("name")
+                if env_name:
+                    task_env_names.add(env_name)
             mismatched_names = {n for n in task_env_names if n != platform_env_name}
             if mismatched_names:
-                source_dir = Path(source).resolve()
-                if source_dir.is_file():
-                    source_dir = source_dir.parent
-                fixed = check_and_fix_env_name(source_dir, platform_env_name, hud_console)
-                if fixed:
-                    hud_console.progress_message("Re-collecting tasks after name fix...")
-                    collection_failures = []
-                    raw_tasks = collect_variants(source)
-                    local_specs = _build_local_specs(raw_tasks, hud_console)
+                hud_console.warning(
+                    "Local task env names do not match the linked platform environment "
+                    f"'{platform_env_name}': {', '.join(sorted(mismatched_names))}"
+                )
 
     # Apply filters
     if task_filter:
-        local_specs = [s for s in local_specs if s["slug"] == task_filter]
-        if not local_specs:
+        local_taskset = local_taskset.filter([task_filter])
+        if not local_taskset:
             hud_console.error(f"No task found with slug '{task_filter}'")
             raise typer.Exit(1)
     if exclude:
-        exclude_set = set(exclude)
-        local_specs = [s for s in local_specs if s["slug"] not in exclude_set]
-        if not local_specs:
+        local_taskset = local_taskset.exclude(exclude)
+        if not local_taskset:
             hud_console.error("No tasks left after exclusions")
             raise typer.Exit(1)
 
     # Fetch remote state (skip if taskset doesn't exist yet)
-    taskset_exists = bool(resolved_taskset_id)
     taskset_name = taskset_display
     remote_tasks: list[dict[str, Any]] = []
 
@@ -613,7 +318,7 @@ def sync_tasks_command(
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                taskset_exists = False
+                remote_tasks = []
             else:
                 hud_console.error(f"Failed to fetch taskset: {e}")
                 raise typer.Exit(1) from e
@@ -621,29 +326,20 @@ def sync_tasks_command(
     if not taskset_name and taskset:
         taskset_name = taskset
 
-    switching_from = (
-        previously_stored_id
-        if previously_stored_id and previously_stored_id != resolved_taskset_id
-        else None
-    )
-
     # Force mode: skip diff, upload everything
     if force:
-        to_upload = local_specs
-        hud_console.info(f"\n  --force: uploading all {len(to_upload)} task(s)")
-    else:
-        to_upload = _diff_and_display(
-            local_specs,
-            remote_tasks,
-            taskset_display,
-            resolved_taskset_id,
-            taskset_exists,
-            hud_console,
-            collection_failures=collection_failures,
-            switching_from=switching_from,
+        plan = local_taskset.diff(
+            Taskset.from_tasks(taskset_name, []),
+            api_url=api_url,
+            headers=headers,
         )
+        hud_console.info(f"\n  --force: uploading all {len(plan.to_apply)} task(s)")
+    else:
+        remote_taskset = Taskset.from_remote_tasks(taskset_name, remote_tasks)
+        plan = local_taskset.diff(remote_taskset, api_url=api_url, headers=headers)
+        hud_console.info("\n" + plan.summary())
 
-    if not to_upload:
+    if not plan.to_apply:
         hud_console.success("All tasks up to date")
         return
 
@@ -663,13 +359,10 @@ def sync_tasks_command(
             hud_console.info("  Aborted.")
             return
 
-    # Infer column definitions from ALL local specs (not just to_upload)
-    column_definitions = _build_column_definitions(local_specs)
-
     # Upload (platform validates envs + scenarios inline)
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = _upload_tasks(to_upload, taskset_name, api_url, headers, column_definitions)
+        result = plan.apply(taskset_name=taskset_name, api_url=api_url, headers=headers)
     except httpx.HTTPStatusError as e:
         detail = ""
         import contextlib
@@ -889,14 +582,6 @@ def sync_env_command(
                     hud_console.info(f"    ... and {len(scenarios) - 15} more")
             else:
                 hud_console.warning("  No scenarios registered (deploy environment first)")
-    except Exception:  # noqa: S110
-        pass
-
-    # Post-check: if local Environment("...") doesn't match, offer to fix
-    try:
-        from hud.cli.utils.name_check import check_and_fix_env_name
-
-        check_and_fix_env_name(env_dir, env_name_for_lookup, hud_console)
     except Exception:  # noqa: S110
         pass
 

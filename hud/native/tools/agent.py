@@ -1,8 +1,8 @@
-"""AgentTool — expose a task as a tool that runs a sub-agent (v6).
+"""AgentTool — expose an env task as a tool that runs a sub-agent (v6).
 
-A v5 holdover, re-homed onto the v6 rollout flow: wrap a :class:`~hud.environment.task.Task`
+A v5 holdover, re-homed onto the v6 rollout flow: wrap an ``@env.task`` callable
 (e.g. ``env("write_section")``) so an orchestrator can call it like a tool. Each
-call binds a :class:`~hud.eval.Variant`, drives a fresh agent over it, and returns
+call binds a :class:`~hud.eval.Task`, drives a fresh agent over it, and returns
 the agent's answer (``run.trace.content``).
 
 Parameters declared ``name | None = None`` on the underlying scenario are
@@ -24,7 +24,7 @@ from .base import BaseTool
 if TYPE_CHECKING:
     from fastmcp.tools import FunctionTool, ToolResult
 
-    from hud.environment.task import Task
+    from hud.environment.task import _TaskFactory
 
 LOGGER = logging.getLogger("hud.native.tools.agent")
 
@@ -68,7 +68,7 @@ class AgentTool(BaseTool):
 
     def __init__(
         self,
-        task: Task[Any],
+        task: _TaskFactory[Any],
         *,
         model: str | None = None,
         agent: Any = None,
@@ -162,9 +162,9 @@ class AgentTool(BaseTool):
 
         @instrument(category="subagent", name=self.name)
         async def _run() -> ToolResult:
-            variant = cast("Any", self._task)(**args)
+            task = cast("Any", self._task)(**args)
             agent = self._make_agent()
-            async with variant as run:
+            async with task as run:
                 await agent(run)
             return ToolResult(content=[TextContent(type="text", text=run.trace.content or "")])
 

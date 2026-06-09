@@ -47,8 +47,8 @@ def _patch_chat(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _service() -> ChatService:
-    variant = cast("Any", SimpleNamespace(task="demo"))
-    return ChatService(variant, model="gpt-test")
+    task = cast("Any", SimpleNamespace(task="demo"))
+    return ChatService(task, model="gpt-test")
 
 
 def test_agent_card() -> None:

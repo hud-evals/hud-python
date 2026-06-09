@@ -6,7 +6,7 @@ icon: "robot"
 
 An **agent** drives one run to completion. The whole contract is a single method:
 
-```python
+```text
 async def __call__(self, run: Run) -> None
 ```
 
@@ -18,7 +18,7 @@ from hud.agents import create_agent, ClaudeAgent, OpenAIAgent, GeminiAgent, Open
 
 ## `create_agent`
 
-```python
+```text
 create_agent(model: str, **kwargs) -> Agent
 ```
 

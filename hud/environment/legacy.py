@@ -7,9 +7,9 @@ Deployed v5 envs are written against the old MCP-server ``Env``: positional
 JSON-RPC control channel of capabilities + tasks), so this mixin re-exposes that
 surface and *adapts* it to v6:
 
-- scenarios register as v6 tasks (via :func:`scenario_to_task_fn`), keeping the
+- scenarios register as v6 tasks (via the env task adapter), keeping the
   v5 metadata (chat flag, returns type, tool exclusions) for agents/manifest;
-- ``env(name)`` returns the registered ``Task`` (a callable variant factory);
+- ``env(name)`` returns the registered task factory;
 - ``env.run(...)`` serves the v6 control channel;
 - registered tools are classified and, on serve, turned into capabilities:
   shell/edit → ``ssh`` (spins up a :class:`~hud.environment.Workspace`), computer
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal, ParamSpec, cast
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from .task import Task
+    from .task import _TaskFactory
     from .workspace import Workspace
 
 LOGGER = logging.getLogger("hud.environment.legacy")
@@ -83,7 +83,7 @@ class LegacyEnvMixin:
 
     # Provided by Environment:
     name: str
-    _tasks: dict[str, Task[Any]]
+    _tasks: dict[str, _TaskFactory[Any]]
     _on_start: list[Callable[[], Any]]
     _on_stop: list[Callable[[], Any]]
     add_capability: Callable[..., None]
@@ -268,7 +268,7 @@ class LegacyEnvMixin:
         allowed_tools: list[str] | None = None,
         returns: type | None = None,
         enable_citations: bool = False,
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], Task[P]]:
+    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
         """[deprecated] Register a scenario as a v6 task. Prefer ``@env.task``.
 
         Accepts the full v5 ``scenario`` signature; the generator (``yield prompt``
@@ -283,7 +283,7 @@ class LegacyEnvMixin:
             stacklevel=2,
         )
 
-        def decorate(fn: Callable[P, AsyncGenerator[Any, Any]]) -> Task[P]:
+        def decorate(fn: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
             scenario_name = name or fn.__name__
             if ":" in scenario_name:
                 raise ValueError(
@@ -296,7 +296,9 @@ class LegacyEnvMixin:
 
             desc = description or (fn.__doc__ or "").strip().split("\n", 1)[0]
             register = cast("Any", self).task  # provided by Environment
-            task: Task[P] = register(id=scenario_name, description=desc, returns=returns)(fn)
+            task: _TaskFactory[P] = register(id=scenario_name, description=desc, returns=returns)(
+                fn
+            )
 
             self._scenario_fns[scenario_name] = fn
             if chat:
@@ -318,15 +320,14 @@ class LegacyEnvMixin:
     # ─── callable factory + run (v5 env("scenario"), env.run) ─────────────
 
     def __call__(self, name: str, /, **args: Any) -> Any:
-        """[deprecated] ``env("scenario")`` → the registered ``Task`` (or a ``Variant``).
+        """[deprecated] ``env("scenario")`` → the registered task factory or ``Task``.
 
-        With no args, returns the registered :class:`~hud.environment.task.Task`
-        (a callable variant factory — e.g. for ``AgentTool``). With args, returns the
-        bound :class:`~hud.eval.Variant`.
+        With no args, returns the callable registered by ``@env.task`` (e.g. for
+        ``AgentTool``). With args, returns the bound :class:`~hud.eval.Task`.
         """
         warnings.warn(
             "env('scenario') is deprecated: keep a reference to the @env.task return "
-            "value (a Task) and call it to build a Variant.",
+            "value and call it to build a Task.",
             DeprecationWarning,
             stacklevel=2,
         )

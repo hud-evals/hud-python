@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from hud.agents.types import AgentAnswer
 from hud.client import HudProtocolError
-from hud.environment import Environment
+from hud.environment import Environment, Workspace
 from hud.environment.legacy import _classify_tool
 from hud.eval import Taskset, launch
 
@@ -76,6 +76,16 @@ def test_classify_tool_buckets() -> None:
     assert _classify_tool(Marked()) == "computer"
 
 
+def test_workspace_construction_has_no_runtime_side_effects(tmp_path) -> None:
+    root = tmp_path / "workspace"
+
+    workspace = Workspace(root)
+
+    assert not root.exists()
+    assert workspace._sock is None
+    assert workspace._host_key is None
+
+
 # ─── single rollout over the wire ─────────────────────────────────────
 
 
@@ -102,14 +112,15 @@ async def test_wrong_answer_scores_zero() -> None:
 async def test_taskset_concurrent_grouped_rollouts() -> None:
     env = _sum_env()
     add = cast("Any", env._tasks["add"])
-    taskset = Taskset(add(a=i, b=i + 1) for i in range(4))
+    taskset = Taskset.from_tasks("adds", (add(a=i, b=i + 1) for i in range(4)))
 
-    runs = await taskset.run(_FnAgent(_solve_add), group=2, max_concurrent=3)
+    job = await taskset.run(_FnAgent(_solve_add), group=2, max_concurrent=3)
+    runs = job.runs
 
-    assert len(runs) == 8  # 4 variants x group of 2
+    assert len(runs) == 8  # 4 tasks x group of 2
     assert all(r.reward == 1.0 for r in runs)
     assert all(r.job_id == runs[0].job_id for r in runs)  # one job for the batch
-    # Each variant's group repeats share a group_id; 4 distinct groups of 2.
+    # Each task's group repeats share a group_id; 4 distinct groups of 2.
     groups = [r.group_id for r in runs]
     assert len(set(groups)) == 4
     assert all(groups.count(g) == 2 for g in set(groups))
@@ -125,7 +136,10 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
             raise RuntimeError("agent exploded")
         return _solve_add(prompt)
 
-    runs = await Taskset(add(a=i, b=1) for i in range(4)).run(_FnAgent(solve_or_boom))
+    job = await Taskset.from_tasks("adds", (add(a=i, b=1) for i in range(4))).run(
+        _FnAgent(solve_or_boom)
+    )
+    runs = job.runs
 
     assert len(runs) == 4
     failed = [r for r in runs if r.trace.isError]

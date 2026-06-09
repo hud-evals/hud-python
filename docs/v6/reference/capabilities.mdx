@@ -37,7 +37,7 @@ Build a capability with the factory for its protocol; each normalizes shorthand 
 
 ### `Capability.ssh`
 
-```python
+```text
 Capability.ssh(*, name="shell", url, user="agent", host_pubkey,
                client_key_path=None, shell=None)
 ```
@@ -46,7 +46,7 @@ SSH with publickey auth. `shell` declares the remote shell (`bash`, `powershell`
 
 ### `Capability.cdp`
 
-```python
+```text
 Capability.cdp(*, name="browser", url, target_id=None)
 ```
 
@@ -54,7 +54,7 @@ Chromium DevTools over WebSocket (default port `9222`).
 
 ### `Capability.rfb`
 
-```python
+```text
 Capability.rfb(*, name="screen", url, password=None, display=0)
 ```
 
@@ -62,7 +62,7 @@ VNC/RFB pixel + HID server. Port defaults to `5900 + display`. Host multiple scr
 
 ### `Capability.mcp`
 
-```python
+```text
 Capability.mcp(*, name="tools", url, auth_token=None)
 ```
 
@@ -70,7 +70,7 @@ An MCP server. Only `ws` / `wss` / `http` / `https` URLs (no stdio).
 
 ### `Capability.ros2`
 
-```python
+```text
 Capability.ros2(*, name="ros", url)
 ```
 
@@ -81,7 +81,7 @@ A rosbridge-compatible WebSocket (default port `9090`).
 `Workspace` backs the `ssh` capability: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP).
 
 ```python
-from hud.environment import Workspace
+from hud.environment import Environment, Workspace
 
 ws = Workspace("/workspace")
 env = Environment(name="coder", capabilities=[ws.capability()])
@@ -127,6 +127,6 @@ The bundled provider agents open these automatically based on which capabilities
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Environments & capabilities" icon="cube" href="/v6/build/environments" />
+<Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
 <Card title="Agents" icon="robot" href="/v6/reference/agents" />
 </CardGroup>

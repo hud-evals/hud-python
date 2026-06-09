@@ -41,18 +41,17 @@ def _read_env_manifest(env_dir: Path) -> dict[str, Any]:
     if len(envs) > 1:
         raise ValueError(f"multiple Environments in {env_file}; expected exactly one")
     manifest = envs[0].to_dict()
-    # Bake the declared variant catalog (slug -> task + args) into the manifest, so the
-    # packaged image carries the runnable set, not just task definitions. Same collector
-    # `hud eval`/`hud task` use; empty if the source declares no Variants/Taskset.
+
     import contextlib
 
-    from hud.cli.utils.collect import collect_variants
+    from hud.eval import Taskset
 
-    variants: list[Any] = []
+    tasks: list[Any] = []
     with contextlib.suppress(Exception):
-        variants = collect_variants(str(env_dir))
-    manifest["variants"] = [
-        {"slug": v.slug or v.default_slug(), "task": v.task, "args": v.args} for v in variants
+        tasks = list(Taskset.from_module(env_dir))
+    manifest["tasks"] = [
+        {"slug": task.slug or task.default_slug(), "task": task.id, "args": task.args}
+        for task in tasks
     ]
     return manifest
 
@@ -681,7 +680,8 @@ def build_environment(
 
     hud_console.status_item("Version", new_version)
     hud_console.status_item("Lock file", "hud.lock.yaml")
-    hud_console.status_item("Tools found", str(analysis["toolCount"]))
+    hud_console.status_item("Tasks found", str(len(analysis.get("tasks") or [])))
+    hud_console.status_item("Capabilities found", str(len(analysis.get("capabilities") or [])))
 
     if image_id:
         hud_console.dim_info("\nImage digest", image_id)

@@ -1,9 +1,8 @@
-"""Task: async-generator that yields {"prompt": ...} then {"score": ...}.
+"""Environment-side task factories and runners.
 
-A ``Task`` is the in-env challenge definition (formerly "scenario"): an async
-generator that yields a prompt for the agent, then — once an answer is sent
-back via ``asend`` — yields a score. ``TaskRunner`` drives one task through
-its ``start -> grade`` lifecycle.
+The public SDK task model lives in :mod:`hud.eval.task`. This module keeps the
+server-side callable returned by ``@env.task`` private: it records the generator
+function and builds public ``hud.eval.Task`` objects when called.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, cast
 
 if TYPE_CHECKING:
-    from hud.eval import Variant
+    from hud.eval import Task as EvalTask
 
     from .env import Environment
 
@@ -24,15 +23,14 @@ TaskFn = Callable[..., AsyncGenerator[dict[str, Any], dict[str, Any]]]
 P = ParamSpec("P")
 
 
-class Task(Generic[P]):
-    """A registered challenge (returned by ``@env.task``) and a factory for variants.
+class _TaskFactory(Generic[P]):
+    """Registered ``@env.task`` callable that creates concrete public tasks.
 
     ``TaskRunner`` drives its async-generator ``func`` (prompt → score) server-side;
-    calling the ``Task`` with the task's args binds a runnable
-    :class:`~hud.eval.Variant`::
+    calling this object with args binds a runnable :class:`~hud.eval.Task`::
 
-        variant = fix_bug(difficulty=3)  # -> Variant
-        async with variant as run:
+        task = fix_bug(difficulty=3)  # -> Task
+        async with task as run:
             await agent(run)
     """
 
@@ -68,11 +66,11 @@ class Task(Generic[P]):
                     entry[key] = TypeAdapter(typ).json_schema()
         return entry
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Variant:
-        from hud.eval import Variant  # local import: avoid env<->eval cycle
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> EvalTask:
+        from hud.eval.task import Task  # local import: avoid env<->eval cycle
 
         bound = self._sig.bind(*args, **kwargs)
-        return Variant(env=self.env, task=self.id, args=dict(bound.arguments))
+        return Task(env=self.env, id=self.id, args=dict(bound.arguments))
 
 
 def _jsonable(value: Any) -> Any:
@@ -187,7 +185,7 @@ def scenario_to_task_fn(scenario_fn: Any) -> Any:
 class TaskRunner:
     """Drives one task through prompt -> grade."""
 
-    def __init__(self, task: Task[Any], args: dict[str, Any] | None = None) -> None:
+    def __init__(self, task: _TaskFactory[Any], args: dict[str, Any] | None = None) -> None:
         self.task = task
         self._args = args or {}
         self._gen: AsyncGenerator[dict[str, Any], dict[str, Any]] | None = None
@@ -233,4 +231,4 @@ class TaskRunner:
             self._gen = None
 
 
-__all__ = ["Task", "TaskFn", "TaskRunner", "scenario_to_task_fn"]
+__all__ = ["TaskFn", "TaskRunner", "scenario_to_task_fn"]

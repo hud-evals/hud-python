@@ -239,7 +239,7 @@ def deploy_environment(
 
     # For rebuilds, resolve actual name from platform (--name doesn't rename)
     from hud.cli.utils.api import hud_headers as _headers
-    from hud.cli.utils.name_check import check_and_fix_env_name, resolve_registry_name
+    from hud.cli.utils.name_check import find_env_name_references, resolve_registry_name
     from hud.settings import settings as _settings
 
     if registry_id:
@@ -252,8 +252,12 @@ def deploy_environment(
             name = platform_name
 
     hud_console.info(f"Environment name: {name}")
-    label = "deployed environment name" if registry_id else "deploy target name"
-    check_and_fix_env_name(env_dir, name, hud_console, label=label)
+    mismatched_refs = [ref for ref in find_env_name_references(env_dir) if ref[3] != name]
+    if mismatched_refs:
+        hud_console.warning(
+            "Local Environment(...) references differ from the deploy target. "
+            "Deploy will not rewrite source; update code or project config explicitly."
+        )
 
     # Resolve whether to include .env vars
     # .env is always loaded as the base layer unless --no-env is passed.

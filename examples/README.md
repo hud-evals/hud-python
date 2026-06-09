@@ -5,10 +5,11 @@ A collection of examples demonstrating HUD SDK usage patterns.
 ## Quick Start
 
 ### 00_agent_env.py
-Minimal MCP server and client in one file. Shows the basic agent-environment communication pattern using `hud.eval()`.
+Minimal environment and agent in one file. Shows the `Task` lifecycle: define a task,
+enter it to get a `Run`, let an agent fill the trace, and read the reward.
 
 ```bash
-python examples/00_agent_env.py
+uv run examples/00_agent_env.py
 ```
 
 ## Coding Agents
@@ -32,18 +33,17 @@ uv run python examples/01_codex_coding_agent.py --local \
 
 ## Key Concepts
 
-### Using hud.eval()
+### Tasks, tasksets, jobs
 
-All examples use `hud.eval()` as the primary entry point:
+Create concrete tasks by calling an `@env.task` function. Group tasks into a
+`Taskset` when you want to evaluate a batch:
 
 ```python
-async with hud.eval(task, name="my-eval", variants={"model": "gpt-4o"}) as ctx:
-    result = await agent.run(ctx, max_steps=10)
-    print(f"Reward: {ctx.reward}")
+from hud import Taskset
+
+taskset = Taskset.from_tasks("my-eval", [count_letter(word="strawberry")])
+job = await taskset.run(agent)
+print(job.runs[0].reward)
 ```
 
-The context manager handles:
-- Environment connection (MCP servers start)
-- Scenario setup execution
-- Telemetry and tracing
-- Automatic scenario evaluation on exit
+Each `Run` owns the agent trace and grade result.

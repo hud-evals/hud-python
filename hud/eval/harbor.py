@@ -83,23 +83,23 @@ async def _materialize_prompt(env: Environment, task: str, args: dict[str, Any])
     return prompt if isinstance(prompt, str) else json.dumps(prompt, indent=2, default=str)
 
 
-def _resolve_env(variant: Any) -> Environment:
-    """Resolve a variant's env-ref to a local :class:`Environment` for materialization.
+def _resolve_env(task: Any) -> Environment:
+    """Resolve a task's env-ref to a local :class:`Environment` for materialization.
 
-    A ``Variant`` from a Python source carries the ``Environment`` directly; one
+    A ``Task`` from a Python source carries the ``Environment`` directly; one
     loaded from a tasks file carries a ``LocalSandbox`` over it (module env-ref).
     Remote / HUD-hosted env-refs can't be materialized locally.
     """
     from hud.environment import Environment
     from hud.eval.sandbox import LocalSandbox
 
-    env = variant.env
+    env = task.env
     if isinstance(env, LocalSandbox):
         env = env._env
     if not isinstance(env, Environment):
         raise TypeError(
             "harbor export needs a local Environment (a module env-ref or env.py); "
-            f"got {type(variant.env).__name__}. Remote/HUD env-refs aren't supported.",
+            f"got {type(task.env).__name__}. Remote/HUD env-refs aren't supported.",
         )
     return env
 
@@ -257,12 +257,12 @@ async def export(
     """Export HUD tasks from *source* into Harbor task folders under *out_dir*.
 
     *source* is either a **tasks file** (``.json`` / ``.jsonl`` of ``{env, task,
-    args}`` entries) or a ``.py`` file/dir exposing ``Variant``s. One folder is
+    args}`` entries) or a ``.py`` file/dir exposing ``Task``s. One folder is
     written per task (task + args), each a self-contained Harbor task. Requires the
     env's build context (a ``Dockerfile.hud``/``Dockerfile`` next to the source).
     Returns the created task directories.
     """
-    from hud.cli.utils.collect import collect_variants, load_variants_json
+    from hud.eval import Taskset
 
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -270,9 +270,9 @@ async def export(
     source_dir = src.parent if src.is_file() else src
 
     if src.suffix in (".json", ".jsonl"):
-        variants = load_variants_json(src)
+        tasks = list(Taskset.from_file(src))
     else:
-        variants = collect_variants(source)
+        tasks = list(Taskset.from_file(source))
 
     dockerfile = _find_dockerfile(source_dir)
     if dockerfile is None:
@@ -282,31 +282,31 @@ async def export(
         )
 
     created: list[Path] = []
-    for variant in variants:
-        env = _resolve_env(variant)
+    for task in tasks:
+        env = _resolve_env(task)
         _check_capabilities(env)
 
-        slug = variant.slug or variant.default_slug()
+        slug = task.slug or task.default_slug()
         task_dir = out / slug
         (task_dir / "tests").mkdir(parents=True, exist_ok=True)
 
-        prompt = await _materialize_prompt(env, variant.task, variant.args)
+        prompt = await _materialize_prompt(env, task.id, task.args)
         instruction = prompt + _INSTRUCTION_SUFFIX.format(answer_file=answer_file)
         _write_text(task_dir / "instruction.md", instruction)
 
         _write_text(
             task_dir / "task.toml",
-            _harbor_task_toml(slug, variant.task, variant.args, timeout_sec),
+            _harbor_task_toml(slug, task.id, task.args, timeout_sec),
         )
 
-        _write_environment(task_dir, source_dir, dockerfile, variant.task, variant.args, out)
+        _write_environment(task_dir, source_dir, dockerfile, task.id, task.args, out)
 
         _write_text(
             task_dir / "tests" / "test.sh",
             _TEST_SH.format(
                 port=CONTROL_PORT,
-                task=variant.task,
-                args_json=json.dumps(variant.args),
+                task=task.id,
+                args_json=json.dumps(task.args),
                 answer_file=answer_file,
             ),
         )
