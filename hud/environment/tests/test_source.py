@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.environment.source import EnvironmentSource
+from hud.environment.source import EnvironmentSource, normalize_environment_name
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -15,6 +15,16 @@ def _write(path: Path, content: str) -> None:
 
 
 # ─── identity ──────────────────────────────────────────────────────────
+
+
+def test_normalize_environment_name() -> None:
+    assert normalize_environment_name("terminal-bench") == "terminal-bench"
+    assert normalize_environment_name("My Cool_Bench") == "my-cool-bench"
+    assert normalize_environment_name("bench@2.0!") == "bench20"
+    assert normalize_environment_name("--hello--") == "hello"
+    assert normalize_environment_name("a---b") == "a-b"
+    assert normalize_environment_name("@#$") == "environment"
+    assert normalize_environment_name("", default="converted") == "converted"
 
 
 def test_environment_name_override() -> None:

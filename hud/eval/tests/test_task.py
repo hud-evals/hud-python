@@ -212,6 +212,32 @@ example = task(env, "solve", slug="alpha", n=2)
     assert Taskset.from_package("cases")["alpha"].args == {"n": 2}
 
 
+def test_load_environment_selects_by_attr_or_env_name(tmp_path) -> None:
+    from hud.eval import load_environment
+
+    module = tmp_path / "envs.py"
+    module.write_text(
+        """
+from hud import Environment
+
+first = Environment("env-one")
+second = Environment("env-two")
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert load_environment(module, name="first").name == "env-one"
+    assert load_environment(module, name="env-two").name == "env-two"
+    with pytest.raises(ValueError, match="multiple Environments"):
+        load_environment(module)
+    with pytest.raises(ValueError, match="no Environment named 'missing'"):
+        load_environment(module, name="missing")
+
+    single = tmp_path / "single.py"
+    single.write_text("from hud import Environment\nenv = Environment('only')\n", encoding="utf-8")
+    assert load_environment(single).name == "only"
+
+
 def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_request(method: str, url: str, **kwargs: object) -> dict[str, object]:
         assert method == "GET"

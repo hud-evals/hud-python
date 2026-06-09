@@ -25,7 +25,7 @@ git config core.hooksPath .githooks
 ### Running Tests
 
 ```bash
-uv run pytest --rootdir=hud -q
+uv run pytest -q
 ```
 
 Tests run on Python 3.11 and 3.12 in CI.

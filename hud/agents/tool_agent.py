@@ -175,9 +175,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     tools[tool.provider_name] = tool
                     params.append(tool.to_params())
 
-        params.extend(
-            hosted.to_params() for hosted in hosted_tools if hosted.supports_model(model)
-        )
+        params.extend(hosted.to_params() for hosted in hosted_tools if hosted.supports_model(model))
 
         return tools, params
 

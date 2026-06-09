@@ -245,6 +245,29 @@ def load_module(path: str | Path) -> ModuleType:
         sys.modules.pop(mod_name, None)
 
 
+def load_environment(path: str | Path, *, name: str | None = None) -> Environment:
+    """Import a Python file and return the :class:`Environment` defined in it.
+
+    The one module-to-Environment scanner (env-ref resolution and ``hud dev``
+    both go through it). *name* selects among multiple environments, matching
+    either the module attribute name or ``Environment.name``. Raises
+    ``ValueError`` when nothing matches or the choice is ambiguous.
+    """
+    from hud.environment import Environment  # local import: avoid import cycle at module load
+
+    module = load_module(path)
+    envs = {attr: v for attr, v in vars(module).items() if isinstance(v, Environment)}
+    if name is not None:
+        matched = [v for attr, v in envs.items() if name in (attr, v.name)]
+    else:
+        matched = list(envs.values())
+    if not matched:
+        raise ValueError(f"no Environment{f' named {name!r}' if name else ''} found in {path}")
+    if len(matched) > 1:
+        raise ValueError(f"multiple Environments in {path}; select one by name")
+    return matched[0]
+
+
 def sandbox_from_ref(ref: dict[str, Any]) -> Sandbox:
     """Resolve a serialized env reference to a :class:`Sandbox`.
 
@@ -258,24 +281,12 @@ def sandbox_from_ref(ref: dict[str, Any]) -> Sandbox:
     - ``{"type": "hud", "name": "my-env", "opts": {...}?}`` →
       :class:`HudSandbox` provisioned from the HUD registry by name (HUD-hosted).
     """
-    from hud.environment import Environment  # local import: avoid import cycle at module load
-
     kind = ref.get("type")
     if kind == "module":
         module = ref.get("module")
         if not isinstance(module, str):
             raise ValueError("env-ref type 'module' requires a string 'module' path")
-        wanted = ref.get("name")
-        envs = [v for v in vars(load_module(module)).values() if isinstance(v, Environment)]
-        if wanted is not None:
-            envs = [e for e in envs if e.name == wanted]
-        if not envs:
-            raise ValueError(
-                f"no Environment{f' named {wanted!r}' if wanted else ''} found in {module}",
-            )
-        if len(envs) > 1:
-            raise ValueError(f"multiple Environments in {module}; add a 'name' to the env-ref")
-        return LocalSandbox(envs[0])
+        return LocalSandbox(load_environment(module, name=ref.get("name")))
     if kind == "url":
         url = ref.get("url")
         if not isinstance(url, str):
@@ -296,6 +307,7 @@ __all__ = [
     "RemoteSandbox",
     "Sandbox",
     "as_sandbox",
+    "load_environment",
     "load_module",
     "sandbox_from_ref",
 ]

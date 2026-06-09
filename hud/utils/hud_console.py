@@ -585,15 +585,10 @@ class HUDConsole:
             return f"  [{GREEN}]✓[/{GREEN}] [{TEXT}]{escaped_content}[/{TEXT}]"
 
     def confirm(self, message: str, default: bool = True) -> bool:
-        """Print a confirmation message.
-
-        Args:
-            message: The confirmation message
-            default: If True, the default choice is True
-        """
+        """Prompt for a yes/no confirmation; Ctrl+C / EOF answers no."""
         import questionary
 
-        return questionary.confirm(message, default=default).ask()
+        return bool(questionary.confirm(message, default=default, qmark="").ask())
 
     # Symbol-based output methods
     def symbol(self, symbol: str, message: str, color: str = GOLD, stderr: bool = True) -> None:

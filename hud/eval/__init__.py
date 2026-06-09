@@ -24,6 +24,7 @@ from .sandbox import (
     RemoteSandbox,
     Sandbox,
     as_sandbox,
+    load_environment,
     load_module,
     sandbox_from_ref,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "as_sandbox",
     "group_relative",
     "launch",
+    "load_environment",
     "load_module",
     "sandbox_from_ref",
     "task",

@@ -164,19 +164,6 @@ def _fetch_remote_taskset(
     raise typer.Exit(1)
 
 
-def _confirm_sync(console: HUDConsole) -> bool:
-    console.info("")
-    try:
-        answer = input("  Proceed? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        console.info("\n  Aborted.")
-        raise typer.Exit(1) from None
-    if answer not in ("y", "yes"):
-        console.info("  Aborted.")
-        return False
-    return True
-
-
 def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
     detail = (error.response_json or {}).get("detail", "")
     if error.status_code == 400 and isinstance(detail, str) and detail:
@@ -320,8 +307,8 @@ def sync_tasks_command(
         hud_console.info("\n  --dry-run: no changes made")
         return
 
-    # Confirm
-    if not yes and not _confirm_sync(hud_console):
+    if not yes and not hud_console.confirm("Proceed?", default=False):
+        hud_console.info("Aborted.")
         return
 
     # Upload tasks; the platform validates referenced environments.
@@ -452,15 +439,9 @@ def sync_env_command(
 
     if existing_registry_id and existing_registry_id != selected_env.id:
         hud_console.warning(f"Currently linked to: {existing_registry_id[:8]}...")
-        if not yes:
-            try:
-                answer = input("Switch to new environment? [y/N] ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                hud_console.info("\nAborted.")
-                raise typer.Exit(0) from None
-            if answer not in ("y", "yes"):
-                hud_console.info("Aborted.")
-                return
+        if not yes and not hud_console.confirm("Switch to new environment?", default=False):
+            hud_console.info("Aborted.")
+            return
 
     changed = env_source.save_config(
         {"registryId": selected_env.id, "registryName": selected_env.name},

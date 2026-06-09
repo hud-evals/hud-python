@@ -26,8 +26,7 @@ def _load_environment(module: str | None) -> Any:
     ``path/to/env.py``. Returns the ``Environment`` instance, or ``None`` if the
     target isn't a v6 environment.
     """
-    from hud.environment import Environment
-    from hud.eval import load_module
+    from hud.eval import load_environment
 
     target, _, attr = (module or "env").partition(":")
     path = Path(target)
@@ -36,20 +35,13 @@ def _load_environment(module: str | None) -> Any:
     if not path.exists():
         return None
     try:
-        mod = load_module(path)
+        return load_environment(path, name=attr or None)
+    except ValueError as exc:
+        hud_console.error(f"{exc} (select one with 'module:attr')")
+        return None
     except Exception as exc:
         hud_console.error(f"Failed to import {path}: {exc}")
         return None
-    if attr:
-        obj = getattr(mod, attr, None)
-        return obj if isinstance(obj, Environment) else None
-    envs = [v for v in vars(mod).values() if isinstance(v, Environment)]
-    if len(envs) > 1:
-        hud_console.error(
-            f"Multiple Environments found in {path}; specify one with 'module:attr'.",
-        )
-        return None
-    return envs[0] if envs else None
 
 
 def _serve_environment(env: Any, port: int) -> None:

@@ -59,7 +59,7 @@ Use the commands in `CONTRIBUTING.md` as the source of truth. Common commands:
 
 ```bash
 uv sync --extra dev
-uv run pytest --rootdir=hud -q
+uv run pytest -q
 uv run ruff format . --check
 uv run ruff check .
 uv run pyright

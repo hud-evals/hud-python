@@ -32,11 +32,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import Any
+
+from hud.environment.source import normalize_environment_name
 
 from .base import BaseConverter, ConvertResult, GeneratedEnvironment
 
@@ -65,15 +66,6 @@ def _hash_directory(path: Path) -> str:
             hasher.update(str(file_path.relative_to(path)).encode())
             hasher.update(file_path.read_bytes())
     return hasher.hexdigest()[:16]
-
-
-def _normalize_name(name: str) -> str:
-    """Normalize a dataset name to a valid HUD environment name."""
-    normalized = name.strip().lower()
-    normalized = normalized.replace(" ", "-").replace("_", "-")
-    normalized = re.sub(r"[^a-z0-9-]", "", normalized)
-    normalized = re.sub(r"-+", "-", normalized)
-    return normalized.strip("-") or "converted"
 
 
 def _extract_workdir(content: str) -> str:
@@ -483,7 +475,7 @@ class HarborConverter(BaseConverter):
         # Generate environments and taskset
         environments: list[GeneratedEnvironment] = []
         taskset: list[dict[str, Any]] = []
-        base_name = f"hud-harbor-{_normalize_name(dataset_name)}"
+        base_name = f"hud-harbor-{normalize_environment_name(dataset_name, default='converted')}"
 
         # Sort groups by size (largest first) for consistent naming
         sorted_groups = sorted(groups.items(), key=lambda x: -len(x[1]))

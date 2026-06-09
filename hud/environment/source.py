@@ -18,6 +18,15 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def normalize_environment_name(name: str, *, default: str = "environment") -> str:
+    """Slugify *name* into a valid environment name (lowercase, ``[a-z0-9-]``)."""
+    normalized = name.strip().lower()
+    normalized = normalized.replace(" ", "-").replace("_", "-")
+    normalized = re.sub(r"[^a-z0-9-]", "", normalized)
+    normalized = re.sub(r"-+", "-", normalized)
+    return normalized.strip("-") or default
+
+
 @dataclass(frozen=True)
 class ValidationIssue:
     severity: str
@@ -64,14 +73,6 @@ class EnvironmentSource:
     @classmethod
     def open(cls, directory: str | Path = ".") -> Self:
         return cls(Path(directory).expanduser().resolve())
-
-    @staticmethod
-    def normalize_environment_name(name: str) -> str:
-        normalized = name.strip().lower()
-        normalized = normalized.replace(" ", "-").replace("_", "-")
-        normalized = re.sub(r"[^a-z0-9-]", "", normalized)
-        normalized = re.sub(r"-+", "-", normalized)
-        return normalized.strip("-") or "environment"
 
     @property
     def hud_dir(self) -> Path:
@@ -126,10 +127,10 @@ class EnvironmentSource:
 
     def environment_name(self, override: str | None = None) -> str:
         if override:
-            return self.normalize_environment_name(override)
+            return normalize_environment_name(override)
 
         directory_name = self.root.name or self.root.parent.name
-        return self.normalize_environment_name(directory_name)
+        return normalize_environment_name(directory_name)
 
     def load_config(self) -> dict[str, Any]:
         if self.config_path.exists():

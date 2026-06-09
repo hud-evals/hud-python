@@ -23,7 +23,6 @@ from hud.cli.convert.harbor import (
     _find_dockerfile,
     _hash_directory,
     _is_harbor_task,
-    _normalize_name,
     _parse_task,
 )
 
@@ -32,32 +31,6 @@ from .conftest import make_harbor_task
 # ============================================================================
 # Helper unit tests
 # ============================================================================
-
-
-class TestNormalizeName:
-    def test_simple(self) -> None:
-        assert _normalize_name("terminal-bench") == "terminal-bench"
-
-    def test_underscores(self) -> None:
-        assert _normalize_name("my_cool_bench") == "my-cool-bench"
-
-    def test_spaces(self) -> None:
-        assert _normalize_name("My Cool Bench") == "my-cool-bench"
-
-    def test_special_chars(self) -> None:
-        assert _normalize_name("bench@2.0!") == "bench20"
-
-    def test_empty(self) -> None:
-        assert _normalize_name("") == "converted"
-
-    def test_only_special_chars(self) -> None:
-        assert _normalize_name("@#$") == "converted"
-
-    def test_leading_trailing_dashes(self) -> None:
-        assert _normalize_name("--hello--") == "hello"
-
-    def test_consecutive_dashes(self) -> None:
-        assert _normalize_name("a---b") == "a-b"
 
 
 class TestAdaptDockerfile:

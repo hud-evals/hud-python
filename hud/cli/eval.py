@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-import questionary
 import typer
 from pydantic import BaseModel, Field, field_validator
 from rich import box
@@ -702,7 +701,7 @@ def eval_command(
 
     cfg.display()
 
-    if not yes and not questionary.confirm("Proceed?", default=True, qmark="").ask():
+    if not yes and not hud_console.confirm("Proceed?"):
         hud_console.info("Cancelled.")
         raise typer.Exit(1)
 

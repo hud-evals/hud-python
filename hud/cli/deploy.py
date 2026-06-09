@@ -209,11 +209,7 @@ def _skip_dotenv(
         if not keys:
             return True
         console.info(f"Found .env with {len(keys)} variable(s): {', '.join(keys)}")
-        try:
-            answer = input("Include in deploy? (encrypted at rest) [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
-        sync_pref = answer in ("", "y", "yes")
+        sync_pref = console.confirm("Include in deploy? (encrypted at rest)")
         env_source.save_config({"syncEnv": sync_pref})
         console.dim_info("Preference saved to:", ".hud/config.json")
 

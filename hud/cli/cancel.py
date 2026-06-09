@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 
-import questionary
 import typer
 
 from hud.shared.exceptions import HudRequestError
@@ -43,10 +42,10 @@ def cancel_command(
     if (
         all_jobs
         and not yes
-        and not questionary.confirm(
+        and not hud_console.confirm(
             "⚠️  This will cancel ALL your active jobs. Continue?",
             default=False,
-        ).ask()
+        )
     ):
         hud_console.info("Cancelled.")
         raise typer.Exit(0)
@@ -55,10 +54,7 @@ def cancel_command(
         job_id
         and not trace_id
         and not yes
-        and not questionary.confirm(
-            f"Cancel all tasks in job {job_id}?",
-            default=True,
-        ).ask()
+        and not hud_console.confirm(f"Cancel all tasks in job {job_id}?")
     ):
         hud_console.info("Cancelled.")
         raise typer.Exit(0)
