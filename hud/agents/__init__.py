@@ -65,16 +65,9 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
         else:
             raise ValueError(f"Model '{model}' not found")
 
-    client = build_gateway_client(provider_name)
     kwargs.setdefault("model", model_id)
-    if agent_type == AgentType.OPENAI_COMPATIBLE:
-        kwargs.setdefault("openai_client", client)
-    else:
-        kwargs.setdefault("model_client", client)
-        kwargs.setdefault("validate_api_key", False)
-
-    # The resolved kwargs (model + provider client + validate flag) are config
-    # fields; build the provider's config and construct the agent.
+    kwargs.setdefault("model_client", build_gateway_client(provider_name))
+    # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
     return agent_type.cls(cast("Any", config))
 

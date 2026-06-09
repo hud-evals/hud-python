@@ -138,7 +138,7 @@ class Chat(AgentExecutor):
         """Create an agent instance from the configured model name."""
         from hud.agents import create_agent
 
-        return create_agent(self._model, **self._agent_params)
+        return create_agent(self._model, **{"max_steps": self._max_steps, **self._agent_params})
 
     # ------------------------------------------------------------------
     # Direct usage
@@ -169,7 +169,7 @@ class Chat(AgentExecutor):
         )
         agent = self._create_agent()
         async with task as run:
-            await agent(run, max_steps=self._max_steps)
+            await agent(run)
         result = run.trace
 
         assistant_msg: dict[str, Any] = {

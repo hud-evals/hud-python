@@ -28,7 +28,7 @@ class FakeOpenAI:
 
 def _agent(response: Any, error: Exception | None = None) -> OpenAIChatAgent:
     client = cast("Any", FakeOpenAI(response, error))
-    return OpenAIChatAgent(OpenAIChatConfig(model="m", openai_client=client))
+    return OpenAIChatAgent(OpenAIChatConfig(model="m", model_client=client))
 
 
 def _response(content: str, tool_calls: list[Any]) -> Any:

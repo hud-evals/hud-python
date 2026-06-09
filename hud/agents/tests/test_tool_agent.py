@@ -14,19 +14,18 @@ import mcp.types as mcp_types
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.tool_agent import RunState, ToolAgent, to_prompt_messages
+from hud.agents.types import AgentConfig
 from hud.capabilities import SSHClient
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
 
 _Msg = dict[str, Any]
 
 
-class DictAgent(ToolAgent[_Msg]):
+class DictAgent(ToolAgent[_Msg, AgentConfig]):
     """Minimal concrete ToolAgent over plain-dict messages."""
 
     def __init__(self, responses: list[AgentResponse]) -> None:
-        self.model = "test-model"
-        self.auto_respond = False
-        self.hosted_tools = []
+        self.config = AgentConfig(model="test-model")
         self._responses = list(responses)
 
     async def _initialize_state(self, *, prompt: Any) -> RunState[_Msg]:

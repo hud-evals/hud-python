@@ -33,7 +33,7 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
-class GeminiAgent(ToolAgent[genai_types.Content]):
+class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     """Gemini agent. Drives SSH (coding/filesystem), RFB (computer), and MCP capabilities."""
 
     tool_catalog = (
@@ -51,9 +51,6 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
     def __init__(self, config: GeminiConfig | None = None) -> None:
         config = config or GeminiConfig()
         self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
 
         model_client = config.model_client
         if model_client is None:
@@ -186,12 +183,12 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         )
 
         api_response = await self.gemini_client.aio.models.generate_content(
-            model=self.model,
+            model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )
         if not api_response.candidates:
-            raise RuntimeError(f"Gemini returned no candidates for model {self.model}")
+            raise RuntimeError(f"Gemini returned no candidates for model {self.config.model}")
 
         candidate = api_response.candidates[0]
         content = candidate.content

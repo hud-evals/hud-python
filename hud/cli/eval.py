@@ -21,6 +21,7 @@ from rich import box
 from rich.table import Table
 
 from hud.cli.utils.api import require_api_key
+from hud.cli.utils.config import parse_key_value
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.env import resolve_env_vars
@@ -161,11 +162,11 @@ def _merge_agent_config(
 
     merged = dict(current)
     for item in updates:
-        if "=" not in item:
+        parsed = parse_key_value(item)
+        if parsed is None:
             continue
-        key, value = item.split("=", 1)
-        key = key.strip()
-        parsed_value = _parse_config_value(value.strip())
+        key, value = parsed
+        parsed_value = _parse_config_value(value)
 
         if "." in key:
             agent_name, param = key.split(".", 1)
@@ -298,26 +299,7 @@ class EvalConfig(BaseModel):
             hud_console.info("Using AWS Bedrock (detected ARN in model)")
 
         kwargs["verbose"] = self.verbose or self.very_verbose
-
-        if self.agent_type in (
-            AgentType.CLAUDE,
-            AgentType.OPENAI,
-            AgentType.GEMINI,
-        ):
-            kwargs["validate_api_key"] = False
-
-        if self.gateway:
-            if not settings.api_key:
-                raise typer.Exit(1)  # Already validated in validate_api_keys()
-
-            from hud.shared.gateway import build_gateway_client
-
-            provider = self.agent_type.gateway_provider
-            client = build_gateway_client(provider)
-
-            is_oai_compat = self.agent_type == AgentType.OPENAI_COMPATIBLE
-            kwargs["openai_client" if is_oai_compat else "model_client"] = client
-            hud_console.info(f"Using HUD Gateway for {provider} API")
+        kwargs["max_steps"] = self.max_steps
 
         return kwargs
 
@@ -488,7 +470,6 @@ class EvalConfig(BaseModel):
             skip = {
                 "model_client",
                 "model_name",
-                "validate_api_key",
                 "model_config",
                 "system_prompt",
             }
@@ -518,17 +499,22 @@ class EvalConfig(BaseModel):
 
 
 def _build_agent(cfg: EvalConfig) -> Any:
-    """Construct a new-flow agent (``agent(run)``) from the eval config.
-
-    New agents are config-based: ``AgentType.cls(config=AgentType.config_cls(...))``.
-    Eval-config kwargs are mapped onto the agent's config (unknown keys ignored).
-    """
+    """Construct a new-flow agent (``agent(run)``) from the eval config."""
     if cfg.agent_type is None:
         raise ValueError("agent_type must be set")
     agent_kwargs = cfg.get_agent_kwargs()
     if cfg.auto_respond:
         agent_kwargs["auto_respond"] = True
-    config = cfg.agent_type.config_cls.model_validate(agent_kwargs)
+
+    if cfg.gateway:
+        from hud.shared.gateway import build_gateway_client
+
+        agent_kwargs.setdefault(
+            "model_client", build_gateway_client(cfg.agent_type.gateway_provider)
+        )
+        hud_console.info(f"Using HUD Gateway for {cfg.agent_type.gateway_provider} API")
+
+    config = cfg.agent_type.config_cls(**agent_kwargs)
     # cls/config_cls are matched unions; the pairing is correct by construction.
     return cast("Any", cfg.agent_type.cls)(config=config)
 
@@ -597,11 +583,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[Any, list[Any]]:
 
     agent = _build_agent(cfg)
 
-    async def drive(run: Any) -> None:
-        await agent(run, max_steps=cfg.max_steps)
-
     job = await taskset.run(
-        drive,
+        agent,
         group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
     )

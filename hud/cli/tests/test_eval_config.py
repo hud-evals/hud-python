@@ -6,7 +6,6 @@ Pure config logic; no agent is constructed and no network is touched.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -49,7 +48,6 @@ def test_get_agent_kwargs_model_precedence_and_flags() -> None:
     assert kwargs["model"] == "gpt-cli"  # CLI model wins over config model
     assert kwargs["temperature"] == 0.5
     assert kwargs["verbose"] is True
-    assert kwargs["validate_api_key"] is False
 
 
 def test_get_agent_kwargs_requires_agent_type() -> None:
@@ -109,35 +107,12 @@ def test_display_renders() -> None:
     EvalConfig(agent_type="openai", model="gpt").display()
 
 
-@pytest.mark.asyncio
-async def test_run_evaluation_passes_max_steps_to_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, int | None] = {"max_steps": None}
-
-    async def fake_agent(_run: object, *, max_steps: int | None = None) -> None:
-        seen["max_steps"] = max_steps
-
-    class FakeTaskset:
-        name = "demo"
-
-        def __bool__(self) -> bool:
-            return True
-
-        def __len__(self) -> int:
-            return 1
-
-        def __iter__(self):
-            return iter([object()])
-
-        async def run(self, agent, *, group: int, max_concurrent: int | None):
-            run = object()
-            await agent(run)
-            return SimpleNamespace(id="job", runs=[run])
-
-    monkeypatch.setattr(eval_mod, "_load_taskset", lambda _source: FakeTaskset())
-    monkeypatch.setattr(eval_mod, "_build_agent", lambda _cfg: fake_agent)
-
-    await eval_mod._run_evaluation(
-        EvalConfig(source="tasks.py", agent_type="openai", all=True, max_steps=17)
+def test_eval_max_steps_lands_in_agent_config() -> None:
+    cfg = EvalConfig(
+        source="tasks.py",
+        agent_type="openai",
+        max_steps=17,
+        agent_config={"openai": {"model_client": object()}},
     )
-
-    assert seen["max_steps"] == 17
+    agent = eval_mod._build_agent(cfg)
+    assert agent.config.max_steps == 17

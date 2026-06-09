@@ -70,21 +70,17 @@ def set_command(
     """
     from hud.utils.hud_console import HUDConsole
 
-    from .utils.config import set_env_values
+    from .utils.config import parse_key_value, set_env_values
 
     hud_console = HUDConsole()
 
     updates: dict[str, str] = {}
     for item in assignments:
-        if "=" not in item:
+        parsed = parse_key_value(item)
+        if parsed is None:
             hud_console.error(f"Invalid assignment (expected KEY=VALUE): {item}")
             raise typer.Exit(1)
-        key, value = item.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            hud_console.error(f"Invalid key in assignment: {item}")
-            raise typer.Exit(1)
+        key, value = parsed
         updates[key] = value
 
     path = set_env_values(updates)

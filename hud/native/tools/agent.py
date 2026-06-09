@@ -174,5 +174,5 @@ class AgentTool(BaseTool):
         if self._model:
             from hud.agents import create_agent
 
-            return create_agent(self._model, **self._agent_params)
+            return create_agent(self._model, **{"max_steps": self._max_steps, **self._agent_params})
         return self._agent_cls(**self._agent_params)

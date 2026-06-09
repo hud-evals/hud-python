@@ -43,7 +43,7 @@ ClaudeImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/we
 ClaudeToolResultContent = BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
 
 
-class ClaudeAgent(ToolAgent[BetaMessageParam]):
+class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
     """Anthropic Claude agent. Drives SSH (coding), RFB (computer), and MCP capabilities."""
 
     tool_catalog = (
@@ -55,14 +55,11 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
 
     def __init__(self, config: ClaudeConfig | None = None) -> None:
         self.config = config or ClaudeConfig()
-        self.model = self.config.model
-        self.auto_respond = self.config.auto_respond
-        self.hosted_tools = list(self.config.hosted_tools)
-        self.max_tokens = self.config.max_tokens
         self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = self._resolve_client()
 
-    @staticmethod
-    def _resolve_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
+    def _resolve_client(self) -> AsyncAnthropic | AsyncAnthropicBedrock:
+        if self.config.model_client is not None:
+            return cast("AsyncAnthropic | AsyncAnthropicBedrock", self.config.model_client)
         if settings.api_key:
             return cast("AsyncAnthropic", gateway.build_gateway_client("anthropic"))
         if settings.anthropic_api_key:
@@ -195,9 +192,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
             try:
                 if is_bedrock:
                     response = await self.anthropic_client.beta.messages.create(
-                        model=self.model,
+                        model=self.config.model,
                         system=system,
-                        max_tokens=self.max_tokens,
+                        max_tokens=self.config.max_tokens,
                         messages=messages_cached,
                         tools=tools,
                         tool_choice=tool_choice,
@@ -206,9 +203,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam]):
                 else:
                     client = cast("AsyncAnthropic", self.anthropic_client)
                     async with client.beta.messages.stream(
-                        model=self.model,
+                        model=self.config.model,
                         system=system,
-                        max_tokens=self.max_tokens,
+                        max_tokens=self.config.max_tokens,
                         messages=messages_cached,
                         tools=tools,
                         tool_choice=tool_choice,

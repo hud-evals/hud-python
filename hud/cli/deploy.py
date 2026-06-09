@@ -15,7 +15,7 @@ import typer
 
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
-from hud.cli.utils.config import parse_env_file
+from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.environment.source import EnvironmentSource
@@ -86,11 +86,11 @@ def _parse_key_value_flags(
 ) -> dict[str, str]:
     values: dict[str, str] = {}
     for flag in flags or []:
-        key, sep, value = flag.partition("=")
-        if not sep:
+        parsed = parse_key_value(flag)
+        if parsed is None:
             console.warning(f"Invalid {option} format: {flag} (expected KEY=VALUE)")
             continue
-        values[key.strip()] = value.strip()
+        values[parsed[0]] = parsed[1]
     return values
 
 

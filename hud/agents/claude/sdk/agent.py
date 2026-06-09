@@ -36,20 +36,15 @@ class ClaudeSDKAgent(Agent):
     MCP config (the CLI connects to them itself).
     """
 
+    config: ClaudeSDKConfig
+
     def __init__(self, config: ClaudeSDKConfig | None = None) -> None:
         self.config = config or ClaudeSDKConfig()
-        self.model = self.config.model
         self._ssh: SSHClient | None = None
         self._mcp_servers: dict[str, dict[str, Any]] = {}
         self._shell = "bash"
 
-    async def __call__(
-        self,
-        run: Run,
-        *,
-        max_steps: int | None = None,
-        system_prompt: str | None = None,
-    ) -> None:
+    async def __call__(self, run: Run) -> None:
         self._mcp_servers = {}
         manifest = run.client.manifest
         bindings = manifest.bindings if manifest is not None else []
@@ -82,8 +77,8 @@ class ClaudeSDKAgent(Agent):
         await self._exec(
             run.trace,
             prompt=run.prompt or "",
-            max_steps=max_steps if max_steps is not None else self.config.max_turns or -1,
-            system_prompt=system_prompt,
+            max_steps=self.config.max_steps,
+            system_prompt=self.config.system_prompt,
         )
 
     async def _exec(
@@ -157,16 +152,16 @@ class ClaudeSDKAgent(Agent):
         elif settings.anthropic_api_key:
             env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
 
-        env["ANTHROPIC_MODEL"] = self.model
-        env["ANTHROPIC_SMALL_FAST_MODEL"] = self.model
+        env["ANTHROPIC_MODEL"] = self.config.model
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = self.config.model
 
         # When using a custom base URL, alias all model tiers to the same model
         # so the CLI doesn't try to reach Anthropic for background requests.
         if "ANTHROPIC_BASE_URL" in env:
-            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.model
-            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.model
-            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.model
-            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.model
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
 
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["IS_SANDBOX"] = "1"
@@ -213,9 +208,8 @@ class ClaudeSDKAgent(Agent):
         ]
         if max_steps > 0:
             cli_parts.append(f"--max-turns={max_steps}")
-        effective_system = system_prompt or self.config.system_prompt
-        if effective_system:
-            cli_parts.extend(["--system-prompt", q(effective_system)])
+        if system_prompt:
+            cli_parts.extend(["--system-prompt", q(system_prompt)])
         for tool in self.config.allowed_tools:
             cli_parts.extend(["--allowedTools", tool])
         if mcp_config_path:

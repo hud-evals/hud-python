@@ -125,9 +125,8 @@ def test_create_agent_value_shortcut_builds_provider_agent(
     agent = create_agent("openai")  # AgentType.OPENAI shortcut
 
     assert isinstance(agent, OpenAIAgent)
-    # The gateway client + validate flag are threaded into the agent's config.
+    # The gateway client is threaded into the agent's config.
     assert agent.config.model_client is sentinel
-    assert agent.config.validate_api_key is False
 
 
 def test_create_agent_resolves_gateway_model_metadata(

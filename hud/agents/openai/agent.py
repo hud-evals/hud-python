@@ -43,7 +43,7 @@ class OpenAIRunState(RunState[ResponseInputItemParam]):
     message_cursor: int = 0
 
 
-class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
+class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
     """OpenAI agent using the Responses API. Drives SSH, RFB, and MCP capabilities."""
 
     tool_catalog = (
@@ -55,9 +55,6 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
     def __init__(self, config: OpenAIConfig | None = None) -> None:
         config = config or OpenAIConfig()
         self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
 
         model_client = config.model_client
         if model_client is None:
@@ -188,7 +185,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
 
         tool_search_threshold: int | None = None
-        for hosted in self.hosted_tools:
+        for hosted in self.config.hosted_tools:
             if isinstance(hosted, OpenAIToolSearchTool):
                 tool_search_threshold = hosted.threshold
                 break

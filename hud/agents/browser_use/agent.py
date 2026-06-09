@@ -35,6 +35,8 @@ CDP_PROTOCOL = "cdp/1.3"
 class BrowserUseAgent(Agent):
     """Run the ``browser-use`` agent against an env's ``cdp/1.3`` capability."""
 
+    config: BrowserUseConfig
+
     def __init__(self, config: BrowserUseConfig | None = None) -> None:
         self.config = config or BrowserUseConfig()
 

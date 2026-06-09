@@ -9,10 +9,10 @@ Usage::
     from hud.native.skills import load_skills
 
     # Load individual files
-    agent = ClaudeAgent.create(system_prompt=load_skills("skills/code_review.md", "skills/git.md"))
+    agent = ClaudeAgent(ClaudeConfig(system_prompt=load_skills("skills/review.md")))
 
     # Load entire directory
-    agent = ClaudeAgent.create(system_prompt=load_skills("skills/"))
+    agent = ClaudeAgent(ClaudeConfig(system_prompt=load_skills("skills/")))
 
 
     # In a scenario

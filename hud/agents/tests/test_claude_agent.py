@@ -45,12 +45,11 @@ class FakeAnthropic:
 
 
 def _agent(final: Any) -> ClaudeAgent:
-    agent = ClaudeAgent.__new__(ClaudeAgent)
-    agent.model = "claude-test"
-    agent.max_tokens = 1024
-    agent.hosted_tools = []
-    agent.anthropic_client = FakeAnthropic(final)  # type: ignore[assignment]
-    return agent
+    from hud.agents.types import ClaudeConfig
+
+    return ClaudeAgent(
+        ClaudeConfig(model="claude-test", max_tokens=1024, model_client=FakeAnthropic(final))
+    )
 
 
 def _state(agent: ClaudeAgent) -> Any:
