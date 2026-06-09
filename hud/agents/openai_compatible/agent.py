@@ -13,6 +13,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
+from hud.shared import gateway
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Sample
 
 from .tools import (
@@ -69,10 +70,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
         elif config.api_key is not None or config.base_url is not None:
             self.oai = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
         elif settings.api_key:
-            self.oai = AsyncOpenAI(
-                api_key=settings.api_key,
-                base_url=settings.hud_gateway_url,
-            )
+            self.oai = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))
         else:
             raise ValueError(
                 "No API key found. Set HUD_API_KEY for HUD gateway, "

@@ -24,10 +24,10 @@ from anthropic.types.beta import (
     BetaToolUnionParam,
 )
 
-from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import Citation, ClaudeConfig
 from hud.settings import settings
+from hud.shared import gateway
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool

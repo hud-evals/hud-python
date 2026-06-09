@@ -14,9 +14,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Protocol, runtime_checkable
 
-import httpx
-
 from hud.settings import settings
+from hud.shared.platform import PlatformClient
 
 
 @runtime_checkable
@@ -93,16 +92,14 @@ class HudTrainingClient:
         if not signals:
             return
 
-        base_url = self.base_url or settings.hud_api_url
-        api_key = self.api_key or settings.api_key
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
-            resp = await client.post(
-                "/train/advantages",
-                json={"config": asdict(self.config), "signals": signals},
-                headers=headers,
-            )
-            resp.raise_for_status()
+        platform = PlatformClient(
+            self.base_url or settings.hud_api_url,
+            self.api_key or settings.api_key or "",
+        )
+        await platform.apost(
+            "/train/advantages",
+            json={"config": asdict(self.config), "signals": signals},
+        )
 
 
 __all__ = ["HudTrainingClient", "Rewarded", "TrainingConfig", "group_relative"]

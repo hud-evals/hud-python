@@ -18,21 +18,17 @@ if TYPE_CHECKING:
 
 
 async def stream_build_logs(
+    platform: PlatformClient,
     build_id: str,
     console: HUDConsole | None = None,
     max_reconnects: int = 3,
 ) -> str:
     """Stream build logs from the HUD backend via WebSocket."""
-    from hud.cli.utils.api import require_api_key
-    from hud.settings import settings
-
-    api_key = require_api_key()
     if console is None:
         console = HUDConsole()
 
-    api_url = settings.hud_api_url
-    ws_url = api_url.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url = f"{ws_url.rstrip('/')}/builds/{build_id}/logs?api_key={api_key}"
+    ws_url = platform.api_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_url.rstrip('/')}/builds/{build_id}/logs?api_key={platform.api_key}"
 
     final_status = "UNKNOWN"
     reconnect_count = 0

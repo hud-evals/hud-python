@@ -58,18 +58,6 @@ class Settings(BaseSettings):
         validation_alias="HUD_TELEMETRY_URL",
     )
 
-    hud_mcp_url: str = Field(
-        default="https://mcp.hud.ai/v3/mcp",
-        description="Base URL for the MCP Server",
-        validation_alias="HUD_MCP_URL",
-    )
-
-    hud_rl_url: str = Field(
-        default="https://rl.hud.ai/v1",
-        description="Base URL for the HUD RL API server",
-        validation_alias="HUD_RL_URL",
-    )
-
     hud_api_url: str = Field(
         default="https://api.hud.ai",
         description="Base URL for the HUD API server",

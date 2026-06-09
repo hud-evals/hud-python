@@ -555,7 +555,7 @@ async def _deploy_async(
 
     console.section_title("Build Logs")
     try:
-        final_status = await stream_build_logs(build_id=build_id, console=console)
+        final_status = await stream_build_logs(platform, build_id, console=console)
     except Exception as e:
         console.warning(f"WebSocket streaming failed: {e}")
         console.info("Falling back to polling...")

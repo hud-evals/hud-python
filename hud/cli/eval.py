@@ -310,7 +310,7 @@ class EvalConfig(BaseModel):
             if not settings.api_key:
                 raise typer.Exit(1)  # Already validated in validate_api_keys()
 
-            from hud.agents.gateway import build_gateway_client
+            from hud.shared.gateway import build_gateway_client
 
             provider = self.agent_type.gateway_provider
             client = build_gateway_client(provider)

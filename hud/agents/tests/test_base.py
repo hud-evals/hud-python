@@ -78,12 +78,40 @@ def test_agent_type_maps_value_to_class_and_provider() -> None:
     assert isinstance(AgentType("openai").gateway_provider, str)
 
 
+def test_missing_provider_dependency_points_at_agents_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Base installs (no [agents] extra) get an actionable error, not a raw import failure."""
+    import sys
+
+    import hud.agents
+
+    class _Blocker:
+        def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
+            if fullname == "anthropic" or fullname.startswith("anthropic."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    for module in list(sys.modules):
+        if module == "anthropic" or module.startswith(("anthropic.", "hud.agents.claude")):
+            monkeypatch.delitem(sys.modules, module)
+    monkeypatch.setattr(sys, "meta_path", [_Blocker(), *sys.meta_path])
+    if "ClaudeAgent" in vars(hud.agents):  # drop any cached lazy export
+        monkeypatch.delitem(hud.agents.__dict__, "ClaudeAgent")
+
+    with pytest.raises(ImportError, match=r"hud-python\[agents\]"):
+        _ = hud.agents.ClaudeAgent
+
+    with pytest.raises(ImportError, match=r"hud-python\[agents\]"):
+        _ = AgentType.CLAUDE.cls
+
+
 # ─── create_agent routing ─────────────────────────────────────────────
 
 
 def test_create_agent_unknown_model_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     # No gateway models available -> a bare unknown model can't be resolved.
-    monkeypatch.setattr("hud.agents.gateway._fetch_gateway_models", list)
+    monkeypatch.setattr("hud.agents.list_gateway_models", list)
     with pytest.raises(ValueError, match="not found"):
         create_agent("totally-unknown-model-xyz")
 
@@ -92,7 +120,7 @@ def test_create_agent_value_shortcut_builds_provider_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sentinel = object()
-    monkeypatch.setattr("hud.agents.gateway.build_gateway_client", lambda _provider: sentinel)
+    monkeypatch.setattr("hud.agents.build_gateway_client", lambda _provider: sentinel)
 
     agent = create_agent("openai")  # AgentType.OPENAI shortcut
 
@@ -105,7 +133,7 @@ def test_create_agent_value_shortcut_builds_provider_agent(
 def test_create_agent_resolves_gateway_model_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from hud.agents.gateway import GatewayModelInfo, GatewayProviderInfo
+    from hud.shared.gateway import GatewayModelInfo, GatewayProviderInfo
 
     model = GatewayModelInfo(
         id="ft:custom-123",
@@ -113,8 +141,8 @@ def test_create_agent_resolves_gateway_model_metadata(
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.agents.gateway._fetch_gateway_models", lambda: [model])
-    monkeypatch.setattr("hud.agents.gateway.build_gateway_client", lambda _provider: object())
+    monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.agents.build_gateway_client", lambda _provider: object())
 
     agent = create_agent("ft:custom-123")
 

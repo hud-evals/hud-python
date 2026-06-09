@@ -10,10 +10,10 @@ import mcp.types as mcp_types
 from google import genai
 from google.genai import types as genai_types
 
-from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import Citation, GeminiConfig
 from hud.settings import settings
+from hud.shared import gateway
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .settings import gemini_agent_settings

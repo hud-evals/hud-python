@@ -27,10 +27,12 @@ import asyncio
 import logging
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
+
+    from openai import AsyncOpenAI
 
 from hud.agents.types import EvaluationResult, SubScore
 from hud.utils.serialization import json_safe_dict
@@ -360,9 +362,7 @@ class LLMJudgeGrader(Grader):
                 "LLMJudgeGrader requires the 'rubric' package. Install with: pip install rubric"
             ) from None
 
-        import os
-
-        from openai import AsyncOpenAI
+        from hud.shared.gateway import build_gateway_client
 
         parsed: list[Criterion] = []
         for c in criteria or []:
@@ -375,8 +375,7 @@ class LLMJudgeGrader(Grader):
         if not parsed:
             return (0.0, {"error": "no criteria provided"})
 
-        api_key = os.environ.get("HUD_API_KEY", "")
-        client = AsyncOpenAI(base_url="https://inference.hud.ai", api_key=api_key)
+        client = cast("AsyncOpenAI", build_gateway_client("openai"))
 
         async def _generate(system_prompt: str, user_prompt: str, **kwargs: Any) -> str:
             response = await client.chat.completions.create(

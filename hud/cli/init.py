@@ -12,8 +12,8 @@ import httpx
 import questionary
 import typer
 
-from hud.cli.utils.api import hud_headers
 from hud.settings import settings
+from hud.shared.platform import PlatformClient
 from hud.utils.hud_console import HUDConsole
 
 # Presets mapping to public GitHub repositories under hud-evals org
@@ -100,15 +100,8 @@ def _fetch_available_templates() -> tuple[list[dict], list[dict]]:
         return [], []
 
     try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.get(
-                f"{settings.hud_api_url}/templates/available",
-                headers=hud_headers(),
-            )
-            if resp.status_code != 200:
-                return [], []
-            data = resp.json()
-            return data.get("public_templates", []), data.get("private_templates", [])
+        data = PlatformClient.from_settings().get("/templates/available")
+        return data.get("public_templates", []), data.get("private_templates", [])
     except Exception:
         return [], []
 
@@ -169,13 +162,14 @@ def _download_tarball_repo(
 
 
 def _download_private_template(template_id: str, dest_dir: Path, files_created: list[str]) -> None:
-    """Download a private template tarball from the HUD API."""
+    """Download a private template tarball from the HUD API (streaming, so raw httpx)."""
     url = f"{settings.hud_api_url}/templates/private/{template_id}/download"
+    headers = {"Authorization": f"Bearer {settings.api_key}"} if settings.api_key else {}
 
     with (
         tempfile.NamedTemporaryFile(delete=False) as tmp_file,
         httpx.Client(timeout=120) as client,
-        client.stream("GET", url, headers=hud_headers()) as resp,
+        client.stream("GET", url, headers=headers) as resp,
     ):
         if resp.status_code == 403:
             raise RuntimeError("Access denied: your team does not have access to this template.")

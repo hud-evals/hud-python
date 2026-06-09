@@ -17,7 +17,6 @@ def test_settings_defaults():
     s = get_settings()
     # These URLs may be overridden by environment variables
     assert s.hud_telemetry_url.endswith("/v3/api")
-    assert s.hud_mcp_url.endswith("/v3/mcp")
     # Default may be overridden in CI; just assert the field exists and is bool
     assert isinstance(s.telemetry_enabled, bool)
     assert s.hud_logging is True
