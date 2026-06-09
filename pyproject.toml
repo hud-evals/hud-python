@@ -201,6 +201,7 @@ lint.ignore = [
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
 "**/examples/**/*.py" = ["ALL"]
+"scripts/*.py" = ["T201", "INP001"]  # dev scripts: print is the interface
 
 
 [tool.ruff.format]
