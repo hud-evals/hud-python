@@ -28,16 +28,16 @@ hud eval my-taskset --full
 
 Pass environment variables with `--env KEY=VALUE` (repeatable) or `--env-file .env`.
 
-## The local path: `hud build`
+## The local path: `docker build`
 
-`hud build` is the fully-local workflow. It builds a Docker image from your environment and writes a `hud.lock.yaml` for reproducibility. Pass `-t` to set the image tag (otherwise it's read from `pyproject.toml`):
+For a fully-local workflow, build the image directly with Docker from your environment's `Dockerfile.hud`:
 
 ```bash
-hud build . -t my-env
+docker build -f Dockerfile.hud -t my-env .
 ```
 
 <Note>
-**Reproducible by construction.** The build is pinned by `hud.lock.yaml`, and each rollout gets its **own fresh environment** — so results reproduce across runs and machines, and one rollout never leaks state into the next. Keep any per-task setup in [`@env.initialize`](/v6/reference/environment#lifecycle-hooks) so every run starts from the same state.
+**Reproducible by construction.** Each rollout gets its **own fresh environment** — so results reproduce across runs and machines, and one rollout never leaks state into the next. Keep any per-task setup in [`@env.initialize`](/v6/reference/environment#lifecycle-hooks) so every run starts from the same state.
 </Note>
 
 Once built, the image is a self-contained box that serves the control channel. Run it and drive a task (here `fix_bug`, a task in your environment) with the packaged CLI — `docker exec` runs the commands *inside* the container, so no port needs publishing:

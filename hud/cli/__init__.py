@@ -28,7 +28,6 @@ SUPPORT_HINT = (
 # NOTE: `sync` is registered below once migrated to the Taskset flow.
 # ---------------------------------------------------------------------------
 
-from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
 from .client import client_app  # noqa: E402
 from .convert import convert_command  # noqa: E402
@@ -43,10 +42,7 @@ from .models import models_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
 from .task import task_app  # noqa: E402
 
-_EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
-
 app.command(name="dev")(dev_command)
-app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
 app.command(name="deploy")(deploy_command)
 app.command(name="link", hidden=True)(link_command)
 app.command(name="login")(login_command)

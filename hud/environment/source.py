@@ -43,7 +43,6 @@ class EnvironmentSource:
     HUD_DIR: ClassVar[str] = ".hud"
     CONFIG_FILENAME: ClassVar[str] = "config.json"
     LEGACY_CONFIG_FILENAME: ClassVar[str] = "deploy.json"
-    LOCK_FILENAME: ClassVar[str] = "hud.lock.yaml"
 
     SOURCE_INCLUDE_FILES: ClassVar[set[str]] = {"Dockerfile", "Dockerfile.hud", "pyproject.toml"}
     SOURCE_INCLUDE_DIRS: ClassVar[set[str]] = {"server", "mcp", "controller", "environment"}
@@ -87,10 +86,6 @@ class EnvironmentSource:
         return self.hud_dir / self.LEGACY_CONFIG_FILENAME
 
     @property
-    def lock_path(self) -> Path:
-        return self.root / self.LOCK_FILENAME
-
-    @property
     def dockerfile(self) -> Path | None:
         hud_dockerfile = self.root / "Dockerfile.hud"
         if hud_dockerfile.exists():
@@ -107,30 +102,6 @@ class EnvironmentSource:
             and self.dockerfile is not None
             and (self.root / "pyproject.toml").exists()
         )
-
-    def manifest(self) -> dict[str, Any]:
-        """Read this source tree's declared Environment manifest."""
-        from hud.environment import Environment
-        from hud.eval import Taskset, load_module
-
-        env_file = self.root / "env.py"
-        if not env_file.exists():
-            raise FileNotFoundError(f"no env.py found in {self.root}")
-
-        module = load_module(env_file)
-        envs = [value for value in vars(module).values() if isinstance(value, Environment)]
-        if not envs:
-            raise ValueError(f"no Environment instance defined in {env_file}")
-        if len(envs) > 1:
-            raise ValueError(f"multiple Environments in {env_file}; expected exactly one")
-
-        manifest = envs[0].to_dict()
-        taskset = Taskset._from_module(self.root, preloaded={env_file.resolve(): module})
-        if taskset:
-            manifest["tasks"] = [
-                {"slug": slug, "task": task.id, "args": task.args} for slug, task in taskset.items()
-            ]
-        return manifest
 
     def environment_name_references(self) -> list[EnvironmentNameReference]:
         """Find positional ``Environment("name")`` references in project source."""
@@ -232,11 +203,6 @@ class EnvironmentSource:
 
     def relative_path(self, path: Path) -> str:
         return str(path.resolve().relative_to(self.root)).replace("\\", "/")
-
-    def dockerfile_env_vars(self) -> list[str]:
-        """Runtime env vars the Dockerfile requires (``ENV`` without a value)."""
-        dockerfile = self.dockerfile
-        return _extract_dockerfile_env_vars(dockerfile) if dockerfile is not None else []
 
     def base_image(self) -> str | None:
         """The Dockerfile's first ``FROM`` image, stage name stripped."""
@@ -442,38 +408,6 @@ class EnvironmentSource:
             LOGGER.info("Migrated .hud/deploy.json to .hud/config.json")
         except OSError as exc:
             LOGGER.warning("Failed to migrate deploy.json to config.json: %s", exc)
-
-
-def _extract_dockerfile_env_vars(dockerfile_path: Path) -> list[str]:
-    required: list[str] = []
-
-    if not dockerfile_path.exists():
-        return required
-
-    content = dockerfile_path.read_text(encoding="utf-8")
-    arg_vars: set[str] = set()
-
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if line.startswith("ARG "):
-            parts = line[4:].strip().split("=", 1)
-            var_name = parts[0].strip()
-            if len(parts) == 1 or not parts[1].strip():
-                arg_vars.add(var_name)
-        elif line.startswith("ENV "):
-            parts = line[4:].strip().split("=", 1)
-            var_name = parts[0].strip()
-            if len(parts) == 2 and parts[1].strip().startswith("$"):
-                ref_var = parts[1].strip()[1:]
-                if ref_var in arg_vars and var_name not in required:
-                    required.append(var_name)
-            elif len(parts) == 2 and not parts[1].strip():
-                if var_name not in required:
-                    required.append(var_name)
-            elif len(parts) == 1 and var_name not in required:
-                required.append(var_name)
-
-    return required
 
 
 def _parse_base_image(dockerfile_path: Path) -> str | None:

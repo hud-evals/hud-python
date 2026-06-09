@@ -68,40 +68,6 @@ def test_base_image_without_dockerfile_is_none(tmp_path: Path) -> None:
     assert EnvironmentSource.open(tmp_path).base_image() is None
 
 
-def test_dockerfile_env_vars_required_runtime_only(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "Dockerfile.hud",
-        "FROM python:3.11\n"
-        "ARG BUILD_ONLY\n"  # build-time only -> not required
-        "ENV NEEDS_VALUE=\n"  # no value -> required
-        "ENV HAS_DEFAULT=foo\n"  # has value -> not required
-        "ENV BARE_ENV\n",  # no '=' -> required
-    )
-    required = EnvironmentSource.open(tmp_path).dockerfile_env_vars()
-    assert "NEEDS_VALUE" in required
-    assert "BARE_ENV" in required
-    assert "HAS_DEFAULT" not in required
-    assert "BUILD_ONLY" not in required  # ARG is build-time, not runtime
-
-
-def test_dockerfile_env_vars_arg_referenced_by_env_is_required(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "Dockerfile",
-        "FROM python:3.11\n"
-        "ARG BUILD_TOKEN\n"
-        "ARG DEFAULTED=1\n"
-        "ENV RUNTIME_KEY\n"
-        "ENV FROM_ARG=$BUILD_TOKEN\n"
-        "ENV WITH_DEFAULT=val\n",
-    )
-    required = EnvironmentSource.open(tmp_path).dockerfile_env_vars()
-    assert "BUILD_TOKEN" not in required  # ARG (build-time only)
-    assert "RUNTIME_KEY" in required  # ENV without value
-    assert "FROM_ARG" in required  # ENV=$ARG -> required at runtime
-    assert "DEFAULTED" not in required
-    assert "WITH_DEFAULT" not in required
-
-
 # ─── source files / hash ───────────────────────────────────────────────
 
 
@@ -177,62 +143,6 @@ def test_scanner_does_not_rewrite_mismatched_name(tmp_path: Path) -> None:
 def test_no_references_is_a_pass(tmp_path: Path) -> None:
     _write(tmp_path / "env.py", "x = 1\n")
     assert EnvironmentSource.open(tmp_path).environment_name_references() == []
-
-
-# ─── manifest ──────────────────────────────────────────────────────────
-
-
-def test_manifest_preserves_declared_tasks_without_concrete_taskset(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "env.py",
-        "from hud import Environment\n"
-        "env = Environment('demo')\n"
-        "@env.task(id='solve', description='Solve it')\n"
-        "async def solve():\n"
-        "    yield 'prompt'\n"
-        "    yield 1.0\n",
-    )
-
-    manifest = EnvironmentSource.open(tmp_path).manifest()
-
-    assert manifest["tasks"] == [{"id": "solve", "description": "Solve it"}]
-
-
-def test_manifest_uses_concrete_taskset_when_exposed(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "env.py",
-        "from hud import Environment\n"
-        "env = Environment('demo')\n"
-        "@env.task(id='solve')\n"
-        "async def solve(n: int):\n"
-        "    yield 'prompt'\n"
-        "    yield 1.0\n"
-        "case = solve(n=2)\n",
-    )
-
-    manifest = EnvironmentSource.open(tmp_path).manifest()
-
-    assert manifest["tasks"] == [{"slug": "solve-99dd84a6", "task": "solve", "args": {"n": 2}}]
-
-
-def test_manifest_does_not_import_env_twice(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "env.py",
-        "from pathlib import Path\n"
-        "from hud import Environment\n"
-        "count = Path(__file__).with_name('count.txt')\n"
-        "count.write_text(str((int(count.read_text()) if count.exists() else 0) + 1))\n"
-        "env = Environment('demo')\n"
-        "@env.task(id='solve')\n"
-        "async def solve(n: int):\n"
-        "    yield 'prompt'\n"
-        "    yield 1.0\n"
-        "case = solve(n=2)\n",
-    )
-
-    EnvironmentSource.open(tmp_path).manifest()
-
-    assert (tmp_path / "count.txt").read_text(encoding="utf-8") == "1"
 
 
 # ─── validation ────────────────────────────────────────────────────────

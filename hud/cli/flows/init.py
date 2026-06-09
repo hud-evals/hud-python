@@ -177,7 +177,7 @@ def _init_in_existing_directory(
     hud_console.command_example("hud eval tasks.py claude", "Evaluate locally")
     hud_console.info("")
     hud_console.info("4. Deploy for scale")
-    hud_console.info("   hud build, hud deploy, then run many evals in parallel.")
+    hud_console.info("   hud deploy, then run many evals in parallel.")
     hud_console.info("")
     hud_console.section_title("Files")
     hud_console.info("• env.py         Your environment: capabilities + @env.task tasks")

@@ -38,21 +38,6 @@ hud dev env.py -p 9000
 | `--port`, `-p` | `8765` | Port to serve on. |
 | `--verbose`, `-v` | — | Detailed logs. |
 
-### `hud build`
-
-Build a Docker image from your environment and write `hud.lock.yaml`.
-
-```bash
-hud build .
-```
-
-| Option | Description |
-|--------|-------------|
-| `--tag`, `-t` | Image tag (default from `pyproject.toml`). |
-| `--no-cache` | Build without Docker cache. |
-| `--platform` | Target platform (e.g. `linux/amd64`). |
-| `--secret` | Build secret, e.g. `--secret id=TOKEN,env=TOKEN`. |
-
 ### `hud deploy`
 
 Build **and** publish to HUD infra in one step.

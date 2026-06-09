@@ -133,12 +133,11 @@ ENV_VAR_MISSING = Hint(
     message="Required environment variables are missing.",
     tips=[
         "Set required environment variables",
-        "Use -e flag: hud build . -e VAR_NAME=value",
+        "Use -e flag: hud deploy . -e VAR_NAME=value",
         "Check Dockerfile for ENV requirements",
-        "Run hud debug . --build for detailed logs",
     ],
     docs_url=None,
-    command_examples=["hud build . -e BROWSER_PROVIDER=anchorbrowser"],
+    command_examples=["hud deploy . -e BROWSER_PROVIDER=anchorbrowser"],
     code="ENV_VAR_MISSING",
     context=["env", "config"],
 )
@@ -150,28 +149,12 @@ MCP_SERVER_ERROR = Hint(
         "Check server logs for details",
         "Verify server configuration",
         "Ensure all dependencies are installed",
-        "Run hud debug to see detailed output",
     ],
     docs_url=None,
-    command_examples=["hud debug", "hud dev --verbose"],
+    command_examples=["hud dev --verbose"],
     code="MCP_SERVER_ERROR",
     context=["mcp", "server"],
 )
-
-
-def secrets_in_build_args(secret_vars: list[str]) -> Hint:
-    return Hint(
-        title="Possible secrets detected in Dockerfile",
-        message=", ".join(secret_vars),
-        tips=[
-            "These will be visible in image layers and build logs",
-            "Mount secrets at build time: RUN --mount=type=secret,id=mytoken",
-            "Pass the --secret flag when you build:",
-        ],
-        command_examples=["hud build . --secret id=mytoken,src=./token.txt"],
-        code="SECRETS_IN_BUILD_ARGS",
-        context=["docker", "security"],
-    )
 
 
 def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> None:
