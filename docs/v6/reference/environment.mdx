@@ -64,8 +64,8 @@ Capabilities are normally passed to the constructor. See [Capabilities](/v6/refe
 
 ```python
 @env.initialize
-async def _start():
-    await ws.start()
+async def _seed():
+    await seed_database()
 ```
 
 ## Serving

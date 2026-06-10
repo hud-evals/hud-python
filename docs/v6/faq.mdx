@@ -49,7 +49,7 @@ uv run hud eval tasks.py claude --gateway
 </Accordion>
 
 <Accordion title="What platforms are supported (macOS / Windows / Linux)?">
-The CLI and SDK run on macOS, Windows, and Linux. One caveat: the `ssh` capability's sandbox isolation uses `bwrap` (bubblewrap), which is **Linux-only**. Off Linux the shell server still runs but **without** isolation — fine for local iteration, and fully isolated inside a built Linux image. See [Capabilities](/v6/reference/capabilities).
+The CLI and SDK run on macOS, Windows, and Linux. Two caveats: the `ssh` capability's sandbox isolation uses `bwrap` (bubblewrap), which is **Linux-only** — off Linux the shell server still runs but **without** isolation (on Windows, sessions run through `cmd.exe`) — and `BashGrader` needs bash, so on native Windows it scores `0.0`. Both are fine for local iteration and fully resolved inside a built Linux image. See [Capabilities](/v6/reference/capabilities).
 </Accordion>
 </AccordionGroup>
 

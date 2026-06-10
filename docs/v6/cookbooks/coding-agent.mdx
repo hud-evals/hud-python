@@ -27,7 +27,6 @@ env = Environment(name="coder", capabilities=[ws.capability()])
 
 @env.initialize
 async def _seed():
-    await ws.start()
     (ws.root / "calc.py").write_text("def add(a, b):\n    return a - b\n")   # bug
     (ws.root / "test_calc.py").write_text(TEST)       # the agent's copy
     CHECKS.mkdir(exist_ok=True)

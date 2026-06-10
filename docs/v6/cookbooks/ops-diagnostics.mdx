@@ -20,7 +20,6 @@ env = Environment(name="ops-diagnostics", capabilities=[ws.capability()])
 
 @env.initialize
 async def _seed():
-    await ws.start()
     ROOT.mkdir(parents=True, exist_ok=True)
     (ROOT / "api.log").write_text(
         "12:01 INFO  request /checkout ok 120ms\n"

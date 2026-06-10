@@ -49,10 +49,6 @@ from hud.native.graders import BashGrader
 ws = Workspace("workspace")  # a local directory the agent works in
 env = Environment(name="coder", capabilities=[ws.capability()])
 
-@env.initialize
-async def _start():
-    await ws.start()
-
 @env.task()
 async def fix_tests(target: str = "tests/"):
     yield f"Make the tests in {target} pass."

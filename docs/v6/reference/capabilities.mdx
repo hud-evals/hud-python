@@ -103,7 +103,7 @@ Key members:
 | Member | Description |
 |--------|-------------|
 | `ws.capability(name="shell")` | The `ssh` `Capability` (available immediately). |
-| `await ws.start()` | Ensure the SSH accept loop is running (idempotent). Call in `@env.initialize`. |
+| `await ws.start()` | Optional: the server starts on a background loop at construction — this only waits for it and surfaces a startup error early. |
 | `ws.ssh_url` | `ssh://host:port`. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
 

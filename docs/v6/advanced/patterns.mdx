@@ -22,10 +22,6 @@ env = Environment(
         Capability.cdp(url="ws://127.0.0.1:9222"),    # cdp: browser
     ],
 )
-
-@env.initialize
-async def _start():
-    await ws.start()
 ```
 
 The same environment serves a shell-only coding task and a browser-driving task — the difference is which capabilities the harness opens, not the environment.
@@ -42,7 +38,6 @@ db: asyncpg.Connection | None = None
 @env.initialize
 async def _start():
     global db
-    await ws.start()
     db = await asyncpg.connect("postgresql://localhost/app")
 
 @env.shutdown
