@@ -1,11 +1,11 @@
 """BrowserUseAgent — delegates browser control to the ``browser-use`` SDK.
 
 The env publishes a ``cdp/1.3`` capability (a Chromium DevTools endpoint); this
-agent reads that binding off the run's manifest and hands the URL to
-``browser-use``, which drives the browser over its own CDP client. We do **not**
-``open`` one of our own ``CapabilityClient`` connections — browser-use owns the
-session — so this agent reaches for ``trace.binding(...)`` (raw declaration)
-rather than ``trace.open(...)`` (managed client).
+agent reads that binding's URL and hands it to ``browser-use``, which drives
+the browser over its own CDP client. We do **not** ``open`` one of our own
+``CapabilityClient`` connections — browser-use owns the session — so this
+agent uses ``client.binding(...)`` (wire data) rather than ``client.open(...)``
+(managed client).
 
 The agent is stateless w.r.t. the env: it holds only config and is driven by
 ``await agent(run)``, receiving the run handle per call. ``browser-use`` is an

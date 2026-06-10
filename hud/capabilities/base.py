@@ -33,9 +33,13 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
 
 @dataclass(frozen=True, slots=True)
 class Capability:
-    """``(name, protocol, url, params)`` — declarative wire metadata for one slice of env access.
+    """``(name, protocol, url, params)`` — declarative metadata for one slice of env access.
 
-    Env-author runs the daemon; capability publishes the URL + connection-time auth.
+    Concrete declarations carry the URL of a daemon the env author runs
+    (``Capability.cdp(url=...)``, ``Capability.ssh(url=...)``). A declaration
+    with an **empty url** is *backed*: the env runs the daemon and resolves
+    the address when it serves a client (``Capability.shell(root)`` → a
+    managed ``Workspace``).
     """
 
     name: str
@@ -61,6 +65,30 @@ class Capability:
         )
 
     # ─── well-known protocol factories ─────────────────────────────────
+
+    @classmethod
+    def shell(
+        cls,
+        root: str | os.PathLike[str],
+        *,
+        name: str = "shell",
+        network: bool = False,
+        guest_path: str = "/workspace",
+        user: str = "agent",
+    ) -> Capability:
+        """``ssh/2``, backed — the env serves a managed ``Workspace`` for it.
+
+        Declares *intent* (a shell rooted at ``root``), not an address: nothing
+        is generated or bound until the env answers a client's ``hello``. For
+        an SSH daemon you run yourself, declare :meth:`ssh` with its URL.
+        """
+        params: dict[str, Any] = {
+            "root": os.fspath(root),
+            "network": network,
+            "guest_path": guest_path,
+            "user": user,
+        }
+        return cls(name=name, protocol="ssh/2", url="", params=params)
 
     @classmethod
     def ssh(

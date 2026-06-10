@@ -29,7 +29,7 @@ import hud
 from hud import spawn
 from hud.agents.openai import OpenAIAgent
 from hud.agents.types import OpenAIConfig
-from hud.environment import Workspace
+from hud.capabilities import Capability
 from hud.settings import settings
 
 # Codex-capable models that support native shell/apply_patch tools
@@ -53,15 +53,11 @@ Work in the current directory. When done, verify your work runs correctly."""
 # The environment this file *is*: `spawn(__file__)` serves it in a child
 # process (which re-imports this module), so the task's prompt and grade
 # arrive over the wire while the agent loop runs here. The workspace root is
-# handed to that child via CODEX_WORK_DIR.
+# handed to that child via CODEX_WORK_DIR. The shell capability is a pure
+# declaration: the serving child materializes the backing workspace (SSH keys
+# + socket) when the agent connects.
 WORK_DIR = os.path.abspath(os.environ.get("CODEX_WORK_DIR") or os.getcwd())
-ws = Workspace(WORK_DIR)
-env = hud.Environment("local-codex", capabilities=[ws.capability()])
-
-
-@env.initialize
-async def _start_workspace() -> None:
-    await ws.start()
+env = hud.Environment("local-codex", capabilities=[Capability.shell(WORK_DIR)])
 
 
 @env.task()

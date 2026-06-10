@@ -14,12 +14,14 @@ from typing import TYPE_CHECKING, Any, Generic, ParamSpec, cast
 
 from pydantic import TypeAdapter
 
+from hud.capabilities import Capability
+
 from .legacy import LegacyEnvMixin
+from .workspace import Workspace
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
-    from hud.capabilities import Capability
     from hud.eval import Task as EvalTask
 
 P = ParamSpec("P")
@@ -86,7 +88,7 @@ class Environment(LegacyEnvMixin):
         name: str = "environment",
         *,
         version: str = "0.0.1",
-        capabilities: list[Capability] | None = None,
+        capabilities: Sequence[Capability] | None = None,
         **legacy_kwargs: Any,
     ) -> None:
         if legacy_kwargs:
@@ -100,7 +102,19 @@ class Environment(LegacyEnvMixin):
             )
         self.name = name
         self.version = version
-        self.capabilities: list[Capability] = list(capabilities or [])
+        #: Declared capabilities — pure data. Entries with an empty ``url`` are
+        #: *backed*: :meth:`resolve_capability` materializes the daemon (e.g. a
+        #: managed ``Workspace``) when the env answers ``hello``.
+        self.capabilities: list[Capability] = []
+        for entry in capabilities or []:
+            if not isinstance(entry, Capability):
+                raise TypeError(
+                    f"Environment(capabilities=...): expected Capability, got {entry!r}",
+                )
+            self.capabilities.append(entry)
+        #: Daemons materialized for backed declarations, keyed by capability name.
+        self._backings: dict[str, Workspace] = {}
+        self._started = False
         #: Registered task factories by id (the ``@env.task`` registry).
         self.tasks: dict[str, _TaskFactory[Any]] = {}
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
@@ -156,9 +170,10 @@ class Environment(LegacyEnvMixin):
     def initialize(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register an initializer, run once before the control channel serves.
 
-        Use it to start a backing daemon — e.g. a :class:`~hud.environment.Workspace`'s
-        SSH server — whose capability is declared at construction
-        (``Environment(..., capabilities=[ws.capability()])``).
+        Use it to start a hand-rolled backing daemon. Daemons that own their
+        capability (e.g. a :class:`~hud.environment.Workspace`) don't need a
+        hook — declare them directly (``Environment(..., capabilities=[ws])``)
+        and the substrate starts them.
         """
         self._on_start.append(fn)
         return fn
@@ -171,17 +186,54 @@ class Environment(LegacyEnvMixin):
     # ─── substrate-run daemon lifecycle ──────────────────────────────────
 
     async def start(self) -> None:
-        """Bring up any backing capability daemons. Idempotent per registered hook.
+        """Run ``@env.initialize`` hooks. Idempotent until :meth:`stop`.
 
-        No-op unless something (e.g. the legacy adapter) registered ``_on_start``
-        hooks. Run once by the substrate before the control channel serves, so the
-        ``hello`` manifest reflects any capabilities the hooks publish.
+        Run by the substrate before the control channel serves. Backed
+        capability daemons are *not* started here — they materialize when the
+        env answers ``hello`` (:meth:`resolve_capability`).
         """
+        if self._started:
+            return
+        self._started = True
         for hook in self._on_start:
             await hook()
 
     async def stop(self) -> None:
-        """Tear down backing daemons started by :meth:`start` (best-effort)."""
+        """Tear down hooks and any backing daemons that materialized (best-effort)."""
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
+        for backing in reversed(self._backings.values()):
+            with contextlib.suppress(Exception):
+                await backing.stop()
+        self._backings.clear()
+        self._started = False
+
+    # ─── capability resolution (drives the ``hello`` manifest) ────────────
+
+    async def resolve_capability(self, name: str) -> Capability:
+        """Resolve a declared capability to concrete wire data.
+
+        Concrete declarations (non-empty ``url``) are returned as-is. Backed
+        declarations materialize their daemon here — for ``ssh/2``, a managed
+        :class:`Workspace` built from the declaration's params — so addresses
+        come into existence when the env serves a client, never at
+        declaration/import time. Idempotent: one daemon per name.
+        """
+        entry = next((c for c in self.capabilities if c.name == name), None)
+        if entry is None:
+            raise KeyError(f"unknown capability: {name!r}")
+        if entry.url:
+            return entry
+        family = entry.protocol.split("/", 1)[0]
+        if family != "ssh":
+            raise RuntimeError(
+                f"capability {name!r} ({entry.protocol}) has no url and no managed "
+                "backing; declare it with a concrete url",
+            )
+        backing = self._backings.get(name)
+        if backing is None:
+            backing = Workspace(**entry.params)
+            self._backings[name] = backing
+        await backing.start()
+        return backing.capability(name=entry.name)

@@ -1,8 +1,8 @@
 """HudClient: JSON-RPC client for the HUD wire protocol.
 
 Transport for a served env's control channel: drives ``hello`` / ``tasks.*`` /
-``bye`` and exposes capabilities via ``binding(name)`` (raw declaration) /
-``open(name)`` (live client). Use the module-level ``connect(runtime)`` to
+``bye`` and exposes capabilities via ``binding(ref)`` (wire data) /
+``open(ref)`` (live client). Use the module-level ``connect(runtime)`` to
 attach to a provisioned substrate.
 """
 
@@ -14,7 +14,7 @@ import itertools
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from hud.capabilities import (
@@ -29,7 +29,6 @@ from hud.environment.utils import read_frame, send_frame
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from types import TracebackType
 
     from hud.environment.runtime import Runtime
 
@@ -60,7 +59,11 @@ class ServerInfo:
 
 @dataclass(frozen=True, slots=True)
 class Manifest:
-    """Env welcome frame returned by ``HudClient.hello()``."""
+    """Env welcome frame returned by ``HudClient.hello()``.
+
+    ``bindings`` carry concrete connection data: the env resolves backed
+    declarations (materializing their daemons) when it answers ``hello``.
+    """
 
     session_id: str
     protocol_version: str  # e.g. "hud/1.0"
@@ -71,9 +74,9 @@ class Manifest:
 class HudClient:
     """JSON-RPC client for a served env's control channel.
 
-    Prefer ``hud.connect(runtime)``, which yields one of these; the raw
-    constructor takes any connected stream pair. ``hello`` runs on
-    ``__aenter__`` so ``manifest`` is ready immediately. Task lifecycle
+    Prefer ``hud.connect(runtime)``, which owns the lifecycle (connect →
+    ``hello`` → yield → ``close``) and yields one of these with ``manifest``
+    ready; the raw constructor takes any connected stream pair. Task lifecycle
     wrapping (start → grade) lives in :class:`hud.eval.Run`.
     """
 
@@ -92,18 +95,6 @@ class HudClient:
         self._opened: dict[str, CapabilityClient] = {}
 
     # ─── lifecycle ────────────────────────────────────────────────────
-
-    async def __aenter__(self) -> Self:
-        await self.hello()
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        await self.close()
 
     async def close(self) -> None:
         if self._closed:
@@ -139,50 +130,50 @@ class HudClient:
 
     # ─── capability access ────────────────────────────────────────────
     #
-    # ``binding`` and ``open`` resolve the same capability *by protocol*; they
-    # differ only in what they hand back:
-    #   binding(proto) -> Capability        raw declaration (url/params; BYO conn)
-    #   open(proto)    -> CapabilityClient   live, connected, cached client
+    # ``binding`` and ``open`` look up the same capability by name or protocol;
+    # they differ only in what they hand back:
+    #   binding(ref) -> Capability         wire data (url/params; BYO conn)
+    #   open(ref)    -> CapabilityClient   live, connected, cached client
 
-    def binding(self, protocol: str) -> Capability:
-        """Resolve a ``Capability`` by protocol (family ``"cdp"`` or full ``"cdp/1.3"``).
+    def binding(self, ref: str) -> Capability:
+        """Find the capability matching *ref* (name, protocol family, or protocol).
 
-        Returns the raw declaration — use this when something else owns the
-        connection (e.g. browser-use reads the CDP url). Ambiguous protocols
-        (multiple bindings) raise; publish distinct protocols to disambiguate.
+        Returns the wire data — use this when something else owns the
+        connection (e.g. browser-use reads the CDP url). Ambiguous refs
+        (multiple matches) raise; use names to disambiguate.
         """
         if self.manifest is None:
             raise RuntimeError("call hello() before accessing bindings")
         matches = [
             c
             for c in self.manifest.bindings
-            if c.protocol == protocol or c.protocol.split("/", 1)[0] == protocol
+            if ref in (c.name, c.protocol, c.protocol.split("/", 1)[0])
         ]
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            protos = ", ".join(c.protocol for c in matches)
-            raise KeyError(f"ambiguous protocol {protocol!r}; matches: {protos}")
-        available = ", ".join(c.protocol for c in self.manifest.bindings) or "<none>"
-        raise KeyError(f"no binding for protocol {protocol!r} (available: {available})")
+            names = ", ".join(f"{c.name} ({c.protocol})" for c in matches)
+            raise KeyError(f"ambiguous capability {ref!r}; matches: {names}")
+        available = ", ".join(f"{c.name} ({c.protocol})" for c in self.manifest.bindings)
+        raise KeyError(f"no capability {ref!r} (available: {available or '<none>'})")
 
-    async def open(self, protocol: str) -> CapabilityClient:
-        """Open (and cache) a live ``CapabilityClient`` for a protocol.
+    async def open(self, ref: str) -> CapabilityClient:
+        """Open (and cache) a live ``CapabilityClient`` for a capability.
 
-        Resolves like ``binding`` but connects and returns a live client, owned by
-        this connection and closed on ``close()``.
+        Resolves like ``binding`` but connects and returns a live client, owned
+        by this connection and closed on ``close()``.
         """
-        cap = self.binding(protocol)
-        cap_client = self._opened.get(cap.protocol)
+        cap = self.binding(ref)
+        cap_client = self._opened.get(cap.name)
         if cap_client is None:
             client_cls = _CLIENT_REGISTRY.get(cap.protocol)
             if client_cls is None:
                 raise ValueError(
                     f"no client registered for protocol {cap.protocol!r}; "
-                    f"use binding({protocol!r}) for raw access",
+                    f"use binding({ref!r}) for raw access",
                 )
             cap_client = await client_cls.connect(cap)
-            self._opened[cap.protocol] = cap_client
+            self._opened[cap.name] = cap_client
         return cap_client
 
     # ─── tasks ────────────────────────────────────────────────────────
@@ -276,8 +267,11 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 120.0) -> AsyncIte
         parts.port or 0,
         ready_timeout=ready_timeout,
     )
-    async with client:
+    try:
+        await client.hello()
         yield client
+    finally:
+        await client.close()
 
 
 __all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo", "connect"]

@@ -28,6 +28,7 @@ def last_image_data(result: MCPToolResult) -> str | None:
             return block.data
     return None
 
+
 OPENAI_KEY_ALIASES: dict[str, str] = {
     "return": "Return",
     "escape": "Escape",

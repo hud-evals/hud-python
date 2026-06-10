@@ -20,7 +20,7 @@ from hud.capabilities import Capability
 
 ## The `Capability` dataclass
 
-A capability is `(name, protocol, url, params)` — declarative wire metadata for one slice of env access. The author runs the daemon; the capability publishes the URL and connection-time auth.
+A capability is `(name, protocol, url, params)` — declarative wire metadata for one slice of env access. A **concrete** declaration carries the URL of a daemon you run yourself (`Capability.cdp(url=...)`). A declaration with an empty `url` is **backed**: the environment runs the daemon and resolves the address when a client connects (`Capability.shell(root)` → a managed [`Workspace`](#workspace)).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -35,6 +35,15 @@ A capability is `(name, protocol, url, params)` — declarative wire metadata fo
 
 Build a capability with the factory for its protocol; each normalizes shorthand URLs and fills sane defaults.
 
+### `Capability.shell`
+
+```text
+Capability.shell(root, *, name="shell", network=False,
+                 guest_path="/workspace", user="agent")
+```
+
+A managed shell (`ssh/2`, backed): declares *intent* — a sandboxed shell rooted at `root` — not an address. Nothing is generated or bound until a client connects, when the environment serves a [`Workspace`](#workspace) for it. This is the usual way to give an agent shell + file access.
+
 ### `Capability.ssh`
 
 ```text
@@ -42,7 +51,7 @@ Capability.ssh(*, name="shell", url, user="agent", host_pubkey,
                client_key_path=None, shell=None)
 ```
 
-SSH with publickey auth. `shell` declares the remote shell (`bash`, `powershell`, `cmd`); defaults to auto-detect. Usually created via [`Workspace.capability()`](#workspace) rather than by hand.
+An SSH daemon you run yourself (`ssh/2`, concrete), with publickey auth. `shell` declares the remote shell (`bash`, `powershell`, `cmd`); defaults to auto-detect. For a managed sandbox, declare [`Capability.shell`](#capability-shell) instead.
 
 ### `Capability.cdp`
 
@@ -78,32 +87,23 @@ A rosbridge-compatible WebSocket (default port `9090`).
 
 ## Workspace
 
-`Workspace` backs the `ssh` capability: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP).
+`Workspace` is the managed backing behind `Capability.shell`: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). You normally never construct one — declare `Capability.shell(root)` and the environment builds the workspace (keys, socket, accept loop) when a client connects, tearing it down on `env.stop()`.
 
 ```python
-from hud.environment import Environment, Workspace
+from hud.capabilities import Capability
+from hud.environment import Environment
 
-ws = Workspace("/workspace")
-env = Environment(name="coder", capabilities=[ws.capability()])
+env = Environment(name="coder", capabilities=[Capability.shell("/workspace")])
 ```
 
-Key parameters:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `root` | — | Directory served (created if missing). |
-| `mounts` | `()` | Extra `Mount` entries for the bwrap namespace. |
-| `network` | `False` | Allow network inside the sandbox. |
-| `env` | `None` | Extra environment variables. |
-| `guest_path` | `"/workspace"` | Path the root mounts at inside the sandbox. |
-| `user` | `"agent"` | SSH username. |
-
-Key members:
+For full control (extra `mounts`, fixed ports, your own keys), construct a `Workspace` directly, start it, and publish `ws.capability()` as a concrete `ssh` capability:
 
 | Member | Description |
 |--------|-------------|
-| `ws.capability(name="shell")` | The `ssh` `Capability` (available immediately). |
-| `await ws.start()` | Ensure the SSH accept loop is running (idempotent). Call in `@env.initialize`. |
+| `Workspace(root, *, mounts=(), network=False, env=None, guest_path="/workspace", user="agent", ...)` | Construct (pure data — nothing touches disk yet). |
+| `await ws.start()` | Ensure the SSH accept loop is running (idempotent). |
+| `ws.capability(name="shell")` | The resolved `ssh` `Capability` — materializes keys and binds the socket. |
+| `await ws.stop()` | Stop accepting sessions and release the socket. |
 | `ws.ssh_url` | `ssh://host:port`. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
 

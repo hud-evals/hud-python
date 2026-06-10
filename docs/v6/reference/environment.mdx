@@ -8,7 +8,7 @@ icon: "cube"
 
 ```python
 from hud import Environment
-# or: from hud.environment import Environment, Workspace
+# or: from hud.environment import Environment
 ```
 
 ## Constructor
@@ -21,7 +21,7 @@ Environment(name="environment", *, version="0.0.1", capabilities=None)
 |-----------|------|---------|-------------|
 | `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
 | `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
-| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish. |
+| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish — concrete declarations (`Capability.cdp(url=...)`) or backed ones the env resolves on connect (`Capability.shell(root)`). |
 
 <Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
 
@@ -53,25 +53,21 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 env.capabilities.append(cap)   # append a Capability after construction
 ```
 
-Capabilities are normally passed to the constructor. See [Capabilities](/v6/reference/capabilities).
+Capabilities are normally passed to the constructor as pure declarations. **Concrete** ones carry the URL of a daemon you run; **backed** ones (`Capability.shell(root)`) carry no address — the env runs the daemon (a managed `Workspace`) and resolves the address when a client connects, tearing it down on stop. See [Capabilities](/v6/reference/capabilities).
 
 ## Lifecycle hooks
 
 ```python
 @env.initialize
-async def _start():
-    ...
+async def _seed():
+    (ROOT / "fixture.txt").write_text("...")
 
 @env.shutdown
 async def _stop():
     ...
 ```
 
-```python
-@env.initialize
-async def _start():
-    await ws.start()
-```
+Hooks run once around serving — use them for seeding state or hand-rolled daemons. Backed capabilities (`Capability.shell`) don't need one; the env manages their daemon itself.
 
 ## Serving
 

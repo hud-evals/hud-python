@@ -60,18 +60,14 @@ and [Tasks](/v6/reference/tasks).
 harness brings its own tools):
 
 ```python
-from hud.environment import Environment, Workspace
+from hud.capabilities import Capability
+from hud.environment import Environment
 
-ws = Workspace("/workspace")
-env = Environment(name="coder", capabilities=[ws.capability()])
-
-@env.initialize
-async def _start():
-    await ws.start()
+env = Environment(name="coder", capabilities=[Capability.shell("/workspace")])
 ```
 
-`ssh` (shell+files via `Workspace`), `mcp`, `cdp` (browser), `rfb`
-(computer-use), `ros2` (robot). Cite [Environments](/v6/reference/environment) and
+`shell`/`ssh` (shell+files), `mcp`, `cdp` (browser), `rfb` (computer-use),
+`ros2` (robot). Cite [Environments](/v6/reference/environment) and
 [Capabilities](/v6/reference/capabilities).
 
 **Run / scale / train:** [Models](/v6/run/models),

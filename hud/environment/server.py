@@ -236,12 +236,20 @@ class _ControlChannel:
 
                 try:
                     if method == "hello":
+                        # Resolving materializes backed declarations (e.g. the
+                        # managed workspace behind ``Capability.shell``), so
+                        # addresses come into existence when the env serves a
+                        # client — never at declaration/import time.
+                        bindings = [
+                            (await env.resolve_capability(c.name)).to_manifest()
+                            for c in env.capabilities
+                        ]
                         await reply_to(
                             msg_id,
                             {
                                 "session_id": session_id,
                                 "env": {"name": env.name, "version": env.version},
-                                "bindings": [c.to_manifest() for c in env.capabilities],
+                                "bindings": bindings,
                             },
                         )
 

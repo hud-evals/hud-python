@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from hud.capabilities import Capability
 
     from .env import Environment, _TaskFactory
-    from .workspace import Workspace
 
 LOGGER = logging.getLogger("hud.environment.legacy")
 
@@ -106,9 +105,8 @@ class LegacyEnvMixin:
         #: id -> env var names the scenario requires.
         self._scenario_required_env_vars: dict[str, list[str]] = {}
         self._tools_hook_registered = False
-        #: Background tasks / workspaces spun up to back synthesized capabilities.
+        #: Background tasks spun up to back synthesized capabilities.
         self._legacy_bg_tasks: list[asyncio.Task[None]] = []
-        self._legacy_workspaces: list[Workspace] = []
 
     # ─── tools (v5 @env.tool / env.add_tool → capabilities) ───────────────
 
@@ -156,7 +154,7 @@ class LegacyEnvMixin:
         for tool in self._legacy_tools:
             buckets[_classify_tool(tool)].append(tool)
         if buckets["shell"]:
-            await self._ensure_ssh_capability()
+            self._ensure_ssh_capability()
         if buckets["computer"]:
             self._ensure_computer_capability()
         if buckets["mcp"]:
@@ -201,31 +199,21 @@ class LegacyEnvMixin:
                 exc_info=True,
             )
 
-    async def _ensure_ssh_capability(self) -> None:
-        """Spin up a :class:`~hud.environment.Workspace` + publish its ``ssh`` capability."""
-        try:
-            from .workspace import Workspace
+    def _ensure_ssh_capability(self) -> None:
+        """Declare a backed shell capability for the collected shell tools.
 
-            root = os.environ.get("HUD_WORKSPACE_ROOT") or os.getcwd()
-            ws = Workspace(root)
-            await ws.start()
-            self._legacy_workspaces.append(ws)
-            self.capabilities.append(ws.capability())
-            LOGGER.info(
-                "legacy env %r: shell tool(s) -> ssh capability at %s", self.name, ws.ssh_url
-            )
-        except Exception:
-            LOGGER.warning(
-                "legacy env %r: could not start an SSH workspace for shell tool(s)",
-                self.name,
-                exc_info=True,
-            )
-            warnings.warn(
-                "Legacy shell tools could not be converted to an ssh capability. Declare one "
-                "explicitly: Environment(..., capabilities=[Workspace(root).capability()]).",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        Pure declaration: the env materializes a managed workspace (keys +
+        bind) when it answers ``hello``, and ``env.stop()`` tears it down.
+        """
+        from hud.capabilities import Capability
+
+        if any(c.protocol.split("/", 1)[0] == "ssh" for c in self.capabilities):
+            return
+        root = os.environ.get("HUD_WORKSPACE_ROOT") or os.getcwd()
+        self.capabilities.append(Capability.shell(root))
+        LOGGER.info(
+            "legacy env %r: shell tool(s) -> backed shell capability (root %s)", self.name, root
+        )
 
     def _ensure_computer_capability(self) -> None:
         """Publish an ``rfb`` capability for a detected/declared VNC server."""
@@ -248,16 +236,15 @@ class LegacyEnvMixin:
         LOGGER.info("legacy env %r: computer tool(s) -> rfb capability at %s", self.name, url)
 
     async def _cleanup_legacy_tools(self) -> None:
-        """Tear down anything :meth:`_serve_legacy_tools` started (best-effort)."""
+        """Tear down anything :meth:`_serve_legacy_tools` started (best-effort).
+
+        The backed shell declaration needs nothing here — ``Environment.stop()``
+        tears down whatever backing materialized for it.
+        """
         for task in self._legacy_bg_tasks:
             task.cancel()
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 await task
-        for ws in self._legacy_workspaces:
-            acceptor = getattr(ws, "_acceptor", None)
-            if acceptor is not None:
-                with contextlib.suppress(Exception):
-                    acceptor.close()
 
     # ─── scenarios (v5 @env.scenario → v6 task) ───────────────────────────
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
@@ -75,7 +76,12 @@ _DEFAULT_USER = "agent"
 
 
 class Workspace:
-    """Directory + bwrap-isolated SSH (bash + chroot'd SFTP)."""
+    """Directory + bwrap-isolated SSH (bash + chroot'd SFTP).
+
+    The managed backing for ``Capability.shell(root)`` declarations — the env
+    builds one when it answers ``hello``. Construct it directly for full
+    control (mounts, keys, fixed ports) and publish via :meth:`capability`.
+    """
 
     def __init__(
         self,
@@ -182,6 +188,27 @@ class Workspace:
         # Yield so the acceptor binds before first use.
         await asyncio.sleep(0)
 
+    async def stop(self) -> None:
+        """Stop accepting SSH sessions and release the socket.
+
+        Credentials stay on disk; a later :meth:`start` re-binds (fresh port
+        unless one was pinned) and reuses them.
+        """
+        if self._serve_task is not None:
+            self._serve_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._serve_task
+            self._serve_task = None
+        if self._acceptor is not None:
+            self._acceptor.close()
+            await self._acceptor.wait_closed()
+            self._acceptor = None
+        elif self._sock is not None:
+            self._sock.close()
+        self._sock = None
+        self._bound_host = None
+        self._bound_port = None
+
     # ─── ssh accessors / capability ───────────────────────────────────
 
     @property
@@ -211,10 +238,7 @@ class Workspace:
         return self._ssh_user
 
     def capability(self, name: str = "shell") -> Capability:
-        """The ``ssh`` capability for this workspace.
-
-        Prepares url/keys lazily, so ``Workspace(...)`` itself remains declarative.
-        """
+        """The resolved ``ssh`` capability — materializes keys + bind."""
         from hud.capabilities import Capability
 
         return Capability.ssh(
