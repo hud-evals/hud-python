@@ -52,7 +52,7 @@
             "groups": [
               { "group": "Start here", "pages": ["v6/index", "v6/quickstart", "v6/faq", "migrate-v6"] },
               { "group": "Build", "pages": ["v6/build/what-to-build", "v6/build/environments", "v6/build/tasks"] },
-              { "group": "Run & scale", "pages": ["v6/run/models", "v6/run/deploy", "v6/run/tasksets", "v6/run/signal", "v6/run/training"] },
+              { "group": "Run & scale", "pages": ["v6/run/models", "v6/run/deploy", "v6/run/signal", "v6/run/training"] },
               { "group": "Reference", "pages": ["v6/reference/environment", "v6/reference/tasks", "v6/reference/capabilities", "v6/reference/agents", "v6/reference/graders", "v6/reference/types", "v6/reference/cli"] },
               { "group": "Advanced", "pages": ["v6/advanced/integrations", "v6/advanced/chat", "v6/advanced/patterns", "v6/advanced/harbor-convert"] },
               { "group": "Cookbooks", "pages": ["v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics"] },

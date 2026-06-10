@@ -1,6 +1,6 @@
 ---
 title: "Package & deploy"
-description: "Build a portable image that runs any task variant, anywhere."
+description: "Publish your environment and tasks, and run them at scale on hosted infra."
 icon: "rocket"
 ---
 
@@ -23,10 +23,49 @@ hud eval my-taskset claude --remote
 ```
 
 - `hud deploy` builds the image and registers the environment.
-- `hud sync tasks my-taskset` publishes your variants as a named taskset.
-- `hud eval my-taskset --remote` runs the taskset on hosted infra; inspect every rollout from the [platform UI](https://hud.ai).
+- `hud sync tasks my-taskset` publishes your variants as a named **taskset**.
+- `hud eval my-taskset --remote` runs the taskset on hosted infra.
 
 Pass environment variables with `--env KEY=VALUE` (repeatable) or `--env-file .env`.
+
+## Publish your tasks as a taskset
+
+A **taskset** is a named dataset of variants stored on the platform. `hud sync tasks` collects the variants from your source, **diffs them against the remote taskset, and uploads only what changed**:
+
+```bash
+hud sync tasks my-taskset                 # scan the current dir, sync to "my-taskset"
+hud sync tasks my-taskset tasks.py        # from a specific file
+hud sync tasks my-taskset tasks/          # from a directory
+```
+
+The first sync creates the taskset and stores its ID in `.hud/config.json`, so afterward `hud sync tasks` with no name re-syncs it.
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Show the sync plan without uploading. |
+| `--task <slug>` | Only sync the task matching this slug. |
+| `--exclude <slug>` | Exclude tasks by slug (repeatable). |
+| `--force` | Upload every task, skipping the diff comparison. |
+| `--yes`, `-y` | Skip the confirmation prompt (use in CI). |
+| `--export <file>` | Export the remote tasks to `.json` or `.csv` instead of syncing. |
+
+Give each variant a stable `slug` and arbitrary `columns` so it's identifiable and filterable on the platform:
+
+```python tasks.py
+v = fix_bug(difficulty=3)
+v.slug = "fix-bug-3"
+v.columns = {"difficulty": 3, "suite": "coding"}
+```
+
+## Run it on hosted infra
+
+Once synced, run the taskset by name. `--remote` submits it to the platform: each rollout gets its own fresh sandbox, runs in parallel, and reports its trace under one job:
+
+```bash
+hud eval my-taskset claude --remote --full
+```
+
+This is how you scale — not by managing containers, but by handing the platform a taskset name. From the [platform UI](https://hud.ai) you can run batches, compare models on the same taskset, browse every trace, and build leaderboards — and a published taskset is shared infrastructure: teammates run the same dataset without passing files around. See the [platform tasksets guide](/platform/tasksets).
 
 ## The local path: `hud build`
 
@@ -49,55 +88,11 @@ docker exec run1 hud task-grade fix_bug --answer "…"
 docker rm -f run1
 ```
 
-`hud task-start` returns the task's prompt; `hud task-grade` returns the reward. Inside the image they attach to the env serving locally — no source needed.
+`hud task-start` returns the task's prompt; `hud task-grade` returns the reward. Inside the image they attach to the env serving locally — no source needed. This is the escape hatch for plugging a build into **your own** rollout infra; for everything else, prefer the hosted path above.
 
 <Note>
 `hud task-start` / `hud task-grade` are the top-level aliases. The same commands exist as the `hud task start` / `hud task grade` subgroup, plus `hud task list` to see what variants an image or source exposes.
 </Note>
-
-## Driving a packaged image from code
-
-A running container is a `RemoteSandbox` — attach a `Variant` to its control-channel URL and run it like any other. To reach it from the **host**, publish the control-channel port when you start it:
-
-```bash
-docker run -d --name run1 -p 8765:8765 my-env
-```
-
-Then attach by task **id** (you don't need the Python task object — construct the `Variant` directly):
-
-```python run.py
-import asyncio
-from hud.eval import RemoteSandbox, Variant
-from hud.agents import create_agent
-
-async def main():
-    sandbox = RemoteSandbox("tcp://127.0.0.1:8765")
-    variant = Variant(env=sandbox, task="fix_bug")   # by task id
-    agent = create_agent("claude-sonnet-4-5")
-    async with variant as run:
-        await agent(run)
-    print(run.reward)
-
-asyncio.run(main())
-```
-
-<Note>
-Build a `Variant` three ways: **call the task** (`fix_bug(...)`) when you have the Python object — the normal path; the **`variant()` helper** for metadata; or the bare **`Variant(env=..., task="id")`** constructor when you only have a task **id** against a remote/packaged image, as above.
-</Note>
-
-## Scaling horizontally
-
-Because each rollout gets its own container, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
-
-```python run.py
-from hud.eval import Taskset
-
-runs = await Taskset(fix_bug(difficulty=d) for d in range(20)).run(
-    agent, max_concurrent=10,
-)
-```
-
-On the platform, `hud eval my-taskset claude --remote --full` runs the entire taskset on hosted sandboxes and reports each trace under one job.
 
 ## Next steps
 
@@ -105,13 +100,13 @@ On the platform, `hud eval my-taskset claude --remote --full` runs the entire ta
 <Card title="Train on your tasks" icon="dumbbell" href="/v6/run/training">
   Turn the rewards you just collected into GRPO advantages.
 </Card>
-<Card title="CLI reference" icon="terminal" href="/v6/reference/cli">
-  Every command and flag: build, deploy, sync, eval, task.
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
+  Compose a taskset that actually trains.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">
   Compare models across the same taskset.
 </Card>
-<Card title="Import Harbor tasks" icon="anchor" href="/v6/advanced/harbor-convert">
-  Bring existing benchmarks into a HUD environment.
+<Card title="CLI reference" icon="terminal" href="/v6/reference/cli">
+  Every command and flag: build, deploy, sync, eval, task.
 </Card>
 </CardGroup>
