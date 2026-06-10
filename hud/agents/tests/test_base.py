@@ -14,7 +14,7 @@ from mcp.types import TextContent
 
 from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
 from hud.agents.base import Agent
-from hud.native.tools.base import BaseTool
+from hud.tools.base import BaseTool
 from hud.types import AgentType
 
 

@@ -180,37 +180,6 @@ class Environment(LegacyEnvMixin):
         self._on_stop.append(fn)
         return fn
 
-    # ─── serialization ────────────────────────────────────────────────────
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the env descriptor: identity, capabilities, and task list.
-
-        Task generator *code* is not serializable; ``tasks`` carries id/description
-        metadata for discovery. :meth:`from_dict` restores identity + capabilities
-        (runnable task funcs come from the env's source/image when launched).
-        """
-        return {
-            "name": self.name,
-            "version": self.version,
-            "capabilities": [c.to_manifest() for c in self.capabilities],
-            "tasks": self.task_entries(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Environment:
-        """Rebuild an Environment from :meth:`to_dict` output (identity + capabilities).
-
-        Tasks are not reconstructed — their generator code lives in the env's
-        source. A deserialized Environment carries identity + capability metadata only.
-        """
-        from hud.capabilities import Capability
-
-        return cls(
-            name=data["name"],
-            version=data.get("version", "0.0.1"),
-            capabilities=[Capability.from_manifest(c) for c in data.get("capabilities") or []],
-        )
-
     # ─── control-channel server ──────────────────────────────────────────
 
     async def bind(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:

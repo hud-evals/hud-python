@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from mcp.types import TextContent
 
-from hud.native.tools.base import BaseTool
+from hud.tools.base import BaseTool
 
 
 class EchoTool(BaseTool):

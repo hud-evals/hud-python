@@ -6,7 +6,7 @@ load them into system prompts or scenario context.
 
 Usage::
 
-    from hud.native.skills import load_skills
+    from hud.skills import load_skills
 
     # Load individual files
     agent = ClaudeAgent(ClaudeConfig(system_prompt=load_skills("skills/review.md")))

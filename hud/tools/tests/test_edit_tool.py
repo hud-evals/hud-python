@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents.types import ToolError
-from hud.native.tools.coding.edit import EditTool
+from hud.tools.coding.edit import EditTool
 
 if TYPE_CHECKING:
     from pathlib import Path

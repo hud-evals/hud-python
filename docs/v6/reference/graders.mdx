@@ -7,8 +7,9 @@ icon: "scale-balanced"
 Graders turn an agent's answer into a reward. HUD ships reusable ones so you don't hand-build common scoring logic. Yield the result (a `float` or an `EvaluationResult`) as the task's second yield.
 
 ```python
-from hud.native.graders import (
-    BashGrader, LLMJudgeGrader, GradeCombiner, Grader,
+from hud.graders import (
+    BashGrader, LLMJudgeGrader, Grader,
+    combine, combine_any, combine_all,
     exact_match, contains, contains_any, contains_all,
     numeric_match, f1_score, normalize,
 )
@@ -71,27 +72,28 @@ result = await LLMJudgeGrader.grade(
 
 `criteria` items are strings, or `(requirement, weight)` tuples.
 
-## `hud.native.graders.GradeCombiner` — compose multiple graders
+## `combine` — compose multiple graders
 
-`GradeCombiner.gather` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
+`combine` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
 
 ```python
 @env.task()
 async def composed(answer: str = ""):
     answer = yield "Solve the task."
-    yield await GradeCombiner.gather(
+    yield await combine(
         BashGrader.grade(weight=0.5, command="pytest -q"),
         LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Matches the spec"]),
         SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
     )
 ```
 
-| Method | Description |
-|--------|-------------|
-| `await GradeCombiner.gather(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
-| `GradeCombiner.from_subscores(list)` | Combine already-resolved subscores. |
+| Function | Description |
+|----------|-------------|
+| `await combine(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
+| `combine_any(weight, subscores)` | Boolean OR: a `SubScore` that passes if any input passes (max). |
+| `combine_all(weight, subscores)` | Boolean AND: a `SubScore` that passes only if all inputs pass (min). |
 
-The subscores appear in the trace, so a partial reward is legible.
+The subscores appear in the trace, so a partial reward is legible. `combine_any`/`combine_all` collapse alternatives into a single component you can feed to `combine` — e.g. "tests pass via `pytest` OR via `make test`" as one 0/1 subscore.
 
 ## Custom graders
 

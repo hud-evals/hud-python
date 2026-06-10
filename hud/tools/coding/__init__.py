@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .bash import (
     BashTool,
     BashToolSession,
@@ -40,3 +42,10 @@ __all__ = [
     "write_file_async",
     "write_file_sync",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """v5 names removed in v6 (``ApplyPatchTool``, ``ShellTool``, …) resolve to no-ops."""
+    from hud._legacy import resolve_legacy_name
+
+    return resolve_legacy_name(__name__, name)

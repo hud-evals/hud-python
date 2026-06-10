@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from hud.environment.task import _TaskFactory
 
-LOGGER = logging.getLogger("hud.native.tools.agent")
+LOGGER = logging.getLogger("hud.tools.agent")
 
 __all__ = ["AgentTool"]
 

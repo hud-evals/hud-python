@@ -84,13 +84,6 @@ async def _start():
 
 In practice you serve with `hud dev` and run through `hud eval`, `Taskset.run()`, or a `Task` context manager rather than calling these directly.
 
-## Serialization
-
-| Method | Description |
-|--------|-------------|
-| `env.to_dict()` | Serialize identity + capabilities + task metadata (task code is not serializable). |
-| `Environment.from_dict(data)` | Rebuild identity + capabilities (tasks come from source when launched). |
-
 ## The wire protocol
 
 An environment answers a small JSON-RPC control channel over tcp:

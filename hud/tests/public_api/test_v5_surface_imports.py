@@ -63,7 +63,6 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.native": (
         "BashGrader",
         "Grade",
-        "GradeCombiner",
         "Grader",
         "LLMJudgeGrader",
         "contains",
@@ -196,7 +195,6 @@ ENVIRONMENT_DEEP_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.native.graders": (
         "BashGrader",
         "Grade",
-        "GradeCombiner",
         "Grader",
     ),
     "hud.server.context": (

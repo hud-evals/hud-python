@@ -72,7 +72,7 @@ Other tool kinds map the same way: a browser becomes `cdp`, full computer-use be
 The generator body is identical — `yield` a prompt, receive the answer, `yield` a reward. Just swap the decorator and keep a reference to the returned `Task`:
 
 ```python title="env.py (v6)"
-from hud.native import BashGrader
+from hud.graders import BashGrader
 
 @env.task()
 async def fix_tests(target: str = "tests/"):
@@ -132,15 +132,15 @@ Because every old import still resolves (the SDK ships shims) and registered too
 
 ### Imports to update
 
-In v6, `hud.tools` is a deprecation shim. Every old import still resolves with a `DeprecationWarning`, but each one does one of three things now:
+In v6, `hud.tools` keeps the standalone tools, but every import that was removed still resolves with a `DeprecationWarning`:
 
 | v5 import | What it resolves to now | What to do |
 |-----------|-------------------------|------------|
-| Tools: `BashTool`, `EditTool`, `JupyterTool`, `MemoryTool`, `PlaywrightTool`, `AgentTool`, `BaseTool` | redirected to `hud.native.tools.*` | usually **delete the registration** — declare the capability instead (see the steps above); import from `hud.native.tools.*` only if you call the tool directly |
+| Tools: `BashTool`, `EditTool`, `JupyterTool`, `PlaywrightTool`, `AgentTool`, `BaseTool` | unchanged — still real classes in `hud.tools.*` | usually **delete the registration** — declare the capability instead (see the steps above); import from `hud.tools.*` only if you call the tool directly |
 | Result types: `AgentAnswer`, `Citation`, `EvaluationResult`, `ScenarioResult`, `ContentResult`, `SubScore`, `ToolError` | redirected to `hud.agents.types` | change the import to `from hud.agents.types import ...` |
 | Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | **removed** — resolve to a marker that synthesizes an `rfb` capability at serve | declare an `rfb` (computer-use) or `cdp` (browser) capability instead |
-| Anything else under `hud.tools`: filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — the capability or agent harness provides the equivalent |
-| Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | unchanged | keep as-is |
+| Anything else under `hud.tools`: filesystem tools, executors, `MemoryTool`, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — the capability or agent harness provides the equivalent |
+| Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | aliased to `hud.graders` | change the import to `from hud.graders import ...` |
 
 The rule of thumb: **result types move to `hud.agents.types`, tools become capabilities, and everything else under `hud.tools` is going away.** When the deprecation log is quiet, the conversion is done.
 

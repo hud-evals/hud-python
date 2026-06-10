@@ -44,7 +44,7 @@ Here's the whole loop in one file: an environment that gives the agent a shell a
 
 ```python env.py
 from hud.environment import Environment, Workspace
-from hud.native.graders import BashGrader
+from hud.graders import BashGrader
 
 ws = Workspace("/workspace")
 env = Environment(name="coder", capabilities=[ws.capability()])

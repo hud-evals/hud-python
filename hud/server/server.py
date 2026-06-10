@@ -403,7 +403,7 @@ class MCPServer(FastMCP):
 
     # Tool registration helper -- appends BaseTool to FastMCP
     def add_tool(self, obj: Any, **kwargs: Any) -> None:
-        from hud.native.tools.base import BaseTool
+        from hud.tools.base import BaseTool
 
         if isinstance(obj, BaseTool):
             super().add_tool(obj.mcp, **kwargs)
@@ -422,7 +422,7 @@ class MCPServer(FastMCP):
         # Accept BaseTool / FastMCP Tool instances or callables in call-form
         if name_or_fn is not None and not isinstance(name_or_fn, str):
             try:
-                from hud.native.tools.base import BaseTool  # lazy import
+                from hud.tools.base import BaseTool  # lazy import
             except Exception:
                 BaseTool = tuple()  # type: ignore[assignment]
             try:

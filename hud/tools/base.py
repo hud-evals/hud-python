@@ -185,3 +185,10 @@ class BaseTool(ABC):
             except Exception as e:
                 logger.warning("after callback failed: %s", e)
         return result
+
+
+def __getattr__(name: str) -> Any:
+    """v5 names removed in v6 (``BaseHub``, …) resolve to no-ops."""
+    from hud._legacy import resolve_legacy_name
+
+    return resolve_legacy_name(__name__, name)

@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 
 from hud.environment import Environment
-from hud.native.tools.agent import AgentTool
+from hud.tools.agent import AgentTool
 
 
 class _FakeAgent:

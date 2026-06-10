@@ -1,19 +1,16 @@
-"""Native chat environment with sample scenarios.
+"""Sample chat environment.
 
 Provides chat-compatible scenarios that accept ``messages`` as
 ``list[PromptMessage]`` -- each message has a role and typed content.
 
-Usage::
-
-    from hud.native.chat import env
+Serve it locally with ``hud dev examples/02_chat_env.py``, or load the ``env``
+defined here and use it directly::
 
     chat = env.chat("chat_simple", model="claude-sonnet-4-5")
     r = await chat.send("What is the capital of France?")
 
     chat = env.chat("chat_full", model="claude-sonnet-4-5")
     r = await chat.send("Analyze this data")
-
-    chat.serve(port=9999)
 """
 
 from __future__ import annotations

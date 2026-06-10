@@ -5,7 +5,7 @@ from __future__ import annotations
 from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.agents.types import ContentResult, ToolError
-from hud.native.tools.base import BaseTool
+from hud.tools.base import BaseTool
 
 from .session import BashSession
 

@@ -10,7 +10,6 @@ icon: "wrench"
 This reference covers the tool system architecture and how to build custom tools. For documentation on built-in tools, see [Scaffolding](/building/scaffolding#native-tools):
 
 - [Coding Tools](/tools/coding) — Shell execution, file editing
-- [Memory Tools](/tools/memory) — Persistent storage
 - [Computer Tools](/tools/computer) — Mouse, keyboard, screenshots
 - [Web Tools](/tools/web) — Browser automation
 </Info>
@@ -27,7 +26,7 @@ HUD tools are async functions that:
 Agent → Tool Call → BaseTool.__call__() → list[ContentBlock] → Agent
 ```
 
-Provider-native details live on agent harnesses. Environments expose generic tools such as `ComputerTool`, `BashTool`, `EditTool`, and `MemoryTool`; Claude/OpenAI/Gemini agents decide how to present those capabilities to their model APIs.
+Provider-native details live on agent harnesses. Environments expose generic tools such as `ComputerTool`, `BashTool`, and `EditTool`; Claude/OpenAI/Gemini agents decide how to present those capabilities to their model APIs.
 
 ## BaseTool
 

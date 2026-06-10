@@ -14,7 +14,7 @@ The `Workspace` gives the agent a sandboxed shell and files under `/workspace`. 
 from pathlib import Path
 
 from hud.environment import Environment, Workspace
-from hud.native.graders import BashGrader
+from hud.graders import BashGrader
 
 ROOT = Path("/workspace")
 ws = Workspace(ROOT)

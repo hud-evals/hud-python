@@ -1,20 +1,20 @@
 """Native graders for HUD evaluation.
 
-All graders are async. ``GradeCombiner.gather`` runs them in parallel and
+All graders are async. ``combine`` runs them in parallel and
 combines the results into an ``EvaluationResult`` you can yield
 directly from a scenario.
 
 Usage::
 
-    from hud.native.graders import BashGrader, GradeCombiner, LLMJudgeGrader
-    from hud.native.graders import exact_match, contains
+    from hud.graders import BashGrader, LLMJudgeGrader, combine
+    from hud.graders import exact_match, contains
     from hud.agents.types import SubScore
 
     # Simple one-liner
     yield exact_match(answer, "France")
 
     # Composed — all graders run in parallel
-    yield await GradeCombiner.gather(
+    yield await combine(
         BashGrader.grade(weight=0.5, command="pytest -q"),
         LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Correct"]),
         SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# GradeCombiner — the native subscore combiner
+# combine — the native subscore combiner
 # =============================================================================
 
 
@@ -77,90 +77,116 @@ def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
     return final_names
 
 
-class GradeCombiner:
-    """Combine ``SubScore`` items into a yieldable ``EvaluationResult``."""
+def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
+    """Combine already-resolved subscores into a weighted result.
 
-    @staticmethod
-    def from_subscores(subscores: list[SubScore]) -> EvaluationResult:
-        """Combine already-resolved subscores into a weighted result.
+    Positive weights are normalized to sum to ``1.0``.
+    Negative weights are preserved as penalties.
+    """
+    if not subscores:
+        raise ValueError("subscores must not be empty")
 
-        Positive weights are normalized to sum to ``1.0``.
-        Negative weights are preserved as penalties.
-        """
-        if not subscores:
-            raise ValueError("subscores must not be empty")
+    positive_weight_sum = sum(item.weight for item in subscores if item.weight > 0)
+    if positive_weight_sum <= 0:
+        raise ValueError("subscores must include at least one positive weight")
 
-        positive_weight_sum = sum(item.weight for item in subscores if item.weight > 0)
-        if positive_weight_sum <= 0:
-            raise ValueError("subscores must include at least one positive weight")
+    normalized_subscores: list[SubScore] = []
+    metadata: dict[str, Any] = {}
 
-        normalized_subscores: list[SubScore] = []
-        metadata: dict[str, Any] = {}
-
-        for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
-            normalized_weight = (
-                item.weight / positive_weight_sum if item.weight > 0 else item.weight
+    for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
+        normalized_weight = item.weight / positive_weight_sum if item.weight > 0 else item.weight
+        normalized_subscores.append(
+            SubScore(
+                name=final_name,
+                weight=normalized_weight,
+                value=item.value,
+                metadata=item.metadata,
             )
-            normalized_subscores.append(
-                SubScore(
-                    name=final_name,
-                    weight=normalized_weight,
-                    value=item.value,
-                    metadata=item.metadata,
-                )
-            )
-            if item.metadata is not None:
-                metadata[final_name] = item.metadata
-
-        reward = float(sum(item.value * item.weight for item in normalized_subscores))
-
-        return EvaluationResult(
-            reward=reward,
-            done=True,
-            subscores=normalized_subscores,
-            info=metadata,
         )
+        if item.metadata is not None:
+            metadata[final_name] = item.metadata
 
-    @staticmethod
-    async def gather(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
-        """Resolve subscores and grader coroutines in parallel, then combine.
+    reward = float(sum(item.value * item.weight for item in normalized_subscores))
 
-        Accepts a mix of:
-        - ``SubScore`` objects (used immediately)
-        - Awaitables returning ``SubScore`` (e.g. ``Grader.grade()``)
+    return EvaluationResult(
+        reward=reward,
+        done=True,
+        subscores=normalized_subscores,
+        info=metadata,
+    )
 
-        All awaitables run concurrently via ``asyncio.gather``.
 
-        Example::
+async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
+    """Resolve subscores and grader coroutines in parallel, then combine.
 
-            yield await GradeCombiner.gather(
-                BashGrader.grade(weight=0.3, command="pytest -q"),
-                LLMJudgeGrader.grade(weight=0.4, answer=answer, criteria=[...]),
-                SubScore(name="answer", value=exact_match(answer, "42"), weight=0.3),
-            )
-        """
-        from collections.abc import Awaitable as _Awaitable
+    Accepts a mix of:
+    - ``SubScore`` objects (used immediately)
+    - Awaitables returning ``SubScore`` (e.g. ``Grader.grade()``)
 
-        resolved: list[SubScore] = []
-        pending: list[tuple[int, _Awaitable[SubScore]]] = []
+    All awaitables run concurrently via ``asyncio.gather``. Positive weights
+    are normalized to sum to ``1.0``; negative weights are penalties.
 
-        for item in items:
-            if isinstance(item, SubScore):
-                resolved.append(item)
-            elif isinstance(item, _Awaitable):
-                pending.append((len(resolved), item))
-                resolved.append(SubScore(name="__placeholder__", value=0.0, weight=0.0))
-            else:
-                raise TypeError(
-                    f"Expected SubScore or Awaitable[SubScore], got {type(item).__name__}"
-                )
+    Example::
 
-        if pending:
-            results = await asyncio.gather(*(aw for _, aw in pending))
-            for (slot, _), result in zip(pending, results, strict=True):
-                resolved[slot] = result
+        yield await combine(
+            BashGrader.grade(weight=0.3, command="pytest -q"),
+            LLMJudgeGrader.grade(weight=0.4, answer=answer, criteria=[...]),
+            SubScore(name="answer", value=exact_match(answer, "42"), weight=0.3),
+        )
+    """
+    from collections.abc import Awaitable as _Awaitable
 
-        return GradeCombiner.from_subscores(resolved)
+    resolved: list[SubScore] = []
+    pending: list[tuple[int, _Awaitable[SubScore]]] = []
+
+    for item in items:
+        if isinstance(item, SubScore):
+            resolved.append(item)
+        elif isinstance(item, _Awaitable):
+            pending.append((len(resolved), item))
+            resolved.append(SubScore(name="__placeholder__", value=0.0, weight=0.0))
+        else:
+            raise TypeError(f"Expected SubScore or Awaitable[SubScore], got {type(item).__name__}")
+
+    if pending:
+        results = await asyncio.gather(*(aw for _, aw in pending))
+        for (slot, _), result in zip(pending, results, strict=True):
+            resolved[slot] = result
+
+    return _combine_subscores(resolved)
+
+
+def _boolean_subscore(
+    name: str, weight: float, subscores: list[SubScore], value: float
+) -> SubScore:
+    unique_names = _dedupe_subscore_names(subscores)
+    return SubScore(
+        name=name,
+        value=value,
+        weight=weight,
+        metadata={
+            "subscores": unique_names,
+            "subscore_metadata": {
+                unique_name: subscore.metadata
+                for unique_name, subscore in zip(unique_names, subscores, strict=True)
+                if subscore.metadata is not None
+            },
+        },
+    )
+
+
+def combine_any(weight: float, subscores: list[SubScore], *, name: str = "any") -> SubScore:
+    """Subscore that passes if any input passes (max)."""
+    if not subscores:
+        raise ValueError("subscores must not be empty")
+    return _boolean_subscore(name, weight, subscores, max(s.value for s in subscores))
+
+
+def combine_all(weight: float, subscores: list[SubScore], *, name: str = "all") -> SubScore:
+    """Subscore that passes only if all inputs pass (min)."""
+    if not subscores:
+        raise ValueError("subscores must not be empty")
+    return _boolean_subscore(name, weight, subscores, min(s.value for s in subscores))
 
 
 # =============================================================================
@@ -203,48 +229,6 @@ class Grader:
         Return a float, or ``(float, metadata_dict)`` to attach extra info.
         """
         raise NotImplementedError("Subclasses must implement compute_score")
-
-    @classmethod
-    def any(cls, weight: float, subscores: list[SubScore]) -> SubScore:
-        """Subscore that passes if any input passes (max)."""
-        if not subscores:
-            raise ValueError("subscores must not be empty")
-
-        unique_names = _dedupe_subscore_names(subscores)
-        return SubScore(
-            name=f"{cls.name}_any",
-            value=max(subscore.value for subscore in subscores),
-            weight=weight,
-            metadata={
-                "subscores": unique_names,
-                "subscore_metadata": {
-                    unique_name: subscore.metadata
-                    for unique_name, subscore in zip(unique_names, subscores, strict=True)
-                    if subscore.metadata is not None
-                },
-            },
-        )
-
-    @classmethod
-    def all(cls, weight: float, subscores: list[SubScore]) -> SubScore:
-        """Subscore that passes only if all inputs pass (min)."""
-        if not subscores:
-            raise ValueError("subscores must not be empty")
-
-        unique_names = _dedupe_subscore_names(subscores)
-        return SubScore(
-            name=f"{cls.name}_all",
-            value=min(subscore.value for subscore in subscores),
-            weight=weight,
-            metadata={
-                "subscores": unique_names,
-                "subscore_metadata": {
-                    unique_name: subscore.metadata
-                    for unique_name, subscore in zip(unique_names, subscores, strict=True)
-                    if subscore.metadata is not None
-                },
-            },
-        )
 
 
 # =============================================================================
@@ -330,7 +314,7 @@ class LLMJudgeGrader(Grader):
 
     Example::
 
-        yield await GradeCombiner.gather(
+        yield await combine(
             BashGrader.grade(weight=0.4, command="pytest -q"),
             LLMJudgeGrader.grade(
                 weight=0.6,
@@ -565,15 +549,13 @@ def f1_score(
     return 2 * precision * recall / (precision + recall)
 
 
-Grade = GradeCombiner
-
-
 __all__ = [
     "BashGrader",
-    "Grade",
-    "GradeCombiner",
     "Grader",
     "LLMJudgeGrader",
+    "combine",
+    "combine_all",
+    "combine_any",
     "contains",
     "contains_all",
     "contains_any",
