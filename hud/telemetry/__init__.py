@@ -1,6 +1,8 @@
 """HUD Telemetry - Lightweight telemetry for HUD SDK.
 
-This module provides the @instrument decorator for recording function calls.
+This module provides:
+- @instrument decorator for recording function calls
+- High-performance span export to HUD API
 
 Usage:
     import hud
@@ -14,8 +16,15 @@ Usage:
         result = await my_function()
 """
 
+from hud.telemetry.exporter import flush, queue_span
 from hud.telemetry.instrument import instrument
+from hud.telemetry.recorder import EpisodeRecorder, Frame, TraceSink
 
 __all__ = [
+    "EpisodeRecorder",
+    "Frame",
+    "TraceSink",
+    "flush",
     "instrument",
+    "queue_span",
 ]
