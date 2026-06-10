@@ -10,8 +10,7 @@ from . import patches as _patches  # noqa: F401
 from ._legacy import install as _install_v5_compat
 from .client import Grade, Run
 from .environment import Environment
-from .eval import Job, SyncPlan, Task, Taskset, launch, task
-from .services import Chat
+from .eval import Chat, Job, SyncPlan, Task, Taskset, launch, task
 from .telemetry.instrument import instrument
 from .types import Trace
 

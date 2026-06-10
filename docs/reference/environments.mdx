@@ -116,10 +116,12 @@ async def search(query: str):
 
 ## Chat
 
-Create a Chat instance for multi-turn conversations:
+Wrap a task in a `Chat` runner for multi-turn conversations:
 
 ```python
-chat = env.chat("assist", model="claude-haiku-4-5")
+from hud import Chat
+
+chat = Chat(env("assist"), model="claude-haiku-4-5")
 
 r1 = await chat.send("Hello")
 r2 = await chat.send("Follow up")
@@ -127,11 +129,10 @@ r2 = await chat.send("Follow up")
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `scenario` | `str` | Required | Chat scenario name |
+| `task` | `Task` | Required | The chat task (positional) |
 | `model` | `str` | Required | Model name |
 | `max_steps` | `int` | `10` | Max agent steps per turn |
-| `trace` | `bool` | `False` | Record traces on HUD platform |
-| `quiet` | `bool` | `True` | Suppress output |
+| `agent_params` | `dict` | `None` | Extra kwargs for agent creation |
 
 See [Chat with Environments](/guides/chat) for full details.
 

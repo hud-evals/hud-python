@@ -2,7 +2,7 @@
 """
 Build Your Own Codex - A Recreation of OpenAI's Codex CLI
 
-This example shows how to build your own Codex (https://github.com/openai/codex)
+This cookbook shows how to build your own Codex (https://github.com/openai/codex)
 from scratch using the HUD SDK. The environment exposes an ``ssh`` capability
 backed by a ``Workspace``; the ``OpenAIAgent`` drives it with OpenAI's native
 ``shell`` and ``apply_patch`` tools — the same protocol the ``codex`` CLI uses.
@@ -11,22 +11,8 @@ What you get:
 - **Your own Codex** - Same behavior as `codex` CLI, but fully customizable
 - **Full observability** - Every tool call and response traced on hud.ai
 
-Usage:
-  uv run python examples/01_codex_coding_agent.py
-
-  # Custom task
-  uv run python examples/01_codex_coding_agent.py \\
-    --task "Create a Python script that prints the Fibonacci sequence"
-
-  # Custom working directory
-  uv run python examples/01_codex_coding_agent.py --work-dir ./codex_output
-
-To run the same environment as a packaged, sandboxed box instead of on your
-machine, see ``hud deploy`` and ``RemoteSandbox`` in the deploy docs.
-
-Requirements:
-  - Install deps: `uv sync`
-  - HUD_API_KEY environment variable (gateway inference)
+See the README in this directory for setup and usage. Requires ``HUD_API_KEY``
+(gateway inference).
 """
 
 import argparse
@@ -131,17 +117,17 @@ def _parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  uv run python examples/01_codex_coding_agent.py
+  uv run codex_agent.py
 
   # Custom working directory
-  uv run python examples/01_codex_coding_agent.py --work-dir ./codex_output
+  uv run codex_agent.py --work-dir ./codex_output
 
   # Custom task
-  uv run python examples/01_codex_coding_agent.py \\
+  uv run codex_agent.py \\
     --task "Create a Python script that prints the Fibonacci sequence up to 10 numbers"
 
   # Use a different Codex model
-  uv run python examples/01_codex_coding_agent.py --model gpt-5.1-codex
+  uv run codex_agent.py --model gpt-5.1-codex
 """,
     )
     parser.add_argument(

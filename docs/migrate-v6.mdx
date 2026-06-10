@@ -142,6 +142,8 @@ In v6, `hud.tools` keeps the standalone tools, but every import that was removed
 | Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | **removed** — resolve to a marker that synthesizes an `rfb` capability at serve | declare an `rfb` (computer-use) or `cdp` (browser) capability instead |
 | Anything else under `hud.tools`: `PlaywrightTool`, `JupyterTool`, `MemoryTool`, filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — declare a capability (`cdp` for browser) or serve your own tool over `mcp` |
 | Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | aliased to `hud.graders` | change the import to `from hud.graders import ...` |
+| Chat: `hud.services.Chat` | aliased to `hud.eval.chat` (re-exported as `hud.Chat`) | change the import to `from hud import Chat` |
+| `hud.services.ChatService` | **removed** — the A2A executor left the SDK | copy the reference server in `cookbooks/a2a-chat/server.py` (a thin A2A adapter over `Chat`) |
 
 The rule of thumb: **result types move to `hud.agents.types`, tools become capabilities, and everything else under `hud.tools` is going away.** When the deprecation log is quiet, the conversion is done.
 

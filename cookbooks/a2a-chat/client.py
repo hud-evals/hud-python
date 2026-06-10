@@ -5,14 +5,14 @@ client forwards user input directly and streams the agent's response.
 
 Usage:
     # Terminal 1: start the A2A server
-    HUD_ENV=my-assistant HUD_SCENARIO=assist HUD_MODEL=claude-haiku-4-5 \
-        uv run python examples/03_a2a_chat_server.py
+    HUD_ENV=my-assistant HUD_TASK=assist HUD_MODEL=claude-haiku-4-5 \
+        uv run server.py
 
     # Terminal 2: run this client
-    uv run python examples/05_a2a_simple_client.py
+    uv run client.py
 
     # Or point at a different server
-    A2A_URL=http://my-host:9999 uv run python examples/05_a2a_simple_client.py
+    A2A_URL=http://my-host:9999 uv run client.py
 """
 
 from __future__ import annotations

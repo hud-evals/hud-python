@@ -102,3 +102,10 @@ def test_hud_native_aliases_preserve_module_identity() -> None:
 
     assert native_base.BaseTool is BaseTool
     assert hud.native.combine is combine
+
+
+def test_hud_services_alias_resolves_chat() -> None:
+    from hud.eval.chat import Chat
+    from hud.services import Chat as legacy_chat  # type: ignore[import-not-found]
+
+    assert legacy_chat is Chat

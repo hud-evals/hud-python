@@ -62,18 +62,17 @@ You can connect chat agents to other A2A-compatible systems, use them as sub-age
 ## SDK Usage
 
 ```python
-from hud import Environment
-from hud.services import Chat
+from hud import Chat, Environment
 
 env = Environment("my-env")
-chat = env.chat("assistant", model="claude-sonnet-4-6")
+chat = Chat(env("assistant"), model="claude-sonnet-4-6")
 
 r1 = await chat.send("Hello!")
 r2 = await chat.send("Tell me more about that.")
-
-# Serve as A2A endpoint
-chat.serve(port=9999)
 ```
+
+To serve a chat as an A2A endpoint yourself, see the reference server in
+[`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
 
 ## See Also
 

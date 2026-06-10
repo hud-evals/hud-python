@@ -8,6 +8,9 @@ installed by ``hud/__init__`` at import time:
   These names resolve as synthetic alias modules that delegate attribute
   access to the real modules, so class identity is preserved for
   ``isinstance`` checks.
+- ``hud.services`` — the package was removed; ``Chat`` moved to
+  :mod:`hud.eval.chat` (the alias serves it). ``ChatService`` (the A2A
+  executor) left the SDK entirely.
 - removed ``hud.tools`` submodules (``types``, ``computer``, ``filesystem``,
   ``executors``, ...) — ``hud.tools.types`` redirects to
   :mod:`hud.agents.types`; the rest resolve names lazily (marker/no-op).
@@ -65,11 +68,13 @@ _NAME_REDIRECTS: dict[str, str] = {
 #: Removed lowercase v5 symbols (module-level instances/functions rather than classes).
 _LOWERCASE_LEGACY = frozenset({"computer_settings", "get_demote_preexec_fn"})
 
-#: ``hud.native`` names that are not ``hud.tools`` descendants.
-_NATIVE_ALIASES: dict[str, str] = {
+#: Removed legacy module -> real v6 module whose attributes it re-exposes.
+_MODULE_ALIASES: dict[str, str] = {
     "hud.native": "hud.graders",
     "hud.native.graders": "hud.graders",
     "hud.native.skills": "hud.skills",
+    "hud.services": "hud.eval.chat",
+    "hud.services.chat": "hud.eval.chat",
 }
 
 _TOOLS_DIR = Path(__file__).parent / "tools"
@@ -173,9 +178,9 @@ def resolve_legacy_name(module_name: str, name: str) -> Any:
     return _NoOp
 
 
-def _native_target(fullname: str) -> str | None:
-    """Real module behind a ``hud.native`` legacy name, or None if unknown."""
-    alias = _NATIVE_ALIASES.get(fullname)
+def _alias_target(fullname: str) -> str | None:
+    """Real module behind an aliased legacy name, or None if unknown."""
+    alias = _MODULE_ALIASES.get(fullname)
     if alias is not None:
         return alias
     if fullname == "hud.native.tools" or fullname.startswith("hud.native.tools."):
@@ -188,7 +193,7 @@ def _is_real_tools_submodule(fullname: str) -> bool:
     return (_TOOLS_DIR / f"{relative}.py").exists() or (_TOOLS_DIR / relative).is_dir()
 
 
-def _make_native_getattr(fullname: str, target_name: str) -> Any:
+def _make_alias_getattr(fullname: str, target_name: str) -> Any:
     def __getattr__(name: str) -> Any:
         if name == "Grade" and target_name == "hud.graders":
             return Grade
@@ -226,15 +231,15 @@ def _make_redirect_getattr(module_name: str, target_name: str) -> Any:
 
 
 class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """Resolve ``hud.native*`` aliases and **removed** ``hud.tools.*`` submodules.
+    """Resolve removed-module aliases and **removed** ``hud.tools.*`` submodules.
 
     Real ``hud.tools`` submodules (``base``, ``agent``) are skipped so the
     normal import machinery handles them.
     """
 
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
-        if fullname.startswith("hud.native"):
-            if _native_target(fullname) is None:
+        if fullname.startswith(("hud.native", "hud.services")):
+            if _alias_target(fullname) is None:
                 return None  # unknown legacy name: fail with ModuleNotFoundError
             return importlib.util.spec_from_loader(fullname, self)
         if fullname.startswith("hud.tools.") and not _is_real_tools_submodule(fullname):
@@ -247,11 +252,11 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def exec_module(self, module: ModuleType) -> None:
         name = module.__name__
 
-        if name.startswith("hud.native"):
-            target = _native_target(name)
+        if name.startswith(("hud.native", "hud.services")):
+            target = _alias_target(name)
             assert target is not None  # find_spec already filtered unknowns
             module.__path__ = []  # mark as package so submodule imports route back here
-            module.__getattr__ = _make_native_getattr(name, target)  # type: ignore[attr-defined]
+            module.__getattr__ = _make_alias_getattr(name, target)  # type: ignore[attr-defined]
             return
 
         redirect = _MODULE_REDIRECTS.get(name)

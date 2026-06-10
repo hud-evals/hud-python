@@ -17,8 +17,6 @@ dependencies = [
     # MCP dependencies
     "mcp>=1.24.0,<2.0",
     "fastmcp==3.0.2",
-    # A2A protocol
-    "a2a-sdk==0.3.26",
     # For all inference agents
     "openai>=2.26.0",
     # CLI dependencies
@@ -58,7 +56,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = [
     "docs/",
-    "examples/",
+    "cookbooks/",
     "**/checkpoints/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -74,7 +72,7 @@ message = """[bold cyan]Thanks for using the hud SDK![/bold cyan]
 • Try the CLI: [green]hud --help[/green]
 • Read the docs: [green]https://docs.hud.ai[/green]
 
-[dim]For more examples, check out the [cyan]examples/[/cyan] directory.[/dim]
+[dim]For runnable recipes, check out the [cyan]cookbooks/[/cyan] directory.[/dim]
 
 [bold]Happy coding! 🎉[/bold]"""
 style = "blue"
@@ -192,7 +190,7 @@ lint.ignore = [
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
-"**/examples/**/*.py" = ["ALL"]
+"**/cookbooks/**/*.py" = ["ALL"]
 "scripts/*.py" = ["T201", "INP001"]  # dev scripts: print is the interface
 
 
@@ -218,7 +216,6 @@ reportMissingImports = "warning"
 source = ["hud"]
 omit = [
     "*/tests/*",
-    "*/examples/*",
 ]
 
 [tool.coverage.report]
@@ -238,13 +235,12 @@ show_missing = true
 fail_under = 58
 omit = [
     "*/tests/*",
-    "*/examples/*",
 ]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud", "examples"]
+testpaths = ["hud"]
 addopts = ""
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access)",

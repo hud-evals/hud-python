@@ -15,6 +15,7 @@ from __future__ import annotations
 from hud.client import Grade, Run
 from hud.types import Trace
 
+from .chat import Chat
 from .job import Job
 from .launch import launch
 from .sandbox import (
@@ -34,6 +35,7 @@ from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relativ
 
 __all__ = [
     "Channel",
+    "Chat",
     "Grade",
     "HudSandbox",
     "HudTrainingClient",

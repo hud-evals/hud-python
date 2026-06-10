@@ -1,35 +1,29 @@
 """Sample chat environment.
 
-Provides chat-compatible scenarios that accept ``messages`` as
-``list[PromptMessage]`` -- each message has a role and typed content.
+Provides chat-style tasks that accept ``messages`` as ``list[PromptMessage]``
+-- each message has a role and typed content.
 
-Serve it locally with ``hud dev examples/02_chat_env.py``, or load the ``env``
-defined here and use it directly::
+Serve it locally with ``hud dev chat_env.py``, or drive a task directly with
+the ``Chat`` runner::
 
-    chat = env.chat("chat_simple", model="claude-sonnet-4-5")
+    from hud import Chat
+
+    chat = Chat(chat_simple(messages=[]), model="claude-sonnet-4-5")
     r = await chat.send("What is the capital of France?")
-
-    chat = env.chat("chat_full", model="claude-sonnet-4-5")
-    r = await chat.send("Analyze this data")
 """
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
 
 from mcp.types import PromptMessage, TextContent
 
 from hud.agents.types import ScenarioResult
 from hud.environment import Environment
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
 env = Environment(name="chat")
 
 
-@env.scenario()
-async def chat_simple(messages: list[PromptMessage]) -> AsyncGenerator[Any, Any]:
+@env.task()
+async def chat_simple(messages: list[PromptMessage]):
     """Minimal chat -- passes PromptMessages straight through.
 
     Each message keeps its role (user/assistant), so the agent's
@@ -39,8 +33,8 @@ async def chat_simple(messages: list[PromptMessage]) -> AsyncGenerator[Any, Any]
     yield 1.0
 
 
-@env.scenario()
-async def chat_full(messages: list[PromptMessage]) -> AsyncGenerator[Any, Any]:
+@env.task()
+async def chat_full(messages: list[PromptMessage]):
     """Full-featured chat with system prompt and eval.
 
     Prepends a system instruction, then passes all conversation

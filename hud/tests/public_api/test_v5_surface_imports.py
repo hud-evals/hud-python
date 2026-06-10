@@ -77,10 +77,8 @@ DOCS_EXAMPLES_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "MCPRouter",
         "MCPServer",
     ),
-    "hud.services": (
-        "Chat",
-        "ChatService",
-    ),
+    # ``ChatService`` (the A2A executor) left the SDK.
+    "hud.services": ("Chat",),
     "hud.tools": (
         "AgentTool",
         "AnthropicComputerTool",
@@ -128,7 +126,8 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "MCPRouter",
         "MCPServer",
     ),
-    "hud.services": ("ChatService",),
+    # ``ChatService`` (the A2A executor) left the SDK.
+    "hud.services": ("Chat",),
     "hud.tools": (
         "AgentTool",
         "AnthropicComputerTool",

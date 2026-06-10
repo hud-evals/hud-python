@@ -35,7 +35,7 @@ async def assistant(messages: list[PromptMessage]):
 
 ```python chat.py
 import asyncio
-from hud.services import Chat
+from hud import Chat
 from tasks import assistant
 
 async def main():
@@ -47,7 +47,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud.services` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`.
+`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`.
 
 ### Managing history
 
@@ -58,13 +58,21 @@ asyncio.run(main())
 | `chat.export_history()` | JSON-serializable history for persistence. |
 | `chat.load_history(messages)` | Restore a prior conversation. |
 
-### Serving over A2A
+### Serving a chat
 
-`Chat` is also an A2A `AgentExecutor`, so you can serve it as an endpoint:
+`Chat` is protocol-agnostic: any frontend — a web handler, a notebook, a wire protocol — just calls `await chat.send(...)`. For example, behind FastAPI:
 
 ```python
-chat.serve(port=9999)   # blocks; serves an A2A agent with an AgentCard
+app = FastAPI()
+chat = Chat(assistant(messages=[]), model="claude-sonnet-4-5")
+
+@app.post("/api/chat")
+async def chat_endpoint(message: str):
+    result = await chat.send(message)
+    return {"response": result.content}
 ```
+
+For an A2A endpoint (sessions per context, agent card, citations transport), see the reference server in [`cookbooks/a2a-chat/server.py`](https://github.com/hud-evals/hud-python/blob/main/cookbooks/a2a-chat/server.py) — copy and adapt it; the protocol adapter is deliberately not part of the SDK.
 
 ## When to use chat vs. a single-turn task
 

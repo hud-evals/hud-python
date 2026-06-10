@@ -1,12 +1,12 @@
-"""Direct A2A Python SDK client for HUD chat service servers.
+"""Direct A2A Python SDK client for HUD chat servers.
 
 Usage:
     # Terminal 1: run A2A server
-    HUD_ENV=my-hud-environment HUD_SCENARIO=analysis_chat \
-        uv run python examples/03_a2a_chat_server.py
+    HUD_ENV=my-hud-environment HUD_TASK=analysis_chat \
+        uv run server.py
 
     # Terminal 2: run this client
-    uv run python examples/04_a2a_chat_llm_client.py
+    uv run llm_client.py
 
 This example is intentionally more advanced than `03`: an LLM sits in front
 of the A2A server and decides when to call it as a tool.

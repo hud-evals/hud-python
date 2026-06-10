@@ -9,7 +9,7 @@ This guide shows you how to **build your own Codex** - a 1:1 recreation of [Open
 <Card
   title="Example Code"
   icon="github"
-  href="https://github.com/hud-evals/hud-python/blob/main/examples/01_codex_coding_agent.py"
+  href="https://github.com/hud-evals/hud-python/blob/main/cookbooks/codex-coding/codex_agent.py"
 >
   The complete working example - your own Codex in ~100 lines of Python.
 </Card>
@@ -257,20 +257,20 @@ Get your keys:
 
 ```bash
 # Local mode - tools run on your machine
-uv run python examples/06_codex_coding_agent.py --local
+uv run --project cookbooks/codex-coding cookbooks/codex-coding/codex_agent.py --local
 
 # Local mode with persistent output directory
-uv run python examples/06_codex_coding_agent.py --local --work-dir ./codex_output
+uv run --project cookbooks/codex-coding cookbooks/codex-coding/codex_agent.py --local --work-dir ./codex_output
 
 # Hub mode - full cloud execution (default)
-uv run python examples/06_codex_coding_agent.py
+uv run --project cookbooks/codex-coding cookbooks/codex-coding/codex_agent.py
 
 # Custom task
-uv run python examples/06_codex_coding_agent.py --local \
+uv run --project cookbooks/codex-coding cookbooks/codex-coding/codex_agent.py --local \
   --task "Create a Python script that prints the Fibonacci sequence up to 10 numbers"
 
 # Verbose output
-uv run python examples/06_codex_coding_agent.py --local --verbose
+uv run --project cookbooks/codex-coding cookbooks/codex-coding/codex_agent.py --local --verbose
 ```
 
 ### CLI Options
