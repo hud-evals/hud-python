@@ -84,16 +84,6 @@ reply = await chat.send("hello")   # any protocol frontend calls this
 
 See [`cookbooks/a2a-chat/server.py`](https://github.com/hud-evals/hud-python/blob/main/cookbooks/a2a-chat/server.py) for a complete A2A reference server (per-context sessions, agent card, citations transport) built on `a2a-sdk`.
 
-## Expose tools as an MCP server
-
-An agent's standalone `native_tools` can be served over MCP for another agent to consume:
-
-```python
-server = agent.as_mcp_server(name="my-tools")
-```
-
-Attach that server to an environment as an `mcp` capability (`Capability.mcp(name=..., url=...)`) so any harness can open it. See [Capabilities](/v6/reference/capabilities).
-
 ## See also
 
 <CardGroup cols={2}>

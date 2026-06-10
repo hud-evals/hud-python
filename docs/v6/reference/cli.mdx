@@ -10,17 +10,16 @@ Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate on
 
 ### `hud init`
 
-Scaffold a new environment from a preset.
+Scaffold a new environment package: `env.py` (tasks + capabilities), `tasks.py`, `Dockerfile.hud`, and `pyproject.toml`. Purely local — no network, no API key.
 
 ```bash
-hud init my-env                 # choose a preset interactively
-hud init --preset browser       # blank | deep-research | browser | rubrics
+hud init my-env                 # create ./my-env
+hud init my-env --dir envs      # create ./envs/my-env
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--dir`, `-d` | Target directory (default `.`). |
-| `--preset`, `-p` | Preset to download. |
+| `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 
 ### `hud dev`

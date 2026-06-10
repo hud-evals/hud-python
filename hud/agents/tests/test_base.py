@@ -1,8 +1,8 @@
-"""The agent base contract: the ``Agent`` ABC, ``as_mcp_server``, gateway routing.
+"""The agent base contract: the ``Agent`` ABC and gateway routing.
 
-These cover the model-agnostic surface that doesn't need provider SDKs or network:
-the stateless ``Agent`` contract, exposing native tools as an ``MCPServer``, and
-``AgentType`` / ``create_agent`` resolution.
+These cover the model-agnostic surface that doesn't need provider SDKs or
+network: the stateless ``Agent`` contract and ``AgentType`` / ``create_agent``
+resolution.
 """
 
 from __future__ import annotations
@@ -10,22 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from mcp.types import TextContent
 
 from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
 from hud.agents.base import Agent
-from hud.tools.base import BaseTool
 from hud.types import AgentType
 
 
-class PingTool(BaseTool):
-    async def __call__(self) -> list[TextContent]:  # name auto-derives to "ping"
-        return [TextContent(type="text", text="pong")]
-
-
-class _ServingAgent(Agent):
-    native_tools = (PingTool,)
-
+class _FillingAgent(Agent):
     async def __call__(self, run: Any) -> None:
         run.trace.content = "done"
 
@@ -42,31 +33,8 @@ async def test_agent_call_fills_trace() -> None:
     from types import SimpleNamespace
 
     run = SimpleNamespace(trace=SimpleNamespace(content=""))
-    await _ServingAgent()(run)
+    await _FillingAgent()(run)
     assert run.trace.content == "done"
-
-
-# ─── as_mcp_server ────────────────────────────────────────────────────
-
-
-async def test_as_mcp_server_exposes_native_tools() -> None:
-    server = _ServingAgent().as_mcp_server()
-    names = {tool.name for tool in await server.list_tools()}
-    assert "ping" in names
-
-
-async def test_as_mcp_server_accepts_tool_override_and_name() -> None:
-    server = _ServingAgent().as_mcp_server(name="custom", tools=[PingTool()])
-    assert server.name == "custom"
-    assert {tool.name for tool in await server.list_tools()} == {"ping"}
-
-
-def test_agent_without_native_tools_serves_empty() -> None:
-    class _Bare(Agent):
-        async def __call__(self, run: Any) -> None: ...
-
-    server = _Bare().as_mcp_server()
-    assert server is not None
 
 
 # ─── AgentType resolution ─────────────────────────────────────────────
@@ -120,7 +88,11 @@ def test_create_agent_value_shortcut_builds_provider_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sentinel = object()
-    monkeypatch.setattr("hud.agents.build_gateway_client", lambda _provider: sentinel)
+
+    def _build_client(_provider: str) -> object:
+        return sentinel
+
+    monkeypatch.setattr("hud.agents.build_gateway_client", _build_client)
 
     agent = create_agent("openai")  # AgentType.OPENAI shortcut
 
@@ -141,7 +113,11 @@ def test_create_agent_resolves_gateway_model_metadata(
         provider=GatewayProviderInfo(name="openai"),
     )
     monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
-    monkeypatch.setattr("hud.agents.build_gateway_client", lambda _provider: object())
+
+    def _build_client(_provider: str) -> object:
+        return object()
+
+    monkeypatch.setattr("hud.agents.build_gateway_client", _build_client)
 
     agent = create_agent("ft:custom-123")
 

@@ -78,16 +78,6 @@ class MyAgent(Agent):
 
 `BrowserUseAgent` (in `hud.agents.browser_use`, config `BrowserUseConfig`) is this pattern wrapping `browser-use` on the `cdp` capability.
 
-### Serving an agent's tools
-
-An agent's standalone `native_tools` can be exposed as an MCP server:
-
-```python
-server = agent.as_mcp_server(name="my-tools")
-```
-
-(Catalog tools are capability proxies and are not servable.)
-
 ## See also
 
 <CardGroup cols={2}>

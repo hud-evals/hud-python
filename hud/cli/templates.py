@@ -1,4 +1,4 @@
-"""Templates for hud init command."""
+"""File templates written by ``hud init``."""
 
 DOCKERFILE_HUD = """\
 FROM python:3.11-slim
@@ -119,8 +119,8 @@ PYPROJECT_TOML = """\
 [project]
 name = "{name}"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = ["hud-python", "openai"]
+requires-python = ">=3.11"
+dependencies = ["hud-python"]
 
 [build-system]
 requires = ["hatchling"]

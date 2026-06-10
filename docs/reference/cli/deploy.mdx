@@ -260,7 +260,7 @@ rm .hud/deploy.json
 To link to a different existing environment:
 
 ```bash
-hud link --id existing-registry-id
+hud sync env existing-registry-id
 ```
 
 ## .dockerignore
@@ -299,7 +299,6 @@ Even without `.dockerignore`, HUD automatically excludes common sensitive files 
 
 ## See Also
 
-- [`hud link`](/reference/cli/link) - Link directory to existing environment
 - [`hud build`](/reference/cli/build) - Build locally
 - [`hud push`](/reference/cli/push) - Push to Docker Hub
 - [Platform Environments](/platform/environments) - Managing environments on hud.ai

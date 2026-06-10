@@ -1,4 +1,4 @@
-"""Registry environment lookups for the CLI link/deploy flows."""
+"""Registry environment lookups for the CLI deploy/sync commands."""
 
 from __future__ import annotations
 

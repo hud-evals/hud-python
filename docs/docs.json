@@ -131,7 +131,6 @@
               "reference/cli/dev",
               "reference/cli/build",
               "reference/cli/deploy",
-              "reference/cli/link",
               "reference/cli/push",
               "reference/cli/analyze",
               "reference/cli/debug",

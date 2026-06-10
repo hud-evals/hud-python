@@ -394,8 +394,6 @@ def sync_env_command(
     [not dim]Resolves an environment by name, verifies it exists, and stores
     the registry ID in .hud/config.json for future deploys and syncs.
 
-    Replaces 'hud link'.
-
     Examples:
         hud sync env coding-env           # link cwd to 'coding-env'
         hud sync env coding-env ./my-env  # link specific directory

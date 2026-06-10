@@ -1,11 +1,9 @@
-"""Shared env helpers: JSON-RPC framing (URL helpers live in ``hud.capabilities.base``)."""
+"""Shared env helpers: JSON-RPC framing for the control channel."""
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
-
-from hud.capabilities.base import SCHEME_RE, normalize_url
 
 if TYPE_CHECKING:
     import asyncio
@@ -37,4 +35,4 @@ def error(msg_id: int, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
 
 
-__all__ = ["SCHEME_RE", "error", "normalize_url", "read_frame", "reply", "send_frame"]
+__all__ = ["error", "read_frame", "reply", "send_frame"]

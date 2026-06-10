@@ -1,134 +1,78 @@
 ---
 title: "hud init"
-description: "Create a new HUD environment from a preset"
+description: "Create a new HUD environment package"
 icon: "sparkles"
 ---
 
-The `hud init` command scaffolds a working MCP environment using templates from the public SDK.
+The `hud init` command scaffolds a new HUD environment package. It is purely local: no network, no API key, no prompts.
 
 ## Usage
 
 ```bash
-hud init [NAME] [OPTIONS]
+hud init NAME [OPTIONS]
 ```
 
 ## Arguments
 
-<ParamField path="name" type="string">
-  Environment name. If omitted, the current directory name is used.
+<ParamField path="name" type="string" required>
+  Environment name — the directory to create.
 </ParamField>
 
 ## Options
 
-<ParamField path="--preset" type="string" default="blank">
-  Template preset: `blank`, `deep-research`, or `browser`. Short: `-p`
-</ParamField>
-
 <ParamField path="--dir" type="string" default=".">
-  Target directory where the environment will be created. Short: `-d`
+  Parent directory where the package will be created. Short: `-d`
 </ParamField>
 
 <ParamField path="--force" type="boolean" default="false">
-  Overwrite existing files if they exist. Short: `-f`
+  Overwrite existing files if the directory is not empty. Short: `-f`
 </ParamField>
 
 ## What It Creates
 
-A minimal but complete environment with controller/frontend and optional backend:
-
 ```
 my-env/
-├── Dockerfile                # Container configuration
-├── pyproject.toml            # Dependencies and metadata
-├── README.md                 # Template instructions
-├── tasks.json                # Example tasks
-├── controller/               # MCP server (stdio)
-│   ├── __init__.py           # mcp = MCPServer()
-│   ├── __main__.py           # python -m controller → mcp.run()
-│   ├── hooks.py              # @mcp.initialize / @mcp.shutdown
-│   └── tools.py              # @mcp.tool act / setup / evaluate
-└── environment/              # Backend (FastAPI example)
-    └── server.py             # /health /act /reset /state
+├── env.py            # Environment: capabilities + @env.task tasks
+├── tasks.py          # The Tasks to evaluate (hud eval tasks.py <agent>)
+├── Dockerfile.hud    # Container config for deployment
+└── pyproject.toml    # Dependencies and metadata
 ```
-
-### Dockerfile (template)
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-
-COPY pyproject.toml ./
-COPY controller/ ./controller/
-COPY environment/ ./environment/
-RUN pip install --no-cache-dir -e .
-
-ENV ENV_SERVER_PORT=8005
-
-# Start backend then launch MCP controller on stdio
-CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --log-level warning & python -m controller"]
-```
-
-<Note>
-Templates may include hot-reload flags for development. Remove them for production images.
-</Note>
 
 ## Examples
 
 ```bash
-# Choose preset interactively (default blank)
-hud init
+# Create ./my-env
+hud init my-env
 
-# Create a blank template in a new directory
-hud init my-env -p blank
+# Create ./envs/my-env
+hud init my-env --dir envs
 
-# Browser presets
-hud init my-browser -p browser
-
-# Deep research preset (remote browser)
-hud init my-deep -p deep-research
-
-# Force overwrite
-hud init my-env -p blank --force
+# Overwrite an existing non-empty directory
+hud init my-env --force
 ```
 
 ## Next Steps
 
 <Steps>
-<Step title="Start Development">
-Start the development server. Add `--watch` (`-w`) to enable hot-reload:
+<Step title="Define tasks">
+Edit `env.py` — a `@env.task` is an async generator: it yields a prompt, then (after the agent answers) yields a reward.
+</Step>
+
+<Step title="Run an agent">
 ```bash
-# Inspector (HTTP, visual)
-hud dev --inspector
-
-# Interactive TUI (arrow keys)
-hud dev --interactive
-
-# Hot-reload specific paths
-hud dev -w controller -w environment --inspector
+hud eval tasks.py claude
 ```
 </Step>
 
-<Step title="Edit Tools">
-Add tools in `controller/tools.py`; use `@mcp.tool`.
-</Step>
-
-<Step title="Build & Deploy">
+<Step title="Deploy">
 ```bash
 hud deploy             # Build remotely & deploy to platform
-# Or connect a GitHub repo on hud.ai → New → Environment
 ```
 </Step>
 </Steps>
 
-## Presets
-
-- **blank**: Minimal controller + FastAPI backend with `/health`, `/act`, `/reset`, `/state` and example tools.
-- **browser**: Local browser environment preset.
-- **deep-research**: Remote browser environment preset (maps to `remote_browser`).
-
 ## See Also
 
-- [Build Environments](/build-environments) – Quickstart tutorial
-- [Technical Spec](/build-environments/spec) – Exact runtime requirements
-- [hud dev](/reference/cli/dev) – Development server (`--watch` for hot-reload)
+- [hud dev](/reference/cli/dev) – Development server
+- [hud eval](/reference/cli/eval) – Run agents over tasks
 - [hud build](/reference/cli/build) – Build production images
