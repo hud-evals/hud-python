@@ -3,8 +3,8 @@
 Deployed v5 environments keep running on v6 through one meta-path finder,
 installed by ``hud/__init__`` at import time:
 
-- ``hud.native[.graders|.skills|.tools...]`` — the package was dissolved into
-  root modules (:mod:`hud.graders`, :mod:`hud.skills`, :mod:`hud.tools`).
+- ``hud.native[.graders|.tools...]`` — the package was dissolved into
+  root modules (:mod:`hud.graders`, :mod:`hud.tools`).
   These names resolve as synthetic alias modules that delegate attribute
   access to the real modules, so class identity is preserved for
   ``isinstance`` checks.
@@ -72,7 +72,6 @@ _LOWERCASE_LEGACY = frozenset({"computer_settings", "get_demote_preexec_fn"})
 _MODULE_ALIASES: dict[str, str] = {
     "hud.native": "hud.graders",
     "hud.native.graders": "hud.graders",
-    "hud.native.skills": "hud.skills",
     "hud.services": "hud.eval.chat",
     "hud.services.chat": "hud.eval.chat",
 }
