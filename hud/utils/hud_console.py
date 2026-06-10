@@ -271,7 +271,7 @@ class HUDConsole:
         - Displays structured hints if present on the exception (e.g., HudException.hints)
         - Prints a link to open an issue for SDK problems
         """
-        from hud.shared.exceptions import HudRequestError  # lazy import: avoid import cycle
+        from hud.utils.exceptions import HudRequestError  # lazy import: avoid import cycle
 
         # Header with exception type
         ex_type = type(error).__name__
@@ -295,7 +295,7 @@ class HUDConsole:
         # Structured hints, if available
         hints = getattr(error, "hints", None)
         if hints:
-            from hud.shared.hints import render_hints  # lazy import: avoid import cycle
+            from hud.utils.hints import render_hints  # lazy import: avoid import cycle
 
             render_hints(hints, design=self)
 

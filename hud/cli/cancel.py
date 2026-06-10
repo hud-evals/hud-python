@@ -6,7 +6,7 @@ import asyncio
 
 import typer
 
-from hud.shared.exceptions import HudRequestError
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 
 

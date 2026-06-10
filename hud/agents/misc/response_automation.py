@@ -62,7 +62,7 @@ async def auto_respond(
 
 @cache
 def _client() -> AsyncOpenAI:
-    from hud.shared.gateway import build_gateway_client
+    from hud.utils.gateway import build_gateway_client
 
     return cast("AsyncOpenAI", build_gateway_client("openai"))
 

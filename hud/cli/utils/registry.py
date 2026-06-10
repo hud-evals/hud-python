@@ -6,10 +6,10 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hud.shared.exceptions import HudRequestError
+from hud.utils.exceptions import HudRequestError
 
 if TYPE_CHECKING:
-    from hud.shared.platform import PlatformClient
+    from hud.utils.platform import PlatformClient
 
 
 @dataclass(frozen=True)

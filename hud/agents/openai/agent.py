@@ -27,8 +27,8 @@ from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import OpenAIConfig
 from hud.settings import settings
-from hud.shared import gateway
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.utils import gateway
 
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result

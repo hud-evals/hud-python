@@ -1,7 +1,7 @@
 """Generic HUD platform API client.
 
 Owns *how* requests reach the platform: base URL, auth, and the shared
-retry/error policy from :mod:`hud.shared.requests`. Endpoint paths and wire
+retry/error policy from :mod:`hud.utils.requests`. Endpoint paths and wire
 payloads live with the feature that owns them (tasksets, builds, registry, ...).
 """
 
@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-from hud.shared.requests import make_request, make_request_sync
+from hud.utils.requests import make_request, make_request_sync
 
 
 @dataclass(frozen=True)
 class PlatformClient:
     """Sync/async client for the HUD platform API.
 
-    Raises :class:`hud.shared.exceptions.HudRequestError` (with ``status_code``
+    Raises :class:`hud.utils.exceptions.HudRequestError` (with ``status_code``
     and ``response_json``) on HTTP errors and retries transient failures.
     Responses are decoded JSON; callers own the payload shape.
     """
@@ -30,9 +30,7 @@ class PlatformClient:
     def from_settings(cls) -> PlatformClient:
         from hud.settings import settings
 
-        if not settings.api_key:
-            raise ValueError("HUD_API_KEY is required for HUD platform API calls")
-        return cls(settings.hud_api_url, settings.api_key)
+        return cls(settings.hud_api_url, settings.api_key or "")
 
     def url(self, path: str, params: dict[str, Any] | None = None) -> str:
         url = f"{self.api_url.rstrip('/')}{path}"

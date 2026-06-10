@@ -13,8 +13,8 @@ import questionary
 import typer
 
 from hud.settings import settings
-from hud.shared.platform import PlatformClient
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
 
 # Presets mapping to public GitHub repositories under hud-evals org
 GITHUB_OWNER = "hud-evals"

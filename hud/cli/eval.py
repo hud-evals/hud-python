@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 import tomllib
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from string import Template
 from typing import Any, ClassVar, cast
 
 import typer
@@ -23,7 +26,6 @@ from hud.cli.utils.api import require_api_key
 from hud.cli.utils.config import parse_key_value
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.env import resolve_env_vars
 from hud.utils.hud_console import HUDConsole
 
 _BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
@@ -38,6 +40,34 @@ logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
 
 _CONFIG_PATH = ".hud_eval.toml"
+
+
+def _resolve_env_vars(obj: Any) -> Any:
+    """Recursively resolve ``${VAR_NAME}`` placeholders in config values.
+
+    Sources values from ``os.environ`` and ``hud.settings`` (uppercase aliases
+    included, so both ``${api_key}`` and ``${API_KEY}`` work). Missing
+    variables resolve to empty strings.
+    """
+    mapping: dict[str, Any] = dict(os.environ)
+    settings_dict = settings.model_dump()
+    mapping.update(settings_dict)
+    mapping.update({key.upper(): val for key, val in settings_dict.items()})
+    if settings.api_key:
+        mapping["HUD_API_KEY"] = settings.api_key
+
+    safe_mapping: defaultdict[str, Any] = defaultdict(str, mapping)
+
+    def substitute(value: Any) -> Any:
+        if isinstance(value, str):
+            return Template(value).substitute(safe_mapping)
+        if isinstance(value, dict):
+            return {k: substitute(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [substitute(item) for item in value]
+        return value
+
+    return substitute(obj)
 
 
 def _require_bedrock_credentials() -> None:
@@ -318,7 +348,7 @@ class EvalConfig(BaseModel):
             hud_console.warning(f"Failed to parse {path}: {e}")
             return cls()
 
-        toml_data = resolve_env_vars(toml_data)
+        toml_data = _resolve_env_vars(toml_data)
 
         eval_section = toml_data.get("eval", {})
         data: dict[str, Any] = {}
@@ -506,7 +536,7 @@ def _build_agent(cfg: EvalConfig) -> Any:
         agent_kwargs["auto_respond"] = True
 
     if cfg.gateway:
-        from hud.shared.gateway import build_gateway_client
+        from hud.utils.gateway import build_gateway_client
 
         agent_kwargs.setdefault(
             "model_client", build_gateway_client(cfg.agent_type.gateway_provider)

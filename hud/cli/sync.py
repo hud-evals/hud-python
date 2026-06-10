@@ -17,9 +17,9 @@ from hud.cli.utils.registry import (
 from hud.environment.source import EnvironmentSource
 from hud.eval import Taskset
 from hud.eval.taskset import resolve_taskset_id, taskset_column_definitions, upload_taskset
-from hud.shared.exceptions import HudException, HudRequestError
-from hud.shared.platform import PlatformClient
+from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
 

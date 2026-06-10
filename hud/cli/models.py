@@ -26,7 +26,7 @@ def models_command(
     """
     from hud.cli.utils.api import require_api_key
     from hud.settings import settings
-    from hud.shared.gateway import list_gateway_models
+    from hud.utils.gateway import list_gateway_models
 
     require_api_key("list models")
 

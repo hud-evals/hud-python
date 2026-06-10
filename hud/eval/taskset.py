@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from hud.client import Run
-from hud.shared.exceptions import HudRequestError
-from hud.shared.platform import PlatformClient
+from hud.utils.exceptions import HudRequestError
+from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter, trace_enter, trace_exit
 
@@ -431,7 +431,7 @@ class Taskset:
 # ─── platform wire format ──────────────────────────────────────────────
 #
 # Taskset endpoints ("evalsets" on the backend) and the upload payload shape.
-# Transport (auth, retries, errors) is hud.shared.platform; the shapes live
+# Transport (auth, retries, errors) is hud.utils.platform; the shapes live
 # here because Taskset owns them.
 
 

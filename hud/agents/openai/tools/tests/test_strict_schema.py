@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hud.utils.strict_schema import ensure_strict_json_schema
+from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 
 
 def test_empty_schema_becomes_closed_object() -> None:

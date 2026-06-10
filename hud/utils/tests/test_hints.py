@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from hud.shared.hints import (
+from hud.utils.hints import (
     CLIENT_NOT_INITIALIZED,
     ENV_VAR_MISSING,
     HUD_API_KEY_MISSING,

@@ -1,6 +1,6 @@
 """HUD inference gateway: provider clients and the model catalog.
 
-The sibling of :mod:`hud.shared.platform` — that module talks to the platform
+The sibling of :mod:`hud.utils.platform` — that module talks to the platform
 API, this one talks to the inference gateway. Agent construction on top of the
 gateway lives in :func:`hud.agents.create_agent`.
 """
@@ -14,7 +14,8 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from hud.settings import settings
-from hud.shared.platform import PlatformClient
+from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from typing import TypeAlias
@@ -51,8 +52,9 @@ def build_gateway_client(provider: str) -> GatewayClient:
     Returns:
         Configured async client for the provider.
     """
+    # Provider SDK clients bypass hud.utils.requests, so guard here.
     if not settings.api_key:
-        raise ValueError("HUD_API_KEY is required for HUD gateway clients")
+        raise HudAuthenticationError("HUD_API_KEY is required for HUD gateway clients")
 
     provider = provider.lower()
 

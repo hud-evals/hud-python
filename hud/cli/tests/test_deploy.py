@@ -153,14 +153,14 @@ class TestDeployAsync:
     async def test_upload_url_failure(self) -> None:
         """Test handling of upload URL failure."""
         from hud.cli.deploy import _deploy_async, _DeployPlan
-        from hud.shared.exceptions import HudRequestError
-        from hud.shared.platform import PlatformClient
+        from hud.utils.exceptions import HudRequestError
         from hud.utils.hud_console import HUDConsole
+        from hud.utils.platform import PlatformClient
 
         console = HUDConsole()
         error = HudRequestError("Unauthorized", status_code=401)
 
-        with patch("hud.shared.platform.make_request", AsyncMock(side_effect=error)):
+        with patch("hud.utils.platform.make_request", AsyncMock(side_effect=error)):
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
                 no_cache=False,
@@ -181,13 +181,13 @@ class TestDeployAsync:
     async def test_upload_url_network_error(self) -> None:
         """Test handling of network error during upload URL fetch."""
         from hud.cli.deploy import _deploy_async, _DeployPlan
-        from hud.shared.platform import PlatformClient
         from hud.utils.hud_console import HUDConsole
+        from hud.utils.platform import PlatformClient
 
         console = HUDConsole()
 
         with patch(
-            "hud.shared.platform.make_request",
+            "hud.utils.platform.make_request",
             AsyncMock(side_effect=Exception("Network error")),
         ):
             result = await _deploy_async(

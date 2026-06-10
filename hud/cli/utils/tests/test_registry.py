@@ -9,8 +9,8 @@ from hud.cli.utils.registry import (
     get_registry_environment,
     resolve_registry_environments,
 )
-from hud.shared.exceptions import HudRequestError
-from hud.shared.platform import PlatformClient
+from hud.utils.exceptions import HudRequestError
+from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     import pytest
@@ -45,7 +45,7 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
     def fake_request(method: str, url: str, **kwargs: object) -> dict:
         raise HudRequestError("not found", status_code=404)
 
-    monkeypatch.setattr("hud.shared.platform.make_request_sync", fake_request)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
 
     env = get_registry_environment(PlatformClient("https://api.example", "key"), "abc")
 

@@ -1,12 +1,11 @@
-"""Generic platform transport in ``hud.shared.platform``."""
+"""Generic platform transport in ``hud.utils.platform``."""
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
-from hud.shared.platform import PlatformClient
+from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.platform import PlatformClient
 
 
 def test_url_joins_base_path_and_params() -> None:
@@ -25,7 +24,7 @@ def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPa
         calls.append({"method": method, "url": url, "json": json, "api_key": kwargs.get("api_key")})
         return {"ok": True}
 
-    monkeypatch.setattr("hud.shared.platform.make_request_sync", fake_request)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
     platform = PlatformClient("https://api.example", "key")
 
     assert platform.get("/x", params={"a": 1}) == {"ok": True}
@@ -36,8 +35,8 @@ def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPa
     ]
 
 
-def test_from_settings_requires_api_key() -> None:
-    with patch("hud.settings.settings") as mock_settings:
-        mock_settings.api_key = None
-        with pytest.raises(ValueError, match="HUD_API_KEY"):
-            PlatformClient.from_settings()
+def test_requests_without_api_key_raise_authentication_error() -> None:
+    platform = PlatformClient("https://api.example", "")
+
+    with pytest.raises(HudAuthenticationError):
+        platform.get("/tasks")

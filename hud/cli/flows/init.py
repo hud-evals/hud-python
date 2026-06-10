@@ -191,19 +191,9 @@ def smart_init(
     force: bool = False,
 ) -> None:
     """Initialize HUD environment, always prompting the user for what to do."""
-    from hud.settings import settings
+    from hud.cli.utils.api import require_api_key
 
-    hud_console = HUDConsole()
-
-    if not settings.api_key:
-        hud_console.error("HUD_API_KEY not found")
-        hud_console.info("")
-        hud_console.info("Set your API key:")
-        hud_console.info("  hud set HUD_API_KEY=your-key-here")
-        hud_console.info("  Or: export HUD_API_KEY=your-key")
-        hud_console.info("")
-        hud_console.info("Get your key at: https://hud.ai/project/api-keys")
-        return
+    require_api_key("initialize an environment")
 
     target = Path(directory).resolve()
 

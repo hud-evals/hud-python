@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hud.shared.platform import PlatformClient
+from hud.utils.platform import PlatformClient
 
 
 async def cancel_job(job_id: str) -> dict[str, Any]:

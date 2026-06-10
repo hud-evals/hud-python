@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from hud.shared.exceptions import HudRequestError
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
-    from hud.shared.platform import PlatformClient
+    from hud.utils.platform import PlatformClient
 
 
 async def stream_build_logs(

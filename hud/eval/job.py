@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hud.shared.platform import PlatformClient
+from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from hud.client import Run

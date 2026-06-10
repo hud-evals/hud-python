@@ -13,8 +13,8 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
-from hud.shared import gateway
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Sample
+from hud.utils import gateway
 
 from .tools import (
     GlobTool,

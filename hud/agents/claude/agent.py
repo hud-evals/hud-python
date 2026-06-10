@@ -27,8 +27,8 @@ from anthropic.types.beta import (
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import Citation, ClaudeConfig
 from hud.settings import settings
-from hud.shared import gateway
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.utils import gateway
 
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from .tools.computer import ClaudeComputerTool

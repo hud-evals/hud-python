@@ -346,7 +346,7 @@ class LLMJudgeGrader(Grader):
                 "LLMJudgeGrader requires the 'rubric' package. Install with: pip install rubric"
             ) from None
 
-        from hud.shared.gateway import build_gateway_client
+        from hud.utils.gateway import build_gateway_client
 
         parsed: list[Criterion] = []
         for c in criteria or []:

@@ -19,9 +19,9 @@ from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.environment.source import EnvironmentSource
-from hud.shared.exceptions import HudRequestError
-from hud.shared.platform import PlatformClient
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
 

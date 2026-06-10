@@ -258,7 +258,7 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
             }
         raise AssertionError(url)
 
-    monkeypatch.setattr("hud.shared.platform.make_request_sync", fake_request)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
     monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
 
     taskset = Taskset.from_api("demo")
@@ -291,7 +291,7 @@ def test_taskset_diff_classifies_create_update_unchanged_and_remote_only() -> No
 
 def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     from hud.eval.taskset import taskset_column_definitions, upload_taskset
-    from hud.shared.platform import PlatformClient
+    from hud.utils.platform import PlatformClient
 
     env = Environment("e")
     upload = task(env, "solve", slug="solve-one", columns={"tier": "easy"}, n=1)
@@ -301,7 +301,7 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
         posted.update(method=method, url=url, json=json, api_key=kwargs.get("api_key"))
         return {"ok": True}
 
-    monkeypatch.setattr("hud.shared.platform.make_request_sync", fake_request)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
 
     platform = PlatformClient("https://api.example", "token")
     result = upload_taskset(

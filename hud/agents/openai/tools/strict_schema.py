@@ -138,7 +138,7 @@ def _ensure_strict_json_schema(
     # prefixItems, minItems, maxItems are NOT supported in strict mode.
     prefix_items = json_schema.get("prefixItems")
     if _is_list(prefix_items) and prefix_items:
-        item_types = set()
+        item_types: set[Any] = set()
         for item in prefix_items:
             if _is_dict(item) and "type" in item:
                 item_types.add(item["type"])

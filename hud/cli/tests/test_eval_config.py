@@ -84,6 +84,19 @@ def test_load_parses_sections(tmp_path: Path) -> None:
     assert cfg.agent_config["openai"]["model"] == "gpt-4o"
 
 
+def test_load_resolves_env_var_placeholders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_EVAL_MODEL", "gpt-4o")
+    path = tmp_path / ".hud_eval.toml"
+    path.write_text(
+        '[eval]\nagent = "openai"\n\n[openai]\nmodel = "${MY_EVAL_MODEL}"\n',
+        encoding="utf-8",
+    )
+    cfg = EvalConfig.load(str(path))
+    assert cfg.agent_config["openai"]["model"] == "gpt-4o"
+
+
 def test_merge_cli_overrides_fields() -> None:
     merged = EvalConfig().merge_cli(agent="openai", task_ids="a, b", max_steps=7)
     assert merged.agent_type is not None and merged.agent_type.value == "openai"

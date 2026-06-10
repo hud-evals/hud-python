@@ -56,7 +56,7 @@ def test_render_exception_does_not_raise() -> None:
 
 
 def test_render_exception_request_error_details() -> None:
-    from hud.shared.exceptions import HudRequestError
+    from hud.utils.exceptions import HudRequestError
 
     c = HUDConsole()
     c.render_exception(HudRequestError("nope", status_code=403, response_text="forbidden"))

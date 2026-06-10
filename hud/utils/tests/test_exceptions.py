@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import httpx
 
-from hud.shared.exceptions import (
+from hud.utils.exceptions import (
     HudAuthenticationError,
     HudException,
     HudRequestError,
 )
-from hud.shared.hints import (
+from hud.utils.hints import (
     HUD_API_KEY_MISSING,
     PRO_PLAN_REQUIRED,
     RATE_LIMIT_HIT,
@@ -72,7 +72,7 @@ class TestHudRequestError:
         assert error.hints == []
 
     def test_explicit_hints_override_defaults(self):
-        from hud.shared.hints import Hint
+        from hud.utils.hints import Hint
 
         custom_hint = Hint(title="Custom Error", message="This is a custom hint")
         error = HudRequestError("Unauthorized", status_code=401, hints=[custom_hint])

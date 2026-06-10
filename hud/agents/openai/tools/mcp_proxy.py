@@ -7,9 +7,9 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.tools import MCPTool
-from hud.utils.strict_schema import ensure_strict_json_schema
 
 from .base import OpenAIToolSpec
+from .strict_schema import ensure_strict_json_schema
 
 if TYPE_CHECKING:
     from openai.types.responses import FunctionToolParam, ToolParam

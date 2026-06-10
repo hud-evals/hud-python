@@ -1,7 +1,7 @@
 """HUD SDK exceptions.
 
 A small typed hierarchy rooted at :class:`HudException`. Subclasses carry
-default :class:`~hud.shared.hints.Hint` lists that the console renderer
+default :class:`~hud.utils.hints.Hint` lists that the console renderer
 displays alongside the error.
 """
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     import httpx
 
-from hud.shared.hints import (
+from hud.utils.hints import (
     CLIENT_NOT_INITIALIZED,
     CREDITS_EXHAUSTED,
     ENV_VAR_MISSING,

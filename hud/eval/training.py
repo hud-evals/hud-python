@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Protocol, runtime_checkable
 
 from hud.settings import settings
-from hud.shared.platform import PlatformClient
+from hud.utils.platform import PlatformClient
 
 
 @runtime_checkable

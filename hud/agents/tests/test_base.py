@@ -132,7 +132,7 @@ def test_create_agent_value_shortcut_builds_provider_agent(
 def test_create_agent_resolves_gateway_model_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from hud.shared.gateway import GatewayModelInfo, GatewayProviderInfo
+    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo
 
     model = GatewayModelInfo(
         id="ft:custom-123",

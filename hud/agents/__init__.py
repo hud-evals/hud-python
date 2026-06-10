@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.shared.gateway import build_gateway_client, list_gateway_models
 from hud.types import AgentType
+from hud.utils.gateway import build_gateway_client, list_gateway_models
 
 if TYPE_CHECKING:
     from typing import TypeAlias

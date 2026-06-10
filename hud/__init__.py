@@ -35,10 +35,3 @@ try:
     from .version import __version__
 except ImportError:
     __version__ = "unknown"
-
-try:
-    from .utils.pretty_errors import install_pretty_errors
-
-    install_pretty_errors()
-except Exception:  # noqa: S110
-    pass

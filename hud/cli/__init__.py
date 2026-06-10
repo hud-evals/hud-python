@@ -8,6 +8,8 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from hud.utils.exceptions import HudException
+
 app = typer.Typer(
     name="hud",
     help="HUD CLI - build, test, and deploy evaluation environments",
@@ -152,6 +154,11 @@ def main() -> None:
 
             hud_console.info(SUPPORT_HINT)
         raise
+    except HudException as e:
+        from hud.utils.hud_console import hud_console
+
+        hud_console.render_exception(e)
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":

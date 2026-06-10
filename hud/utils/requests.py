@@ -12,13 +12,13 @@ from typing import Any
 
 import httpx
 
-from hud.shared.exceptions import (
+from hud.utils.exceptions import (
     HudAuthenticationError,
     HudNetworkError,
     HudRequestError,
     HudTimeoutError,
 )
-from hud.shared.hints import (
+from hud.utils.hints import (
     CREDITS_EXHAUSTED,
     HUD_API_KEY_MISSING,
     RATE_LIMIT_HIT,
