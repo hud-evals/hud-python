@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import shutil
 import socket
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from hud.capabilities import Capability
 
 LOGGER = logging.getLogger("hud.environment.workspace")
+
+# Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
+_warned_no_bwrap = False
 
 
 # ─────────────────────────── mount declarations ───────────────────────────
@@ -112,10 +115,16 @@ class Workspace:
         )
         self._bwrap = shutil.which("bwrap")
         if self._bwrap is None and sys.platform != "win32":
-            LOGGER.warning(
-                "bwrap not on PATH; SSH sessions will run WITHOUT isolation. "
-                "Install bubblewrap, or run inside a Linux container that has it.",
-            )
+            # Once per process: repeating this on every Workspace construction is
+            # noise, and on macOS (no bubblewrap exists) it is an expected state.
+            global _warned_no_bwrap
+            if not _warned_no_bwrap:
+                _warned_no_bwrap = True
+                log = LOGGER.warning if sys.platform == "linux" else LOGGER.info
+                log(
+                    "bwrap not on PATH; SSH sessions will run WITHOUT isolation. "
+                    "Install bubblewrap, or run inside a Linux container that has it.",
+                )
 
         # ssh config
         self._ssh_host = host
@@ -123,7 +132,6 @@ class Workspace:
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
-        self._serve_task: asyncio.Task[None] | None = None
         self._client_key_path: Path | None = None
 
         # ─── synchronous spinup ───
@@ -135,10 +143,18 @@ class Workspace:
         self._sock.listen(128)
         self._bound_host, self._bound_port = self._sock.getsockname()[:2]
 
-        # Kick off the async accept loop if an event loop is running.
-        with contextlib.suppress(RuntimeError):
-            loop = asyncio.get_running_loop()
-            self._serve_task = loop.create_task(self._serve())
+        # Serve from a dedicated background event loop (daemon thread), so the
+        # SSH server is live right after construction — module-level
+        # ``Workspace(...)`` just works, with no ``@env.initialize`` /
+        # ``await ws.start()`` boilerplate.
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self._loop.run_forever,
+            name=f"hud-workspace-ssh-{self._bound_port}",
+            daemon=True,
+        )
+        self._thread.start()
+        self._serve_future = asyncio.run_coroutine_threadsafe(self._serve(), self._loop)
 
         LOGGER.info(
             "Workspace SSH bound on %s as user %r (client key: %s)",
@@ -164,16 +180,13 @@ class Workspace:
         )
 
     async def start(self) -> None:
-        """Ensure the SSH accept loop is running. Idempotent.
+        """Wait until the background SSH acceptor is up. Idempotent.
 
-        The socket is already bound in ``__init__``; this just guarantees the
-        async acceptor exists (for callers that construct ``Workspace`` outside
-        a running loop).
+        The server starts on its own background loop at construction; this only
+        surfaces a startup error early. Calling it is optional and kept for
+        backward compatibility.
         """
-        if self._serve_task is None and self._acceptor is None:
-            self._serve_task = asyncio.get_event_loop().create_task(self._serve())
-        # Yield so the acceptor binds before first use.
-        await asyncio.sleep(0)
+        await asyncio.wrap_future(self._serve_future)
 
     # ─── ssh accessors / capability ───────────────────────────────────
 

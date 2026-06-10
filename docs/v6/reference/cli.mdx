@@ -96,7 +96,7 @@ hud eval "My Tasks" claude --remote
 
 ## Run a packaged image
 
-Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or load from source with `--source`.
+`hud task-start` / `hud task-grade` attach to an env already serving locally (e.g. inside a built image, or alongside `hud dev`), or load one from source with `--source`. `hud task-list` always reads from source (default `.`) — it doesn't attach.
 
 ```bash
 hud task-list                          # what variants are exposed

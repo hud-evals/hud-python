@@ -38,12 +38,14 @@ async def capital(country: str = "France"):
 
 ## `BashGrader`
 
-Runs a shell command via `bash -lc` and scores by exit code (`1.0` if it exits `0`). Async; returns a `SubScore`.
+Runs a shell command via `/bin/bash -lc` and scores by exit code (`1.0` if it exits `0`). Async; returns a `SubScore`. Needs bash — macOS, Linux, WSL, or a built image; on native Windows it scores `0.0` with a `/bin/bash not found` error.
 
 ```python
-result = await BashGrader.grade(weight=1.0, command="pytest -q", cwd="/workspace")
+result = await BashGrader.grade(weight=1.0, command="pytest -q", cwd=str(ws.root))
 yield result.value
 ```
+
+`cwd` is the host directory to run in — for a `Workspace`-backed task, pass `str(ws.root)` so the grader sees the same files the agent edited.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -110,5 +112,5 @@ A `SubScore` (`name`, `value` 0–1, `weight`, optional `metadata`) is one compo
 
 <CardGroup cols={2}>
 <Card title="Tasks & grading" icon="list-check" href="/v6/build/tasks" />
-<Card title="Designing tasks for signal" icon="signal" href="/v6/advanced/signal" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
 </CardGroup>

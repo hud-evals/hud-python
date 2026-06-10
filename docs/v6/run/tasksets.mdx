@@ -1,0 +1,106 @@
+---
+title: "Tasksets"
+description: "Group variants into a dataset, publish it to the platform, and run it across your team."
+icon: "layer-group"
+---
+
+A **taskset** is a collection of [variants](/v6/build/tasks) you evaluate one agent over. It's how you go from a single task to a dataset you can run as a batch, share with your team, and run on remote infra.
+
+## "Taskset" means three related things
+
+The word shows up in three places. They're connected, but don't mix them up:
+
+| Sense | What it is | How you use it |
+|-------|------------|----------------|
+| A **list of variants** | a plain Python list, e.g. `[fix_bug(d) for d in range(5)]` | `hud eval tasks.py claude` runs it directly |
+| The **`Taskset` class** | `hud.eval.Taskset` — adds GRPO grouping, a concurrency cap, and one-job reporting | `await Taskset(...).run(agent, group=8)` in code |
+| A **named platform taskset** | a dataset stored on [hud.ai](https://hud.ai), identified by name | `hud sync tasks <name>` to publish, `hud eval <name>` to run |
+
+## Build one in code
+
+The `Taskset` class gathers rollouts over every variant, optionally repeating each one `group` times (a GRPO group) with a concurrency cap:
+
+```python run.py
+import asyncio
+from hud.agents import create_agent
+from hud.eval import Taskset
+from tasks import fix_bug
+
+async def main():
+    agent = create_agent("claude-sonnet-4-5")
+    taskset = Taskset(fix_bug(difficulty=d) for d in range(1, 6))
+    runs = await taskset.run(agent, group=8, max_concurrent=10)
+    print(sum(r.reward for r in runs) / len(runs))
+
+asyncio.run(main())
+```
+
+This launches a fresh environment per rollout, grades each on exit, isolates failures so one bad rollout never collapses the batch, and reports every trace under one HUD job. See the [Taskset reference](/v6/reference/tasks#taskset).
+
+## Publish to the platform with `hud sync tasks`
+
+`hud sync tasks` is how a taskset becomes a shared, named dataset on the platform. It collects the `Task`/variant definitions from your source, **diffs them against the remote taskset, and uploads only what changed**.
+
+```bash
+hud sync tasks my-taskset                 # scan the current dir, sync to "my-taskset"
+hud sync tasks my-taskset tasks.py        # from a specific file
+hud sync tasks my-taskset tasks/          # from a directory
+```
+
+The first sync creates the taskset and stores its ID in `.hud/config.json`, so afterward you can re-sync with no name — it resolves the ID from config:
+
+```bash
+hud sync tasks                            # re-sync the taskset recorded in .hud/config.json
+```
+
+Useful flags:
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Show the sync plan without uploading. |
+| `--task <slug>` | Only sync the task matching this slug. |
+| `--exclude <slug>` | Exclude tasks by slug (repeatable). |
+| `--force` | Upload every task, skipping the diff comparison. |
+| `--yes`, `-y` | Skip the confirmation prompt (use in CI). |
+| `--id <id>` | Target a taskset by ID directly. |
+| `--export <file>` | Export the remote tasks to `.json` or `.csv` instead of syncing. |
+
+Give each variant a stable `slug` and arbitrary `columns` so it's identifiable and filterable on the platform:
+
+```python tasks.py
+v = fix_bug(difficulty=3)
+v.slug = "fix-bug-3"
+v.columns = {"difficulty": 3, "suite": "coding"}
+```
+
+## Run a published taskset
+
+Once synced, run it by name — locally or on hosted infra:
+
+```bash
+hud eval my-taskset claude              # run the named taskset
+hud eval my-taskset claude --remote --full   # whole set, on hosted sandboxes
+```
+
+See [Package & deploy](/v6/run/deploy) for the remote path.
+
+## Manage tasks across a team
+
+Publishing turns a taskset into shared infrastructure: teammates run the same dataset, compare models on it, browse every rollout, and build leaderboards from the [platform UI](https://hud.ai) — without passing files around. The platform is where tasksets are organized, versioned, and shared. See the [platform tasksets guide](/platform/tasksets).
+
+## Next steps
+
+<CardGroup cols={2}>
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
+  Run a taskset on remote infra.
+</Card>
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
+  Compose a taskset that actually trains.
+</Card>
+<Card title="Tasks & variants reference" icon="list-check" href="/v6/reference/tasks">
+  The `Taskset` API in full.
+</Card>
+<Card title="Train on rewards" icon="dumbbell" href="/v6/run/training">
+  Turn a taskset's rollouts into training signal.
+</Card>
+</CardGroup>

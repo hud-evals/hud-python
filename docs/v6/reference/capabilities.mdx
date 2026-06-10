@@ -83,7 +83,7 @@ A rosbridge-compatible WebSocket (default port `9090`).
 ```python
 from hud.environment import Workspace
 
-ws = Workspace("/workspace")
+ws = Workspace("workspace")   # relative: created next to your env.py
 env = Environment(name="coder", capabilities=[ws.capability()])
 ```
 

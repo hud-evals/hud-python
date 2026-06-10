@@ -46,7 +46,7 @@ Here's the whole loop in one file: an environment that gives the agent a shell a
 from hud.environment import Environment, Workspace
 from hud.native.graders import BashGrader
 
-ws = Workspace("/workspace")
+ws = Workspace("workspace")  # a local directory the agent works in
 env = Environment(name="coder", capabilities=[ws.capability()])
 
 @env.initialize
@@ -56,23 +56,25 @@ async def _start():
 @env.task()
 async def fix_tests(target: str = "tests/"):
     yield f"Make the tests in {target} pass."
-    result = await BashGrader.grade(weight=1.0, command=f"pytest {target} -q", cwd="/workspace")
+    result = await BashGrader.grade(weight=1.0, command=f"pytest {target} -q", cwd=str(ws.root))
     yield result.value
+
+tasks = [fix_tests()]
 ```
 
-Run it against any model:
+Run it against any model. `--gateway` routes the model through HUD with just your `HUD_API_KEY`, so you need no provider key:
 
 ```bash
-hud eval env.py claude
+hud eval env.py claude --gateway
 ```
 
-Every rollout is traced on the [hud.ai](https://hud.ai) platform when your `HUD_API_KEY` is set.
+Every rollout is traced on the [hud.ai](https://hud.ai) platform.
 
 ## Where to go next
 
 <CardGroup cols={2}>
 <Card title="Quickstart" icon="bolt" href="/v6/quickstart">
-  From install to your first graded run in a few minutes.
+  From install to your first graded trace in a few minutes.
 </Card>
 <Card title="Environments & capabilities" icon="cube" href="/v6/build/environments">
   Give the agent shell, browser, GUI, tools, or a robot to act on.

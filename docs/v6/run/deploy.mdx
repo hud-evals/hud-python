@@ -4,7 +4,7 @@ description: "Build a portable image that runs any task variant, anywhere."
 icon: "rocket"
 ---
 
-**Scale** is the first verb you apply to data points: package once, run anywhere. A built image is the **end product for your tasks** — one build packs every variant from a single definition, and because the protocol exposes only capabilities, it runs unchanged on your laptop, in CI, on Kubernetes, or on managed cloud sandboxes.
+Package once, run anywhere: a built image is the **end product for your tasks** — one build packs every variant from a single definition, and because the protocol exposes only capabilities, it runs unchanged on your laptop, in CI, on Kubernetes, or on managed cloud sandboxes.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ icon: "rocket"
 ```bash
 hud deploy
 hud sync tasks my-taskset
-hud eval my-taskset --remote
+hud eval my-taskset claude --remote
 ```
 
 - `hud deploy` builds the image and registers the environment.
@@ -40,7 +40,7 @@ hud build . -t my-env
 **Reproducible by construction.** The build is pinned by `hud.lock.yaml`, and each rollout gets its **own fresh environment** — so results reproduce across runs and machines, and one rollout never leaks state into the next. Keep any per-task setup in [`@env.initialize`](/v6/build/environments#lifecycle-hooks) so every run starts from the same state.
 </Note>
 
-Once built, the image is a self-contained box that serves the control channel. Run it and drive a task (here `fix_bug`, a task in your environment) with the packaged CLI — `docker exec` runs the commands *inside* the container, so no port needs publishing:
+Once built, the image is self-contained and serves the control channel. Run it and drive a task (here `fix_bug`, a task in your environment) with the packaged CLI — `docker exec` runs the commands *inside* the container, so no port needs publishing:
 
 ```bash
 docker run -d --name run1 my-env
@@ -55,9 +55,9 @@ docker rm -f run1
 `hud task-start` / `hud task-grade` are the top-level aliases. The same commands exist as the `hud task start` / `hud task grade` subgroup, plus `hud task list` to see what variants an image or source exposes.
 </Note>
 
-## Driving a packaged box from code
+## Driving a packaged image from code
 
-A running box is a `RemoteSandbox` — attach a `Variant` to its control-channel URL and run it like any other. To reach the box from the **host**, publish the control-channel port when you start it:
+A running container is a `RemoteSandbox` — attach a `Variant` to its control-channel URL and run it like any other. To reach it from the **host**, publish the control-channel port when you start it:
 
 ```bash
 docker run -d --name run1 -p 8765:8765 my-env
@@ -82,12 +82,12 @@ asyncio.run(main())
 ```
 
 <Note>
-Build a `Variant` three ways: **call the task** (`fix_bug(...)`) when you have the Python object — the normal path; the **`variant()` helper** for metadata; or the bare **`Variant(env=..., task="id")`** constructor when you only have a task **id** against a remote/packaged box, as above.
+Build a `Variant` three ways: **call the task** (`fix_bug(...)`) when you have the Python object — the normal path; the **`variant()` helper** for metadata; or the bare **`Variant(env=..., task="id")`** constructor when you only have a task **id** against a remote/packaged image, as above.
 </Note>
 
 ## Scaling horizontally
 
-Because each rollout gets its own box, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
+Because each rollout gets its own container, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
 
 ```python run.py
 from hud.eval import Taskset
@@ -97,7 +97,7 @@ runs = await Taskset(fix_bug(difficulty=d) for d in range(20)).run(
 )
 ```
 
-On the platform, `hud eval my-taskset --remote --full` runs the entire taskset on hosted sandboxes and reports each trace under one job.
+On the platform, `hud eval my-taskset claude --remote --full` runs the entire taskset on hosted sandboxes and reports each trace under one job.
 
 ## Next steps
 

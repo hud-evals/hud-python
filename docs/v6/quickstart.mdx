@@ -44,6 +44,17 @@ The rest of this page walks the same path by hand.
 uv tool install hud-python --python 3.12
 ```
 
+Don't have [uv](https://docs.astral.sh/uv/)? Install it first:
+
+<CodeGroup>
+```bash macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+```powershell Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+</CodeGroup>
+
 <Note>Prefer a library install? `pip install hud-python` works too — everything on this page is also available in Python.</Note>
 
 ## 2. Set your API key
@@ -57,6 +68,8 @@ This persists the key to `~/.hud/.env`. (You can also `export HUD_API_KEY=...` i
 ## 3. Write a task
 
 A **task** is an async generator: it `yield`s a prompt, receives the agent's answer, then `yield`s a score between `0.0` and `1.0`. Create `tasks.py`:
+
+<Tip>No task in mind yet? [What to build](/v6/build/what-to-build) maps each substrate to concrete starter ideas.</Tip>
 
 ```python tasks.py
 from hud import Environment
@@ -93,14 +106,14 @@ hud eval tasks.py claude --gateway --full
 
 ## 5. Read the result
 
-The CLI prints each task's reward and a link to the trace on [hud.ai](https://hud.ai), where you can replay exactly what the agent did, step by step. That reward-plus-trace pair **is** the data point.
+The CLI prints each task's reward and a link to the trace on [hud.ai](https://hud.ai), where you can replay exactly what the agent did, step by step.
 
 ## What you just built
 
-You wrote one task definition, turned it into three variants, and evaluated a model on each — producing graded, traced data points. That same loop scales up without changing the task:
+You wrote one task definition, turned it into three variants, and evaluated a model on each — three graded traces. That same loop scales up without changing the task:
 
 <Note>
-This letter-count task is a **minimal illustration** — a single prompt-and-grade turn. A task you intend to *train* on should be multi-step and produce a spread of rewards across a group; see [Designing tasks for signal](/v6/advanced/signal).
+This letter-count task is a **minimal illustration** — a single prompt-and-grade turn. A task you intend to *train* on should be multi-step and produce a spread of rewards across a group; see [Designing tasks for signal](/v6/run/signal).
 </Note>
 
 <CardGroup cols={2}>

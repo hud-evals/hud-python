@@ -124,7 +124,7 @@ v5 served an MCP server via `env.run(transport=...)`. v6 serves its control chan
 
 ## Converting with an agent
 
-The conversion is mechanical, so the fastest path is to let your coding agent do it. Add the HUD docs to your agent — they're available as an MCP server at `docs.hud.ai/mcp`, or use the **Copy / Claude / ChatGPT** buttons at the top of any docs page — then point it at this guide and the [Environment reference](/reference/environments) and ask it to adapt your `env.py`. A prompt like:
+The conversion is mechanical, so the fastest path is to let your coding agent do it. Add the HUD docs to your agent — they're available as an MCP server at `docs.hud.ai/mcp`, or use the **Copy / Claude / ChatGPT** buttons at the top of any docs page — then point it at this guide and the [Environment reference](/v6/reference/environment) and ask it to adapt your `env.py`. A prompt like:
 
 > Convert this v5 HUD environment to v6 using the migration guide at docs.hud.ai. Rename scenarios to tasks, replace registered tools with the capability they imply (shell/files → `ssh`, browser → `cdp`, computer-use → `rfb`, custom tools → `mcp`), switch `env("name", ...)` to calling the task, and fix the `hud.tools` imports below.
 
@@ -147,16 +147,16 @@ The rule of thumb: **result types move to `hud.agents.types`, tools become capab
 ## Next steps
 
 <CardGroup cols={2}>
-<Card title="Scaffolding" icon="hammer" href="/building/scaffolding">
+<Card title="Environments & capabilities" icon="cube" href="/v6/build/environments">
   The full environment authoring guide.
 </Card>
-<Card title="Environment Reference" icon="desktop" href="/reference/environments">
+<Card title="Environment reference" icon="desktop" href="/v6/reference/environment">
   Tasks, capabilities, and serving.
 </Card>
-<Card title="Tasks & Evaluation" icon="flask-vial" href="/building/tasks-and-evaluation">
+<Card title="Tasks, variants & grading" icon="list-check" href="/v6/build/tasks">
   Define tasks, run them, iterate.
 </Card>
-<Card title="Deploy & Go Remote" icon="rocket" href="/building/running-at-scale">
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
   Publish with hud deploy and run at scale.
 </Card>
 </CardGroup>

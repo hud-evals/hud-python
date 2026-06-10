@@ -15,6 +15,20 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+def suppress_known_import_warnings() -> None:
+    """Filter third-party import-time noise the user can never act on.
+
+    Called before anything imports fastmcp: its jwt provider imports
+    ``authlib.jose``, which emits an ``AuthlibDeprecationWarning`` (a
+    ``DeprecationWarning`` subclass) on every CLI launch.
+    """
+    warnings.filterwarnings(
+        "ignore",
+        message=r"authlib\.jose module is deprecated",
+        category=DeprecationWarning,
+    )
+
+
 def apply_default_warning_filters(*, verbose: bool) -> None:
     """Apply our default warning filters for non-verbose CLI/server modes."""
     if verbose:

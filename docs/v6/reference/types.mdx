@@ -84,7 +84,7 @@ A normalized citation across providers: `type`, `text`, `source`, `title`, `star
 
 ### `ContentResult`
 
-Intermediate tool-execution output: `output`, `error`, `base64_image`, `system`, `url` (combinable with `+`).
+Intermediate tool-execution output: `output`, `error`, `base64_image`, `system`, `url` (combinable with `+`). `to_content_blocks()` converts it to the `list[ContentBlock]` an MCP tool returns — the one-liner for vision tools that send text plus a screenshot (see [Custom MCP tools](/v6/build/environments#custom-mcp-tools)).
 
 ## Training types
 

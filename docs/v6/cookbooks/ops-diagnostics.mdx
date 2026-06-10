@@ -11,13 +11,11 @@ A complete, runnable example of an **investigation** task: the agent reads sever
 We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files — no single artifact contains the answer.
 
 ```python env.py
-from pathlib import Path
-
 from hud.environment import Environment, Workspace
 from hud.native.graders import LLMJudgeGrader
 
-ROOT = Path("/workspace/incident")
-ws = Workspace("/workspace")
+ws = Workspace("workspace")
+ROOT = ws.root / "incident"
 env = Environment(name="ops-diagnostics", capabilities=[ws.capability()])
 
 @env.initialize
@@ -39,7 +37,8 @@ async def _seed():
 async def diagnose():
     answer = yield (
         "Checkout started returning 503s at 12:03. The logs and deploy history are "
-        "under /workspace/incident. What is the root cause, and what's the evidence?"
+        "in the incident/ directory of your workspace. What is the root cause, and "
+        "what's the evidence?"
     )
     result = await LLMJudgeGrader.grade(
         weight=1.0,
@@ -52,13 +51,15 @@ async def diagnose():
         ],
     )
     yield result.value
+
+tasks = [diagnose()]
 ```
 
 The answer is the agent's **text diagnosis** (`answer = yield ...`). The judge scores it against weighted criteria; `LLMJudgeGrader` needs `pip install rubric`.
 
 ## Why this is a good training task
 
-It satisfies the [signal](/v6/advanced/signal) principles:
+It satisfies the [signal](/v6/run/signal) principles:
 
 - **Multi-channel integration** — the cause (a removed index) is in `deploy.log`, but the symptom path runs through `db.log` and `api.log`. No single file is decisive, so the agent must *integrate*.
 - **Multi-step** — the agent reads several files, forms a hypothesis, and checks it against the evidence.
@@ -75,13 +76,13 @@ Inspect the trace at [hud.ai](https://hud.ai) to see which files the agent read 
 
 ## Build a spread
 
-Vary the incident to mint a dataset with a difficulty range — some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/advanced/signal)).
+Vary the incident to mint a dataset with a difficulty range — some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/run/signal)).
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Designing tasks for signal" icon="signal" href="/v6/advanced/signal" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
 <Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
-<Card title="Coding agent" icon="code" href="/v6/cookbooks/codex-coding" />
+<Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent" />
 <Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
 </CardGroup>
