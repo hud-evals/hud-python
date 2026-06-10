@@ -65,7 +65,7 @@ async def count(sentence: str, letter: str):
 #   from hud.tools import BaseTool
 #   server = MCPServer(name="{env_name}-tools")
 #   server.add_tool(MyTool())  # any BaseTool subclass
-#   env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8765/mcp"))
+#   env.capabilities.append(Capability.mcp(name="tools", url="http://127.0.0.1:8765/mcp"))
 
 
 # =============================================================================
@@ -74,12 +74,14 @@ async def count(sentence: str, letter: str):
 
 async def test():
     from hud.agents.claude import ClaudeAgent
+    from hud.environment import spawn
 
     agent = ClaudeAgent()
 
-    # Calling a task binds a runnable Task; entering it launches the env.
-    async with count(sentence="Strawberry world", letter="r") as run:
-        await agent(run)          # fills run.trace; answer is run.trace.content
+    # Calling a task binds a runnable Task; ``on=spawn(__file__)`` serves this
+    # file in a child process and runs the task against it over the wire.
+    task = count(sentence="Strawberry world", letter="r")
+    run = await task.run(agent, on=spawn(__file__))
 
     print("reward:", run.reward)
 
@@ -97,7 +99,7 @@ if __name__ == "__main__":
 #   from hud.eval import Taskset
 #   from hud.agents.claude import ClaudeAgent
 #
-#   ts = Taskset.from_tasks(
+#   ts = Taskset(
 #       "letters",
 #       [count(sentence=s, letter="r") for s in ["strawberry", "raspberry"]],
 #   )

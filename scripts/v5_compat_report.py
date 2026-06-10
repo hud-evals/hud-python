@@ -60,7 +60,7 @@ def probe(path: str) -> dict[str, object]:
         if extra.is_dir() and str(extra) not in sys.path:
             sys.path.insert(0, str(extra))
 
-    from hud.eval import load_module
+    from hud.utils.modules import load_module
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -84,7 +84,7 @@ def probe(path: str) -> dict[str, object]:
     envs = [
         {
             "name": value.name,
-            "tasks": len(value.task_entries()),
+            "tasks": len(value.tasks),
             "capabilities": [type(c).__name__ for c in value.capabilities],
             "legacy_tools": len(getattr(value, "_legacy_tools", [])),
         }

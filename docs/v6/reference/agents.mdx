@@ -68,7 +68,7 @@ Subclass `Agent` and implement `__call__`. Write the answer to `run.trace.conten
 
 ```python
 from hud.agents.base import Agent
-from hud.client import Run
+from hud import Run
 
 class MyAgent(Agent):
     async def __call__(self, run: Run) -> None:

@@ -1,15 +1,33 @@
-"""``Chat`` — multi-turn conversation runner over a task."""
+"""``Chat`` — multi-turn conversation runner over a task.
+
+Turn tests place each turn's rollout with ``on=spawn(env_file)`` — a pure-data
+``Task`` row against a chat-style env served from a child process.
+"""
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+import textwrap
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 from mcp.types import TextContent
 
+from hud.agents.base import Agent
+from hud.environment import Environment, spawn
 from hud.eval import Task
 from hud.eval.chat import Chat, _content_to_blocks
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+class _EchoAgent(Agent):
+    """Replies with ``echo:<last user message>`` read from the prompt."""
+
+    async def __call__(self, run: Any) -> None:
+        last = run.prompt[-1]["content"]["text"]
+        run.trace.content = f"echo:{last}"
 
 
 @pytest.fixture()
@@ -31,56 +49,52 @@ class TestContentHelpers:
 
 
 class TestChatConstruction:
-    def test_requires_model(self, dummy_task: Any) -> None:
+    def test_requires_an_agent(self, dummy_task: Any) -> None:
         with pytest.raises(TypeError):
             Chat(dummy_task)  # type: ignore[call-arg]
 
-    def test_positional_task(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="test-model")
-        assert chat._task is dummy_task
-        assert chat._model == "test-model"
-
-    def test_messages_start_empty(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="test-model")
+    def test_messages_start_empty_and_are_the_public_history(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, _EchoAgent())
         assert chat.messages == []
-
-    def test_clear_resets_messages(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="test-model")
+        # History is the plain ``messages`` list: persist/restore it directly.
         chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
-        chat.clear()
-        assert chat.messages == []
+        assert Chat(dummy_task, _EchoAgent()).messages == []
 
 
-class TestHistory:
-    def test_export_and_load_roundtrip(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="m")
-        chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
-        exported = chat.export_history()
-        assert exported == chat.messages
-        assert exported is not chat.messages
+_CHAT_ENV = """\
+from hud import Environment
 
-        restored = Chat(dummy_task, model="m")
-        restored.load_history(exported)
-        assert restored.messages == exported
+env = Environment("chat")
 
 
-class TestMessageFormat:
-    @pytest.mark.asyncio()
-    async def test_send_stores_prompt_message_format(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="test-model")
+@env.task()
+async def assistant(messages: list):
+    _answer = yield messages
+    yield 1.0
+"""
 
-        run = MagicMock()
-        run.trace = MagicMock(content="response text", citations=[])
-        fake_task = MagicMock()
-        fake_task.__aenter__ = AsyncMock(return_value=run)
-        fake_task.__aexit__ = AsyncMock(return_value=False)
 
-        with (
-            patch("hud.eval.chat.replace", return_value=fake_task),
-            patch.object(chat, "_create_agent", return_value=AsyncMock()),
-        ):
-            await chat.send("hello")
+@pytest.fixture(scope="module")
+def chat_env_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    path = tmp_path_factory.mktemp("chat") / "env.py"
+    path.write_text(textwrap.dedent(_CHAT_ENV), encoding="utf-8")
+    return path
 
+
+def _chat_task() -> Task:
+    """A pure data row for the chat-style task the spawned file defines."""
+    return Task(env=Environment("chat"), id="assistant", args={"messages": []})
+
+
+class TestSend:
+    async def test_send_runs_a_turn_and_stores_prompt_message_format(
+        self, chat_env_file: Path
+    ) -> None:
+        chat = Chat(_chat_task(), _EchoAgent(), on=spawn(chat_env_file))
+
+        trace = await chat.send("hello")
+
+        assert trace.content == "echo:hello"
         assert len(chat.messages) == 2
 
         user_msg = chat.messages[0]
@@ -91,4 +105,18 @@ class TestMessageFormat:
         assistant_msg = chat.messages[1]
         assert assistant_msg["role"] == "assistant"
         assert assistant_msg["content"]["type"] == "text"
-        assert assistant_msg["content"]["text"] == "response text"
+        assert assistant_msg["content"]["text"] == "echo:hello"
+
+    async def test_failed_turn_raises_and_records_no_assistant_message(
+        self, chat_env_file: Path
+    ) -> None:
+        class _Boom(Agent):
+            async def __call__(self, run: Any) -> None:
+                raise RuntimeError("agent exploded")
+
+        chat = Chat(_chat_task(), _Boom(), on=spawn(chat_env_file))
+
+        with pytest.raises(RuntimeError, match="agent exploded"):
+            await chat.send("hello")
+
+        assert [m["role"] for m in chat.messages] == ["user"]

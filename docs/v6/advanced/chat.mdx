@@ -9,7 +9,7 @@ Most tasks yield a single text prompt. A **chat-style task** yields a *list of m
 ## Prerequisites
 
 - An environment and a task (see [Tasks](/v6/reference/tasks)).
-- A model id for `Chat` (routed through the HUD gateway).
+- An agent to drive the turns (see [Run on any model](/v6/run/models)).
 
 ## A chat-style task
 
@@ -31,15 +31,16 @@ async def assistant(messages: list[PromptMessage]):
 
 ## Driving it with `Chat`
 
-`Chat` wraps a concrete **Task** plus a model. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
+`Chat` wraps a concrete **Task** plus an **Agent**. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
 
 ```python chat.py
 import asyncio
 from hud import Chat
+from hud.agents import create_agent
 from tasks import assistant
 
 async def main():
-    chat = Chat(assistant(messages=[]), model="claude-sonnet-4-5")
+    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
     print(r2.content)            # the assistant's latest reply
@@ -47,16 +48,16 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`.
+`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`; pass `on=` to place each turn's rollout (defaults to HUD-hosted provisioning by the task's env name).
 
 ### Managing history
 
-| Method | Description |
-|--------|-------------|
+The conversation history **is** the public `chat.messages` list — persist it, restore it, or reset it directly:
+
+| Operation | Description |
+|-----------|-------------|
 | `await chat.send(message)` | Send a user turn; returns the reply `Trace`. |
-| `chat.clear()` | Reset the conversation. |
-| `chat.export_history()` | JSON-serializable history for persistence. |
-| `chat.load_history(messages)` | Restore a prior conversation. |
+| `chat.messages` | The history (`{"role", "content"}` dicts) — `json.dumps` it to persist, assign to restore, clear to reset. |
 
 ### Serving a chat
 
@@ -64,7 +65,7 @@ asyncio.run(main())
 
 ```python
 app = FastAPI()
-chat = Chat(assistant(messages=[]), model="claude-sonnet-4-5")
+chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
 
 @app.post("/api/chat")
 async def chat_endpoint(message: str):

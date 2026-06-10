@@ -57,32 +57,31 @@ Use `hud task list` to see what tasks an image or source exposes.
 
 ## Driving a packaged box from code
 
-A running box is a `RemoteSandbox` — attach a `Task` to its control-channel URL and run it like any other. To reach the box from the **host**, publish the control-channel port when you start it:
+A running box serves the control channel at a URL — `Runtime(url)` is that address, passed as the task's placement. To reach the box from the **host**, publish the control-channel port when you start it:
 
 ```bash
 docker run -d --name run1 -p 8765:8765 my-env
 ```
 
-Then attach by task **id** (you don't need the Python task factory — construct a `Task` directly):
+Then attach by task **id** (you don't need the Python task factory — construct a `Task` row directly):
 
 ```python run.py
 import asyncio
-from hud.eval import RemoteSandbox, Task
+from hud import Environment, Runtime
+from hud.eval import Task
 from hud.agents import create_agent
 
 async def main():
-    sandbox = RemoteSandbox("tcp://127.0.0.1:8765")
-    task = Task(env=sandbox, id="fix_bug")   # by task id
+    task = Task(env=Environment("my-env"), id="fix_bug")   # a pure data row
     agent = create_agent("claude-sonnet-4-5")
-    async with task as run:
-        await agent(run)
+    run = await task.run(agent, on=Runtime("tcp://127.0.0.1:8765"))
     print(run.reward)
 
 asyncio.run(main())
 ```
 
 <Note>
-Build a `Task` three ways: **call the task function** (`fix_bug(...)`) when you have the Python authoring object — the normal path; use the **`task()` helper** when you want metadata; or use the bare **`Task(env=..., id="id")`** constructor when you only have a task id against a remote/packaged box, as above.
+Build a `Task` three ways: **call the task function** (`fix_bug(...)`) when you have the Python authoring object — the normal path; use the **`task()` helper** when you want metadata; or use the bare **`Task(env=..., id="id")`** constructor when you only have a task id, as above. Where it runs is always the `on=` placement: `Runtime(url)` for a box provisioned elsewhere, `spawn("env.py")` for a local child process.
 </Note>
 
 ## Scaling horizontally
@@ -90,11 +89,12 @@ Build a `Task` three ways: **call the task function** (`fix_bug(...)`) when you 
 Because each rollout gets its own box, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
 
 ```python run.py
+from hud import spawn
 from hud.eval import Taskset
 
-taskset = Taskset.from_tasks("bugs", [fix_bug(difficulty=d) for d in range(20)])
+taskset = Taskset("bugs", [fix_bug(difficulty=d) for d in range(20)])
 job = await taskset.run(
-    agent, max_concurrent=10,
+    agent, on=spawn("env.py"), max_concurrent=10,
 )
 rewards = [run.reward for run in job.runs]
 ```
@@ -111,7 +111,7 @@ rewards = [run.reward for run in job.runs]
 <Card title="Run on any model" icon="robot" href="/v6/run/models">
   Compare models across the same taskset.
 </Card>
-<Card title="Import Harbor tasks" icon="anchor" href="/v6/advanced/harbor-convert">
-  Bring existing benchmarks into a HUD environment.
+<Card title="Harbor interop" icon="anchor" href="/v6/advanced/harbor-convert">
+  Load existing benchmarks straight into the runtime.
 </Card>
 </CardGroup>

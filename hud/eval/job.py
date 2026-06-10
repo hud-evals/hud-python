@@ -1,6 +1,6 @@
 """Job: the platform/batch receipt for one taskset execution.
 
-The live execution atom remains :class:`hud.client.Run`; a ``Job`` collects the
+The live execution atom remains :class:`hud.eval.Run`; a ``Job`` collects the
 graded runs of one batch under one platform job id.
 
 Backend reporting contract:
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
-    from hud.client import Run
+    from .rollout import Run
 
 logger = logging.getLogger("hud.eval.job")
 

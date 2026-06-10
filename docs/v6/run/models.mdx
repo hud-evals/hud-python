@@ -44,13 +44,13 @@ Every agent implements one method — `await agent(run)` — which drives a live
 
 ```python run.py
 import asyncio
+from hud import spawn
 from hud.agents import create_agent
 from tasks import count_letter
 
 async def main():
     agent = create_agent("claude-sonnet-4-5")
-    async with count_letter(word="strawberry") as run:
-        await agent(run)
+    run = await count_letter(word="strawberry").run(agent, on=spawn("tasks.py"))
     print(run.reward)
 
 asyncio.run(main())
@@ -94,7 +94,7 @@ A harness is just *attach to a capability + define a tool spec*, so wrapping ano
 
 ```python harness.py
 from hud.agents.base import Agent
-from hud.client import Run
+from hud import Run
 
 class EchoAgent(Agent):
     async def __call__(self, run: Run) -> None:

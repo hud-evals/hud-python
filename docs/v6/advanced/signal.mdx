@@ -13,7 +13,7 @@ Modern RL post-training (GRPO and its relatives) computes each rollout's advanta
 So the operational unit of trainability is **spread within a group**, not the mean. Run each task as a group and check that outcomes differ:
 
 ```python
-taskset = Taskset.from_tasks("spread-check", [my_task(seed=s) for s in range(5)])
+taskset = Taskset("spread-check", [my_task(seed=s) for s in range(5)])
 job = await taskset.run(agent, group=16)
 rewards = [run.reward for run in job.runs]
 # All 0.0 (or all 1.0) → no signal. You want a non-degenerate spread.

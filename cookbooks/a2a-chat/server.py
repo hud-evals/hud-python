@@ -16,6 +16,7 @@ import logging
 import os
 import time
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import uvicorn
@@ -37,13 +38,16 @@ from a2a.types import (
     TextPart,
 )
 
-from hud import Chat
-from hud.eval import HudSandbox, Task
+from hud import Chat, Environment, Runtime, spawn
+from hud.agents import create_agent
+from hud.eval import Task
 
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
+    from hud.agents.base import Agent
+    from hud.environment import Provider
     from hud.types import Trace
 
 LOGGER = logging.getLogger("a2a_chat_server")
@@ -88,10 +92,10 @@ def _citations_event(context_id: str, task_id: str, trace: Trace) -> TaskArtifac
 class ChatExecutor(AgentExecutor):
     """A2A adapter: one ``Chat`` (conversation) per A2A context id."""
 
-    def __init__(self, task: Task, *, model: str, max_steps: int = 50) -> None:
+    def __init__(self, task: Task, agent: Agent, *, on: Provider | None = None) -> None:
         self._task = task
-        self._model = model
-        self._max_steps = max_steps
+        self._agent = agent
+        self._on = on
         self._sessions: dict[str, Chat] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_active: dict[str, float] = {}
@@ -105,9 +109,7 @@ class ChatExecutor(AgentExecutor):
                 lock = self._locks.get(cid)
                 if lock is None or not lock.locked():
                     self._locks.pop(cid, None)
-        chat = self._sessions.setdefault(
-            context_id, Chat(self._task, model=self._model, max_steps=self._max_steps)
-        )
+        chat = self._sessions.setdefault(context_id, Chat(self._task, self._agent, on=self._on))
         self._last_active[context_id] = now
         return chat
 
@@ -150,7 +152,7 @@ class ChatExecutor(AgentExecutor):
         )
 
 
-def serve(task: Task, *, model: str, host: str, port: int) -> None:
+def serve(task: Task, agent: Agent, *, on: Provider | None, host: str, port: int) -> None:
     name = task.id or "chat"
     url = f"http://{host}:{port}/"
     app = A2AStarletteApplication(
@@ -165,7 +167,7 @@ def serve(task: Task, *, model: str, host: str, port: int) -> None:
             skills=[],
         ),
         http_handler=DefaultRequestHandler(
-            agent_executor=ChatExecutor(task, model=model),
+            agent_executor=ChatExecutor(task, agent, on=on),
             task_store=InMemoryTaskStore(),
         ),
     )
@@ -174,16 +176,24 @@ def serve(task: Task, *, model: str, host: str, port: int) -> None:
 
 
 def main() -> None:
-    env_name = os.getenv("HUD_ENV", "").strip()
-    if not env_name:
-        raise ValueError("Set HUD_ENV to the target environment name.")
-    task_id = os.getenv("HUD_TASK", "").strip()
-    if not task_id:
-        raise ValueError("Set HUD_TASK to the target chat task name.")
+    """Serve `HUD_TASK` (default: this directory's chat_env.py) over A2A.
+
+    Placement: `HUD_ENV_URL` attaches each turn to an already-served control
+    channel; otherwise every turn spawns `HUD_SOURCE` locally.
+    """
+    task_id = os.getenv("HUD_TASK", "chat_full").strip()
+    env_name = os.getenv("HUD_ENV", "chat").strip()
+    env_url = os.getenv("HUD_ENV_URL", "").strip()
+    source = os.getenv("HUD_SOURCE", str(Path(__file__).parent / "chat_env.py")).strip()
+    placement = Runtime(env_url) if env_url else spawn(source)
 
     serve(
-        Task(env=HudSandbox(env_name), id=task_id),
-        model=os.getenv("HUD_MODEL", "claude-haiku-4-5"),
+        Task(env=Environment(env_name), id=task_id),
+        create_agent(
+            os.getenv("HUD_MODEL", "claude-haiku-4-5"),
+            max_steps=int(os.getenv("HUD_MAX_STEPS", "50")),
+        ),
+        on=placement,
         host=os.getenv("HUD_A2A_HOST", "0.0.0.0"),  # noqa: S104
         port=int(os.getenv("HUD_A2A_PORT", "9999")),
     )

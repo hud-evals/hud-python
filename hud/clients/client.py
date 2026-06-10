@@ -1,9 +1,9 @@
 """HudClient: JSON-RPC client for the HUD wire protocol.
 
-Transport for an ``Environment.serve()`` endpoint: drives ``hello`` / ``tasks.*`` /
+Transport for a served env's control channel: drives ``hello`` / ``tasks.*`` /
 ``bye`` and exposes capabilities via ``binding(name)`` (raw declaration) /
-``open(name)`` (live client) and ``task(id, **args)`` (a ``Run`` handle). Use the
-module-level ``connect`` to attach, or ``hud.eval.launch`` to provision + attach.
+``open(name)`` (live client). Use the module-level ``connect(runtime)`` to
+attach to a provisioned substrate.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ import contextlib
 import itertools
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import urlsplit
 
 from hud.capabilities import (
     Capability,
@@ -25,14 +27,13 @@ from hud.capabilities import (
 )
 from hud.environment.utils import read_frame, send_frame
 
-from . import Manifest, ServerInfo
-from .run import Run
-
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from types import TracebackType
 
-LOGGER = logging.getLogger("hud.client")
+    from hud.environment.runtime import Runtime
+
+LOGGER = logging.getLogger("hud.clients")
 
 #: protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
@@ -49,15 +50,31 @@ class HudProtocolError(RuntimeError):
         self.message = message
 
 
+@dataclass(frozen=True, slots=True)
+class ServerInfo:
+    """Identity of the env serving this session (for compatibility / observability)."""
+
+    name: str
+    version: str
+
+
+@dataclass(frozen=True, slots=True)
+class Manifest:
+    """Env welcome frame returned by ``HudClient.hello()``."""
+
+    session_id: str
+    protocol_version: str  # e.g. "hud/1.0"
+    server_info: ServerInfo
+    bindings: list[Capability]
+
+
 class HudClient:
-    """JSON-RPC client for an ``Environment.serve()`` endpoint.
+    """JSON-RPC client for a served env's control channel.
 
-    Prefer ``hud.connect`` / ``hud.eval.launch``; this is the transport they sit on.
-    ``hello`` runs on ``__aenter__`` so ``manifest`` is ready immediately::
-
-        async with await HudClient.connect("127.0.0.1", 9001) as client:
-            async with client.task("write_hello") as run:
-                run.trace.content = "done"  # the answer, graded on exit
+    Prefer ``hud.connect(runtime)``, which yields one of these; the raw
+    constructor takes any connected stream pair. ``hello`` runs on
+    ``__aenter__`` so ``manifest`` is ready immediately. Task lifecycle
+    wrapping (start → grade) lives in :class:`hud.eval.Run`.
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -75,11 +92,6 @@ class HudClient:
         self._opened: dict[str, CapabilityClient] = {}
 
     # ─── lifecycle ────────────────────────────────────────────────────
-
-    @classmethod
-    async def connect(cls, host: str = "127.0.0.1", port: int = 0) -> Self:
-        reader, writer = await asyncio.open_connection(host, port)
-        return cls(reader, writer)
 
     async def __aenter__(self) -> Self:
         await self.hello()
@@ -175,15 +187,6 @@ class HudClient:
 
     # ─── tasks ────────────────────────────────────────────────────────
 
-    def task(self, task_id: str, **args: Any) -> Run:
-        """Return a ``Run`` handle for a task (async context manager).
-
-        ``async with client.task("sum_column", sheet="q3.xlsx") as run: ...``
-        starts the task on enter (populating ``run.trace.prompt``) and grades it on
-        exit (populating ``run.trace.reward``).
-        """
-        return Run(self, task_id, args)
-
     async def list_tasks(self) -> list[dict[str, Any]]:
         """Return ``[{id, description}, ...]`` for every registered task."""
         result = await self._call("tasks.list", {})
@@ -230,12 +233,51 @@ class HudClient:
 # ─── module-level entry points ────────────────────────────────────────
 
 
+async def _connect_ready(
+    host: str,
+    port: int,
+    *,
+    ready_timeout: float,
+    interval: float = 0.5,
+) -> HudClient:
+    """Connect to a control channel, retrying until it accepts or ``ready_timeout``.
+
+    A freshly-provisioned substrate may not be serving yet; the client owns
+    waiting for readiness by retrying the connect.
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + ready_timeout
+    while True:
+        try:
+            reader, writer = await asyncio.open_connection(host, port)
+            return HudClient(reader, writer)
+        except OSError:
+            if loop.time() >= deadline:
+                raise
+            await asyncio.sleep(interval)
+
+
 @asynccontextmanager
-async def connect(host: str = "127.0.0.1", port: int = 0) -> AsyncIterator[HudClient]:
-    """Attach to an already-running env (borrow; does not tear down the substrate)."""
-    client = await HudClient.connect(host, port)
+async def connect(runtime: Runtime, *, ready_timeout: float = 120.0) -> AsyncIterator[HudClient]:
+    """Connect a :class:`HudClient` to a provisioned substrate's control channel.
+
+    Takes the :class:`~hud.environment.runtime.Runtime` a provider yielded (or
+    one constructed directly for a substrate served elsewhere) and retries the
+    connect until the channel is ready. Does not tear the substrate down —
+    lifecycle belongs to whichever provider brought it up.
+    """
+    parts = urlsplit(runtime.url)
+    if parts.scheme not in ("", "tcp"):
+        raise NotImplementedError(
+            f"control transport {parts.scheme!r} not supported yet (only tcp://)",
+        )
+    client = await _connect_ready(
+        parts.hostname or "127.0.0.1",
+        parts.port or 0,
+        ready_timeout=ready_timeout,
+    )
     async with client:
         yield client
 
 
-__all__ = ["HudClient", "HudProtocolError", "connect"]
+__all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo", "connect"]

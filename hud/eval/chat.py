@@ -2,20 +2,22 @@
 
 A chat-style task takes a ``messages`` parameter and yields it as the prompt.
 ``Chat`` folds such a task over a growing history: each :meth:`send` appends
-the user turn, drives a fresh agent over a fresh run with the full history,
+the user turn, drives the agent over a fresh run with the full history,
 appends the reply, and returns the :class:`~hud.types.Trace`.
 
 Example::
 
     from hud import Chat
+    from hud.agents import create_agent
     from tasks import assistant  # an @env.task taking ``messages``
 
-    chat = Chat(assistant(messages=[]), model="claude-sonnet-4-5")
+    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
 
 ``Chat`` is protocol-agnostic: a web app, notebook, or wire protocol (A2A,
-etc.) is just a frontend calling ``await chat.send(...)``.
+etc.) is just a frontend calling ``await chat.send(...)``. The conversation
+history is the public ``messages`` list — persist and restore it directly.
 """
 
 from __future__ import annotations
@@ -30,6 +32,9 @@ from mcp.types import ContentBlock, TextContent
 from hud.types import Trace  # noqa: TC001 - used as return type
 
 if TYPE_CHECKING:
+    from hud.agents.base import Agent
+    from hud.environment.runtime import Provider
+
     from .task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -64,7 +69,7 @@ class Chat:
     Each ``send()`` call:
     1. Appends the user message to history
     2. Creates a Task copy with the full history as the ``messages`` arg
-    3. Enters the Task, lets the agent drive the Run, then grades on exit
+    3. Drives the agent over it through the rollout engine
     4. Appends the assistant response to history
     5. Returns the Trace
     """
@@ -72,35 +77,28 @@ class Chat:
     def __init__(
         self,
         task: Task,
+        agent: Agent,
         /,
         *,
-        model: str,
-        agent_params: dict[str, Any] | None = None,
-        max_steps: int = 10,
+        on: Provider | None = None,
     ) -> None:
         """Initialize Chat.
 
         Args:
             task: A :class:`hud.eval.Task` (env + task id + default args).
-                Positional only. Create one by calling a task, e.g.
-                ``assistant(messages=[])``. Its ``messages`` arg is replaced with
-                the running conversation on each :meth:`send`.
-            model: Model name string (e.g. "claude-sonnet-4-5").
-                Auto-resolves to the right agent via the HUD gateway.
-            agent_params: Extra kwargs forwarded to agent creation
-            max_steps: Max agent tool-call steps per turn
+                Create one by calling a task, e.g. ``assistant(messages=[])``.
+                Its ``messages`` arg is replaced with the running conversation
+                on each :meth:`send`.
+            agent: The :class:`~hud.agents.base.Agent` driving every turn
+                (stateless per run, e.g. ``create_agent("claude-sonnet-4-5")``).
+            on: Placement provider for each turn's rollout (e.g.
+                ``spawn("env.py")``); defaults to HUD-hosted provisioning by
+                the task's env name.
         """
         self._task = task
-        self._model = model
-        self._agent_params = agent_params or {}
-        self._max_steps = max_steps
+        self._agent = agent
+        self._on = on
         self.messages: list[dict[str, Any]] = []
-
-    def _create_agent(self) -> Any:
-        """Create an agent instance from the configured model name."""
-        from hud.agents import create_agent
-
-        return create_agent(self._model, **{"max_steps": self._max_steps, **self._agent_params})
 
     async def send(self, message: MessageContent) -> Trace:
         """Send a user message and get the agent's response.
@@ -119,16 +117,17 @@ class Chat:
         self.messages.append({"role": "user", "content": content_data})
 
         # Rebuild the task with the running conversation as the ``messages`` arg,
-        # then drive the agent over a fresh run (the chat task yields these messages
-        # as the prompt; see the messages input modality).
+        # then drive the agent through the rollout engine (the chat task yields
+        # these messages as the prompt; see the messages input modality).
         task = replace(
             self._task,
             args={**self._task.args, "messages": list(self.messages)},
         )
-        agent = self._create_agent()
-        async with task as run:
-            await agent(run)
+        run = await task.run(self._agent, on=self._on)
         result = run.trace
+        if result.isError:
+            # Don't record the failed turn as an assistant message.
+            raise RuntimeError(result.content or "chat turn failed")
 
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
@@ -138,23 +137,3 @@ class Chat:
             assistant_msg["citations"] = result.citations
         self.messages.append(assistant_msg)
         return result
-
-    def clear(self) -> None:
-        """Reset the conversation history."""
-        self.messages = []
-
-    def export_history(self) -> list[dict[str, Any]]:
-        """Export the conversation history for persistence.
-
-        Returns a JSON-serializable list of message dicts that can be
-        saved and later restored with ``load_history()``.
-        """
-        return [dict(m) for m in self.messages]
-
-    def load_history(self, messages: list[dict[str, Any]]) -> None:
-        """Restore conversation history from a previous export.
-
-        Replaces the current history. Use after ``export_history()`` to
-        resume a conversation across server restarts or sessions.
-        """
-        self.messages = [dict(m) for m in messages]

@@ -12,7 +12,7 @@ Any agent framework becomes a HUD harness by subclassing `Agent` and implementin
 
 ```python harness.py
 from hud.agents.base import Agent
-from hud.client import Run
+from hud import Run
 
 class MyHarness(Agent):
     async def __call__(self, run: Run) -> None:
@@ -32,11 +32,28 @@ from hud.agents.browser_use import BrowserUseAgent
 from hud.agents.types import BrowserUseConfig
 
 agent = BrowserUseAgent(BrowserUseConfig(model="claude-sonnet-4-5", max_steps=25))
-async with my_browser_task() as run:
-    await agent(run)
+run = await my_browser_task().run(agent)
 ```
 
 Use it as a template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`, `rfb`, `ros2`).
+
+## Run on your own infra
+
+The other integration seam is **placement**: a provider is any callable that
+takes the task row being placed and yields a connectable `Runtime`. Your
+cluster, a sandbox vendor, or a per-row GPU policy plugs in without touching
+the engine:
+
+```python
+def placer(task):
+    gpus = 4 if task.args.get("big_model") else 1
+    return my_cloud(image=f"hud/{task.env.name}", gpus=gpus)
+
+job = await taskset.run(agent, on=placer)
+```
+
+See [placement](/v6/reference/tasks#placement-where-a-task-runs) for the
+built-in providers (`spawn`, `Runtime(url)`, `provision`).
 
 ## Any OpenAI-compatible endpoint
 
@@ -59,8 +76,9 @@ The [`Chat`](/v6/advanced/chat) runner is protocol-agnostic — an A2A endpoint 
 
 ```python
 from hud import Chat
+from hud.agents import create_agent
 
-chat = Chat(my_task(messages=[]), model="claude-sonnet-4-5")
+chat = Chat(my_task(messages=[]), create_agent("claude-sonnet-4-5"))
 reply = await chat.send("hello")   # any protocol frontend calls this
 ```
 

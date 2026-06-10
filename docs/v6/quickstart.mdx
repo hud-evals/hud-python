@@ -83,7 +83,7 @@ Three things are happening:
 hud eval tasks.py claude --gateway
 ```
 
-`hud eval` collects the tasks from `tasks.py`, launches the environment, hands each run to the `claude` agent, and grades it. `--gateway` routes the model through HUD using your `HUD_API_KEY` — no provider key needed.
+`hud eval` collects the tasks from `tasks.py`, spawns the environment on a local substrate, hands each run to the `claude` agent, and grades it. `--gateway` routes the model through HUD using your `HUD_API_KEY` — no provider key needed.
 
 By default `hud eval` runs a single task. Add `--full` to run the whole dataset:
 

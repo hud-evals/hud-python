@@ -125,7 +125,7 @@ the user judges a task by its *average* reward.
 rollout in the group is equal, the advantage is zero and **no gradient is
 produced** — the task teaches nothing, however good the average looks. The unit
 of trainability is *within-group spread*, not the mean. Run a group
-(`await Taskset.from_tasks("name", tasks).run(agent, group=16)`) and confirm a non-degenerate spread.
+(`await Taskset("name", tasks).run(agent, group=16)`) and confirm a non-degenerate spread.
 All-one (saturated) is wasted surface; all-zero at small group sizes may still
 be learnable at training scale, but investigate it.
 

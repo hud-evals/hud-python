@@ -7,8 +7,9 @@ Serve it locally with ``hud dev chat_env.py``, or drive a task directly with
 the ``Chat`` runner::
 
     from hud import Chat
+    from hud.agents import create_agent
 
-    chat = Chat(chat_simple(messages=[]), model="claude-sonnet-4-5")
+    chat = Chat(chat_simple(messages=[]), create_agent("claude-sonnet-4-5"))
     r = await chat.send("What is the capital of France?")
 """
 
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 from mcp.types import PromptMessage, TextContent
 
-from hud.agents.types import ScenarioResult
+from hud.agents.types import EvaluationResult
 from hud.environment import Environment
 
 env = Environment(name="chat")
@@ -55,7 +56,7 @@ async def chat_full(messages: list[PromptMessage]):
     answer = yield [system, *messages]
 
     answer_str = answer if isinstance(answer, str) else str(answer)
-    yield ScenarioResult(
+    yield EvaluationResult(
         reward=1.0,
         content=answer_str,
         info={

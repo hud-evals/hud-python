@@ -548,28 +548,42 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
-def _load_taskset(source: str) -> Any:
-    from hud.eval import Taskset
+def _spawn_target(source: Path) -> Path:
+    """The path the ``spawn`` provider serves: the source itself for ``.py``
+    files and directories, the surrounding directory for JSON/JSONL data files
+    (the env's ``.py`` source lives next to the tasks file)."""
+    resolved = source.resolve()
+    if resolved.is_dir() or resolved.suffix == ".py":
+        return resolved
+    return resolved.parent
 
-    path = Path(source)
-    return Taskset.from_file(path) if path.exists() else Taskset.from_api(source)
 
-
-async def _run_evaluation(cfg: EvalConfig) -> tuple[Any, list[Any]]:
+async def _run_evaluation(cfg: EvalConfig) -> Any:
     """Run evaluation on the Env/Task/Taskset/Run flow.
 
-    Loads a ``Taskset`` from a Python source, JSON/JSONL taskset, or API taskset
-    name, then runs the agent locally. ``Taskset.run`` returns the platform/batch
-    ``Job`` receipt containing the live execution ``Run`` results.
+    Loads a ``Taskset`` from a Python source or JSON/JSONL taskset and runs it
+    on spawned local substrates (``on=spawn(source)`` — each rollout serves
+    its own row's env, so mixed-env tasksets are one job). Returns the ``Job``
+    receipt containing the live execution ``Run`` results.
     """
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
+    from hud.environment import spawn
     from hud.eval import Taskset
+
+    source_path = Path(cfg.source)
+    if not source_path.exists():
+        hud_console.error(
+            f"Task source not found locally: {cfg.source}. Platform-hosted execution "
+            "is not wired up yet; export the taskset (hud sync tasks <name> --export "
+            "tasks.json) and run it from the env's source directory."
+        )
+        raise typer.Exit(1)
 
     hud_console.info(f"Loading tasks from: {cfg.source}")
     try:
-        taskset = _load_taskset(cfg.source)
+        taskset = Taskset.from_file(source_path)
     except Exception as e:
         hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
         raise typer.Exit(1) from e
@@ -583,7 +597,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[Any, list[Any]]:
 
     if cfg.task_ids:
         wanted = set(cfg.task_ids)
-        taskset = Taskset.from_tasks(
+        taskset = Taskset(
             taskset.name,
             (
                 task
@@ -597,7 +611,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[Any, list[Any]]:
         hud_console.info(f"Filtered to {len(taskset)} task(s)")
     elif not cfg.all:
         tasks = list(taskset)
-        taskset = Taskset.from_tasks(taskset.name, [tasks[0]])
+        taskset = Taskset(taskset.name, [tasks[0]])
         hud_console.info("Using first task (run with --full or --task-ids for more)")
 
     hud_console.info(f"Loaded {len(taskset)} task(s)")
@@ -611,18 +625,20 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[Any, list[Any]]:
         )
 
     agent = _build_agent(cfg)
+    target = _spawn_target(source_path)
 
+    # Placement comes from the source path the CLI holds: one spawned substrate
+    # per rollout, each serving its own row's env.
     job = await taskset.run(
         agent,
+        on=spawn(target),
         group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
     )
+    if job.runs and settings.telemetry_enabled and settings.api_key:
+        hud_console.info(f"https://hud.ai/jobs/{job.id}")
 
-    job_id = job.id if job.runs else None
-    if job_id and settings.telemetry_enabled and settings.api_key:
-        hud_console.info(f"https://hud.ai/jobs/{job_id}")
-
-    return job, list(taskset)
+    return job
 
 
 def eval_command(
@@ -737,13 +753,14 @@ def eval_command(
 
     start_time = time.time()
     try:
-        job, _tasks = asyncio.run(_run_evaluation(cfg))
+        job = asyncio.run(_run_evaluation(cfg))
     except ValueError as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from None
     elapsed = time.time() - start_time
 
-    if job.runs:
+    runs = job.runs
+    if runs:
         from hud.cli.utils.display import display_runs
 
-        display_runs(job.runs, name=cfg.source or "", elapsed=elapsed)
+        display_runs(runs, name=cfg.source or "", elapsed=elapsed)

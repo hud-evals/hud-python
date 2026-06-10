@@ -33,6 +33,7 @@ from hud.utils import gateway
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
 from .tools.coding import _shell_output
+from .tools.computer import last_image_data
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +101,6 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         tool = state.tools.get(call.name)
 
         if isinstance(tool, OpenAIComputerTool):
-            from hud.agents.tools.computer import last_image_data
-
             screenshot = last_image_data(result)
             if not screenshot:
                 logger.warning("Computer tool result missing screenshot for call %s", call.name)

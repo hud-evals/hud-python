@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING, Any, Literal, ParamSpec, cast
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from .task import _TaskFactory
+    from hud.capabilities import Capability
+
+    from .env import Environment, _TaskFactory
     from .workspace import Workspace
 
 LOGGER = logging.getLogger("hud.environment.legacy")
@@ -84,10 +86,10 @@ class LegacyEnvMixin:
 
     # Provided by Environment:
     name: str
-    _tasks: dict[str, _TaskFactory[Any]]
+    tasks: dict[str, _TaskFactory[Any]]
+    capabilities: list[Capability]
     _on_start: list[Callable[[], Any]]
     _on_stop: list[Callable[[], Any]]
-    add_capability: Callable[..., None]
 
     def _init_legacy(self) -> None:
         """Initialize legacy-compat state (called from ``Environment.__init__``)."""
@@ -186,7 +188,9 @@ class LegacyEnvMixin:
                 server.run_async(transport="http", host="127.0.0.1", port=port, show_banner=False),
             )
             self._legacy_bg_tasks.append(task)
-            self.add_capability(Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp"))
+            self.capabilities.append(
+                Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp")
+            )
             LOGGER.info(
                 "legacy env %r: %d tool(s) -> mcp capability (port %d)", self.name, len(tools), port
             )
@@ -206,7 +210,7 @@ class LegacyEnvMixin:
             ws = Workspace(root)
             await ws.start()
             self._legacy_workspaces.append(ws)
-            self.add_capability(ws.capability())
+            self.capabilities.append(ws.capability())
             LOGGER.info(
                 "legacy env %r: shell tool(s) -> ssh capability at %s", self.name, ws.ssh_url
             )
@@ -238,7 +242,7 @@ class LegacyEnvMixin:
                 stacklevel=2,
             )
             return
-        self.add_capability(
+        self.capabilities.append(
             Capability.rfb(name="screen", url=url, password=os.environ.get("HUD_VNC_PASSWORD")),
         )
         LOGGER.info("legacy env %r: computer tool(s) -> rfb capability at %s", self.name, url)
@@ -332,7 +336,7 @@ class LegacyEnvMixin:
             DeprecationWarning,
             stacklevel=2,
         )
-        task = self._tasks.get(name)
+        task = self.tasks.get(name)
         if task is None:
             raise KeyError(f"unknown task {name!r} on env {self.name!r}")
         return cast("Any", task)(**args) if args else task
@@ -348,11 +352,14 @@ class LegacyEnvMixin:
         """[deprecated] Serve the env. v6 serves the control channel, not MCP stdio/http.
 
         ``transport`` is ignored (v6 always serves its tcp control channel); use
-        ``hud dev`` / ``hud deploy`` for managed serving. Prefer ``await env.serve()``.
+        ``hud dev`` / ``hud deploy`` for managed serving.
         """
+        # Inline import: this mixin is part of Environment, which server.py loads.
+        from .server import serve
+
         warnings.warn(
             "env.run(transport=...) is deprecated: v6 serves a tcp control channel. "
-            "Use `hud dev` / `hud deploy`, or `await env.serve(host, port)`.",
+            "Use `hud dev` / `hud deploy`.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -360,4 +367,4 @@ class LegacyEnvMixin:
             LOGGER.warning(
                 "env.run: transport %r ignored in v6 (serving tcp control channel)", transport
             )
-        asyncio.run(cast("Any", self).serve(host, port or 8765))
+        asyncio.run(serve(cast("Environment", self), host, port or 8765))

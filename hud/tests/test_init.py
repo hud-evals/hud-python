@@ -46,11 +46,14 @@ class TestHudInit:
             "Grade",
             "Job",
             "Run",
+            "Runtime",
             "SyncPlan",
             "Task",
             "Taskset",
+            "connect",
             "instrument",
-            "launch",
+            "provision",
+            "spawn",
             "task",
         ]
 

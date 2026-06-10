@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -14,9 +17,9 @@ from hud.cli.utils.registry import (
     list_registry_environments,
     resolve_registry_environments,
 )
-from hud.environment.source import EnvironmentSource
+from hud.cli.utils.source import EnvironmentSource
 from hud.eval import Taskset
-from hud.eval.taskset import resolve_taskset_id, taskset_column_definitions, upload_taskset
+from hud.eval.sync import diff, resolve_taskset_id, taskset_column_definitions, upload_taskset
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -49,6 +52,38 @@ def _taskset_target(
     return target_ref
 
 
+def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
+    """Spreadsheet view of task rows: one ``arg:``/``col:`` column per key."""
+    arg_keys = sorted({key for entry in entries for key in (entry.get("args") or {})})
+    col_keys = sorted({key for entry in entries for key in (entry.get("columns") or {})})
+    fieldnames = [
+        "slug",
+        "task",
+        "env",
+        *[f"arg:{key}" for key in arg_keys],
+        *[f"col:{key}" for key in col_keys],
+    ]
+
+    def cell(value: Any) -> Any:
+        return json.dumps(value, default=str) if isinstance(value, (dict, list)) else value
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for entry in entries:
+            args = entry.get("args") or {}
+            cols = entry.get("columns") or {}
+            writer.writerow(
+                {
+                    "slug": entry.get("slug") or "",
+                    "task": entry.get("task") or "",
+                    "env": (entry.get("env") or {}).get("name") or "",
+                    **{f"arg:{key}": cell(args.get(key)) for key in arg_keys},
+                    **{f"col:{key}": cell(cols.get(key)) for key in col_keys},
+                }
+            )
+
+
 def _export_taskset(
     target_ref: str,
     output_path: str,
@@ -60,7 +95,12 @@ def _export_taskset(
         if not remote_taskset:
             console.warning("No tasks found in taskset")
             return
-        out = remote_taskset.to_file(output_path)
+        out = Path(output_path)
+        if out.suffix.lower() == ".csv":
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _write_csv(out, [task.to_dict() for task in remote_taskset])
+        else:
+            out = remote_taskset.to_file(out)
     except (HudException, ValueError) as e:
         console.error(str(e))
         raise typer.Exit(1) from e
@@ -151,14 +191,14 @@ def _fetch_remote_taskset(
     otherwise.
     """
     if force:
-        return Taskset.from_tasks(target_ref, [])
+        return Taskset(target_ref, [])
 
     taskset_uuid, display = resolve_taskset_id(platform, target_ref)
     if taskset_uuid:
         return Taskset.from_api(taskset_uuid)
     if allow_create:
         console.info(f"Taskset '{display}' not found; it will be created")
-        return Taskset.from_tasks(display, [])
+        return Taskset(display, [])
 
     console.error(f"Taskset not found: {target_ref}")
     raise typer.Exit(1)
@@ -286,7 +326,7 @@ def sync_tasks_command(
             allow_create=allow_create,
             console=hud_console,
         )
-        plan = local_taskset.diff(remote_taskset)
+        plan = diff(local_taskset, remote_taskset)
     except ValueError as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from e

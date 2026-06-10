@@ -1,6 +1,6 @@
 """Rich CLI display for new-flow eval results (``list[Run]``).
 
-Adapted from the legacy ``hud/eval/display.py`` to read :class:`hud.client.Run`
+Adapted from the legacy ``hud/eval/display.py`` to read :class:`hud.eval.Run`
 (``reward`` + ``trace.content`` + ``trace.isError`` + ``prompt``) rather than the
 legacy ``EvalContext``.
 """
@@ -13,14 +13,16 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from hud.client import Run
+    from hud.eval.rollout import Run
 
 _SUCCESS_THRESHOLD = 0.7
 
 
-def _truncate(text: str | None, max_len: int) -> str:
+def _truncate(text: str | list[Any] | None, max_len: int) -> str:
     if not text:
         return "—"
+    if not isinstance(text, str):  # chat-style prompts are message lists
+        text = str(text)
     text = text.replace("\n", " ").strip()
     return text[: max_len - 2] + ".." if len(text) > max_len else text
 

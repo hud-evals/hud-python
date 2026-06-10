@@ -78,7 +78,7 @@ from hud.eval import Taskset
 from coding_tasks import fix_bug, add_feature
 from review_tasks import review_pr
 
-taskset = Taskset.from_tasks("engineering-work", [
+taskset = Taskset("engineering-work", [
     *(fix_bug(difficulty=d) for d in range(1, 6)),
     add_feature(spec="health endpoint"),
     review_pr(pr_id=1421),
@@ -98,7 +98,7 @@ v.columns = {"difficulty": 3, "suite": "coding"}
 To measure variance (or feed training), run each task several times. `group` repeats share a GRPO group:
 
 ```python run.py
-taskset = Taskset.from_tasks("bugs", [fix_bug(difficulty=d) for d in range(1, 6)])
+taskset = Taskset("bugs", [fix_bug(difficulty=d) for d in range(1, 6)])
 job = await taskset.run(
     agent, group=8, max_concurrent=10,
 )

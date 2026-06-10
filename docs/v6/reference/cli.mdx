@@ -57,12 +57,14 @@ hud deploy
 
 ### `hud eval`
 
-Run an agent over a task source (a `.py`, directory, JSON/JSONL file, or platform taskset).
+Run an agent over a local task source (a `.py`, directory, or JSON/JSONL file).
+Each rollout runs on a fresh local substrate spawned from the source (the
+`spawn` placement). To run a platform taskset locally, export it first:
+`hud sync tasks <name> --export tasks.json`.
 
 ```bash
 hud eval tasks.py claude
 hud eval tasks.py claude --gateway --full
-hud eval "My Tasks" claude --full
 ```
 
 | Option | Description |
@@ -76,11 +78,10 @@ hud eval "My Tasks" claude --full
 | `--max-steps` | Cap steps per task. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
-| `--taskset`, `-t` | Associate the job with a named taskset. |
 
 ## Run a packaged image
 
-Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or load from source with `--source`.
+Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or spawn from source with `--source`.
 
 ```bash
 hud task list                          # what tasks are exposed
@@ -101,15 +102,8 @@ hud sync tasks my-taskset      # publish tasks as a named taskset
 hud sync env                   # sync environment metadata
 ```
 
-## Convert
-
-```bash
-hud convert ./tasks                  # auto-detect format
-hud convert ./tasks --from harbor    # explicit
-hud convert ./tasks --output ./out   # custom output dir
-```
-
-Brings external benchmark formats (currently Harbor) into a HUD environment + taskset. See [Import Harbor tasks](/v6/advanced/harbor-convert).
+External benchmark formats (currently Harbor) load directly into the runtime
+as `Taskset`s — no conversion step. See [Harbor interop](/v6/advanced/harbor-convert).
 
 ## Other commands
 

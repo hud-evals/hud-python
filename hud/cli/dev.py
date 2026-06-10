@@ -22,15 +22,15 @@ hud_console = HUDConsole()
 def _load_environment(module: str | None) -> Any:
     """Load a v6 :class:`~hud.environment.Environment` from a dev target.
 
-    Accepts ``None`` (defaults to ``env.py``), ``module``, ``module:attr``, or a
-    ``path/to/env.py``. Returns the ``Environment`` instance, or ``None`` if the
-    target isn't a v6 environment.
+    Accepts ``None`` (defaults to ``env.py``), ``module``, ``module:attr``, a
+    ``path/to/env.py``, or a directory. Returns the ``Environment`` instance,
+    or ``None`` if the target isn't a v6 environment.
     """
-    from hud.eval import load_environment
+    from hud.environment import load_environment
 
     target, _, attr = (module or "env").partition(":")
     path = Path(target)
-    if path.suffix != ".py":
+    if path.suffix != ".py" and not path.is_dir():
         path = Path(f"{target}.py")
     if not path.exists():
         return None
@@ -56,13 +56,14 @@ def _serve_environment(env: Any, port: int) -> None:
         highlight=False,
     )
     hud_console.console.print(
-        f"{hud_console.sym.ITEM} {len(env.task_entries())} task(s), "
-        f"{len(env.capabilities)} capability(ies)",
+        f"{hud_console.sym.ITEM} {len(env.tasks)} task(s), {len(env.capabilities)} capability(ies)",
         highlight=False,
     )
     hud_console.hint("Press Ctrl+C to stop.")
+    from hud.environment.server import serve
+
     try:
-        asyncio.run(env.serve("127.0.0.1", port))
+        asyncio.run(serve(env, "127.0.0.1", port))
     except KeyboardInterrupt:
         hud_console.info("Stopped.")
 

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
-    from hud.client import Run
+    from hud.eval.rollout import Run
     from hud.server import MCPServer
 
 

@@ -1,9 +1,11 @@
 """Integration tests for the v5->v6 env-authoring compatibility layer.
 
-These exercise real environments end-to-end over the wire (``launch`` brings up a
-``LocalSandbox`` + ``HudClient`` on a loopback port) and through ``Taskset``, rather
-than poking internals: concurrency, error isolation, typed returns, message-list
-prompts, cancellation, unknown tasks, and on-serve capability synthesis.
+These exercise real environments end-to-end over the wire (the ``served``
+harness brings up a loopback substrate + ``HudClient``) and through
+``Taskset``, rather than poking internals: concurrency, error isolation, typed
+returns, message-list prompts, cancellation, unknown tasks, and on-serve
+capability synthesis. The envs are built inline (no source file to spawn), so
+placement uses the in-process ``_local`` provider.
 """
 
 from __future__ import annotations
@@ -14,18 +16,22 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel
 
+from hud.agents.base import Agent
 from hud.agents.types import AgentAnswer
-from hud.client import HudProtocolError
+from hud.clients import HudProtocolError
 from hud.environment import Environment, Workspace
 from hud.environment.legacy import _classify_tool
-from hud.eval import Taskset, launch
+from hud.environment.runtime import _local
+from hud.eval import Run, Taskset
+
+from .conftest import served
 
 
 def _silence_deprecation() -> None:
     warnings.simplefilter("ignore", DeprecationWarning)
 
 
-class _FnAgent:
+class _FnAgent(Agent):
     """Stateless agent: answers each run by applying ``fn`` to ``run.prompt``.
 
     One instance drives many concurrent rollouts (the contract ``Taskset`` relies on).
@@ -91,9 +97,9 @@ def test_workspace_construction_has_no_runtime_side_effects(tmp_path) -> None:
 
 async def test_scenario_runs_start_to_evaluate_over_the_wire() -> None:
     env = _sum_env()
-    async with launch(env) as client:
+    async with served(env) as client:
         assert "add" in [t["id"] for t in await client.list_tasks()]
-        async with client.task("add", a=2, b=3) as run:
+        async with Run(client, "add", {"a": 2, "b": 3}) as run:
             assert run.prompt == "add:2:3"
             run.trace.content = "5"
         assert run.reward == 1.0
@@ -101,7 +107,7 @@ async def test_scenario_runs_start_to_evaluate_over_the_wire() -> None:
 
 async def test_wrong_answer_scores_zero() -> None:
     env = _sum_env()
-    async with launch(env) as client, client.task("add", a=2, b=3) as run:
+    async with served(env) as client, Run(client, "add", {"a": 2, "b": 3}) as run:
         run.trace.content = "6"
     assert run.reward == 0.0
 
@@ -111,10 +117,12 @@ async def test_wrong_answer_scores_zero() -> None:
 
 async def test_taskset_concurrent_grouped_rollouts() -> None:
     env = _sum_env()
-    add = cast("Any", env._tasks["add"])
-    taskset = Taskset.from_tasks("adds", (add(a=i, b=i + 1) for i in range(4)))
+    add = cast("Any", env.tasks["add"])
+    taskset = Taskset("adds", (add(a=i, b=i + 1) for i in range(4)))
 
-    job = await taskset.run(_FnAgent(_solve_add), group=2, max_concurrent=3)
+    job = await taskset.run(
+        _FnAgent(_solve_add), on=lambda _row: _local(env), group=2, max_concurrent=3
+    )
     runs = job.runs
 
     assert len(runs) == 8  # 4 tasks x group of 2
@@ -128,7 +136,7 @@ async def test_taskset_concurrent_grouped_rollouts() -> None:
 
 async def test_taskset_isolates_a_failing_rollout() -> None:
     env = _sum_env()
-    add = cast("Any", env._tasks["add"])
+    add = cast("Any", env.tasks["add"])
 
     def solve_or_boom(prompt: str) -> str:
         _, a, _b = prompt.split(":")
@@ -136,8 +144,8 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
             raise RuntimeError("agent exploded")
         return _solve_add(prompt)
 
-    job = await Taskset.from_tasks("adds", (add(a=i, b=1) for i in range(4))).run(
-        _FnAgent(solve_or_boom)
+    job = await Taskset("adds", (add(a=i, b=1) for i in range(4))).run(
+        _FnAgent(solve_or_boom), on=lambda _row: _local(env)
     )
     runs = job.runs
 
@@ -146,6 +154,9 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
     assert len(failed) == 1  # only a==2 blew up
     assert failed[0].reward == 0.0
     assert "agent exploded" in (failed[0].trace.content or "")
+    # Mid-run failure keeps the real run: the prompt and placement survive.
+    assert failed[0].prompt == "add:2:1"
+    assert failed[0].runtime is not None
     assert sum(1 for r in runs if r.reward == 1.0) == 3  # the batch survived
 
 
@@ -154,7 +165,7 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
 
 async def test_unknown_task_raises_protocol_error() -> None:
     env = _sum_env()
-    async with launch(env) as client:
+    async with served(env) as client:
         with pytest.raises(HudProtocolError):
             await client.start_task("does-not-exist")
 
@@ -169,17 +180,17 @@ async def test_task_that_errors_in_evaluate_propagates() -> None:
             yield "go"
             raise ValueError("evaluate failed")
 
-    async with launch(env) as client:
+    async with served(env) as client:
         with pytest.raises(HudProtocolError):
-            async with client.task("explode") as run:
+            async with Run(client, "explode", {}) as run:
                 run.trace.content = "x"
 
 
 async def test_exception_in_body_cancels_without_evaluating() -> None:
     env = _sum_env()
-    async with launch(env) as client:
+    async with served(env) as client:
         with pytest.raises(RuntimeError, match="agent failed"):
-            async with client.task("add", a=1, b=1) as run:
+            async with Run(client, "add", {"a": 1, "b": 1}) as run:
                 raise RuntimeError("agent failed")
         assert run.trace.isError is True
         assert run.reward == 0.0  # never graded
@@ -199,7 +210,7 @@ async def test_chat_scenario_yields_message_list_prompt() -> None:
             yield 1.0
 
     history = [{"role": "user", "content": "hello"}]
-    async with launch(env) as client, client.task("ask", messages=history) as run:
+    async with served(env) as client, Run(client, "ask", {"messages": history}) as run:
         assert isinstance(run.prompt, list)
         assert run.prompt[-1]["content"] == "ready"
         assert run.prompt[0]["content"] == "hello"
@@ -221,7 +232,7 @@ async def test_typed_returns_delivers_agent_answer() -> None:
             ok = isinstance(ans, AgentAnswer) and ans.content.value == 42
             yield 1.0 if ok else 0.0
 
-    async with launch(env) as client, client.task("typed") as run:
+    async with served(env) as client, Run(client, "typed", {}) as run:
         run.trace.content = '{"value": 42}'
     assert run.reward == 1.0
 
@@ -251,7 +262,7 @@ async def test_legacy_tools_become_capabilities_end_to_end(
 
         env.add_tool(Computer())
 
-    async with launch(env) as client:
+    async with served(env) as client:
         assert client.manifest is not None
         protocols = {c.protocol for c in client.manifest.bindings}
         # function tool -> mcp capability; computer marker -> rfb capability

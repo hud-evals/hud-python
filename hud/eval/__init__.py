@@ -1,60 +1,52 @@
 """HUD eval: the v6 execution surface.
 
-Define a :class:`Task` (a concrete task bound to an env/sandbox), group
-many into a :class:`Taskset`, and run agents against live
-:class:`~hud.client.Run`s. A :class:`Job` is the platform/batch receipt for a
-taskset run; ``Run`` remains the execution atom agents drive.
+Define a :class:`Task` (a row pointing at its env), group many into a
+:class:`Taskset`, and run agents against live :class:`~hud.eval.Run`s.
+:func:`rollout` is the execution atom (one agent, one task, fully recorded);
+``Task.run`` is its per-task sugar and ``Taskset.run`` the batch scheduler over
+it. A :class:`Job` is the platform/batch receipt for a taskset run.
 
-    from hud.eval import Taskset, Task, launch
+Placement is a provider passed at execution time (see
+:mod:`hud.environment.runtime`): ``spawn`` a local source, ``provision`` a
+HUD-hosted substrate, or attach to a ``Runtime(url)``. A :func:`configure`
+scope binds ambient placement/schedule for every run inside it::
 
-    job = await Taskset.from_tasks("demo", [task(d) for d in range(5)]).run(agent, group=8)
+    from hud.eval import Taskset, configure
+    from hud.environment import spawn
+
+    run = await my_task(a=1).run(agent, on=spawn("env.py"))
+    with configure(on=spawn("env.py"), group=8):
+        job = await Taskset("demo", [task(d) for d in range(5)]).run(agent)
 """
 
 from __future__ import annotations
 
-from hud.client import Grade, Run
 from hud.types import Trace
 
 from .chat import Chat
+from .config import RunConfig, configure
 from .job import Job
-from .launch import launch
-from .sandbox import (
-    Channel,
-    HudSandbox,
-    LocalSandbox,
-    RemoteSandbox,
-    Sandbox,
-    as_sandbox,
-    load_environment,
-    load_module,
-    sandbox_from_ref,
-)
+from .rollout import Grade, Run, rollout
+from .sync import SyncPlan
 from .task import Task, task
-from .taskset import SyncPlan, Taskset
+from .taskset import Taskset
 from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relative
 
 __all__ = [
-    "Channel",
     "Chat",
     "Grade",
-    "HudSandbox",
     "HudTrainingClient",
     "Job",
-    "LocalSandbox",
-    "RemoteSandbox",
     "Rewarded",
     "Run",
-    "Sandbox",
+    "RunConfig",
     "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
     "TrainingConfig",
-    "as_sandbox",
+    "configure",
     "group_relative",
-    "launch",
-    "load_environment",
-    "load_module",
-    "sandbox_from_ref",
+    "rollout",
     "task",
 ]

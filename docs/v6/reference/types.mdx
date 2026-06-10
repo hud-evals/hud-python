@@ -7,39 +7,44 @@ icon: "code"
 The serializable shapes agents, tasks, and graders exchange.
 
 ```python
-from hud.client import Grade, Run
+from hud import Grade, Run
 from hud.types import Trace
 from hud.agents.types import AgentAnswer, Citation, EvaluationResult, SubScore, ContentResult
 ```
 
 ## `Run`
 
-The live handle for one task — the lifecycle plus the agent's `Trace`. You get one by entering a `Task` (`async with task as run`).
+The live handle for one task — the lifecycle plus the agent's `Trace`. You get
+one from `task.run(agent)` or by opening `task.session()`.
 
 | Member | Type | Description |
 |--------|------|-------------|
 | `run.prompt` | `str \| list \| None` | The task's opening prompt (text, or chat-style message list). |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
 | `run.grade` | `Grade` | Structured grade result. |
-| `run.reward` | `float` | The graded reward (set on exit). |
-| `run.evaluation` | `dict` | The full grade payload (`score` + metadata). |
+| `run.reward` | `float` | The graded reward (`grade.reward`, set on exit). |
+| `run.evaluation` | `dict` | The raw grade payload (`grade.raw`). |
+| `run.runtime` | `str \| None` | Control-channel url the run executed against (the placement record). |
 | `run.trace_id` | `str \| None` | Keys the trajectory; satisfies `Rewarded`. |
 | `run.job_id` / `run.group_id` | `str \| None` | Batch + GRPO group, set by the runner. |
 
-`Run.failed(error, *, trace_id=None)` builds a spent run for an isolated failure.
+A rollout that fails before its session is live comes back as a synthesized
+failed run (no prompt, no runtime); a mid-run failure keeps the real run —
+prompt, runtime, partial trace — with the error on `run.trace`.
 
 ## `Grade`
 
-Structured result from grading one run.
+Structured result from grading one run, parsed from the wire grade frame
+(`{"score": ..., "done": ..., "isError": ..., ...}`).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `reward` | `float` | Convenience score. |
+| `reward` | `float` | The frame's `score`. |
 | `done` | `bool` | Whether the task is complete. |
 | `content` | `str \| None` | Human-readable grade content. |
 | `info` | `dict` | Extra metadata. |
 | `is_error` | `bool` | Whether grading failed. |
-| `raw` | `dict` | Original grade payload. |
+| `raw` | `dict` | The full original frame. |
 
 ## `Trace`
 

@@ -26,12 +26,17 @@ class TestInitModule:
             "Grade",
             "Job",
             "Run",
+            "RunConfig",
+            "Runtime",
             "SyncPlan",
             "Task",
             "Taskset",
             "Trace",
+            "configure",
+            "connect",
             "instrument",
-            "launch",
+            "provision",
+            "spawn",
             "task",
         ]
 

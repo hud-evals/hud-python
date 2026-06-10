@@ -24,7 +24,8 @@ from .base import BaseTool
 if TYPE_CHECKING:
     from fastmcp.tools import FunctionTool, ToolResult
 
-    from hud.environment.task import _TaskFactory
+    from hud.agents.base import Agent
+    from hud.environment.env import _TaskFactory
 
 LOGGER = logging.getLogger("hud.tools.agent")
 
@@ -54,7 +55,8 @@ def _is_eval_only(param: inspect.Parameter) -> bool:
 class AgentTool(BaseTool):
     """Run a task with a sub-agent, exposed as an MCP tool.
 
-    Example::
+    The ``agent`` is a stateless :class:`~hud.agents.base.Agent` instance
+    (the rollout contract); one instance drives every invocation. Example::
 
         @env.task
         async def investigate(issue_id: str, expected_cause: str | None = None):
@@ -62,32 +64,21 @@ class AgentTool(BaseTool):
             yield 1.0
 
 
-        seer = AgentTool(env("investigate"), model="claude-haiku-4-5")
+        seer = AgentTool(env("investigate"), create_agent("claude-haiku-4-5"))
         env.add_tool(seer)
     """
 
     def __init__(
         self,
         task: _TaskFactory[Any],
+        agent: Agent,
         *,
-        model: str | None = None,
-        agent: Any = None,
-        agent_params: dict[str, Any] | None = None,
         name: str | None = None,
         description: str | None = None,
         parameters: dict[str, Any] | None = None,
-        max_steps: int = 10,
     ) -> None:
-        if not model and agent is None:
-            raise ValueError("AgentTool: provide either 'model' or 'agent'")
-        if model and agent is not None:
-            raise ValueError("AgentTool: provide only one of 'model' or 'agent'")
-
         self._task = task
-        self._model = model
-        self._agent_cls = agent
-        self._agent_params = agent_params or {}
-        self._max_steps = max_steps
+        self._agent = agent
 
         self._visible_params: set[str] = set()
         self._param_schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
@@ -155,6 +146,7 @@ class AgentTool(BaseTool):
     async def __call__(self, **kwargs: Any) -> ToolResult:
         from fastmcp.tools import ToolResult
 
+        from hud.environment.runtime import _local
         from hud.telemetry.instrument import instrument
 
         visible = self._param_schema.get("properties", {})
@@ -163,16 +155,11 @@ class AgentTool(BaseTool):
         @instrument(category="subagent", name=self.name)
         async def _run() -> ToolResult:
             task = cast("Any", self._task)(**args)
-            agent = self._make_agent()
-            async with task as run:
-                await agent(run)
+            # The tool executes inside the substrate that hosts its env, so the
+            # sub-rollout places itself on the env this process already owns.
+            run = await task.run(self._agent, on=lambda _row: _local(task.env))
+            if run.trace.isError:
+                raise RuntimeError(run.trace.content or "subagent rollout failed")
             return ToolResult(content=[TextContent(type="text", text=run.trace.content or "")])
 
         return await _run()
-
-    def _make_agent(self) -> Any:
-        if self._model:
-            from hud.agents import create_agent
-
-            return create_agent(self._model, **{"max_steps": self._max_steps, **self._agent_params})
-        return self._agent_cls(**self._agent_params)

@@ -50,7 +50,7 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 ## Capabilities
 
 ```python
-env.add_capability(cap)   # append a Capability after construction
+env.capabilities.append(cap)   # append a Capability after construction
 ```
 
 Capabilities are normally passed to the constructor. See [Capabilities](/v6/reference/capabilities).
@@ -75,14 +75,17 @@ async def _start():
 
 ## Serving
 
-| Method | Description |
-|--------|-------------|
-| `await env.serve(host="127.0.0.1", port=0)` | Start daemons and accept control-channel connections (blocks). |
-| `await env.bind(host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
-| `await env.start()` | Run `@env.initialize` hooks (idempotent). |
-| `await env.stop()` | Run `@env.shutdown` hooks (best-effort). |
+Serving belongs to `hud.environment.server` — the same entry point a container
+CMD runs (`python -m hud.environment.server <source>`):
 
-In practice you serve with `hud dev` and run through `hud eval`, `Taskset.run()`, or a `Task` context manager rather than calling these directly.
+| Function | Description |
+|----------|-------------|
+| `await serve(env, host="127.0.0.1", port=0)` | Start daemons and accept control-channel connections (blocks). |
+| `await bind(env, host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
+| `await env.start()` / `await env.stop()` | Run `@env.initialize` / `@env.shutdown` hooks directly. |
+
+In practice you serve with `hud dev` and run through `hud eval`, `task.run()`,
+or `Taskset.run()` — placement (`on=spawn(...)`) brings substrates up for you.
 
 ## The wire protocol
 

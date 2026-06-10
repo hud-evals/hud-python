@@ -8,9 +8,9 @@ from __future__ import annotations
 # Apply patches to third-party libraries early, before other imports
 from . import patches as _patches  # noqa: F401
 from ._legacy import install as _install_v5_compat
-from .client import Grade, Run
-from .environment import Environment
-from .eval import Chat, Job, SyncPlan, Task, Taskset, launch, task
+from .clients import connect
+from .environment import Environment, Runtime, provision, spawn
+from .eval import Chat, Grade, Job, Run, RunConfig, SyncPlan, Task, Taskset, configure, task
 from .telemetry.instrument import instrument
 from .types import Trace
 
@@ -22,12 +22,17 @@ __all__ = [
     "Grade",
     "Job",
     "Run",
+    "RunConfig",
+    "Runtime",
     "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
+    "configure",
+    "connect",
     "instrument",
-    "launch",
+    "provision",
+    "spawn",
     "task",
 ]
 

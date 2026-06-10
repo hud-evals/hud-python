@@ -1,7 +1,10 @@
-"""``Task`` construction, default slug, and serialization round-trips.
+"""``Task`` construction, the portable row shape, and taskset collection.
 
 ``to_dict``/``from_dict`` are the portable identity used by ``hud sync`` and the
-JSON/JSONL taskset path, so the tagged env-ref round-trip is the contract under test.
+JSON/JSONL taskset path: env serializes as a bare name reference and
+deserializes to a declarative ``Environment(name)``. Placement is never part of
+the row — without an ``on=`` provider, execution defaults to the (not yet
+wired) HUD-hosted provisioner, which raises a precise error.
 """
 
 from __future__ import annotations
@@ -11,8 +14,7 @@ import json
 import pytest
 
 from hud.environment import Environment
-from hud.eval import Channel, HudSandbox, RemoteSandbox, Task, Taskset, task
-from hud.eval.sandbox import LocalSandbox
+from hud.eval import Task, Taskset, task
 
 
 def test_task_helper_collects_args_and_metadata() -> None:
@@ -36,6 +38,7 @@ def test_env_task_call_returns_public_task() -> None:
     assert isinstance(runnable, Task)
     assert runnable.id == "solve"
     assert runnable.args == {"n": 3}
+    assert runnable.env is env
 
 
 def test_default_slug_is_task_id_without_args() -> None:
@@ -52,24 +55,15 @@ def test_default_slug_is_deterministic_with_args() -> None:
     assert a.default_slug() != Task(env=env, id="solve", args={"a": 9}).default_slug()
 
 
-def test_environment_serializes_to_hud_ref() -> None:
+# ─── the portable row shape ────────────────────────────────────────────
+
+
+def test_env_serializes_as_name_reference() -> None:
     v = task(Environment("team-intel"), "ask", x=1)
     data = v.to_dict()
-    assert data["env"] == {"type": "hud", "name": "team-intel"}
+    assert data["env"] == {"name": "team-intel"}
     assert data["task"] == "ask"
     assert data["args"] == {"x": 1}
-
-
-def test_local_sandbox_unwraps_to_underlying_env_ref() -> None:
-    sandbox = LocalSandbox(Environment("wrapped"))
-    data = Task(env=sandbox, id="t").to_dict()
-    assert data["env"] == {"type": "hud", "name": "wrapped"}
-
-
-def test_remote_sandbox_serializes_to_url_ref() -> None:
-    v = Task(env=RemoteSandbox("tcp://host:7000", token="abc"), id="t")
-    data = v.to_dict()
-    assert data["env"] == {"type": "url", "url": "tcp://host:7000", "params": {"token": "abc"}}
 
 
 def test_to_dict_only_includes_set_metadata() -> None:
@@ -94,7 +88,8 @@ def test_roundtrip_is_stable_through_from_dict() -> None:
 
     rebuilt = Task.from_dict(original)
 
-    assert isinstance(rebuilt.env, HudSandbox)  # hud ref -> HudSandbox
+    assert isinstance(rebuilt.env, Environment)  # bare declarative reference
+    assert rebuilt.env.name == "team-intel"
     assert rebuilt.id == "ask"
     assert rebuilt.args == {"difficulty": 3}
     assert rebuilt.slug == "ask-v1"
@@ -105,28 +100,35 @@ def test_roundtrip_is_stable_through_from_dict() -> None:
     assert rebuilt.to_dict() == original
 
 
-def test_to_dict_rejects_unserializable_env() -> None:
-    class NotAnEnv: ...
-
-    with pytest.raises(TypeError, match="cannot serialize"):
-        Task(env=NotAnEnv(), id="t").to_dict()  # type: ignore[arg-type]
-
-
 def test_from_dict_validates_shape() -> None:
     with pytest.raises(ValueError, match="env"):
         Task.from_dict({"task": "t"})
-    with pytest.raises(ValueError, match="task"):
-        Task.from_dict({"env": {"type": "hud", "name": "e"}})
+    with pytest.raises(ValueError, match="task id"):
+        Task.from_dict({"env": {"name": "e"}})
     with pytest.raises(ValueError, match="args"):
-        Task.from_dict({"env": {"type": "hud", "name": "e"}, "task": "t", "args": "nope"})
+        Task.from_dict({"env": {"name": "e"}, "task": "t", "args": "nope"})
 
 
-def test_taskset_from_tasks_is_ordered_and_keyed_by_slug() -> None:
+# ─── placement ─────────────────────────────────────────────────────────
+
+
+async def test_no_placement_defaults_to_provision_stub_with_precise_error() -> None:
+    v = task(Environment("hosted-env"), "solve", n=1)
+    with pytest.raises(NotImplementedError, match=r"'hosted-env'.*on=spawn") as err:
+        async with v.session():
+            pass
+    assert "Runtime(url)" in str(err.value)
+
+
+# ─── taskset collection ────────────────────────────────────────────────
+
+
+def test_taskset_is_ordered_and_keyed_by_slug() -> None:
     env = Environment("e")
     first = task(env, "solve", slug="first", n=1)
     second = task(env, "solve", slug="second", n=2)
 
-    tasks = Taskset.from_tasks("demo", [first, second])
+    tasks = Taskset("demo", [first, second])
 
     assert list(tasks) == [first, second]
     assert tasks["first"] is first
@@ -152,9 +154,22 @@ def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:
     assert [t.slug for t in Taskset.from_file(jsonl_path)] == ["one", "two"]
 
 
-def test_taskset_to_file_writes_json_jsonl_and_csv(tmp_path) -> None:
+def test_file_roundtrip_keeps_rows_and_env_names(tmp_path) -> None:
+    env = Environment("authored")
+    authored = [task(env, "solve", slug="one", n=1), task(env, "solve", slug="two", n=2)]
+    out = Taskset("demo", authored).to_file(tmp_path / "tasks.json")
+
+    loaded = Taskset.from_file(out)
+
+    assert [t.slug for t in loaded] == ["one", "two"]
+    # Rows come back with bare name-reference envs, not the authored object.
+    assert all(t.env.name == "authored" and t.env is not env for t in loaded)
+    assert [t.to_dict() for t in loaded] == [t.to_dict() for t in authored]
+
+
+def test_taskset_to_file_writes_json_and_jsonl(tmp_path) -> None:
     env = Environment("e")
-    taskset = Taskset.from_tasks(
+    taskset = Taskset(
         "demo",
         [
             task(env, "solve", slug="one", columns={"tier": "easy"}, n=1),
@@ -164,23 +179,17 @@ def test_taskset_to_file_writes_json_jsonl_and_csv(tmp_path) -> None:
 
     json_path = taskset.to_file(tmp_path / "tasks.json")
     jsonl_path = taskset.to_file(tmp_path / "tasks.jsonl")
-    csv_path = taskset.to_file(tmp_path / "tasks.csv")
 
     assert [entry["slug"] for entry in json.loads(json_path.read_text())] == ["one", "two"]
     assert [json.loads(line)["slug"] for line in jsonl_path.read_text().splitlines()] == [
         "one",
         "two",
     ]
-    csv_text = csv_path.read_text()
-    assert "slug,task,env,arg:n,col:tier" in csv_text
-    assert "one,solve,e,1,easy" in csv_text
-    assert 'two,solve,e,"{""x"": 2}",hard' in csv_text
+    with pytest.raises(ValueError, match=r"use \.json or \.jsonl"):
+        taskset.to_file(tmp_path / "tasks.txt")
 
 
-def test_taskset_from_module_and_package_collect_public_tasks(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_taskset_from_module_collects_public_tasks(tmp_path) -> None:
     module = tmp_path / "local_tasks.py"
     module.write_text(
         """
@@ -192,50 +201,7 @@ local = task(env, "solve", slug="local", n=1)
         encoding="utf-8",
     )
 
-    package = tmp_path / "cases"
-    case = package / "alpha"
-    case.mkdir(parents=True)
-    (package / "__init__.py").write_text("", encoding="utf-8")
-    (case / "__init__.py").write_text("from .task import example\n", encoding="utf-8")
-    (case / "task.py").write_text(
-        """
-from hud import Environment, task
-
-env = Environment("package-env")
-example = task(env, "solve", slug="alpha", n=2)
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.syspath_prepend(str(tmp_path))
-
     assert Taskset.from_module(module)["local"].args == {"n": 1}
-    assert Taskset.from_package("cases")["alpha"].args == {"n": 2}
-
-
-def test_load_environment_selects_by_attr_or_env_name(tmp_path) -> None:
-    from hud.eval import load_environment
-
-    module = tmp_path / "envs.py"
-    module.write_text(
-        """
-from hud import Environment
-
-first = Environment("env-one")
-second = Environment("env-two")
-""".strip(),
-        encoding="utf-8",
-    )
-
-    assert load_environment(module, name="first").name == "env-one"
-    assert load_environment(module, name="env-two").name == "env-two"
-    with pytest.raises(ValueError, match="multiple Environments"):
-        load_environment(module)
-    with pytest.raises(ValueError, match="no Environment named 'missing'"):
-        load_environment(module, name="missing")
-
-    single = tmp_path / "single.py"
-    single.write_text("from hud import Environment\nenv = Environment('only')\n", encoding="utf-8")
-    assert load_environment(single).name == "only"
 
 
 def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,78 +231,6 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
 
     assert taskset.name == "Demo"
     assert taskset["one"].id == "e:solve"
+    assert taskset["one"].env.name == "e"
     assert taskset["one"].args == {"n": 1}
     assert taskset["one"].columns == {"tier": "easy"}
-
-
-def test_taskset_diff_classifies_create_update_unchanged_and_remote_only() -> None:
-    env = Environment("e")
-    local_a = task(env, "solve", slug="a", n=1)
-    local_b = task(env, "solve", slug="b", n=2)
-    local_c = task(env, "solve", slug="c", n=3)
-    remote_a = Task.from_dict(local_a.to_dict())
-    remote_b = task(env, "solve", slug="b", n=99)
-    remote_old = task(env, "solve", slug="old", n=0)
-
-    plan = Taskset.from_tasks("demo", [local_a, local_b, local_c]).diff(
-        Taskset.from_tasks("demo", [remote_a, remote_b, remote_old]),
-    )
-
-    assert [t.slug for t in plan.to_create] == ["c"]
-    assert [t.slug for t in plan.to_update] == ["b"]
-    assert [t.slug for t in plan.unchanged] == ["a"]
-    assert [t.slug for t in plan.remote_only] == ["old"]
-    assert "Create: 1" in plan.summary()
-
-
-def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    from hud.eval.taskset import taskset_column_definitions, upload_taskset
-    from hud.utils.platform import PlatformClient
-
-    env = Environment("e")
-    upload = task(env, "solve", slug="solve-one", columns={"tier": "easy"}, n=1)
-    posted: dict[str, object] = {}
-
-    def fake_request(method: str, url: str, json: object = None, **kwargs: object) -> dict:
-        posted.update(method=method, url=url, json=json, api_key=kwargs.get("api_key"))
-        return {"ok": True}
-
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
-
-    platform = PlatformClient("https://api.example", "token")
-    result = upload_taskset(
-        platform, "demo", [upload], columns=taskset_column_definitions([upload])
-    )
-
-    assert result == {"ok": True}
-    assert posted["method"] == "POST"
-    assert posted["url"] == "https://api.example/tasks/upload"
-    assert posted["api_key"] == "token"
-    assert posted["json"] == {
-        "name": "demo",
-        "tasks": [
-            {
-                "slug": "solve-one",
-                "env": {"name": "e"},
-                "scenario": "e:solve",
-                "args": {"n": 1},
-                "column_values": {"tier": "easy"},
-            },
-        ],
-        "columns": {"tier": {"type": "text"}},
-    }
-
-
-async def test_remote_sandbox_create_returns_channel() -> None:
-    sandbox = RemoteSandbox("tcp://host:7000", token="abc")
-
-    channel = await sandbox.create()
-
-    assert isinstance(channel, Channel)
-    assert channel.url == "tcp://host:7000"
-    assert channel.params == {"token": "abc"}
-    assert sandbox.channel is channel
-
-    await sandbox.terminate()
-    with pytest.raises(RuntimeError, match="not created"):
-        _ = sandbox.channel

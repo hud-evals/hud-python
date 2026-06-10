@@ -25,7 +25,7 @@ from hud.agents.types import BrowserUseConfig
 from hud.settings import settings
 
 if TYPE_CHECKING:
-    from hud.client import Run
+    from hud.eval.rollout import Run
 
 LOGGER = logging.getLogger("hud.agents.browser_use")
 

@@ -21,7 +21,7 @@ from hud.settings import settings
 
 if TYPE_CHECKING:
     from hud.capabilities import RFBClient, SSHClient
-    from hud.client import Run
+    from hud.eval.rollout import Run
     from hud.types import Trace
 
 logger = logging.getLogger(__name__)

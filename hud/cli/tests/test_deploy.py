@@ -122,13 +122,13 @@ class TestDeployEnvironment:
     def test_validation_errors_exit(self, tmp_path: Path) -> None:
         """Test that validation errors cause exit."""
         from hud.cli.deploy import deploy_environment
-        from hud.environment.source import ValidationIssue
+        from hud.cli.utils.source import ValidationIssue
 
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
 
         with (
             patch("hud.settings.settings") as mock_settings,
-            patch("hud.environment.source.EnvironmentSource.validate") as mock_validate,
+            patch("hud.cli.utils.source.EnvironmentSource.validate") as mock_validate,
             pytest.raises(typer.Exit) as exc_info,
         ):
             mock_settings.api_key = "test-key"

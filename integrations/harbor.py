@@ -1,11 +1,28 @@
-"""Export HUD tasks to Harbor task folders.
+"""Harbor integration: load Harbor task dirs as a Taskset; export HUD tasks to Harbor.
 
-:func:`export` turns a task source (JSON/JSONL or ``.py``, like ``hud eval``) into
-Harbor task folders (``task.toml`` + ``instruction.md`` + ``environment/`` +
-``tests/test.sh``). Convertible iff the env's capabilities are ``ssh``/``mcp`` only
-(Harbor is shell-centric; ``rfb``/``cdp`` don't map).
+Harbor task structure (terminal-bench layout)::
 
-Lifecycle mapping (HUD setup/evaluate → Harbor image/verifier):
+    task_name/
+    ├── instruction.md          # agent prompt
+    ├── task.toml               # config: timeouts, metadata, resources
+    ├── environment/Dockerfile  # container the agent runs in
+    ├── tests/test.sh           # verification -> writes reward.txt
+    └── solution/               # optional (ignored)
+
+:func:`load` parses a task dir (or a dataset of them) into rows sharing one
+bare :class:`~hud.environment.Environment` per distinct ``environment/`` build
+context — no codegen, no roundtrip. Like every row, the result is runnable
+once a placement is supplied (``on=Runtime(url)`` against a served substrate
+today). Providers receive the row being placed, so a docker provider that
+builds and runs each row's ``environment/`` image is the named follow-up —
+expressible without engine changes.
+
+:func:`export` is the reverse direction: turn a HUD task source into
+self-contained Harbor task folders (``task.toml`` + ``instruction.md`` +
+``environment/`` + ``tests/test.sh``). Convertible iff the env's capabilities
+are ``ssh``/``mcp`` only (Harbor is shell-centric; ``rfb``/``cdp`` don't map).
+
+Export lifecycle mapping (HUD setup/evaluate → Harbor image/verifier):
 
 * The env's build context is copied into ``environment/`` and a ``hud_entrypoint.sh``
   is baked in as the image ENTRYPOINT (Harbor overrides CMD with ``sleep infinity``).
@@ -16,26 +33,31 @@ Lifecycle mapping (HUD setup/evaluate → Harbor image/verifier):
 * ``tests/test.sh`` runs the task's **evaluate** (``hud task grade``) against the
   parked run and writes the reward to ``/logs/verifier/reward.txt``.
 
-Round-trip note: the exported task grades over the HUD control channel, so it is
-*not* a harness-agnostic Harbor task — it depends on the baked ENTRYPOINT serving
-that channel. Re-importing it via ``hud convert --from harbor`` does **not**
-round-trip the grading: the generated HUD env serves its own ``run-task`` channel
-on the same port, and its scenario runs this ``test.sh`` mid-evaluate, so the inner
-``hud task grade --url`` collides with the outer channel. The two converters adapt
-to different harnesses; they are not inverses.
+The exported task grades over the HUD control channel, so it is *not* a
+harness-agnostic Harbor task — it depends on the baked ENTRYPOINT serving that
+channel.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+import re
 import shutil
+import tomllib
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from hud.environment import Environment
+from hud.environment.server import TaskRunner
+from hud.eval import Task, Taskset
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.environment import Environment
+LOGGER = logging.getLogger(__name__)
 
 #: Capability protocols that map onto Harbor's shell/tool model.
 ALLOWED_PROTOCOLS = ("ssh", "mcp")
@@ -51,6 +73,116 @@ CONTROL_PORT = 8765
 _BUILD_CONTEXT_IGNORE = shutil.ignore_patterns(
     "__pycache__", "*.pyc", ".git", ".venv", "venv", "*.egg-info", ".pytest_cache"
 )
+
+
+# ─── load: Harbor dirs -> Taskset ──────────────────────────────────────
+
+
+def detect(path: str | Path) -> bool:
+    """True when *path* is a Harbor task dir or a dataset of them."""
+    root = Path(path)
+    if _is_harbor_task(root):
+        return True
+    if root.is_dir():
+        return any(_is_harbor_task(d) for d in root.iterdir() if d.is_dir())
+    return False
+
+
+def load(path: str | Path) -> Taskset:
+    """Load a Harbor task dir (or dataset dir) into a :class:`Taskset`.
+
+    One row per task dir (``id`` = the dir name, ``task.toml`` ``[metadata]``
+    as columns); rows share one bare ``Environment`` per distinct
+    ``environment/`` build context (content-hashed), named after the dataset.
+    """
+    root = Path(path).resolve()
+    if _is_harbor_task(root):
+        task_dirs = [root]
+        dataset_name = root.parent.name
+    else:
+        task_dirs = sorted(d for d in root.iterdir() if d.is_dir() and _is_harbor_task(d))
+        dataset_name = root.name
+    if not task_dirs:
+        raise ValueError(f"no Harbor tasks found in {path}")
+
+    parsed = [task for task_dir in task_dirs if (task := _parse_task(task_dir)) is not None]
+    if not parsed:
+        raise ValueError(f"all Harbor tasks under {path} failed to parse")
+    if len(parsed) < len(task_dirs):
+        LOGGER.warning(
+            "skipped %d Harbor task(s) that failed to parse", len(task_dirs) - len(parsed)
+        )
+
+    groups: dict[str, list[_HarborTask]] = {}
+    for harbor_task in parsed:
+        groups.setdefault(harbor_task.env_hash, []).append(harbor_task)
+    sorted_groups = sorted(groups.values(), key=lambda group: -len(group))
+
+    base_name = _slugify(dataset_name)
+    tasks: list[Task] = []
+    for idx, group in enumerate(sorted_groups, start=1):
+        env = Environment(base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}")
+        for harbor_task in group:
+            metadata = harbor_task.config.get("metadata")
+            tasks.append(
+                Task(
+                    env=env,
+                    id=harbor_task.task_id,
+                    columns=dict(metadata) if isinstance(metadata, dict) and metadata else None,
+                )
+            )
+    return Taskset(base_name, tasks)
+
+
+def _slugify(name: str) -> str:
+    """A valid env name (lowercase ``[a-z0-9-]``) from a dataset dir name."""
+    normalized = re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", "-").replace("_", "-"))
+    return re.sub(r"-+", "-", normalized).strip("-") or "harbor"
+
+
+def _is_harbor_task(path: Path) -> bool:
+    return path.is_dir() and (path / "task.toml").exists() and (path / "instruction.md").exists()
+
+
+def _hash_directory(path: Path) -> str:
+    """Content-hash a directory for grouping tasks by identical environments."""
+    hasher = hashlib.sha256()
+    if not path.exists():
+        return "empty"
+    for file_path in sorted(path.rglob("*")):
+        if file_path.is_file():
+            hasher.update(str(file_path.relative_to(path)).encode())
+            hasher.update(file_path.read_bytes())
+    return hasher.hexdigest()[:16]
+
+
+@dataclass(frozen=True, slots=True)
+class _HarborTask:
+    """One parsed Harbor task dir."""
+
+    task_id: str
+    config: dict[str, Any]
+    env_hash: str
+
+
+def _parse_task(task_dir: Path) -> _HarborTask | None:
+    if not (task_dir / "instruction.md").is_file():
+        LOGGER.warning("failed to read instruction.md in %s", task_dir)
+        return None
+    try:
+        config: dict[str, Any] = tomllib.loads((task_dir / "task.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        LOGGER.warning("failed to parse task.toml in %s", task_dir)
+        config = {}
+    env_dir = task_dir / "environment"
+    return _HarborTask(
+        task_id=task_dir.name,
+        config=config,
+        env_hash=_hash_directory(env_dir) if env_dir.exists() else "no-env",
+    )
+
+
+# ─── export: HUD tasks -> Harbor task folders ───────────────────────────
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -72,28 +204,27 @@ def _check_capabilities(env: Environment) -> None:
 
 async def _materialize_prompt(env: Environment, task: str, args: dict[str, Any]) -> str:
     """Run a task's first yield locally to get its concrete prompt (deterministic)."""
-    payload = await env.task_prompt(task, args)
+    runner = TaskRunner(env.tasks[task], args)
+    try:
+        payload = await runner.start()
+    finally:
+        await runner.cancel()
     prompt = payload.get("prompt")
     return prompt if isinstance(prompt, str) else json.dumps(prompt, indent=2, default=str)
 
 
-def _resolve_env(task: Any) -> Environment:
-    """Resolve a task's env-ref to a local :class:`Environment` for materialization.
+def _resolve_env(task: Task) -> Environment:
+    """Resolve a task's env to a local, authored env that defines the task.
 
-    A ``Task`` from a Python source carries the ``Environment`` directly; one
-    loaded from a tasks file carries a ``LocalSandbox`` over it (module env-ref).
-    Remote / HUD-hosted env-refs can't be materialized locally.
+    Tasks from a Python source carry the authored ``Environment`` directly;
+    rows loaded from a tasks file are materialized against the envs defined
+    next to it. A row whose env reference matched nothing can't be exported.
     """
-    from hud.environment import Environment
-    from hud.eval.sandbox import LocalSandbox
-
     env = task.env
-    if isinstance(env, LocalSandbox):
-        env = env._env
-    if not isinstance(env, Environment):
+    if task.id not in env.tasks:
         raise TypeError(
-            "harbor export needs a local Environment (a module env-ref or env.py); "
-            f"got {type(task.env).__name__}. Remote/HUD env-refs aren't supported.",
+            f"harbor export needs a local env defining task {task.id!r} "
+            f"(an env.py named {env.name!r} next to the tasks); none was found.",
         )
     return env
 
@@ -256,17 +387,27 @@ async def export(
     env's build context (a ``Dockerfile.hud``/``Dockerfile`` next to the source).
     Returns the created task directories.
     """
-    from hud.eval import Taskset
+    from hud.utils.modules import iter_modules
 
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     src = Path(source).resolve()
     source_dir = src.parent if src.is_file() else src
 
+    tasks = list(Taskset.from_file(src))
     if src.suffix in (".json", ".jsonl"):
-        tasks = list(Taskset.from_file(src))
-    else:
-        tasks = list(Taskset.from_file(source))
+        # Data rows hold bare name references; export needs the authored envs
+        # (defined next to the tasks file) to materialize prompts in-process.
+        authored = {
+            env.name: env
+            for module in iter_modules(source_dir)
+            for env in vars(module).values()
+            if isinstance(env, Environment)
+        }
+        tasks = [
+            replace(task, env=authored[task.env.name]) if task.env.name in authored else task
+            for task in tasks
+        ]
 
     dockerfile = _find_dockerfile(source_dir)
     if dockerfile is None:
@@ -310,4 +451,11 @@ async def export(
     return created
 
 
-__all__ = ["ALLOWED_PROTOCOLS", "CONTROL_PORT", "DEFAULT_ANSWER_FILE", "export"]
+__all__ = [
+    "ALLOWED_PROTOCOLS",
+    "CONTROL_PORT",
+    "DEFAULT_ANSWER_FILE",
+    "detect",
+    "export",
+    "load",
+]

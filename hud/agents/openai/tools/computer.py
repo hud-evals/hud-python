@@ -20,6 +20,14 @@ OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
     api_name="computer",
 )
 
+
+def last_image_data(result: MCPToolResult) -> str | None:
+    """Base64 data of the most recent screenshot block in a tool result."""
+    for block in reversed(result.content):
+        if isinstance(block, mcp_types.ImageContent):
+            return block.data
+    return None
+
 OPENAI_KEY_ALIASES: dict[str, str] = {
     "return": "Return",
     "escape": "Escape",

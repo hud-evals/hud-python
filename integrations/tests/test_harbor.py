@@ -1,4 +1,4 @@
-"""``hud.eval.harbor.export`` — turn a task source into Harbor task folders."""
+"""``integrations.harbor`` — load Harbor task dirs as a Taskset; export HUD tasks."""
 
 from __future__ import annotations
 
@@ -7,10 +7,81 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.eval.harbor import export
+from integrations.harbor import detect, export, load
+
+from .conftest import make_harbor_task
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# ─── detect / load: Harbor dirs -> Taskset ─────────────────────────────
+
+
+def test_detect_recognizes_task_and_dataset_dirs(single_task: Path, tmp_path: Path) -> None:
+    assert detect(single_task)
+    assert detect(single_task.parent)  # dataset dir containing task dirs
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert not detect(empty)
+    assert not detect(single_task / "task.toml")  # a file is not a task dir
+
+
+def test_load_single_task_dir_maps_metadata_to_columns(single_task: Path) -> None:
+    taskset = load(single_task)
+
+    assert len(taskset) == 1
+    row = taskset["cancel-async-tasks"]
+    assert row.id == "cancel-async-tasks"
+    assert row.args == {}
+    assert row.columns == {
+        "category": "systems",
+        "difficulty": "medium",
+        "tags": ["bash", "linux"],
+    }
+    assert row.env.name == taskset.name
+
+
+def test_load_dataset_shares_one_env_per_build_context(dataset_same_env: Path) -> None:
+    taskset = load(dataset_same_env)
+
+    assert len(taskset) == 3
+    assert taskset.environment_names() == {"terminal-bench-sample"}
+    envs = {id(task.env) for task in taskset}
+    assert len(envs) == 1  # identical Dockerfiles -> one shared declarative env
+
+
+def test_load_dataset_groups_by_distinct_build_contexts(dataset_multi_env: Path) -> None:
+    taskset = load(dataset_multi_env)
+
+    assert len(taskset) == 4
+    assert taskset.environment_names() == {"mixed-bench-g1", "mixed-bench-g2"}
+    assert taskset["build-pmars"].env is taskset["cancel-async-tasks"].env
+    assert taskset["caffe-cifar-10"].env is taskset["sam-cell-seg"].env
+    assert taskset["build-pmars"].env is not taskset["caffe-cifar-10"].env
+
+
+def test_load_rejects_dirs_without_harbor_tasks(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="no Harbor tasks"):
+        load(empty)
+
+
+def test_load_skips_unparseable_toml_but_keeps_the_rest(tmp_path: Path) -> None:
+    dataset = tmp_path / "bench"
+    dataset.mkdir()
+    make_harbor_task(dataset, "good")
+    broken = make_harbor_task(dataset, "broken")
+    (broken / "task.toml").write_text("not [valid toml", encoding="utf-8")
+
+    taskset = load(dataset)
+
+    # Unparseable config degrades to no metadata; the task itself still loads.
+    assert {task.id for task in taskset} == {"good", "broken"}
+    assert taskset["broken"].columns is None
+
+
+# ─── export: HUD tasks -> Harbor task folders ───────────────────────────
 
 _ENV_PY = """\
 from hud import Environment

@@ -18,14 +18,19 @@ outside the SDK on purpose. Copy and adapt them.
 From this directory (uv resolves the dependencies on first run):
 
 ```bash
-# Terminal 1: serve a chat task from a deployed environment
-HUD_ENV=my-hud-environment HUD_TASK=analysis_chat \
-    uv run server.py
+# Terminal 1: serve the bundled chat task (spawns chat_env.py per turn)
+uv run server.py
 
 # Terminal 2: talk to it
 uv run client.py            # plain client
 uv run llm_client.py        # LLM-fronted client
 ```
+
+Configuration is via env vars: `HUD_MODEL` picks the agent's model (gateway,
+needs `HUD_API_KEY`), `HUD_TASK`/`HUD_ENV` pick the task row, `HUD_SOURCE`
+spawns a different env source, and `HUD_ENV_URL` attaches each turn to an
+already-served control channel (e.g. `hud dev chat_env.py` →
+`HUD_ENV_URL=tcp://127.0.0.1:8765`) instead of spawning.
 
 The server publishes an agent card at `/.well-known/agent-card.json` and
 accepts A2A messages at the root endpoint. The configured task should accept a

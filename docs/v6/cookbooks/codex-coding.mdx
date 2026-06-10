@@ -58,14 +58,14 @@ For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSD
 
 ```python run.py
 import asyncio
+from hud import spawn
 from hud.agents import ClaudeSDKAgent
 from hud.agents.types import ClaudeSDKConfig
 from env import fix_add
 
 async def main():
     agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
-    async with fix_add() as run:
-        await agent(run)
+    run = await fix_add().run(agent, on=spawn("env.py"))
     print("reward:", run.reward)
 
 asyncio.run(main())

@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from hud.agents.tools.base import AgentTool
     from hud.agents.types import AgentConfig
     from hud.capabilities import CapabilityClient
-    from hud.client import Run
+    from hud.eval.rollout import Run
     from hud.types import AgentResponse
 
 logger = logging.getLogger(__name__)

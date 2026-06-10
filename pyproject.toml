@@ -57,6 +57,7 @@ build-backend = "hatchling.build"
 exclude = [
     "docs/",
     "cookbooks/",
+    "integrations/",
     "**/checkpoints/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -201,7 +202,7 @@ docstring-code-format = true
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.pyright]
-include = ["hud"]
+include = ["hud", "integrations"]
 exclude = [
     "**/node_modules",
     "**/__pycache__",
@@ -240,7 +241,7 @@ omit = [
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud"]
+testpaths = ["hud", "integrations"]
 addopts = ""
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access)",

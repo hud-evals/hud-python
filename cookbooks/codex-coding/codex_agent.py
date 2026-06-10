@@ -26,6 +26,7 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 import hud
+from hud import spawn
 from hud.agents.openai import OpenAIAgent
 from hud.agents.types import OpenAIConfig
 from hud.environment import Workspace
@@ -48,6 +49,25 @@ Use the available tools:
 - `apply_patch` to create or modify files
 
 Work in the current directory. When done, verify your work runs correctly."""
+
+# The environment this file *is*: `spawn(__file__)` serves it in a child
+# process (which re-imports this module), so the task's prompt and grade
+# arrive over the wire while the agent loop runs here. The workspace root is
+# handed to that child via CODEX_WORK_DIR.
+WORK_DIR = os.path.abspath(os.environ.get("CODEX_WORK_DIR") or os.getcwd())
+ws = Workspace(WORK_DIR)
+env = hud.Environment("local-codex", capabilities=[ws.capability()])
+
+
+@env.initialize
+async def _start_workspace() -> None:
+    await ws.start()
+
+
+@env.task()
+async def coding_task(task_description: str):
+    yield PROMPT_TEMPLATE.format(task_description=task_description)
+    yield 1.0  # simple success - task completed
 
 
 async def run_coding_task(
@@ -76,20 +96,9 @@ async def run_coding_task(
     base_path = os.path.abspath(work_dir) if work_dir else os.getcwd()
     if not os.path.exists(base_path):
         raise ValueError(f"Directory not found: {base_path}")
+    os.environ["CODEX_WORK_DIR"] = base_path  # inherited by the spawned env process
 
     print(f"📁 Working directory: {base_path}")
-
-    ws = Workspace(base_path)
-    env = hud.Environment("local-codex", capabilities=[ws.capability()])
-
-    @env.initialize
-    async def _start_workspace() -> None:
-        await ws.start()
-
-    @env.task()
-    async def coding_task(task_description: str):
-        yield PROMPT_TEMPLATE.format(task_description=task_description)
-        yield 1.0  # simple success - task completed
 
     # Codex-capable OpenAIAgent routed through the HUD gateway.
     model_client = AsyncOpenAI(
@@ -103,10 +112,12 @@ async def run_coding_task(
     print(f"📋 Task: {task}")
     print("=" * 60)
 
-    async with coding_task(task_description=task) as run:
-        await agent(run)
+    run = await coding_task(task_description=task).run(agent, on=spawn(__file__))
 
     print("=" * 60)
+    if run.trace.isError:
+        print(f"❌ Task failed: {run.trace.content}")
+        return
     print("✅ Task completed!")
     print(f"📊 Reward: {run.reward}")
 

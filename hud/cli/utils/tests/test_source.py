@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.environment.source import EnvironmentSource, normalize_environment_name
+from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
 
 if TYPE_CHECKING:
     from pathlib import Path

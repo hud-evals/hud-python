@@ -27,7 +27,7 @@ async def main():
     trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
 
     words = ["strawberry", "raspberry", "blueberry", "blackberry"]
-    taskset = Taskset.from_tasks("letters", [count_letter(word=w) for w in words])
+    taskset = Taskset("letters", [count_letter(word=w) for w in words])
     job = await taskset.run(agent, group=16)
     await trainer.reward(job.runs)
 
