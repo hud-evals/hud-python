@@ -1,37 +1,32 @@
 #!/usr/bin/env python3
 """
-Build Your Own Codex - A 1:1 Recreation of OpenAI's Codex CLI
+Build Your Own Codex - A Recreation of OpenAI's Codex CLI
 
 This example shows how to build your own Codex (https://github.com/openai/codex)
-from scratch using the HUD SDK. The implementation matches Codex's behavior
-through OpenAI's native coding tools while the environment exposes HUD tools:
-
-- `BashTool` provides persistent shell execution
-- `EditTool` provides generic file operations
-
-The `OpenAIAgent` exposes OpenAI's native `shell` and `apply_patch` tools and
-translates them to the environment tools.
+from scratch using the HUD SDK. The environment exposes an ``ssh`` capability
+backed by a ``Workspace``; the ``OpenAIAgent`` drives it with OpenAI's native
+``shell`` and ``apply_patch`` tools — the same protocol the ``codex`` CLI uses.
 
 What you get:
 - **Your own Codex** - Same behavior as `codex` CLI, but fully customizable
 - **Full observability** - Every tool call and response traced on hud.ai
-- **Two modes** - Local (like `codex`) or Hub (cloud sandboxed execution)
 
 Usage:
-  # Local mode - just like running `codex` on your machine
-  uv run python examples/01_codex_coding_agent.py --local
-
-  # Hub mode - sandboxed cloud execution with full telemetry
-  export HUD_API_KEY="sk-hud-..."
   uv run python examples/01_codex_coding_agent.py
 
   # Custom task
-  uv run python examples/01_codex_coding_agent.py --local \\
+  uv run python examples/01_codex_coding_agent.py \\
     --task "Create a Python script that prints the Fibonacci sequence"
+
+  # Custom working directory
+  uv run python examples/01_codex_coding_agent.py --work-dir ./codex_output
+
+To run the same environment as a packaged, sandboxed box instead of on your
+machine, see ``hud deploy`` and ``RemoteSandbox`` in the deploy docs.
 
 Requirements:
   - Install deps: `uv sync`
-  - HUD_API_KEY environment variable (for both local and hub modes)
+  - HUD_API_KEY environment variable (gateway inference)
 """
 
 import argparse
@@ -46,15 +41,9 @@ load_dotenv()
 
 import hud
 from hud.agents.openai import OpenAIAgent
+from hud.agents.types import OpenAIConfig
+from hud.environment import Workspace
 from hud.settings import settings
-from hud.tools.coding import BashSession, BashTool, EditTool
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-# Default hub environment name
-DEFAULT_HUB = "codex_environment_sandbox"
 
 # Codex-capable models that support native shell/apply_patch tools
 CODEX_MODELS = {
@@ -64,198 +53,76 @@ CODEX_MODELS = {
     "gpt-5.4",
 }
 
+PROMPT_TEMPLATE = """You are a skilled software developer. Complete the following task:
 
-# =============================================================================
-# Run Coding Task Locally (No Docker)
-# =============================================================================
+{task_description}
+
+Use the available tools:
+- `shell` to run commands (ls, cat, python, etc.)
+- `apply_patch` to create or modify files
+
+Work in the current directory. When done, verify your work runs correctly."""
 
 
-async def run_coding_task_local(
+async def run_coding_task(
     task: str,
     model: str = "gpt-5.3-codex",
     max_steps: int = 20,
-    verbose: bool = False,
     work_dir: str | None = None,
 ) -> None:
-    """
-    Run a coding task locally without Docker.
+    """Run a coding task locally.
 
-    Uses BashTool and EditTool running on your local machine.
-    Files are created in a temporary directory (or specified work_dir).
-
-    Args:
-        task: Description of the coding task
-        model: OpenAI model to use (default: gpt-5.1)
-        max_steps: Maximum agent steps (default: 20)
-        verbose: Enable verbose output
-        work_dir: Working directory for file operations (default: temp dir)
+    The environment declares an ``ssh`` capability backed by a ``Workspace`` on
+    your machine; the agent's shell commands and patches land in that directory.
     """
-    # Validate model is Codex-capable
     if model not in CODEX_MODELS:
         raise ValueError(
             f"Model '{model}' is not in the Codex-capable list {sorted(CODEX_MODELS)}.\n"
             "Use a model that supports native shell/apply_patch tools."
         )
+    if not settings.api_key:
+        raise ValueError(
+            "HUD_API_KEY is required.\n"
+            "Get yours at: https://hud.ai/project/api-keys\n"
+            "Then: export HUD_API_KEY='sk-hud-...'"
+        )
 
-    # Set base path - use current directory by default
-    if work_dir:
-        base_path = os.path.abspath(work_dir)
-    else:
-        base_path = os.getcwd()
-
+    base_path = os.path.abspath(work_dir) if work_dir else os.getcwd()
     if not os.path.exists(base_path):
         raise ValueError(f"Directory not found: {base_path}")
 
     print(f"📁 Working directory: {base_path}")
 
-    # Require HUD_API_KEY for gateway access
-    if not settings.api_key:
-        raise ValueError(
-            "HUD_API_KEY is required.\n"
-            "Get yours at: https://hud.ai/project/api-keys\n"
-            "Then: export HUD_API_KEY='sk-hud-...'"
-        )
+    ws = Workspace(base_path)
+    env = hud.Environment("local-codex", capabilities=[ws.capability()])
 
-    # Create environment with HUD tools. OpenAIAgent owns the Codex-specific
-    # shell/apply_patch protocol and routes those calls to bash/edit.
-    env = hud.Environment("local-codex")
-    env.add_tool(BashTool(session=BashSession(cwd=base_path)))
-    env.add_tool(EditTool(base_path=base_path))
+    @env.initialize
+    async def _start_workspace() -> None:
+        await ws.start()
 
-    # Create agent using HUD Gateway (uses HUD_API_KEY)
+    @env.task()
+    async def coding_task(task_description: str):
+        yield PROMPT_TEMPLATE.format(task_description=task_description)
+        yield 1.0  # simple success - task completed
+
+    # Codex-capable OpenAIAgent routed through the HUD gateway.
     model_client = AsyncOpenAI(
         base_url=settings.hud_gateway_url,
         api_key=settings.api_key,
     )
-    agent = OpenAIAgent.create(
-        model=model,
-        model_client=model_client,
-        validate_api_key=False,  # HUD key won't validate against OpenAI
-        verbose=verbose,
-    )
-    print("🌐 Using HUD Gateway for inference")
+    agent = OpenAIAgent(OpenAIConfig(model=model, model_client=model_client, max_steps=max_steps))
 
+    print("🌐 Using HUD Gateway for inference")
     print(f"🤖 Model: {model}")
     print(f"📋 Task: {task}")
     print("=" * 60)
 
-    # Define a scenario for the coding task
-    @env.scenario("coding_task")
-    async def coding_task_scenario(task_description: str):
-        yield f"""You are a skilled software developer. Complete the following task:
-
-{task_description}
-
-Use the available tools:
-- `shell` to run commands (ls, cat, python, etc.)
-- `apply_patch` to create or modify files
-
-Work in the current directory. When done, verify your work runs correctly."""
-
-        # Simple success - task completed
-        yield 1.0
-
-    # Run the agent
-    result = await env("coding_task", task_description=task).run(agent, max_steps=max_steps)
+    async with coding_task(task_description=task) as run:
+        await agent(run)
 
     print("=" * 60)
     print("✅ Task completed!")
-    print(f"📊 Reward: {result.reward}")
-
-
-# =============================================================================
-# Run Coding Task via HUD Hub
-# =============================================================================
-
-
-async def run_coding_task_hub(
-    task: str,
-    model: str = "gpt-5.3-codex",
-    max_steps: int = 20,
-    hub_name: str = DEFAULT_HUB,
-    verbose: bool = False,
-) -> None:
-    """
-    Run a coding task against the codex_environment_sandbox via HUD Hub.
-
-    Uses connect_hub() to route through HUD's infrastructure, enabling
-    full telemetry (both inference and environment steps visible in trace).
-
-    Note: You must create the codex_environment_sandbox environment in hud.ai
-    first before using this function.
-
-    Args:
-        task: Description of the coding task
-        model: OpenAI model to use (default: gpt-5.1)
-        max_steps: Maximum agent steps (default: 20)
-        hub_name: Hub environment name (default: codex_environment_sandbox)
-        verbose: Enable verbose output
-    """
-    # Require HUD_API_KEY for gateway access
-    if not settings.api_key:
-        raise ValueError(
-            "HUD_API_KEY is required.\n"
-            "Get yours at: https://hud.ai/project/api-keys\n"
-            "Then: export HUD_API_KEY='sk-hud-...'"
-        )
-
-    print(f"🌐 Connecting to hub: {hub_name}")
-
-    # Create environment and connect via HUD Hub (full telemetry)
-    env = hud.Environment()
-    env.connect_hub(hub_name)
-
-    # Validate model is Codex-capable
-    if model not in CODEX_MODELS:
-        raise ValueError(
-            f"Model '{model}' is not in the Codex-capable list {sorted(CODEX_MODELS)}.\n"
-            "Use a model that supports native shell/apply_patch tools."
-        )
-
-    # Create agent with HUD Gateway for inference telemetry
-    model_client = AsyncOpenAI(
-        base_url=settings.hud_gateway_url,
-        api_key=settings.api_key,
-    )
-    agent = OpenAIAgent.create(
-        model=model,
-        model_client=model_client,
-        validate_api_key=False,  # HUD key won't validate against OpenAI
-        verbose=verbose,
-    )
-    print("🌐 Using HUD Gateway for inference")
-
-    print(f"🤖 Model: {model}")
-    print(f"📋 Task: {task}")
-    print("=" * 60)
-
-    # Define a scenario for the coding task
-    @env.scenario("coding_task")
-    async def coding_task_scenario(task_description: str):
-        yield f"""You are a skilled software developer. Complete the following task:
-
-{task_description}
-
-Use the available tools:
-- `shell` to run commands (ls, cat, python, etc.)
-- `apply_patch` to create or modify files
-
-Work in the current directory. When done, verify your work runs correctly."""
-
-        # Evaluation is handled by the environment's evaluate tool
-        yield 1.0
-
-    # Run the agent
-    result = await env("coding_task", task_description=task).run(agent, max_steps=max_steps)
-
-    print("=" * 60)
-    print("✅ Task completed!")
-    print(f"📊 Reward: {result.reward}")
-
-
-# =============================================================================
-# CLI
-# =============================================================================
+    print(f"📊 Reward: {run.reward}")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -264,30 +131,18 @@ def _parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Local mode (no Docker, no HUD_API_KEY required)
-  uv run python examples/01_codex_coding_agent.py --local
-
-  # Local mode with custom working directory
-  uv run python examples/01_codex_coding_agent.py --local --work-dir ./codex_output
-
-  # Hub mode (full telemetry, requires HUD_API_KEY)
   uv run python examples/01_codex_coding_agent.py
 
+  # Custom working directory
+  uv run python examples/01_codex_coding_agent.py --work-dir ./codex_output
+
   # Custom task
-  uv run python examples/01_codex_coding_agent.py --local \\
+  uv run python examples/01_codex_coding_agent.py \\
     --task "Create a Python script that prints the Fibonacci sequence up to 10 numbers"
 
-  # Verbose output
-  uv run python examples/01_codex_coding_agent.py --local --verbose
-
   # Use a different Codex model
-  uv run python examples/01_codex_coding_agent.py --local --model gpt-5.1-codex
+  uv run python examples/01_codex_coding_agent.py --model gpt-5.1-codex
 """,
-    )
-    parser.add_argument(
-        "--local",
-        action="store_true",
-        help="Run locally without Docker (tools execute on your machine)",
     )
     parser.add_argument(
         "--task",
@@ -313,32 +168,17 @@ Examples:
         default=None,
         help="Working directory for file operations (default: current directory)",
     )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose output",
-    )
     return parser.parse_args()
 
 
 async def main() -> None:
     args = _parse_args()
-
-    if args.local:
-        await run_coding_task_local(
-            task=args.task,
-            model=args.model,
-            max_steps=args.max_steps,
-            verbose=args.verbose,
-            work_dir=args.work_dir,
-        )
-    else:
-        await run_coding_task_hub(
-            task=args.task,
-            model=args.model,
-            max_steps=args.max_steps,
-            verbose=args.verbose,
-        )
+    await run_coding_task(
+        task=args.task,
+        model=args.model,
+        max_steps=args.max_steps,
+        work_dir=args.work_dir,
+    )
 
 
 if __name__ == "__main__":

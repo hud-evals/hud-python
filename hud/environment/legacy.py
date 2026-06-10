@@ -63,8 +63,9 @@ def _port_open(host: str, port: int, timeout: float = 0.3) -> bool:
 def _classify_tool(tool: Any) -> ToolKind:
     """Bucket a registered tool into the capability it should become.
 
-    Honors an explicit ``_legacy_capability_kind`` marker (set by the ``hud.tools``
-    shim for removed computer tools), else infers from the tool's name/class.
+    Honors an explicit ``_legacy_capability_kind`` marker (set by
+    :mod:`hud._legacy` for removed computer and shell/edit tools), else infers
+    from the tool's name/class.
     """
     marker = getattr(tool, "_legacy_capability_kind", None)
     if marker in ("shell", "computer", "mcp"):

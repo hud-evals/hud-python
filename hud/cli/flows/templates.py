@@ -62,9 +62,9 @@ async def count(sentence: str, letter: str):
 # For arbitrary MCP tools, run them on your own MCPServer and attach it:
 #
 #   from hud.server import MCPServer
-#   from hud.tools import JupyterTool
+#   from hud.tools import BaseTool
 #   server = MCPServer(name="{env_name}-tools")
-#   server.add_tool(JupyterTool())
+#   server.add_tool(MyTool())  # any BaseTool subclass
 #   env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8765/mcp"))
 
 

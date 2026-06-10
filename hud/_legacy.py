@@ -13,9 +13,10 @@ installed by ``hud/__init__`` at import time:
   :mod:`hud.agents.types`; the rest resolve names lazily (marker/no-op).
 - removed ``hud.tools`` symbols — :func:`resolve_legacy_name` (hooked from the
   real modules' ``__getattr__``) redirects result types to
-  :mod:`hud.agents.types`, maps removed computer tools to a capability marker
-  consumed by :mod:`hud.environment.legacy`, and no-ops the rest. Each
-  resolution emits a ``DeprecationWarning``.
+  :mod:`hud.agents.types`, maps removed computer and shell/edit tools to
+  capability markers consumed by :mod:`hud.environment.legacy` (→ ``rfb`` /
+  ``ssh``), and no-ops the rest. Each resolution emits a
+  ``DeprecationWarning``.
 
 Also home to the :class:`Grade` shim — the v5 grading entry point, replaced by
 :func:`hud.graders.combine`.
@@ -61,8 +62,8 @@ _NAME_REDIRECTS: dict[str, str] = {
     "ToolError": "hud.agents.types",
 }
 
-#: Removed lowercase v5 symbols (module-level instances rather than classes).
-_LOWERCASE_LEGACY = frozenset({"computer_settings"})
+#: Removed lowercase v5 symbols (module-level instances/functions rather than classes).
+_LOWERCASE_LEGACY = frozenset({"computer_settings", "get_demote_preexec_fn"})
 
 #: ``hud.native`` names that are not ``hud.tools`` descendants.
 _NATIVE_ALIASES: dict[str, str] = {
@@ -106,24 +107,40 @@ class _NoOp:
         return self
 
 
-class LegacyComputerTool:
-    """Marker for a removed computer tool.
+class _LegacyCapabilityMarker:
+    """Marker for a removed v5 tool that maps to a capability.
 
-    Carries ``_legacy_capability_kind = "computer"`` so the legacy env adapter
-    (:mod:`hud.environment.legacy`) publishes a ``computer`` (rfb) capability
-    when one is registered, instead of silently no-op'ing it.
+    Carries ``_legacy_capability_kind`` so the legacy env adapter
+    (:mod:`hud.environment.legacy`) publishes the matching capability when one
+    is registered, instead of silently no-op'ing it.
     """
 
-    _legacy_capability_kind = "computer"
+    _legacy_capability_kind: str
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.name = "computer"
+        self.name = self._legacy_capability_kind
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self
 
     def __getattr__(self, _name: str) -> Any:
         return None
+
+
+class LegacyComputerTool(_LegacyCapabilityMarker):
+    """Removed computer tool → ``rfb`` capability at serve time."""
+
+    _legacy_capability_kind = "computer"
+
+
+class LegacyShellTool(_LegacyCapabilityMarker):
+    """Removed shell/edit tool (``BashTool``, ``EditTool``, …) → ``ssh`` capability."""
+
+    _legacy_capability_kind = "shell"
+
+
+#: Substrings identifying removed v5 shell/edit tool classes.
+_SHELL_NAME_HINTS = ("Bash", "Shell", "Edit", "Patch")
 
 
 def _warn(what: str) -> None:
@@ -149,6 +166,9 @@ def resolve_legacy_name(module_name: str, name: str) -> Any:
     if "Computer" in name:
         _warn(f"{module_name}.{name} was removed; using a computer-capability marker")
         return LegacyComputerTool
+    if any(hint in name for hint in _SHELL_NAME_HINTS):
+        _warn(f"{module_name}.{name} was removed; using a shell-capability marker")
+        return LegacyShellTool
     _warn(f"{module_name}.{name} is a no-op")
     return _NoOp
 
@@ -208,7 +228,7 @@ def _make_redirect_getattr(module_name: str, target_name: str) -> Any:
 class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     """Resolve ``hud.native*`` aliases and **removed** ``hud.tools.*`` submodules.
 
-    Real ``hud.tools`` submodules (``base``, ``coding``, …) are skipped so the
+    Real ``hud.tools`` submodules (``base``, ``agent``) are skipped so the
     normal import machinery handles them.
     """
 

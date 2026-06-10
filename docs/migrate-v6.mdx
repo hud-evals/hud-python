@@ -136,10 +136,11 @@ In v6, `hud.tools` keeps the standalone tools, but every import that was removed
 
 | v5 import | What it resolves to now | What to do |
 |-----------|-------------------------|------------|
-| Tools: `BashTool`, `EditTool`, `JupyterTool`, `PlaywrightTool`, `AgentTool`, `BaseTool` | unchanged — still real classes in `hud.tools.*` | usually **delete the registration** — declare the capability instead (see the steps above); import from `hud.tools.*` only if you call the tool directly |
+| Tools: `AgentTool`, `BaseTool` | unchanged — still real classes in `hud.tools` | keep — register on your own `MCPServer` for an `mcp` capability |
 | Result types: `AgentAnswer`, `Citation`, `EvaluationResult`, `ScenarioResult`, `ContentResult`, `SubScore`, `ToolError` | redirected to `hud.agents.types` | change the import to `from hud.agents.types import ...` |
+| Shell/edit tools: `BashTool`, `EditTool`, `ShellTool`, `ApplyPatchTool`, ... | **removed** — resolve to a marker that synthesizes an `ssh` capability at serve | declare an `ssh` capability instead (e.g. `Workspace(root).capability()`) |
 | Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | **removed** — resolve to a marker that synthesizes an `rfb` capability at serve | declare an `rfb` (computer-use) or `cdp` (browser) capability instead |
-| Anything else under `hud.tools`: filesystem tools, executors, `MemoryTool`, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — the capability or agent harness provides the equivalent |
+| Anything else under `hud.tools`: `PlaywrightTool`, `JupyterTool`, `MemoryTool`, filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — declare a capability (`cdp` for browser) or serve your own tool over `mcp` |
 | Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | aliased to `hud.graders` | change the import to `from hud.graders import ...` |
 
 The rule of thumb: **result types move to `hud.agents.types`, tools become capabilities, and everything else under `hud.tools` is going away.** When the deprecation log is quiet, the conversion is done.

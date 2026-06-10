@@ -40,12 +40,12 @@ Wraps a Task template so it can be called as a tool.
 
 ```python
 from hud import Environment
+from hud.capabilities import Capability
 from hud.tools import AgentTool
-from hud.tools import PlaywrightTool
 
-# Define a specialist environment
+# Define a specialist environment with browsing
 researcher_env = Environment("researcher")
-researcher_env.add_tool(PlaywrightTool())
+researcher_env.add_capability(Capability.cdp(url="http://localhost:9222"))
 
 @researcher_env.scenario()
 async def investigate(issue_id: str):
@@ -221,4 +221,3 @@ Match models to complexity. Use cheaper models for simple delegation, expensive 
 Test specialists independently. Run each sub-agent scenario directly before composing.
 
 → [Computer Tools](/tools/computer) — GUI automation for sub-agents
-→ [Coding Tools](/tools/coding) — Shell and editing for coding agents

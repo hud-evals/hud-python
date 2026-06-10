@@ -15,12 +15,12 @@ def test_real_tools_import_without_warning() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         import hud.tools
-        from hud.tools.agent import AgentTool
 
-        bash = hud.tools.BashTool
+        agent_tool = hud.tools.AgentTool
+        base_tool = hud.tools.BaseTool
 
-    assert AgentTool.__module__ == "hud.tools.agent"
-    assert bash.__module__.startswith("hud.tools.coding")
+    assert agent_tool.__module__ == "hud.tools.agent"
+    assert base_tool.__module__ == "hud.tools.base"
 
 
 def test_result_types_redirect_to_agents_types() -> None:
@@ -42,14 +42,27 @@ def test_computer_tool_resolves_to_capability_marker() -> None:
     assert getattr(instance, "_legacy_capability_kind", None) == "computer"
 
 
-def test_removed_name_from_real_module_falls_back_to_noop() -> None:
-    # ``GeminiEditTool`` was dropped in v6; importing it must not raise ImportError.
+def test_shell_tool_resolves_to_capability_marker() -> None:
+    # ``BashTool``/``EditTool`` were dropped in v6; a registered one becomes an
+    # ``ssh`` capability at serve time via the shell marker.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools.coding import GeminiEditTool
+        from hud.tools import BashTool
+        from hud.tools.coding import EditTool
+
+    for tool_cls in (BashTool, EditTool):
+        instance = tool_cls(base_path="/tmp")
+        assert getattr(instance, "_legacy_capability_kind", None) == "shell"
+
+
+def test_removed_name_from_real_module_falls_back_to_noop() -> None:
+    # ``BaseHub`` was dropped in v6; importing it must not raise ImportError.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from hud.tools.base import BaseHub
 
         # No-op stand-in: constructs and calls without error.
-        assert GeminiEditTool(anything=1)() is not None
+        assert BaseHub(anything=1)() is not None
 
 
 def test_removed_submodule_resolves_names() -> None:
@@ -58,6 +71,18 @@ def test_removed_submodule_resolves_names() -> None:
         from hud.tools.filesystem import ReadTool
 
         assert ReadTool() is not None
+
+
+def test_jupyter_and_playwright_resolve_to_noops() -> None:
+    # Dropped in v6: registering them in a v5 env silently does nothing.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from hud.tools import JupyterTool, PlaywrightTool
+        from hud.tools.playwright import PlaywrightTool as deep_playwright
+
+    for tool_cls in (JupyterTool, PlaywrightTool, deep_playwright):
+        instance = tool_cls(cdp_url="http://localhost:9222")
+        assert instance() is not None
 
 
 def test_unknown_symbol_is_noop_not_error() -> None:

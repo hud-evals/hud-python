@@ -132,11 +132,6 @@ bedrock = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud-python[agents]",  # Include agents for dev
-    # Jupyter support
-    "ipykernel",
-    "ipython <9",
-    "jupyter_client",
-    "jupyter_core",
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff >=0.11.8, <0.15.0",
@@ -145,9 +140,6 @@ dev = [
     "pytest-mock",
     "pytest-cov",
     "pyright==1.1.407",
-    # Automation and computer control
-    "playwright",
-    "pyautogui>=0.9.54",
     # Optional integrations (for type checking)
     "llama-index-core",
     "google-adk",
