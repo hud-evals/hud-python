@@ -59,12 +59,7 @@ from hud.environment import Environment, Workspace
 
 ws = Workspace("workspace")  # relative path — absolute "/workspace" fails on macOS
 env = Environment(name="coder", capabilities=[ws.capability()])
-
-@env.initialize
-async def _start():
-    await ws.start()
 ```
-
 `ssh` (shell+files via `Workspace`), `mcp`, `cdp` (browser), `rfb`
 (computer-use), `ros2` (robot). Cite [Environments](/v6/build/environments) and
 [Capabilities](/v6/reference/capabilities).
