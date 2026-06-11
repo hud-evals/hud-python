@@ -21,11 +21,12 @@ Agent harness usage::
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    import numpy as np
+import numpy as np
 
+if TYPE_CHECKING:
     from .tracer import RobotTracer
 
 # ─── throughput counter (shared by the baseline + batched paths) ─────────────
@@ -74,6 +75,25 @@ def lerobot_infer(policy: Any, preprocess: Any, postprocess: Any, batch: Any) ->
     return action.squeeze(0).cpu().numpy()
 
 
+def lerobot_chunk_infer(policy: Any, preprocess: Any, postprocess: Any, batch: Any) -> np.ndarray:
+    """Run the LeRobot preprocess → chunk-forward → postprocess sandwich.
+
+    The chunked sibling of :func:`lerobot_infer`: calls
+    ``policy.predict_action_chunk`` (not ``select_action``), so the postprocessor
+    unnormalizes the whole ``[B, chunk_size, action_dim]`` chunk in one pass.
+    Returns a ``[chunk_size, action_dim]`` array (batch dim squeezed). The policy
+    must implement ``predict_action_chunk``.
+
+    Pure by design (all dependencies passed in) so custom models can reuse it —
+    e.g. feeding the chunk to an :class:`Ensembler`.
+    """
+    import torch
+
+    with torch.no_grad():
+        chunk = postprocess(policy.predict_action_chunk(preprocess(batch)))
+    return chunk.squeeze(0).float().cpu().numpy()
+
+
 # ─── the abstraction ──────────────────────────────────────────────────────────
 
 
@@ -113,6 +133,58 @@ class Model:
         return await asyncio.to_thread(self.infer, batch)
 
 
+# TODO: define a general chunk -> action class model side. `Ensembler` is the
+# first instance of that abstraction — a reducer that consumes the stream of
+# (overlapping) action chunks a chunked policy emits and yields one action per
+# step. Other reducers (open-loop pop-the-queue, RTC-style prefix stitching)
+# should eventually share this interface so `LeRobotModel` can be parameterized
+# by the chunk->action strategy instead of hardcoding `select_action`.
+class Ensembler:
+    """Reduce a stream of overlapping action chunks to one action per step.
+
+    Temporal action ensembling (ACT's idea, with CogACT's adaptive weighting):
+    a chunked policy predicts a ``[chunk_size, action_dim]`` chunk every step,
+    and the chunk produced ``i`` steps ago made a forecast for *now* in its row
+    ``i``. :meth:`__call__` keeps the last ``horizon`` chunks, time-aligns those
+    forecasts, and returns their weighted average — closed-loop reactivity with
+    the smoothness of consensus.
+
+    Weights are ``softmax(alpha * cos_sim)`` against the newest prediction, so
+    predictions that disagree with the freshest evidence are down-weighted
+    (``alpha=0`` recovers ACT's uniform average). Port of the starVLA SimplerEnv
+    eval client's ``AdaptiveEnsembler`` (``adaptive_ensemble.py``).
+
+    Space-agnostic: it averages in whatever space it is fed, so place it AFTER
+    the policy's postprocessor (chunks already in env/native units). Note any
+    discretized dim (e.g. a binarized gripper) is averaged to a continuous value
+    the caller must re-threshold.
+    """
+
+    def __init__(self, horizon: int = 7, alpha: float = 0.1) -> None:
+        self.horizon = int(horizon)
+        self.alpha = float(alpha)
+        self._history: deque[np.ndarray] = deque(maxlen=self.horizon)
+
+    def reset(self) -> None:
+        """Clear the per-episode chunk history."""
+        self._history.clear()
+
+    def __call__(self, chunk: np.ndarray) -> np.ndarray:
+        """Push the freshly inferred ``[chunk_size, action_dim]`` chunk; return one action."""
+        self._history.append(np.asarray(chunk, dtype=np.float32))
+        n = len(self._history)
+        # Time-align: the chunk pushed i steps ago contributes its row i (its
+        # forecast for the current timestep); the newest chunk contributes row 0.
+        preds = np.stack([c[i] for i, c in zip(range(n - 1, -1, -1), self._history)])
+        ref = preds[-1]  # newest opinion = inferred from the freshest observation
+        cos = np.sum(preds * ref, axis=1) / (
+            np.linalg.norm(preds, axis=1) * np.linalg.norm(ref) + 1e-7
+        )
+        weights = np.exp(self.alpha * cos)
+        weights = weights / weights.sum()
+        return np.sum(weights[:, None] * preds, axis=0)
+
+
 class LeRobotModel(Model):
     """Wraps a LeRobot policy with its pre- and post-processor pipelines.
 
@@ -120,21 +192,35 @@ class LeRobotModel(Model):
     that deviates from the standard pipeline (e.g. a realtime chunk model) can
     subclass this and override :meth:`infer`, while still getting :meth:`reset`
     and access to ``policy`` / ``preprocess`` / ``postprocess`` for free.
+
+    Pass an :class:`Ensembler` to switch from the default open-loop behavior
+    (``select_action`` pops a chunk it executes step-by-step) to per-step
+    re-inference + temporal ensembling: every step runs the full
+    preprocess -> ``predict_action_chunk`` -> postprocess sandwich and reduces
+    the resulting chunk to one action. ``ensembler=None`` (the default) keeps the
+    original pop-the-queue path untouched.
     """
 
-    def __init__(self, policy: Any, preprocess: Any, postprocess: Any) -> None:
+    def __init__(
+        self, policy: Any, preprocess: Any, postprocess: Any, ensembler: Ensembler | None = None
+    ) -> None:
         self.policy = policy
         self.preprocess = preprocess
         self.postprocess = postprocess
+        #: Optional chunk->action reducer. When set, :meth:`infer` re-infers a
+        #: chunk every step and ensembles it instead of popping ``select_action``.
+        self.ensembler = ensembler
         #: Flipped to False after the first forward; used to print the one-time
         #: CUDA/flow-matching warmup message.
         self._first_inference = True
         self._step = 0  # env-step index within the episode (for the tracer)
 
     def reset(self) -> None:
-        """Reset LeRobot's open-loop action queue for the new episode."""
+        """Reset LeRobot's open-loop action queue (and the ensembler) for the new episode."""
         if hasattr(self.policy, "reset"):
             self.policy.reset()
+        if self.ensembler is not None:
+            self.ensembler.reset()
         self._step = 0
 
     def _queue_len(self) -> int | None:
@@ -146,12 +232,21 @@ class LeRobotModel(Model):
             return None
 
     def infer(self, batch: Any) -> np.ndarray:
-        """Run :func:`lerobot_infer`, with a one-time first-inference log.
+        """Run one inference step, with a one-time first-inference log + tracing.
 
-        When a :attr:`tracer` is attached, every step emits a platform span;
-        steps where ``select_action`` had to predict a **fresh action chunk**
-        (its open-loop queue was empty) are stamped as keyframes carrying the
-        chunk horizon — the decision-point markers in the trace viewer.
+        Two paths share the same logging / tracer / step-counter scaffolding and
+        differ only in how the action is produced:
+
+        - default (:attr:`ensembler` is ``None``) — :func:`lerobot_infer`
+          (``select_action`` pops the open-loop queue). The step is a fresh chunk
+          iff the queue was empty going in.
+        - ensembling (:attr:`ensembler` set) — :func:`lerobot_chunk_infer` every
+          step, reduced to one action by the ensembler. Every step re-infers, so
+          every step is a fresh chunk.
+
+        When a :attr:`tracer` is attached, each step emits a platform span; fresh
+        chunks are stamped as keyframes carrying the chunk horizon — the
+        decision-point markers in the trace viewer.
         """
         if self._first_inference:
             print(
@@ -159,18 +254,26 @@ class LeRobotModel(Model):
                 "may take a while; subsequent steps will be fast",
                 flush=True,
             )
-        before = self._queue_len()
-        result = lerobot_infer(self.policy, self.preprocess, self.postprocess, batch)
-        if self._first_inference:
-            print("[agent] first inference done — inference is now fast", flush=True)
-            self._first_inference = False
-        if self.tracer is not None:
-            # Fresh chunk iff the queue was empty going in. The queued actions
-            # are pre-postprocess (normalized), so only the horizon is recorded:
+
+        if self.ensembler is not None:
+            chunk = lerobot_chunk_infer(self.policy, self.preprocess, self.postprocess, batch)
+            result = self.ensembler(chunk)
+            keyframe, chunk_len = True, len(chunk)
+        else:
+            before = self._queue_len()
+            result = lerobot_infer(self.policy, self.preprocess, self.postprocess, batch)
+            # Fresh chunk iff the queue was empty going in. The queued actions are
+            # pre-postprocess (normalized), so only the horizon is recorded: the
             # popped action + whatever select_action left queued.
             after = self._queue_len()
             keyframe = (before == 0) or (before is None and self._step == 0)
             chunk_len = (after + 1) if (keyframe and after is not None) else None
+
+        if self._first_inference:
+            print("[agent] first inference done — inference is now fast", flush=True)
+            self._first_inference = False
+
+        if self.tracer is not None:
             self.tracer.emit_step(
                 batch, result, step=self._step, keyframe=bool(keyframe), chunk_len=chunk_len
             )
@@ -178,4 +281,12 @@ class LeRobotModel(Model):
         return result
 
 
-__all__ = ["STEP_COUNTER", "LeRobotModel", "Model", "StepCounter", "lerobot_infer"]
+__all__ = [
+    "STEP_COUNTER",
+    "Ensembler",
+    "LeRobotModel",
+    "Model",
+    "StepCounter",
+    "lerobot_chunk_infer",
+    "lerobot_infer",
+]
