@@ -17,6 +17,10 @@ This package is the **advisory** wiring check used at preflight time:
 - :func:`~hud.environment.robots.contracts.visualization.render_match` — terminal
   wiring diagram.
 
+The beta standard contract schema is the single-space form: one
+``role == "action"`` feature set plus observations per contract (no
+``action_modes`` / ``observation_modes`` wrappers).
+
 .. warning::
     In development: the matcher still centers on the experimental multi-mode
     contract schema (``action_modes`` / ``observation_modes``). The going-forward

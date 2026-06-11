@@ -133,6 +133,15 @@ class RobotBridge(ABC):
             "total_reward": float(self.total_reward),
         }
 
+    def attach_recorder(self, recorder: EpisodeRecorder | None) -> None:
+        """Attach (or replace) the off-loop recorder.
+
+        Used by ``RobotEndpoint`` when it builds the framework-default recorder
+        (see :func:`~hud.environment.robots.recording.default_recorder`), so the
+        env author never threads a recorder through by hand.
+        """
+        self._recorder = recorder
+
     @property
     def url(self) -> str:
         """The ``ws://`` address agents dial — advertise this in the manifest."""
@@ -149,6 +158,12 @@ class RobotBridge(ABC):
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        if self._recorder is not None:
+            # Drain + finalize so the on-disk dataset is loadable. Idempotent, and
+            # safe here: by stop() time no more frames are produced. Runs whenever
+            # the bridge stops (e.g. from an @env.shutdown hook), so authors never
+            # call recorder.close() themselves; atexit remains the backstop.
+            self._recorder.close()
 
     async def _handle_client(self, ws: Any) -> None:
         # A later connection replaces the previous one (only one agent at a time).

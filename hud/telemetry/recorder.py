@@ -93,14 +93,21 @@ _SHUTDOWN_SIGNALS = frozenset(
 class EpisodeRecorder:
     """Buffer trajectory events on the control loop, drain them on a worker thread.
 
-    Construct with a :class:`TraceSink`, then drive the episode lifecycle from the
-    env: :meth:`start_episode` / :meth:`record_frame` / :meth:`end_episode`, and
-    :meth:`close` once at shutdown. Every public method is non-blocking except
-    :meth:`close`, which drains the queue and joins the worker.
+    Construct with one or more :class:`TraceSink` s, then drive the episode
+    lifecycle from the env: :meth:`start_episode` / :meth:`record_frame` /
+    :meth:`end_episode`, and :meth:`close` once at shutdown. Every public method
+    is non-blocking except :meth:`close`, which drains the queue and joins the
+    worker.
+
+    With multiple sinks, every event fans out to each sink in construction order
+    (one copy, one queue, one worker — N consumers). Sink failures are isolated
+    per sink: one sink raising never starves the others of the event.
     """
 
-    def __init__(self, sink: TraceSink, *, max_queue: int = 0) -> None:
-        self._sink = sink
+    def __init__(self, *sinks: TraceSink, max_queue: int = 0) -> None:
+        if not sinks:
+            raise ValueError("EpisodeRecorder needs at least one TraceSink")
+        self._sinks = sinks
         # max_queue == 0 -> unbounded. Recording is opt-in for offline data
         # collection, so we favor never dropping frames over bounding memory.
         self._queue: queue.Queue[tuple[str, Any] | None] = queue.Queue(maxsize=max_queue)
@@ -188,19 +195,21 @@ class EpisodeRecorder:
             if event is None:
                 break
             kind, payload = event
+            for sink in self._sinks:  # per-sink isolation: one failing never starves the rest
+                try:
+                    if kind == _START:
+                        sink.on_episode_start(payload)
+                    elif kind == _FRAME:
+                        sink.on_frame(payload)
+                    elif kind == _END:
+                        sink.on_episode_end(payload)
+                except Exception:  # a sink failure must never crash the env
+                    logger.exception("trace sink %r failed handling %s event", sink, kind)
+        for sink in self._sinks:
             try:
-                if kind == _START:
-                    self._sink.on_episode_start(payload)
-                elif kind == _FRAME:
-                    self._sink.on_frame(payload)
-                elif kind == _END:
-                    self._sink.on_episode_end(payload)
-            except Exception:  # a sink failure must never crash the env
-                logger.exception("trace sink failed handling %s event", kind)
-        try:
-            self._sink.on_close()
-        except Exception:
-            logger.exception("trace sink failed on close")
+                sink.on_close()
+            except Exception:
+                logger.exception("trace sink %r failed on close", sink)
 
 
 __all__ = ["EpisodeRecorder", "Frame", "TraceSink"]

@@ -40,16 +40,41 @@ if TYPE_CHECKING:
 class RobotEndpoint:
     """Lifecycle wrapper: bridge episode management + recorder lifecycle.
 
-    Construct in ``env_server.py`` with the bridge and (optionally) the recorder;
-    pass into the task generator closure::
+    The canonical construction hands the endpoint the env contract and lets the
+    framework own recording entirely::
 
-        endpoint = RobotEndpoint(sim_bridge, recorder)
+        endpoint = RobotEndpoint(bridge, contract=CONTRACT, name="my_env")
+
+    With ``contract`` given (and no explicit ``recorder``), the endpoint builds
+    the framework-default recorder from launch-time configuration — a LeRobot
+    dataset sink when ``BENCH_RECORD_DIR`` is set, a live platform stream when
+    HUD telemetry is configured, fanned out from one
+    :class:`~hud.telemetry.EpisodeRecorder` (see
+    :func:`~hud.environment.robots.recording.default_recorder`) — and attaches
+    it to the bridge. The recorder is closed by ``bridge.stop()`` (i.e. the
+    env's ``@env.shutdown`` hook), so the author writes **zero recorder code**.
+
+    Passing an explicit ``recorder`` (legacy self-serving env servers) still
+    works and skips the default construction.
 
     The task generator then calls :meth:`reset` and :meth:`result` — nothing else.
     """
 
-    def __init__(self, bridge: RobotBridge, recorder: EpisodeRecorder | None = None) -> None:
+    def __init__(
+        self,
+        bridge: RobotBridge,
+        recorder: EpisodeRecorder | None = None,
+        *,
+        contract: dict[str, Any] | None = None,
+        name: str | None = None,
+    ) -> None:
         self._bridge = bridge
+        if recorder is None and contract is not None:
+            from .recording import default_recorder
+
+            recorder = default_recorder(contract, name=name or "env")
+            if recorder is not None:
+                bridge.attach_recorder(recorder)
         self._recorder = recorder
 
     async def reset(self, **task_args: Any) -> str:

@@ -67,6 +67,16 @@ def make_recorder(
     if record_dir is None:
         return None
     from hud.telemetry import EpisodeRecorder
+
+    return EpisodeRecorder(_lerobot_sink(contract, record_dir, name=name))
+
+
+def _lerobot_sink(contract: dict, record_dir: str, *, name: str):
+    """Build the file-backed LeRobot dataset sink under ``<record_dir>/<name>_<stamp>/``.
+
+    See :func:`make_recorder` for the ``BENCH_HF_REPO`` / ``BENCH_HF_PRIVATE``
+    Hugging Face push behavior (it applies here — the sink owns the push).
+    """
     from hud.telemetry.lerobot import LeRobotTraceSink
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -80,7 +90,48 @@ def make_recorder(
     )
     dest = f" -> push to hf:{repo_id} ({'private' if private else 'public'})" if push else ""
     print(f"[env] recording traces -> {root}{dest}", flush=True)
-    return EpisodeRecorder(sink)
+    return sink
+
+
+def default_recorder(contract: dict, *, name: str) -> EpisodeRecorder | None:
+    """Build the framework-default recorder from launch-time configuration.
+
+    One :class:`~hud.telemetry.EpisodeRecorder` fanning out to every sink the
+    launch configuration enables — the env author writes no recorder code:
+
+    - **LeRobot dataset** (``BENCH_RECORD_DIR`` set): every executed tick lands
+      in a LeRobot v3 dataset under that directory (per-lane dirs come from the
+      fleet; the optional HF push applies, see :func:`make_recorder`).
+    - **Platform stream** (HUD telemetry configured: ``HUD_API_KEY`` set and
+      telemetry enabled): the same tick stream ships live to the platform via
+      :class:`~hud.telemetry.platform_sink.PlatformTraceSink`.
+
+    Returns ``None`` when nothing is enabled, so the bridge skips all recording
+    overhead. Called by ``RobotEndpoint(bridge, contract=...)``; authors normally
+    never call this directly.
+    """
+    sinks: list = []
+
+    record_dir = os.environ.get("BENCH_RECORD_DIR")
+    if record_dir:
+        sinks.append(_lerobot_sink(contract, record_dir, name=name))
+
+    try:
+        from hud.settings import settings
+
+        if settings.telemetry_enabled and settings.api_key:
+            from hud.telemetry.platform_sink import PlatformTraceSink
+
+            sinks.append(PlatformTraceSink(env_name=name))
+            print("[env] streaming ticks to the HUD platform", flush=True)
+    except Exception:  # settings unavailable -> platform streaming off
+        pass
+
+    if not sinks:
+        return None
+    from hud.telemetry import EpisodeRecorder
+
+    return EpisodeRecorder(*sinks)
 
 
 async def serve_until_signal(env: Environment, host: str, port: int) -> None:
@@ -115,4 +166,4 @@ async def serve_until_signal(env: Environment, host: str, port: int) -> None:
             await asyncio.gather(serve_task, stop_task, return_exceptions=True)
 
 
-__all__ = ["add_record_arg", "make_recorder", "serve_until_signal"]
+__all__ = ["add_record_arg", "default_recorder", "make_recorder", "serve_until_signal"]
