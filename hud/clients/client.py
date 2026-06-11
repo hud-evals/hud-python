@@ -244,12 +244,12 @@ class HudClient:
         cap_client = self._opened.get(cap.name)
         if cap_client is None:
             client_cls = _CLIENT_REGISTRY.get(cap.protocol)
-            if client_cls is None and cap.protocol == "robot":
+            if client_cls is None and cap.protocol.split("/", 1)[0] == "robot":
                 # RobotClient pulls optional deps (numpy/msgpack — the ``robot``
                 # extra), so it joins the registry on first open, not at import.
                 from hud.capabilities.robot import RobotClient
 
-                client_cls = _CLIENT_REGISTRY[cap.protocol] = RobotClient
+                client_cls = _CLIENT_REGISTRY[RobotClient.protocol] = RobotClient
             if client_cls is None:
                 raise ValueError(
                     f"no client registered for protocol {cap.protocol!r}; "

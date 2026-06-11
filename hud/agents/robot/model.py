@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import numpy as np
 
+    from .tracer import RobotTracer
+
 # ─── throughput counter (shared by the baseline + batched paths) ─────────────
 
 
@@ -87,6 +89,11 @@ class Model:
     - :meth:`infer` every step — run the policy on a prepared batch.
     """
 
+    #: Optional per-step platform tracer (one span per env step, keyframes at
+    #: fresh chunks). The harness attaches a default one when HUD telemetry is
+    #: configured; models that know their chunk boundaries emit through it.
+    tracer: RobotTracer | None = None
+
     def reset(self) -> None:
         """Reset per-episode model state. Override when the policy is stateful."""
 
@@ -122,24 +129,52 @@ class LeRobotModel(Model):
         #: Flipped to False after the first forward; used to print the one-time
         #: CUDA/flow-matching warmup message.
         self._first_inference = True
+        self._step = 0  # env-step index within the episode (for the tracer)
 
     def reset(self) -> None:
         """Reset LeRobot's open-loop action queue for the new episode."""
         if hasattr(self.policy, "reset"):
             self.policy.reset()
+        self._step = 0
+
+    def _queue_len(self) -> int | None:
+        """Length of LeRobot's open-loop action queue, or ``None`` if unknown."""
+        queue = getattr(self.policy, "_action_queue", None)
+        try:
+            return None if queue is None else len(queue)
+        except TypeError:
+            return None
 
     def infer(self, batch: Any) -> np.ndarray:
-        """Run :func:`lerobot_infer`, with a one-time first-inference log."""
+        """Run :func:`lerobot_infer`, with a one-time first-inference log.
+
+        When a :attr:`tracer` is attached, every step emits a platform span;
+        steps where ``select_action`` had to predict a **fresh action chunk**
+        (its open-loop queue was empty) are stamped as keyframes carrying the
+        chunk horizon — the decision-point markers in the trace viewer.
+        """
         if self._first_inference:
             print(
                 "[agent] first inference — flow-matching/CUDA warmup on this call, "
                 "may take a while; subsequent steps will be fast",
                 flush=True,
             )
+        before = self._queue_len()
         result = lerobot_infer(self.policy, self.preprocess, self.postprocess, batch)
         if self._first_inference:
             print("[agent] first inference done — inference is now fast", flush=True)
             self._first_inference = False
+        if self.tracer is not None:
+            # Fresh chunk iff the queue was empty going in. The queued actions
+            # are pre-postprocess (normalized), so only the horizon is recorded:
+            # popped action + whatever select_action left queued.
+            after = self._queue_len()
+            keyframe = (before == 0) or (before is None and self._step == 0)
+            chunk_len = (after + 1) if (keyframe and after is not None) else None
+            self.tracer.emit_step(
+                batch, result, step=self._step, keyframe=bool(keyframe), chunk_len=chunk_len
+            )
+        self._step += 1
         return result
 
 

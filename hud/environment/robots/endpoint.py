@@ -47,15 +47,15 @@ class RobotEndpoint:
 
     With ``contract`` given (and no explicit ``recorder``), the endpoint builds
     the framework-default recorder from launch-time configuration — a LeRobot
-    dataset sink when ``BENCH_RECORD_DIR`` is set, a live platform stream when
+    dataset sink when ``HUD_RECORD_DIR`` is set, a live platform stream when
     HUD telemetry is configured, fanned out from one
     :class:`~hud.telemetry.EpisodeRecorder` (see
     :func:`~hud.environment.robots.recording.default_recorder`) — and attaches
     it to the bridge. The recorder is closed by ``bridge.stop()`` (i.e. the
     env's ``@env.shutdown`` hook), so the author writes **zero recorder code**.
 
-    Passing an explicit ``recorder`` (legacy self-serving env servers) still
-    works and skips the default construction.
+    Passing an explicit ``recorder`` still works and skips the default
+    construction.
 
     The task generator then calls :meth:`reset` and :meth:`result` — nothing else.
     """

@@ -128,6 +128,8 @@ class PlatformTraceSink(TraceSink):
         if self._trace_id is None or not self._enabled():
             return
         try:
+            from hud.agents.robot.tracer import camera_content  # noqa: PLC0415
+
             now = _now_iso()
             request: dict[str, Any] = {"step": self._step, "prompt": self._prompt}
             if self._env or self._meta:
@@ -137,12 +139,16 @@ class PlatformTraceSink(TraceSink):
                 }
             images = _obs_images(frame.obs)
             if images:
-                request["images"] = images
-                request["image"] = next(iter(images.values()))  # single-frame back-compat
+                # Same wire shape as the agent-side RobotTracer: frames ride the
+                # messages-content path the platform offloads to S3 + presigns.
+                request["messages"] = [{"role": "robot", "content": camera_content(images)}]
             result: dict[str, Any] = {
-                "action": np.round(
-                    np.asarray(frame.action, dtype=np.float32), 4
-                ).reshape(-1).tolist(),
+                # float64 before round: float32 values would re-acquire
+                # representation noise (0.10000000149...) in the JSON.
+                "action": np.asarray(frame.action, dtype=np.float64)
+                .round(4)
+                .reshape(-1)
+                .tolist(),
                 "reward": float(frame.reward),
                 "done": bool(frame.done),
             }
@@ -196,7 +202,7 @@ class PlatformTraceSink(TraceSink):
         assert self._trace_id is not None
         attributes = TraceStep(
             task_run_id=self._trace_id,
-            category="env",
+            category="robot",
             type="CLIENT",
             request=request,
             result=result,

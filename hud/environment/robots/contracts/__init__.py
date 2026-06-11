@@ -4,11 +4,13 @@ A *contract* is the JSON schema a robot env advertises with its ``robot``
 capability — robot type, control rate, and every observation/action feature
 (dtype/shape/names/stats plus semantic fields like ``state_type``, ``frame``,
 ``units``). Model contracts describe the same things from the policy's side.
-The contract format is defined in the ``SPEC.md`` co-located in this package.
+The contract format is defined in ``spec_v0.md`` co-located in this package.
 
 This package is the **advisory** wiring check used at preflight time:
 
-- :func:`~hud.environment.robots.contracts.matching.match` — robot_type gate.
+- :func:`~hud.environment.robots.contracts.matching.match` — robot_type gate
+  (v0: support is the top-level ``robot_type``; returns ``{}`` on a match, so test
+  ``is None``).
 - :func:`~hud.environment.robots.contracts.matching.pair_observations` /
   :func:`~hud.environment.robots.contracts.matching.match_actions` — feature pairing.
 - :func:`~hud.environment.robots.contracts.adaptation.integration_review` — gap
@@ -17,9 +19,10 @@ This package is the **advisory** wiring check used at preflight time:
 - :func:`~hud.environment.robots.contracts.visualization.render_match` — terminal
   wiring diagram.
 
-The beta standard contract schema is the single-space form: one
-``role == "action"`` feature set plus observations per contract (no
-``action_modes`` / ``observation_modes`` wrappers).
+The v0 contract schema is the single-space form: one embodiment (``robot_type``),
+one ``role == "action"`` feature set plus observations per contract (no
+``action_modes`` / ``observation_modes`` wrappers and no ``decision_variables`` /
+``robot_type_variables`` knobs). Every feature is rank ≥ 1 (scalars use ``[1]``).
 
 .. warning::
     In development: the matcher still centers on the experimental multi-mode

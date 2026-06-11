@@ -252,6 +252,24 @@ class TraceStep(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
+class HudSpan(BaseModel):
+    """A telemetry span ready for export to HUD API."""
+
+    name: str
+    trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
+    span_id: str = Field(pattern=r"^[0-9a-fA-F]{16}$")
+    parent_span_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{16}$")
+    start_time: str
+    end_time: str
+    status_code: str
+    status_message: str | None = None
+    attributes: TraceStep
+    internal_type: str | None = None
+    exceptions: list[dict[str, Any]] | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Trace(BaseModel):
     """The agent's trajectory for one rollout — a pure, serializable datum.
 
@@ -295,6 +313,7 @@ class Trace(BaseModel):
 __all__ = [
     "AgentResponse",
     "AgentType",
+    "HudSpan",
     "JsonObject",
     "JsonValue",
     "MCPToolCall",

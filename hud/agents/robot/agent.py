@@ -70,16 +70,37 @@ class RobotAgent(Agent):
     def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
         """Called once before the observe/act loop begins.
 
-        Stores the prompt, resets the model and adapter. Mostly internal — the base
-        always calls it. Override (calling ``super()`` first) only when per-episode
-        env-contract reading or extra setup is needed (e.g. ``RealtimeRobotAgent``
-        reads inference mode/threshold from the contract here).
+        Stores the prompt, resets the model and adapter, and stamps the rollout's
+        task onto the model's tracer (so platform spans are labeled). Mostly
+        internal — the base always calls it. Override (calling ``super()`` first)
+        only when per-episode env-contract reading or extra setup is needed
+        (e.g. ``RealtimeRobotAgent`` reads inference mode/threshold here).
         """
         self._prompt = prompt
         if self.model is not None:
             self.model.reset()
+            if self.model.tracer is not None:
+                self.model.tracer.set_episode(
+                    task=getattr(run, "_task_id", None), args=getattr(run, "_args", None)
+                )
         if self.adapter is not None:
             self.adapter.reset()
+
+    def _attach_tracer(self, run: Run) -> None:
+        """Give the model a default :class:`RobotTracer` when none is set.
+
+        Zero-config platform telemetry: with HUD telemetry configured, every
+        robot rollout streams per-step spans (frames + keyframe markers at
+        fresh action chunks) without the user wiring anything. The tracer
+        itself is a no-op when the platform isn't configured.
+        """
+        if self.model is None or self.model.tracer is not None:
+            return
+        from .tracer import RobotTracer
+
+        manifest = getattr(run.client, "manifest", None)
+        env_name = manifest.server_info.name if manifest is not None else None
+        self.model.tracer = RobotTracer(model=type(self).__name__, env=env_name)
 
     def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
         """Return True to break out of the step loop (before ``select_action``)."""
@@ -105,6 +126,7 @@ class RobotAgent(Agent):
         client = await RobotClient.connect(cap)
         try:
             self.setup_robot(client)
+            self._attach_tracer(run)
             prompt = run.prompt
             if not isinstance(prompt, str):
                 raise TypeError(

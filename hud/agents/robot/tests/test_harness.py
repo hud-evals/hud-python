@@ -110,8 +110,8 @@ def test_should_stop_reads_terminated() -> None:
 
 
 def test_robot_protocol_constant() -> None:
-    assert ROBOT_PROTOCOL == "robot"
-    assert RobotAgent.robot_protocol == "robot"
+    assert ROBOT_PROTOCOL == "robot/0.1"
+    assert RobotAgent.robot_protocol == "robot/0.1"
 
 
 # ── RealtimeRobotAgent._model_prefix ──────────────────────────────────────────

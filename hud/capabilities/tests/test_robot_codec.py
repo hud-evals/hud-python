@@ -121,7 +121,7 @@ CONTRACT = {
 
 def test_capability_robot_protocol_and_contract() -> None:
     cap = Capability.robot(url="ws://localhost:9091", contract=CONTRACT)
-    assert cap.protocol == "robot"
+    assert cap.protocol == "robot/0.1"
     assert cap.name == "robot"
     assert cap.url == "ws://localhost:9091"
     assert cap.params["contract"] == CONTRACT
@@ -130,7 +130,7 @@ def test_capability_robot_protocol_and_contract() -> None:
 def test_capability_robot_round_trips_through_manifest() -> None:
     cap = Capability.robot(url="ws://localhost:9091", contract=CONTRACT)
     restored = Capability.from_manifest(cap.to_manifest())
-    assert restored.protocol == "robot"
+    assert restored.protocol == "robot/0.1"
     assert restored.params["contract"] == CONTRACT
 
 
@@ -140,4 +140,4 @@ def test_capability_robot_normalizes_bare_host() -> None:
 
 
 def test_robot_client_protocol_string() -> None:
-    assert RobotClient.protocol == "robot"
+    assert RobotClient.protocol == "robot/0.1"

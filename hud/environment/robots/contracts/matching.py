@@ -4,7 +4,7 @@ NOTE (In Development): the `action_modes` (see `model_action_modes`) and
 `observation_modes` (see `model_features`) handling below targets the *experimental*
 multi-mode contract schema (specs in the demos `contracts/experiments/` corpus). The
 going-forward **standard** schema is one action space and one observation space per
-contract (no `*_modes` wrappers); see §5 of the SPEC.md co-located in this package.
+contract (no `*_modes` wrappers); see §5 of the spec_v0.md co-located in this package.
 This matcher has **not** been
 updated to that standard — it still centers on the experimental wrappers, so the
 standard split contracts do not exercise these code paths (top-level `action.*`
@@ -20,8 +20,23 @@ Feature = tuple[str, dict | None]
 
 
 def match(model: dict, robot_type: str) -> dict | None:
-    """Decision variables for ``robot_type``, or None if the model does not support it."""
-    return model.get("robot_type_variables", {}).get(robot_type)
+    """Whether ``model`` supports ``robot_type`` (v0 gate), else ``None``.
+
+    v0 single-type schema: support is declared solely by the model's top-level
+    ``robot_type`` (a string, or a list for legacy multi-embodiment contracts). On a
+    match this returns an empty dict ``{}`` ("supported, no knobs"), so callers must
+    test ``is None`` rather than truthiness — the empty dict is supported yet falsy.
+
+    Backward-compatible: archived experiment contracts that still carry
+    ``robot_type_variables`` resolve through it (returning any per-embodiment decision
+    values), so those specs keep loading.
+    """
+    rtv = model.get("robot_type_variables")
+    if rtv is not None:
+        return rtv.get(robot_type)
+    declared = model.get("robot_type")
+    supported = declared if isinstance(declared, list) else [declared]
+    return {} if robot_type in supported else None
 
 
 def model_features(model: dict, robot_type: str | None = None) -> dict:

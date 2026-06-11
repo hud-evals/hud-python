@@ -1,6 +1,6 @@
-"""The ``robot`` protocol: wire codec + the agent-side client.
+"""The ``robot/0.1`` protocol: wire codec + the agent-side client.
 
-This module defines the ``robot`` wire format (msgpack + raw numpy array buffers) and
+This module defines the ``robot/0.1`` wire format (msgpack + raw numpy array buffers) and
 :class:`RobotClient`, the agent-side capability client that dials a robot env and exchanges
 observations/actions over it.
 
@@ -51,9 +51,9 @@ def _unpackb(data: bytes) -> Any:
 
 
 class RobotClient(CapabilityClient):
-    """Live ``robot`` connection: send actions, receive observations."""
+    """Live ``robot/0.1`` connection: send actions, receive observations."""
 
-    protocol: ClassVar[str] = "robot"
+    protocol: ClassVar[str] = "robot/0.1"
 
     def __init__(self, capability: Capability, ws: Any) -> None:
         self.capability = capability

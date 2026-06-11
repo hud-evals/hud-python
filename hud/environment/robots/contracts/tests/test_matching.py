@@ -1,6 +1,7 @@
-"""Contract matcher tests against the BETA-standard single-space schema.
+"""Contract matcher tests against the v0 single-space schema.
 
-The beta standard is one action space + one observation space per contract (no
+v0 is one embodiment (``robot_type``) and one action space + one observation space
+per contract (no
 ``action_modes`` / ``observation_modes`` wrappers): a model's top-level
 ``role == "action"`` features register through ``model_action_modes``'s
 ``default`` branch, and observations pair positionally (images first, then
@@ -76,7 +77,6 @@ def make_model_contract(**overrides: Any) -> dict[str, Any]:
         "model": "stub_policy",
         "robot_type": "bot_x",
         "control_rate": 10,
-        "robot_type_variables": {"bot_x": {}},
         "features": {
             "observation.images.image": {
                 "role": "observation",
@@ -115,12 +115,21 @@ def make_model_contract(**overrides: Any) -> dict[str, Any]:
 
 
 def test_match_gates_on_robot_type() -> None:
+    # v0: support is the top-level robot_type; match returns {} (supported, no knobs).
     model = make_model_contract()
-    assert match(model, "bot_x") == {}  # supported: decision variables (empty ok)
+    assert match(model, "bot_x") == {}
     assert match(model, "other_bot") is None  # unsupported
 
 
-def test_match_returns_decision_variables() -> None:
+def test_match_gates_on_robot_type_list() -> None:
+    # v0 tolerates a list robot_type for legacy multi-embodiment checkpoints.
+    model = make_model_contract(robot_type=["bot_x", "bot_y"])
+    assert match(model, "bot_y") == {}
+    assert match(model, "bot_z") is None
+
+
+def test_match_legacy_robot_type_variables() -> None:
+    # Backward-compat: archived experiment contracts still resolve through rtv.
     model = make_model_contract(robot_type_variables={"bot_x": {"observation_mode": None}})
     assert match(model, "bot_x") == {"observation_mode": None}
 
@@ -198,7 +207,7 @@ def test_integration_review_clean_match_has_no_problems() -> None:
 
 
 def test_integration_review_returns_none_when_robot_type_unsupported() -> None:
-    model = make_model_contract(robot_type_variables={})
+    model = make_model_contract(robot_type="other_bot")
     assert integration_review(make_env_contract(), model) is None
 
 

@@ -59,18 +59,20 @@ def render_match(
     integration: bool = False,
 ) -> str:
     robot_type = env.get("robot_type", "?")
-    decision_variables = match(model, robot_type)
+    supported = match(model, robot_type)
     head = _c(
         f"robot: env {env_name!r} ({robot_type}) <-> model {model_name!r}",
         "1;36",
     )
-    if decision_variables is None:
-        robots = list(model.get("robot_type_variables", {}))
+    if supported is None:
+        declared = model.get("robot_type") or list(model.get("robot_type_variables", {}))
+        robots = declared if isinstance(declared, list) else [declared]
         return f"{head}\n  {_c('NO MATCH', '1;31')} {_c(f'(model robots: {robots})', '90')}"
 
+    extra = f" | {supported}" if supported else ""
     lines = [
         head,
-        f"  {_c('MATCH', '1;32')} | decision_variables={decision_variables or '{}'}",
+        f"  {_c('MATCH', '1;32')} ({robot_type}){extra}",
         _c("  observations (env -> model):", "1;34"),
         *_rows(
             pair_observations(env, model, robot_type),
@@ -98,7 +100,7 @@ def render_match(
         )
 
     if integration:
-        review = integration_review(env, model, decision_variables=decision_variables)
+        review = integration_review(env, model, supported=supported)
         if review is not None:
             lines.extend(format_integration_review(review))
     return "\n".join(lines)

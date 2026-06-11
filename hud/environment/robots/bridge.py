@@ -68,11 +68,15 @@ class RobotBridge(ABC):
     def __init__(
         self,
         *,
-        host: str = "localhost",
-        port: int = 9091,
+        host: str = "127.0.0.1",
+        port: int = 0,
         recorder: EpisodeRecorder | None = None,
         sim_runner: SimRunner | None = None,
     ) -> None:
+        # Loopback + ephemeral by default: the bridge's concrete address is
+        # published in the manifest from an ``@env.initialize`` hook (after
+        # ``start()``), and the control-channel tunnel makes a loopback bind
+        # reachable from anywhere — so no env ever manages bridge ports.
         self._host = host
         self._port = port
         self._client: Any = None  # robot serves a single agent at a time
@@ -144,13 +148,24 @@ class RobotBridge(ABC):
 
     @property
     def url(self) -> str:
-        """The ``ws://`` address agents dial — advertise this in the manifest."""
+        """The bridge's concrete ``ws://`` address — publish this in the manifest.
+
+        With an ephemeral port (the default) the address only exists once
+        :meth:`start` has bound the socket, so publish from an
+        ``@env.initialize`` hook *after* ``await bridge.start()``.
+        """
+        if self._port == 0:
+            raise RuntimeError(
+                "bridge bound to an ephemeral port; call start() before reading url"
+            )
         return f"ws://{self._host}:{self._port}"
 
     async def start(self) -> None:
         self._server = await websockets.serve(
             self._handle_client, self._host, self._port, max_size=None, reuse_address=True
         )
+        if self._port == 0:
+            self._port = self._server.sockets[0].getsockname()[1]
         print(f"[env] robot listening on ws://{self._host}:{self._port}", flush=True)
 
     async def stop(self) -> None:

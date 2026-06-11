@@ -1,18 +1,25 @@
 """``RobotTracer``: agent-side per-step trace spans with keyframe stamps.
 
-Emits one span per **env step** (``robot.step``) through the existing
-``hud.telemetry`` exporter, so benchmark runs stream live into the platform
-viewer with zero new transport: ``Taskset._rollout`` already binds a per-rollout
+Emits one span per **env step** (``robot.step``, ``category="robot"``) through
+the existing ``hud.telemetry`` exporter, so runs stream live into the platform
+viewer with zero new transport: ``rollout`` already binds a per-rollout
 ``trace_id`` into the trace context, and ``queue_span`` ships spans
 fire-and-forget on a worker pool.
 
 Every step carries *small* JPEGs of **every camera** the model saw plus the
-executed action — that is the stream a viewer plays back as video. Steps where a
-**fresh action chunk** was inferred are stamped ``keyframe: true`` and
-additionally carry the full chunk and full-resolution frames (the decision-point
-record). Dense playback lives in the *agent-side* trace because the env-side
-LeRobot dataset (the lossless training artifact) does not share a disk with the
-viewer once envs move to their own containers.
+executed action — that is the stream the viewer scrubs through as frames.
+Steps where a **fresh action chunk** was inferred are stamped
+``keyframe: true`` and carry full-resolution frames (+ the chunk when the
+caller has it) — the decision-point markers on the viewer's timeline.
+
+Wire shape (what the platform projects into ``robot_step`` events):
+
+- camera frames ride ``request.messages[0].content`` as ``image_url`` items
+  (each stamped with its ``camera`` name), i.e. the exact path the platform's
+  artifact pipeline already offloads to S3 and presigns on read;
+- ``request`` carries ``step`` / ``keyframe`` / ``prompt`` / ``meta``;
+- ``result`` carries the executed ``action`` (+ ``chunk`` / ``chunk_len`` /
+  ``action_dim`` on keyframes).
 
 Measured budget: stress testing sustained ~40 image spans/s with zero loss;
 10 Hz control x a few lanes with ~10-15 KB step frames is well inside that.
@@ -48,6 +55,20 @@ def _now_iso() -> str:
 def _normalize_trace_id(trace_id: str) -> str:
     clean = trace_id.replace("-", "")
     return clean[:32].ljust(32, "0")
+
+
+def camera_content(images: dict[str, str]) -> list[dict[str, Any]]:
+    """``{camera: data_url}`` -> ``image_url`` content items (artifact-pipeline shape).
+
+    The platform ingest walks ``request.messages[].content[]`` for ``image_url``
+    items, offloads the base64 payload to S3, and presigns it on the read path —
+    so frames never bloat the stored span. The extra ``camera`` key survives the
+    round trip and names the stream in the viewer.
+    """
+    return [
+        {"type": "image_url", "camera": name, "image_url": {"url": url}}
+        for name, url in images.items()
+    ]
 
 
 def _encode_chw(value: Any, *, max_px: int, quality: int) -> str | None:
@@ -128,11 +149,13 @@ class RobotTracer:
         step: int,
         keyframe: bool = False,
         chunk: np.ndarray | None = None,
+        chunk_len: int | None = None,
     ) -> None:
         """Record one env step: what the model saw and the action executed.
 
-        ``keyframe=True`` marks a fresh-chunk inference step; pass the full
-        ``chunk`` then so the decision-point record is complete. Fire-and-forget;
+        ``keyframe=True`` marks a fresh-chunk inference step — pass the full
+        ``chunk`` then (or at least ``chunk_len`` when only the horizon is
+        known) so the decision-point record is complete. Fire-and-forget;
         any failure is logged and swallowed.
         """
         try:
@@ -162,21 +185,29 @@ class RobotTracer:
             if meta:
                 request["meta"] = meta  # model / env / task / task_args — for the viewer
             if images:
-                request["images"] = images  # {camera_name: data_url} — all streams
-                request["image"] = next(iter(images.values()))  # back-compat single frame
+                # Camera frames as messages-content image items: the platform's
+                # artifact pipeline offloads these to S3 at ingest and presigns
+                # them on read, so the viewer gets URLs, not inline base64.
+                request["messages"] = [{"role": "robot", "content": camera_content(images)}]
 
             result: dict[str, Any] = {
-                "action": np.round(np.asarray(action, dtype=np.float32), 4).reshape(-1).tolist(),
+                # float64 before round: float32 values would re-acquire
+                # representation noise (0.10000000149...) in the JSON.
+                "action": np.asarray(action, dtype=np.float64).round(4).reshape(-1).tolist(),
             }
-            if keyframe and chunk is not None:
-                arr = np.asarray(chunk, dtype=np.float32)
-                result["chunk_len"] = int(arr.shape[0]) if arr.ndim >= 1 else 1
-                result["action_dim"] = int(arr.shape[-1]) if arr.ndim >= 1 else int(arr.size)
-                result["chunk"] = np.round(arr, 4).tolist()
+            if keyframe:
+                if chunk is not None:
+                    arr = np.asarray(chunk, dtype=np.float64)
+                    result["chunk_len"] = int(arr.shape[0]) if arr.ndim >= 1 else 1
+                    result["action_dim"] = int(arr.shape[-1]) if arr.ndim >= 1 else int(arr.size)
+                    result["chunk"] = arr.round(4).tolist()
+                elif chunk_len is not None:
+                    result["chunk_len"] = int(chunk_len)
+                    result["action_dim"] = int(np.asarray(action).size)
 
             attributes = TraceStep(
                 task_run_id=trace_id,
-                category="agent",
+                category="robot",
                 type="CLIENT",
                 request=request,
                 result=result,
@@ -201,4 +232,4 @@ class RobotTracer:
             logger.debug("tracer: span emission failed", exc_info=True)
 
 
-__all__ = ["RobotTracer"]
+__all__ = ["RobotTracer", "camera_content"]

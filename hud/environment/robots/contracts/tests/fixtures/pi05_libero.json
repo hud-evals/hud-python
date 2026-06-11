@@ -6,10 +6,6 @@
     "robot_class": "arm7g1",
     "chunk_size": 50,
     "control_rate": 10,
-    "robot_type_variables": {
-        "franka_panda_libero": {}
-    },
-    "decision_variables": {},
     "features": {
         "observation.images.image": {
             "role": "observation",
@@ -163,5 +159,5 @@
             "comment": "Gripper open/close, normalized [-1,1], ABSOLUTE (arm is delta)."
         }
     },
-    "comment": "pi0.5 (PI05) flow-matching VLA finetuned on LIBERO, one Franka Panda. State tokenized into the prompt (256 bins); 50-step action chunk. MEAN_STD checkpoint (quantiles: lerobot/pi05_libero_finetuned_quantiles; base/stats-less: lerobot/pi05_libero_base). Matching uses robot_type_variables only."
+    "comment": "pi0.5 (PI05) flow-matching VLA finetuned on LIBERO, one Franka Panda. State tokenized into the prompt (256 bins); 50-step action chunk. MEAN_STD checkpoint (quantiles: lerobot/pi05_libero_finetuned_quantiles; base/stats-less: lerobot/pi05_libero_base). Matching gates on robot_type."
 }
