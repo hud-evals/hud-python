@@ -14,7 +14,7 @@ import threading
 from collections import defaultdict
 from typing import Any
 
-from hud.shared import make_request_sync
+from hud.utils import make_request_sync
 
 logger = logging.getLogger(__name__)
 

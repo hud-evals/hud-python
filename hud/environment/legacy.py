@@ -7,9 +7,9 @@ Deployed v5 envs are written against the old MCP-server ``Env``: positional
 JSON-RPC control channel of capabilities + tasks), so this mixin re-exposes that
 surface and *adapts* it to v6:
 
-- scenarios register as v6 tasks (via :func:`scenario_to_task_fn`), keeping the
+- scenarios register as v6 tasks (via the env task adapter), keeping the
   v5 metadata (chat flag, returns type, tool exclusions) for agents/manifest;
-- ``env(name)`` returns the registered ``Task`` (a callable variant factory);
+- ``env(name)`` returns the registered task factory;
 - ``env.run(...)`` serves the v6 control channel;
 - registered tools are classified and, on serve, turned into capabilities:
   shell/edit → ``ssh`` (spins up a :class:`~hud.environment.Workspace`), computer
@@ -34,8 +34,9 @@ from typing import TYPE_CHECKING, Any, Literal, ParamSpec, cast
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from .task import Task
-    from .workspace import Workspace
+    from hud.capabilities import Capability
+
+    from .env import Environment, _TaskFactory
 
 LOGGER = logging.getLogger("hud.environment.legacy")
 
@@ -63,8 +64,9 @@ def _port_open(host: str, port: int, timeout: float = 0.3) -> bool:
 def _classify_tool(tool: Any) -> ToolKind:
     """Bucket a registered tool into the capability it should become.
 
-    Honors an explicit ``_legacy_capability_kind`` marker (set by the ``hud.tools``
-    shim for removed computer tools), else infers from the tool's name/class.
+    Honors an explicit ``_legacy_capability_kind`` marker (set by
+    :mod:`hud._legacy` for removed computer and shell/edit tools), else infers
+    from the tool's name/class.
     """
     marker = getattr(tool, "_legacy_capability_kind", None)
     if marker in ("shell", "computer", "mcp"):
@@ -83,10 +85,11 @@ class LegacyEnvMixin:
 
     # Provided by Environment:
     name: str
-    _tasks: dict[str, Task[Any]]
+    tasks: dict[str, _TaskFactory[Any]]
+    capabilities: list[Capability]
+    add_capability: Callable[[Capability], None]
     _on_start: list[Callable[[], Any]]
     _on_stop: list[Callable[[], Any]]
-    add_capability: Callable[..., None]
 
     def _init_legacy(self) -> None:
         """Initialize legacy-compat state (called from ``Environment.__init__``)."""
@@ -103,9 +106,8 @@ class LegacyEnvMixin:
         #: id -> env var names the scenario requires.
         self._scenario_required_env_vars: dict[str, list[str]] = {}
         self._tools_hook_registered = False
-        #: Background tasks / workspaces spun up to back synthesized capabilities.
+        #: Background tasks spun up to back synthesized capabilities.
         self._legacy_bg_tasks: list[asyncio.Task[None]] = []
-        self._legacy_workspaces: list[Workspace] = []
 
     # ─── tools (v5 @env.tool / env.add_tool → capabilities) ───────────────
 
@@ -197,30 +199,21 @@ class LegacyEnvMixin:
             )
 
     async def _ensure_ssh_capability(self) -> None:
-        """Spin up a :class:`~hud.environment.Workspace` + publish its ``ssh`` capability."""
-        try:
-            from .workspace import Workspace
+        """Start a workspace for the collected shell tools + publish ``shell``.
 
-            root = os.environ.get("HUD_WORKSPACE_ROOT") or os.getcwd()
-            ws = Workspace(root)
-            await ws.start()
-            self._legacy_workspaces.append(ws)
-            self.add_capability(ws.capability())
-            LOGGER.info(
-                "legacy env %r: shell tool(s) -> ssh capability at %s", self.name, ws.ssh_url
-            )
-        except Exception:
-            LOGGER.warning(
-                "legacy env %r: could not start an SSH workspace for shell tool(s)",
-                self.name,
-                exc_info=True,
-            )
-            warnings.warn(
-                "Legacy shell tools could not be converted to an ssh capability. Declare one "
-                "explicitly: Environment(..., capabilities=[Workspace(root).capability()]).",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        Runs inside the serve-time tools hook, so the workspace (keys + bind)
+        comes up here and ``env.stop()`` tears it down.
+        """
+        from .workspace import Workspace
+
+        if any(c.protocol.split("/", 1)[0] == "ssh" for c in self.capabilities):
+            return
+        root = os.environ.get("HUD_WORKSPACE_ROOT") or os.getcwd()
+        ws = Workspace(root)
+        await ws.start()
+        self.add_capability(ws.capability("shell"))
+        self._on_stop.append(ws.stop)
+        LOGGER.info("legacy env %r: shell tool(s) -> shell capability (root %s)", self.name, root)
 
     def _ensure_computer_capability(self) -> None:
         """Publish an ``rfb`` capability for a detected/declared VNC server."""
@@ -243,16 +236,15 @@ class LegacyEnvMixin:
         LOGGER.info("legacy env %r: computer tool(s) -> rfb capability at %s", self.name, url)
 
     async def _cleanup_legacy_tools(self) -> None:
-        """Tear down anything :meth:`_serve_legacy_tools` started (best-effort)."""
+        """Tear down anything :meth:`_serve_legacy_tools` started (best-effort).
+
+        The backed shell declaration needs nothing here — ``Environment.stop()``
+        tears down whatever backing materialized for it.
+        """
         for task in self._legacy_bg_tasks:
             task.cancel()
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 await task
-        for ws in self._legacy_workspaces:
-            acceptor = getattr(ws, "_acceptor", None)
-            if acceptor is not None:
-                with contextlib.suppress(Exception):
-                    acceptor.close()
 
     # ─── scenarios (v5 @env.scenario → v6 task) ───────────────────────────
 
@@ -268,7 +260,7 @@ class LegacyEnvMixin:
         allowed_tools: list[str] | None = None,
         returns: type | None = None,
         enable_citations: bool = False,
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], Task[P]]:
+    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
         """[deprecated] Register a scenario as a v6 task. Prefer ``@env.task``.
 
         Accepts the full v5 ``scenario`` signature; the generator (``yield prompt``
@@ -283,7 +275,7 @@ class LegacyEnvMixin:
             stacklevel=2,
         )
 
-        def decorate(fn: Callable[P, AsyncGenerator[Any, Any]]) -> Task[P]:
+        def decorate(fn: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
             scenario_name = name or fn.__name__
             if ":" in scenario_name:
                 raise ValueError(
@@ -296,7 +288,9 @@ class LegacyEnvMixin:
 
             desc = description or (fn.__doc__ or "").strip().split("\n", 1)[0]
             register = cast("Any", self).task  # provided by Environment
-            task: Task[P] = register(id=scenario_name, description=desc, returns=returns)(fn)
+            task: _TaskFactory[P] = register(id=scenario_name, description=desc, returns=returns)(
+                fn
+            )
 
             self._scenario_fns[scenario_name] = fn
             if chat:
@@ -318,19 +312,18 @@ class LegacyEnvMixin:
     # ─── callable factory + run (v5 env("scenario"), env.run) ─────────────
 
     def __call__(self, name: str, /, **args: Any) -> Any:
-        """[deprecated] ``env("scenario")`` → the registered ``Task`` (or a ``Variant``).
+        """[deprecated] ``env("scenario")`` → the registered task factory or ``Task``.
 
-        With no args, returns the registered :class:`~hud.environment.task.Task`
-        (a callable variant factory — e.g. for ``AgentTool``). With args, returns the
-        bound :class:`~hud.eval.Variant`.
+        With no args, returns the callable registered by ``@env.task`` (e.g. for
+        ``AgentTool``). With args, returns the bound :class:`~hud.eval.Task`.
         """
         warnings.warn(
             "env('scenario') is deprecated: keep a reference to the @env.task return "
-            "value (a Task) and call it to build a Variant.",
+            "value and call it to build a Task.",
             DeprecationWarning,
             stacklevel=2,
         )
-        task = self._tasks.get(name)
+        task = self.tasks.get(name)
         if task is None:
             raise KeyError(f"unknown task {name!r} on env {self.name!r}")
         return cast("Any", task)(**args) if args else task
@@ -346,11 +339,14 @@ class LegacyEnvMixin:
         """[deprecated] Serve the env. v6 serves the control channel, not MCP stdio/http.
 
         ``transport`` is ignored (v6 always serves its tcp control channel); use
-        ``hud dev`` / ``hud deploy`` for managed serving. Prefer ``await env.serve()``.
+        ``hud serve`` / ``hud deploy`` for managed serving.
         """
+        # Inline import: this mixin is part of Environment, which server.py loads.
+        from .server import serve
+
         warnings.warn(
             "env.run(transport=...) is deprecated: v6 serves a tcp control channel. "
-            "Use `hud dev` / `hud deploy`, or `await env.serve(host, port)`.",
+            "Use `hud serve` / `hud deploy`.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -358,4 +354,4 @@ class LegacyEnvMixin:
             LOGGER.warning(
                 "env.run: transport %r ignored in v6 (serving tcp control channel)", transport
             )
-        asyncio.run(cast("Any", self).serve(host, port or 8765))
+        asyncio.run(serve(cast("Environment", self), host, port or 8765))

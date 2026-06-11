@@ -27,7 +27,7 @@ def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
     mcp = fastmcp.FastMCP("computer-use")
 
     @mcp.tool()
-    async def computer(
+    async def computer(  # pyright: ignore[reportUnusedFunction]
         action: str,
         coordinate: str | None = None,
         text: str | None = None,

@@ -8,12 +8,12 @@ icon: "cube"
 
 ```python
 from hud import Environment
-# or: from hud.environment import Environment, Workspace
+# or: from hud.environment import Environment
 ```
 
 ## Constructor
 
-```python
+```text
 Environment(name="environment", *, version="0.0.1", capabilities=None)
 ```
 
@@ -21,17 +21,17 @@ Environment(name="environment", *, version="0.0.1", capabilities=None)
 |-----------|------|---------|-------------|
 | `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
 | `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
-| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish. |
+| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish — concrete wire data for services that already exist (`Capability.cdp(url=...)`). Daemons the env runs itself publish theirs at serve time: `env.workspace(root)` for the shell case, `env.add_capability(...)` from an `@env.initialize` hook in general. |
 
 <Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
 
 ## Registering tasks
 
-```python
+```text
 @env.task(*, id=None, description="", input=None, returns=None)
 ```
 
-Registers an async-generator task. The decorated function **must** be an async generator (`async def` with `yield`) or `@env.task` raises `TypeError`. Returns a [`Task`](/v6/reference/tasks); calling it mints a `Variant`.
+Registers an async-generator task. The decorated function **must** be an async generator (`async def` with `yield`) or `@env.task` raises `TypeError`. The decorated callable creates a public [`Task`](/v6/reference/tasks) when called with task arguments.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -50,41 +50,39 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 ## Capabilities
 
 ```python
-env.add_capability(cap)   # append a Capability after construction
+env.workspace("/workspace")    # attach a Workspace; publishes "shell" (ssh/2) at serve
+env.add_capability(cap)        # publish concrete wire data (replaces a same-named entry)
 ```
 
-Capabilities are normally passed to the constructor. See [Capabilities](/v6/reference/capabilities).
+A **`Capability`** is always concrete wire data — the URL of something serving the protocol. Pass capabilities for services that already exist to the constructor; for a daemon the env runs itself, start it in an `@env.initialize` hook and publish its address with `env.add_capability(...)`. `env.workspace(root)` wires the common shell case: nothing touches the filesystem until the env serves. See [Capabilities](/v6/reference/capabilities).
 
 ## Lifecycle hooks
 
 ```python
-@env.initialize    # async fn, runs once before serving (start backing daemons)
-@env.shutdown      # async fn, runs on stop, in reverse order
-```
-
-```python
 @env.initialize
 async def _seed():
-    await seed_database()
+    (ROOT / "fixture.txt").write_text("...")
+
+@env.shutdown
+async def _stop():
+    ...
 ```
+
+Hooks run once around serving — seed state, or stand up a daemon and publish its capability with `env.add_capability(...)`. By the time a client says `hello`, every published capability is concrete.
 
 ## Serving
 
-| Method | Description |
-|--------|-------------|
-| `await env.serve(host="127.0.0.1", port=0)` | Start daemons and accept control-channel connections (blocks). |
-| `await env.bind(host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
-| `await env.start()` | Run `@env.initialize` hooks (idempotent). |
-| `await env.stop()` | Run `@env.shutdown` hooks (best-effort). |
+Serving belongs to `hud.environment.server` — the same entry point a container
+CMD runs (`python -m hud.environment.server <source>`):
 
-In practice you serve with `hud dev` and launch with `hud eval` or a `Variant` context manager rather than calling these directly.
+| Function | Description |
+|----------|-------------|
+| `await serve(env, host="127.0.0.1", port=0)` | Start daemons and accept control-channel connections (blocks). |
+| `await bind(env, host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
+| `await env.start()` / `await env.stop()` | Run `@env.initialize` / `@env.shutdown` hooks directly. |
 
-## Serialization
-
-| Method | Description |
-|--------|-------------|
-| `env.to_dict()` | Serialize identity + capabilities + task metadata (task code is not serializable). |
-| `Environment.from_dict(data)` | Rebuild identity + capabilities (tasks come from source when launched). |
+In practice you serve with `hud serve` and run through `hud eval`, `task.run()`,
+or `Taskset.run()` — placement (`runtime=LocalRuntime(...)`) brings substrates up for you.
 
 ## The wire protocol
 
@@ -99,11 +97,11 @@ An environment answers a small JSON-RPC control channel over tcp:
 | `tasks.cancel` | cancels the held task |
 | `bye` | ends the session and tears the held task down |
 
-The held task survives a dropped connection, so a client can `tasks.start`, disconnect, then reconnect to `tasks.grade` — which is how `hud task-start` / `hud task-grade` work against a packaged image.
+The held task survives a dropped connection, so a client can `tasks.start`, disconnect, then reconnect to `tasks.grade` — which is how `hud task start` / `hud task grade` work against a packaged image.
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & variants" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
 <Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
 </CardGroup>

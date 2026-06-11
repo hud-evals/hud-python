@@ -7,9 +7,9 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.tools import MCPTool
-from hud.utils.strict_schema import ensure_strict_json_schema
 
 from .base import OpenAIToolSpec
+from .strict_schema import ensure_strict_json_schema
 
 if TYPE_CHECKING:
     from openai.types.responses import FunctionToolParam, ToolParam
@@ -21,7 +21,7 @@ class OpenAIMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as an OpenAI function tool."""
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec | None:
+    def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OpenAIToolSpec(api_type="function", api_name="function")
 

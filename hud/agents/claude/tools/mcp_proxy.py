@@ -17,7 +17,7 @@ class ClaudeMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as a Claude function tool."""
 
     @classmethod
-    def default_spec(cls, model: str) -> ClaudeToolSpec | None:
+    def default_spec(cls, model: str) -> ClaudeToolSpec:
         del model
         return ClaudeToolSpec(api_type="function", api_name="function")
 

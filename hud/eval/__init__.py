@@ -1,48 +1,54 @@
 """HUD eval: the v6 execution surface.
 
-Define a :class:`Variant` (a parameterized task bound to an env/sandbox), group
-many into a :class:`Taskset`, ``launch`` a :class:`Sandbox`, and ship rewarded
-:class:`~hud.client.Run`s to the :class:`HudTrainingClient`.
+Define a :class:`Task` (a row pointing at its env), group many into a
+:class:`Taskset`, and run agents against live :class:`~hud.eval.Run`s.
+:func:`rollout` is the execution atom (one agent, one task, fully recorded);
+``Task.run`` and ``Taskset.run`` are the scheduler over it, both returning a
+:class:`Job` — the platform receipt. There are no standalone traces: every
+run reports under a job.
 
-    from hud.eval import Taskset, Variant, launch
+Placement is a provider passed at execution time (see :mod:`.runtime`):
+``LocalRuntime`` a local source, ``DockerRuntime`` an image, ``HUDRuntime`` a
+HUD-hosted substrate, or attach to a ``Runtime(url)``::
 
-    runs = await Taskset(task(d) for d in range(5)).run(agent, group=8)
+    from hud.eval import LocalRuntime, Taskset
+
+    job = await my_task(a=1).run(agent, runtime=LocalRuntime("env.py"))
+    job = await Taskset("demo", [my_task(d) for d in range(5)]).run(
+        agent, runtime=LocalRuntime("env.py"), group=8
+    )
 """
 
 from __future__ import annotations
 
-from .launch import launch
-from .remote import submit_rollouts
-from .sandbox import (
-    HudSandbox,
-    LocalSandbox,
-    RemoteSandbox,
-    Runtime,
-    Sandbox,
-    as_sandbox,
-    load_module,
-    sandbox_from_ref,
-)
+from hud.types import Trace
+
+from .chat import Chat
+from .job import Job
+from .rollout import Grade, Run, rollout
+from .runtime import DockerRuntime, HUDRuntime, LocalRuntime, Provider, Runtime
+from .sync import SyncPlan
+from .task import Task
 from .taskset import Taskset
 from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relative
-from .variant import Variant, variant
 
 __all__ = [
-    "HudSandbox",
+    "Chat",
+    "DockerRuntime",
+    "Grade",
+    "HUDRuntime",
     "HudTrainingClient",
-    "LocalSandbox",
-    "RemoteSandbox",
+    "Job",
+    "LocalRuntime",
+    "Provider",
     "Rewarded",
+    "Run",
     "Runtime",
-    "Sandbox",
+    "SyncPlan",
+    "Task",
     "Taskset",
+    "Trace",
     "TrainingConfig",
-    "Variant",
-    "as_sandbox",
     "group_relative",
-    "launch",
-    "load_module",
-    "sandbox_from_ref",
-    "submit_rollouts",
-    "variant",
+    "rollout",
 ]

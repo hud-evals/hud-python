@@ -1,26 +1,78 @@
-"""Environment: declarative capabilities + tasks behind the HUD wire protocol."""
+"""Environment: declarative capabilities + tasks behind the HUD wire protocol.
+
+Pure declaration — what exists (identity, capabilities, registered tasks) and
+the daemon hooks a substrate runs around serving. The protocol server that
+puts a declaration on the wire lives in :mod:`hud.environment.server`.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
+import functools
 import inspect
-import logging
-import secrets
-from typing import TYPE_CHECKING, Any, ParamSpec, cast
+from typing import TYPE_CHECKING, Any, Generic, ParamSpec, cast
+
+from pydantic import TypeAdapter
+
+from hud.capabilities import Capability
 
 from .legacy import LegacyEnvMixin
-from .task import Task, TaskRunner
-from .utils import error, read_frame, reply, send_frame
+from .workspace import Workspace
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+    from pathlib import Path
 
-    from hud.capabilities import Capability
-
-LOGGER = logging.getLogger("hud.environment.env")
+    from hud.eval import Task as EvalTask
 
 P = ParamSpec("P")
+
+
+class _TaskFactory(Generic[P]):
+    """Registered ``@env.task`` callable that creates concrete public tasks.
+
+    The server side (:class:`~hud.environment.server.TaskRunner`) drives its
+    async-generator ``func`` (prompt → score); calling this object with args
+    binds a runnable :class:`~hud.eval.Task`::
+
+        task = fix_bug(difficulty=3)  # -> Task
+        job = await task.run(agent, runtime=LocalRuntime("env.py"))
+    """
+
+    def __init__(
+        self,
+        env: Environment,
+        id: str,
+        description: str,
+        func: Callable[P, AsyncGenerator[Any, Any]],
+        *,
+        input: Any = None,
+        returns: Any = None,
+    ) -> None:
+        self.env = env
+        self.id = id
+        self.description = description
+        self.func: Callable[..., AsyncGenerator[Any, Any]] = func
+        #: Type(s) the agent is given as input (a model or union; ``None`` = text).
+        self.input_type = input
+        #: Type the agent must produce (``None`` = plain text). Drives answer
+        #: deserialization into ``AgentAnswer[T]``.
+        self.return_type = returns
+        self.sig = inspect.signature(func)
+        functools.update_wrapper(self, func)
+
+    def manifest_entry(self) -> dict[str, Any]:
+        entry: dict[str, Any] = {"id": self.id, "description": self.description}
+        for key, typ in (("input", self.input_type), ("returns", self.return_type)):
+            if typ is not None:
+                entry[key] = TypeAdapter(typ).json_schema()
+        return entry
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> EvalTask:
+        from hud.eval.task import Task  # local import: avoid env<->eval cycle
+
+        bound = self.sig.bind(*args, **kwargs)
+        return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
 
 
 class Environment(LegacyEnvMixin):
@@ -37,7 +89,7 @@ class Environment(LegacyEnvMixin):
         name: str = "environment",
         *,
         version: str = "0.0.1",
-        capabilities: list[Capability] | None = None,
+        capabilities: Sequence[Capability] | None = None,
         **legacy_kwargs: Any,
     ) -> None:
         if legacy_kwargs:
@@ -51,13 +103,18 @@ class Environment(LegacyEnvMixin):
             )
         self.name = name
         self.version = version
-        self.capabilities: list[Capability] = list(capabilities or [])
-        self._tasks: dict[str, Task[Any]] = {}
-        # One held task session, kept across disconnects so a client can start, drop
-        # the connection, and reconnect later to grade.
-        self._active_runner: TaskRunner | None = None
+        #: Published capabilities — always concrete wire data. Daemons the env
+        #: runs itself publish theirs at serve time (:meth:`add_capability`
+        #: from an ``@env.initialize`` hook; :meth:`workspace` wires the
+        #: common ssh case).
+        self.capabilities: list[Capability] = []
+        for entry in capabilities or []:
+            self.add_capability(entry)
+        self._started = False
+        #: Registered task factories by id (the ``@env.task`` registry).
+        self.tasks: dict[str, _TaskFactory[Any]] = {}
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
-        # stands up). Run once by the substrate (LocalSandbox) around serving.
+        # stands up). Run once by the serving substrate around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         self._init_legacy()
@@ -71,48 +128,47 @@ class Environment(LegacyEnvMixin):
         description: str = "",
         input: Any = None,
         returns: Any = None,
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], Task[P]]:
+    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
         """Register an async-generator task (``id`` defaults to the function name).
 
         The task yields a prompt, then — once the answer is sent back — a reward.
         Either form works (both normalized to the wire protocol): friendly (``yield
         prompt`` → ``yield reward``) or explicit (``yield {"prompt": ...}`` → ``yield
         {"score": ...}``). ``input``/``returns`` optionally declare the agent's I/O
-        types (surfaced in the manifest as JSON schemas). Returns a ``Task`` — call it
-        with the task's args to get a runnable :class:`~hud.eval.Variant`.
+        types (surfaced in the manifest as JSON schemas). The decorated callable
+        returns a concrete :class:`~hud.eval.Task` when called with task args.
         """
-        from .task import scenario_to_task_fn
 
-        def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> Task[P]:
+        def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
             if not inspect.isasyncgenfunction(func):
                 raise TypeError(
                     f"@env.task: {getattr(func, '__qualname__', func)} must be an async "
                     "generator function (`async def ...:` with `yield`)",
                 )
             task_id = id or func.__name__
-            if task_id in self._tasks:
+            if task_id in self.tasks:
                 raise ValueError(
                     f"task {task_id!r} already registered on env {self.name!r}",
                 )
-            normalized = cast(
-                "Callable[P, AsyncGenerator[dict[str, Any], dict[str, Any]]]",
-                scenario_to_task_fn(func),
+            task = _TaskFactory(
+                self,
+                task_id,
+                description,
+                func,
+                input=input,
+                returns=returns,
             )
-            task = Task(self, task_id, description, normalized, input=input, returns=returns)
-            self._tasks[task_id] = cast("Task[Any]", task)
+            self.tasks[task_id] = cast("_TaskFactory[Any]", task)
             return task
 
         return decorate
 
-    def add_capability(self, cap: Capability) -> None:
-        self.capabilities.append(cap)
-
     def initialize(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register an initializer, run once before the control channel serves.
 
-        Use it to start a backing daemon — e.g. a :class:`~hud.environment.Workspace`'s
-        SSH server — whose capability is declared at construction
-        (``Environment(..., capabilities=[ws.capability()])``).
+        Seed state, or stand up a daemon and publish its address with
+        :meth:`add_capability` — that is how capabilities the env runs itself
+        come into existence at serve time rather than at import.
         """
         self._on_start.append(fn)
         return fn
@@ -122,171 +178,75 @@ class Environment(LegacyEnvMixin):
         self._on_stop.append(fn)
         return fn
 
-    # ─── serialization ────────────────────────────────────────────────────
+    # ─── capabilities ─────────────────────────────────────────────────────
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the env descriptor: identity, capabilities, and task list.
+    def add_capability(self, cap: Capability) -> None:
+        """Publish concrete wire data, replacing any same-named entry.
 
-        Task generator *code* is not serializable; ``tasks`` carries id/description
-        metadata for discovery. :meth:`from_dict` restores identity + capabilities
-        (runnable task funcs come from the env's source/image when launched).
+        Call at declaration for services that already exist, or from an
+        ``@env.initialize`` hook once a daemon the env runs is up. Replacement
+        keeps restarts idempotent: a re-run hook overwrites its stale address.
         """
-        return {
-            "name": self.name,
-            "version": self.version,
-            "capabilities": [c.to_manifest() for c in self.capabilities],
-            "tasks": [t.manifest_entry() for t in self._tasks.values()],
-        }
+        if not isinstance(cap, Capability):
+            raise TypeError(f"add_capability: expected Capability, got {cap!r}")
+        if not cap.url:
+            raise ValueError(
+                f"capability {cap.name!r} has no url; start the service in an "
+                "@env.initialize hook and publish its concrete address",
+            )
+        self.capabilities = [c for c in self.capabilities if c.name != cap.name] + [cap]
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Environment:
-        """Rebuild an Environment from :meth:`to_dict` output (identity + capabilities).
+    def capability(self, name: str) -> Capability:
+        """Look up a published capability by name."""
+        cap = next((c for c in self.capabilities if c.name == name), None)
+        if cap is None:
+            raise KeyError(f"unknown capability: {name!r}")
+        return cap
 
-        Tasks are not reconstructed — their generator code lives in the env's
-        source. A deserialized Environment carries identity + capability metadata only.
+    def workspace(
+        self,
+        root: Path | str,
+        *,
+        name: str = "shell",
+        **kwargs: Any,
+    ) -> Workspace:
+        """Attach a :class:`Workspace` serving ``name`` over ``ssh/2``.
+
+        Registers the start → publish → stop lifecycle on this env's hooks;
+        nothing touches the filesystem until the env actually serves. Extra
+        kwargs go to :class:`Workspace` (``network=``, ``env=``, ...).
         """
-        from hud.capabilities import Capability
+        ws = Workspace(root, **kwargs)
 
-        return cls(
-            name=data["name"],
-            version=data.get("version", "0.0.1"),
-            capabilities=[Capability.from_manifest(c) for c in data.get("capabilities") or []],
-        )
+        @self.initialize
+        async def _up() -> None:
+            await ws.start()
+            self.add_capability(ws.capability(name))
 
-    # ─── control-channel server ──────────────────────────────────────────
+        @self.shutdown
+        async def _down() -> None:
+            await ws.stop()
 
-    async def bind(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
-        """Bind the control-channel socket (not yet serving). Returns the server.
+        return ws
 
-        Callers read the assigned port via ``server.sockets[0].getsockname()`` and
-        drive it with ``server.serve_forever()``. Used by ``hud.launch`` to bring
-        up a live env on an ephemeral loopback port.
-        """
-        server = await asyncio.start_server(self._handle_session, host=host, port=port)
-        sock = server.sockets[0].getsockname()
-        LOGGER.info("env %r bound on %s:%s", self.name, sock[0], sock[1])
-        return server
-
-    async def serve(self, host: str = "127.0.0.1", port: int = 0) -> None:
-        """Accept HUD control-channel connections; cap daemons must already be running."""
-        await self.start()
-        server = await self.bind(host, port)
-        async with server:
-            await server.serve_forever()
+    # ─── substrate-run daemon lifecycle ──────────────────────────────────
 
     async def start(self) -> None:
-        """Bring up any backing capability daemons. Idempotent per registered hook.
+        """Run ``@env.initialize`` hooks. Idempotent until :meth:`stop`.
 
-        No-op unless something (e.g. the legacy adapter) registered ``_on_start``
-        hooks. Run once by the substrate before the control channel serves, so the
-        ``hello`` manifest reflects any capabilities the hooks publish.
+        Run by the substrate before the control channel serves, so every
+        capability — including ones published by hooks — is concrete by the
+        time a client says ``hello``.
         """
+        if self._started:
+            return
+        self._started = True
         for hook in self._on_start:
             await hook()
 
     async def stop(self) -> None:
-        """Tear down backing daemons started by :meth:`start` (best-effort)."""
+        """Run ``@env.shutdown`` hooks in reverse order (best-effort)."""
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
-
-    # ─── per-connection protocol dispatch (transport-agnostic) ───────────
-
-    async def _handle_session(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        session_id = "sess-" + secrets.token_hex(4)
-
-        async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
-            if msg_id is not None:
-                await send_frame(writer, reply(msg_id, result))
-
-        async def error_to(msg_id: int | None, code: int, message: str) -> None:
-            if msg_id is not None:
-                await send_frame(writer, error(msg_id, code, message))
-
-        try:
-            while True:
-                msg = await read_frame(reader)
-                if msg is None:
-                    return
-
-                method = msg.get("method", "")
-                params = msg.get("params") or {}
-                msg_id = msg.get("id")
-
-                try:
-                    if method == "hello":
-                        await reply_to(
-                            msg_id,
-                            {
-                                "session_id": session_id,
-                                "env": {"name": self.name, "version": self.version},
-                                "bindings": [c.to_manifest() for c in self.capabilities],
-                            },
-                        )
-
-                    elif method == "tasks.list":
-                        await reply_to(
-                            msg_id,
-                            {
-                                "tasks": [t.manifest_entry() for t in self._tasks.values()],
-                            },
-                        )
-
-                    elif method == "tasks.start":
-                        task_id = params.get("id")
-                        if not isinstance(task_id, str):
-                            await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
-                            continue
-                        task = self._tasks.get(task_id)
-                        if task is None:
-                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
-                            continue
-                        args = params.get("args") or {}
-                        if not isinstance(args, dict):
-                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
-                            continue
-                        if self._active_runner is not None:
-                            await self._active_runner.cancel()  # a new start replaces it
-                        self._active_runner = TaskRunner(task, args)
-                        prompt = await self._active_runner.start()
-                        await reply_to(msg_id, prompt)
-
-                    elif method == "tasks.grade":
-                        if self._active_runner is None:
-                            await error_to(msg_id, -32600, "no task in progress")
-                            continue
-                        evaluation = await self._active_runner.grade(params)
-                        self._active_runner = None
-                        await reply_to(msg_id, evaluation)
-
-                    elif method == "tasks.cancel":
-                        if self._active_runner is not None:
-                            await self._active_runner.cancel()
-                            self._active_runner = None
-                        await reply_to(msg_id, {"cancelled": True})
-
-                    elif method == "bye":
-                        # Explicit end-of-session: tear the held task down (disconnect won't).
-                        if self._active_runner is not None:
-                            await self._active_runner.cancel()
-                            self._active_runner = None
-                        await reply_to(msg_id, {"goodbye": True})
-                        return
-
-                    else:
-                        await error_to(msg_id, -32601, f"method not found: {method}")
-
-                except Exception as exc:
-                    LOGGER.exception("error handling %s", method)
-                    await error_to(msg_id, -32000, str(exc))
-
-        finally:
-            # No cancel here: the held session survives disconnect (only `bye` or a
-            # replacing start tears it down) so a later connection can grade it.
-            with contextlib.suppress(Exception):
-                writer.close()
-                await writer.wait_closed()
+        self._started = False

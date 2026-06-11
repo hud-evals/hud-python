@@ -1,7 +1,7 @@
 """``hud client`` — drive a running env's control channel from the shell.
 
-A thin CLI over :class:`hud.client.HudClient`. Point it at an env served by
-``hud dev`` (or any control channel) to inspect it or run a task with a supplied
+A thin CLI over :class:`hud.clients.HudClient`. Point it at an env served by
+``hud serve`` (or any control channel) to inspect it or run a task with a supplied
 answer. The Harbor ``test.sh`` uses ``hud client run`` to grade.
 """
 
@@ -9,23 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-from urllib.parse import urlsplit
 
 import typer
 
+from hud.eval.runtime import Runtime
 from hud.utils.hud_console import HUDConsole
 
 hud_console = HUDConsole()
 
 client_app = typer.Typer(
-    help="Talk to a running env's control channel (served by `hud dev`).",
+    help="Talk to a running env's control channel (served by `hud serve`).",
     rich_markup_mode="rich",
 )
 
 
-def _host_port(url: str) -> tuple[str, int]:
-    parts = urlsplit(url if "://" in url else f"tcp://{url}")
-    return parts.hostname or "127.0.0.1", parts.port or 8765
+def _runtime(url: str) -> Runtime:
+    return Runtime(url if "://" in url else f"tcp://{url}")
 
 
 @client_app.command("info")
@@ -33,12 +32,11 @@ def info_command(
     url: str = typer.Option("tcp://127.0.0.1:8765", "--url", "-u", help="Env control-channel URL."),
 ) -> None:
     """Show the env's identity, capabilities, and tasks."""
-    host, port = _host_port(url)
 
     async def _run() -> None:
-        from hud.client import connect
+        from hud.clients import connect
 
-        async with connect(host, port) as client:
+        async with connect(_runtime(url), ready_timeout=10.0) as client:
             manifest = client.manifest
             if manifest is None:
                 hud_console.error("No manifest returned by the env.")
@@ -69,12 +67,15 @@ def run_command(
     instead of produced by an agent. The reward goes to stdout — redirect it where
     you need it (e.g. ``> /logs/verifier/reward.txt``).
     """
-    host, port = _host_port(url)
 
     async def _run() -> float:
-        from hud.client import connect
+        from hud.clients import connect
+        from hud.eval.rollout import Run
 
-        async with connect(host, port) as client, client.task(task, **json.loads(args)) as run:
+        async with (
+            connect(_runtime(url), ready_timeout=10.0) as client,
+            Run(client, task, json.loads(args)) as run,
+        ):
             run.trace.content = answer
         return run.reward
 

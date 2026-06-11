@@ -1,0 +1,17 @@
+[project]
+name = "codex-coding"
+version = "0.1.0"
+description = "Build your own Codex with the HUD SDK (cookbook)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud-python",
+    "python-dotenv",
+]
+
+[tool.uv]
+package = false
+
+# Track the SDK from this repo. If you copied this folder out, delete this
+# block to use the released hud-python from PyPI.
+[tool.uv.sources]
+hud-python = { path = "../..", editable = true }

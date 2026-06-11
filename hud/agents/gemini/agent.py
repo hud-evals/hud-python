@@ -10,11 +10,11 @@ import mcp.types as mcp_types
 from google import genai
 from google.genai import types as genai_types
 
-from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import Citation, GeminiConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.utils import gateway
 
 from .settings import gemini_agent_settings
 from .tools import (
@@ -33,7 +33,7 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
-class GeminiAgent(ToolAgent[genai_types.Content]):
+class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     """Gemini agent. Drives SSH (coding/filesystem), RFB (computer), and MCP capabilities."""
 
     tool_catalog = (
@@ -51,9 +51,6 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
     def __init__(self, config: GeminiConfig | None = None) -> None:
         config = config or GeminiConfig()
         self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
 
         model_client = config.model_client
         if model_client is None:
@@ -186,12 +183,12 @@ class GeminiAgent(ToolAgent[genai_types.Content]):
         )
 
         api_response = await self.gemini_client.aio.models.generate_content(
-            model=self.model,
+            model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )
         if not api_response.candidates:
-            raise RuntimeError(f"Gemini returned no candidates for model {self.model}")
+            raise RuntimeError(f"Gemini returned no candidates for model {self.config.model}")
 
         candidate = api_response.candidates[0]
         content = candidate.content

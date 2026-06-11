@@ -24,15 +24,16 @@ from openai.types.responses.response_input_param import (
 )
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
-from hud.agents import gateway
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import OpenAIConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.utils import gateway
 
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
-from .tools.coding import _shell_output
+from .tools.coding import shell_output
+from .tools.computer import last_image_data
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class OpenAIRunState(RunState[ResponseInputItemParam]):
     message_cursor: int = 0
 
 
-class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
+class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
     """OpenAI agent using the Responses API. Drives SSH, RFB, and MCP capabilities."""
 
     tool_catalog = (
@@ -55,9 +56,6 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
     def __init__(self, config: OpenAIConfig | None = None) -> None:
         config = config or OpenAIConfig()
         self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
 
         model_client = config.model_client
         if model_client is None:
@@ -103,8 +101,6 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         tool = state.tools.get(call.name)
 
         if isinstance(tool, OpenAIComputerTool):
-            from hud.agents.tools.computer import last_image_data
-
             screenshot = last_image_data(result)
             if not screenshot:
                 logger.warning("Computer tool result missing screenshot for call %s", call.name)
@@ -123,7 +119,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
             )
             checks = (call.model_extra or {}).get("pending_safety_checks")
             if isinstance(checks, list):
-                acknowledged = []
+                acknowledged: list[Any] = []
                 for raw_check in cast("list[Any]", checks):
                     if hasattr(raw_check, "model_dump"):
                         acknowledged.append(raw_check.model_dump())
@@ -142,7 +138,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
                 from hud.agents.tools.base import result_text
 
                 text = result_text(result)
-                output_list = [_shell_output("", text, 1 if result.isError else 0)]
+                output_list = [shell_output("", text, 1 if result.isError else 0)]
             response: dict[str, Any] = {
                 "type": "shell_call_output",
                 "call_id": call.id,
@@ -188,7 +184,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam]):
         from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
 
         tool_search_threshold: int | None = None
-        for hosted in self.hosted_tools:
+        for hosted in self.config.hosted_tools:
             if isinstance(hosted, OpenAIToolSearchTool):
                 tool_search_threshold = hosted.threshold
                 break

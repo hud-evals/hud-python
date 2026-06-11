@@ -10,13 +10,13 @@ A few beliefs shape everything in the SDK:
 
 1. **Environments should outlast the agents that run them.** The systems an agent works on (a shell, a browser, a filesystem) have barely changed in a decade, and the tasks built on them are just as stable. Writing an environment is nothing new: you expose the system as it already is, through a capability like an `ssh` shell, and that same environment still runs in five years when the next real-time harness or model ships. Nothing to rebuild.
 
-2. **Tasks should be generative, not declarative.** A task defines a *space* of challenges over a substrate, which is exactly the structure a synthetic pipeline needs to generate from. An entire benchmark like SWE-bench or Terminal-Bench can live as one generative task whose variants cover every instance, served from a single image. One environment holds any number of tasks; there's no separate image per task.
+2. **Tasks should be generative, not declarative.** A task definition should span a *space* of challenges over a substrate, which is exactly the structure a synthetic pipeline needs to generate from. An entire benchmark like SWE-bench or Terminal-Bench can live as one generative task definition whose concrete tasks cover every instance, served from a single image. One environment holds any number of tasks; there's no separate image per task.
 
 3. **HUD owns the environment and the reward, and nothing else.** That minimalism is what lets everything around it vary. The same reward-from-rollout loop trains a coding, computer-use, browser, or robotics agent, so an environment exposes a bounded connection the agent drives directly: `ssh` into a sandboxed workspace, `cdp` for a browser, `rfb` for a screen, `ros2` for a robot, at action rates that discrete calls or MCP round-trips can't carry. The environment ships as one standardized image that runs on any rollout infra like [Daytona](https://www.daytona.io/), [Modal](https://modal.com/), or [E2B](https://e2b.dev/), and a trainer needs only the rewards and a model API, so feeding rollouts into your own GRPO/PPO loop or a stack like [Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or [Fireworks](https://fireworks.ai/) takes no environment-side glue.
 
 ## The protocol
 
-HUD is protocol-first. An agent and an environment exchange just three things: a manifest (the environment's capabilities and tasks), a task-start that returns the prompt, and a task-grade that returns the reward. In between, the agent just works, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
+HUD is protocol-first. An agent and an environment exchange just three things: a manifest (the environment's capabilities and tasks), `tasks.start` that returns the prompt, and `tasks.grade` that returns the reward. In between, the agent just works, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
 
 ```mermaid
 sequenceDiagram
@@ -25,14 +25,14 @@ sequenceDiagram
     participant Caps as Capabilities (ssh · mcp · cdp · rfb · ros2)
     Agent->>Env: manifest exchange
     Env-->>Agent: capabilities + tasks
-    Agent->>Env: task-start
+    Agent->>Env: tasks.start
     Env-->>Agent: prompt
     rect rgb(238,238,238)
     Note over Agent,Caps: the agent works, driving capabilities directly
     Agent->>Caps: shell · browser · GUI · tools · robot
     Caps-->>Agent: observations
     end
-    Agent->>Env: task-grade
+    Agent->>Env: tasks.grade
     Env-->>Agent: reward
 ```
 
@@ -43,16 +43,16 @@ Because the protocol only exposes capabilities (never a fixed agent), an environ
 Here's the whole loop in one file: an environment that gives the agent a shell and files, and a task that asks it to make a test suite pass and grades the result by running the tests.
 
 ```python env.py
-from hud.environment import Environment, Workspace
-from hud.native.graders import BashGrader
+from hud.environment import Environment
+from hud.graders import BashGrader
 
-ws = Workspace("workspace")  # a local directory the agent works in
-env = Environment(name="coder", capabilities=[ws.capability()])
+env = Environment(name="coder")
+env.workspace("/workspace")   # a directory the agent works in, served as ssh
 
 @env.task()
 async def fix_tests(target: str = "tests/"):
     yield f"Make the tests in {target} pass."
-    result = await BashGrader.grade(weight=1.0, command=f"pytest {target} -q", cwd=str(ws.root))
+    result = await BashGrader.grade(weight=1.0, command=f"pytest {target} -q", cwd="/workspace")
     yield result.value
 
 tasks = [fix_tests()]
@@ -72,10 +72,10 @@ Every rollout is traced on the [hud.ai](https://hud.ai) platform.
 <Card title="Quickstart" icon="bolt" href="/v6/quickstart">
   From install to your first graded trace in a few minutes.
 </Card>
-<Card title="Environments & capabilities" icon="cube" href="/v6/build/environments">
+<Card title="Environments & capabilities" icon="cube" href="/v6/reference/environment">
   Give the agent shell, browser, GUI, tools, or a robot to act on.
 </Card>
-<Card title="Tasks, variants & grading" icon="list-check" href="/v6/build/tasks">
+<Card title="Tasks, tasksets & grading" icon="list-check" href="/v6/reference/tasks">
   Turn one task definition into a whole dataset.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">

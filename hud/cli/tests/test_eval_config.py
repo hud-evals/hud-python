@@ -48,7 +48,6 @@ def test_get_agent_kwargs_model_precedence_and_flags() -> None:
     assert kwargs["model"] == "gpt-cli"  # CLI model wins over config model
     assert kwargs["temperature"] == 0.5
     assert kwargs["verbose"] is True
-    assert kwargs["validate_api_key"] is False
 
 
 def test_get_agent_kwargs_requires_agent_type() -> None:
@@ -85,6 +84,19 @@ def test_load_parses_sections(tmp_path: Path) -> None:
     assert cfg.agent_config["openai"]["model"] == "gpt-4o"
 
 
+def test_load_resolves_env_var_placeholders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_EVAL_MODEL", "gpt-4o")
+    path = tmp_path / ".hud_eval.toml"
+    path.write_text(
+        '[eval]\nagent = "openai"\n\n[openai]\nmodel = "${MY_EVAL_MODEL}"\n',
+        encoding="utf-8",
+    )
+    cfg = EvalConfig.load(str(path))
+    assert cfg.agent_config["openai"]["model"] == "gpt-4o"
+
+
 def test_merge_cli_overrides_fields() -> None:
     merged = EvalConfig().merge_cli(agent="openai", task_ids="a, b", max_steps=7)
     assert merged.agent_type is not None and merged.agent_type.value == "openai"
@@ -106,3 +118,14 @@ def test_resolve_agent_interactive_uses_selected_preset(monkeypatch: pytest.Monk
 
 def test_display_renders() -> None:
     EvalConfig(agent_type="openai", model="gpt").display()
+
+
+def test_eval_max_steps_lands_in_agent_config() -> None:
+    cfg = EvalConfig(
+        source="tasks.py",
+        agent_type="openai",
+        max_steps=17,
+        agent_config={"openai": {"model_client": object()}},
+    )
+    agent = eval_mod._build_agent(cfg)
+    assert agent.config.max_steps == 17

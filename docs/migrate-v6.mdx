@@ -11,7 +11,7 @@ v6 is a leaner spec. The environment is no longer an MCP server that hands tools
 **Environments are mostly backwards compatible.** The v6 SDK still runs environments written against the v5 surface: `@env.scenario`, `@env.tool` / `env.add_tool`, `env("scenario")`, and `env.run(...)` all keep working — each emits a `DeprecationWarning` and adapts to v6 under the hood. New (v6) agents can evaluate your existing environments unchanged.
 
 <Warning>
-**The break is on the agent/runtime side.** v6 serves a new control channel instead of MCP stdio/http, so **old (v5) agents cannot run old or new environments** — once an environment is served by the v6 SDK (whether authored in the v5 or v6 style), only a v6 client can drive it. Upgrade the side that *runs* agents to v6.
+**The break is on the agent side.** v6 serves a new control channel instead of MCP stdio/http, so **old (v5) agents cannot run old or new environments** — once an environment is served by the v6 SDK (whether authored in the v5 or v6 style), only a v6 client can drive it. Upgrade the side that *runs* agents to v6.
 </Warning>
 
 So you can upgrade the SDK first and keep your environments as-is, then convert at your own pace. Converting is worth it: the v6 spec removes most of the tool-wiring boilerplate.
@@ -23,12 +23,12 @@ So you can upgrade the SDK first and keep your environments as-is, then convert 
 | `Environment("name")` | `Environment(name="name", capabilities=[...])` | positional name still works; declare capabilities up front |
 | `@env.scenario("count")` | `@env.task()` | same `yield prompt` then `yield reward` generator |
 | `@env.tool` / `env.add_tool(ComputerTool())` | a **capability** (`ssh` / `mcp` / `cdp` / `rfb` / `ros2`) | the agent's harness brings the tools now |
-| `env("count", word=...)` | `count(word=...)` | keep the `@env.task` return value; calling it builds a `Variant` |
-| `task.run("claude")` / `hud.eval(task)` | `async with variant as run: await agent(run)` | or just `hud eval tasks.py claude` |
-| `env.run(transport=...)` | `await env.serve()` / `hud dev` / `hud deploy` | v6 serves a control channel, not MCP |
-| `.slug`, `.columns` on a task | `.slug`, `.columns` on the `Variant` | unchanged |
+| `env("count", word=...)` | `count(word=...)` | keep the `@env.task` return value; calling it builds a `Task` |
+| `task.run("claude")` / `hud.eval(task)` | `await task.run(agent)` | or just `hud eval tasks.py claude` |
+| `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` | v6 serves a control channel, not MCP |
+| `.slug`, `.columns` on a task | `.slug`, `.columns` on the `Task` | unchanged |
 
-The CLI you already use is stable: `hud init`, `hud dev`, `hud build`, `hud deploy`, `hud eval`, and `hud sync tasks` all carry over.
+The CLI you already use is stable: `hud init`, `hud deploy`, `hud eval`, and `hud sync tasks` all carry over. `hud dev` is now `hud serve` (the old name remains as a deprecated alias).
 
 ## Walk through a conversion
 
@@ -52,13 +52,13 @@ async def fix_tests(target: str = "tests/"):
 <Steps>
 
 <Step title="Replace tools with a capability">
-This is the biggest change. In v5 you registered tools and the environment forwarded them, translating per provider. In v6 you declare a **capability** — a connection — and the agent's harness attaches its own tools to it. Shell and file tools become an `ssh` capability backed by a `Workspace`, whose SSH server is live as soon as you construct it:
+This is the biggest change. In v5 you registered tools and the environment forwarded them, translating per provider. In v6 you declare a **capability** — a connection — and the agent's harness attaches its own tools to it. Shell and file tools become a `Workspace`: the environment starts the sandboxed workspace and publishes its `ssh` capability when it serves:
 
 ```python title="env.py (v6)"
-from hud.environment import Environment, Workspace
+from hud.environment import Environment
 
-ws = Workspace("workspace")
-env = Environment(name="coder", capabilities=[ws.capability()])
+env = Environment(name="coder")
+env.workspace("/workspace")
 ```
 
 Other tool kinds map the same way: a browser becomes `cdp`, full computer-use becomes `rfb`, a robot becomes `ros2`, and any custom MCP tools become an `mcp` capability via `Capability.mcp(name=..., url=...)`. You no longer hand-wire `ComputerTool()` / `BashTool()` or call `env.as_claude_tools()` — the harness does that.
@@ -68,7 +68,7 @@ Other tool kinds map the same way: a browser becomes `cdp`, full computer-use be
 The generator body is identical — `yield` a prompt, receive the answer, `yield` a reward. Just swap the decorator and keep a reference to the returned `Task`:
 
 ```python title="env.py (v6)"
-from hud.native import BashGrader
+from hud.graders import BashGrader
 
 @env.task()
 async def fix_tests(target: str = "tests/"):
@@ -79,8 +79,8 @@ async def fix_tests(target: str = "tests/"):
 `@env.task()` also accepts `id=`, `description=`, and optional `input=` / `returns=` types (surfaced as JSON schemas in the manifest). The v5 scenario options (`chat`, `returns`, `exclude_tools`, ...) still parse through the compatibility layer if you keep `@env.scenario`.
 </Step>
 
-<Step title="Build variants by calling the task">
-`env("fix-tests", target="tests/")` becomes a direct call on the task function. It returns a `Variant` — the runnable unit — and `.slug` / `.columns` work exactly as before:
+<Step title="Build tasks by calling the task function">
+`env("fix-tests", target="tests/")` becomes a direct call on the task function. It returns a `Task` — the runnable unit — and `.slug` / `.columns` work exactly as before:
 
 ```python title="tasks.py (v6)"
 from env import fix_tests
@@ -98,22 +98,21 @@ Locally, `hud eval` is unchanged:
 hud eval tasks.py claude
 ```
 
-Programmatically, the `hud.eval(task)` context manager and `task.run(model)` are replaced by entering the variant and handing the run to an agent:
+Programmatically, the `hud.eval(task)` context manager and `task.run(model)` are replaced by handing an agent to the task — it returns a `Job` holding the graded runs:
 
 ```python
 from hud.agents import create_agent
 
 agent = create_agent("claude-sonnet-4-5")
-async with fix_tests(target="tests/") as run:
-    await agent(run)
-print(run.reward)
+job = await fix_tests(target="tests/").run(agent)
+print(job.reward)
 ```
 
 `create_agent` routes any model (`claude-...`, `gpt-...`, `gemini-...`, `grok-...`) through the HUD gateway and wires the tools for whichever capabilities the environment exposes.
 </Step>
 
 <Step title="Serve and deploy">
-v5 served an MCP server via `env.run(transport=...)`. v6 serves its control channel — use `hud dev` while iterating and `hud deploy` to publish (it builds and publishes in one step). `await env.serve(host, port)` is the in-code equivalent.
+v5 served an MCP server via `env.run(transport=...)`. v6 serves its control channel — use `hud serve` while iterating and `hud deploy` to publish (it builds and publishes in one step). `await env.serve(host, port)` is the in-code equivalent.
 </Step>
 
 </Steps>
@@ -128,29 +127,30 @@ Because every old import still resolves (the SDK ships shims) and registered too
 
 ### Imports to update
 
-In v6, `hud.tools` is a deprecation shim. Every old import still resolves with a `DeprecationWarning`, but each one does one of three things now:
+In v6, `hud.tools` keeps the standalone tools, but every import that was removed still resolves with a `DeprecationWarning`:
 
 | v5 import | What it resolves to now | What to do |
 |-----------|-------------------------|------------|
-| Tools: `BashTool`, `EditTool`, `JupyterTool`, `MemoryTool`, `PlaywrightTool`, `AgentTool`, `BaseTool` | redirected to `hud.native.tools.*` | usually **delete the registration** — declare the capability instead (see the steps above); import from `hud.native.tools.*` only if you call the tool directly |
+| Tools: `AgentTool`, `BaseTool` | unchanged — still real classes in `hud.tools` | keep — register on your own `MCPServer` for an `mcp` capability |
 | Result types: `AgentAnswer`, `Citation`, `EvaluationResult`, `ScenarioResult`, `ContentResult`, `SubScore`, `ToolError` | redirected to `hud.agents.types` | change the import to `from hud.agents.types import ...` |
+| Shell/edit tools: `BashTool`, `EditTool`, `ShellTool`, `ApplyPatchTool`, ... | **removed** — resolve to a marker that synthesizes an `ssh` capability at serve | call `env.workspace(root)` instead |
 | Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | **removed** — resolve to a marker that synthesizes an `rfb` capability at serve | declare an `rfb` (computer-use) or `cdp` (browser) capability instead |
-| Anything else under `hud.tools`: filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — the capability or agent harness provides the equivalent |
-| Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | unchanged | keep as-is |
+| Anything else under `hud.tools`: `PlaywrightTool`, `JupyterTool`, `MemoryTool`, filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — declare a capability (`cdp` for browser) or serve your own tool over `mcp` |
+| Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | aliased to `hud.graders` | change the import to `from hud.graders import ...` |
+| Chat: `hud.services.Chat` | aliased to `hud.eval.chat` (re-exported as `hud.Chat`) | change the import to `from hud import Chat` |
+| `hud.services.ChatService` | **removed** — the A2A executor left the SDK | copy the reference server in `cookbooks/a2a-chat/server.py` (a thin A2A adapter over `Chat`) |
+| `hud.shared.*` (`exceptions`, `requests`, ...) | **merged into `hud.utils`** (no alias — no environment imported it) | change the import to `from hud.utils... import ...` |
 
 The rule of thumb: **result types move to `hud.agents.types`, tools become capabilities, and everything else under `hud.tools` is going away.** When the deprecation log is quiet, the conversion is done.
 
 ## Next steps
 
 <CardGroup cols={2}>
-<Card title="Environments & capabilities" icon="cube" href="/v6/build/environments">
-  The full environment authoring guide.
+<Card title="Environment reference" icon="cube" href="/v6/reference/environment">
+  Define capabilities, lifecycle hooks, and tasks.
 </Card>
-<Card title="Environment reference" icon="desktop" href="/v6/reference/environment">
-  Tasks, capabilities, and serving.
-</Card>
-<Card title="Tasks, variants & grading" icon="list-check" href="/v6/build/tasks">
-  Define tasks, run them, iterate.
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks">
+  Define tasks, collect tasksets, and grade runs.
 </Card>
 <Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
   Publish with hud deploy and run at scale.

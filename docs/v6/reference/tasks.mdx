@@ -1,101 +1,235 @@
 ---
-title: "Tasks & variants"
-description: "The Task, Variant, and Taskset API."
+title: "Tasks & Tasksets"
+description: "The Task, Taskset, Job, and SyncPlan API."
 icon: "list-check"
 ---
 
-A **`Task`** is what `@env.task` returns (the registered definition). Calling it mints a **`Variant`** — a parameterized, runnable, serializable instance. A **`Taskset`** groups variants you evaluate one agent over.
+A **`Task`** is a concrete, runnable data point: an environment plus a task id,
+arguments, slug, and metadata. Calling an `@env.task()` function returns a
+`Task`. A **`Taskset`** is a named, ordered collection of tasks.
 
 ```python
-from hud.eval import Variant, Taskset, variant
+from hud import Environment, Taskset
+from hud.eval import Task, task
 ```
 
-## Task
+## Authoring Tasks
 
-Returned by [`@env.task`](/v6/reference/environment#registering-tasks). You rarely construct one directly.
-
-| Attribute / method | Description |
-|--------------------|-------------|
-| `task.id` | The task id. |
-| `task.description` | Human-readable description. |
-| `task.env` | The owning `Environment`. |
-| `task.input_type` / `task.return_type` | The declared `input=` / `returns=` types. |
-| `task.manifest_entry()` | The manifest dict (id, description, JSON schemas). |
-| `task(*args, **kwargs)` | **Binds a `Variant`** with those arguments. |
+`@env.task()` registers an async-generator task on an `Environment`. The returned
+callable is the authoring handle; call it with arguments to create a public
+`Task`.
 
 ```python
-v = count_letter(word="raspberry")   # -> Variant, runs nothing yet
+env = Environment("letter-count")
+
+@env.task()
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s are in '{word}'?"
+    yield 1.0 if answer == str(word.count(letter)) else 0.0
+
+task = count_letter(word="raspberry")  # -> hud.eval.Task
 ```
 
-## Variant
+## `Task`
 
-A parameterized task bound to an env or sandbox. It's a dataclass:
+`Task` is a Pydantic model — one portable, validated row of data:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `env` | `Environment \| Sandbox` | Where it runs. |
-| `task` | `str` | The task id. |
+| `env` | `str` | The name of the environment it belongs to. |
+| `id` | `str` | The task id registered on the environment. |
 | `args` | `dict` | Bound arguments. |
-| `slug` | `str \| None` | Stable id for sync/registry. |
-| `columns` | `dict \| None` | Arbitrary metadata for filtering/leaderboards. |
-| `validation` | `list[dict] \| None` | Sync metadata. |
-| `agent_config` | `dict \| None` | Sync metadata. |
+| `slug` | `str \| None` | Stable id for sync/filtering/registry. |
+| `columns` | `dict \| None` | Metadata for filtering and leaderboards. |
+| `validation` | `list[dict] \| None` | Sync/platform metadata. |
+| `agent_config` | `dict \| None` | Sync/platform metadata. |
 
-### Running a variant
+The env on a task is a *name*, never a live object: it is the join key between
+the row and whatever placement can bring that environment up. Running a task
+never needs a live env in-process — the prompt and grade arrive over the wire
+from whatever substrate placement brought up.
 
-Enter it as an async context manager to get a live [`Run`](/v6/reference/types#run); exit grades it:
+### Placement: where a task runs
+
+Placement is decided at execution time with the `runtime=` parameter — a *provider*.
+A provider is called with the task row being placed and brings up one fresh
+substrate for it:
 
 ```python
-async with count_letter(word="strawberry") as run:
-    await agent(run)         # agent fills run.trace
-print(run.reward)            # graded on exit
+class Provider(Protocol):
+    def __call__(self, task: Task, /) -> AbstractAsyncContextManager[Runtime]: ...
 ```
 
-### Methods
+The contract is structural — a class holding real state (a platform session, an image cache, a warm pool) or a plain closure both qualify.
+
+| Provider | Description |
+|----------|-------------|
+| `LocalRuntime(path)` | Serve the row's env from a local `.py` source in a child process (the same serving path a container CMD runs). `env=` pins one explicitly. |
+| `DockerRuntime(image)` | `docker run` a fresh container per rollout from an image whose CMD serves the control channel (the scaffolded `Dockerfile.hud`). `port=` (default 8765) is the in-container port; `run_args=` passes extra `docker run` flags. The control port is the only one published — capability connections (workspace SSH, CDP, ...) tunnel through it. |
+| `Runtime(url)` | Attach to an already-served control channel (provisioned elsewhere; no lifecycle). |
+| `HUDRuntime()` | One HUD-hosted substrate by the row's env name (the default when `runtime=` is omitted; not wired up yet). |
+
+```python
+from hud import DockerRuntime, LocalRuntime, Runtime
+
+job = await task.run(agent, runtime=LocalRuntime("env.py"))          # local subprocess
+job = await task.run(agent, runtime=DockerRuntime("my-env:latest"))  # fresh container
+job = await task.run(agent, runtime=Runtime("tcp://host:8765"))  # already served
+```
+
+Because the provider sees the row, placement can vary per task — heavier
+substrates for heavier rows, no engine involvement:
+
+```python
+def placer(task):
+    gpus = 4 if task.args.get("big_model") else 1
+    return my_cloud(image=f"hud/{task.env}", gpus=gpus)
+
+job = await taskset.run(agent, runtime=placer)
+```
+
+### Running a Task
+
+`task.run(agent, runtime=...)` executes the task end to end — provision, agent,
+grade — and returns a `Job` holding the graded [`Run`](/v6/reference/types#run)s.
+It is the single-task form of `Taskset.run()` with identical scheduling
+semantics (`group=`, `max_concurrent=`) and failure isolation (a crashed
+rollout comes back as a failed `Run` inside the job rather than raising).
+There are no standalone traces — every run reports under a job:
+
+```python
+job = await count_letter(word="strawberry").run(agent, runtime=LocalRuntime("env.py"))
+print(job.reward)           # mean reward across runs
+print(job.runs[0].trace.content)
+```
+
+For manual control (custom drivers, no agent), compose the engine's public
+pieces yourself — a provider, `connect`, and the `Run` lifecycle. Exiting the
+`Run` grades it; this path skips the trace reporting and failure isolation
+`task.run()` provides:
+
+```python
+from hud import Run, connect
+
+task = count_letter(word="strawberry")
+async with LocalRuntime("env.py")(task) as runtime, connect(runtime) as client:
+    async with Run(client, task.id, task.args) as run:
+        run.trace.content = "3"  # your driver fills the trace
+print(run.reward)                # graded on exit
+```
+
+### Task Methods
 
 | Method | Description |
 |--------|-------------|
-| `variant.default_slug()` | Stable slug from the task id + an args hash. |
-| `variant.to_dict()` | Serialize to `{env, task, args, ...}` (env becomes a portable ref). |
-| `Variant.from_dict(data)` | Rebuild from a serialized entry. |
+| `task.run(agent, runtime=..., group=..., max_concurrent=...)` | Schedule through the rollout engine (single-task `Taskset.run`); returns a `Job`. |
+| `task.default_slug()` | Stable slug from the task id and, when present, an args hash. |
 
-### The `variant()` helper
+There is no bespoke serialization: the model is the row. `task.model_dump()`
+is the portable entry (`{"env": name, "id": ..., "args": ...}`) and
+`Task.model_validate(data)` rebuilds it — standard Pydantic.
 
-Construct a variant explicitly (e.g. against a sandbox) with metadata:
+### Constructing Rows Directly
+
+When you don't have the task function in hand (data pipelines, generated
+tasksets), construct the model — fields and metadata are explicit:
 
 ```python
-from hud.eval import variant, RemoteSandbox
+from hud import Task
 
-v = variant(RemoteSandbox("tcp://127.0.0.1:8765"), "count_letter",
-            slug="count-straw", columns={"difficulty": "easy"}, word="strawberry")
+t = Task(env="letter-count", id="count_letter", args={"word": "strawberry"}, slug="count-straw")
 ```
 
-## Taskset
+## `Taskset`
 
-A collection of variants you evaluate one agent over.
+A named, ordered collection of tasks.
 
 ```python
-Taskset(variants: Iterable[Variant])
+taskset = Taskset("letters", [
+    count_letter(word="strawberry"),
+    count_letter(word="raspberry"),
+])
+```
+
+### Sources
+
+| Constructor | Description |
+|-------------|-------------|
+| `Taskset(name, tasks)` | Wrap an iterable of `Task`s. |
+| `Taskset.from_file(path)` | Load `.py`, directory, `.json`, or `.jsonl` sources. |
+| `Taskset.from_module(path)` | Load public `Task` or `Taskset` objects from Python source. |
+| `Taskset.from_api(name)` | Load a platform taskset by name or id. |
+| `taskset.to_file(path)` | Write `.json` or `.jsonl` (`hud sync tasks --export` adds CSV). |
+
+### Collection Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `len(taskset)` / `iter(taskset)` | Count / iterate tasks. |
+| `taskset["slug"]` | Lookup by slug. |
+| `taskset.filter(slugs)` | Keep matching slugs. |
+| `taskset.exclude(slugs)` | Drop matching slugs. |
+
+### Running
+
+`Taskset.run()` expands each task `group` times, acquires a fresh substrate per
+rollout from the `runtime=` provider (called with that rollout's task row, so one
+provider serves a mixed-env taskset), lets `agent(run)` fill the trace, grades
+on exit, and returns a `Job`.
+
+```python
+job = await taskset.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurrent=10)
+for run in job.runs:
+    print(run.reward)
 ```
 
 | Method | Description |
 |--------|-------------|
-| `len(taskset)` / `iter(taskset)` | Count / iterate variants. |
-| `await taskset.run(agent, *, group=1, max_concurrent=None)` | Gather rollouts; returns `list[Run]`. |
+| `await taskset.run(agent, runtime=None, group=1, max_concurrent=None, job=None)` | Run the taskset and return `Job` (pass an open `job` to accumulate into it). |
 
-`run` expands each variant `group` times (the repeats share a GRPO `group_id`), launches a fresh env per rollout, lets `agent(run)` fill the trace, grades on exit, and reports each trace under one HUD job. A failed launch is isolated into a failed `Run` so one bad rollout never collapses the batch.
+## `Job`
+
+The platform receipt for one execution — there are no standalone traces, so
+every run (including a single `task.run`) reports under a job.
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `id` | `str` | HUD job id. |
+| `name` | `str` | Display name. |
+| `runs` | `list[Run]` | Runs in expansion order. |
+| `group` | `int` | Runs per task. |
+| `reward` | `float` | Mean reward across runs. |
+| `await Job.start(name, group=1)` | `Job` | Open a job spanning multiple scheduler calls (a training session); pass it as `job=` to accumulate. |
+
+## Sync
+
+`hud.eval.sync.diff()` compares local tasks to remote tasks and returns a
+`SyncPlan`.
 
 ```python
-from hud.eval import Taskset
+from hud.eval.sync import diff
 
-runs = await Taskset(count_letter(word=w) for w in words).run(
-    agent, group=8, max_concurrent=10,
-)
+local = Taskset.from_file("tasks.py")
+remote = Taskset.from_api("SheetBench-50")
+
+plan = diff(local, remote)
+print(plan.summary())
 ```
 
-## See also
+| Type / method | Description |
+|---------------|-------------|
+| `SyncPlan.to_create` | Local tasks not present remotely. |
+| `SyncPlan.to_update` | Local tasks whose signature differs. |
+| `SyncPlan.unchanged` | Matching tasks. |
+| `SyncPlan.remote_only` | Remote tasks not present locally. |
+
+Use `hud sync tasks` to upload a taskset to the platform.
+
+## See Also
 
 <CardGroup cols={2}>
+<Card title="Environment" icon="cube" href="/v6/reference/environment" />
+<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
 <Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
 <Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
 </CardGroup>

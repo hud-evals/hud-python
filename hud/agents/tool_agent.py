@@ -2,7 +2,7 @@
 
 Subclass contract::
 
-    class ClaudeAgent(ToolAgent[BetaMessageParam]):
+    class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         tool_catalog = (ClaudeBashTool, ClaudeTextEditorTool, ClaudeMCPProxyTool)
 
         async def _initialize_state(self, *, prompt) -> RunState[BetaMessageParam]: ...
@@ -27,20 +27,21 @@ import mcp.types as mcp_types
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
+from hud.agents.tools.base import AgentTool
 from hud.capabilities import MCPClient
 from hud.telemetry.instrument import instrument
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
-    from hud.agents.tools.base import AgentTool
-    from hud.agents.tools.hosted import HostedTool
+    from hud.agents.types import AgentConfig
     from hud.capabilities import CapabilityClient
-    from hud.client import Run
+    from hud.eval.rollout import Run
     from hud.types import AgentResponse
 
 logger = logging.getLogger(__name__)
 
 MessageT = TypeVar("MessageT")
+ConfigT = TypeVar("ConfigT", bound="AgentConfig")
 
 
 def _message_text(message: mcp_types.PromptMessage) -> str:
@@ -90,22 +91,20 @@ class RunState(Generic[MessageT]):
     drive many concurrent rollouts without shared mutable state.
     """
 
-    messages: list[MessageT] = field(default_factory=list)
-    tools: dict[str, AgentTool[Any]] = field(default_factory=dict)
-    params: list[Any] = field(default_factory=list)
+    messages: list[MessageT] = field(default_factory=list[MessageT])
+    tools: dict[str, AgentTool[Any]] = field(default_factory=dict[str, AgentTool[Any]])
+    params: list[Any] = field(default_factory=list[Any])
 
 
-class ToolAgent(Agent, Generic[MessageT]):
+class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     """Catalog-driven provider tool-call loop."""
 
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
     #: Capability-client types this agent can drive (derived from the catalog).
     clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
 
-    # set by subclass __init__
-    model: str
-    auto_respond: bool
-    hosted_tools: list[HostedTool[Any]]
+    #: The agent's typed config; set by subclass __init__.
+    config: ConfigT
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -115,21 +114,16 @@ class ToolAgent(Agent, Generic[MessageT]):
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
 
-    async def __call__(
-        self,
-        run: Run,
-        *,
-        max_steps: int = 10,
-        system_prompt: str | None = None,
-        citations_enabled: bool = False,
-    ) -> None:
+    async def __call__(self, run: Run) -> None:
         """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
 
         Opens the capabilities this agent's catalog supports off the connection
         (``run.client.open(protocol)``), builds the tools into a fresh ``RunState``,
         then runs the loop against ``run.prompt``, accumulating the trajectory onto
-        ``run.trace``. No per-rollout state is stored on ``self``, so one instance
-        may drive many concurrent rollouts.
+        ``run.trace``. Loop budget and prompting come from the agent's config
+        (``max_steps``, ``system_prompt``, ``citations_enabled``). No per-rollout
+        state is stored on ``self``, so one instance may drive many concurrent
+        rollouts.
         """
         connections: dict[str, CapabilityClient] = {}
         manifest = run.client.manifest
@@ -143,9 +137,9 @@ class ToolAgent(Agent, Generic[MessageT]):
         await self._loop(
             run,
             state,
-            max_steps=max_steps,
-            system_prompt=system_prompt,
-            citations_enabled=citations_enabled,
+            max_steps=self.config.max_steps,
+            system_prompt=self.config.system_prompt,
+            citations_enabled=self.config.citations_enabled,
         )
 
     async def _build_tools(
@@ -155,7 +149,8 @@ class ToolAgent(Agent, Generic[MessageT]):
         """Build the (tools, params) for one run from the given open connections."""
         tools: dict[str, AgentTool[Any]] = {}
         params: list[Any] = []
-        hosted_tools = getattr(self, "hosted_tools", [])
+        model = self.config.model
+        hosted_tools = self.config.hosted_tools
 
         mcp_clients = [c for c in connections.values() if isinstance(c, MCPClient)]
         mcp_lists = await asyncio.gather(*(c.list_tools() for c in mcp_clients))
@@ -164,7 +159,7 @@ class ToolAgent(Agent, Generic[MessageT]):
         )
 
         for tool_cls in type(self).tool_catalog:
-            spec = tool_cls.default_spec(self.model)
+            spec = tool_cls.default_spec(model)
             if spec is None:
                 continue
             for client in connections.values():
@@ -180,9 +175,7 @@ class ToolAgent(Agent, Generic[MessageT]):
                     tools[tool.provider_name] = tool
                     params.append(tool.to_params())
 
-        params.extend(
-            hosted.to_params() for hosted in hosted_tools if hosted.supports_model(self.model)
-        )
+        params.extend(hosted.to_params() for hosted in hosted_tools if hosted.supports_model(model))
 
         return tools, params
 
@@ -215,7 +208,9 @@ class ToolAgent(Agent, Generic[MessageT]):
                     trace.samples.append(response.sample)
 
                 if response.done or not response.tool_calls:
-                    follow_up = await auto_respond(response.content, enabled=self.auto_respond)
+                    follow_up = await auto_respond(
+                        response.content, enabled=self.config.auto_respond
+                    )
                     if follow_up is not None:
                         text = (
                             follow_up.content.text

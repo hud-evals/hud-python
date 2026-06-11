@@ -5,8 +5,13 @@ the group, and POST ``{trace_id, advantage}`` to the backend (which holds the
 token-level trajectories keyed by ``trace_id`` and runs the optimizer)::
 
     trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
-    runs = await Taskset(task(x) for x in xs).run(agent, group=16)
-    await trainer.reward(runs)
+    taskset = Taskset("train", [task(x) for x in xs])
+
+    session = await Job.start("train", group=16)  # one job spans the session
+    for _ in range(steps):
+        batch_start = len(session.runs)
+        await taskset.run(agent, job=session)
+        await trainer.reward(session.runs[batch_start:])
 """
 
 from __future__ import annotations
@@ -14,9 +19,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Protocol, runtime_checkable
 
-import httpx
-
 from hud.settings import settings
+from hud.utils.platform import PlatformClient
 
 
 @runtime_checkable
@@ -93,16 +97,14 @@ class HudTrainingClient:
         if not signals:
             return
 
-        base_url = self.base_url or settings.hud_api_url
-        api_key = self.api_key or settings.api_key
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
-            resp = await client.post(
-                "/train/advantages",
-                json={"config": asdict(self.config), "signals": signals},
-                headers=headers,
-            )
-            resp.raise_for_status()
+        platform = PlatformClient(
+            self.base_url or settings.hud_api_url,
+            self.api_key or settings.api_key or "",
+        )
+        await platform.apost(
+            "/train/advantages",
+            json={"config": asdict(self.config), "signals": signals},
+        )
 
 
 __all__ = ["HudTrainingClient", "Rewarded", "TrainingConfig", "group_relative"]

@@ -65,9 +65,11 @@ class CDPClient(CapabilityClient):
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
         parts = urlsplit(cap.url)
-        host = parts.hostname or "127.0.0.1"
-        port = parts.port or 9222
-        ws_url = await cls._resolve_ws_url(host, port, cap.params.get("target_id"), cap.url)
+        if parts.hostname is None or parts.port is None:
+            raise ValueError(f"cdp capability missing host or port: {cap.url!r}")
+        ws_url = await cls._resolve_ws_url(
+            parts.hostname, parts.port, cap.params.get("target_id"), cap.url
+        )
         ws = await ws_connect(ws_url, max_size=None)
         client = cls(cap, ws)
         client._reader = asyncio.create_task(client._read_loop())

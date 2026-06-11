@@ -5,30 +5,30 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+
+if TYPE_CHECKING:
+    from hud.utils.platform import PlatformClient
 
 
 async def stream_build_logs(
+    platform: PlatformClient,
     build_id: str,
     console: HUDConsole | None = None,
     max_reconnects: int = 3,
 ) -> str:
     """Stream build logs from the HUD backend via WebSocket."""
-    from hud.cli.utils.api import require_api_key
-    from hud.settings import settings
-
-    api_key = require_api_key()
     if console is None:
         console = HUDConsole()
 
-    api_url = settings.hud_api_url
-    ws_url = api_url.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url = f"{ws_url.rstrip('/')}/builds/{build_id}/logs?api_key={api_key}"
+    ws_url = platform.api_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_url.rstrip('/')}/builds/{build_id}/logs?api_key={platform.api_key}"
 
     final_status = "UNKNOWN"
     reconnect_count = 0
@@ -192,22 +192,16 @@ def _print_log_line(
 
 
 async def poll_build_status(
+    platform: PlatformClient,
     build_id: str,
     console: HUDConsole | None = None,
     poll_interval: float = 5.0,
     max_wait: float = 3600.0,
 ) -> dict[str, Any]:
     """Poll for build status as a fallback when WebSocket is not available."""
-    import httpx
-
-    from hud.cli.utils.api import hud_headers
-    from hud.settings import settings
-
     if console is None:
         console = HUDConsole()
 
-    api_url = settings.hud_api_url
-    headers = hud_headers()
     start_time = asyncio.get_event_loop().time()
     last_status = ""
 
@@ -218,25 +212,18 @@ async def poll_build_status(
             return {"status": "TIMED_OUT"}
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{api_url.rstrip('/')}/builds/{build_id}/status",
-                    headers=headers,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                data = response.json()
+            data = await platform.aget(f"/builds/{build_id}/status")
 
-                status = data.get("status", "")
-                if status != last_status:
-                    console.info(f"Build status: {status}")
-                    last_status = status
+            status = data.get("status", "")
+            if status != last_status:
+                console.info(f"Build status: {status}")
+                last_status = status
 
-                if status in ["SUCCEEDED", "FAILED", "STOPPED", "TIMED_OUT"]:
-                    return data
+            if status in ["SUCCEEDED", "FAILED", "STOPPED", "TIMED_OUT"]:
+                return data
 
-        except httpx.HTTPStatusError as e:
-            console.warning(f"Status check failed: {e.response.status_code}")
+        except HudRequestError as e:
+            console.warning(f"Status check failed: {e.status_code or e}")
         except Exception as e:
             console.warning(f"Status check error: {e}")
 

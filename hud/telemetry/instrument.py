@@ -98,7 +98,6 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,
     method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
@@ -112,7 +111,6 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,
     method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
@@ -126,7 +124,6 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,
     method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
@@ -139,7 +136,6 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,
     method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
@@ -153,7 +149,6 @@ def instrument(
         func: The function to instrument
         name: Custom span name (defaults to module.function)
         category: Span category (e.g., "agent", "tool", "function", "mcp")
-        span_type: Alias for category (deprecated, use category instead)
         method: MCP method name (e.g., "tools/call", "resources/read").
             When set, produces MCP spans: name becomes "{method}.mcp",
             type becomes "SERVER", and request is structured as
@@ -174,8 +169,6 @@ def instrument(
         async def call_model(messages: list) -> str:
             return await model.generate(messages)
     """
-    effective_category = span_type if span_type is not None else category
-    effective_method = method
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if hasattr(func, "_hud_instrumented"):
@@ -201,15 +194,15 @@ def instrument(
             error: str | None = None,
         ) -> dict[str, Any]:
             """Build a span record for export."""
-            is_mcp = effective_method is not None
+            is_mcp = method is not None
 
             extra_attrs: dict[str, Any] = {}
             if is_mcp:
-                extra_attrs["method_name"] = effective_method
+                extra_attrs["method_name"] = method
 
             attributes = TraceStep(
                 task_run_id=task_run_id,
-                category="mcp" if is_mcp else effective_category,
+                category="mcp" if is_mcp else category,
                 type="SERVER" if is_mcp else "CLIENT",
                 start_timestamp=start_time,
                 end_timestamp=end_time,
@@ -230,7 +223,7 @@ def instrument(
                     if args_dict:
                         if is_mcp:
                             attributes.request = {
-                                "method": effective_method,
+                                "method": method,
                                 "params": args_dict,
                             }
                         else:
@@ -242,7 +235,7 @@ def instrument(
             if record_result and result is not None and error is None:
                 try:
                     serialized = _serialize_value(result)
-                    if is_mcp and effective_method == "prompts/get":
+                    if is_mcp and method == "prompts/get":
                         if isinstance(serialized, str):
                             serialized = {
                                 "messages": [
@@ -255,7 +248,7 @@ def instrument(
                                     }
                                 ]
                             }
-                    elif is_mcp and effective_method == "resources/read":
+                    elif is_mcp and method == "resources/read":
                         if isinstance(serialized, list):
                             serialized = {"contents": serialized}
                         elif isinstance(serialized, dict) and "reward" in serialized:
@@ -269,7 +262,7 @@ def instrument(
 
             # Build span
             span_id = uuid.uuid4().hex[:16]
-            effective_name = f"{effective_method}.mcp" if is_mcp else span_name
+            effective_name = f"{method}.mcp" if is_mcp else span_name
             span: dict[str, Any] = {
                 "name": effective_name,
                 "trace_id": _normalize_trace_id(task_run_id),

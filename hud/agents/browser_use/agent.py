@@ -1,11 +1,11 @@
 """BrowserUseAgent — delegates browser control to the ``browser-use`` SDK.
 
 The env publishes a ``cdp/1.3`` capability (a Chromium DevTools endpoint); this
-agent reads that binding off the run's manifest and hands the URL to
-``browser-use``, which drives the browser over its own CDP client. We do **not**
-``open`` one of our own ``CapabilityClient`` connections — browser-use owns the
-session — so this agent reaches for ``trace.binding(...)`` (raw declaration)
-rather than ``trace.open(...)`` (managed client).
+agent reads that binding's URL and hands it to ``browser-use``, which drives
+the browser over its own CDP client. We do **not** ``open`` one of our own
+``CapabilityClient`` connections — browser-use owns the session — so this
+agent uses ``client.binding(...)`` (wire data) rather than ``client.open(...)``
+(managed client).
 
 The agent is stateless w.r.t. the env: it holds only config and is driven by
 ``await agent(run)``, receiving the run handle per call. ``browser-use`` is an
@@ -15,6 +15,10 @@ optional dependency
 
 from __future__ import annotations
 
+# browser-use is an optional, untyped dependency (lazy __getattr__ exports), so
+# its symbols and members resolve as Unknown under strict checking. This whole
+# module is the boundary around that SDK; contain the unknowns here.
+# pyright: reportAttributeAccessIssue=false, reportUnknownVariableType=false, reportUnknownMemberType=false
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -25,7 +29,7 @@ from hud.agents.types import BrowserUseConfig
 from hud.settings import settings
 
 if TYPE_CHECKING:
-    from hud.client import Run
+    from hud.eval.rollout import Run
 
 LOGGER = logging.getLogger("hud.agents.browser_use")
 
@@ -34,6 +38,8 @@ CDP_PROTOCOL = "cdp/1.3"
 
 class BrowserUseAgent(Agent):
     """Run the ``browser-use`` agent against an env's ``cdp/1.3`` capability."""
+
+    config: BrowserUseConfig
 
     def __init__(self, config: BrowserUseConfig | None = None) -> None:
         self.config = config or BrowserUseConfig()

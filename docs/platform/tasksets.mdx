@@ -155,21 +155,21 @@ Tasks are defined with:
 
 ```json
 {
-  "slug": "checkout-laptop",
   "scenario": "checkout",
   "args": {
     "product_name": "Laptop"
   },
   "env": {
     "name": "my-store-env"
-  }
+  },
+  "prompt": "Optional custom prompt override"
 }
 ```
 
-- **slug** — Stable identifier used for sync and updates
 - **scenario** — The scenario name to run
 - **args** — Arguments passed to the scenario
 - **env.name** — The environment containing the scenario
+- **prompt** — (Optional) Override the scenario's default prompt
 
 ## Next Steps
 

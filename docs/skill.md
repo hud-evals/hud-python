@@ -33,7 +33,8 @@ Always prefer reading the relevant docs page over guessing an API.
 ## The golden path (v6)
 
 A task is an async generator: `yield` a prompt, receive the answer, `yield` a
-reward (0.0–1.0). Calling the task mints a runnable **Variant**.
+reward (0.0–1.0). Calling the decorated task function creates a runnable
+**Task**.
 
 ```python
 from hud import Environment
@@ -49,19 +50,21 @@ tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
 
 Run it: `hud eval tasks.py claude --gateway`. Cite [Quickstart](/v6/quickstart)
-and [Tasks](/v6/build/tasks).
+and [Tasks](/v6/reference/tasks).
 
 **Capabilities** give the agent something to act on (declare on the env; the
 harness brings its own tools):
 
 ```python
-from hud.environment import Environment, Workspace
+from hud.environment import Environment
 
-ws = Workspace("workspace")  # relative path — absolute "/workspace" fails on macOS
-env = Environment(name="coder", capabilities=[ws.capability()])
+env = Environment(name="coder")
+env.workspace("/workspace")
 ```
-`ssh` (shell+files via `Workspace`), `mcp`, `cdp` (browser), `rfb`
-(computer-use), `ros2` (robot). Cite [Environments](/v6/build/environments) and
+
+`ssh` (shell+files; `env.workspace(root)` runs the sandbox for you),
+`mcp`, `cdp` (browser), `rfb` (computer-use), `ros2` (robot). Cite
+[Environments](/v6/reference/environment) and
 [Capabilities](/v6/reference/capabilities).
 
 **Run / scale / train:** [Models](/v6/run/models),
@@ -77,9 +80,9 @@ If you catch yourself writing any of these, stop and convert:
 |------------------|------------|
 | `@env.scenario("name")` | `@env.task()` |
 | `@env.tool` / `env.add_tool(BashTool())` | declare a **capability** (`ssh`/`mcp`/`cdp`/`rfb`/`ros2`) |
-| `env("scenario", ...)` | call the task: `count_letter(word=...)` → `Variant` |
-| `hud.eval(task)` / `task.run("claude")` | `async with variant as run: await agent(run)` |
-| `env.run(transport=...)` | `await env.serve()` / `hud dev` / `hud deploy` |
+| `env("scenario", ...)` | call the task: `count_letter(word=...)` → `Task` |
+| `hud.eval(task)` / `task.run("claude")` | `await task.run(agent)` → `Job` |
+| `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` |
 | `from hud.tools import ...` | tools are gone; result types live in `hud.agents.types` |
 
 For an existing v5 env, follow [Migrate to v6](/migrate-v6).
@@ -115,7 +118,7 @@ the user judges a task by its *average* reward.
 rollout in the group is equal, the advantage is zero and **no gradient is
 produced** — the task teaches nothing, however good the average looks. The unit
 of trainability is *within-group spread*, not the mean. Run a group
-(`Taskset(...).run(agent, group=16)`) and confirm a non-degenerate spread.
+(`await Taskset("name", tasks).run(agent, group=16)`) and confirm a non-degenerate spread.
 All-one (saturated) is wasted surface; all-zero at small group sizes may still
 be learnable at training scale, but investigate it.
 
@@ -211,7 +214,7 @@ grader"), [Graders](/v6/reference/graders).
 ## Grading quick reference
 
 - Plain helpers (return float): `exact_match`, `contains`, `numeric_match`,
-  `f1_score` from `hud.native.graders`.
+  `f1_score` from `hud.graders`.
 - Async graders (return `SubScore`): `BashGrader.grade(weight, command=...)`,
   `LLMJudgeGrader.grade(weight, answer=..., criteria=[...])`.
 - Compose: `await Grade.gather(...)` (positive weights normalize to 1.0).
@@ -230,7 +233,7 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 - No v5 idioms anywhere.
 
 When unsure about an API, read the page rather than guess:
-[Environment](/v6/reference/environment) · [Tasks & variants](/v6/reference/tasks) ·
+[Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·
 [Capabilities](/v6/reference/capabilities) · [Agents](/v6/reference/agents) ·
 [Graders](/v6/reference/graders) · [Types](/v6/reference/types) ·
 [CLI](/v6/reference/cli).

@@ -16,17 +16,14 @@ Color Palette:
 from __future__ import annotations
 
 import logging
-import time
 import traceback
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import Any
 
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-if TYPE_CHECKING:
-    from rich.status import Status
 # HUD Brand Colors - Optimized for both light and dark modes
 GOLD = "rgb(192,150,12)"  # #c0960c - Primary brand color
 RED = "rgb(205,92,92)"  # Indian red / coral — warm, readable on both backgrounds
@@ -37,18 +34,11 @@ TEXT = "bright_white"  # Off-white that's readable on dark, not too bright on li
 SECONDARY = "rgb(108,113,196)"  # Muted blue-purple for secondary text
 
 
-# HUD Symbol System - Minimal 3-category system with default colors
 class Symbols:
     """Unicode symbols for consistent CLI output with default colors."""
 
     # Info/Items - Use for all informational lines (gold)
     ITEM = f"[{GOLD}]•[/{GOLD}]"
-
-    # Status - Use for state/completion (green)
-    SUCCESS = f"[{GREEN}]●[/{GREEN}]"
-
-    # Flow/Special - Use for transitions and important notes (gold)
-    FLOW = f"[{GOLD}]⟿[/{GOLD}]"
 
 
 class HUDConsole:
@@ -170,17 +160,6 @@ class HUDConsole:
         console = self._stderr_console if stderr else self._stdout_console
         console.print(f"[{SECONDARY} underline]{escape(url)}[/{SECONDARY} underline]")
 
-    def json_config(self, json_str: str, stderr: bool = True) -> None:
-        """Print JSON configuration with neutral theme.
-
-        Args:
-            json_str: JSON string to display
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        # Print JSON with neutral grey text
-        console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{TEXT}]{escape(json_str)}[/{TEXT}]")
-
     def key_value_table(
         self, data: dict[str, str | int | float], show_header: bool = False, stderr: bool = True
     ) -> None:
@@ -210,29 +189,6 @@ class HUDConsole:
         """
         console = self._stderr_console if stderr else self._stdout_console
         console.print(f"[{DIM}]{escape(message)}[/{DIM}]")
-
-    def phase(self, phase_num: int, title: str, stderr: bool = True) -> None:
-        """Print a phase header (for debug command).
-
-        Args:
-            phase_num: Phase number
-            title: Phase title
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"\n{'=' * 80}", style=GOLD)
-        console.print(f"[bold {GOLD}]PHASE {phase_num}: {title}[/bold {GOLD}]")
-        console.print(f"{'=' * 80}", style=GOLD)
-
-    def command(self, cmd: list[str], stderr: bool = True) -> None:
-        """Print a command being executed.
-
-        Args:
-            cmd: Command parts as list
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[bold {TEXT}]$ {' '.join(cmd)}[/bold {TEXT}]")
 
     def hint(self, hint: str, stderr: bool = True) -> None:
         """Print a hint message.
@@ -315,11 +271,7 @@ class HUDConsole:
         - Displays structured hints if present on the exception (e.g., HudException.hints)
         - Prints a link to open an issue for SDK problems
         """
-        try:
-            from hud.shared.exceptions import HudRequestError  # lazy import
-        except Exception:
-            # Keep type available for isinstance guards below without import-time dependency
-            HudRequestError = tuple()  # type: ignore
+        from hud.utils.exceptions import HudRequestError  # lazy import: avoid import cycle
 
         # Header with exception type
         ex_type = type(error).__name__
@@ -327,31 +279,25 @@ class HUDConsole:
         self.error(f"{ex_type}: {message}", stderr=stderr)
 
         # Specialized details for request errors
-        if isinstance(error, HudRequestError):  # type: ignore[arg-type]
-            details: dict[str, str] = {}
-            status_code = getattr(error, "status_code", None)
-            if status_code is not None:
-                details["Status"] = str(status_code)
-            response_text = getattr(error, "response_text", None)
-            if response_text:
+        if isinstance(error, HudRequestError):
+            details: dict[str, str | int | float] = {}
+            if error.status_code is not None:
+                details["Status"] = str(error.status_code)
+            if error.response_text:
                 # Limit very long responses
-                trimmed = response_text[:500] + ("..." if len(response_text) > 500 else "")
-                details["Response"] = trimmed
-            response_json = getattr(error, "response_json", None)
-            if response_json and not details.get("Response"):
-                details["Response JSON"] = str(response_json)
+                text = error.response_text
+                details["Response"] = text[:500] + ("..." if len(text) > 500 else "")
+            if error.response_json and "Response" not in details:
+                details["Response JSON"] = str(error.response_json)
             if details:
-                self.key_value_table(details, show_header=False, stderr=stderr)  # type: ignore
+                self.key_value_table(details, show_header=False, stderr=stderr)
 
         # Structured hints, if available
         hints = getattr(error, "hints", None)
         if hints:
-            try:
-                from hud.shared.hints import render_hints  # lazy import
+            from hud.utils.hints import render_hints  # lazy import: avoid import cycle
 
-                render_hints(hints, design=self)
-            except Exception as render_error:
-                self.debug_log(f"Failed to render hints: {render_error}")
+            render_hints(hints, design=self)
 
         # Standard support hint
         self.render_support_hint(stderr=stderr)
@@ -361,46 +307,7 @@ class HUDConsole:
         """Get the stderr console for direct access when needed."""
         return self._stderr_console
 
-    def set_verbose(self, verbose: bool) -> None:
-        """Set the logging level based on verbose flag.
-
-        Args:
-            verbose: If True, show INFO level messages. If False, only show WARNING and above.
-        """
-        if verbose:
-            self._logger.setLevel(logging.INFO)
-        else:
-            self._logger.setLevel(logging.WARNING)
-
-    @property
-    def prefix(self) -> str:
-        """Get the metadata of the current file."""
-        metadata = self._logger.findCaller(stacklevel=3)
-        return f"{metadata[0]}:{metadata[1]} in {metadata[2]} | "
-
-    # Logging-aware methods that check logging levels before printing
-    def log(
-        self,
-        message: str,
-        level: Literal["info", "debug", "warning", "error"] = "info",
-        stderr: bool = True,
-    ) -> None:
-        """Print a message based on the logging level."""
-        prefix = self.prefix
-        if level == "info":
-            self.info_log(f"{prefix}{message}", stderr=stderr)
-        elif level == "debug":
-            self.debug_log(f"{prefix}{message}", stderr=stderr)
-        elif level == "warning":
-            self.warning_log(f"{prefix}{message}", stderr=stderr)
-        elif level == "error":
-            self.error_log(f"{prefix}{message}", stderr=stderr)
-
     def debug(self, message: str, stderr: bool = True) -> None:
-        """Print a debug message."""
-        self.debug_log(message, stderr=stderr)
-
-    def debug_log(self, message: str, stderr: bool = True) -> None:
         """Print a debug message only if DEBUG logging is enabled.
 
         Args:
@@ -409,75 +316,6 @@ class HUDConsole:
         """
         if self._logger.isEnabledFor(logging.DEBUG):
             self.dim_info(message, "", stderr=stderr)
-
-    def info_log(self, message: str, stderr: bool = True) -> None:
-        """Print an info message only if INFO logging is enabled.
-
-        Args:
-            message: The info message
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        if self._logger.isEnabledFor(logging.INFO):
-            self.info(message, stderr=stderr)
-
-    def progress_log(self, message: str, stderr: bool = True) -> None:
-        """Print a progress message only if INFO logging is enabled.
-
-        Args:
-            message: The progress message
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        if self._logger.isEnabledFor(logging.INFO):
-            self.progress_message(message, stderr=stderr)
-
-    def progress(self, initial: str = "", stderr: bool = True) -> _ProgressContext:
-        """Create a progress context manager for inline updates.
-
-        Args:
-            initial: Initial message to display
-            stderr: If True, output to stderr (default), otherwise stdout
-
-        Returns:
-            A context manager that provides update() method
-
-        Example:
-            with console.progress("Processing...") as progress:
-                for i in range(10):
-                    progress.update(f"Processing item {i+1}/10")
-        """
-        return _ProgressContext(
-            console=self._stderr_console if stderr else self._stdout_console, initial=initial
-        )
-
-    def success_log(self, message: str, stderr: bool = True) -> None:
-        """Print a success message only if INFO logging is enabled.
-
-        Args:
-            message: The success message
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        if self._logger.isEnabledFor(logging.INFO):
-            self.success(message, stderr=stderr)
-
-    def warning_log(self, message: str, stderr: bool = True) -> None:
-        """Print a warning message only if WARNING logging is enabled.
-
-        Args:
-            message: The warning message
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        if self._logger.isEnabledFor(logging.WARNING):
-            self.warning(message, stderr=stderr)
-
-    def error_log(self, message: str, stderr: bool = True) -> None:
-        """Print an error message only if ERROR logging is enabled.
-
-        Args:
-            message: The error message
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
-        if self._logger.isEnabledFor(logging.ERROR):
-            self.error(message, stderr=stderr)
 
     def select(
         self,
@@ -585,76 +423,11 @@ class HUDConsole:
             return f"  [{GREEN}]✓[/{GREEN}] [{TEXT}]{escaped_content}[/{TEXT}]"
 
     def confirm(self, message: str, default: bool = True) -> bool:
-        """Print a confirmation message.
-
-        Args:
-            message: The confirmation message
-            default: If True, the default choice is True
-        """
+        """Prompt for a yes/no confirmation; Ctrl+C / EOF answers no."""
         import questionary
 
-        return questionary.confirm(message, default=default).ask()
-
-    # Symbol-based output methods
-    def symbol(self, symbol: str, message: str, color: str = GOLD, stderr: bool = True) -> None:
-        """Print a message with a colored symbol prefix.
-
-        Args:
-            symbol: Symbol to use (use Symbols.* constants)
-            message: Message text
-            color: Color for the symbol (default: gold)
-            stderr: If True, output to stderr
-        """
-        console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{color}]{symbol}[/{color}] {escape(message)}")
-
-    def detail(self, message: str, stderr: bool = True) -> None:
-        """Print an indented detail line with gold pointer symbol."""
-        console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"  [{GOLD}]{Symbols.ITEM}[/{GOLD}] {escape(message)}")
-
-    def flow(self, message: str, stderr: bool = True) -> None:
-        """Print a flow/transition message with wave symbol."""
-        self.symbol(Symbols.FLOW, message, GOLD, stderr)
-
-    def note(self, message: str, stderr: bool = True) -> None:
-        """Print an important note with asterism symbol."""
-        self.symbol(Symbols.ITEM, message, GOLD, stderr)
+        return bool(questionary.confirm(message, default=default, qmark="").ask())
 
 
 # Global design instance for convenience
-class _ProgressContext:
-    """Context manager for inline progress updates."""
-
-    def __init__(self, console: Console, initial: str = "") -> None:
-        self.console = console
-        self.initial = initial
-        self.status: Status | None = None
-        self.start_time: float | None = None
-
-    def __enter__(self) -> Self:
-        self.status = self.console.status(self.initial)
-        self.status.__enter__()
-        self.start_time = time.time()
-        return self
-
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        if self.status:
-            self.status.__exit__(exc_type, exc_val, exc_tb)  # type: ignore
-
-    def update(self, message: str, with_elapsed: bool = True) -> None:
-        """Update the progress message.
-
-        Args:
-            message: New message to display
-            with_elapsed: If True, append elapsed time to message
-        """
-        if self.status:
-            if with_elapsed and self.start_time:
-                elapsed = time.time() - self.start_time
-                self.status.update(f"{message} [{elapsed:.1f}s]")
-            else:
-                self.status.update(message)
-
-
 hud_console = HUDConsole()

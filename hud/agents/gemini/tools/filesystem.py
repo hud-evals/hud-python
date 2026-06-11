@@ -8,7 +8,7 @@ from hud.agents.tools import SSHTool
 from hud.types import MCPToolResult
 
 from .base import GeminiToolSpec
-from .coding import _decl, _required_str
+from .coding import required_str, tool_decl
 
 if TYPE_CHECKING:
     from google.genai import types as genai_types
@@ -38,10 +38,10 @@ class GeminiReadTool(SSHTool):
         return GEMINI_READ_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        path = _required_str(arguments, "file_path")
+        path = required_str(arguments, "file_path")
         result = await self.file_read(path)
         if result.isError:
             return result
@@ -81,10 +81,10 @@ class GeminiSearchTool(SSHTool):
         return GEMINI_SEARCH_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        pattern = _required_str(arguments, "pattern")
+        pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         include = arguments.get("include_pattern")
         cmd = f"grep -rn {_shell_quote(pattern)} {_shell_quote(str(dir_path))}"
@@ -111,10 +111,10 @@ class GeminiGlobTool(SSHTool):
         return GEMINI_GLOB_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        pattern = _required_str(arguments, "pattern")
+        pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         cmd = f"find {_shell_quote(str(dir_path))} -name {_shell_quote(pattern)}"
         return await self.bash(cmd)
@@ -137,10 +137,10 @@ class GeminiListTool(SSHTool):
         return GEMINI_LIST_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        return await self.file_list(_required_str(arguments, "dir_path"))
+        return await self.file_list(required_str(arguments, "dir_path"))
 
 
 def _shell_quote(s: str) -> str:

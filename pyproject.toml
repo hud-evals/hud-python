@@ -17,8 +17,6 @@ dependencies = [
     # MCP dependencies
     "mcp>=1.24.0,<2.0",
     "fastmcp==3.0.2",
-    # A2A protocol
-    "a2a-sdk==0.3.26",
     # For all inference agents
     "openai>=2.26.0",
     # CLI dependencies
@@ -58,7 +56,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = [
     "docs/",
-    "examples/",
+    "cookbooks/",
+    "integrations/",
     "**/checkpoints/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -74,7 +73,7 @@ message = """[bold cyan]Thanks for using the hud SDK![/bold cyan]
 • Try the CLI: [green]hud --help[/green]
 • Read the docs: [green]https://docs.hud.ai[/green]
 
-[dim]For more examples, check out the [cyan]examples/[/cyan] directory.[/dim]
+[dim]For runnable recipes, check out the [cyan]cookbooks/[/cyan] directory.[/dim]
 
 [bold]Happy coding! 🎉[/bold]"""
 style = "blue"
@@ -132,11 +131,6 @@ bedrock = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud-python[agents]",  # Include agents for dev
-    # Jupyter support
-    "ipykernel",
-    "ipython <9",
-    "jupyter_client",
-    "jupyter_core",
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff >=0.11.8, <0.15.0",
@@ -145,9 +139,6 @@ dev = [
     "pytest-mock",
     "pytest-cov",
     "pyright==1.1.407",
-    # Automation and computer control
-    "playwright",
-    "pyautogui>=0.9.54",
     # Optional integrations (for type checking)
     "llama-index-core",
     "google-adk",
@@ -200,7 +191,8 @@ lint.ignore = [
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
-"**/examples/**/*.py" = ["ALL"]
+"**/cookbooks/**/*.py" = ["ALL"]
+"scripts/*.py" = ["T201", "INP001"]  # dev scripts: print is the interface
 
 
 [tool.ruff.format]
@@ -210,11 +202,12 @@ docstring-code-format = true
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.pyright]
-include = ["hud"]
+include = ["hud", "integrations"]
 exclude = [
     "**/node_modules",
     "**/__pycache__",
     "**/venv",
+    "**/.venv",
 ]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
@@ -225,7 +218,6 @@ reportMissingImports = "warning"
 source = ["hud"]
 omit = [
     "*/tests/*",
-    "*/examples/*",
 ]
 
 [tool.coverage.report]
@@ -245,13 +237,12 @@ show_missing = true
 fail_under = 58
 omit = [
     "*/tests/*",
-    "*/examples/*",
 ]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud", "examples"]
+testpaths = ["hud", "integrations"]
 addopts = ""
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access)",
