@@ -1,17 +1,16 @@
 """End-to-end loopback: RobotBridge env <-> RobotAgent over a real WebSocket.
 
 A stub counter sim is served by a real :class:`RobotBridge`, published as a
-``robot`` capability on a real :class:`Environment` behind a
-:class:`LocalSandbox`, and driven by a :class:`RobotAgent` subclass with a stub
-model — the full agent-side path (manifest -> binding -> RobotClient ->
-observe/act loop -> grade).
+``robot`` capability on a real :class:`Environment` served in-process
+(:func:`hud.eval.runtime._local`), and driven by a :class:`RobotAgent`
+subclass with a stub model — the full agent-side path (manifest -> binding ->
+RobotClient -> observe/act loop -> grade).
 """
 
 from __future__ import annotations
 
 import socket
 from typing import Any
-from urllib.parse import urlsplit
 
 import numpy as np
 import pytest
@@ -20,10 +19,11 @@ from hud.agents.robot.agent import RobotAgent
 from hud.agents.robot.model import Model
 from hud.capabilities.base import Capability
 from hud.capabilities.robot import RobotClient
-from hud.client.client import HudClient
+from hud.clients import connect
 from hud.environment import Environment
 from hud.environment.robots.bridge import RobotBridge
-from hud.eval.sandbox import LocalSandbox
+from hud.eval.rollout import Run
+from hud.eval.runtime import _local
 
 CONTRACT: dict[str, Any] = {
     "robot_type": "counter_bot",
@@ -121,17 +121,15 @@ async def test_full_loopback_episode(bridge: CounterBridge) -> None:
     model = EchoCountModel()
     agent = StubAgent(model)
 
-    async with LocalSandbox(env) as runtime:
-        parts = urlsplit(runtime.url)
-        assert parts.hostname is not None and parts.port is not None
-        async with await HudClient.connect(parts.hostname, parts.port) as client:
-            async with client.task("count") as run:
-                assert run.prompt == "count to 5"
-                await agent(run)
-            # Grading reflects bridge success.
-            assert run.reward == 1.0
-            assert run.evaluation["success"] is True
-            assert run.evaluation["total_reward"] == 5.0
+    async with _local(env) as runtime, connect(runtime) as client:
+        run = Run(client, "count", {})
+        async with run:  # start on enter; grade on exit
+            assert run.prompt == "count to 5"
+            await agent(run)
+        # Grading reflects bridge success.
+        assert run.reward == 1.0
+        assert run.evaluation["success"] is True
+        assert run.evaluation["total_reward"] == 5.0
 
     # The agent saw each decoded observation in order (count 0..4)...
     assert [float(s[0]) for s in model.observed_states] == [0.0, 1.0, 2.0, 3.0, 4.0]

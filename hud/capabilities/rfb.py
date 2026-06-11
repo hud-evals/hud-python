@@ -50,8 +50,9 @@ class RFBClient(CapabilityClient):
         self._conn = conn
         self._exit_stack = exit_stack
         parts = urlsplit(capability.url)
-        self._host = parts.hostname or "127.0.0.1"
-        self._port = parts.port or 5900
+        assert parts.hostname is not None and parts.port is not None  # connect() validated
+        self._host = parts.hostname
+        self._port = parts.port
         self._user = capability.params.get("user")
         self._password = capability.params.get("password")
 

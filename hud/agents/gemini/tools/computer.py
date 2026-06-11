@@ -53,7 +53,7 @@ class GeminiComputerTool(RFBTool):
         self.excluded_predefined_functions: list[str] = []
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec | None:
+    def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_COMPUTER_SPEC
 

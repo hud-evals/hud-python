@@ -4,13 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
-from hud.settings import settings
-
-
-def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {settings.api_key}"}
+from hud.utils.platform import PlatformClient
 
 
 async def cancel_job(job_id: str) -> dict[str, Any]:
@@ -18,24 +12,18 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
 
     Returns the response with cancellation results (``total_found``, ``cancelled``).
     """
-    api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel_job"
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(api_url, json={"job_id": job_id}, headers=_headers())
-        response.raise_for_status()
-        return response.json()
+    return await PlatformClient.from_settings().apost(
+        "/v1/rollouts/cancel_job",
+        json={"job_id": job_id},
+    )
 
 
 async def cancel_task(job_id: str, trace_id: str) -> dict[str, Any]:
     """Cancel a specific task run within a job."""
-    api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel"
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            api_url,
-            json={"job_id": job_id, "trace_id": trace_id},
-            headers=_headers(),
-        )
-        response.raise_for_status()
-        return response.json()
+    return await PlatformClient.from_settings().apost(
+        "/v1/rollouts/cancel",
+        json={"job_id": job_id, "trace_id": trace_id},
+    )
 
 
 async def cancel_all_jobs() -> dict[str, Any]:
@@ -44,11 +32,7 @@ async def cancel_all_jobs() -> dict[str, Any]:
     Returns the response with ``jobs_cancelled``, ``total_tasks_cancelled``, and
     ``job_details``.
     """
-    api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel_user_jobs"
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(api_url, json={}, headers=_headers())
-        response.raise_for_status()
-        return response.json()
+    return await PlatformClient.from_settings().apost("/v1/rollouts/cancel_user_jobs", json={})
 
 
 __all__ = ["cancel_all_jobs", "cancel_job", "cancel_task"]

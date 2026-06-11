@@ -14,6 +14,7 @@ from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Sample
+from hud.utils import gateway
 
 from .tools import (
     GlobTool,
@@ -33,7 +34,7 @@ class OpenAIChatRunState(RunState[ChatCompletionMessageParam]):
     continuation_message_count: int | None = None
 
 
-class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
+class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
     """OpenAI-compatible agent using the chat.completions protocol."""
 
     tool_catalog = (
@@ -47,9 +48,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
     def __init__(self, config: OpenAIChatConfig | None = None) -> None:
         config = config or OpenAIChatConfig()
         self.config = config
-        self.model = config.model
-        self.auto_respond = config.auto_respond
-        self.hosted_tools = list(config.hosted_tools)
 
         if (
             config.api_key
@@ -64,19 +62,16 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
             )
 
         self.oai: AsyncOpenAI
-        if config.openai_client is not None:
-            self.oai = config.openai_client
+        if config.model_client is not None:
+            self.oai = config.model_client
         elif config.api_key is not None or config.base_url is not None:
             self.oai = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
         elif settings.api_key:
-            self.oai = AsyncOpenAI(
-                api_key=settings.api_key,
-                base_url=settings.hud_gateway_url,
-            )
+            self.oai = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))
         else:
             raise ValueError(
                 "No API key found. Set HUD_API_KEY for HUD gateway, "
-                "or provide api_key/base_url/openai_client explicitly."
+                "or provide api_key/base_url/model_client explicitly."
             )
 
         self.completion_kwargs = dict(config.completion_kwargs)
@@ -147,7 +142,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam]):
 
         try:
             response: ChatCompletion = await self.oai.chat.completions.create(
-                model=self.model,
+                model=self.config.model,
                 messages=(
                     [{"role": "system", "content": system_prompt}, *messages]
                     if system_prompt is not None

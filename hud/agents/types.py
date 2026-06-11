@@ -28,11 +28,16 @@ class AgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     auto_respond: bool = False
+    max_steps: int = 10
     system_prompt: str | None = None
+    citations_enabled: bool = False
     hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
 
     model_name: str = "Agent"
     model: str = Field(default="unknown", validation_alias=_model_alias)
+    #: Provider client (AsyncAnthropic, AsyncOpenAI, genai.Client, ...). When unset,
+    #: agents resolve one from settings (HUD gateway or provider API key).
+    model_client: Any = None
 
 
 # -----------------------------------------------------------------------------
@@ -43,10 +48,8 @@ class AgentConfig(BaseModel):
 class ClaudeConfig(AgentConfig):
     model_name: str = "Claude"
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_tokens: int = 16384
     use_computer_beta: bool = True
-    validate_api_key: bool = True
 
 
 # -----------------------------------------------------------------------------
@@ -59,12 +62,10 @@ class GeminiConfig(AgentConfig):
 
     model_name: str = "Gemini"
     model: str = Field(default="gemini-3-pro-preview", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 40
     max_output_tokens: int = 8192
-    validate_api_key: bool = True
     excluded_predefined_functions: list[str] = Field(default_factory=list)
     thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
     include_thoughts: bool = True
@@ -80,7 +81,6 @@ class OpenAIConfig(AgentConfig):
 
     model_name: str = "OpenAI"
     model: str = Field(default="gpt-5.4", validation_alias=_model_alias)
-    model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Any = None  # openai Reasoning
@@ -88,7 +88,6 @@ class OpenAIConfig(AgentConfig):
     text: Any = None  # {"verbosity": "low"|"medium"|"high"}
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
-    validate_api_key: bool = True
 
 
 class OpenAIChatConfig(AgentConfig):
@@ -103,7 +102,6 @@ class OpenAIChatConfig(AgentConfig):
         "the model's current active checkpoint. Passed as 'checkpoint' in the "
         "request body's extra_body.",
     )
-    openai_client: Any = None  # AsyncOpenAI
     api_key: str | None = None
     base_url: str | None = None
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
@@ -117,13 +115,14 @@ class OpenAIChatConfig(AgentConfig):
 class ClaudeSDKConfig(AgentConfig):
     """Configuration for ClaudeSDKAgent (runs the ``claude`` CLI over SSH).
 
-    ``system_prompt`` is inherited from ``AgentConfig``.
+    ``system_prompt`` is inherited from ``AgentConfig``. ``max_steps`` maps to the
+    CLI's ``--max-turns``; values <= 0 leave the turn budget to the CLI (unlimited).
     """
 
     model_name: str = "Claude Code"
     model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
-    max_turns: int | None = None
+    max_steps: int = -1
     allowed_tools: list[str] = Field(
         default_factory=lambda: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
     )
@@ -323,7 +322,7 @@ class AgentAnswer(BaseModel, Generic[T]):
 
     content: T = Field(description="The parsed structured answer")
     raw: str = Field(default="", description="Original answer string before parsing")
-    citations: list[Citation] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list[Citation])
     trace: Trace | None = Field(
         default=None,
         description="Full conversation transcript (multi-turn). "

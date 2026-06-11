@@ -38,19 +38,19 @@ class AgentType(str, Enum):
     def cls(self) -> AgentClass:
         match self:
             case AgentType.CLAUDE:
-                from hud.agents.claude import ClaudeAgent
+                from hud.agents import ClaudeAgent
 
                 return ClaudeAgent
             case AgentType.OPENAI:
-                from hud.agents.openai import OpenAIAgent
+                from hud.agents import OpenAIAgent
 
                 return OpenAIAgent
             case AgentType.GEMINI:
-                from hud.agents.gemini import GeminiAgent
+                from hud.agents import GeminiAgent
 
                 return GeminiAgent
             case AgentType.OPENAI_COMPATIBLE:
-                from hud.agents.openai_compatible import OpenAIChatAgent
+                from hud.agents import OpenAIChatAgent
 
                 return OpenAIChatAgent
 

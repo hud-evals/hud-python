@@ -205,7 +205,7 @@ Tasks with a matching `slug` in the same taskset are updated instead of duplicat
 
 ### Add Tasks by Evalset ID
 
-`POST /tasks/evalsets/{evalset_id}/tasks` adds tasks to an existing taskset by its UUID. This is a platform-internal shape with explicit `scenario_id` references; SDK clients should prefer `POST /tasks/upload`.
+`POST /tasks/evalsets/{evalset_id}/tasks` adds tasks to an existing taskset by its UUID. This endpoint uses the internal task format with explicit `scenario_id` references.
 
 ```bash
 curl -X POST https://api.hud.ai/tasks/evalsets/{evalset_id}/tasks \

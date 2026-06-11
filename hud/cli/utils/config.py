@@ -23,6 +23,19 @@ def ensure_config_dir() -> Path:
     return config_dir
 
 
+def parse_key_value(item: str) -> tuple[str, str] | None:
+    """Split one ``KEY=VALUE`` string into ``(key, value)``.
+
+    Returns ``None`` for malformed input (no ``=`` or empty key); each caller
+    decides whether that's a warning, an error, or a skip.
+    """
+    key, sep, value = item.partition("=")
+    key = key.strip()
+    if not sep or not key:
+        return None
+    return key, value.strip()
+
+
 def parse_env_file(contents: str) -> dict[str, str]:
     """Parse simple KEY=VALUE lines into a dict.
 

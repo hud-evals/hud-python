@@ -113,42 +113,37 @@ def _display_lock_details(
         rich_console: Rich Console for output
         lock_data: Parsed lock file data
     """
-    # Display scenarios/prompts
-    prompts = lock_data.get("prompts") or lock_data.get("scenarios", [])
-    if prompts:
+    tasks = lock_data.get("tasks") or []
+    if tasks:
         rich_console.print()
-        scenarios_table = Table(
-            title=f"[bold]Scenarios ({len(prompts)})[/bold]",
+        tasks_table = Table(
+            title=f"[bold]Tasks ({len(tasks)})[/bold]",
             show_header=True,
             header_style="bold",
             border_style="dim",
         )
-        scenarios_table.add_column("Name", style="cyan")
-        scenarios_table.add_column("Arguments", style="dim")
+        tasks_table.add_column("Slug", style="cyan")
+        tasks_table.add_column("Task", style="magenta")
+        tasks_table.add_column("Args", style="dim")
 
-        for prompt in prompts[:10]:  # Limit to 10
-            name = prompt.get("name", "default")
-            args = prompt.get("arguments", [])
-            if args:
-                arg_strs = []
-                for arg in args:
-                    arg_name = arg.get("name", "")
-                    required = arg.get("required", False)
-                    arg_type = arg.get("type", "str")
-                    suffix = " (required)" if required else ""
-                    arg_strs.append(f"{arg_name}: {arg_type}{suffix}")
-                args_str = ", ".join(arg_strs)
-            else:
-                args_str = "No arguments"
-            scenarios_table.add_row(name, args_str)
+        for task in tasks[:10]:
+            if not isinstance(task, dict):
+                tasks_table.add_row(str(task), "", "")
+                continue
+            slug = str(task.get("slug") or "")
+            task_id = str(task.get("task") or task.get("id") or "")
+            args = task.get("args") or {}
+            args_str = ", ".join(sorted(args)) if isinstance(args, dict) and args else "No args"
+            tasks_table.add_row(slug, task_id, args_str)
 
-        if len(prompts) > 10:
-            scenarios_table.add_row(
-                f"[dim]... and {len(prompts) - 10} more[/dim]",
+        if len(tasks) > 10:
+            tasks_table.add_row(
+                f"[dim]... and {len(tasks) - 10} more[/dim]",
+                "",
                 "",
             )
 
-        rich_console.print(scenarios_table)
+        rich_console.print(tasks_table)
 
     # Display environment variables
     env_config = lock_data.get("environment") or {}
@@ -174,18 +169,22 @@ def _display_lock_details(
                 )
             )
 
-    # Display tools
-    tools = lock_data.get("tools", [])
-    if tools:
-        tool_names = [t.get("name", str(t)) if isinstance(t, dict) else str(t) for t in tools[:10]]
-        tools_str = ", ".join(tool_names)
-        if len(tools) > 10:
-            tools_str += f", ... and {len(tools) - 10} more"
+    capabilities = lock_data.get("capabilities") or []
+    if capabilities:
+        capability_names = [
+            capability.get("name", str(capability))
+            if isinstance(capability, dict)
+            else str(capability)
+            for capability in capabilities[:10]
+        ]
+        capabilities_str = ", ".join(capability_names)
+        if len(capabilities) > 10:
+            capabilities_str += f", ... and {len(capabilities) - 10} more"
 
         rich_console.print()
         rich_console.print(
             Panel(
-                f"[bold]Tools ({len(tools)}):[/bold] {tools_str}",
+                f"[bold]Capabilities ({len(capabilities)}):[/bold] {capabilities_str}",
                 border_style="dim",
                 padding=(0, 2),
             )
@@ -200,26 +199,23 @@ def _display_usage_example(
     """Display a task JSON usage example after a successful deploy."""
     import json as json_mod
 
-    prompts = lock_data.get("prompts") or lock_data.get("scenarios", [])
-    if not prompts:
+    tasks = lock_data.get("tasks") or []
+    if not tasks:
         return
 
-    first = prompts[0]
-    scenario_name = first.get("name", "default")
-
-    args = first.get("arguments", [])
-    example_args: dict[str, str] = {}
-    for arg in args:
-        arg_name = arg.get("name", "")
-        if arg_name:
-            example_args[arg_name] = "..."
+    first = tasks[0]
+    if not isinstance(first, dict):
+        return
 
     task_example: dict[str, Any] = {
-        "scenario": scenario_name,
-        "env": {"name": env_name},
+        "env": env_name,
+        "id": first.get("task") or first.get("id") or "",
     }
-    if example_args:
-        task_example["args"] = example_args
+    if first.get("slug"):
+        task_example["slug"] = first["slug"]
+    args = first.get("args")
+    if isinstance(args, dict) and args:
+        task_example["args"] = args
 
     example_json = json_mod.dumps(task_example, indent=2)
     rich_console.print()

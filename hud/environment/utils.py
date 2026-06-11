@@ -1,14 +1,11 @@
-"""Shared env helpers: JSON-RPC framing (URL helpers live in ``hud.capabilities.base``)."""
+"""Shared env helpers: JSON-RPC framing + byte splicing for the control channel."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
-from typing import TYPE_CHECKING, Any
-
-from hud.capabilities.base import SCHEME_RE, normalize_url
-
-if TYPE_CHECKING:
-    import asyncio
+from typing import Any
 
 # ─── JSON-RPC 2.0 framing ───
 
@@ -37,4 +34,37 @@ def error(msg_id: int, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
 
 
-__all__ = ["SCHEME_RE", "error", "normalize_url", "read_frame", "reply", "send_frame"]
+# ─── byte splicing (tunneled capability connections) ───
+
+
+async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    # Resets/aborts are a normal way for tunneled streams to end (an SSH
+    # client hanging up, a container dying); they end the pump, not the world.
+    with contextlib.suppress(OSError):
+        while data := await reader.read(65536):
+            writer.write(data)
+            await writer.drain()
+        if writer.can_write_eof():
+            writer.write_eof()
+
+
+async def splice(
+    a: tuple[asyncio.StreamReader, asyncio.StreamWriter],
+    b: tuple[asyncio.StreamReader, asyncio.StreamWriter],
+) -> None:
+    """Pipe two byte streams into each other until both directions hit EOF.
+
+    Closes both writers on the way out — under Python 3.12 an unclosed
+    connection parks ``Server.wait_closed()`` forever.
+    """
+    try:
+        await asyncio.gather(_pump(a[0], b[1]), _pump(b[0], a[1]))
+    finally:
+        for writer in (a[1], b[1]):
+            writer.close()
+        for writer in (a[1], b[1]):
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+
+
+__all__ = ["error", "read_frame", "reply", "send_frame", "splice"]

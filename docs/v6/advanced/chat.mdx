@@ -8,8 +8,8 @@ Most tasks yield a single text prompt. A **chat-style task** yields a *list of m
 
 ## Prerequisites
 
-- An environment and a task (see [Tasks](/v6/build/tasks)).
-- A model id for `Chat` (routed through the HUD gateway).
+- An environment and a task (see [Tasks](/v6/reference/tasks)).
+- An agent to drive the turns (see [Run on any model](/v6/run/models)).
 
 ## A chat-style task
 
@@ -31,15 +31,16 @@ async def assistant(messages: list[PromptMessage]):
 
 ## Driving it with `Chat`
 
-`Chat` wraps a **variant** (a called task) plus a model. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
+`Chat` wraps a concrete **Task** plus an **Agent**. Each `send()` appends the user message, runs the agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
 
 ```python chat.py
 import asyncio
-from hud.services import Chat
+from hud import Chat
+from hud.agents import create_agent
 from tasks import assistant
 
 async def main():
-    chat = Chat(assistant(messages=[]), model="claude-sonnet-4-5")
+    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
     print(r2.content)            # the assistant's latest reply
@@ -47,34 +48,42 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud.services` (also re-exported as `hud.Chat`). The variant's `messages` argument is replaced with the running conversation on every `send`.
+`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout (defaults to HUD-hosted provisioning by the task's env name).
 
 ### Managing history
 
-| Method | Description |
-|--------|-------------|
+The conversation history **is** the public `chat.messages` list — persist it, restore it, or reset it directly:
+
+| Operation | Description |
+|-----------|-------------|
 | `await chat.send(message)` | Send a user turn; returns the reply `Trace`. |
-| `chat.clear()` | Reset the conversation. |
-| `chat.export_history()` | JSON-serializable history for persistence. |
-| `chat.load_history(messages)` | Restore a prior conversation. |
+| `chat.messages` | The history (`{"role", "content"}` dicts) — `json.dumps` it to persist, assign to restore, clear to reset. |
 
-### Serving over A2A
+### Serving a chat
 
-`Chat` is also an A2A `AgentExecutor`, so you can serve it as an endpoint:
+`Chat` is protocol-agnostic: any frontend — a web handler, a notebook, a wire protocol — just calls `await chat.send(...)`. For example, behind FastAPI:
 
 ```python
-chat.serve(port=9999)   # blocks; serves an A2A agent with an AgentCard
+app = FastAPI()
+chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
+
+@app.post("/api/chat")
+async def chat_endpoint(message: str):
+    result = await chat.send(message)
+    return {"response": result.content}
 ```
+
+For an A2A endpoint (sessions per context, agent card, citations transport), see the reference server in [`cookbooks/a2a-chat/server.py`](https://github.com/hud-evals/hud-python/blob/main/cookbooks/a2a-chat/server.py) — copy and adapt it; the protocol adapter is deliberately not part of the SDK.
 
 ## When to use chat vs. a single-turn task
 
-- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/build/tasks)).
+- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/reference/tasks)).
 - **Chat task** — when the *interaction itself* is the thing: assistants, tool-use dialogues, or anything where the agent needs prior turns. The grading model is the same — you still yield a reward.
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & variants" icon="list-check" href="/v6/build/tasks" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
 <Card title="Run on any model" icon="robot" href="/v6/run/models" />
 <Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
 <Card title="Types: Trace" icon="code" href="/v6/reference/types" />

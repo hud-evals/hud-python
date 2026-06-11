@@ -13,7 +13,7 @@ Short answers to the questions that come up most. For the full story, each answe
 Rolling your own usually means three recurring chores: re-wiring tools for each model, re-packaging an artifact per task, and gluing rewards into a trainer. HUD removes all three:
 
 - **The environment never needs rebuilding as models change.** It exposes a *capability* — a real connection like an `ssh` shell or a browser — that any model or harness drives directly, so a harness released years from now still runs it.
-- **One task definition is a whole dataset.** A generative task mints as many variants as you want from a single image; you don't author and store one artifact per task.
+- **One task definition is a whole dataset.** A generative task mints as many concrete tasks as you want from a single definition; you don't author and store one artifact per task.
 - **Nothing downstream is locked in.** A graded rollout is just a `trace_id` and a `reward`, so the same runs you eval today feed any trainer tomorrow — your own loop or a stack like Tinker, slime, or Fireworks — with no environment-side glue, on any rollout infra.
 
 You write the environment once; the model, harness, trainer, and infra all stay swappable. See [Introduction](/v6/index).
@@ -24,7 +24,7 @@ You write the environment once; the model, harness, trainer, and infra all stay 
 
 <AccordionGroup>
 <Accordion title="Do I need Docker?">
-Not for the quickstart. `hud eval`, `hud dev`, and gateway runs need **no Docker** — you write a `tasks.py` and run it. You only need Docker for the **local packaging path**: `hud build` (build a portable image) and the local build step of `hud deploy`. See [Package & deploy](/v6/run/deploy).
+Not for the quickstart. `hud eval`, `hud serve`, and gateway runs need **no Docker** — you write a `tasks.py` and run it. You only need Docker for the **packaging path**: building a portable image from `Dockerfile.hud` and the build step of `hud deploy`. See [Package & deploy](/v6/run/deploy).
 </Accordion>
 
 <Accordion title="Do I need an API key?">
@@ -66,25 +66,24 @@ For data-handling specifics, see [hud.ai](https://hud.ai) or contact the team.
 </Accordion>
 
 <Accordion title="How much does it cost?">
-Running locally with your own provider key (`hud dev`, `hud build`, `hud eval ... claude`) incurs no HUD charge beyond your provider's usage. The **gateway**, **`--remote`** hosted runs, and **managed training** use hosted compute. For current pricing, quotas, and any free tier, see [hud.ai](https://hud.ai/project/api-keys).
+Running locally with your own provider key (`hud serve`, `hud eval ... claude`) incurs no HUD charge beyond your provider's usage. The **gateway** and **managed training** use hosted compute. For current pricing, quotas, and any free tier, see [hud.ai](https://hud.ai/project/api-keys).
 </Accordion>
 </AccordionGroup>
 
 ## Concepts & commands
 
 <AccordionGroup>
-<Accordion title="Environment vs task vs variant vs taskset?">
-- **Environment** — where the agent acts; exposes [capabilities](/v6/build/environments) (`ssh`, `cdp`, …).
-- **Task** — a `@env.task` async generator that prompts and grades. One definition.
-- **Variant** — calling a task (`count_letter(word="…")`) mints one runnable, parameterized instance.
-- **Taskset** — a collection of variants you evaluate one agent over, with optional GRPO grouping. See [Tasks & variants](/v6/build/tasks).
+<Accordion title="Environment vs task vs taskset?">
+- **Environment** — where the agent acts; exposes [capabilities](/v6/reference/capabilities) (`ssh`, `cdp`, …).
+- **Task definition** — a `@env.task` async generator that prompts and grades.
+- **Task** — calling a definition (`count_letter(word="…")`) mints one runnable, parameterized data row.
+- **Taskset** — a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/reference/tasks).
 </Accordion>
 
-<Accordion title="hud eval vs hud dev vs hud build vs hud deploy — which when?">
+<Accordion title="hud eval vs hud serve vs hud deploy — which when?">
 - **`hud eval tasks.py claude`** — run an agent over your tasks and grade them. Your main loop.
-- **`hud dev tasks.py`** — serve the environment locally so you can drive one task by hand (`hud task-start` / `hud task-grade`).
-- **`hud build .`** — build a portable Docker image of the environment.
-- **`hud deploy`** — build **and** publish to HUD infra in one step.
+- **`hud serve env.py`** — serve the environment locally so you can drive one task by hand (`hud task start` / `hud task grade`).
+- **`hud deploy`** — build a portable Docker image **and** publish to HUD infra in one step.
 
 Full surface in the [CLI reference](/v6/reference/cli).
 </Accordion>
@@ -98,7 +97,7 @@ Evals are a complete use on their own — write tasks, run them across models, r
 </Accordion>
 
 <Accordion title="Can I bring an existing benchmark or tasks?">
-Yes. `hud convert ./tasks` imports Harbor-format tasks into a HUD environment. And a whole benchmark can become one generative task with variants. See [Harbor conversion](/v6/advanced/harbor-convert).
+Yes. The Harbor integration loads Harbor-format tasks straight into a `Taskset` (`integrations.harbor.load`), no conversion round-trip needed. And a whole benchmark can become one generative task definition. See [Harbor interop](/v6/advanced/harbor-convert).
 </Accordion>
 
 <Accordion title="I'm upgrading from v5 — what changed?">

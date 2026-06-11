@@ -7,13 +7,16 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
+
+if TYPE_CHECKING:
+    from hud.capabilities import SSHClient
 
 
 class _Completed:
@@ -87,6 +90,10 @@ class _FakeSSH:
         self.conn = _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)
 
 
+def _ssh(**kwargs: Any) -> SSHClient:
+    return cast("SSHClient", _FakeSSH(**kwargs))
+
+
 def _commands(tool: Any) -> list[str]:
     return tool.client.conn.commands
 
@@ -95,7 +102,7 @@ def _commands(tool: Any) -> list[str]:
 
 
 async def test_openai_shell_wraps_command_with_timeout() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_FakeSSH())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
 
     result = await tool.execute({"commands": ["pwd"], "timeout_ms": 2500})
 
@@ -107,7 +114,7 @@ async def test_openai_shell_wraps_command_with_timeout() -> None:
 
 
 async def test_openai_shell_runs_each_command_without_timeout() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_FakeSSH())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
 
     await tool.execute({"commands": ["echo a", "echo b"]})
 
@@ -115,7 +122,7 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
 
 
 async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_FakeSSH())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
 
     result = await tool.execute({"commands": 123})
 
@@ -124,7 +131,7 @@ async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
 
 
 def test_openai_shell_to_params_is_shell_type() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_FakeSSH())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
     assert tool.to_params()["type"] == "shell"
 
 
@@ -132,7 +139,7 @@ def test_openai_shell_to_params_is_shell_type() -> None:
 
 
 async def test_gemini_shell_scopes_command_to_quoted_directory() -> None:
-    tool = GeminiShellTool(spec=GeminiShellTool.default_spec("gemini"), client=_FakeSSH())
+    tool = GeminiShellTool(spec=GeminiShellTool.default_spec("gemini"), client=_ssh())
 
     await tool.execute({"command": "ls -la", "dir_path": "/tmp/my dir"})
 
@@ -140,7 +147,7 @@ async def test_gemini_shell_scopes_command_to_quoted_directory() -> None:
 
 
 async def test_gemini_shell_runs_bare_command() -> None:
-    tool = GeminiShellTool(spec=GeminiShellTool.default_spec("gemini"), client=_FakeSSH())
+    tool = GeminiShellTool(spec=GeminiShellTool.default_spec("gemini"), client=_ssh())
 
     await tool.execute({"command": "ls"})
 
@@ -148,7 +155,7 @@ async def test_gemini_shell_runs_bare_command() -> None:
 
 
 async def test_gemini_shell_requires_command() -> None:
-    tool = GeminiShellTool(spec=GeminiShellTool.default_spec("gemini"), client=_FakeSSH())
+    tool = GeminiShellTool(spec=GeminiShellTool.default_spec("gemini"), client=_ssh())
 
     with pytest.raises(ValueError, match="command is required"):
         await tool.execute({"command": ""})
@@ -158,7 +165,7 @@ async def test_gemini_shell_requires_command() -> None:
 
 
 async def test_claude_bash_runs_command() -> None:
-    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_FakeSSH())
+    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_ssh())
 
     await tool.execute({"command": "echo hi"})
 
@@ -166,7 +173,7 @@ async def test_claude_bash_runs_command() -> None:
 
 
 async def test_claude_bash_restart_is_a_noop() -> None:
-    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_FakeSSH())
+    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_ssh())
 
     result = await tool.execute({"restart": True})
 
@@ -175,7 +182,7 @@ async def test_claude_bash_restart_is_a_noop() -> None:
 
 
 async def test_claude_bash_requires_command() -> None:
-    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_FakeSSH())
+    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_ssh())
 
     result = await tool.execute({})
 
@@ -184,7 +191,7 @@ async def test_claude_bash_requires_command() -> None:
 
 
 def test_claude_bash_to_params_carries_native_schema() -> None:
-    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_FakeSSH())
+    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-sonnet-4-6"), client=_ssh())
     params = tool.to_params()
     assert params == {"type": "bash_20250124", "name": "bash"}
 
@@ -194,7 +201,9 @@ def test_claude_bash_to_params_carries_native_schema() -> None:
 
 async def test_claude_text_editor_creates_file() -> None:
     ssh = _FakeSSH()
-    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"), client=cast("SSHClient", ssh)
+    )
 
     result = await tool.execute({"command": "create", "path": "/f.txt", "file_text": "hello"})
 
@@ -204,7 +213,9 @@ async def test_claude_text_editor_creates_file() -> None:
 
 async def test_claude_text_editor_str_replace_rewrites_file() -> None:
     ssh = _FakeSSH(files={"/f.txt": b"hello old world"})
-    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"), client=cast("SSHClient", ssh)
+    )
 
     result = await tool.execute(
         {"command": "str_replace", "path": "/f.txt", "old_str": "old", "new_str": "new"},
@@ -216,7 +227,9 @@ async def test_claude_text_editor_str_replace_rewrites_file() -> None:
 
 async def test_claude_text_editor_str_replace_errors_when_not_unique() -> None:
     ssh = _FakeSSH(files={"/f.txt": b"a a a"})
-    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"), client=cast("SSHClient", ssh)
+    )
 
     result = await tool.execute(
         {"command": "str_replace", "path": "/f.txt", "old_str": "a", "new_str": "b"},
@@ -228,7 +241,7 @@ async def test_claude_text_editor_str_replace_errors_when_not_unique() -> None:
 
 async def test_gemini_edit_creates_file_when_old_string_empty() -> None:
     ssh = _FakeSSH()
-    tool = GeminiEditTool(spec=GeminiEditTool.default_spec("gemini"), client=ssh)
+    tool = GeminiEditTool(spec=GeminiEditTool.default_spec("gemini"), client=cast("SSHClient", ssh))
 
     await tool.execute({"file_path": "/n.txt", "old_string": "", "new_string": "fresh"})
 

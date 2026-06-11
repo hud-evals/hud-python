@@ -25,20 +25,11 @@ class FakeGenai:
 
 
 def _agent(response: Any) -> GeminiAgent:
-    agent = GeminiAgent.__new__(GeminiAgent)
-    a = cast("Any", agent)
-    a.model = "gemini-test"
-    a.hosted_tools = []
-    a.gemini_client = FakeGenai(response)
-    a.temperature = None
-    a.top_p = None
-    a.top_k = None
-    a.max_output_tokens = None
-    a.thinking_level = None
-    a.include_thoughts = False
-    a.excluded_predefined_functions = []
-    a.max_recent_turn_with_screenshots = 3
-    return agent
+    from hud.agents.types import GeminiConfig
+
+    return GeminiAgent(
+        GeminiConfig(model="gemini-test", include_thoughts=False, model_client=FakeGenai(response))
+    )
 
 
 def _state(agent: GeminiAgent) -> Any:

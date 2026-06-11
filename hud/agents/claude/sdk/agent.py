@@ -21,7 +21,7 @@ from hud.settings import settings
 
 if TYPE_CHECKING:
     from hud.capabilities import RFBClient, SSHClient
-    from hud.client import Run
+    from hud.eval.rollout import Run
     from hud.types import Trace
 
 logger = logging.getLogger(__name__)
@@ -36,20 +36,15 @@ class ClaudeSDKAgent(Agent):
     MCP config (the CLI connects to them itself).
     """
 
+    config: ClaudeSDKConfig
+
     def __init__(self, config: ClaudeSDKConfig | None = None) -> None:
         self.config = config or ClaudeSDKConfig()
-        self.model = self.config.model
         self._ssh: SSHClient | None = None
         self._mcp_servers: dict[str, dict[str, Any]] = {}
         self._shell = "bash"
 
-    async def __call__(
-        self,
-        run: Run,
-        *,
-        max_steps: int | None = None,
-        system_prompt: str | None = None,
-    ) -> None:
+    async def __call__(self, run: Run) -> None:
         self._mcp_servers = {}
         manifest = run.client.manifest
         bindings = manifest.bindings if manifest is not None else []
@@ -81,9 +76,9 @@ class ClaudeSDKAgent(Agent):
 
         await self._exec(
             run.trace,
-            prompt=run.prompt or "",
-            max_steps=max_steps if max_steps is not None else self.config.max_turns or -1,
-            system_prompt=system_prompt,
+            prompt=_prompt_text(run.prompt),
+            max_steps=self.config.max_steps,
+            system_prompt=self.config.system_prompt,
         )
 
     async def _exec(
@@ -157,16 +152,16 @@ class ClaudeSDKAgent(Agent):
         elif settings.anthropic_api_key:
             env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
 
-        env["ANTHROPIC_MODEL"] = self.model
-        env["ANTHROPIC_SMALL_FAST_MODEL"] = self.model
+        env["ANTHROPIC_MODEL"] = self.config.model
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = self.config.model
 
         # When using a custom base URL, alias all model tiers to the same model
         # so the CLI doesn't try to reach Anthropic for background requests.
         if "ANTHROPIC_BASE_URL" in env:
-            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.model
-            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.model
-            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.model
-            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.model
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
 
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["IS_SANDBOX"] = "1"
@@ -213,9 +208,8 @@ class ClaudeSDKAgent(Agent):
         ]
         if max_steps > 0:
             cli_parts.append(f"--max-turns={max_steps}")
-        effective_system = system_prompt or self.config.system_prompt
-        if effective_system:
-            cli_parts.extend(["--system-prompt", q(effective_system)])
+        if system_prompt:
+            cli_parts.extend(["--system-prompt", q(system_prompt)])
         for tool in self.config.allowed_tools:
             cli_parts.extend(["--allowedTools", tool])
         if mcp_config_path:
@@ -251,11 +245,12 @@ class ClaudeSDKAgent(Agent):
             msg_type = msg.get("type")
 
             if msg_type == "assistant" and isinstance(msg.get("message"), dict):
-                for block in msg["message"].get("content", []):
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text", "")
-                        if text:
-                            content_parts.append(text)
+                for raw_block in msg["message"].get("content", []):
+                    if not isinstance(raw_block, dict):
+                        continue
+                    block = cast("dict[str, Any]", raw_block)
+                    if block.get("type") == "text" and block.get("text"):
+                        content_parts.append(str(block["text"]))
 
             elif msg_type == "result":
                 is_error = msg.get("is_error", False)
@@ -278,6 +273,21 @@ class ClaudeSDKAgent(Agent):
         trace.isError = is_error
         trace.messages = messages
         trace.info.update(info)
+
+
+def _prompt_text(prompt: str | list[Any] | None) -> str:
+    """Flatten a run prompt (text or chat-style message dicts) into CLI text."""
+    if isinstance(prompt, str):
+        return prompt
+    if not prompt:
+        return ""
+    parts: list[str] = []
+    for message in prompt:
+        if isinstance(message, dict):
+            parts.append(str(cast("dict[str, Any]", message).get("content", "")))
+        else:
+            parts.append(str(message))
+    return "\n\n".join(part for part in parts if part)
 
 
 __all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]

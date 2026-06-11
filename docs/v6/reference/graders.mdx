@@ -1,14 +1,15 @@
 ---
 title: "Graders"
-description: "Native graders, comparison helpers, and the Grade combiner."
+description: "Native graders, comparison helpers, and the native grade combiner."
 icon: "scale-balanced"
 ---
 
 Graders turn an agent's answer into a reward. HUD ships reusable ones so you don't hand-build common scoring logic. Yield the result (a `float` or an `EvaluationResult`) as the task's second yield.
 
 ```python
-from hud.native.graders import (
-    BashGrader, LLMJudgeGrader, Grade, Grader,
+from hud.graders import (
+    BashGrader, LLMJudgeGrader, Grader,
+    combine, combine_any, combine_all,
     exact_match, contains, contains_any, contains_all,
     numeric_match, f1_score, normalize,
 )
@@ -41,11 +42,14 @@ async def capital(country: str = "France"):
 Runs a shell command via `/bin/bash -lc` and scores by exit code (`1.0` if it exits `0`). Async; returns a `SubScore`. Needs bash — macOS, Linux, WSL, or a built image; on native Windows it scores `0.0` with a `/bin/bash not found` error.
 
 ```python
-result = await BashGrader.grade(weight=1.0, command="pytest -q", cwd=str(ws.root))
-yield result.value
+@env.task()
+async def fix_tests():
+    answer = yield "Make the tests pass."
+    result = await BashGrader.grade(weight=1.0, command="pytest -q", cwd="/workspace")
+    yield result.value
 ```
 
-`cwd` is the host directory to run in — for a `Workspace`-backed task, pass `str(ws.root)` so the grader sees the same files the agent edited.
+`cwd` is the host directory to run in — for a workspace-backed task, pass the workspace root so the grader sees the same files the agent edited.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -70,24 +74,28 @@ result = await LLMJudgeGrader.grade(
 
 `criteria` items are strings, or `(requirement, weight)` tuples.
 
-## `Grade` — compose multiple graders
+## `combine` — compose multiple graders
 
-`Grade.gather` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
+`combine` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
 
 ```python
-yield await Grade.gather(
-    BashGrader.grade(weight=0.5, command="pytest -q"),
-    LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Matches the spec"]),
-    SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
-)
+@env.task()
+async def composed(answer: str = ""):
+    answer = yield "Solve the task."
+    yield await combine(
+        BashGrader.grade(weight=0.5, command="pytest -q"),
+        LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Matches the spec"]),
+        SubScore(name="format", value=exact_match(answer, "42"), weight=0.2),
+    )
 ```
 
-| Method | Description |
-|--------|-------------|
-| `await Grade.gather(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
-| `Grade.from_subscores(list)` | Combine already-resolved subscores. |
+| Function | Description |
+|----------|-------------|
+| `await combine(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
+| `combine_any(weight, subscores)` | Boolean OR: a `SubScore` that passes if any input passes (max). |
+| `combine_all(weight, subscores)` | Boolean AND: a `SubScore` that passes only if all inputs pass (min). |
 
-The subscores appear in the trace, so a partial reward is legible.
+The subscores appear in the trace, so a partial reward is legible. `combine_any`/`combine_all` collapse alternatives into a single component you can feed to `combine` — e.g. "tests pass via `pytest` OR via `make test`" as one 0/1 subscore.
 
 ## Custom graders
 
@@ -106,11 +114,11 @@ result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 
 ## `SubScore` and `EvaluationResult`
 
-A `SubScore` (`name`, `value` 0–1, `weight`, optional `metadata`) is one component; an `EvaluationResult` (alias of `ScenarioResult`) carries the combined `reward`, `subscores`, and `info`. See [Types](/v6/reference/types).
+A `SubScore` (`name`, `value` 0–1, `weight`, optional `metadata`) is one component; an `EvaluationResult` carries the combined `reward`, `subscores`, and `info`. See [Types](/v6/reference/types).
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & grading" icon="list-check" href="/v6/build/tasks" />
+<Card title="Tasks & grading" icon="list-check" href="/v6/reference/tasks" />
 <Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
 </CardGroup>

@@ -33,7 +33,7 @@ This works for a few reasons:
 
 **It's flexible.** With files and bash, the agent can grep for specific error messages, cross-reference logs with tool calls, or build its own analysis pipeline. A fixed set of specialized endpoints can't anticipate every question you'll want to ask.
 
-**Images just work.** CUA traces include screenshots at each step, so no special image tool is needed for computer-use traces.
+**Images just work.** CUA traces include screenshots at each step. The HUD SDK's `ReadTool` already handles images—it base64-encodes them so the model can view them visually. No special image tool needed.
 
 ## How the Environment Works
 
@@ -106,4 +106,5 @@ If you want to build an environment where an agent analyzes structured data—lo
 
 - [Source Code on GitHub](https://github.com/hud-evals/hud-trace-explorer) - Fork this as a starting point
 - [Environments](/platform/environments) - How environments work on the platform
-- [Coding Tools](/tools/coding) - Shell, apply_patch, and related tools
+- [Coding Tools](/v5/tools/coding) - Shell, apply_patch, and related tools
+- [Filesystem Tools](/v5/tools/filesystem) - Read, grep, and file navigation tools

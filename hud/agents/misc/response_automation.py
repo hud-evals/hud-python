@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 from functools import cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import mcp.types as types
-from openai import AsyncOpenAI
 from openai.types.responses import ResponseOutputText
 
-from hud.settings import settings
 from hud.telemetry import instrument
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +62,9 @@ async def auto_respond(
 
 @cache
 def _client() -> AsyncOpenAI:
-    api_key = settings.api_key
-    if not api_key:
-        raise ValueError(
-            "HUD API key is required for auto_respond. Set HUD_API_KEY environment variable."
-        )
+    from hud.utils.gateway import build_gateway_client
 
-    return AsyncOpenAI(
-        base_url=settings.hud_gateway_url,
-        api_key=api_key,
-    )
+    return cast("AsyncOpenAI", build_gateway_client("openai"))
 
 
 @instrument(

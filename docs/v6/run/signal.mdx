@@ -13,8 +13,9 @@ Modern RL post-training (GRPO and its relatives) computes each rollout's advanta
 So the operational unit of trainability is **spread within a group**, not the mean. Run each task as a group and check that outcomes differ:
 
 ```python
-runs = await Taskset(my_task(seed=s) for s in range(5)).run(agent, group=16)
-rewards = [r.reward for r in runs]
+taskset = Taskset("spread-check", [my_task(seed=s) for s in range(5)])
+job = await taskset.run(agent, group=16)
+rewards = [run.reward for run in job.runs]
 # All 0.0 (or all 1.0) → no signal. You want a non-degenerate spread.
 ```
 
@@ -43,7 +44,7 @@ The single most important grader property: **the highest reward an agent can get
 
 ## Make it multi-step
 
-A task where one inference call produces the deliverable doesn't give RL enough rollout structure to learn from. Real training tasks require **multiple steps** — several observations, tool calls, or turns — so the trajectory carries learnable structure. If your task is single-shot, give the agent something to *do*: a [capability](/v6/build/environments) to act through and a problem that requires integrating evidence across more than one observation.
+A task where one inference call produces the deliverable doesn't give RL enough rollout structure to learn from. Real training tasks require **multiple steps** — several observations, tool calls, or turns — so the trajectory carries learnable structure. If your task is single-shot, give the agent something to *do*: a [capability](/v6/reference/environment) to act through and a problem that requires integrating evidence across more than one observation.
 
 ## Keep the answer out of the environment
 
@@ -61,7 +62,7 @@ What the prompt sets up, the grader should test — and vice versa. Two related 
 - **Prompt–grader alignment:** don't score for content the prompt never asked for, and don't ask for work the grader ignores.
 - **Score–quality monotonicity:** a rollout whose substantive work is *better* must not score *lower*. If a generic memo that did no investigation can outscore a thorough one, the grader is measuring shape, not substance.
 
-Compose graders so a partial reward is legible (see [`Grade.gather`](/v6/reference/graders)) — subscores let you see which component earned the reward, which is how you catch monotonicity violations.
+Compose graders so a partial reward is legible (see [`combine`](/v6/reference/graders)) — subscores let you see which component earned the reward, which is how you catch monotonicity violations.
 
 ## Source substrate that isn't memorized
 
@@ -93,7 +94,7 @@ A single great task isn't a dataset. A taskset where every task does the same th
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & grading" icon="list-check" href="/v6/build/tasks" />
+<Card title="Tasks & grading" icon="list-check" href="/v6/reference/tasks" />
 <Card title="Graders reference" icon="scale-balanced" href="/v6/reference/graders" />
 <Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
 <Card title="Patterns" icon="puzzle-piece" href="/v6/advanced/patterns" />

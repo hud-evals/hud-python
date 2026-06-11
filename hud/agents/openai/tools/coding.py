@@ -12,11 +12,6 @@ from hud.types import MCPToolResult
 
 from .base import OpenAIToolSpec
 
-try:
-    from openai.types.responses import FunctionShellToolParam, ToolParam
-except Exception:
-    ToolParam = Any  # type: ignore[assignment,misc]
-
 OPENAI_SHELL_SPEC = OpenAIToolSpec(
     api_type="shell",
     api_name="shell",
@@ -27,15 +22,14 @@ class OpenAIShellTool(SSHTool):
     name = "shell"
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec | None:
+    def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OPENAI_SHELL_SPEC
 
     def to_params(self) -> Any:
-        return cast(
-            "ToolParam",
-            FunctionShellToolParam(type="shell", environment={"type": "local"}),
-        )
+        # openai.types.responses.FunctionShellToolParam, as a plain dict (TypedDicts
+        # are dicts at runtime, and the param type isn't present in all SDK versions).
+        return {"type": "shell", "environment": {"type": "local"}}
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         def invalid_commands_result() -> MCPToolResult:
@@ -44,7 +38,7 @@ class OpenAIShellTool(SSHTool):
                 text,
                 is_error=True,
                 structured={
-                    "output": [_shell_output("", text, 1)],
+                    "output": [shell_output("", text, 1)],
                     "max_output_length": arguments.get("max_output_length"),
                 },
             )
@@ -75,10 +69,10 @@ class OpenAIShellTool(SSHTool):
             result = await self.bash(full_cmd)
             text = result_text(result)
             if result.isError:
-                outputs.append(_shell_output("", text, 1))
+                outputs.append(shell_output("", text, 1))
                 is_error = True
             else:
-                outputs.append(_shell_output(text, "", 0))
+                outputs.append(shell_output(text, "", 0))
             if text:
                 text_parts.append(text)
 
@@ -106,7 +100,7 @@ def _shell_result(
     )
 
 
-def _shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+def shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
     return {
         "stdout": stdout,
         "stderr": stderr,

@@ -9,8 +9,8 @@ from hud.server import MCPServer
 
 def test_add_tool_accepts_base_tool(monkeypatch):
     """If obj is BaseTool, its `.mcp` gets passed through to FastMCP.add_tool."""
-    # Stub hud.native.tools.base.BaseTool and capture FastMCP.add_tool calls
-    mod = types.ModuleType("hud.native.tools.base")
+    # Stub hud.tools.base.BaseTool and capture FastMCP.add_tool calls
+    mod = types.ModuleType("hud.tools.base")
 
     class FakeBaseTool:
         """Stub type checked by isinstance() inside add_tool."""
@@ -18,7 +18,7 @@ def test_add_tool_accepts_base_tool(monkeypatch):
     # Tell the type checker we're mutating a dynamic module
     mod_any = cast("Any", mod)
     mod_any.BaseTool = FakeBaseTool
-    monkeypatch.setitem(sys.modules, "hud.native.tools.base", mod)
+    monkeypatch.setitem(sys.modules, "hud.tools.base", mod)
 
     calls: dict[str, object | None] = {"obj": None, "kwargs": None}
 

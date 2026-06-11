@@ -11,12 +11,14 @@ A complete, runnable example of an **investigation** task: the agent reads sever
 We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files — no single artifact contains the answer.
 
 ```python env.py
-from hud.environment import Environment, Workspace
-from hud.native.graders import LLMJudgeGrader
+from pathlib import Path
 
-ws = Workspace("workspace")
-ROOT = ws.root / "incident"
-env = Environment(name="ops-diagnostics", capabilities=[ws.capability()])
+from hud.environment import Environment
+from hud.graders import LLMJudgeGrader
+
+ROOT = Path("/workspace/incident")
+env = Environment(name="ops-diagnostics")
+env.workspace("/workspace")
 
 @env.initialize
 async def _seed():

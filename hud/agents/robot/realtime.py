@@ -32,7 +32,7 @@ from .agent import RobotAgent
 if TYPE_CHECKING:
     import numpy as np
 
-    from hud.client import Run
+    from hud.eval.rollout import Run
 
 
 class RealtimeRobotAgent(RobotAgent):

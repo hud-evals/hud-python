@@ -8,7 +8,7 @@ An **evaluation** produces one **trace**: an agent works the task against the en
 
 ## Prerequisites
 
-- A task to run (see [Tasks](/v6/build/tasks)).
+- A task to run (see [Tasks](/v6/reference/tasks)).
 - A `HUD_API_KEY` for gateway routing + tracing, **or** a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) to call a provider directly.
 
 ## The fastest path: `hud eval`
@@ -32,12 +32,11 @@ Useful flags:
 | Flag | Effect |
 |------|--------|
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`) |
-| `--all` | Run every variant instead of just the first |
+| `--all` | Run every task instead of just the first |
 | `--model`, `-m` | Pin a specific model id |
 | `--group-size N` | Run each task `N` times (for GRPO / variance) |
 | `--max-concurrent N` | Cap parallel rollouts |
 | `--max-steps N` | Cap agent steps per task |
-| `--remote` | Submit to the platform for hosted execution |
 
 ## In code: the agent contract
 
@@ -45,14 +44,14 @@ Every agent implements one method — `await agent(run)` — which drives a live
 
 ```python run.py
 import asyncio
+from hud import LocalRuntime
 from hud.agents import create_agent
 from tasks import count_letter
 
 async def main():
     agent = create_agent("claude-sonnet-4-5")
-    async with count_letter(word="strawberry") as run:
-        await agent(run)
-    print(run.reward)
+    job = await count_letter(word="strawberry").run(agent, runtime=LocalRuntime("tasks.py"))
+    print(job.reward)
 
 asyncio.run(main())
 ```
@@ -95,7 +94,7 @@ A harness is just *attach to a capability + define a tool spec*, so wrapping ano
 
 ```python harness.py
 from hud.agents.base import Agent
-from hud.client import Run
+from hud import Run
 
 class EchoAgent(Agent):
     async def __call__(self, run: Run) -> None:
@@ -109,7 +108,7 @@ class EchoAgent(Agent):
 
 <CardGroup cols={2}>
 <Card title="Deploy & scale" icon="layer-group" href="/v6/run/deploy">
-  Package once, run anywhere — and run batches on hosted infra.
+  Package once, run anywhere.
 </Card>
 <Card title="Train on your tasks" icon="dumbbell" href="/v6/run/training">
   Turn a group of rewards into GRPO advantages.

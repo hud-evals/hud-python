@@ -56,7 +56,7 @@ class TestCLICommands:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "eval" in result.output
-        assert "build" in result.output
+        assert "deploy" in result.output
 
 
 class TestMainFunction:

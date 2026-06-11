@@ -86,7 +86,7 @@ For automated pipelines or local deployments, you can deploy directly via CLI:
 hud deploy        # Build remotely & deploy to platform (requires HUD_API_KEY)
 ```
 
-See [`hud deploy`](/reference/cli/deploy) for details.
+See [`hud deploy`](/v5/reference/cli/deploy) for details.
 
 ### Develop Locally First
 
@@ -223,7 +223,7 @@ hud eval my-env/checkout --model gpt-4o --group-size 10
 | Docker Hub rate limit error | Save your [Docker Hub credentials in settings](https://www.hud.ai/project/secrets) |
 | Build times out | Reduce image size or use multi-stage builds |
 
-For local debugging before pushing, see [`hud debug`](/reference/cli/debug).
+For local debugging before pushing, see [`hud debug`](/v5/reference/cli/debug).
 
 ## Debugging Traces
 
@@ -276,11 +276,11 @@ Worker logs in the DEBUG tab are only visible to platform administrators. Regula
 ## Next Steps
 
 <CardGroup cols={2}>
-<Card title="Build Environments" icon="hammer" href="/building/scaffolding">
+<Card title="Build Environments" icon="hammer" href="/v5/building/scaffolding">
   Learn the environment SDK
 </Card>
 
-<Card title="Deploy Guide" icon="rocket" href="/building/running-at-scale">
+<Card title="Deploy Guide" icon="rocket" href="/v5/building/running-at-scale">
   Push your environment to production
 </Card>
 

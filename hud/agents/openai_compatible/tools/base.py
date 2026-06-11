@@ -143,7 +143,7 @@ def openai_compatible_tool_param(
     name: str | None = None,
 ) -> OpenAICompatibleToolParam:
     parameters = tool.inputSchema
-    sanitized = (
+    sanitized: dict[str, Any] = (
         _sanitize_schema_for_openai(parameters)
         if parameters
         else {"type": "object", "properties": {}}

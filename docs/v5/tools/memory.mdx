@@ -1,0 +1,197 @@
+---
+title: "Memory Tools"
+description: "Persistent storage across conversations"
+icon: "brain"
+---
+
+Memory tools let agents store and retrieve information that persists beyond a single request. Options include file-based storage (Claude's native memory), session-based key-value storage, and semantic search.
+
+## Quick Reference
+
+| Tool | Agent | Storage | Persistence |
+|------|-------|---------|-------------|
+| `ClaudeMemoryTool` | Claude | Files in `/memories` | Across conversations |
+| `SessionMemoryTool` | Any | In-memory dict | Session only |
+| `GeminiMemoryTool` | Gemini | In-memory dict | Session only |
+
+All memory tools are in the `hud.tools.memory` module:
+
+```python
+from hud.tools.memory import (
+    ClaudeMemoryTool,
+    SessionMemoryTool,
+    GeminiMemoryTool,
+)
+```
+
+## ClaudeMemoryTool
+
+File-based memory for Claude. Uses native `memory_20250818` API. Stores files in a `/memories` directory.
+
+```python
+from hud.tools.memory import ClaudeMemoryTool
+
+memory = ClaudeMemoryTool(memories_dir="/memories")
+```
+
+**Commands**: `view`, `create`, `str_replace`, `insert`, `delete`, `rename`
+
+```python
+# View memories directory
+await memory(command="view", path="/memories")
+
+# Create a memory file
+await memory(
+    command="create",
+    path="/memories/user_prefs.md",
+    file_text="# Preferences\n\n- Theme: dark\n- Language: Python",
+)
+
+# Update memory
+await memory(
+    command="str_replace",
+    path="/memories/user_prefs.md",
+    old_str="- Theme: dark",
+    new_str="- Theme: light",
+)
+
+# View file contents
+await memory(command="view", path="/memories/user_prefs.md")
+
+# Delete
+await memory(command="delete", path="/memories/old_notes.md")
+
+# Rename/move
+await memory(
+    command="rename",
+    old_path="/memories/temp.md",
+    new_path="/memories/archive/temp.md",
+)
+```
+
+Paths must start with `/memories`. Directory traversal is blocked.
+
+## SessionMemoryTool
+
+Simple key-value memory for any agent. Stores data in an in-memory dictionary.
+
+```python
+from hud.tools.memory import SessionMemoryTool
+
+memory = SessionMemoryTool()
+```
+
+**Actions**: `add`, `query`, `list`
+
+```python
+# Store memory with a key
+await memory(action="add", key="user_lang", value="Python is their preferred language")
+
+# Query by key
+result = await memory(action="query", key="user_lang")
+
+# List all keys
+result = await memory(action="list")
+```
+
+Useful for simple session context that doesn't need semantic search or persistence.
+
+## GeminiMemoryTool
+
+Gemini CLI-style memory with read/write operations. Uses in-memory storage.
+
+```python
+from hud.tools.memory import GeminiMemoryTool
+
+memory = GeminiMemoryTool()
+```
+
+**Actions**: `read`, `write`, `list`
+
+```python
+# Write memory
+await memory(action="write", key="context", value="User is working on a web app")
+
+# Read memory
+result = await memory(action="read", key="context")
+
+# List all memories
+result = await memory(action="list")
+```
+
+## When to Use Which
+
+| Use Case | Tool |
+|----------|------|
+| Claude with native API | `ClaudeMemoryTool` |
+| Structured file storage | `ClaudeMemoryTool` |
+| Simple key-value storage | `SessionMemoryTool` |
+| Gemini agents | `GeminiMemoryTool` |
+
+## Typical Setup
+
+For Claude:
+
+```python
+from hud import Environment
+from hud.tools import BashTool, EditTool
+from hud.tools.memory import ClaudeMemoryTool
+
+env = Environment("claude-env")
+env.add_tool(BashTool())
+env.add_tool(EditTool())
+env.add_tool(ClaudeMemoryTool())
+```
+
+For Gemini:
+
+```python
+from hud import Environment
+from hud.tools.coding import GeminiShellTool, GeminiEditTool
+from hud.tools.memory import GeminiMemoryTool
+
+env = Environment("gemini-env")
+env.add_tool(GeminiShellTool())
+env.add_tool(GeminiEditTool())
+env.add_tool(GeminiMemoryTool())
+```
+
+For any agent with simple memory:
+
+```python
+from hud import Environment
+from hud.tools import BashTool
+from hud.tools.memory import SessionMemoryTool
+
+env = Environment("generic-env")
+env.add_tool(BashTool())
+env.add_tool(SessionMemoryTool())
+```
+
+## Custom Memory
+
+Key-value storage:
+
+```python
+from hud.tools import BaseTool
+from mcp.types import ContentBlock, TextContent
+
+class ContextTool(BaseTool):
+    def __init__(self):
+        super().__init__(name="context", description="Store and retrieve context")
+        self._store: dict[str, str] = {}
+    
+    async def __call__(
+        self, action: str, key: str, value: str | None = None
+    ) -> list[ContentBlock]:
+        if action == "set" and value:
+            self._store[key] = value
+            return [TextContent(text=f"Stored: {key}", type="text")]
+        elif action == "get":
+            val = self._store.get(key, "Not found")
+            return [TextContent(text=val, type="text")]
+        elif action == "list":
+            keys = ", ".join(self._store.keys()) or "Empty"
+            return [TextContent(text=keys, type="text")]
+        return [TextContent(text="Unknown action", type="text")]
+```

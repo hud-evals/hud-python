@@ -23,12 +23,12 @@ from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
 
 if TYPE_CHECKING:
-    from hud.client import Run
+    from hud.eval.rollout import Run
 
     from .adapter import Adapter
     from .model import Model
 
-ROBOT_PROTOCOL = "robot"
+ROBOT_PROTOCOL = "robot/0.1"
 
 
 class RobotAgent(Agent):
@@ -40,7 +40,7 @@ class RobotAgent(Agent):
 
     **Override if needed:**
 
-    - :attr:`robot_protocol` — class attr if not ``robot``
+    - :attr:`robot_protocol` — class attr if not ``robot/0.1``
     - :meth:`on_episode_start` — mostly internal; override (with ``super()``) to
       add per-episode setup (e.g. reading the env contract).
     - :meth:`should_stop` — custom early-exit condition beyond ``obs["terminated"]``
