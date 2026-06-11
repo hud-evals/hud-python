@@ -116,14 +116,17 @@ def _record_to_task(record: dict[str, Any]) -> Task:
     """Map one platform task record onto the portable row shape.
 
     Platform records key the task id as ``scenario`` (env-prefixed, e.g.
-    ``"e:solve"``) and may omit the env block — the prefix recovers the env
-    name in that case.
+    ``"e:solve"``). Local task ids are always env-local (envs register
+    scenarios unprefixed, and ``:`` is rejected in scenario names), so the
+    prefix is stripped here — it only recovers the env name when the record
+    omits the env block. ``task_upload_payload`` re-composes it on upload.
     """
     task_id = record.get("scenario") or record.get("task") or record.get("id") or ""
     env_data = record.get("env")
     env_name = env_data.get("name") if isinstance(env_data, dict) else None
-    if not env_name and isinstance(task_id, str) and ":" in task_id:
-        env_name = task_id.split(":", 1)[0]
+    if isinstance(task_id, str) and ":" in task_id:
+        prefix, task_id = task_id.split(":", 1)
+        env_name = env_name or prefix
     return Task.model_validate(
         {
             "env": env_name,
@@ -175,9 +178,8 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
 
 
 def platform_task_id(task: Task) -> str:
-    if ":" not in task.id:
-        return f"{task.env}:{task.id}"
-    return task.id
+    """The platform's composite wire key; local ``Task.id`` is always env-local."""
+    return f"{task.env}:{task.id}"
 
 
 def taskset_column_definitions(tasks: list[Task]) -> dict[str, dict[str, Any]] | None:
@@ -226,16 +228,12 @@ def _task_signature(task: Task) -> str:
         sig_data["agent_config"] = task.agent_config
     if task.columns:
         sig_data["columns"] = task.columns
-    return f"{_short_task_id(task.id)}|" + json.dumps(
+    return f"{task.id}|" + json.dumps(
         sig_data,
         sort_keys=True,
         default=str,
         separators=(",", ":"),
     )
-
-
-def _short_task_id(task_id: str) -> str:
-    return task_id.rsplit(":", 1)[-1] if ":" in task_id else task_id
 
 
 __all__ = [

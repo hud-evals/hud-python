@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from hud.eval import Task, Taskset
 from hud.eval.sync import (
     diff,
+    fetch_taskset_tasks,
     resolve_taskset_id,
     task_upload_payload,
     taskset_column_definitions,
@@ -43,14 +44,31 @@ def test_diff_classifies_create_update_unchanged_and_remote_only() -> None:
     assert "Create: 1" in plan.summary()
 
 
-def test_diff_treats_platform_prefixed_task_ids_as_equal() -> None:
-    # Platform records come back env-prefixed ("e:solve"); a local "solve"
-    # with identical content must diff as unchanged, not an update.
-    local = _row("a", 1)
-    remote = Task(env="e", id="e:solve", args={"n": 1}, slug="a")
+def test_fetched_tasks_strip_env_prefix_to_runnable_local_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Platform records key tasks as env-prefixed "e:solve"; locally a Task.id
+    # must stay env-local ("solve") so start_task resolves against the env's
+    # unprefixed scenario registry. The prefix recovers env when the record
+    # omits the env block.
+    payload = {
+        "evalset_name": "demo",
+        "tasks": {
+            "1": {"scenario": "e:solve", "env": {"name": "myenv"}, "slug": "a", "args": {"n": 1}},
+            "2": {"scenario": "e:solve", "slug": "b"},
+        },
+    }
 
-    plan = diff(Taskset("d", [local]), Taskset("d", [remote]))
+    def fake_request(method: str, url: str, **kwargs: object) -> dict:
+        return payload
 
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
+
+    _, tasks = fetch_taskset_tasks(PlatformClient("https://api.example", "token"), "ts-id")
+
+    assert [(t.env, t.id) for t in tasks] == [("myenv", "solve"), ("e", "solve")]
+    # Round-trip: a fetched task diffs as unchanged against its local twin.
+    plan = diff(Taskset("d", [_row("a", 1)]), Taskset("d", [tasks[0]]))
     assert [t.slug for t in plan.unchanged] == ["a"]
 
 
@@ -96,7 +114,6 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_task_upload_payload_prefixes_task_id_with_env_name() -> None:
     assert task_upload_payload(Task(env="e", id="solve", args={"n": 1}))["scenario"] == "e:solve"
-    assert task_upload_payload(Task(env="e", id="e:solve"))["scenario"] == "e:solve"
 
 
 def test_taskset_column_definitions_infer_types() -> None:
