@@ -62,95 +62,81 @@
             "version": "v5",
             "tag": "Legacy",
             "groups": [
-          {
-            "group": "Get Started",
-            "pages": [
-              "index",
-              "llm-quickstart",
-              "migrate-v6"
-            ]
-          },
-          {
-            "group": "Building Environments",
-            "pages": [
-              "building/scaffolding",
-              "building/tasks-and-evaluation",
-              "building/running-at-scale",
-              "building/environments-as-data"
-            ]
-          },
-          {
-            "group": "Running Agents",
-            "pages": [
-              "quick-links/models",
-              "quick-links/training",
-              "guides/integrations",
-              "guides/chat",
-              "tools/agents"
-            ]
-          },
-          {
-            "group": "Advanced",
-            "pages": [
-              "advanced/patterns",
-              "advanced/harbor-convert",
-              "platform/publishing-leaderboards"
-            ]
-          },
-          {
-            "group": "SDK Reference",
-            "pages": [
-              "reference/environments",
-              "reference/tools",
-              "reference/native-graders",
-              "reference/evals",
-              "reference/agents",
-              "reference/types"
-            ]
-          },
-          {
-            "group": "Tools Reference",
-            "pages": [
-              "tools/computer",
-              "tools/coding",
-              "tools/filesystem",
-              "tools/memory",
-              "tools/web",
-              "tools/grounding"
-            ]
-          },
-          {
-            "group": "Cookbooks",
-            "pages": [
-              "cookbooks/codex-coding",
-              "cookbooks/ops-diagnostics",
-              "cookbooks/opencode-agent"
-            ]
-          },
-          {
-            "group": "CLI Reference",
-            "pages": [
-              "reference/cli/overview",
-              "reference/cli/init",
-              "reference/cli/dev",
-              "reference/cli/build",
-              "reference/cli/deploy",
-              "reference/cli/link",
-              "reference/cli/push",
-              "reference/cli/analyze",
-              "reference/cli/debug",
-              "reference/cli/eval",
-              "reference/cli/rl",
-              "reference/cli/sync",
-              "reference/cli/misc"
-            ]
-          },
-          {
-            "group": "Community",
-            "pages": [
-              "contributing"
-            ]
-          }
+              {
+                "group": "Get Started",
+                "pages": ["v5/index", "v5/llm-quickstart", "migrate-v6"]
+              },
+              {
+                "group": "Building Environments",
+                "pages": [
+                  "v5/building/scaffolding",
+                  "v5/building/tasks-and-evaluation",
+                  "v5/building/running-at-scale",
+                  "v5/building/environments-as-data"
+                ]
+              },
+              {
+                "group": "Running Agents",
+                "pages": [
+                  "v5/quick-links/models",
+                  "v5/quick-links/training",
+                  "v5/guides/integrations",
+                  "v5/guides/chat",
+                  "v5/tools/agents"
+                ]
+              },
+              {
+                "group": "Advanced",
+                "pages": [
+                  "v5/advanced/patterns",
+                  "v5/advanced/harbor-convert",
+                  "platform/publishing-leaderboards"
+                ]
+              },
+              {
+                "group": "SDK Reference",
+                "pages": [
+                  "v5/reference/environments",
+                  "v5/reference/tools",
+                  "v5/reference/native-graders",
+                  "v5/reference/evals",
+                  "v5/reference/agents",
+                  "v5/reference/types"
+                ]
+              },
+              {
+                "group": "Tools Reference",
+                "pages": [
+                  "v5/tools/computer",
+                  "v5/tools/coding",
+                  "v5/tools/filesystem",
+                  "v5/tools/memory",
+                  "v5/tools/web",
+                  "v5/tools/grounding"
+                ]
+              },
+              {
+                "group": "CLI Reference",
+                "pages": [
+                  "v5/reference/cli/overview",
+                  "v5/reference/cli/init",
+                  "v5/reference/cli/dev",
+                  "v5/reference/cli/build",
+                  "v5/reference/cli/deploy",
+                  "v5/reference/cli/link",
+                  "v5/reference/cli/push",
+                  "v5/reference/cli/analyze",
+                  "v5/reference/cli/debug",
+                  "v5/reference/cli/eval",
+                  "v5/reference/cli/rl",
+                  "v5/reference/cli/sync",
+                  "v5/reference/cli/misc"
+                ]
+              },
+              {
+                "group": "Community",
+                "pages": ["contributing"]
+              }
             ]
           }
         ]
@@ -219,6 +205,18 @@
       }
     ]
   },
+  "redirects": [
+    { "source": "/building/:slug*", "destination": "/v5/building/:slug*" },
+    { "source": "/guides/:slug*", "destination": "/v5/guides/:slug*" },
+    { "source": "/quick-links/:slug*", "destination": "/v5/quick-links/:slug*" },
+    { "source": "/reference/:slug*", "destination": "/v5/reference/:slug*" },
+    { "source": "/tools/:slug*", "destination": "/v5/tools/:slug*" },
+    { "source": "/advanced/:slug*", "destination": "/v5/advanced/:slug*" },
+    { "source": "/llm-quickstart", "destination": "/v5/llm-quickstart" },
+    { "source": "/cookbooks/ops-diagnostics", "destination": "/v6/cookbooks/ops-diagnostics" },
+    { "source": "/cookbooks/codex-coding", "destination": "/v6/cookbooks/coding-agent" },
+    { "source": "/cookbooks/:slug*", "destination": "/v6/quickstart" }
+  ],
   "contextual": {
     "options": ["copy", "claude", "chatgpt", "perplexity"]
   },

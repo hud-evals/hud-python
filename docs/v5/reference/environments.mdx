@@ -1,0 +1,480 @@
+---
+title: "Environment"
+description: "SDK reference for the Environment class - tools, connectors, and integrations"
+icon: "desktop"
+---
+
+`Environment` is the unified class for defining tools, connecting to services, and formatting for any LLM provider.
+
+## Environment
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+```
+
+### Constructor
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `name` | `str` | Environment name | `"environment"` |
+| `instructions` | `str \| None` | Description/instructions | `None` |
+| `conflict_resolution` | `ConflictResolution` | How to handle tool name conflicts | `PREFIX` |
+
+### Context Manager
+
+Environment must be used as an async context manager to connect:
+
+```python
+async with env:
+    tools = env.as_openai_chat_tools()
+    result = await env.call_tool("my_tool", arg="value")
+```
+
+## Defining Tools
+
+### @env.tool()
+
+Register functions as callable tools:
+
+```python
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
+
+@env.tool()
+async def fetch_data(url: str) -> dict:
+    """Fetch JSON data from URL."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+        return response.json()
+```
+
+Tools are automatically documented from type hints and docstrings.
+
+## Scenarios
+
+Scenarios define evaluation logic with two yields:
+
+```python
+@env.scenario("checkout")
+async def checkout_flow(product: str):
+    # First yield: send prompt, receive answer
+    answer = yield f"Add '{product}' to cart and checkout"
+    
+    # Second yield: return reward based on result
+    order_exists = await check_order(product)
+    yield 1.0 if order_exists else 0.0
+```
+
+Create Tasks from Scenarios:
+
+```python
+task = env("checkout", product="laptop")
+
+async with hud.eval(task) as ctx:
+    await agent.run(ctx.prompt)
+    await ctx.submit(agent.response)
+```
+
+### @env.scenario() Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str \| None` | function name | Scenario identifier |
+| `description` | `str \| None` | docstring | Description of the scenario |
+| `chat` | `bool` | `False` | Mark as chat-compatible (requires `messages` param) |
+| `exclude_tools` | `list[str] \| None` | `None` | fnmatch patterns for tools to hide from agent |
+| `exclude_sources` | `list[str] \| None` | `None` | Connection names to hide from agent |
+| `allowed_tools` | `list[str] \| None` | `None` | fnmatch patterns to rescue from exclusions |
+| `returns` | `type \| None` | `None` | Pydantic model for structured agent answers |
+| `enable_citations` | `bool` | `False` | Request citation extraction from provider |
+| `required_env_vars` | `list[str] \| None` | `None` | Env vars this scenario needs (for platform UI) |
+
+**Chat scenarios** must accept a `messages` parameter:
+
+```python
+@env.scenario("assist", chat=True)
+async def assist(messages: list[dict] | None = None):
+    messages = messages or []
+    yield "You are a helpful assistant."
+    yield 1.0
+```
+
+**Tool filtering** lets the environment use tools internally while hiding them from the agent:
+
+```python
+@env.scenario("search", exclude_sources=["admin"], allowed_tools=["admin_read_*"])
+async def search(query: str):
+    # Environment can call admin tools in setup, but agent only sees admin_read_*
+    await env.call_tool("admin_setup", query=query)
+    yield f"Search for: {query}"
+    yield 1.0
+```
+
+## Chat
+
+Create a Chat instance for multi-turn conversations:
+
+```python
+chat = env.chat("assist", model="claude-haiku-4-5")
+
+r1 = await chat.send("Hello")
+r2 = await chat.send("Follow up")
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `scenario` | `str` | Required | Chat scenario name |
+| `model` | `str` | Required | Model name |
+| `max_steps` | `int` | `10` | Max agent steps per turn |
+| `trace` | `bool` | `False` | Record traces on HUD platform |
+| `quiet` | `bool` | `True` | Suppress output |
+
+See [Chat with Environments](/v5/guides/chat) for full details.
+
+## Connectors
+
+Connect to external services as tool sources.
+
+### connect_hub()
+
+Connect to a deployed HUD environment:
+
+```python
+env.connect_hub("browser", prefix="browser")
+# Tools available as browser_navigate, browser_click, etc.
+```
+
+### connect_fastapi()
+
+Import FastAPI routes as tools:
+
+```python
+from fastapi import FastAPI
+
+api = FastAPI()
+
+@api.get("/users/{user_id}", operation_id="get_user")
+def get_user(user_id: int):
+    return {"id": user_id, "name": "Alice"}
+
+env.connect_fastapi(api)
+# Tool available as get_user
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `app` | `FastAPI` | FastAPI application | Required |
+| `name` | `str \| None` | Server name | `app.title` |
+| `prefix` | `str \| None` | Tool name prefix | `None` |
+| `include_hidden` | `bool` | Include routes with `include_in_schema=False` | `True` |
+
+### connect_openapi()
+
+Import from OpenAPI spec:
+
+```python
+env.connect_openapi("https://api.example.com/openapi.json")
+```
+
+### connect_server()
+
+Mount an MCPServer or FastMCP directly:
+
+```python
+from fastmcp import FastMCP
+
+tools = FastMCP("tools")
+
+@tools.tool
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+env.connect_server(tools)
+```
+
+### connect_mcp_config()
+
+Connect via MCP config dict:
+
+```python
+env.connect_mcp_config({
+    "my-server": {
+        "command": "uvx",
+        "args": ["some-mcp-server"]
+    }
+})
+```
+
+### connect_image()
+
+Connect to a Docker image via stdio:
+
+```python
+env.connect_image("mcp/fetch")
+```
+
+## Tool Formatting
+
+Convert tools to provider-specific formats.
+
+### OpenAI
+
+```python
+# Chat Completions API
+tools = env.as_openai_chat_tools()
+response = await client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages,
+    tools=tools,
+)
+
+# Responses API
+tools = env.as_openai_responses_tools()
+
+# Agents SDK (requires openai-agents)
+tools = env.as_openai_agent_tools()
+```
+
+### Anthropic/Claude
+
+```python
+tools = env.as_claude_tools()
+response = await client.messages.create(
+    model="claude-sonnet-4-5",
+    messages=messages,
+    tools=tools,
+)
+```
+
+### Gemini
+
+```python
+tools = env.as_gemini_tools()
+config = env.as_gemini_tool_config()
+```
+
+### LangChain
+
+```python
+# Requires langchain-core
+tools = env.as_langchain_tools()
+```
+
+### LlamaIndex
+
+```python
+# Requires llama-index-core
+tools = env.as_llamaindex_tools()
+```
+
+### Google ADK
+
+```python
+# Requires google-adk
+tools = env.as_adk_tools()
+```
+
+## Calling Tools
+
+### call_tool()
+
+Execute tools with auto-format detection:
+
+```python
+# Simple call
+result = await env.call_tool("my_tool", arg="value")
+
+# From OpenAI tool call
+result = await env.call_tool(response.choices[0].message.tool_calls[0])
+
+# From Claude tool use
+result = await env.call_tool(response.content[0])  # tool_use block
+```
+
+Returns result in matching format (OpenAI tool call → OpenAI tool message, etc.).
+
+## Mock Mode
+
+Test without real connections:
+
+```python
+env.mock()  # Enable mock mode
+
+# Set specific mock outputs
+env.mock_tool("navigate", "Navigation successful")
+env.mock_tool("screenshot", b"fake_image_data")
+
+async with env:
+    result = await env.call_tool("navigate", url="https://example.com")
+    # Returns "Navigation successful" instead of actually navigating
+
+env.unmock()  # Disable mock mode
+```
+
+| Method | Description |
+|--------|-------------|
+| `mock(enable=True)` | Enable/disable mock mode |
+| `unmock()` | Disable mock mode |
+| `mock_tool(name, output)` | Set specific mock output |
+| `is_mock` | Check if mock mode is enabled |
+
+## Serving as MCP Server
+
+Environment can serve its tools over MCP protocols, either standalone or mounted on an existing server.
+
+### serve()
+
+Start a standalone MCP server:
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+
+@env.tool()
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+# Run as MCP server (blocking)
+env.serve()
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `transport` | `Literal["stdio", "sse", "streamable-http"]` | Transport protocol | `"streamable-http"` |
+| `host` | `str` | Host address to bind | `"0.0.0.0"` |
+| `port` | `int` | Port to bind | `8000` |
+
+```python
+# Serve over stdio (for CLI tools)
+env.serve(transport="stdio")
+
+# Serve over HTTP on custom port
+env.serve(transport="streamable-http", host="0.0.0.0", port=8765)
+```
+
+### http_app()
+
+Get a Starlette/ASGI app to mount on an existing FastAPI server. This is inherited from FastMCP and enables deployment on platforms like Railway, Fly.io, or Vercel.
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from hud import Environment
+
+env = Environment("my-env")
+
+@env.tool()
+def my_tool(arg: str) -> str:
+    return f"Got: {arg}"
+
+# Create the MCP app with stateless_http=True for multi-replica deployments
+mcp_app = env.http_app(path="/", stateless_http=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Enter BOTH the environment context AND the MCP app's lifespan
+    async with env, mcp_app.router.lifespan_context(mcp_app):
+        yield
+
+app = FastAPI(lifespan=lifespan, redirect_slashes=False)
+
+# Mount the MCP app
+app.mount("/mcp", mcp_app)
+
+# Your other FastAPI routes work normally
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `path` | `str \| None` | Internal path for the MCP endpoint | `"/"` |
+| `stateless_http` | `bool` | Stateless mode for multi-replica deployments | `False` |
+| `middleware` | `list[ASGIMiddleware] \| None` | Starlette middleware | `None` |
+
+<Warning>
+**Lifespan is critical.** You must enter both `env` (the Environment context) and `mcp_app.router.lifespan_context(mcp_app)` (the MCP session manager). Missing either will cause tools to fail or sessions to not initialize.
+</Warning>
+
+#### Stateless HTTP Mode
+
+Enable `stateless_http=True` when deploying to platforms with multiple replicas (Railway, Fly.io, etc.). This ensures each request creates a fresh transport context, eliminating session affinity requirements:
+
+```python
+# For single-replica or sticky sessions
+mcp_app = env.http_app(path="/")
+
+# For multi-replica deployments (Railway, Fly.io, Vercel)
+mcp_app = env.http_app(path="/", stateless_http=True)
+```
+
+#### Authentication via Headers
+
+For authenticated tools, use FastMCP's `get_http_headers()` to extract the API key:
+
+```python
+from fastmcp.server.dependencies import get_http_headers
+
+@env.tool()
+async def protected_tool(query: str) -> dict:
+    """A tool that requires authentication."""
+    headers = get_http_headers()
+    auth_header = headers.get("authorization", "")
+    
+    if not auth_header.startswith("Bearer "):
+        return {"error": "Missing API key"}
+    
+    api_key = auth_header[7:]  # Remove "Bearer " prefix
+    # Validate api_key and proceed...
+    return {"result": "authenticated"}
+```
+
+MCP clients can then connect at `http://your-server/mcp`:
+
+```python
+# Client connecting to mounted environment
+env.connect_url("http://localhost:8000/mcp")
+```
+
+
+## Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `str` | Environment name |
+| `prompt` | `str \| None` | Default prompt (set by scenarios or agent code) |
+| `is_connected` | `bool` | True if in context |
+| `connections` | `dict[str, Connector]` | Active connections |
+
+## Creating Tasks
+
+Call the environment to create a Task:
+
+```python
+# With scenario
+task = env("checkout", product="laptop")
+
+# Without scenario (just the environment)
+task = env()
+```
+
+Then run with `hud.eval()`:
+
+```python
+async with hud.eval(task, variants={"model": ["gpt-4o"]}) as ctx:
+    ...
+```
+
+## See Also
+
+- [Evals](/v5/reference/evals) - hud.eval() reference
+- [MCPServer](/v5/reference/mcpserver) - Building MCP servers
+- [Scaffolding](/v5/building/scaffolding) - Getting started guide
+- [Chat with Environments](/v5/guides/chat) - Multi-turn chat scenarios and A2A serving
+

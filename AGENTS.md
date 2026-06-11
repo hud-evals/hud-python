@@ -13,8 +13,6 @@ adding local workarounds.
 - `README.md` for the protocol, product concepts, and common CLI workflows.
 - `docs/v6/` for the live SDK docs: quickstart, reference (environment, tasks,
   capabilities, agents, graders, types, cli), run guides, and cookbooks.
-  Everything else under `docs/` is the frozen v5 doc site — do not edit it for
-  SDK changes.
 - `CONTRIBUTING.md` for setup, test, lint, and type-check commands.
 - `pyproject.toml` for supported Python versions, dependencies, optional extras,
   ruff, pyright, pytest, and coverage configuration.
