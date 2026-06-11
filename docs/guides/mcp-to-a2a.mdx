@@ -22,7 +22,7 @@ flowchart LR
 
 1. **Connect** your MCP server to a HUD Environment
 2. **Define** a `chat=True` scenario (the agent gets your MCP tools automatically)
-3. **Serve** it over A2A with the reference server in `cookbooks/a2a-chat/server.py`
+3. **Serve** with `ChatService` — it speaks A2A out of the box
 
 ## Step 1: Connect Your MCP Server
 
@@ -79,20 +79,22 @@ The built-in example script serves any environment + scenario combination:
 
 ```bash
 HUD_ENV=my-assistant HUD_SCENARIO=assist HUD_MODEL=claude-haiku-4-5 \
-    uv run --project cookbooks/a2a-chat cookbooks/a2a-chat/server.py
+    uv run python examples/03_a2a_chat_server.py
 ```
 
 ### Programmatic
 
-The A2A adapter lives in the cookbook, not the SDK — copy [`cookbooks/a2a-chat/server.py`](https://github.com/hud-evals/hud-python/blob/main/cookbooks/a2a-chat/server.py) and adapt it:
-
 ```python
-from server import serve  # your copy of cookbooks/a2a-chat/server.py
+from hud.services import ChatService
 
-serve(env("assist"), model="claude-haiku-4-5", host="0.0.0.0", port=9999)
+service = ChatService(
+    env("assist"),
+    model="claude-haiku-4-5",
+)
+service.serve(host="0.0.0.0", port=9999)
 ```
 
-The server publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint.
+The service publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint.
 
 ## Step 4: Talk to It
 
@@ -215,14 +217,14 @@ async def chat(messages: list[dict[str, Any]] | None = None):
 ```bash
 # Serve it
 HUD_ENV=github-assistant HUD_SCENARIO=chat \
-    uv run --project cookbooks/a2a-chat cookbooks/a2a-chat/server.py
+    uv run python examples/03_a2a_chat_server.py
 
 # Talk to it
-uv run --project cookbooks/a2a-chat cookbooks/a2a-chat/client.py
+uv run python examples/05_a2a_simple_client.py
 ```
 
 ## What Next
 
-- [Chat with Environments](/guides/chat) — full Chat reference
+- [Chat with Environments](/guides/chat) — full Chat and ChatService reference
 - [Ops Diagnostics](/cookbooks/ops-diagnostics) — hierarchical agents with multiple MCP servers
 - [Environments as Data](/building/environments-as-data) — environment design patterns

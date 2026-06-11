@@ -116,12 +116,10 @@ async def search(query: str):
 
 ## Chat
 
-Wrap a task in a `Chat` runner for multi-turn conversations:
+Create a Chat instance for multi-turn conversations:
 
 ```python
-from hud import Chat
-
-chat = Chat(env("assist"), model="claude-haiku-4-5")
+chat = env.chat("assist", model="claude-haiku-4-5")
 
 r1 = await chat.send("Hello")
 r2 = await chat.send("Follow up")
@@ -129,10 +127,11 @@ r2 = await chat.send("Follow up")
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `task` | `Task` | Required | The chat task (positional) |
+| `scenario` | `str` | Required | Chat scenario name |
 | `model` | `str` | Required | Model name |
 | `max_steps` | `int` | `10` | Max agent steps per turn |
-| `agent_params` | `dict` | `None` | Extra kwargs for agent creation |
+| `trace` | `bool` | `False` | Record traces on HUD platform |
+| `quiet` | `bool` | `True` | Suppress output |
 
 See [Chat with Environments](/guides/chat) for full details.
 
@@ -449,6 +448,7 @@ env.connect_url("http://localhost:8000/mcp")
 | Property | Type | Description |
 |----------|------|-------------|
 | `name` | `str` | Environment name |
+| `prompt` | `str \| None` | Default prompt (set by scenarios or agent code) |
 | `is_connected` | `bool` | True if in context |
 | `connections` | `dict[str, Connector]` | Active connections |
 
@@ -477,3 +477,4 @@ async with hud.eval(task, variants={"model": ["gpt-4o"]}) as ctx:
 - [MCPServer](/reference/mcpserver) - Building MCP servers
 - [Scaffolding](/building/scaffolding) - Getting started guide
 - [Chat with Environments](/guides/chat) - Multi-turn chat scenarios and A2A serving
+

@@ -1,8 +1,8 @@
 # HUD Python Agent Guide
 
-This repository is the Python SDK and CLI for HUD: environments, tools, agents,
-evaluation context, telemetry, and command-line workflows for building and
-running agent evaluations.
+This repository is the Python SDK and CLI for HUD: environments, capabilities,
+tasks, agents, the rollout engine, telemetry, and command-line workflows for
+building and running agent evaluations.
 
 Priorities: solve the requested problem, keep scope tight, preserve public SDK
 behavior where it is actually shipped, and improve code quality rather than
@@ -10,34 +10,29 @@ adding local workarounds.
 
 ## Where To Look First
 
-- `README.md` for product concepts, public examples, and common CLI workflows.
+- `README.md` for the protocol, product concepts, and common CLI workflows.
+- `docs/v6/` for the live SDK docs: quickstart, reference (environment, tasks,
+  capabilities, agents, graders, types, cli), run guides, and cookbooks.
+  Everything else under `docs/` is the frozen v5 doc site — do not edit it for
+  SDK changes.
 - `CONTRIBUTING.md` for setup, test, lint, and type-check commands.
 - `pyproject.toml` for supported Python versions, dependencies, optional extras,
   ruff, pyright, pytest, and coverage configuration.
 - Source files and colocated tests for exact behavior. Trust code and tests over
   stale prose.
-- `examples/` for supported user-facing usage patterns.
+- `cookbooks/` for runnable end-to-end examples (each is its own uv project).
 
 Keep this file stable. Do not turn it into a release runbook, command matrix, or
 inventory of current incidents.
 
 ## Repository Map
 
-- `hud/agents/`: provider agents, gateway model resolution, native tool adapters,
-  and shared agent contracts.
-- `hud/environment/`: MCP environment abstraction, connectors, scenario sessions,
-  tool routing, and format conversion.
-- `hud/tools/`: model-agnostic tools for computer control, coding, filesystem,
-  memory, browser, and submission flows.
-- `hud/eval/`: task and evaluation context orchestration.
-- `hud/cli/`: Typer CLI entrypoints, flows, conversion, build, deploy, sync, and
-  eval commands.
-- `hud/server/`: MCP server helpers and tool registration behavior.
-- `hud/telemetry/`: instrumentation and export.
-- `hud/datasets/`, `hud/native/`, `hud/services/`, `hud/shared/`, `hud/utils/`:
-  supporting SDK functionality.
-- `hud/tests/public_api/`: import and workflow contracts for the supported public
-  surface.
+- Core flow: `hud/environment/` (spec: capabilities, tasks, serving) →
+  `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
+  connected by `hud/capabilities/` and `hud/clients/`.
+- `hud/cli/` is the Typer surface over the same modules.
+- `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
+- `cookbooks/` and `integrations/` live outside the `hud` package.
 
 ## Working Style
 
@@ -130,20 +125,20 @@ Python `>=3.11, <3.13`.
   boundaries as needed. Do not mock core logic just to make a test easy.
 - Mark tests that require `HUD_API_KEY`, network access, or deployed services as
   integration tests.
-- For public API changes, update import/workflow coverage under
-  `hud/tests/public_api/`.
 - Run the narrowest relevant tests first, then broader checks when the blast
   radius is shared or user-facing.
 
 ## Operational Debugging
 
 - Follow the execution path instead of guessing from abstractions.
-- For CLI issues, start with the command/flow module, then config/settings, then
-  the SDK module being exercised.
+- For CLI issues, start with the command module, then config/settings, then the
+  SDK module being exercised.
 - For agent/provider issues, inspect gateway resolution, provider adapter code,
-  native tool conversion, and recorded request/response shapes.
-- For environment/tool issues, inspect scenario setup, MCP connection/routing,
-  tool schema conversion, and result formatting.
+  capability-backed tool wiring, and recorded request/response shapes.
+- For environment/task issues, inspect the task lifecycle (start/grade), the
+  control-channel server and client, and capability routing/tunneling.
+- For execution issues, inspect the rollout engine: runtime provider
+  acquisition, `connect`, the `Run` lifecycle, and job/trace reporting.
 - For telemetry issues, inspect instrumentation boundaries and exporter behavior
   before changing call sites.
 - Report what was verified, what remains inferred, and which file, test, trace,

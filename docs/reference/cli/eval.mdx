@@ -27,7 +27,7 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 </ParamField>
 
 <ParamField path="agent" type="string">
-  Agent to use: `claude`, `openai`, `gemini`, `openai_compatible`. If omitted, an interactive preset selector appears.
+  Agent to use: `claude`, `openai`, `operator`, `gemini`, `gemini_cua`, `openai_compatible`. If omitted, an interactive preset selector appears.
 </ParamField>
 
 ## Options
@@ -79,7 +79,7 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 </ParamField>
 
 <ParamField path="--auto-respond" type="boolean">
-  Use response automation to decide when to stop/continue. Default: True for `--full`.
+  Use ResponseAgent to decide when to stop/continue. Default: True for `--full`.
 </ParamField>
 
 ### Taskset Association
@@ -133,6 +133,10 @@ On first run, a template is created:
 # auto_respond = true
 # gateway = false
 # quiet = false
+
+[agent]
+# allowed_tools = ["computer", "playwright"]
+# disallowed_tools = []
 
 [claude]
 # model = "claude-sonnet-4-5"
@@ -209,7 +213,9 @@ When agent is omitted, an interactive selector shows presets:
 ? Select an agent:
 ❯ Claude Sonnet 4.5
   GPT-5
+  Operator (OpenAI Computer Use)
   Gemini 3 Pro Preview
+  Gemini CUA (Gemini Computer Use)
   Grok 4-1 Fast (xAI)
 ```
 
@@ -222,17 +228,15 @@ hud eval "My Tasks" claude --full --remote
 ```
 
 - **Remote agent**: Runs on HUD workers (no local compute needed)
-- **Remote environment**: Tasks must reference a deployed environment with serializable `env` config
+- **Remote environment**: Tasks must use URL-based `mcp_config` (not local Docker)
 - Uses HUD Gateway - no model-specific API keys needed
 - Monitor progress at `https://hud.ai/jobs/{job_id}`
 - Cancel with `hud cancel`
 
 <Note>
-Tasks with local tools or scenarios cannot be submitted directly for remote execution. Deploy the environment first, then sync or run tasks that reference it:
+Tasks with local Docker configs (`command`-based `mcp_config`) cannot be run remotely. Convert them first:
 ```bash
-hud deploy
-hud sync tasks my-taskset
-hud eval my-taskset claude --full --remote
+hud convert tasks.json
 ```
 </Note>
 

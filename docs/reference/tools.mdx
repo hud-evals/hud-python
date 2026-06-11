@@ -9,6 +9,9 @@ icon: "wrench"
 
 This reference covers the tool system architecture and how to build custom tools. For documentation on built-in tools, see [Scaffolding](/building/scaffolding#native-tools):
 
+- [Coding Tools](/tools/coding) — Shell execution, file editing
+- [Filesystem Tools](/tools/filesystem) — Read, search, glob, list
+- [Memory Tools](/tools/memory) — Persistent storage
 - [Computer Tools](/tools/computer) — Mouse, keyboard, screenshots
 - [Web Tools](/tools/web) — Browser automation
 </Info>
@@ -17,7 +20,7 @@ This reference covers the tool system architecture and how to build custom tools
 
 HUD tools are async functions that:
 
-1. **Receive structured input** from agents over MCP
+1. **Receive structured input** from agents (via MCP or native APIs)
 2. **Execute actions** against an environment, filesystem, or service
 3. **Return `ContentBlock` lists** — standardized MCP output (text, images, etc.)
 
@@ -25,7 +28,7 @@ HUD tools are async functions that:
 Agent → Tool Call → BaseTool.__call__() → list[ContentBlock] → Agent
 ```
 
-Provider-native details live on agent harnesses. Environments expose generic tools such as `ComputerTool`, `BashTool`, and `EditTool`; Claude/OpenAI/Gemini agents decide how to present those capabilities to their model APIs.
+Tools integrate with providers through **native specs** — when Claude calls `bash`, it uses Anthropic's native `bash_20250124` API. When OpenAI calls `shell`, it uses their native format. HUD translates automatically.
 
 ## BaseTool
 
@@ -64,6 +67,7 @@ class MyTool(BaseTool):
 **Properties:**
 
 - `mcp` — FastMCP `FunctionTool` wrapper for server registration
+- `native_specs` — Dict mapping `AgentType` to `NativeToolSpec`
 
 **Registration:**
 
@@ -74,16 +78,44 @@ mcp = MCPServer(name="my-env")
 mcp.add_tool(MyTool())  # Automatically wraps with .mcp
 ```
 
-## Provider Tools
+## Native Tool Specs
 
-Provider-native and provider-hosted tools are configured on agents, not on environment tools. Use environment tools for client-executed capabilities and agent config for hosted tools:
+Tools can declare native API mappings for specific providers. This enables zero-translation tool calls for supported agents.
 
 ```python
-from hud.agents.claude import ClaudeAgent
-from hud.tools import BashTool
+from hud.tools import BaseTool
+from hud.tools.native_types import NativeToolSpec
+from hud.types import AgentType
 
-env.add_tool(BashTool())
-agent = ClaudeAgent.create(hosted_tools=["web_search"])
+class BashTool(BaseTool):
+    native_specs = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="bash_20250124",
+            api_name="bash",
+            beta="computer-use-2025-01-24",
+            role="shell",
+        ),
+    }
+```
+
+**NativeToolSpec Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_type` | `str` | Provider's tool type identifier |
+| `api_name` | `str` | Provider's tool name |
+| `beta` | `str \| None` | Required beta header (Anthropic) |
+| `role` | `str \| None` | Logical role for exclusion (`"shell"`, `"editor"`, `"memory"`) |
+| `supported_models` | `list[str] \| None` | Glob patterns for compatible models |
+
+**Role Exclusion:**
+
+Tools with the same `role` are mutually exclusive — you can't have both `BashTool` (Claude) and `ShellTool` (OpenAI) active. When an agent accepts one natively, others with the same role are excluded.
+
+```python
+# Both have role="shell" — only one registers natively
+env.add_tool(BashTool())    # Claude gets this natively
+env.add_tool(ShellTool())   # OpenAI gets this natively
 ```
 
 ## Tool Hooks
@@ -312,13 +344,13 @@ class MyExecutor(BaseExecutor):
 
 ```python
 from hud.tools.executors import PyAutoGUIExecutor, XDOExecutor
-from hud.tools import ComputerTool
+from hud.tools import HudComputerTool
 
 # Cross-platform
-computer = ComputerTool(executor=PyAutoGUIExecutor())
+computer = HudComputerTool(executor=PyAutoGUIExecutor())
 
 # Linux with specific display
-computer = ComputerTool(executor=XDOExecutor(display_num=1))
+computer = HudComputerTool(executor=XDOExecutor(display_num=1))
 ```
 
 ## Callback Functions
@@ -342,7 +374,7 @@ class MyTool(BaseTool):
 
 **Callback Methods:**
 
-```text
+```python
 add_callback(event_type: str, callback: Callable)
 remove_callback(event_type: str, callback: Callable)
 _trigger_callbacks(event_type: str, **kwargs)  # Call from tool methods

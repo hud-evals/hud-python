@@ -54,7 +54,7 @@
               { "group": "Run & scale", "pages": ["v6/run/models", "v6/run/deploy", "v6/advanced/signal", "v6/run/training"] },
               { "group": "Reference", "pages": ["v6/reference/environment", "v6/reference/tasks", "v6/reference/capabilities", "v6/reference/agents", "v6/reference/graders", "v6/reference/types", "v6/reference/cli"] },
               { "group": "Advanced", "pages": ["v6/advanced/integrations", "v6/advanced/chat", "v6/advanced/patterns", "v6/advanced/harbor-convert"] },
-              { "group": "Cookbooks", "pages": ["v6/cookbooks/codex-coding", "v6/cookbooks/ops-diagnostics"] },
+              { "group": "Cookbooks", "pages": ["v6/cookbooks/codex-coding", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat"] },
               { "group": "Community", "pages": ["contributing"] }
             ]
           },
@@ -113,14 +113,19 @@
             "group": "Tools Reference",
             "pages": [
               "tools/computer",
-              "tools/web"
+              "tools/coding",
+              "tools/filesystem",
+              "tools/memory",
+              "tools/web",
+              "tools/grounding"
             ]
           },
           {
             "group": "Cookbooks",
             "pages": [
               "cookbooks/codex-coding",
-              "cookbooks/ops-diagnostics"
+              "cookbooks/ops-diagnostics",
+              "cookbooks/opencode-agent"
             ]
           },
           {
@@ -131,6 +136,7 @@
               "reference/cli/dev",
               "reference/cli/build",
               "reference/cli/deploy",
+              "reference/cli/link",
               "reference/cli/push",
               "reference/cli/analyze",
               "reference/cli/debug",

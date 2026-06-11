@@ -29,9 +29,9 @@ Swap `model="gpt-4o"` for `model="claude-sonnet-4-5"` and you're comparing provi
 
 ## create_agent and Native Tools
 
-`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer`, `shell`, and `apply_patch`; Gemini has `ComputerUse`. Each is a provider-specific API the model was trained on.
+`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer_use_preview`; Gemini has `ComputerUse`. Each is a provider-specific API the model was trained on.
 
-HUD agents read environment capability metadata and choose provider-native tools on the agent side:
+HUD environments declare `native_specs` that tell agents how to use each tool natively:
 
 ```python
 from hud.agents import create_agent
@@ -40,14 +40,14 @@ from hud.agents import create_agent
 agent = create_agent("claude-sonnet-4-5")
 # → Claude gets bash_20250124, computer_20250124, text_editor_20250728
 
-agent = create_agent("gpt-5.4")
-# → OpenAI gets computer, shell, apply_patch when the environment exposes matching capabilities
+agent = create_agent("gpt-4o")
+# → OpenAI gets computer_use_preview
 
 agent = create_agent("gemini-2.5-pro")
-# → Gemini gets its agent-owned computer and CLI-shaped tools
+# → Gemini gets ComputerUse
 ```
 
-The same environment works with Claude, OpenAI, and Gemini agents. You optimize your model through the platform to be best at your environment, while each provider harness owns its native interface.
+The same environment works with Claude Code, Codex, Operator, Gemini CUA—each gets its native interface. You optimize your model through the platform to be best at your environment, while supporting all providers and their specialized tools.
 
 ## Trained Models
 

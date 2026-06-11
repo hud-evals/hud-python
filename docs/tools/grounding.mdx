@@ -1,0 +1,188 @@
+---
+title: "Grounding Tools"
+description: "Element descriptions to coordinates"
+icon: "crosshairs"
+---
+
+Grounding tools convert natural language element descriptions to pixel coordinates. Agent says "click the red submit button"—grounder finds it and returns coordinates.
+
+## How It Works
+
+```
+Agent: "click the red submit button"
+         ↓
+    [Screenshot]
+         ↓
+    [Vision Model: (450, 320)]
+         ↓
+    Computer: click(x=450, y=320)
+```
+
+## GroundedComputerTool
+
+Wraps a computer tool to accept element descriptions instead of coordinates.
+
+```python
+from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
+
+config = GrounderConfig(
+    api_base="https://api.openai.com/v1",
+    model="gpt-4o",
+    api_key="your-api-key",
+)
+grounder = Grounder(config=config)
+
+grounded = GroundedComputerTool(
+    grounder=grounder,
+    ctx=env,                        # Environment context
+    computer_tool_name="computer",  # Name of computer tool to use
+)
+```
+
+**Actions**: `click`, `double_click`, `move`, `scroll`, `drag`, `type`, `keypress`, `screenshot`, `wait`
+
+```python
+# Click using description
+await grounded(
+    action="click",
+    element_description="the blue login button at the top",
+    screenshot_b64=current_screenshot,
+)
+
+# Scroll at element
+await grounded(
+    action="scroll",
+    element_description="the main content area",
+    scroll_x=0,
+    scroll_y=-100,
+    screenshot_b64=current_screenshot,
+)
+
+# Drag between elements
+await grounded(
+    action="drag",
+    start_element_description="the file icon",
+    end_element_description="the trash folder",
+    screenshot_b64=current_screenshot,
+)
+
+# No grounding needed for these
+await grounded(action="type", text="Hello!")
+await grounded(action="keypress", keys=["ctrl", "s"])
+```
+
+Screenshot is required for actions that need grounding.
+
+## Grounder
+
+The engine that locates elements using vision models.
+
+```python
+from hud.tools.grounding import Grounder, GrounderConfig
+
+# Basic config
+config = GrounderConfig(
+    api_base="https://api.openai.com/v1",
+    model="gpt-4o",
+)
+grounder = Grounder(config=config)
+
+# With custom settings
+config = GrounderConfig(
+    api_base="https://openrouter.ai/api/v1",
+    model="qwen/qwen-2.5-vl-7b-instruct",
+    api_key="your-openrouter-key",
+    output_format="pixels",
+)
+grounder = Grounder(config=config)
+```
+
+```python
+coords = await grounder.predict_click(
+    image_b64=screenshot_base64,
+    instruction="the submit button",
+)
+# Returns: (x, y) or None if not found
+```
+
+**Supported models**: Any vision-capable model via OpenAI-compatible API—GPT-4o, Qwen VL, LLaVA, etc.
+
+## With HUD Agents
+
+`GroundedComputerTool` is typically used as a wrapper around environment computer tools. Register the underlying computer tool, then use grounded calls:
+
+```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool
+from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
+
+# Setup environment with computer tool
+env = Environment("grounded-env")
+env.add_tool(AnthropicComputerTool())
+
+# Create grounder
+config = GrounderConfig(
+    api_base="https://api.openai.com/v1",
+    model="gpt-4o",
+    api_key="your-api-key",
+)
+grounder = Grounder(config=config)
+
+async with env:
+    # Wrap environment for grounded calls
+    grounded = GroundedComputerTool(grounder=grounder, ctx=env)
+    
+    # Take screenshot via environment
+    result = await env.call_tool("computer", action="screenshot")
+    
+    # Use grounded tool for element-based actions
+    await grounded(
+        action="click",
+        element_description="the login button",
+        screenshot_b64=result.content[0].data,  # base64 from screenshot
+    )
+```
+
+For full agent loops, use HUD's built-in agents which handle the loop automatically:
+
+```python
+from hud.agents import create_agent
+import hud
+
+task = env("my_task")
+agent = create_agent("gpt-4o")
+
+async with hud.eval(task) as ctx:
+    await agent.run(ctx)
+```
+
+## When to Use
+
+**Good for**:
+- Dynamic interfaces where elements move
+- Natural language task descriptions
+- Complex layouts with many similar elements
+
+**Avoid when**:
+- Static, known positions
+- High-frequency actions (grounding adds latency)
+- Precision required (coordinates are more exact)
+
+## Trade-offs
+
+| Aspect | Grounded | Direct Coordinates |
+|--------|----------|-------------------|
+| Flexibility | High | Low |
+| Precision | Medium | High |
+| Speed | Slower | Faster |
+| Error handling | Descriptive | Silent failures |
+
+## Tips
+
+Write specific descriptions. "The blue submit button at the bottom of the form" beats "the button".
+
+Always use recent screenshots. Stale images lead to wrong coordinates if UI changed.
+
+Handle `None` returns. Grounder returns `None` if it can't find the element—provide fallback behavior.
+
+→ [Computer Tools](/tools/computer) — Underlying computer control

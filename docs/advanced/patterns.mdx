@@ -129,6 +129,8 @@ await env.list_prompts()    # MCP prompts
 
 ## Common Issues
 
+**`evaluate_tool: NULL` but using v5 scenarios** — v5 scenarios return rewards via `read_resource`, not `evaluate_tool`. Ensure your orchestrator calls `read_resource()` after agent completion.
+
 **`TypeError` with complex args like `list[dict]`** — MCP passes all arguments as strings; SDK deserializes them. Add logging to check `type(arg)` at scenario entry.
 
 **Scenario setup works but evaluate returns no reward** — `submit()` wasn't called before `read_resource()`. Call `await env.submit(scenario_name, answer)` first.

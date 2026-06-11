@@ -61,7 +61,7 @@ async with hud.eval(
     variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
 ) as ctx:
     model = ctx.variants["model"]  # Current variant
-    response = await client.chat.completions.create(model=model, messages=[])
+    response = await client.chat.completions.create(model=model, ...)
 ```
 
 Lists expand to all combinations:
@@ -106,7 +106,7 @@ async with hud.eval(
 |----------|------|-------------|
 | `trace_id` | `str` | Unique trace identifier |
 | `eval_name` | `str` | Evaluation name |
-| `prompt` | `str \| None` | Prompt produced by scenario setup |
+| `prompt` | `str \| None` | Task prompt (from scenario or task) |
 | `variants` | `dict[str, Any]` | Current variant assignment |
 | `reward` | `float \| None` | Evaluation reward (settable) |
 | `answer` | `str \| None` | Submitted answer |
@@ -226,3 +226,4 @@ for result in ctx.results:
 - [Tasks & Evaluation](/building/tasks-and-evaluation) - Define tasks, test locally, iterate
 - [Deploy & Go Remote](/building/running-at-scale) - Running evals at scale
 - [`hud eval` CLI](/reference/cli/eval) - Command-line interface
+

@@ -34,7 +34,7 @@ Returned by `hud.eval()`. Extends Environment with evaluation tracking.
 
 ```python
 async with hud.eval(task) as ctx:
-    print(ctx.prompt)      # Scenario prompt
+    print(ctx.prompt)      # Task prompt
     print(ctx.variants)    # Current variant
     ctx.reward = 1.0       # Set reward
 ```
@@ -43,7 +43,7 @@ async with hud.eval(task) as ctx:
 |----------|------|-------------|
 | `trace_id` | `str` | Unique trace identifier |
 | `eval_name` | `str` | Evaluation name |
-| `prompt` | `str \| None` | Prompt produced by scenario setup |
+| `prompt` | `str \| None` | Task prompt |
 | `variants` | `dict[str, Any]` | Current variant assignment |
 | `reward` | `float \| None` | Evaluation reward |
 | `answer` | `str \| None` | Submitted answer |
@@ -111,12 +111,12 @@ print(result.reward, result.done)
 | `trace` | `list[TraceStep]` | Execution trace steps |
 | `messages` | `list[Any]` | Final conversation state |
 
-## AgentResponse
+## InferenceResult
 
 Returned by agent `get_response()` methods. Represents the result of a single LLM inference call.
 
 ```python
-from hud.types import AgentResponse
+from hud.types import InferenceResult
 ```
 
 | Field | Type | Description |
@@ -128,6 +128,8 @@ from hud.types import AgentResponse
 | `citations` | `list[dict[str, Any]]` | Provider-normalized citations |
 | `info` | `dict[str, Any]` | Provider-specific metadata |
 | `isError` | `bool` | Error flag |
+
+> **Note:** `AgentResponse` is available as a backwards-compatible alias for `InferenceResult`.
 
 ## AgentType
 
@@ -144,7 +146,9 @@ agent = agent_cls.create()
 |-------|-------------|
 | `AgentType.CLAUDE` | `ClaudeAgent` |
 | `AgentType.OPENAI` | `OpenAIAgent` |
+| `AgentType.OPERATOR` | `OperatorAgent` |
 | `AgentType.GEMINI` | `GeminiAgent` |
+| `AgentType.GEMINI_CUA` | `GeminiCUAAgent` |
 | `AgentType.OPENAI_COMPATIBLE` | `OpenAIChatAgent` |
 
 ## ContentBlock

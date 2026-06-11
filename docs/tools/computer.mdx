@@ -4,16 +4,17 @@ description: "Mouse, keyboard, and screenshot control"
 icon: "desktop"
 ---
 
-Computer tools let agents interact with GUIs—click, type, scroll, drag, screenshot. Environments expose the generic HUD computer action schema; provider-specific computer use APIs and action translation live in the agent harness.
+Computer tools let agents interact with GUIs—click, type, scroll, drag, screenshot. Each provider has its own computer use API. Pick the one that matches your agent.
 
 ## Quick Reference
 
 | Tool | Agent | Default Resolution |
 |------|-------|-------------------|
 | `AnthropicComputerTool` | Claude | 1280×720 |
-| `OpenAIComputerTool` | OpenAI | 1920×1080 |
+| `OpenAIComputerTool` | OpenAI / Operator | 1920×1080 |
 | `GeminiComputerTool` | Gemini | 1440×900 |
-| `ComputerTool` | Any | 1280×720 |
+| `GLMComputerTool` | GLM-V | 1024×768 |
+| `HudComputerTool` | Any (function calling) | 1280×720 |
 
 ## AnthropicComputerTool
 
@@ -50,9 +51,7 @@ await computer(action="scroll", coordinate=[640, 360], scroll_direction="down", 
 
 ## OpenAIComputerTool
 
-Compatibility registration for OpenAI computer use. It exposes HUD's generic
-computer actions; OpenAI-specific native tool configuration and action
-translation live in `OpenAIAgent`.
+For OpenAI and Operator. Uses `computer_use_preview` native API.
 
 ```python
 from hud.tools import OpenAIComputerTool
@@ -64,30 +63,30 @@ computer = OpenAIComputerTool(
 )
 ```
 
-**Actions**: `screenshot`, `click`, `press`, `write`, `scroll`, `move`, `wait`, `drag`
+**Actions**: `screenshot`, `click`, `double_click`, `scroll`, `type`, `wait`, `move`, `keypress`, `drag`
 
 ```python
 # Click
-await computer(action="click", x=500, y=300, button="left")
+await computer(type="click", x=500, y=300, button="left")
 
 # Type
-await computer(action="write", text="Hello!")
+await computer(type="type", text="Hello!")
 
 # Key press
-await computer(action="press", keys=["ctrl", "v"])
+await computer(type="keypress", keys=["ctrl", "v"])
 
 # Scroll
-await computer(action="scroll", x=500, y=300, scroll_x=0, scroll_y=-100)
+await computer(type="scroll", x=500, y=300, scroll_x=0, scroll_y=-100)
 
 # Drag
-await computer(action="drag", path=[{"x": 100, "y": 100}, {"x": 300, "y": 300}])
+await computer(type="drag", path=[{"x": 100, "y": 100}, {"x": 300, "y": 300}])
 ```
 
 ## GeminiComputerTool
 
-Compatibility registration for `GeminiAgent` with Gemini's native Computer Use
-models. The environment tool still exposes the generic HUD computer action
-schema; Gemini's predefined actions are translated by the agent harness.
+For `GeminiAgent` with Gemini's native Computer Use models. Uses normalized
+0–999 coordinates and returns screenshots plus URL metadata in Gemini
+`FunctionResponse` parts.
 
 ```python
 from hud.agents.gemini import GeminiAgent
@@ -99,33 +98,49 @@ env.add_tool(GeminiComputerTool())
 
 **Supported native models**: `gemini-2.5-computer-use-preview-10-2025`, `gemini-3-flash-preview`
 
-**Environment actions**: `click`, `press`, `write`, `scroll`, `move`, `wait`, `drag`, `screenshot`, and the other generic `ComputerTool` actions.
+**Actions**: `open_web_browser`, `click_at`, `hover_at`, `type_text_at`, `scroll_document`, `scroll_at`, `wait_5_seconds`, `go_back`, `go_forward`, `search`, `navigate`, `key_combination`, `drag_and_drop`
 
-## GLMComputerTool / QwenComputerTool
+## GLMComputerTool
 
-Compatibility registrations for older environments. They expose HUD's generic
-computer actions with model-specific default resolutions; GLM/Qwen native
-payloads and argument translation are owned by the OpenAI-compatible agent
-harness.
+For GLM-4.6V and later. Uses **normalized 0–999 coordinates** automatically rescaled to screen pixels.
 
 ```python
-from hud.agents import OpenAIChatAgent
-from hud.tools import ComputerTool
+from hud.tools import GLMComputerTool
 
-agent = OpenAIChatAgent.create(model="glm-4.6v")
-env.add_tool(ComputerTool())
+computer = GLMComputerTool(width=1024, height=768, rescale_images=True)
 ```
 
-**Environment actions**: `click`, `press`, `write`, `scroll`, `move`, `wait`, `drag`, `screenshot`, and the other generic `ComputerTool` actions.
+**Actions**: `left_click`, `right_click`, `middle_click`, `hover`, `left_double_click`, `left_drag`, `key`, `type`, `scroll`, `screenshot`, `WAIT`, `DONE`, `FAIL`
 
-## ComputerTool
+```python
+# Click (start_box accepts "[x,y]" string, [x,y] list, or [[x,y]])
+await computer(action="left_click", start_box="[500, 300]")
+
+# Type text
+await computer(action="type", content="Hello, World!")
+
+# Keyboard shortcut
+await computer(action="key", keys="ctrl+c")
+
+# Scroll down 5 steps
+await computer(action="scroll", start_box="[500, 300]", direction="down", step=5)
+
+# Drag
+await computer(action="left_drag", start_box="[100, 100]", end_box="[400, 400]")
+
+# Task completion / failure signals
+await computer(action="DONE")
+await computer(action="FAIL")
+```
+
+## HudComputerTool
 
 Generic computer tool for any agent via function calling. Use when you need provider-agnostic control.
 
 ```python
-from hud.tools import ComputerTool
+from hud.tools import HudComputerTool
 
-computer = ComputerTool(
+computer = HudComputerTool(
     platform_type="auto",  # "auto", "xdo", or "pyautogui"
     width=1280,
     height=720,
@@ -151,11 +166,11 @@ Computer tools use executors for the actual system interaction:
 | `XDOExecutor` | Linux/X11 | Faster, uses xdotool |
 
 ```python
-from hud.tools import ComputerTool
+from hud.tools import HudComputerTool
 from hud.tools.executors import XDOExecutor
 
 executor = XDOExecutor(display_num=1)
-computer = ComputerTool(executor=executor)
+computer = HudComputerTool(executor=executor)
 ```
 
 ## Coordinate Scaling
@@ -204,3 +219,5 @@ class SafeComputerTool(AnthropicComputerTool):
             raise ToolError(f"Action '{action}' not allowed")
         return await super().__call__(action, **kwargs)
 ```
+
+→ [Grounding Tools](/tools/grounding) — Resolve element descriptions to coordinates
