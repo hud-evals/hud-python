@@ -263,6 +263,23 @@ class EvalConfig(BaseModel):
         if self.agent_type is None:
             return
 
+        # Gateway by default: when the provider key is missing but HUD_API_KEY is
+        # set, route via the HUD gateway instead of erroring — the out-of-the-box
+        # path needs only one key.
+        if (
+            not self.gateway
+            and self.agent_type in _API_KEY_REQUIREMENTS
+            and not _is_bedrock_arn(self.model)
+            and settings.api_key
+        ):
+            attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
+            if not getattr(settings, attr, None):
+                self.gateway = True
+                hud_console.info(
+                    f"No {env_var} set — routing via the HUD Gateway with your HUD_API_KEY. "
+                    f"Set {env_var} to call the provider directly."
+                )
+
         if self.gateway:
             require_api_key("use gateway mode")
             return
@@ -610,8 +627,13 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         hud_console.info(f"Filtered to {len(taskset)} task(s)")
     elif not cfg.all:
         tasks = list(taskset)
+        total = len(tasks)
         taskset = Taskset(taskset.name, [tasks[0]])
-        hud_console.info("Using first task (run with --full or --task-ids for more)")
+        if total > 1:
+            hud_console.warning(
+                f"Running only 1 of {total} tasks (the first). "
+                f"Add --full to run all {total}, or --task-ids to pick specific ones."
+            )
 
     hud_console.info(f"Loaded {len(taskset)} task(s)")
 

@@ -82,7 +82,7 @@ hud eval tasks.py claude --gateway --full
 
 ## Run a packaged image
 
-Attach to an env serving locally (e.g. inside a built image, or alongside `hud serve`), or spawn from source with `--source`.
+`hud task start` / `hud task grade` attach to an env already serving locally (e.g. inside a built image, or alongside `hud serve`), or load one from source with `--source`. `hud task list` always reads from source (default `.`) — it doesn't attach.
 
 ```bash
 hud task list                          # what tasks are exposed

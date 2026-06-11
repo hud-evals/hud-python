@@ -1,0 +1,105 @@
+---
+title: "Coding agent"
+description: "Run a coding agent against a shell + files environment, graded by tests."
+icon: "code"
+---
+
+A complete, runnable example: an environment with a managed shell, a task that asks the agent to make a failing test pass, and a `BashGrader` that scores by running the test suite.
+
+## The environment
+
+The workspace gives the agent a sandboxed shell and files — the env starts it and publishes the `shell` capability when it serves. We seed a buggy module and a test in `@env.initialize`, then declare the task — the grader runs `pytest` and scores by exit code.
+
+One design point matters here: **the grader runs an authoritative copy of the test that lives outside the agent's workspace.** The agent gets its own copy to read and run, but if the grader re-ran that editable copy, the cheapest path to a passing `pytest` would be weakening or deleting the test — classic reward hacking.
+
+```python env.py
+from pathlib import Path
+
+from hud.environment import Environment
+from hud.graders import BashGrader
+
+ROOT = Path("workspace").resolve()     # the agent's directory
+CHECKS = Path("checks").resolve()      # grader-only, outside the workspace
+
+TEST = "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+
+env = Environment(name="coder")
+env.workspace(ROOT)
+
+@env.initialize
+async def _seed():
+    (ROOT / "calc.py").write_text("def add(a, b):\n    return a - b\n")   # bug
+    (ROOT / "test_calc.py").write_text(TEST)          # the agent's copy
+    CHECKS.mkdir(exist_ok=True)
+    (CHECKS / "test_calc.py").write_text(TEST)        # the authoritative copy
+
+@env.task()
+async def fix_add(target: str = "test_calc.py"):
+    yield f"There's a failing test in {target} in your workspace. Find and fix the bug so the test passes."
+    result = await BashGrader.grade(
+        weight=1.0,
+        command=f"python -m pytest {CHECKS / target} -q",
+        cwd=str(ROOT),
+    )
+    yield result.value
+
+tasks = [fix_add()]
+```
+
+This task has no `answer = yield` — the deliverable is the **state of the workspace**, not a text answer. The first yield is the prompt; the second is the reward from running the tests.
+
+<Note>
+**The agent and the grader share the workspace directory.** `env.workspace(ROOT)` serves a real local directory; the agent's edits over the `ssh` capability land in it. The grader runs `python -m pytest` with `cwd=str(ROOT)`, so the (fixed) `calc.py` imports from the workspace while the test file itself comes from `checks/`, which the agent can't reach. Inside the sandbox and built images the directory mounts at `/workspace` automatically. To start from an existing repo instead of seeding files inline, write it into the root in `@env.initialize`, or pass extra `mounts=` (see [Capabilities](/v6/reference/capabilities)).
+</Note>
+
+## Run it
+
+Point a coding agent at the environment. `claude` opens the `ssh` capability, edits `calc.py`, and the grader re-runs the test:
+
+```bash
+hud eval env.py claude --gateway
+```
+
+For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSDKAgent` in code:
+
+```python run.py
+import asyncio
+from hud import LocalRuntime
+from hud.agents import ClaudeSDKAgent
+from hud.agents.types import ClaudeSDKConfig
+from env import fix_add
+
+async def main():
+    agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
+    job = await fix_add().run(agent, runtime=LocalRuntime("env.py"))
+    print("reward:", job.reward)
+
+asyncio.run(main())
+```
+
+## Read the trace
+
+Every step — the shell commands, the edit, the test run — is on the trace at [hud.ai](https://hud.ai). A reward of `1.0` means `pytest` exited `0`; `0.0` means the test still fails.
+
+## Make it a dataset
+
+Parameterize the task definition and create concrete tasks for a spread of bugs:
+
+```python tasks.py
+from env import fix_add
+
+tasks = [fix_add(target=t) for t in ("test_calc.py", "test_utils.py", "test_io.py")]
+```
+
+<Note>
+**Platform notes.** `bwrap` isolation applies on Linux; on macOS/Windows the shell runs without it (fine for iteration). `BashGrader` runs commands via `/bin/bash`, so grading needs bash — macOS/Linux, WSL, or a built image; on native Windows it scores `0.0` with a "/bin/bash not found" error. Inside a built image both isolation and bash are always available. See [Capabilities](/v6/reference/capabilities).
+</Note>
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
+<Card title="Ops diagnostics" icon="stethoscope" href="/v6/cookbooks/ops-diagnostics" />
+</CardGroup>

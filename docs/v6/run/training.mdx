@@ -4,13 +4,13 @@ description: "Turn rewarded rollouts into training signal for any model."
 icon: "dumbbell"
 ---
 
-**Train** is the second verb: the rewards are the signal. The tasks you evaluate are already training data — every rollout returns a `Run` carrying a `trace_id` and a `reward`. Run a **group** per task and turn the rewards into **GRPO advantages**.
+The rewards are the signal: the tasks you evaluate are already training data — every rollout returns a `Run` carrying a `trace_id` and a `reward`. Run a **group** per task and turn the rewards into **GRPO advantages**.
 
 ## Prerequisites
 
 - A task and an agent (see [Tasks](/v6/reference/tasks) and [Models](/v6/run/models)).
 - A `HUD_API_KEY` for the managed training backend.
-- A task with **spread** in its rewards — a group that all scores `0.0` (or all `1.0`) produces zero advantage and teaches nothing. See [Designing tasks for signal](/v6/advanced/signal).
+- A task with **spread** in its rewards — a group that all scores `0.0` (or all `1.0`) produces zero advantage and teaches nothing. See [Designing tasks for signal](/v6/run/signal).
 
 ## The managed path
 
@@ -79,12 +79,12 @@ Feed those advantages into whatever optimizer you run. The same environment trai
 
 ## Why grouping matters
 
-GRPO advantages are *relative within a group*: `reward - mean`, optionally divided by the group's std. If every rollout in a group earns the same reward, the advantage is zero and the model learns nothing from that task. A good training task produces a **spread** of rewards across the group — some attempts better than others. That property is a task-design concern, covered in [Designing tasks for signal](/v6/advanced/signal).
+GRPO advantages are *relative within a group*: `reward - mean`, optionally divided by the group's std. If every rollout in a group earns the same reward, the advantage is zero and the model learns nothing from that task. A good training task produces a **spread** of rewards across the group — some attempts better than others. That property is a task-design concern, covered in [Designing tasks for signal](/v6/run/signal).
 
 ## Next steps
 
 <CardGroup cols={2}>
-<Card title="Designing tasks for signal" icon="signal" href="/v6/advanced/signal">
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
   Build tasks that produce within-group spread and resist reward hacking.
 </Card>
 <Card title="Reference: types" icon="brackets-curly" href="/v6/reference/types">

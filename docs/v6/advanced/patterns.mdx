@@ -54,14 +54,14 @@ One task definition should span a range. Parameterize the generator and create a
 ```python tasks.py
 @env.task()
 async def fix_bug(difficulty: int = 1):
-    answer = yield f"Fix the level-{difficulty} bug in /workspace."
+    answer = yield f"Fix the level-{difficulty} bug in your workspace."
     result = await BashGrader.grade(weight=1.0, command="pytest -q")
     yield result.value
 
 tasks = [fix_bug(difficulty=d) for d in range(1, 6)]
 ```
 
-A controlled difficulty distribution is what makes a taskset trainable — see [Designing tasks for signal](/v6/advanced/signal).
+A controlled difficulty distribution is what makes a taskset trainable — see [Designing tasks for signal](/v6/run/signal).
 
 ## Structure a large taskset across files
 
@@ -102,7 +102,7 @@ rewards = [run.reward for run in job.runs]
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Designing tasks for signal" icon="signal" href="/v6/advanced/signal" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
 <Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
 <Card title="Package & deploy" icon="rocket" href="/v6/run/deploy" />
 <Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />

@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.workspace")
 
+# Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
+_warned_no_bwrap = False
+
 
 # ─────────────────────────── mount declarations ───────────────────────────
 
@@ -118,7 +121,6 @@ class Workspace:
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
         )
         self._bwrap = shutil.which("bwrap")
-
         # ssh config
         self._ssh_host = host
         self._ssh_port = port
@@ -140,10 +142,16 @@ class Workspace:
         if self._sock is not None:
             return
         if self._bwrap is None and sys.platform != "win32":
-            LOGGER.warning(
-                "bwrap not on PATH; SSH sessions will run WITHOUT isolation. "
-                "Install bubblewrap, or run inside a Linux container that has it.",
-            )
+            # Once per process: repeating this for every Workspace is noise, and
+            # on macOS (no bubblewrap exists) it is an expected state.
+            global _warned_no_bwrap
+            if not _warned_no_bwrap:
+                _warned_no_bwrap = True
+                log = LOGGER.warning if sys.platform == "linux" else LOGGER.info
+                log(
+                    "bwrap not on PATH; SSH sessions will run WITHOUT isolation. "
+                    "Install bubblewrap, or run inside a Linux container that has it.",
+                )
         self.root.mkdir(parents=True, exist_ok=True)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()

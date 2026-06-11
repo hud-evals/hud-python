@@ -1,10 +1,10 @@
 ---
 title: "Package & deploy"
-description: "Build a portable image that runs any task, anywhere."
+description: "Publish your environment and tasks, and package an image that runs anywhere."
 icon: "rocket"
 ---
 
-**Scale** is the first verb you apply to data points: package once, run anywhere. A built image is the **end product for your tasks** — one build packs every concrete task from a single definition, and because the protocol exposes only capabilities, it runs unchanged on your laptop, in CI, on Kubernetes, or on managed cloud sandboxes.
+Package once, run anywhere: a built image is the **end product for your tasks** — one build packs every concrete task from a single definition, and because the protocol exposes only capabilities, it runs unchanged on your laptop, in CI, on Kubernetes, or on managed cloud sandboxes.
 
 ## Prerequisites
 
@@ -23,10 +23,41 @@ hud eval my-taskset --full
 ```
 
 - `hud deploy` builds the image and registers the environment.
-- `hud sync tasks my-taskset` publishes your tasks as a named taskset.
+- `hud sync tasks my-taskset` publishes your tasks as a named **taskset**.
 - `hud eval my-taskset --full` runs the taskset with the selected local agent.
 
 Pass environment variables with `--env KEY=VALUE` (repeatable) or `--env-file .env`.
+
+## Publish your tasks as a taskset
+
+A **taskset** is a named dataset of tasks stored on the platform. `hud sync tasks` collects the tasks from your source, **diffs them against the remote taskset, and uploads only what changed**:
+
+```bash
+hud sync tasks my-taskset                 # scan the current dir, sync to "my-taskset"
+hud sync tasks my-taskset tasks.py        # from a specific file
+hud sync tasks my-taskset tasks/          # from a directory
+```
+
+The first sync creates the taskset and stores its ID in `.hud/config.json`, so afterward `hud sync tasks` with no name re-syncs it.
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Show the sync plan without uploading. |
+| `--task <slug>` | Only sync the task matching this slug. |
+| `--exclude <slug>` | Exclude tasks by slug (repeatable). |
+| `--force` | Upload every task, skipping the diff comparison. |
+| `--yes`, `-y` | Skip the confirmation prompt (use in CI). |
+| `--export <file>` | Export the remote tasks to `.json` or `.csv` instead of syncing. |
+
+Give each task a stable `slug` and arbitrary `columns` so it's identifiable and filterable on the platform:
+
+```python tasks.py
+task = fix_bug(difficulty=3)
+task.slug = "fix-bug-3"
+task.columns = {"difficulty": 3, "suite": "coding"}
+```
+
+A published taskset is shared infrastructure: teammates run the same dataset without passing files around, and from the [platform UI](https://hud.ai) you can browse every trace and compare models on the same taskset.
 
 ## The local path: `docker build`
 
@@ -40,7 +71,7 @@ docker build -f Dockerfile.hud -t my-env .
 **Reproducible by construction.** Each rollout gets its **own fresh environment** — so results reproduce across runs and machines, and one rollout never leaks state into the next. Keep any per-task setup in [`@env.initialize`](/v6/reference/environment#lifecycle-hooks) so every run starts from the same state.
 </Note>
 
-Once built, the image is a self-contained box that serves the control channel. Run it and drive a task (here `fix_bug`, a task in your environment) with the packaged CLI — `docker exec` runs the commands *inside* the container, so no port needs publishing:
+Once built, the image is self-contained and serves the control channel. Run it and drive a task (here `fix_bug`, a task in your environment) with the packaged CLI — `docker exec` runs the commands *inside* the container, so no port needs publishing:
 
 ```bash
 docker run -d --name run1 my-env
@@ -49,7 +80,7 @@ docker exec run1 hud task grade fix_bug --answer "…"
 docker rm -f run1
 ```
 
-`hud task start` returns the task's prompt; `hud task grade` returns the reward. Inside the image they attach to the env serving locally — no source needed.
+`hud task start` returns the task's prompt; `hud task grade` returns the reward. Inside the image they attach to the env serving locally — no source needed. This is the escape hatch for plugging a build into **your own** rollout infra.
 
 <Note>
 Use `hud task list` to see what tasks an image or source exposes.
@@ -105,13 +136,16 @@ rewards = [run.reward for run in job.runs]
 <Card title="Train on your tasks" icon="dumbbell" href="/v6/run/training">
   Turn the rewards you just collected into GRPO advantages.
 </Card>
-<Card title="CLI reference" icon="terminal" href="/v6/reference/cli">
-  Every command and flag: build, deploy, sync, eval, task.
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
+  Compose a taskset that actually trains.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">
   Compare models across the same taskset.
 </Card>
 <Card title="Harbor interop" icon="anchor" href="/v6/advanced/harbor-convert">
   Load existing benchmarks straight into the runtime.
+</Card>
+<Card title="CLI reference" icon="terminal" href="/v6/reference/cli">
+  Every command and flag: deploy, sync, eval, task.
 </Card>
 </CardGroup>

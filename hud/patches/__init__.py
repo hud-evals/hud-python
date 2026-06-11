@@ -5,7 +5,12 @@ This module applies monkey-patches to fix issues in dependencies
 without requiring forked packages.
 """
 
-from hud.patches.mcp_patches import apply_all_patches
+from hud.patches.warnings import suppress_known_import_warnings
+
+# Filter import-time third-party noise before anything below pulls in fastmcp.
+suppress_known_import_warnings()
+
+from hud.patches.mcp_patches import apply_all_patches  # noqa: E402
 
 # Apply patches on import
 apply_all_patches()
