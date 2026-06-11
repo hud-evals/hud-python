@@ -224,8 +224,20 @@ class LeRobotModel(Model):
         self._step = 0
 
     def _queue_len(self) -> int | None:
-        """Length of LeRobot's open-loop action queue, or ``None`` if unknown."""
+        """Length of LeRobot's open-loop action queue, or ``None`` if unknown.
+
+        Handles both LeRobot queue conventions: the older single-deque form
+        ``policy._action_queue`` (e.g. pi05) and the newer per-key dict form
+        ``policy._queues[ACTION]`` (e.g. VLA-JEPA). Returns ``None`` only when
+        neither form is present.
+        """
         queue = getattr(self.policy, "_action_queue", None)
+        if queue is None:
+            # Newer convention: a dict of deques keyed by feature constant. The
+            # action key is the literal "action" (lerobot.utils.constants.ACTION).
+            queues = getattr(self.policy, "_queues", None)
+            if isinstance(queues, dict):
+                queue = queues.get("action")
         try:
             return None if queue is None else len(queue)
         except TypeError:
