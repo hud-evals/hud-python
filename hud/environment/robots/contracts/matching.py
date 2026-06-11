@@ -19,24 +19,35 @@ from dataclasses import dataclass
 Feature = tuple[str, dict | None]
 
 
-def match(model: dict, robot_type: str) -> dict | None:
-    """Whether ``model`` supports ``robot_type`` (v0 gate), else ``None``.
+def match(model: dict, robot_type: str) -> bool:
+    """Whether ``model`` supports ``robot_type`` — the v0 gate, truthiness-safe.
 
     v0 single-type schema: support is declared solely by the model's top-level
-    ``robot_type`` (a string, or a list for legacy multi-embodiment contracts). On a
-    match this returns an empty dict ``{}`` ("supported, no knobs"), so callers must
-    test ``is None`` rather than truthiness — the empty dict is supported yet falsy.
+    ``robot_type`` (a string, or a list for legacy multi-embodiment contracts).
+    Archived experiment contracts that still carry ``robot_type_variables``
+    gate through it instead; their per-embodiment decision values are an
+    experimental artifact, available via :func:`match_legacy`.
+    """
+    rtv = model.get("robot_type_variables")
+    if rtv is not None:
+        return robot_type in rtv
+    declared = model.get("robot_type")
+    supported = declared if isinstance(declared, list) else [declared]
+    return robot_type in supported
 
-    Backward-compatible: archived experiment contracts that still carry
-    ``robot_type_variables`` resolve through it (returning any per-embodiment decision
-    values), so those specs keep loading.
+
+def match_legacy(model: dict, robot_type: str) -> dict | None:
+    """Decision variables for ``robot_type``, or ``None`` if unsupported.
+
+    Artifact of the *experimental* multi-mode schema (the demos
+    ``contracts/experiments/`` corpus), where a match carried per-embodiment
+    decision values (``observation_mode`` / ``action_adapter`` / model knobs).
+    v0 contracts have no decision variables — use :func:`match`.
     """
     rtv = model.get("robot_type_variables")
     if rtv is not None:
         return rtv.get(robot_type)
-    declared = model.get("robot_type")
-    supported = declared if isinstance(declared, list) else [declared]
-    return {} if robot_type in supported else None
+    return {} if match(model, robot_type) else None
 
 
 def model_features(model: dict, robot_type: str | None = None) -> dict:

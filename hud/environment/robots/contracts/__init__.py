@@ -9,8 +9,7 @@ The contract format is defined in ``spec_v0.md`` co-located in this package.
 This package is the **advisory** wiring check used at preflight time:
 
 - :func:`~hud.environment.robots.contracts.matching.match` — robot_type gate
-  (v0: support is the top-level ``robot_type``; returns ``{}`` on a match, so test
-  ``is None``).
+  (v0: support is the top-level ``robot_type``; returns a plain bool).
 - :func:`~hud.environment.robots.contracts.matching.pair_observations` /
   :func:`~hud.environment.robots.contracts.matching.match_actions` — feature pairing.
 - :func:`~hud.environment.robots.contracts.adaptation.integration_review` — gap
@@ -41,6 +40,7 @@ from .matching import (
     list_actions,
     match,
     match_actions,
+    match_legacy,
     model_action_modes,
     model_features,
     pair_observations,
@@ -59,6 +59,7 @@ __all__ = [
     "list_actions",
     "match",
     "match_actions",
+    "match_legacy",
     "model_action_modes",
     "model_features",
     "pair_observations",

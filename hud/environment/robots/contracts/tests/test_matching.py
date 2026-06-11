@@ -24,6 +24,7 @@ from hud.environment.robots.contracts import (
     list_actions,
     match,
     match_actions,
+    match_legacy,
     pair_observations,
     render_match,
 )
@@ -115,23 +116,35 @@ def make_model_contract(**overrides: Any) -> dict[str, Any]:
 
 
 def test_match_gates_on_robot_type() -> None:
-    # v0: support is the top-level robot_type; match returns {} (supported, no knobs).
+    # v0: support is the top-level robot_type; match is a plain truthy bool.
     model = make_model_contract()
-    assert match(model, "bot_x") == {}
-    assert match(model, "other_bot") is None  # unsupported
+    assert match(model, "bot_x") is True
+    assert match(model, "other_bot") is False  # unsupported
 
 
 def test_match_gates_on_robot_type_list() -> None:
     # v0 tolerates a list robot_type for legacy multi-embodiment checkpoints.
     model = make_model_contract(robot_type=["bot_x", "bot_y"])
-    assert match(model, "bot_y") == {}
-    assert match(model, "bot_z") is None
+    assert match(model, "bot_y") is True
+    assert match(model, "bot_z") is False
 
 
-def test_match_legacy_robot_type_variables() -> None:
-    # Backward-compat: archived experiment contracts still resolve through rtv.
+def test_match_gates_through_legacy_robot_type_variables() -> None:
+    # Archived experiment contracts gate through rtv; match stays a bool.
     model = make_model_contract(robot_type_variables={"bot_x": {"observation_mode": None}})
-    assert match(model, "bot_x") == {"observation_mode": None}
+    assert match(model, "bot_x") is True
+    assert match(model, "bot_y") is False
+
+
+def test_match_legacy_returns_decision_variables() -> None:
+    # The experimental-schema artifact: per-embodiment decision values.
+    model = make_model_contract(robot_type_variables={"bot_x": {"observation_mode": None}})
+    assert match_legacy(model, "bot_x") == {"observation_mode": None}
+    assert match_legacy(model, "bot_y") is None
+    # v0 contracts have no decision variables: {} when supported, None otherwise.
+    v0 = make_model_contract()
+    assert match_legacy(v0, "bot_x") == {}
+    assert match_legacy(v0, "other_bot") is None
 
 
 # ── pair_observations(): positional image/vector pairing ─────────────────────
@@ -279,7 +292,7 @@ def pi05_model() -> dict[str, Any]:
 
 
 def test_libero_pi05_pair_matches(libero_env: dict, pi05_model: dict) -> None:
-    assert match(pi05_model, libero_env["robot_type"]) is not None
+    assert match(pi05_model, libero_env["robot_type"])
     action = match_actions(libero_env, pi05_model, libero_env["robot_type"])
     assert action.matched is True
     assert action.mode == "default"

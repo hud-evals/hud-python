@@ -182,13 +182,13 @@ def integration_review(
     env: dict,
     model: dict,
     *,
-    supported: dict | None = None,
+    supported: bool | None = None,
 ) -> IntegrationReview | None:
     """Analyze integration gaps for a robot_type match. Returns None if no match."""
     robot_type = env.get("robot_type", "?")
     if supported is None:
         supported = match(model, robot_type)
-    if supported is None:
+    if not supported:
         return None
 
     obs_pairs = pair_observations(env, model, robot_type)

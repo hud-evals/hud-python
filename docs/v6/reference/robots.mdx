@@ -11,31 +11,28 @@ The `robot` capability is in **beta**. The wire protocol is versioned `robot/0.1
 
 HUD runs robot environments the same way it runs everything else — an environment declares tasks and capabilities, an agent drives a live `Run` — but a policy at 10 Hz can't ride discrete tool calls. The `robot` capability is a **schema-driven observation/action loop over WebSocket** (msgpack + raw arrays): the environment owns the simulator and serves frames; the agent runs the policy and streams actions back.
 
-Both sides meet through one artifact, the **contract** — the environment's self-describing schema, carried in the capability's manifest params. The agent wires observations to policy inputs purely from the manifest; there is no shared config.
-
 Everything below ships behind the `robot` extra (`pip install hud-python[robot]` — numpy + msgpack).
 
-## The contract
+## Overview
 
-A JSON document describing the embodiment: `robot_type`, `control_rate`, and a `features` map where each feature declares its `role` (`observation` / `action`), `dtype`, `shape`, and ordering:
+Integrating a policy against a robot environment means answering three questions: who owns the simulator, who runs the policy, and how do their spaces line up. The capability splits each answer into a small, named abstraction — implement the ones on your side, and the framework owns everything in between (the serve loop, the wire protocol, recording, telemetry).
 
-```json
-{
-  "robot_type": "franka_panda_libero",
-  "control_rate": 10,
-  "features": {
-    "observation.images.agentview_image": {"role": "observation", "type": "rgb", "dtype": "uint8", "shape": [256, 256, 3]},
-    "observation.state.robot0_eef_pos":  {"role": "observation", "dtype": "float32", "shape": [3], "order": "0-2"},
-    "action.delta_eef_pos":              {"role": "action", "dtype": "float32", "shape": [3], "order": "0-2"}
-  }
-}
-```
+**Environment side** — owns the simulator and serves frames:
 
-The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role`. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives in the SDK at `hud/environment/robots/contracts/spec_v0.md`.
+- **`RobotBridge`** — the one class you implement around your sim: `reset` / `step` / `get_observation`. The framework owns the WebSocket serve loop and the single-agent connection.
+- **`RobotEndpoint`** — wraps the bridge for task definitions: episode bookkeeping, results, and the default dataset recorder.
 
-### Contract matching (advisory)
+**Agent side** — runs the policy and streams actions:
 
-`hud.environment.robots.contracts` checks how an env contract pairs with a *model* contract (same feature schema from the policy's side): `match` gates on `robot_type` (returns `{}` when supported — test `is None`, not truthiness), `pair_observations` / `match_actions` pair features, `integration_review` reports dtype/shape/frame/rate gaps, and `render_match` prints the wiring diagram. It is advisory and in development — a warning means *check the wiring*, never *this will fail*.
+- **`RobotAgent`** — the episode-loop harness: connect to the env, read its schema, then `observe → infer → act` until the env terminates.
+- **`Model`** — the policy seam: `infer(batch) -> action`. `LeRobotModel` wraps a stock LeRobot checkpoint.
+- **`Adapter`** — the space-translation seam between what the env emits and what the policy consumes. `DefaultAdapter` covers the common wiring.
+
+**The contract** — the one artifact both sides share: a self-describing JSON schema of the embodiment's observation and action spaces, carried in the capability's manifest params. The agent wires observations to policy inputs purely from the manifest; there is no shared config.
+
+Each side has a **realtime** variant (`RealtimeRobotBridge` / `RealtimeRobotAgent`) for when the sim clock must not wait on inference — the env advances on its own wall clock while the agent streams action chunks asynchronously.
+
+The shape of the work follows from the split: a bridge is written **once per environment**, a model + adapter **once per policy**, and the contract tells you — before you run anything — whether a given pairing wires up. That's the path from "new checkpoint" to "scored episodes on a benchmark" in an afternoon.
 
 ## Environment side
 
@@ -91,12 +88,6 @@ This module is declare-only — serve it like any other environment (`hud serve 
 A simulator that must **own the process main thread** (Isaac Sim / Omniverse) can't run under `hud serve`. Run the SDK server on a worker thread instead — `asyncio.run(hud.environment.server.serve(env, host, port))` in a thread, with a `MainThreadSimRunner` pumping sim work back to the main thread.
 </Note>
 
-### Realtime control
-
-`RealtimeRobotBridge` decouples the sim clock from inference: it advances at `control_hz` on its own wall clock, popping actions from an injected **`ActionProvider`** while the agent streams whole action chunks asynchronously. Providers implement the merge strategy — `sync` (blocking baseline), `naive_async` (drop-and-replace), `weighted_async` (blended overlap), and `rtc` (real-time chunking with an execution horizon) — via `make_action_provider(mode, ...)`. On underrun the sim HOLDs (`no_op_action`) rather than freezing, because the real world doesn't pause for inference.
-
-**`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default), `ThreadSimRunner` (dedicated worker — render-heavy sims), `MainThreadSimRunner` (sim owns main, server on a worker).
-
 ## Agent side
 
 The harness lives in `hud.agents.robot`. `RobotAgent` owns the episode loop — connect to the `robot` binding, read the contract, then `observe → infer → act` until the env terminates. You supply two seams:
@@ -125,7 +116,39 @@ class PI05Agent(RobotAgent):
         self.adapter = DefaultAdapter(model_image_keys=list(policy.config.image_features))
 ```
 
-Run it with the normal engine — `Taskset(...).run(agent, runtime=...)` — against any substrate serving the env. `RealtimeRobotAgent` is the chunk-streaming variant for realtime bridges: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
+Run it with the normal engine — `Taskset(...).run(agent, runtime=...)` — against any substrate serving the env.
+
+## The contract
+
+Robot observation and action spaces differ immensely. Embodiments disagree on camera count, resolution, and naming; on state representation (joint angles vs. EEF pose, quaternions vs. axis-angle, world frame vs. base frame); on action semantics (absolute vs. delta, position vs. velocity); on control rate. Policies are just as opinionated about what they consume and emit. Pairing *a specific model* with *a specific env* therefore always involves a wiring step — and getting it silently wrong (a transposed image, a reordered state vector) produces a policy that runs fine and scores zero.
+
+The **HUD robot spec** exists to make that wiring explicit and checkable. Each environment carries a contract — a JSON document describing the embodiment: `robot_type`, `control_rate`, and a `features` map where each feature declares its `role` (`observation` / `action`), `dtype`, `shape`, and ordering:
+
+```json
+{
+  "robot_type": "franka_panda_libero",
+  "control_rate": 10,
+  "features": {
+    "observation.images.agentview_image": {"role": "observation", "type": "rgb", "dtype": "uint8", "shape": [256, 256, 3]},
+    "observation.state.robot0_eef_pos":  {"role": "observation", "dtype": "float32", "shape": [3], "order": "0-2"},
+    "action.delta_eef_pos":              {"role": "action", "dtype": "float32", "shape": [3], "order": "0-2"}
+  }
+}
+```
+
+The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role` — this is what the `Adapter` wires against. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives in the SDK at `hud/environment/robots/contracts/spec_v0.md`.
+
+### Contract matching (advisory)
+
+The same feature schema also describes a *model* contract — what a policy consumes and emits — so an env/model pairing can be reviewed before anything runs. `hud.environment.robots.contracts` does the comparison: `match` gates on `robot_type` (a plain bool — `if match(model, robot_type):` does what it looks like), `pair_observations` / `match_actions` pair features, `integration_review` reports dtype/shape/frame/rate gaps, and `render_match` prints the wiring diagram. It is advisory and in development — a warning means *check the wiring*, never *this will fail*. (`match_legacy` is the experimental-schema artifact that returned per-embodiment decision variables.)
+
+## Realtime control
+
+The default loop is lockstep — the sim waits for each action. `RealtimeRobotBridge` decouples the sim clock from inference: it advances at `control_hz` on its own wall clock, popping actions from an injected **`ActionProvider`** while the agent streams whole action chunks asynchronously. Providers implement the merge strategy — `sync` (blocking baseline), `naive_async` (drop-and-replace), `weighted_async` (blended overlap), and `rtc` (real-time chunking with an execution horizon) — via `make_action_provider(mode, ...)`. On underrun the sim HOLDs (`no_op_action`) rather than freezing, because the real world doesn't pause for inference.
+
+On the agent side, **`RealtimeRobotAgent`** is the chunk-streaming counterpart: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
+
+**`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default), `ThreadSimRunner` (dedicated worker — render-heavy sims), `MainThreadSimRunner` (sim owns main, server on a worker).
 
 ## Recording & telemetry
 

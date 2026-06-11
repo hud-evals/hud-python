@@ -64,15 +64,14 @@ def render_match(
         f"robot: env {env_name!r} ({robot_type}) <-> model {model_name!r}",
         "1;36",
     )
-    if supported is None:
+    if not supported:
         declared = model.get("robot_type") or list(model.get("robot_type_variables", {}))
         robots = declared if isinstance(declared, list) else [declared]
         return f"{head}\n  {_c('NO MATCH', '1;31')} {_c(f'(model robots: {robots})', '90')}"
 
-    extra = f" | {supported}" if supported else ""
     lines = [
         head,
-        f"  {_c('MATCH', '1;32')} ({robot_type}){extra}",
+        f"  {_c('MATCH', '1;32')} ({robot_type})",
         _c("  observations (env -> model):", "1;34"),
         *_rows(
             pair_observations(env, model, robot_type),
