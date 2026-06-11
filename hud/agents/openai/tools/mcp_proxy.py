@@ -21,7 +21,7 @@ class OpenAIMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as an OpenAI function tool."""
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec | None:
+    def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OpenAIToolSpec(api_type="function", api_name="function")
 

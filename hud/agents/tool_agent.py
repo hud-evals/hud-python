@@ -27,12 +27,12 @@ import mcp.types as mcp_types
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
+from hud.agents.tools.base import AgentTool
 from hud.capabilities import MCPClient
 from hud.telemetry.instrument import instrument
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
-    from hud.agents.tools.base import AgentTool
     from hud.agents.types import AgentConfig
     from hud.capabilities import CapabilityClient
     from hud.eval.rollout import Run
@@ -91,9 +91,9 @@ class RunState(Generic[MessageT]):
     drive many concurrent rollouts without shared mutable state.
     """
 
-    messages: list[MessageT] = field(default_factory=list)
-    tools: dict[str, AgentTool[Any]] = field(default_factory=dict)
-    params: list[Any] = field(default_factory=list)
+    messages: list[MessageT] = field(default_factory=list[MessageT])
+    tools: dict[str, AgentTool[Any]] = field(default_factory=dict[str, AgentTool[Any]])
+    params: list[Any] = field(default_factory=list[Any])
 
 
 class ToolAgent(Agent, Generic[MessageT, ConfigT]):

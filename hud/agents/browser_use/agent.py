@@ -15,6 +15,10 @@ optional dependency
 
 from __future__ import annotations
 
+# browser-use is an optional, untyped dependency (lazy __getattr__ exports), so
+# its symbols and members resolve as Unknown under strict checking. This whole
+# module is the boundary around that SDK; contain the unknowns here.
+# pyright: reportAttributeAccessIssue=false, reportUnknownVariableType=false, reportUnknownMemberType=false
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, cast

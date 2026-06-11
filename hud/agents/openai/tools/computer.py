@@ -75,7 +75,7 @@ class OpenAIComputerTool(RFBTool):
     name = "computer"
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec | None:
+    def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OPENAI_COMPUTER_SPEC
 
@@ -196,13 +196,13 @@ class OpenAIComputerTool(RFBTool):
                 await self.press_keys(mapped)
 
         elif action_type == "drag":
-            path_raw = args.get("path") or []
-            if not isinstance(path_raw, list) or len(path_raw) < 2:
+            path_raw = args.get("path")
+            if not isinstance(path_raw, list):
                 raise ValueError("drag requires a path with at least 2 points")
-            path = [
-                (int(p.get("x", 0)), int(p.get("y", 0)))
-                for p in cast("list[dict[str, Any]]", path_raw)
-            ]
+            points = cast("list[dict[str, Any]]", path_raw)
+            if len(points) < 2:
+                raise ValueError("drag requires a path with at least 2 points")
+            path = [(int(p.get("x", 0)), int(p.get("y", 0))) for p in points]
             hold = _hold_keys(args.get("keys"))
             await self.drag(path, hold_keys=hold)
 

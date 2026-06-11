@@ -322,7 +322,7 @@ class AgentAnswer(BaseModel, Generic[T]):
 
     content: T = Field(description="The parsed structured answer")
     raw: str = Field(default="", description="Original answer string before parsing")
-    citations: list[Citation] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list[Citation])
     trace: Trace | None = Field(
         default=None,
         description="Full conversation transcript (multi-turn). "

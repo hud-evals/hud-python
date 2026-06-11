@@ -32,7 +32,7 @@ from hud.utils import gateway
 
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
-from .tools.coding import _shell_output
+from .tools.coding import shell_output
 from .tools.computer import last_image_data
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             )
             checks = (call.model_extra or {}).get("pending_safety_checks")
             if isinstance(checks, list):
-                acknowledged = []
+                acknowledged: list[Any] = []
                 for raw_check in cast("list[Any]", checks):
                     if hasattr(raw_check, "model_dump"):
                         acknowledged.append(raw_check.model_dump())
@@ -138,7 +138,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                 from hud.agents.tools.base import result_text
 
                 text = result_text(result)
-                output_list = [_shell_output("", text, 1 if result.isError else 0)]
+                output_list = [shell_output("", text, 1 if result.isError else 0)]
             response: dict[str, Any] = {
                 "type": "shell_call_output",
                 "call_id": call.id,

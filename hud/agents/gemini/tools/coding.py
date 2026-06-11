@@ -20,7 +20,7 @@ GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")
 GEMINI_WRITE_SPEC = GeminiToolSpec(api_type="write_file", api_name="write_file")
 
 
-def _decl(name: str, description: str, parameters: dict[str, Any]) -> genai_types.Tool:
+def tool_decl(name: str, description: str, parameters: dict[str, Any]) -> genai_types.Tool:
     return genai_types.Tool(
         function_declarations=[
             genai_types.FunctionDeclaration(
@@ -54,7 +54,7 @@ class GeminiShellTool(SSHTool):
         return GEMINI_SHELL_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
@@ -89,10 +89,10 @@ class GeminiEditTool(SSHTool):
         return GEMINI_EDIT_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
-        file_path = _required_str(arguments, "file_path")
+        file_path = required_str(arguments, "file_path")
         old_string = arguments.get("old_string", "")
         new_string = arguments.get("new_string", "")
         if old_string == "":
@@ -124,16 +124,16 @@ class GeminiWriteTool(SSHTool):
         return GEMINI_WRITE_SPEC
 
     def to_params(self) -> genai_types.Tool:
-        return _decl(self.name, self.description, self.parameters)
+        return tool_decl(self.name, self.description, self.parameters)
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         return await self.file_write(
-            _required_str(arguments, "file_path"),
+            required_str(arguments, "file_path"),
             arguments.get("content") or "",
         )
 
 
-def _required_str(arguments: dict[str, Any], key: str) -> str:
+def required_str(arguments: dict[str, Any], key: str) -> str:
     value = arguments.get(key)
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} is required")

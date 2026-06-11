@@ -13,7 +13,7 @@ class GeminiMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as a Gemini FunctionDeclaration."""
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec | None:
+    def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GeminiToolSpec(api_type="function", api_name="function")
 

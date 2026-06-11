@@ -76,7 +76,7 @@ class ClaudeSDKAgent(Agent):
 
         await self._exec(
             run.trace,
-            prompt=run.prompt or "",
+            prompt=_prompt_text(run.prompt),
             max_steps=self.config.max_steps,
             system_prompt=self.config.system_prompt,
         )
@@ -245,11 +245,12 @@ class ClaudeSDKAgent(Agent):
             msg_type = msg.get("type")
 
             if msg_type == "assistant" and isinstance(msg.get("message"), dict):
-                for block in msg["message"].get("content", []):
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text", "")
-                        if text:
-                            content_parts.append(text)
+                for raw_block in msg["message"].get("content", []):
+                    if not isinstance(raw_block, dict):
+                        continue
+                    block = cast("dict[str, Any]", raw_block)
+                    if block.get("type") == "text" and block.get("text"):
+                        content_parts.append(str(block["text"]))
 
             elif msg_type == "result":
                 is_error = msg.get("is_error", False)
@@ -272,6 +273,21 @@ class ClaudeSDKAgent(Agent):
         trace.isError = is_error
         trace.messages = messages
         trace.info.update(info)
+
+
+def _prompt_text(prompt: str | list[Any] | None) -> str:
+    """Flatten a run prompt (text or chat-style message dicts) into CLI text."""
+    if isinstance(prompt, str):
+        return prompt
+    if not prompt:
+        return ""
+    parts: list[str] = []
+    for message in prompt:
+        if isinstance(message, dict):
+            parts.append(str(cast("dict[str, Any]", message).get("content", "")))
+        else:
+            parts.append(str(message))
+    return "\n\n".join(part for part in parts if part)
 
 
 __all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]

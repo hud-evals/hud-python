@@ -36,7 +36,7 @@ class ClaudeBashTool(SSHTool):
     name = "bash"
 
     @classmethod
-    def default_spec(cls, model: str) -> ClaudeToolSpec | None:
+    def default_spec(cls, model: str) -> ClaudeToolSpec:
         del model
         return CLAUDE_BASH_SPEC
 
@@ -72,7 +72,7 @@ class ClaudeTextEditorTool(SSHTool):
     name = "str_replace_based_edit_tool"
 
     @classmethod
-    def default_spec(cls, model: str) -> ClaudeToolSpec | None:
+    def default_spec(cls, model: str) -> ClaudeToolSpec:
         del model
         return CLAUDE_TEXT_EDITOR_SPEC
 

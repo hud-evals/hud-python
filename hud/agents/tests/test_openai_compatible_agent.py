@@ -72,4 +72,4 @@ async def test_get_response_error_path() -> None:
     result = await agent.get_response(_state(agent))
     assert result.isError is True
     assert result.done is True
-    assert "boom" in result.content
+    assert result.content is not None and "boom" in result.content
