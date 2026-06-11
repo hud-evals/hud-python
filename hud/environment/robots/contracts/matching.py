@@ -1,15 +1,13 @@
-"""Lightweight contract matching by robot_type and feature wiring.
+"""Lightweight contract matching by robot_type and feature wiring (v0 schema).
 
-NOTE (In Development): the `action_modes` (see `model_action_modes`) and
-`observation_modes` (see `model_features`) handling below targets the *experimental*
-multi-mode contract schema (specs in the demos `contracts/experiments/` corpus). The
-going-forward **standard** schema is one action space and one observation space per
-contract (no `*_modes` wrappers); see §5 of the spec_v0.md co-located in this package.
-This matcher has **not** been
-updated to that standard — it still centers on the experimental wrappers, so the
-standard split contracts do not exercise these code paths (top-level `action.*`
-features only fall back through `model_action_modes`'s `default` branch). Treat this
-as in-development until the design settles."""
+v0 is the single-space schema: one embodiment (``robot_type``), one observation
+space and one action space per contract — no ``action_modes`` /
+``observation_modes`` wrappers and no ``robot_type_variables`` decision knobs.
+A model that targets several embodiments or action forms ships **one contract
+per form** (see spec_v0.md §5). The retired multi-mode schema is archived as
+documentation under the demos ``contracts/experiments/`` corpus and is not
+loadable here.
+"""
 
 from __future__ import annotations
 
@@ -22,50 +20,12 @@ Feature = tuple[str, dict | None]
 def match(model: dict, robot_type: str) -> bool:
     """Whether ``model`` supports ``robot_type`` — the v0 gate, truthiness-safe.
 
-    v0 single-type schema: support is declared solely by the model's top-level
-    ``robot_type`` (a string, or a list for legacy multi-embodiment contracts).
-    Archived experiment contracts that still carry ``robot_type_variables``
-    gate through it instead; their per-embodiment decision values are an
-    experimental artifact, available via :func:`match_legacy`.
+    Support is declared solely by the model's top-level ``robot_type`` (a
+    string; a list is tolerated for multi-embodiment checkpoints, see spec §3.9).
     """
-    rtv = model.get("robot_type_variables")
-    if rtv is not None:
-        return robot_type in rtv
     declared = model.get("robot_type")
     supported = declared if isinstance(declared, list) else [declared]
     return robot_type in supported
-
-
-def match_legacy(model: dict, robot_type: str) -> dict | None:
-    """Decision variables for ``robot_type``, or ``None`` if unsupported.
-
-    Artifact of the *experimental* multi-mode schema (the demos
-    ``contracts/experiments/`` corpus), where a match carried per-embodiment
-    decision values (``observation_mode`` / ``action_adapter`` / model knobs).
-    v0 contracts have no decision variables — use :func:`match`.
-    """
-    rtv = model.get("robot_type_variables")
-    if rtv is not None:
-        return rtv.get(robot_type)
-    return {} if match(model, robot_type) else None
-
-
-def model_features(model: dict, robot_type: str | None = None) -> dict:
-    """Model features for pairing; swaps obs state when ``observation_mode`` is set."""
-    features = dict(model.get("features", {}))
-    if not robot_type:
-        return features
-    mode_name = model.get("robot_type_variables", {}).get(robot_type, {}).get("observation_mode")
-    if not mode_name:
-        return features
-    mode_feats = model.get("observation_modes", {}).get(mode_name, {}).get("features", {})
-    features = {k: v for k, v in features.items() if not k.startswith("observation.state.")}
-    features.update(mode_feats)
-    return features
-
-
-def _contract_with_features(contract: dict, features: dict) -> dict:
-    return {**contract, "features": features}
 
 
 def _is_image(feature: dict) -> bool:
@@ -99,38 +59,15 @@ def action_signature(features: list[Feature]) -> str:
     return "+".join(feat.get("state_type", feat.get("type", "?")) for _, feat in features)
 
 
-def model_action_modes(model: dict, robot_type: str | None = None) -> dict[str, dict]:
-    """Map action signature -> {mode, features}. Top-level actions register as ``default``."""
-    modes: dict[str, dict] = {}
-    for mode_name, mode in model.get("action_modes", {}).items():
-        feats = sorted(mode.get("features", {}).items(), key=lambda x: x[1].get("order", x[0]))
-        modes[action_signature(feats)] = {"mode": mode_name, "features": feats}
-    actions = list_actions(model)
-    if actions:
-        modes.setdefault(action_signature(actions), {"mode": "default", "features": actions})
-    if robot_type:
-        adapter = model.get("robot_type_variables", {}).get(robot_type, {}).get("action_adapter")
-        if adapter and adapter in model.get("action_modes", {}):
-            feats = sorted(
-                model["action_modes"][adapter]["features"].items(),
-                key=lambda x: x[1].get("order", x[0]),
-            )
-            modes[action_signature(feats)] = {"mode": adapter, "features": feats}
-    return modes
-
-
 def _zip_features(left: list[Feature], right: list[Feature]) -> list[tuple[Feature, Feature]]:
     fill: Feature = (None, None)
     return list(itertools.zip_longest(left, right, fillvalue=fill))
 
 
-def pair_observations(
-    env: dict, model: dict, robot_type: str | None = None
-) -> list[tuple[Feature, Feature]]:
+def pair_observations(env: dict, model: dict) -> list[tuple[Feature, Feature]]:
     """Pair env obs -> model obs: images first, then vectors (positional within each group)."""
-    model_view = _contract_with_features(model, model_features(model, robot_type))
     env_images, env_vectors = split_observations(env)
-    model_images, model_vectors = split_observations(model_view)
+    model_images, model_vectors = split_observations(model)
     return _zip_features(env_images, model_images) + _zip_features(env_vectors, model_vectors)
 
 
@@ -138,22 +75,23 @@ def pair_observations(
 class ActionMatch:
     signature: str
     matched: bool
-    mode: str | None = None
     pairs: tuple[tuple[Feature, Feature], ...] = ()
-    available_signatures: tuple[str, ...] = ()
+    model_signature: str | None = None
 
 
-def match_actions(env: dict, model: dict, robot_type: str | None = None) -> ActionMatch:
-    """Select a model action mode whose signature matches the env, then pair features."""
+def match_actions(env: dict, model: dict) -> ActionMatch:
+    """Compare the env action signature against the model's, then pair features.
+
+    v0: both sides declare exactly one action space (their top-level
+    ``role == "action"`` features); a match is signature equality.
+    """
     env_actions = list_actions(env)
+    model_actions = list_actions(model)
     signature = action_signature(env_actions)
-    modes = model_action_modes(model, robot_type)
-    if signature in modes:
-        selected = modes[signature]
-        pairs = tuple(_zip_features(env_actions, selected["features"]))
-        return ActionMatch(signature=signature, matched=True, mode=selected["mode"], pairs=pairs)
-    return ActionMatch(
-        signature=signature,
-        matched=False,
-        available_signatures=tuple(sorted(modes)),
-    )
+    model_signature = action_signature(model_actions) if model_actions else None
+    if model_actions and signature == model_signature:
+        pairs = tuple(_zip_features(env_actions, model_actions))
+        return ActionMatch(
+            signature=signature, matched=True, pairs=pairs, model_signature=model_signature
+        )
+    return ActionMatch(signature=signature, matched=False, model_signature=model_signature)

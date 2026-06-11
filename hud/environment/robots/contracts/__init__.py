@@ -19,15 +19,12 @@ This package is the **advisory** wiring check used at preflight time:
   wiring diagram.
 
 The v0 contract schema is the single-space form: one embodiment (``robot_type``),
-one ``role == "action"`` feature set plus observations per contract (no
-``action_modes`` / ``observation_modes`` wrappers and no ``decision_variables`` /
-``robot_type_variables`` knobs). Every feature is rank ≥ 1 (scalars use ``[1]``).
-
-.. warning::
-    In development: the matcher still centers on the experimental multi-mode
-    contract schema (``action_modes`` / ``observation_modes``). The going-forward
-    standard is one action space + one observation space per contract; treat this
-    API as unstable until that design settles.
+one ``role == "action"`` feature set plus observations per contract. A model or
+env with several action/observation forms ships one contract per form. Every
+feature is rank ≥ 1 (scalars use ``[1]``). The retired multi-mode schema
+(``action_modes`` / ``observation_modes`` / ``robot_type_variables``) lives only
+as archived documentation in the demos ``contracts/experiments/`` corpus; this
+package does not load it.
 """
 
 from __future__ import annotations
@@ -40,9 +37,6 @@ from .matching import (
     list_actions,
     match,
     match_actions,
-    match_legacy,
-    model_action_modes,
-    model_features,
     pair_observations,
     split_observations,
 )
@@ -59,9 +53,6 @@ __all__ = [
     "list_actions",
     "match",
     "match_actions",
-    "match_legacy",
-    "model_action_modes",
-    "model_features",
     "pair_observations",
     "render_match",
     "split_observations",

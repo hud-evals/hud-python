@@ -191,8 +191,8 @@ def integration_review(
     if not supported:
         return None
 
-    obs_pairs = pair_observations(env, model, robot_type)
-    action = match_actions(env, model, robot_type)
+    obs_pairs = pair_observations(env, model)
+    action = match_actions(env, model)
 
     env_images = sum(1 for (_, ef), _ in obs_pairs if ef and _is_image(ef))
     env_vectors = sum(1 for (_, ef), _ in obs_pairs if ef and not _is_image(ef))
@@ -204,9 +204,9 @@ def integration_review(
     if action.matched:
         chunk = model.get("chunk_size")
         chunk_note = f", chunk_size={chunk}" if chunk else ""
-        scope.append(f"act: mode={action.mode!r} [{action.signature}]{chunk_note}")
+        scope.append(f"act: [{action.signature}]{chunk_note}")
     else:
-        scope.append(f"act: NO mode for [{action.signature}]")
+        scope.append(f"act: NO match for [{action.signature}]")
 
     problems: list[Gap] = []
 
@@ -222,9 +222,9 @@ def integration_review(
         problems.append(
             Gap(
                 "act",
-                "no action mode matches env signature",
+                "action signature mismatch",
                 f"env signature={action.signature}, "
-                f"model modes={list(action.available_signatures)}",
+                f"model signature={action.model_signature}",
             )
         )
 

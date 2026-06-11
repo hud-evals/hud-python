@@ -65,7 +65,7 @@ def render_match(
         "1;36",
     )
     if not supported:
-        declared = model.get("robot_type") or list(model.get("robot_type_variables", {}))
+        declared = model.get("robot_type")
         robots = declared if isinstance(declared, list) else [declared]
         return f"{head}\n  {_c('NO MATCH', '1;31')} {_c(f'(model robots: {robots})', '90')}"
 
@@ -74,7 +74,7 @@ def render_match(
         f"  {_c('MATCH', '1;32')} ({robot_type})",
         _c("  observations (env -> model):", "1;34"),
         *_rows(
-            pair_observations(env, model, robot_type),
+            pair_observations(env, model),
             "->",
             indent="    ",
             env_code="34",
@@ -82,17 +82,17 @@ def render_match(
         ),
     ]
 
-    action = match_actions(env, model, robot_type)
+    action = match_actions(env, model)
     lines.append(_c("  action (env <- model):", "1;33"))
     if action.matched:
-        lines.append(_c(f"    mode={action.mode!r} [{action.signature}]", "33"))
+        lines.append(_c(f"    [{action.signature}]", "33"))
         lines.extend(
             _rows(list(action.pairs), "<-", indent="      ", env_code="33", model_code="35")
         )
     else:
         lines.append(
             _c(
-                f"    model modes {list(action.available_signatures)} "
+                f"    model [{action.model_signature}] "
                 f"-> env wants [{action.signature}]  MISSING",
                 "1;31",
             )

@@ -1,13 +1,11 @@
 """Contract matcher tests against the v0 single-space schema.
 
-v0 is one embodiment (``robot_type``) and one action space + one observation space
-per contract (no
-``action_modes`` / ``observation_modes`` wrappers): a model's top-level
-``role == "action"`` features register through ``model_action_modes``'s
-``default`` branch, and observations pair positionally (images first, then
-vectors). The inline fixtures below are written in that single-space style;
-the ``fixtures/`` pair (libero env / pi05_libero model) is a known-MATCH
-real-world pair in the same style.
+v0 is one embodiment (``robot_type``) and one action space + one observation
+space per contract: actions match on signature equality between the two sides'
+top-level ``role == "action"`` features, and observations pair positionally
+(images first, then vectors). The inline fixtures below are written in that
+single-space style; the ``fixtures/`` pair (libero env / pi05_libero model) is
+a known-MATCH real-world pair in the same style.
 """
 
 from __future__ import annotations
@@ -24,7 +22,6 @@ from hud.environment.robots.contracts import (
     list_actions,
     match,
     match_actions,
-    match_legacy,
     pair_observations,
     render_match,
 )
@@ -123,28 +120,10 @@ def test_match_gates_on_robot_type() -> None:
 
 
 def test_match_gates_on_robot_type_list() -> None:
-    # v0 tolerates a list robot_type for legacy multi-embodiment checkpoints.
+    # A list robot_type is tolerated for multi-embodiment checkpoints (spec §3.9).
     model = make_model_contract(robot_type=["bot_x", "bot_y"])
     assert match(model, "bot_y") is True
     assert match(model, "bot_z") is False
-
-
-def test_match_gates_through_legacy_robot_type_variables() -> None:
-    # Archived experiment contracts gate through rtv; match stays a bool.
-    model = make_model_contract(robot_type_variables={"bot_x": {"observation_mode": None}})
-    assert match(model, "bot_x") is True
-    assert match(model, "bot_y") is False
-
-
-def test_match_legacy_returns_decision_variables() -> None:
-    # The experimental-schema artifact: per-embodiment decision values.
-    model = make_model_contract(robot_type_variables={"bot_x": {"observation_mode": None}})
-    assert match_legacy(model, "bot_x") == {"observation_mode": None}
-    assert match_legacy(model, "bot_y") is None
-    # v0 contracts have no decision variables: {} when supported, None otherwise.
-    v0 = make_model_contract()
-    assert match_legacy(v0, "bot_x") == {}
-    assert match_legacy(v0, "other_bot") is None
 
 
 # ── pair_observations(): positional image/vector pairing ─────────────────────
@@ -152,7 +131,7 @@ def test_match_legacy_returns_decision_variables() -> None:
 
 def test_pair_observations_pairs_images_then_vectors_positionally() -> None:
     env, model = make_env_contract(), make_model_contract()
-    pairs = pair_observations(env, model, "bot_x")
+    pairs = pair_observations(env, model)
     assert len(pairs) == 2
     (env_img, model_img), (env_vec, model_vec) = pairs
     assert env_img[0] == "observation.images.cam"
@@ -171,7 +150,7 @@ def test_pair_observations_fills_missing_side_with_none() -> None:
         "dtype": "uint8",
         "shape": [64, 64, 3],
     }
-    pairs = pair_observations(env, model, "bot_x")
+    pairs = pair_observations(env, model)
     img_pairs = [p for p in pairs if p[1][1] and p[1][1].get("type") == "rgb"]
     assert len(img_pairs) == 2
     unmatched = img_pairs[1]
@@ -179,15 +158,15 @@ def test_pair_observations_fills_missing_side_with_none() -> None:
     assert unmatched[1][0] == "observation.images.wrist"
 
 
-# ── match_actions(): signature matching via the default branch ────────────────
+# ── match_actions(): signature equality between the two single spaces ─────────
 
 
-def test_match_actions_default_branch_matches() -> None:
+def test_match_actions_matches_on_signature_equality() -> None:
     env, model = make_env_contract(), make_model_contract()
-    result = match_actions(env, model, "bot_x")
+    result = match_actions(env, model)
     assert result.matched is True
-    assert result.mode == "default"  # top-level actions register as 'default'
     assert result.signature == "EE_DEL_POS+GRIPPER_ABS_POS"
+    assert result.model_signature == result.signature
     assert len(result.pairs) == 2
     assert result.pairs[0][0][0] == "action.delta_eef_pos"
     assert result.pairs[0][1][0] == "action.delta_eef_pos"
@@ -196,11 +175,10 @@ def test_match_actions_default_branch_matches() -> None:
 def test_match_actions_signature_mismatch() -> None:
     env = make_env_contract()
     env["features"]["action.delta_eef_pos"]["state_type"] = "JOINT_DEL_POS"
-    result = match_actions(env, make_model_contract(), "bot_x")
+    result = match_actions(env, make_model_contract())
     assert result.matched is False
-    assert result.mode is None
     assert result.signature == "JOINT_DEL_POS+GRIPPER_ABS_POS"
-    assert "EE_DEL_POS+GRIPPER_ABS_POS" in result.available_signatures
+    assert result.model_signature == "EE_DEL_POS+GRIPPER_ABS_POS"
 
 
 def test_action_signature_sorted_by_order() -> None:
@@ -250,7 +228,7 @@ def test_integration_review_reports_unmatched_action_signature() -> None:
     review = integration_review(env, make_model_contract())
     assert review is not None
     act_gaps = [g for g in review.problems if g.category == "act"]
-    assert any("no action mode matches" in g.issue for g in act_gaps)
+    assert any("action signature mismatch" in g.issue for g in act_gaps)
 
 
 # ── render_match(): terminal rendering ────────────────────────────────────────
@@ -261,7 +239,7 @@ def test_render_match_reports_match() -> None:
     assert isinstance(out, str)
     assert "MATCH" in out
     assert "NO MATCH" not in out
-    assert "mode='default'" in out
+    assert "[EE_DEL_POS+GRIPPER_ABS_POS]" in out
 
 
 def test_render_match_reports_no_match_for_unknown_robot_type() -> None:
@@ -293,9 +271,8 @@ def pi05_model() -> dict[str, Any]:
 
 def test_libero_pi05_pair_matches(libero_env: dict, pi05_model: dict) -> None:
     assert match(pi05_model, libero_env["robot_type"])
-    action = match_actions(libero_env, pi05_model, libero_env["robot_type"])
+    action = match_actions(libero_env, pi05_model)
     assert action.matched is True
-    assert action.mode == "default"
     out = render_match(pi05_model, libero_env, integration=True)
     assert "MATCH" in out
     assert "NO MATCH" not in out

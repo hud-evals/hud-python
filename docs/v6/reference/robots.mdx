@@ -140,7 +140,7 @@ The agent reads it back via `RobotClient.spaces()`, which splits features into a
 
 ### Contract matching (advisory)
 
-The same feature schema also describes a *model* contract — what a policy consumes and emits — so an env/model pairing can be reviewed before anything runs. `hud.environment.robots.contracts` does the comparison: `match` gates on `robot_type` (a plain bool — `if match(model, robot_type):` does what it looks like), `pair_observations` / `match_actions` pair features, `integration_review` reports dtype/shape/frame/rate gaps, and `render_match` prints the wiring diagram. It is advisory and in development — a warning means *check the wiring*, never *this will fail*. (`match_legacy` is the experimental-schema artifact that returned per-embodiment decision variables.)
+The same feature schema also describes a *model* contract — what a policy consumes and emits — so an env/model pairing can be reviewed before anything runs. `hud.environment.robots.contracts` does the comparison: `match` gates on `robot_type` (a plain bool — `if match(model, robot_type):` does what it looks like), `pair_observations` / `match_actions` pair features, `integration_review` reports dtype/shape/frame/rate gaps, and `render_match` prints the wiring diagram. It is advisory and in development — a warning means *check the wiring*, never *this will fail*.
 
 ## Realtime control
 
