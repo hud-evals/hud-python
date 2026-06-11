@@ -8,7 +8,7 @@ pull heavy/optional client dependencies (``fastmcp`` for MCP, ``websockets``'s
 asyncio client for CDP). This lets an env server run in a minimal environment
 (e.g. an Isaac Sim conda env pinned to an older ``websockets``).
 
-The *env-side* robot runtime (the ``robot/1`` bridges, action providers, and sim
+The *env-side* robot runtime (the ``robot`` bridges, action providers, and sim
 runners) lives in :mod:`hud.environment.robots`; only the agent-side
 :class:`~hud.capabilities.robot.RobotClient` is a capability client and stays here.
 """

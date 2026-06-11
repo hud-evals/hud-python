@@ -10,9 +10,9 @@ loop down, so this module splits the work in two:
   :class:`TraceSink`, which does all the heavy lifting (image/video encoding,
   parquet writes, stats) entirely off the control loop.
 
-``TraceSink`` is the decoupling seam: a file-backed LeRobot-dataset sink lives in
-the robotics demos today, and a future "stream to the HUD platform" sink can drop
-in without touching any environment. It is a sibling of the span ``exporter`` —
+``TraceSink`` is the decoupling seam: the file-backed LeRobot-dataset sink lives in
+:mod:`hud.telemetry.lerobot`, and a future "stream to the HUD platform" sink can
+drop in without touching any environment. It is a sibling of the span ``exporter`` —
 both are background-thread "record what happened during a run and ship it"
 machinery, which is why this lives under :mod:`hud.telemetry`.
 """

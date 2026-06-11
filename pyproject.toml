@@ -159,6 +159,19 @@ browseruse = [
     "browser-use>=0.11.13",
 ]
 
+# Robot capability (robot protocol wire codec + bridges + agent harness)
+robot = [
+    "numpy>=1.24",
+    "msgpack>=1.0",
+]
+
+# LeRobot v3 dataset recording (hud.telemetry.lerobot sink)
+lerobot = [
+    "hud-python[robot]",
+    "lerobot[dataset]",
+    "av>=15,<16",
+]
+
 
 [tool.ruff]
 target-version = "py311"
@@ -199,6 +212,11 @@ lint.ignore = [
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
+# Robot runtime/harness: bare prints are deliberate operator feedback on env/agent loops.
+"hud/environment/robots/**" = ["T201"]
+"hud/agents/robot/**" = ["T201"]
+"hud/capabilities/robot.py" = ["T201"]
+"hud/telemetry/lerobot.py" = ["T201"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
 "**/examples/**/*.py" = ["ALL"]
 

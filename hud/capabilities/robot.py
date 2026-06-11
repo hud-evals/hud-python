@@ -1,6 +1,6 @@
-"""The ``robot/1`` protocol: wire codec + the agent-side client.
+"""The ``robot`` protocol: wire codec + the agent-side client.
 
-This module defines the ``robot/1`` wire format (msgpack + raw numpy array buffers) and
+This module defines the ``robot`` wire format (msgpack + raw numpy array buffers) and
 :class:`RobotClient`, the agent-side capability client that dials a robot env and exchanges
 observations/actions over it.
 
@@ -51,9 +51,9 @@ def _unpackb(data: bytes) -> Any:
 
 
 class RobotClient(CapabilityClient):
-    """Live ``robot/1`` connection: send actions, receive observations."""
+    """Live ``robot`` connection: send actions, receive observations."""
 
-    protocol: ClassVar[str] = "robot/1"
+    protocol: ClassVar[str] = "robot"
 
     def __init__(self, capability: Capability, ws: Any) -> None:
         self.capability = capability
@@ -153,7 +153,7 @@ class RobotClient(CapabilityClient):
         except Exception as exc:  # never silently stop draining the socket
             import traceback
 
-            print(f"[agent] robot/1 recv loop crashed: {exc!r}", flush=True)
+            print(f"[agent] robot recv loop crashed: {exc!r}", flush=True)
             traceback.print_exc()
             raise
 

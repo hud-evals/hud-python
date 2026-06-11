@@ -181,7 +181,7 @@ class Capability:
         url: str,
         contract: dict[str, Any],
     ) -> Capability:
-        """``robot/1`` — schema-driven action/observation loop over WebSocket.
+        """``robot`` — schema-driven action/observation loop over WebSocket.
 
         ``contract`` is the env's full self-describing config: ``robot_type``,
         ``control_rate``, and a ``features`` map where each feature declares its
@@ -192,7 +192,7 @@ class Capability:
         contract's features into action/observation spaces by ``role``.
         """
         normalized = normalize_url(url, default_scheme="ws", default_port=9091)
-        return cls(name=name, protocol="robot/1", url=normalized, params={"contract": contract})
+        return cls(name=name, protocol="robot", url=normalized, params={"contract": contract})
 
 
 class CapabilityClient(ABC):

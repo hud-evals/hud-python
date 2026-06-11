@@ -1,6 +1,6 @@
-"""Env-side ``robot/1`` bridges: own the sim, serve observations/actions over WebSocket.
+"""Env-side ``robot`` bridges: own the sim, serve observations/actions over WebSocket.
 
-This is the *server* side of the ``robot/1`` protocol; the agent-side client lives in
+This is the *server* side of the ``robot`` protocol; the agent-side client lives in
 :mod:`hud.capabilities.robot` (:class:`~hud.capabilities.robot.RobotClient`). Both speak
 the same msgpack + raw-array wire codec, which is defined once in that module and reused
 here.
@@ -30,7 +30,7 @@ import numpy as np
 import websockets
 import websockets.exceptions
 
-# The robot/1 wire codec is defined alongside the agent-side client; reuse it so both
+# The robot wire codec is defined alongside the agent-side client; reuse it so both
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
 from hud.capabilities.robot import _decode_array, _encode_array, _packb, _unpackb
 
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
 
 class RobotBridge(ABC):
-    """Serves ``robot/1`` over WebSocket; subclass and implement the env hooks.
+    """Serves ``robot`` over WebSocket; subclass and implement the env hooks.
 
     **Subclass contract:** implement :meth:`step`, :meth:`get_observation`, and
     :meth:`reset`. The base owns the WebSocket serve loop; subclasses own the sim.
@@ -75,7 +75,7 @@ class RobotBridge(ABC):
     ) -> None:
         self._host = host
         self._port = port
-        self._client: Any = None  # robot/1 serves a single agent at a time
+        self._client: Any = None  # robot serves a single agent at a time
         self._server: Any = None
         # Strategy for *which thread* runs the (thread-affine) simulator. Defaults to
         # InlineSimRunner — run sim work on the loop thread — which is exactly the
@@ -142,7 +142,7 @@ class RobotBridge(ABC):
         self._server = await websockets.serve(
             self._handle_client, self._host, self._port, max_size=None, reuse_address=True
         )
-        print(f"[env] robot/1 listening on ws://{self._host}:{self._port}", flush=True)
+        print(f"[env] robot listening on ws://{self._host}:{self._port}", flush=True)
 
     async def stop(self) -> None:
         if self._server is not None:
@@ -195,7 +195,7 @@ class RobotBridge(ABC):
 
 
 class RealtimeRobotBridge(RobotBridge):
-    """A ``robot/1`` bridge whose env advances on its own wall clock.
+    """A ``robot`` bridge whose env advances on its own wall clock.
 
     Unlike :class:`RobotBridge` (which steps once per received action), a realtime
     bridge runs a control-rate clock loop that is fully decoupled from inference:

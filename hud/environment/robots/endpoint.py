@@ -20,7 +20,7 @@ user implements the bridge; the framework constructs the endpoint.
 The four verbs ``reset / observe / step / result`` are the full episode
 interface. The control-plane pair (:meth:`reset` / :meth:`result`) is what the
 task generator drives; the data-plane pair (:meth:`observe` / :meth:`step`) is
-served to the agent over ``robot/1`` directly today (so it is *not* on the
+served to the agent over ``robot`` directly today (so it is *not* on the
 in-process hot path), and is exposed here only to complete the verb set so the
 same interface can cross a process boundary later (Phase 8).
 """
@@ -69,7 +69,7 @@ class RobotEndpoint:
         """Return the current ``(data, terminated)`` frame (data-plane verb).
 
         A passthrough to ``bridge.get_observation()``. In-process the agent reads
-        observations over ``robot/1`` directly, so this is not on the hot path; it
+        observations over ``robot`` directly, so this is not on the hot path; it
         completes the ``reset / observe / step / result`` verb set so the interface
         can be served across a process boundary later.
         """
@@ -79,7 +79,7 @@ class RobotEndpoint:
         """Advance the sim by one action (data-plane verb).
 
         A passthrough to ``bridge.step(action)``. Like :meth:`observe`, this is
-        served over ``robot/1`` in-process and is here only to complete the verb set.
+        served over ``robot`` in-process and is here only to complete the verb set.
         """
         self._bridge.step(action)
 

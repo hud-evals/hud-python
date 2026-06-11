@@ -39,6 +39,27 @@ _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
     cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
 }
 
+#: protocol -> (module, attr) for clients with optional dependencies, resolved on
+#: first ``open``. ``RobotClient`` pulls numpy/msgpack (the ``robot`` extra), so it
+#: must not be imported eagerly with the core clients above.
+_LAZY_CLIENT_REGISTRY: dict[str, tuple[str, str]] = {
+    "robot": ("hud.capabilities.robot", "RobotClient"),
+}
+
+
+def _resolve_client(protocol: str) -> type[CapabilityClient] | None:
+    client_cls = _CLIENT_REGISTRY.get(protocol)
+    if client_cls is not None:
+        return client_cls
+    target = _LAZY_CLIENT_REGISTRY.get(protocol)
+    if target is None:
+        return None
+    from importlib import import_module
+
+    client_cls = getattr(import_module(target[0]), target[1])
+    _CLIENT_REGISTRY[protocol] = client_cls  # cache for subsequent opens
+    return client_cls
+
 
 class HudProtocolError(RuntimeError):
     """Raised when the env returns a JSON-RPC error frame."""
@@ -163,7 +184,7 @@ class HudClient:
         cap = self.binding(protocol)
         cap_client = self._opened.get(cap.protocol)
         if cap_client is None:
-            client_cls = _CLIENT_REGISTRY.get(cap.protocol)
+            client_cls = _resolve_client(cap.protocol)
             if client_cls is None:
                 raise ValueError(
                     f"no client registered for protocol {cap.protocol!r}; "

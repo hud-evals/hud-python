@@ -1,4 +1,7 @@
-"""Agent implementations."""
+"""Agent implementations.
+
+The robot policy harness lives in :mod:`hud.agents.robot` (requires the ``robot`` extra).
+"""
 
 from __future__ import annotations
 
