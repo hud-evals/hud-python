@@ -44,14 +44,14 @@ Every agent implements one method — `await agent(run)` — which drives a live
 
 ```python run.py
 import asyncio
-from hud import spawn
+from hud import LocalRuntime
 from hud.agents import create_agent
 from tasks import count_letter
 
 async def main():
     agent = create_agent("claude-sonnet-4-5")
-    run = await count_letter(word="strawberry").run(agent, on=spawn("tasks.py"))
-    print(run.reward)
+    job = await count_letter(word="strawberry").run(agent, runtime=LocalRuntime("tasks.py"))
+    print(job.reward)
 
 asyncio.run(main())
 ```

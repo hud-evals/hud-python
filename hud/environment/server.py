@@ -6,8 +6,8 @@ declares what exists; this module puts one on the wire. It owns task execution
 (:func:`bind`), and the full serving lifecycle (:func:`serve`) — backing
 daemons up, control channel bound (announcing the port on stdout as
 ``HUD_SERVE_PORT=<port>``), daemons down. Every substrate shape runs it: the
-:func:`~hud.environment.runtime.spawn` child process, a container CMD, and
-``hud dev``.
+:class:`~hud.eval.runtime.LocalRuntime` child process, a container CMD, and
+``hud serve``.
 """
 
 from __future__ import annotations
@@ -20,13 +20,14 @@ import logging
 import secrets
 import signal
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from .utils import error, read_frame, reply, send_frame
+from .utils import error, read_frame, reply, send_frame, splice
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, AsyncIterator
 
     from .env import Environment, _TaskFactory
 
@@ -171,10 +172,23 @@ class TaskRunner:
 
 
 # ─── wire protocol ───────────────────────────────────────────────────────
+# The connection grammar (control session vs capability stream) lives on
+# :func:`bind` — the accept point. Session dispatch lives on _ControlChannel.
 
 
 class _NoTaskInProgress(RuntimeError):
     pass
+
+
+async def _frames(
+    first: dict[str, Any],
+    reader: asyncio.StreamReader,
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield ``first`` and then every subsequent frame until the peer hangs up."""
+    msg: dict[str, Any] | None = first
+    while msg is not None:
+        yield msg
+        msg = await read_frame(reader)
 
 
 class _ControlChannel:
@@ -208,11 +222,13 @@ class _ControlChannel:
             await self._runner.cancel()
             self._runner = None
 
-    async def handle(
+    async def session(
         self,
+        first: dict[str, Any],
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
+        """One control session: JSON-RPC dispatch for the connection's lifetime."""
         env = self.env
         session_id = "sess-" + secrets.token_hex(4)
 
@@ -224,98 +240,136 @@ class _ControlChannel:
             if msg_id is not None:
                 await send_frame(writer, error(msg_id, code, message))
 
-        try:
-            while True:
-                msg = await read_frame(reader)
-                if msg is None:
+        async for msg in _frames(first, reader):
+            method = msg.get("method", "")
+            params = msg.get("params") or {}
+            msg_id = msg.get("id")
+
+            try:
+                if method == "hello":
+                    # env.start() ran before serving, so hook-published
+                    # capabilities (e.g. a workspace's ssh address) are
+                    # already concrete here.
+                    bindings = [c.to_manifest() for c in env.capabilities]
+                    await reply_to(
+                        msg_id,
+                        {
+                            "session_id": session_id,
+                            "env": {"name": env.name, "version": env.version},
+                            "bindings": bindings,
+                        },
+                    )
+
+                elif method == "tasks.list":
+                    await reply_to(
+                        msg_id,
+                        {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
+                    )
+
+                elif method == "tasks.start":
+                    task_id = params.get("id")
+                    if not isinstance(task_id, str):
+                        await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
+                        continue
+                    args = params.get("args") or {}
+                    if not isinstance(args, dict):
+                        await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
+                        continue
+                    try:
+                        prompt = await self.start(task_id, args)
+                    except KeyError:
+                        await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
+                        continue
+                    await reply_to(msg_id, prompt)
+
+                elif method == "tasks.grade":
+                    try:
+                        evaluation = await self.grade(params)
+                    except _NoTaskInProgress:
+                        await error_to(msg_id, -32600, "no task in progress")
+                        continue
+                    await reply_to(msg_id, evaluation)
+
+                elif method == "tasks.cancel":
+                    await self.cancel()
+                    await reply_to(msg_id, {"cancelled": True})
+
+                elif method == "bye":
+                    await self.cancel()
+                    await reply_to(msg_id, {"goodbye": True})
                     return
 
-                method = msg.get("method", "")
-                params = msg.get("params") or {}
-                msg_id = msg.get("id")
+                else:
+                    await error_to(msg_id, -32601, f"method not found: {method}")
 
-                try:
-                    if method == "hello":
-                        # Resolving materializes backed declarations (e.g. the
-                        # managed workspace behind ``Capability.shell``), so
-                        # addresses come into existence when the env serves a
-                        # client — never at declaration/import time.
-                        bindings = [
-                            (await env.resolve_capability(c.name)).to_manifest()
-                            for c in env.capabilities
-                        ]
-                        await reply_to(
-                            msg_id,
-                            {
-                                "session_id": session_id,
-                                "env": {"name": env.name, "version": env.version},
-                                "bindings": bindings,
-                            },
-                        )
+            except Exception as exc:
+                LOGGER.exception("error handling %s", method)
+                await error_to(msg_id, -32000, str(exc))
 
-                    elif method == "tasks.list":
-                        await reply_to(
-                            msg_id,
-                            {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
-                        )
 
-                    elif method == "tasks.start":
-                        task_id = params.get("id")
-                        if not isinstance(task_id, str):
-                            await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
-                            continue
-                        args = params.get("args") or {}
-                        if not isinstance(args, dict):
-                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
-                            continue
-                        try:
-                            prompt = await self.start(task_id, args)
-                        except KeyError:
-                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
-                            continue
-                        await reply_to(msg_id, prompt)
+async def _stream(
+    env: Environment,
+    msg: dict[str, Any],
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+) -> None:
+    """One capability stream: dial the resolved daemon and splice raw bytes.
 
-                    elif method == "tasks.grade":
-                        try:
-                            evaluation = await self.grade(params)
-                        except _NoTaskInProgress:
-                            await error_to(msg_id, -32600, "no task in progress")
-                            continue
-                        await reply_to(msg_id, evaluation)
-
-                    elif method == "tasks.cancel":
-                        await self.cancel()
-                        await reply_to(msg_id, {"cancelled": True})
-
-                    elif method == "bye":
-                        await self.cancel()
-                        await reply_to(msg_id, {"goodbye": True})
-                        return
-
-                    else:
-                        await error_to(msg_id, -32601, f"method not found: {method}")
-
-                except Exception as exc:
-                    LOGGER.exception("error handling %s", method)
-                    await error_to(msg_id, -32000, str(exc))
-
-        finally:
-            # A drop leaves any suspended runner on the channel for a later
-            # connection's ``tasks.grade``.
-            with contextlib.suppress(Exception):
-                writer.close()
-                await writer.wait_closed()
+    The client opens one such connection per capability stream, so the
+    control port is the only address a substrate ever needs to expose.
+    """
+    msg_id = msg.get("id")
+    try:
+        name = (msg.get("params") or {}).get("capability")
+        if not isinstance(name, str):
+            raise ValueError("tunnel.open: 'capability' must be a string")
+        cap = env.capability(name)
+        parts = urlsplit(cap.url)
+        if parts.hostname is None or parts.port is None:
+            raise ValueError(f"capability {name!r} has no host:port to tunnel to")
+        backend = await asyncio.open_connection(parts.hostname, parts.port)
+    except Exception as exc:
+        LOGGER.warning("refusing capability stream: %s", exc)
+        if msg_id is not None:
+            code = -32602 if isinstance(exc, ValueError) else -32000
+            await send_frame(writer, error(msg_id, code, str(exc)))
+        return
+    if msg_id is not None:
+        await send_frame(writer, reply(msg_id, {"capability": name}))
+    await splice((reader, writer), backend)
 
 
 async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
     """Bind a control-channel server for *env* (not yet serving).
+
+    The accept point owns the transport's connection grammar — TCP has no
+    native streams, so the preface (first) frame decides what a connection
+    is: a ``tunnel.open`` frame opens one capability stream (a single reply,
+    then raw bytes — the CONNECT analog); anything else begins a JSON-RPC
+    control session. Session methods are transport-invariant; the preface is
+    TCP routing (a WebSocket transport would tunnel via its native upgrade).
 
     Each bind gets fresh serving state. Callers read the assigned port from
     ``server.sockets[0].getsockname()`` and drive it with
     ``server.serve_forever()``.
     """
     channel = _ControlChannel(env)
-    server = await asyncio.start_server(channel.handle, host=host, port=port)
+
+    async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            first = await read_frame(reader)
+            if first is None:
+                return
+            if first.get("method") == "tunnel.open":
+                await _stream(env, first, reader, writer)
+            else:
+                await channel.session(first, reader, writer)
+        finally:
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
+
+    server = await asyncio.start_server(accept, host=host, port=port)
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])
     return server

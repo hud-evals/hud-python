@@ -8,17 +8,17 @@ A complete, runnable example: an environment with a managed shell, a task that a
 
 ## The environment
 
-`Capability.shell` gives the agent a sandboxed shell and files under `/workspace`. We seed a buggy module and a test in `@env.initialize`, then declare the task — the grader runs `pytest` and scores by exit code.
+A `Workspace` gives the agent a sandboxed shell and files under `/workspace` — the env starts it and publishes the `shell` capability when it serves. We seed a buggy module and a test in `@env.initialize`, then declare the task — the grader runs `pytest` and scores by exit code.
 
 ```python env.py
 from pathlib import Path
 
-from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.graders import BashGrader
 
 ROOT = Path("/workspace")
-env = Environment(name="coder", capabilities=[Capability.shell(ROOT)])
+env = Environment(name="coder")
+env.workspace(ROOT)
 
 @env.initialize
 async def _seed():
@@ -38,7 +38,7 @@ async def fix_add(target: str = "test_calc.py"):
 This task has no `answer = yield` — the deliverable is the **state of the workspace**, not a text answer. The first yield is the prompt; the second is the reward from running the tests.
 
 <Note>
-**The agent and the grader share the workspace directory.** `Capability.shell("/workspace")` serves a real directory; the agent's edits over the `ssh` capability land in it, and the grader runs in the environment process against that same directory. Keep the `root` and its `guest_path` equal (both `/workspace` here) so the path the agent edits and the path `BashGrader` runs `pytest` in are the same. To start from an existing repo instead of seeding files inline, write it into the root in `@env.initialize` (see [Capabilities](/v6/reference/capabilities)).
+**The agent and the grader share the workspace directory.** `Workspace("/workspace")` serves a real directory; the agent's edits over the `ssh` capability land in it, and the grader runs in the environment process against that same directory. Keep the `root` and its `guest_path` equal (both `/workspace` here) so the path the agent edits and the path `BashGrader` runs `pytest` in are the same. To start from an existing repo instead of seeding files inline, write it into the root in `@env.initialize` (see [Capabilities](/v6/reference/capabilities)).
 </Note>
 
 <Warning>
@@ -57,15 +57,15 @@ For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSD
 
 ```python run.py
 import asyncio
-from hud import spawn
+from hud import LocalRuntime
 from hud.agents import ClaudeSDKAgent
 from hud.agents.types import ClaudeSDKConfig
 from env import fix_add
 
 async def main():
     agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
-    run = await fix_add().run(agent, on=spawn("env.py"))
-    print("reward:", run.reward)
+    job = await fix_add().run(agent, runtime=LocalRuntime("env.py"))
+    print("reward:", job.reward)
 
 asyncio.run(main())
 ```

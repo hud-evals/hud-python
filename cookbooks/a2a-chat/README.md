@@ -29,7 +29,7 @@ uv run llm_client.py        # LLM-fronted client
 Configuration is via env vars: `HUD_MODEL` picks the agent's model (gateway,
 needs `HUD_API_KEY`), `HUD_TASK`/`HUD_ENV` pick the task row, `HUD_SOURCE`
 spawns a different env source, and `HUD_ENV_URL` attaches each turn to an
-already-served control channel (e.g. `hud dev chat_env.py` →
+already-served control channel (e.g. `hud serve chat_env.py` →
 `HUD_ENV_URL=tcp://127.0.0.1:8765`) instead of spawning.
 
 The server publishes an agent card at `/.well-known/agent-card.json` and

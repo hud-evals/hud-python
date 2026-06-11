@@ -31,18 +31,18 @@ assert detect("./terminal-bench")
 taskset = load("./terminal-bench")
 
 for task in taskset:
-    print(task.env.name, task.id, task.columns)
+    print(task.env, task.id, task.columns)
 ```
 
 Like every task row, the result carries no placement. Run it by supplying one —
 today that means a substrate already serving the control channel
-(`on=Runtime(url)`); a docker provider that builds and runs each task's
+(`runtime=Runtime(url)`); a docker provider that builds and runs each task's
 `environment/` image is the planned follow-up:
 
 ```python
 from hud import Runtime
 
-job = await taskset.run(agent, on=Runtime("tcp://127.0.0.1:8765"))
+job = await taskset.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
 ```
 
 ## Export HUD tasks to Harbor

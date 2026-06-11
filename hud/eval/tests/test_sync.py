@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.environment import Environment
-from hud.eval import Task, Taskset, task
+from hud.eval import Task, Taskset
 from hud.eval.sync import (
     diff,
     resolve_taskset_id,
@@ -19,14 +18,17 @@ if TYPE_CHECKING:
     import pytest
 
 
+def _row(slug: str, n: object) -> Task:
+    return Task(env="e", id="solve", args={"n": n}, slug=slug)
+
+
 def test_diff_classifies_create_update_unchanged_and_remote_only() -> None:
-    env = Environment("e")
-    local_a = task(env, "solve", slug="a", n=1)
-    local_b = task(env, "solve", slug="b", n=2)
-    local_c = task(env, "solve", slug="c", n=3)
-    remote_a = Task.from_dict(local_a.to_dict())
-    remote_b = task(env, "solve", slug="b", n=99)
-    remote_old = task(env, "solve", slug="old", n=0)
+    local_a = _row("a", 1)
+    local_b = _row("b", 2)
+    local_c = _row("c", 3)
+    remote_a = Task.model_validate(local_a.model_dump())
+    remote_b = _row("b", 99)
+    remote_old = _row("old", 0)
 
     plan = diff(
         Taskset("demo", [local_a, local_b, local_c]),
@@ -44,9 +46,8 @@ def test_diff_classifies_create_update_unchanged_and_remote_only() -> None:
 def test_diff_treats_platform_prefixed_task_ids_as_equal() -> None:
     # Platform records come back env-prefixed ("e:solve"); a local "solve"
     # with identical content must diff as unchanged, not an update.
-    env = Environment("e")
-    local = task(env, "solve", slug="a", n=1)
-    remote = Task(env=Environment("e"), id="e:solve", args={"n": 1}, slug="a")
+    local = _row("a", 1)
+    remote = Task(env="e", id="e:solve", args={"n": 1}, slug="a")
 
     plan = diff(Taskset("d", [local]), Taskset("d", [remote]))
 
@@ -60,8 +61,7 @@ def test_resolve_taskset_id_passes_uuids_through() -> None:
 
 
 def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    env = Environment("e")
-    upload = task(env, "solve", slug="solve-one", columns={"tier": "easy"}, n=1)
+    upload = Task(env="e", id="solve", args={"n": 1}, slug="solve-one", columns={"tier": "easy"})
     posted: dict[str, object] = {}
 
     def fake_request(method: str, url: str, json: object = None, **kwargs: object) -> dict:
@@ -95,16 +95,14 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_task_upload_payload_prefixes_task_id_with_env_name() -> None:
-    env = Environment("e")
-    assert task_upload_payload(task(env, "solve", n=1))["scenario"] == "e:solve"
-    assert task_upload_payload(Task(env=env, id="e:solve"))["scenario"] == "e:solve"
+    assert task_upload_payload(Task(env="e", id="solve", args={"n": 1}))["scenario"] == "e:solve"
+    assert task_upload_payload(Task(env="e", id="e:solve"))["scenario"] == "e:solve"
 
 
 def test_taskset_column_definitions_infer_types() -> None:
-    env = Environment("e")
     tasks = [
-        task(env, "t", slug="a", columns={"tier": "easy", "score": 1, "tags": ["x"]}),
-        task(env, "t", slug="b", columns={"tier": "hard", "score": 2.5, "tags": ["y", "z"]}),
+        Task(env="e", id="t", slug="a", columns={"tier": "easy", "score": 1, "tags": ["x"]}),
+        Task(env="e", id="t", slug="b", columns={"tier": "hard", "score": 2.5, "tags": ["y", "z"]}),
     ]
 
     definitions = taskset_column_definitions(tasks)
@@ -114,4 +112,4 @@ def test_taskset_column_definitions_infer_types() -> None:
         "score": {"type": "number"},
         "tags": {"type": "multi-select", "options": ["x", "y", "z"]},
     }
-    assert taskset_column_definitions([task(env, "t", slug="c")]) is None
+    assert taskset_column_definitions([Task(env="e", id="t", slug="c")]) is None

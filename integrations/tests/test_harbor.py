@@ -38,16 +38,15 @@ def test_load_single_task_dir_maps_metadata_to_columns(single_task: Path) -> Non
         "difficulty": "medium",
         "tags": ["bash", "linux"],
     }
-    assert row.env.name == taskset.name
+    assert row.env == taskset.name
 
 
 def test_load_dataset_shares_one_env_per_build_context(dataset_same_env: Path) -> None:
     taskset = load(dataset_same_env)
 
     assert len(taskset) == 3
+    # Identical Dockerfiles -> all rows reference one env name.
     assert taskset.environment_names() == {"terminal-bench-sample"}
-    envs = {id(task.env) for task in taskset}
-    assert len(envs) == 1  # identical Dockerfiles -> one shared declarative env
 
 
 def test_load_dataset_groups_by_distinct_build_contexts(dataset_multi_env: Path) -> None:
@@ -55,9 +54,9 @@ def test_load_dataset_groups_by_distinct_build_contexts(dataset_multi_env: Path)
 
     assert len(taskset) == 4
     assert taskset.environment_names() == {"mixed-bench-g1", "mixed-bench-g2"}
-    assert taskset["build-pmars"].env is taskset["cancel-async-tasks"].env
-    assert taskset["caffe-cifar-10"].env is taskset["sam-cell-seg"].env
-    assert taskset["build-pmars"].env is not taskset["caffe-cifar-10"].env
+    assert taskset["build-pmars"].env == taskset["cancel-async-tasks"].env
+    assert taskset["caffe-cifar-10"].env == taskset["sam-cell-seg"].env
+    assert taskset["build-pmars"].env != taskset["caffe-cifar-10"].env
 
 
 def test_load_rejects_dirs_without_harbor_tasks(tmp_path: Path) -> None:
@@ -162,7 +161,7 @@ async def test_scripts_drive_hud_task_lifecycle(tmp_path: Path) -> None:
     test_sh = (created[0] / "tests" / "test.sh").read_text(encoding="utf-8")
 
     # Boot serves the channel, parks the run via setup, then hands off.
-    assert "hud dev env:env" in boot
+    assert "hud serve env:env" in boot
     assert "hud task start 'solve'" in boot
     assert 'exec "$@"' in boot
     # Verifier grades the parked run and writes the Harbor reward.

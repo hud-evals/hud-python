@@ -118,12 +118,12 @@ This letter-count task is a **minimal illustration** — a single prompt-and-gra
 </Card>
 </CardGroup>
 
-## Iterate locally with `hud dev`
+## Iterate locally with `hud serve`
 
 While building, serve the environment's control channel locally and attach to it:
 
 ```bash
-hud dev tasks.py
+hud serve tasks.py
 ```
 
 This serves the environment on `tcp://127.0.0.1:8765`. In another terminal, drive a single task end-to-end without a model:

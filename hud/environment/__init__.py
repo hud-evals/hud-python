@@ -1,11 +1,11 @@
-"""HUD environment authoring runtime: declarations and the substrate story.
+"""HUD environment authoring: declarations and the wire protocol that serves them.
 
 :class:`Environment` is the declaration (capabilities + tasks behind the wire
 protocol); ``load_environment`` selects one from authored ``.py`` source;
-:mod:`~hud.environment.runtime` owns how a substrate serving one comes up
-(:class:`Runtime`, the ``Provider`` contract, :func:`spawn`,
-:func:`provision`); :mod:`~hud.environment.server` is the serving entry point
-those substrates run.
+:mod:`~hud.environment.server` is the serving entry point substrates run.
+How a substrate comes up — placement — belongs to the eval engine: see
+:mod:`hud.eval.runtime` (:class:`~hud.eval.runtime.Runtime`, the ``Provider``
+contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from hud.server import MCPRouter
 from hud.utils.modules import iter_modules
 
 from .env import Environment
-from .runtime import Provider, Runtime, provision, spawn
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
 if TYPE_CHECKING:
@@ -53,11 +52,7 @@ __all__ = [
     "MCPRouter",
     "Mount",
     "MountKind",
-    "Provider",
-    "Runtime",
     "ToolRouter",
     "Workspace",
     "load_environment",
-    "provision",
-    "spawn",
 ]

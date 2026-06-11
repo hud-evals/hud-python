@@ -60,14 +60,15 @@ and [Tasks](/v6/reference/tasks).
 harness brings its own tools):
 
 ```python
-from hud.capabilities import Capability
 from hud.environment import Environment
 
-env = Environment(name="coder", capabilities=[Capability.shell("/workspace")])
+env = Environment(name="coder")
+env.workspace("/workspace")
 ```
 
-`shell`/`ssh` (shell+files), `mcp`, `cdp` (browser), `rfb` (computer-use),
-`ros2` (robot). Cite [Environments](/v6/reference/environment) and
+`ssh` (shell+files; `env.workspace(root)` runs the sandbox for you),
+`mcp`, `cdp` (browser), `rfb` (computer-use), `ros2` (robot). Cite
+[Environments](/v6/reference/environment) and
 [Capabilities](/v6/reference/capabilities).
 
 **Run / scale / train:** [Models](/v6/run/models),
@@ -84,8 +85,8 @@ If you catch yourself writing any of these, stop and convert:
 | `@env.scenario("name")` | `@env.task()` |
 | `@env.tool` / `env.add_tool(BashTool())` | declare a **capability** (`ssh`/`mcp`/`cdp`/`rfb`/`ros2`) |
 | `env("scenario", ...)` | call the task: `count_letter(word=...)` → `Task` |
-| `hud.eval(task)` / `task.run("claude")` | `async with task as run: await agent(run)` |
-| `env.run(transport=...)` | `await env.serve()` / `hud dev` / `hud deploy` |
+| `hud.eval(task)` / `task.run("claude")` | `await task.run(agent)` → `Job` |
+| `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` |
 | `from hud.tools import ...` | tools are gone; result types live in `hud.agents.types` |
 
 For an existing v5 env, follow [Migrate to v6](/migrate-v6).

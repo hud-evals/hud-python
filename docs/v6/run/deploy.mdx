@@ -67,21 +67,21 @@ Then attach by task **id** (you don't need the Python task factory — construct
 
 ```python run.py
 import asyncio
-from hud import Environment, Runtime
+from hud import Runtime
 from hud.eval import Task
 from hud.agents import create_agent
 
 async def main():
-    task = Task(env=Environment("my-env"), id="fix_bug")   # a pure data row
+    task = Task(env="my-env", id="fix_bug")   # a pure data row
     agent = create_agent("claude-sonnet-4-5")
-    run = await task.run(agent, on=Runtime("tcp://127.0.0.1:8765"))
-    print(run.reward)
+    job = await task.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
+    print(job.reward)
 
 asyncio.run(main())
 ```
 
 <Note>
-Build a `Task` three ways: **call the task function** (`fix_bug(...)`) when you have the Python authoring object — the normal path; use the **`task()` helper** when you want metadata; or use the bare **`Task(env=..., id="id")`** constructor when you only have a task id, as above. Where it runs is always the `on=` placement: `Runtime(url)` for a box provisioned elsewhere, `spawn("env.py")` for a local child process.
+Build a `Task` two ways: **call the task function** (`fix_bug(...)`) when you have the Python authoring object — the normal path; or use the **`Task(env="name", id="id")`** constructor when you only have the names (args and metadata are explicit fields), as above. Where it runs is always the `runtime=` placement: `Runtime(url)` for a box provisioned elsewhere, `LocalRuntime("env.py")` for a local child process.
 </Note>
 
 ## Scaling horizontally
@@ -89,12 +89,12 @@ Build a `Task` three ways: **call the task function** (`fix_bug(...)`) when you 
 Because each rollout gets its own box, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
 
 ```python run.py
-from hud import spawn
+from hud import LocalRuntime
 from hud.eval import Taskset
 
 taskset = Taskset("bugs", [fix_bug(difficulty=d) for d in range(20)])
 job = await taskset.run(
-    agent, on=spawn("env.py"), max_concurrent=10,
+    agent, runtime=LocalRuntime("env.py"), max_concurrent=10,
 )
 rewards = [run.reward for run in job.runs]
 ```

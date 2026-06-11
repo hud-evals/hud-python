@@ -87,6 +87,7 @@ class LegacyEnvMixin:
     name: str
     tasks: dict[str, _TaskFactory[Any]]
     capabilities: list[Capability]
+    add_capability: Callable[[Capability], None]
     _on_start: list[Callable[[], Any]]
     _on_stop: list[Callable[[], Any]]
 
@@ -154,7 +155,7 @@ class LegacyEnvMixin:
         for tool in self._legacy_tools:
             buckets[_classify_tool(tool)].append(tool)
         if buckets["shell"]:
-            self._ensure_ssh_capability()
+            await self._ensure_ssh_capability()
         if buckets["computer"]:
             self._ensure_computer_capability()
         if buckets["mcp"]:
@@ -186,9 +187,7 @@ class LegacyEnvMixin:
                 server.run_async(transport="http", host="127.0.0.1", port=port, show_banner=False),
             )
             self._legacy_bg_tasks.append(task)
-            self.capabilities.append(
-                Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp")
-            )
+            self.add_capability(Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp"))
             LOGGER.info(
                 "legacy env %r: %d tool(s) -> mcp capability (port %d)", self.name, len(tools), port
             )
@@ -199,21 +198,22 @@ class LegacyEnvMixin:
                 exc_info=True,
             )
 
-    def _ensure_ssh_capability(self) -> None:
-        """Declare a backed shell capability for the collected shell tools.
+    async def _ensure_ssh_capability(self) -> None:
+        """Start a workspace for the collected shell tools + publish ``shell``.
 
-        Pure declaration: the env materializes a managed workspace (keys +
-        bind) when it answers ``hello``, and ``env.stop()`` tears it down.
+        Runs inside the serve-time tools hook, so the workspace (keys + bind)
+        comes up here and ``env.stop()`` tears it down.
         """
-        from hud.capabilities import Capability
+        from .workspace import Workspace
 
         if any(c.protocol.split("/", 1)[0] == "ssh" for c in self.capabilities):
             return
         root = os.environ.get("HUD_WORKSPACE_ROOT") or os.getcwd()
-        self.capabilities.append(Capability.shell(root))
-        LOGGER.info(
-            "legacy env %r: shell tool(s) -> backed shell capability (root %s)", self.name, root
-        )
+        ws = Workspace(root)
+        await ws.start()
+        self.add_capability(ws.capability("shell"))
+        self._on_stop.append(ws.stop)
+        LOGGER.info("legacy env %r: shell tool(s) -> shell capability (root %s)", self.name, root)
 
     def _ensure_computer_capability(self) -> None:
         """Publish an ``rfb`` capability for a detected/declared VNC server."""
@@ -230,7 +230,7 @@ class LegacyEnvMixin:
                 stacklevel=2,
             )
             return
-        self.capabilities.append(
+        self.add_capability(
             Capability.rfb(name="screen", url=url, password=os.environ.get("HUD_VNC_PASSWORD")),
         )
         LOGGER.info("legacy env %r: computer tool(s) -> rfb capability at %s", self.name, url)
@@ -339,14 +339,14 @@ class LegacyEnvMixin:
         """[deprecated] Serve the env. v6 serves the control channel, not MCP stdio/http.
 
         ``transport`` is ignored (v6 always serves its tcp control channel); use
-        ``hud dev`` / ``hud deploy`` for managed serving.
+        ``hud serve`` / ``hud deploy`` for managed serving.
         """
         # Inline import: this mixin is part of Environment, which server.py loads.
         from .server import serve
 
         warnings.warn(
             "env.run(transport=...) is deprecated: v6 serves a tcp control channel. "
-            "Use `hud dev` / `hud deploy`.",
+            "Use `hud serve` / `hud deploy`.",
             DeprecationWarning,
             stacklevel=2,
         )

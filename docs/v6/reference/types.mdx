@@ -15,7 +15,9 @@ from hud.agents.types import AgentAnswer, Citation, EvaluationResult, SubScore, 
 ## `Run`
 
 The live handle for one task — the lifecycle plus the agent's `Trace`. You get
-one from `task.run(agent)` or by opening `task.session()`.
+them in `job.runs` from `task.run(agent)` / `taskset.run(agent)`, or construct
+one over a connected client for manual driving (see
+[Running a Task](/v6/reference/tasks#running-a-task)).
 
 | Member | Type | Description |
 |--------|------|-------------|

@@ -21,7 +21,7 @@ Environment(name="environment", *, version="0.0.1", capabilities=None)
 |-----------|------|---------|-------------|
 | `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
 | `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
-| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish — concrete declarations (`Capability.cdp(url=...)`) or backed ones the env resolves on connect (`Capability.shell(root)`). |
+| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish — concrete wire data for services that already exist (`Capability.cdp(url=...)`). Daemons the env runs itself publish theirs at serve time: `env.workspace(root)` for the shell case, `env.add_capability(...)` from an `@env.initialize` hook in general. |
 
 <Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
 
@@ -50,10 +50,11 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 ## Capabilities
 
 ```python
-env.capabilities.append(cap)   # append a Capability after construction
+env.workspace("/workspace")    # attach a Workspace; publishes "shell" (ssh/2) at serve
+env.add_capability(cap)        # publish concrete wire data (replaces a same-named entry)
 ```
 
-Capabilities are normally passed to the constructor as pure declarations. **Concrete** ones carry the URL of a daemon you run; **backed** ones (`Capability.shell(root)`) carry no address — the env runs the daemon (a managed `Workspace`) and resolves the address when a client connects, tearing it down on stop. See [Capabilities](/v6/reference/capabilities).
+A **`Capability`** is always concrete wire data — the URL of something serving the protocol. Pass capabilities for services that already exist to the constructor; for a daemon the env runs itself, start it in an `@env.initialize` hook and publish its address with `env.add_capability(...)`. `env.workspace(root)` wires the common shell case: nothing touches the filesystem until the env serves. See [Capabilities](/v6/reference/capabilities).
 
 ## Lifecycle hooks
 
@@ -67,7 +68,7 @@ async def _stop():
     ...
 ```
 
-Hooks run once around serving — use them for seeding state or hand-rolled daemons. Backed capabilities (`Capability.shell`) don't need one; the env manages their daemon itself.
+Hooks run once around serving — seed state, or stand up a daemon and publish its capability with `env.add_capability(...)`. By the time a client says `hello`, every published capability is concrete.
 
 ## Serving
 
@@ -80,8 +81,8 @@ CMD runs (`python -m hud.environment.server <source>`):
 | `await bind(env, host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
 | `await env.start()` / `await env.stop()` | Run `@env.initialize` / `@env.shutdown` hooks directly. |
 
-In practice you serve with `hud dev` and run through `hud eval`, `task.run()`,
-or `Taskset.run()` — placement (`on=spawn(...)`) brings substrates up for you.
+In practice you serve with `hud serve` and run through `hud eval`, `task.run()`,
+or `Taskset.run()` — placement (`runtime=LocalRuntime(...)`) brings substrates up for you.
 
 ## The wire protocol
 

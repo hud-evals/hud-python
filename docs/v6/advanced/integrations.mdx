@@ -32,7 +32,7 @@ from hud.agents.browser_use import BrowserUseAgent
 from hud.agents.types import BrowserUseConfig
 
 agent = BrowserUseAgent(BrowserUseConfig(model="claude-sonnet-4-5", max_steps=25))
-run = await my_browser_task().run(agent)
+job = await my_browser_task().run(agent)
 ```
 
 Use it as a template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`, `rfb`, `ros2`).
@@ -47,13 +47,13 @@ the engine:
 ```python
 def placer(task):
     gpus = 4 if task.args.get("big_model") else 1
-    return my_cloud(image=f"hud/{task.env.name}", gpus=gpus)
+    return my_cloud(image=f"hud/{task.env}", gpus=gpus)
 
-job = await taskset.run(agent, on=placer)
+job = await taskset.run(agent, runtime=placer)
 ```
 
 See [placement](/v6/reference/tasks#placement-where-a-task-runs) for the
-built-in providers (`spawn`, `Runtime(url)`, `provision`).
+built-in providers (`LocalRuntime`, `Runtime(url)`, `HUDRuntime`).
 
 ## Any OpenAI-compatible endpoint
 

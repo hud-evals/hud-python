@@ -36,6 +36,22 @@ asyncio.run(main())
 
 `group=16` runs each task 16 times; the repeats share a GRPO group. `trainer.reward(job.runs)` computes advantages over each group and enqueues them — it returns once enqueued, without waiting for an optimizer step. Only the reward signals cross the wire, never token data.
 
+### One job per session
+
+Each `taskset.run()` call mints its own job. A multi-step training loop should
+report as one arc: open a job with `Job.start()` and pass it to every batch —
+the runs accumulate under one id:
+
+```python
+from hud.eval import Job
+
+session = await Job.start("letters-train", group=16)
+for step in range(10):
+    batch_start = len(session.runs)
+    await taskset.run(agent, job=session)          # group defaults to the job's
+    await trainer.reward(session.runs[batch_start:])
+```
+
 ### Tuning the run
 
 `TrainingConfig` carries the managed-tier knobs:

@@ -1,8 +1,8 @@
-"""``hud dev`` — serve a v6 :class:`~hud.environment.Environment` locally.
+"""``hud serve`` — serve a v6 :class:`~hud.environment.Environment` locally.
 
-In v6, ``hud dev`` brings up an environment's control channel (tcp JSON-RPC) so
-agents can connect to it. The legacy MCP-server hot-reload / Docker / inspector
-mode is no longer supported.
+In v6, ``hud serve`` brings up an environment's control channel (tcp JSON-RPC)
+so agents can connect to it. ``hud dev`` is a deprecated alias. The legacy
+MCP-server hot-reload / Docker / inspector mode is no longer supported.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _load_environment(module: str | None) -> Any:
         return None
 
 
-def _serve_environment(env: Any, port: int) -> None:
+def _serve_environment(env: Any, host: str, port: int) -> None:
     """Serve an ``Environment``'s control channel (tcp JSON-RPC) until interrupted."""
     hud_console.section_title("Environment")
     hud_console.console.print(
@@ -52,7 +52,7 @@ def _serve_environment(env: Any, port: int) -> None:
         highlight=False,
     )
     hud_console.console.print(
-        f"{hud_console.sym.ITEM} serving on tcp://127.0.0.1:{port}",
+        f"{hud_console.sym.ITEM} serving on tcp://{host}:{port}",
         highlight=False,
     )
     hud_console.console.print(
@@ -63,12 +63,12 @@ def _serve_environment(env: Any, port: int) -> None:
     from hud.environment.server import serve
 
     try:
-        asyncio.run(serve(env, "127.0.0.1", port))
+        asyncio.run(serve(env, host, port))
     except KeyboardInterrupt:
         hud_console.info("Stopped.")
 
 
-def dev_command(
+def serve_command(
     module: str | None = typer.Argument(
         None,
         help="Module exposing an Environment (e.g. 'env:env', 'env', or 'env.py').",
@@ -76,16 +76,19 @@ def dev_command(
     port: int = typer.Option(
         8765, "--port", "-p", help="Port to serve the environment control channel on."
     ),
+    host: str = typer.Option(
+        "127.0.0.1", "--host", help="Interface to bind (use 0.0.0.0 inside containers)."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs."),
 ) -> None:
     """🔥 Serve a HUD Environment locally (its tcp control channel).
 
     [not dim]Examples:
-        hud dev                # auto-detect env.py
-        hud dev env:env        # explicit module:attribute
-        hud dev env.py -p 9000 # serve on a specific port
+        hud serve                # auto-detect env.py
+        hud serve env:env        # explicit module:attribute
+        hud serve env.py -p 9000 # serve on a specific port
 
-    In v6, ``hud dev`` serves a :class:`hud.environment.Environment`. The old
+    In v6, ``hud serve`` serves a :class:`hud.environment.Environment`. The old
     MCP-server hot-reload / Docker dev mode is no longer supported.[/not dim]
     """
     if verbose:
@@ -99,10 +102,10 @@ def dev_command(
             f"No HUD Environment found for {module or 'env.py'}.",
         )
         hud_console.info(
-            "In v6, `hud dev` serves a `hud.environment.Environment` "
+            "In v6, `hud serve` serves a `hud.environment.Environment` "
             "(e.g. `env = Environment(name=...)` in env.py). "
             "MCP-server hot-reload mode is no longer supported.",
         )
         raise typer.Exit(1)
 
-    _serve_environment(env, port)
+    _serve_environment(env, host, port)

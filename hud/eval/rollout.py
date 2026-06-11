@@ -5,12 +5,17 @@ is its record: the live handle whose lifecycle the atom drives — ``prompt``
 (from ``tasks.start`` on enter), the ``trace`` the agent fills (its answer is
 ``run.trace.content``), and the ``grade`` (from ``tasks.grade`` on exit)::
 
-    run = await rollout(task, agent, on=spawn("env.py"))
-    run = await task.run(agent, on=spawn("env.py"))  # same call, method sugar
+    run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
 
-``Taskset.run`` is the batch scheduler over this atom; ``Chat`` and
-``AgentTool`` call it per turn / per invocation. The only paths that bypass it
-are deliberate: ``hud task`` CLI (split start/grade lifecycle over raw RPCs)
+The engine owns the whole lifecycle — acquire the placement, connect, start
+the task, drive the agent, grade and tear down — and the task row stays an
+argument, never a participant. There are no standalone traces: every rollout
+reports under a job — the batch job the scheduler threads through ``job_id``,
+or a single-run job the atom registers itself. ``Taskset.run`` is the
+scheduler over this atom (and ``Task.run`` its single-task form); ``Chat``
+and ``AgentTool`` call the atom per turn / per invocation. The only paths
+that bypass it are deliberate: ``hud task`` CLI (split start/grade lifecycle
+over raw RPCs, composing :func:`hud.clients.connect` + :class:`Run` directly)
 and harbor's prompt-only materialization.
 """
 
@@ -21,18 +26,19 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
+from hud.clients import connect
 from hud.types import Trace
 
-from .config import active
-from .job import trace_enter, trace_exit
+from .job import job_enter, trace_enter, trace_exit
+from .runtime import HUDRuntime
 
 if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
-    from hud.environment.runtime import Provider
 
+    from .runtime import Provider
     from .task import Task
 
 logger = logging.getLogger("hud.eval.rollout")
@@ -83,7 +89,7 @@ class Run:
         #: Batch this run belongs to (set by the runner); platform job + GRPO group.
         self.job_id: str | None = None
         self.group_id: str | None = None
-        # Written by ``Task.session`` once placement is acquired.
+        # Written by :func:`rollout` once placement is acquired.
         self._runtime: str | None = None
 
     @property
@@ -155,37 +161,47 @@ async def rollout(
     task: Task,
     agent: Agent,
     *,
-    on: Provider | None = None,
+    runtime: Provider | None = None,
     job_id: str | None = None,
     group_id: str | None = None,
 ) -> Run:
     """Drive one task to a graded :class:`Run` (the rollout atom).
 
-    ``on`` is the placement provider — explicit beats the ambient
-    :func:`hud.eval.configure` scope, which beats HUD-hosted provisioning by
-    env name. The agent fills ``run.trace``; grading happens on session exit
+    ``runtime`` is the placement provider; left unset it defaults to
+    HUD-hosted provisioning by env name (:class:`~hud.eval.runtime.HUDRuntime`).
+    Each rollout acquires one fresh substrate, connects, and starts
+    the task; the agent fills ``run.trace``; grading happens on exit
     (``run.reward``). ``job_id``/``group_id`` are batch identities threaded by
-    the scheduler, recorded on the trace. The per-rollout ``trace_id`` is
+    the scheduler; there are no standalone traces, so when no ``job_id`` is
+    given the atom registers a single-run job itself. The per-rollout
+    ``trace_id`` is
     bound into the trace context (so ``@instrument`` spans attribute to it —
     always, even with telemetry off, for local training) and the trace is
     reported to HUD.
 
     Failures are isolated so one bad rollout never collapses a batch, without
-    erasing evidence: a failure *before* the session is live (provision,
+    erasing evidence: a failure *before* the run is live (provision,
     connect, start) yields a synthesized :meth:`Run.failed`; a failure
     *mid-run* keeps the real run — prompt, placement record, and the partial
     trace the agent built — marked as errored.
     """
     from hud.telemetry.context import set_trace_context
 
-    on = on or active().on
+    provider = runtime or HUDRuntime()
+    if job_id is None:  # no standalone traces: a lone rollout is a job of one
+        job_id = uuid.uuid4().hex
+        await job_enter(job_id, name=task.id, group=1)
     trace_id = uuid.uuid4().hex
     with set_trace_context(trace_id):
         await trace_enter(trace_id, job_id=job_id, group_id=group_id)
         run: Run | None = None
         try:
-            async with task.session(on=on) as run:
-                await agent(run)
+            async with provider(task) as addr, connect(addr) as client:
+                live = Run(client, task.id, task.args)
+                live._runtime = addr.url  # the placement record for the receipt
+                async with live:  # start on enter; grade on exit
+                    run = live  # bound only once live: an earlier failure synthesizes
+                    await agent(run)
         except TimeoutError:
             raise
         except Exception as exc:
@@ -196,6 +212,7 @@ async def rollout(
                 logger.warning("rollout failed mid-run: %s", exc)
                 run.trace.isError = True
                 run.trace.content = str(exc)
+        assert run is not None  # the body bound it, or the handler synthesized it
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id

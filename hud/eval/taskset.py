@@ -5,7 +5,7 @@ schedules the rollout engine over them. HUD job/trace reporting lives in
 :mod:`hud.eval.job`; platform persistence in :mod:`hud.eval.sync`::
 
     job = await Taskset("bugs", [fix_bug(difficulty=d) for d in range(5)]).run(
-        agent, on=spawn("env.py")
+        agent, runtime=LocalRuntime("env.py")
     )
 """
 
@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 
 from hud.utils.platform import PlatformClient
 
-from .config import active
 from .job import Job, job_enter
 from .rollout import rollout
 from .sync import fetch_taskset_tasks, resolve_taskset_id
@@ -29,9 +28,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from hud.agents.base import Agent
-    from hud.environment.runtime import Provider
 
     from .rollout import Run
+    from .runtime import Provider
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
@@ -63,7 +62,7 @@ class Taskset:
         """Load a taskset from ``.py`` source, a directory, or JSON/JSONL data.
 
         Data rows reference envs by bare name and are runnable as-is —
-        placement is an execution-time concern (``run(agent, on=...)``).
+        placement is an execution-time concern (``run(agent, runtime=...)``).
         """
         source = Path(path)
         if source.suffix in {".json", ".jsonl"}:
@@ -99,7 +98,8 @@ class Taskset:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         suffix = target.suffix.lower()
-        data = [task.to_dict() for task in self]
+        # Compact rows: unset metadata is omitted (defaults restore it on load).
+        data = [task.model_dump(exclude_none=True) for task in self]
 
         if suffix == ".json":
             target.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
@@ -147,7 +147,7 @@ class Taskset:
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ValueError(f"{path}: each task entry must be an object")
-            tasks.append(Task.from_dict(entry))
+            tasks.append(Task.model_validate(entry))
         return tasks
 
     @staticmethod
@@ -193,31 +193,34 @@ class Taskset:
 
     def environment_names(self) -> set[str]:
         """Return env names referenced by tasks in this taskset."""
-        return {task.env.name for task in self}
+        return {task.env for task in self}
 
     async def run(
         self,
         agent: Agent,
         *,
-        on: Provider | None = None,
+        runtime: Provider | None = None,
         group: int | None = None,
         max_concurrent: int | None = None,
+        job: Job | None = None,
     ) -> Job:
         """Run every task x ``group`` with an optional concurrency cap.
 
-        One shared (stateless) ``agent`` drives every run; ``on`` is the
+        One shared (stateless) ``agent`` drives every run; ``runtime`` is the
         placement provider, called once per rollout with that rollout's task
         row — so one provider serves a mixed-env taskset and can size each
-        substrate per row. Arguments left unset resolve from the ambient
-        :func:`hud.eval.configure` scope (then ``group=1``, no cap,
-        provision-by-env-name placement). Registers one HUD job as the
-        batch/platform receipt and reports each run's trace under it. Returned
-        ``job.runs`` preserves expansion order (task-major, then group).
+        substrate per row (left unset: HUD-hosted provisioning by env name).
+        Registers one HUD job as the platform receipt and reports each run's
+        trace under it — or, given an open ``job`` (:meth:`Job.start`),
+        accumulates this batch into it instead, so a longer arc (a training
+        session) spans many calls under one id. Returned ``job.runs``
+        preserves expansion order (task-major, then group).
         """
-        config = active().override(on=on, group=group, max_concurrent=max_concurrent)
-        on = config.on
-        group = config.group or 1
-        max_concurrent = config.max_concurrent
+        group = group or (job.group if job else 1)
+        if group < 1:
+            raise ValueError("group must be >= 1")
+        if max_concurrent is not None and max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
 
         # Tasks are pure rows, shared across rollouts; the ``group`` repeats of
         # one task share a group_id (the GRPO group).
@@ -227,17 +230,18 @@ class Taskset:
             group_id = uuid.uuid4().hex
             expanded.extend((task, group_id) for _ in range(group))
 
-        job_id = uuid.uuid4().hex
-        name = _job_name(task_list, group)
-        await job_enter(job_id, name=name, group=group)
+        if job is None:
+            job = Job(id=uuid.uuid4().hex, name=_job_name(task_list, group), group=group)
+            await job_enter(job.id, name=job.name, group=group)
+        job_id = job.id
 
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _one(task: Task, group_id: str) -> Run:
             if sem is None:
-                return await rollout(task, agent, on=on, job_id=job_id, group_id=group_id)
+                return await rollout(task, agent, runtime=runtime, job_id=job_id, group_id=group_id)
             async with sem:
-                return await rollout(task, agent, on=on, job_id=job_id, group_id=group_id)
+                return await rollout(task, agent, runtime=runtime, job_id=job_id, group_id=group_id)
 
         logger.info(
             "running %d rollouts (%d tasks x %d group)%s",
@@ -246,8 +250,8 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        runs = list(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
-        return Job(id=job_id, name=name, runs=runs, group=group)
+        job.runs.extend(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
+        return job
 
 
 __all__ = ["Job", "Taskset"]

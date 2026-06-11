@@ -22,22 +22,20 @@ class TestInitModule:
 
         expected = [
             "Chat",
+            "DockerRuntime",
             "Environment",
             "Grade",
             "Job",
+            "HUDRuntime",
             "Run",
-            "RunConfig",
             "Runtime",
+            "LocalRuntime",
             "SyncPlan",
             "Task",
             "Taskset",
             "Trace",
-            "configure",
             "connect",
             "instrument",
-            "provision",
-            "spawn",
-            "task",
         ]
 
         assert set(hud.__all__) == set(expected)

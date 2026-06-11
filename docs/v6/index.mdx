@@ -43,11 +43,11 @@ Because the protocol only exposes capabilities (never a fixed agent), an environ
 Here's the whole loop in one file: an environment that gives the agent a shell and files, and a task that asks it to make a test suite pass and grades the result by running the tests.
 
 ```python env.py
-from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.graders import BashGrader
 
-env = Environment(name="coder", capabilities=[Capability.shell("/workspace")])
+env = Environment(name="coder")
+env.workspace("/workspace")
 
 @env.task()
 async def fix_tests(target: str = "tests/"):

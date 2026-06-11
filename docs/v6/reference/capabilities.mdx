@@ -20,7 +20,7 @@ from hud.capabilities import Capability
 
 ## The `Capability` dataclass
 
-A capability is `(name, protocol, url, params)` — declarative wire metadata for one slice of env access. A **concrete** declaration carries the URL of a daemon you run yourself (`Capability.cdp(url=...)`). A declaration with an empty `url` is **backed**: the environment runs the daemon and resolves the address when a client connects (`Capability.shell(root)` → a managed [`Workspace`](#workspace)).
+A capability is `(name, protocol, url, params)` — concrete wire data for one slice of env access, always carrying the real address of something serving the protocol. For a service that already exists, pass it to the constructor (`Capability.cdp(url=...)`); for a daemon the *environment* runs itself, publish it at [serve time](#environment-managed-capabilities).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -31,27 +31,55 @@ A capability is `(name, protocol, url, params)` — declarative wire metadata fo
 
 `cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it.
 
+## Environment-managed capabilities
+
+A daemon the environment runs itself can't have an address at declaration time — so it publishes one when the env serves. Start it in an `@env.initialize` hook and call `env.add_capability(...)` with its concrete wire data; tear it down in an `@env.shutdown` hook. For the common shell case, `env.workspace(root)` wires all of that in one line:
+
+```python
+from hud.environment import Environment
+
+env = Environment(name="coder")
+env.workspace("/workspace")   # starts a Workspace + publishes "shell" (ssh/2) at serve
+```
+
+Attaching is pure declaration — nothing is generated or bound at import time. The workspace comes up when the env starts (before any client's `hello`), stays up across connections, and stops with the env.
+
+Publication is protocol-agnostic — any daemon works, so a managed browser needs no SDK type:
+
+```python
+from hud.capabilities import Capability
+
+env = Environment(name="web")
+
+@env.initialize
+async def _up():
+    global proc
+    proc = await launch_chromium()
+    env.add_capability(Capability.cdp(name="browser", url=f"ws://127.0.0.1:{proc.port}"))
+
+@env.shutdown
+async def _down():
+    proc.kill()
+```
+
+`env.add_capability` replaces any same-named entry, so re-serving an env overwrites stale addresses instead of duplicating them.
+
+### Bindings are always reachable
+
+The manifest a client receives carries *client-reachable* addresses. An address resolved on the substrate's loopback (a managed workspace, a browser in the same container) can't be dialed across a container or sandbox boundary — so the client transparently forwards it: the binding's url points at a local stand-in, and each connection to it tunnels through the env's control port (`ssh -L` style). Non-loopback addresses pass through untouched. This is why a container only ever publishes **one** port — the control channel.
+
 ## Protocol factories
 
 Build a capability with the factory for its protocol; each normalizes shorthand URLs and fills sane defaults.
-
-### `Capability.shell`
-
-```text
-Capability.shell(root, *, name="shell", network=False,
-                 guest_path="/workspace", user="agent")
-```
-
-A managed shell (`ssh/2`, backed): declares *intent* — a sandboxed shell rooted at `root` — not an address. Nothing is generated or bound until a client connects, when the environment serves a [`Workspace`](#workspace) for it. This is the usual way to give an agent shell + file access.
 
 ### `Capability.ssh`
 
 ```text
 Capability.ssh(*, name="shell", url, user="agent", host_pubkey,
-               client_key_path=None, shell=None)
+               client_key=None, client_key_path=None, shell=None)
 ```
 
-An SSH daemon you run yourself (`ssh/2`, concrete), with publickey auth. `shell` declares the remote shell (`bash`, `powershell`, `cmd`); defaults to auto-detect. For a managed sandbox, declare [`Capability.shell`](#capability-shell) instead.
+An SSH daemon you run yourself (`ssh/2`), with publickey auth. `client_key` carries the private key *content* (valid from anywhere — what a managed daemon hands its client); `client_key_path` points at a key file and only works when client and daemon share a filesystem. `shell` declares the remote shell (`bash`, `powershell`, `cmd`); defaults to auto-detect. For a sandbox the env manages itself, use `env.workspace(root)` (a [`Workspace`](#workspace)) instead.
 
 ### `Capability.cdp`
 
@@ -87,16 +115,20 @@ A rosbridge-compatible WebSocket (default port `9090`).
 
 ## Workspace
 
-`Workspace` is the managed backing behind `Capability.shell`: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). You normally never construct one — declare `Capability.shell(root)` and the environment builds the workspace (keys, socket, accept loop) when a client connects, tearing it down on `env.stop()`.
+`Workspace` is the standard shell daemon: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). Attach one with `env.workspace(root, ...)` and the environment brings it up (keys, socket, accept loop) when it serves, tearing it down on `env.stop()`. Extra kwargs configure the workspace — mounts, network, env vars, guest path, fixed ports, your own keys:
 
 ```python
-from hud.capabilities import Capability
-from hud.environment import Environment
+from hud.environment import Environment, Mount
 
-env = Environment(name="coder", capabilities=[Capability.shell("/workspace")])
+env = Environment(name="coder")
+env.workspace(
+    "/workspace",
+    network=True,
+    mounts=[Mount("ro", src="/data", dst="/data")],
+)
 ```
 
-For full control (extra `mounts`, fixed ports, your own keys), construct a `Workspace` directly, start it, and publish `ws.capability()` as a concrete `ssh` capability:
+To run one yourself (outside an env), drive the lifecycle directly and publish `ws.capability()` as a concrete `ssh` capability:
 
 | Member | Description |
 |--------|-------------|

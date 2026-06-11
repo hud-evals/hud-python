@@ -10,9 +10,9 @@ Harbor task structure (terminal-bench layout)::
     └── solution/               # optional (ignored)
 
 :func:`load` parses a task dir (or a dataset of them) into rows sharing one
-bare :class:`~hud.environment.Environment` per distinct ``environment/`` build
-context — no codegen, no roundtrip. Like every row, the result is runnable
-once a placement is supplied (``on=Runtime(url)`` against a served substrate
+env name per distinct ``environment/`` build context — no codegen, no
+roundtrip. Like every row, the result is runnable
+once a placement is supplied (``runtime=Runtime(url)`` against a served substrate
 today). Providers receive the row being placed, so a docker provider that
 builds and runs each row's ``environment/`` image is the named follow-up —
 expressible without engine changes.
@@ -26,7 +26,7 @@ Export lifecycle mapping (HUD setup/evaluate → Harbor image/verifier):
 
 * The env's build context is copied into ``environment/`` and a ``hud_entrypoint.sh``
   is baked in as the image ENTRYPOINT (Harbor overrides CMD with ``sleep infinity``).
-  At container start it serves the env control channel (``hud dev``) and runs the
+  At container start it serves the env control channel (``hud serve``) and runs the
   task's **setup** (``hud task start``), which parks the paused run on the env so a
   later connection can grade it, then ``exec "$@"`` into the container command.
 * The agent then works in the container and writes its answer to ``answer_file``.
@@ -46,7 +46,7 @@ import logging
 import re
 import shutil
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -92,8 +92,8 @@ def load(path: str | Path) -> Taskset:
     """Load a Harbor task dir (or dataset dir) into a :class:`Taskset`.
 
     One row per task dir (``id`` = the dir name, ``task.toml`` ``[metadata]``
-    as columns); rows share one bare ``Environment`` per distinct
-    ``environment/`` build context (content-hashed), named after the dataset.
+    as columns); rows share one env name per distinct ``environment/`` build
+    context (content-hashed), derived from the dataset name.
     """
     root = Path(path).resolve()
     if _is_harbor_task(root):
@@ -121,12 +121,12 @@ def load(path: str | Path) -> Taskset:
     base_name = _slugify(dataset_name)
     tasks: list[Task] = []
     for idx, group in enumerate(sorted_groups, start=1):
-        env = Environment(base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}")
+        env_name = base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}"
         for harbor_task in group:
             metadata = harbor_task.config.get("metadata")
             tasks.append(
                 Task(
-                    env=env,
+                    env=env_name,
                     id=harbor_task.task_id,
                     columns=dict(metadata) if isinstance(metadata, dict) and metadata else None,
                 )
@@ -213,18 +213,18 @@ async def _materialize_prompt(env: Environment, task: str, args: dict[str, Any])
     return prompt if isinstance(prompt, str) else json.dumps(prompt, indent=2, default=str)
 
 
-def _resolve_env(task: Task) -> Environment:
-    """Resolve a task's env to a local, authored env that defines the task.
+def _resolve_env(task: Task, authored: dict[str, Environment]) -> Environment:
+    """Resolve a task row's env name to a local, authored env defining the task.
 
-    Tasks from a Python source carry the authored ``Environment`` directly;
-    rows loaded from a tasks file are materialized against the envs defined
-    next to it. A row whose env reference matched nothing can't be exported.
+    Rows reference envs by name; export materializes prompts in-process, so
+    the authored ``Environment`` must be defined in (or next to) the task
+    source. A row whose name matches nothing exportable fails loudly.
     """
-    env = task.env
-    if task.id not in env.tasks:
+    env = authored.get(task.env)
+    if env is None or task.id not in env.tasks:
         raise TypeError(
             f"harbor export needs a local env defining task {task.id!r} "
-            f"(an env.py named {env.name!r} next to the tasks); none was found.",
+            f"(an env.py named {task.env!r} next to the tasks); none was found.",
         )
     return env
 
@@ -241,7 +241,7 @@ _ENTRYPOINT_SH = """\
 # reaches the parked run on 127.0.0.1:{port} to grade.
 set -u
 
-hud dev env:env --port {port} &
+hud serve env:env --port {port} &
 
 # Wait for the control channel to accept connections (python is always present).
 python3 -c 'import socket, sys, time
@@ -395,19 +395,15 @@ async def export(
     source_dir = src.parent if src.is_file() else src
 
     tasks = list(Taskset.from_file(src))
-    if src.suffix in (".json", ".jsonl"):
-        # Data rows hold bare name references; export needs the authored envs
-        # (defined next to the tasks file) to materialize prompts in-process.
-        authored = {
-            env.name: env
-            for module in iter_modules(source_dir)
-            for env in vars(module).values()
-            if isinstance(env, Environment)
-        }
-        tasks = [
-            replace(task, env=authored[task.env.name]) if task.env.name in authored else task
-            for task in tasks
-        ]
+    # Rows reference envs by name; collect the authored envs (defined in the
+    # source, or next to a tasks file) to materialize prompts in-process.
+    scan = source_dir if src.suffix in (".json", ".jsonl") else src
+    authored = {
+        env.name: env
+        for module in iter_modules(scan)
+        for env in vars(module).values()
+        if isinstance(env, Environment)
+    }
 
     dockerfile = _find_dockerfile(source_dir)
     if dockerfile is None:
@@ -418,7 +414,7 @@ async def export(
 
     created: list[Path] = []
     for task in tasks:
-        env = _resolve_env(task)
+        env = _resolve_env(task, authored)
         _check_capabilities(env)
 
         slug = task.slug or task.default_slug()

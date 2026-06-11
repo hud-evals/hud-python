@@ -1,29 +1,25 @@
 """``Task`` construction, the portable row shape, and taskset collection.
 
-``to_dict``/``from_dict`` are the portable identity used by ``hud sync`` and the
-JSON/JSONL taskset path: env serializes as a bare name reference and
-deserializes to a declarative ``Environment(name)``. Placement is never part of
-the row — without an ``on=`` provider, execution defaults to the (not yet
-wired) HUD-hosted provisioner, which raises a precise error.
+The model is the row: plain pydantic (``model_validate``/``model_dump``) is the
+whole codec for ``hud sync`` and the JSON/JSONL taskset path. ``env`` is carried
+as its name, the join key to whatever placement can bring that environment up.
+Placement is never part of the row — without an ``runtime=`` provider, execution
+defaults to the (not yet wired) HUD-hosted provisioner, which raises a precise
+error.
 """
 
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from hud.environment import Environment
-from hud.eval import Task, Taskset, task
+from hud.eval import Task, Taskset
 
-
-def test_task_helper_collects_args_and_metadata() -> None:
-    env = Environment("e")
-    v = task(env, "task", slug="my-slug", validation=[{"name": "submit"}], x=1, y=2)
-    assert v.id == "task"
-    assert v.args == {"x": 1, "y": 2}
-    assert v.slug == "my-slug"
-    assert v.validation == [{"name": "submit"}]
+if TYPE_CHECKING:
+    from hud.agents.base import Agent
 
 
 def test_env_task_call_returns_public_task() -> None:
@@ -38,58 +34,56 @@ def test_env_task_call_returns_public_task() -> None:
     assert isinstance(runnable, Task)
     assert runnable.id == "solve"
     assert runnable.args == {"n": 3}
-    assert runnable.env is env
+    assert runnable.env == "e"  # the row carries the env's name, not the object
 
 
 def test_default_slug_is_task_id_without_args() -> None:
-    v = Task(env=Environment("e"), id="solve")
+    v = Task(env="e", id="solve")
     assert v.default_slug() == "solve"
 
 
 def test_default_slug_is_deterministic_with_args() -> None:
-    env = Environment("e")
-    a = Task(env=env, id="solve", args={"b": 2, "a": 1})
-    b = Task(env=env, id="solve", args={"a": 1, "b": 2})  # key order differs
+    a = Task(env="e", id="solve", args={"b": 2, "a": 1})
+    b = Task(env="e", id="solve", args={"a": 1, "b": 2})  # key order differs
     assert a.default_slug() == b.default_slug()  # stable: keys sorted
     assert a.default_slug().startswith("solve-")
-    assert a.default_slug() != Task(env=env, id="solve", args={"a": 9}).default_slug()
+    assert a.default_slug() != Task(env="e", id="solve", args={"a": 9}).default_slug()
 
 
 # ─── the portable row shape ────────────────────────────────────────────
 
 
 def test_env_serializes_as_name_reference() -> None:
-    v = task(Environment("team-intel"), "ask", x=1)
-    data = v.to_dict()
-    assert data["env"] == {"name": "team-intel"}
-    assert data["task"] == "ask"
+    v = Task(env="team-intel", id="ask", args={"x": 1})
+    data = v.model_dump(exclude_none=True)
+    assert data["env"] == "team-intel"
+    assert data["id"] == "ask"
     assert data["args"] == {"x": 1}
 
 
-def test_to_dict_only_includes_set_metadata() -> None:
-    data = Task(env=Environment("e"), id="t").to_dict()
-    assert set(data) == {"env", "task", "args"}  # no None slug/validation/etc.
+def test_compact_dump_omits_unset_metadata() -> None:
+    data = Task(env="e", id="t").model_dump(exclude_none=True)
+    assert set(data) == {"env", "id", "args"}  # no None slug/validation/etc.
 
-    data2 = task(Environment("e"), "t", slug="s", columns={"tier": "easy"}).to_dict()
+    data2 = Task(env="e", id="t", slug="s", columns={"tier": "easy"}).model_dump(exclude_none=True)
     assert data2["slug"] == "s"
     assert data2["columns"] == {"tier": "easy"}
 
 
-def test_roundtrip_is_stable_through_from_dict() -> None:
-    original = task(
-        Environment("team-intel"),
-        "ask",
+def test_roundtrip_is_stable_through_plain_pydantic() -> None:
+    original = Task(
+        env="team-intel",
+        id="ask",
+        args={"difficulty": 3},
         slug="ask-v1",
         validation=[{"name": "submit", "arguments": {"answer": "x"}}],
         agent_config={"system_prompt": "be precise"},
         columns={"tier": "hard"},
-        difficulty=3,
-    ).to_dict()
+    ).model_dump(exclude_none=True)
 
-    rebuilt = Task.from_dict(original)
+    rebuilt = Task.model_validate(original)
 
-    assert isinstance(rebuilt.env, Environment)  # bare declarative reference
-    assert rebuilt.env.name == "team-intel"
+    assert rebuilt.env == "team-intel"  # the name is the reference
     assert rebuilt.id == "ask"
     assert rebuilt.args == {"difficulty": 3}
     assert rebuilt.slug == "ask-v1"
@@ -97,36 +91,42 @@ def test_roundtrip_is_stable_through_from_dict() -> None:
     assert rebuilt.agent_config == {"system_prompt": "be precise"}
     assert rebuilt.columns == {"tier": "hard"}
     # ...and re-serializing yields the same portable dict.
-    assert rebuilt.to_dict() == original
+    assert rebuilt.model_dump(exclude_none=True) == original
 
 
-def test_from_dict_validates_shape() -> None:
+def test_row_validation_rejects_malformed_entries() -> None:
+    # pydantic.ValidationError is a ValueError: callers catch one exception type.
     with pytest.raises(ValueError, match="env"):
-        Task.from_dict({"task": "t"})
-    with pytest.raises(ValueError, match="task id"):
-        Task.from_dict({"env": {"name": "e"}})
+        Task.model_validate({"id": "t"})
+    with pytest.raises(ValueError, match="env"):
+        Task.model_validate({"env": {"name": "e"}, "id": "t"})  # an object is not a name
+    with pytest.raises(ValueError, match="id"):
+        Task.model_validate({"env": "e"})
     with pytest.raises(ValueError, match="args"):
-        Task.from_dict({"env": {"name": "e"}, "task": "t", "args": "nope"})
+        Task.model_validate({"env": "e", "id": "t", "args": "nope"})
 
 
 # ─── placement ─────────────────────────────────────────────────────────
 
 
 async def test_no_placement_defaults_to_provision_stub_with_precise_error() -> None:
-    v = task(Environment("hosted-env"), "solve", n=1)
-    with pytest.raises(NotImplementedError, match=r"'hosted-env'.*on=spawn") as err:
-        async with v.session():
-            pass
-    assert "Runtime(url)" in str(err.value)
+    v = Task(env="hosted-env", id="solve", args={"n": 1})
+    # Placement fails before launch, so the agent is never invoked and the
+    # rollout comes back as an isolated failed Run carrying the precise error.
+    job = await v.run(cast("Agent", object()))
+    (run,) = job.runs
+    assert run.trace.isError
+    assert "'hosted-env'" in (run.trace.content or "")
+    assert "runtime=LocalRuntime" in (run.trace.content or "")
+    assert "Runtime(url)" in (run.trace.content or "")
 
 
 # ─── taskset collection ────────────────────────────────────────────────
 
 
 def test_taskset_is_ordered_and_keyed_by_slug() -> None:
-    env = Environment("e")
-    first = task(env, "solve", slug="first", n=1)
-    second = task(env, "solve", slug="second", n=2)
+    first = Task(env="e", id="solve", args={"n": 1}, slug="first")
+    second = Task(env="e", id="solve", args={"n": 2}, slug="second")
 
     tasks = Taskset("demo", [first, second])
 
@@ -139,10 +139,9 @@ def test_taskset_is_ordered_and_keyed_by_slug() -> None:
 
 
 def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:
-    env = Environment("e")
     entries = [
-        task(env, "solve", slug="one", n=1).to_dict(),
-        task(env, "solve", slug="two", n=2).to_dict(),
+        Task(env="e", id="solve", args={"n": 1}, slug="one").model_dump(exclude_none=True),
+        Task(env="e", id="solve", args={"n": 2}, slug="two").model_dump(exclude_none=True),
     ]
 
     json_path = tmp_path / "tasks.json"
@@ -155,25 +154,25 @@ def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:
 
 
 def test_file_roundtrip_keeps_rows_and_env_names(tmp_path) -> None:
-    env = Environment("authored")
-    authored = [task(env, "solve", slug="one", n=1), task(env, "solve", slug="two", n=2)]
+    authored = [
+        Task(env="authored", id="solve", args={"n": 1}, slug="one"),
+        Task(env="authored", id="solve", args={"n": 2}, slug="two"),
+    ]
     out = Taskset("demo", authored).to_file(tmp_path / "tasks.json")
 
     loaded = Taskset.from_file(out)
 
     assert [t.slug for t in loaded] == ["one", "two"]
-    # Rows come back with bare name-reference envs, not the authored object.
-    assert all(t.env.name == "authored" and t.env is not env for t in loaded)
-    assert [t.to_dict() for t in loaded] == [t.to_dict() for t in authored]
+    assert all(t.env == "authored" for t in loaded)
+    assert list(loaded) == authored  # rows survive the file intact (value equality)
 
 
 def test_taskset_to_file_writes_json_and_jsonl(tmp_path) -> None:
-    env = Environment("e")
     taskset = Taskset(
         "demo",
         [
-            task(env, "solve", slug="one", columns={"tier": "easy"}, n=1),
-            task(env, "solve", slug="two", columns={"tier": "hard"}, n={"x": 2}),
+            Task(env="e", id="solve", args={"n": 1}, slug="one", columns={"tier": "easy"}),
+            Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two", columns={"tier": "hard"}),
         ],
     )
 
@@ -193,10 +192,9 @@ def test_taskset_from_module_collects_public_tasks(tmp_path) -> None:
     module = tmp_path / "local_tasks.py"
     module.write_text(
         """
-from hud import Environment, task
+from hud import Task
 
-env = Environment("module-env")
-local = task(env, "solve", slug="local", n=1)
+local = Task(env="module-env", id="solve", args={"n": 1}, slug="local")
 """.strip(),
         encoding="utf-8",
     )
@@ -214,7 +212,7 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
                 "evalset_name": "Demo",
                 "tasks": {
                     "1": {
-                        "env": {"name": "e"},
+                        "env": {"name": "e"},  # the platform record shape, normalized on fetch
                         "scenario": "e:solve",
                         "args": {"n": 1},
                         "slug": "one",
@@ -231,6 +229,6 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
 
     assert taskset.name == "Demo"
     assert taskset["one"].id == "e:solve"
-    assert taskset["one"].env.name == "e"
+    assert taskset["one"].env == "e"
     assert taskset["one"].args == {"n": 1}
     assert taskset["one"].columns == {"tier": "easy"}

@@ -9,8 +9,20 @@ from __future__ import annotations
 from . import patches as _patches  # noqa: F401
 from ._legacy import install as _install_v5_compat
 from .clients import connect
-from .environment import Environment, Runtime, provision, spawn
-from .eval import Chat, Grade, Job, Run, RunConfig, SyncPlan, Task, Taskset, configure, task
+from .environment import Environment
+from .eval import (
+    Chat,
+    DockerRuntime,
+    Grade,
+    HUDRuntime,
+    Job,
+    LocalRuntime,
+    Run,
+    Runtime,
+    SyncPlan,
+    Task,
+    Taskset,
+)
 from .telemetry.instrument import instrument
 from .types import Trace
 
@@ -18,22 +30,20 @@ _install_v5_compat()
 
 __all__ = [
     "Chat",
+    "DockerRuntime",
     "Environment",
     "Grade",
+    "HUDRuntime",
     "Job",
+    "LocalRuntime",
     "Run",
-    "RunConfig",
     "Runtime",
     "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
-    "configure",
     "connect",
     "instrument",
-    "provision",
-    "spawn",
-    "task",
 ]
 
 try:

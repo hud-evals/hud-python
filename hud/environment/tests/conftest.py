@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from hud.clients import connect
-from hud.environment.runtime import _local
+from hud.eval.runtime import _local
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

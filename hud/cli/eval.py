@@ -549,7 +549,7 @@ def _build_agent(cfg: EvalConfig) -> Any:
 
 
 def _spawn_target(source: Path) -> Path:
-    """The path the ``spawn`` provider serves: the source itself for ``.py``
+    """The path the ``LocalRuntime`` provider serves: the source itself for ``.py``
     files and directories, the surrounding directory for JSON/JSONL data files
     (the env's ``.py`` source lives next to the tasks file)."""
     resolved = source.resolve()
@@ -562,15 +562,14 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     """Run evaluation on the Env/Task/Taskset/Run flow.
 
     Loads a ``Taskset`` from a Python source or JSON/JSONL taskset and runs it
-    on spawned local substrates (``on=spawn(source)`` — each rollout serves
+    on spawned local substrates (``runtime=LocalRuntime(source)`` — each rollout serves
     its own row's env, so mixed-env tasksets are one job). Returns the ``Job``
     receipt containing the live execution ``Run`` results.
     """
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    from hud.environment import spawn
-    from hud.eval import Taskset
+    from hud.eval import LocalRuntime, Taskset
 
     source_path = Path(cfg.source)
     if not source_path.exists():
@@ -631,7 +630,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     # per rollout, each serving its own row's env.
     job = await taskset.run(
         agent,
-        on=spawn(target),
+        runtime=LocalRuntime(target),
         group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
     )

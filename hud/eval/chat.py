@@ -24,17 +24,19 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import ContentBlock, TextContent
 
 from hud.types import Trace  # noqa: TC001 - used as return type
 
+from .job import Job
+from .rollout import rollout
+
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from hud.environment.runtime import Provider
 
+    from .runtime import Provider
     from .task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -80,7 +82,7 @@ class Chat:
         agent: Agent,
         /,
         *,
-        on: Provider | None = None,
+        runtime: Provider | None = None,
     ) -> None:
         """Initialize Chat.
 
@@ -91,14 +93,17 @@ class Chat:
                 on each :meth:`send`.
             agent: The :class:`~hud.agents.base.Agent` driving every turn
                 (stateless per run, e.g. ``create_agent("claude-sonnet-4-5")``).
-            on: Placement provider for each turn's rollout (e.g.
-                ``spawn("env.py")``); defaults to HUD-hosted provisioning by
-                the task's env name.
+            runtime: Placement provider for each turn's rollout (e.g.
+                ``LocalRuntime("env.py")``); defaults to HUD-hosted provisioning
+                by the task's env name.
         """
         self._task = task
         self._agent = agent
-        self._on = on
+        self._runtime = runtime
         self.messages: list[dict[str, Any]] = []
+        #: The conversation's job — every turn's run reports under it
+        #: (started on the first ``send``).
+        self.job: Job | None = None
 
     async def send(self, message: MessageContent) -> Trace:
         """Send a user message and get the agent's response.
@@ -119,11 +124,13 @@ class Chat:
         # Rebuild the task with the running conversation as the ``messages`` arg,
         # then drive the agent through the rollout engine (the chat task yields
         # these messages as the prompt; see the messages input modality).
-        task = replace(
-            self._task,
-            args={**self._task.args, "messages": list(self.messages)},
+        task = self._task.model_copy(
+            update={"args": {**self._task.args, "messages": list(self.messages)}},
         )
-        run = await task.run(self._agent, on=self._on)
+        if self.job is None:  # one job spans the whole conversation
+            self.job = await Job.start(self._task.id)
+        run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
+        self.job.runs.append(run)
         result = run.trace
         if result.isError:
             # Don't record the failed turn as an assistant message.

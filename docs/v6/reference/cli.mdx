@@ -22,19 +22,21 @@ hud init my-env --dir envs      # create ./envs/my-env
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 
-### `hud dev`
+### `hud serve`
 
-Serve an environment's control channel locally (tcp JSON-RPC).
+Serve an environment's control channel locally (tcp JSON-RPC). `hud dev` is a
+deprecated alias.
 
 ```bash
-hud dev               # auto-detect env.py
-hud dev env:env       # explicit module:attribute
-hud dev env.py -p 9000
+hud serve               # auto-detect env.py
+hud serve env:env       # explicit module:attribute
+hud serve env.py -p 9000
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port`, `-p` | `8765` | Port to serve on. |
+| `--host` | `127.0.0.1` | Interface to bind (use `0.0.0.0` inside containers). |
 | `--verbose`, `-v` | — | Detailed logs. |
 
 ### `hud deploy`
@@ -58,7 +60,7 @@ hud deploy
 
 Run an agent over a local task source (a `.py`, directory, or JSON/JSONL file).
 Each rollout runs on a fresh local substrate spawned from the source (the
-`spawn` placement). To run a platform taskset locally, export it first:
+`LocalRuntime` placement). To run a platform taskset locally, export it first:
 `hud sync tasks <name> --export tasks.json`.
 
 ```bash
@@ -80,7 +82,7 @@ hud eval tasks.py claude --gateway --full
 
 ## Run a packaged image
 
-Attach to an env serving locally (e.g. inside a built image, or alongside `hud dev`), or spawn from source with `--source`.
+Attach to an env serving locally (e.g. inside a built image, or alongside `hud serve`), or spawn from source with `--source`.
 
 ```bash
 hud task list                          # what tasks are exposed

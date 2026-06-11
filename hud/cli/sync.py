@@ -58,7 +58,7 @@ def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
     col_keys = sorted({key for entry in entries for key in (entry.get("columns") or {})})
     fieldnames = [
         "slug",
-        "task",
+        "id",
         "env",
         *[f"arg:{key}" for key in arg_keys],
         *[f"col:{key}" for key in col_keys],
@@ -76,8 +76,8 @@ def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
             writer.writerow(
                 {
                     "slug": entry.get("slug") or "",
-                    "task": entry.get("task") or "",
-                    "env": (entry.get("env") or {}).get("name") or "",
+                    "id": entry.get("id") or "",
+                    "env": entry.get("env") or "",
                     **{f"arg:{key}": cell(args.get(key)) for key in arg_keys},
                     **{f"col:{key}": cell(cols.get(key)) for key in col_keys},
                 }
@@ -98,7 +98,7 @@ def _export_taskset(
         out = Path(output_path)
         if out.suffix.lower() == ".csv":
             out.parent.mkdir(parents=True, exist_ok=True)
-            _write_csv(out, [task.to_dict() for task in remote_taskset])
+            _write_csv(out, [task.model_dump(exclude_none=True) for task in remote_taskset])
         else:
             out = remote_taskset.to_file(out)
     except (HudException, ValueError) as e:

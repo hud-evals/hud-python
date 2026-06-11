@@ -13,12 +13,12 @@ We give the agent shell access to a directory of logs and traces, then ask for a
 ```python env.py
 from pathlib import Path
 
-from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.graders import LLMJudgeGrader
 
 ROOT = Path("/workspace/incident")
-env = Environment(name="ops-diagnostics", capabilities=[Capability.shell("/workspace")])
+env = Environment(name="ops-diagnostics")
+env.workspace("/workspace")
 
 @env.initialize
 async def _seed():

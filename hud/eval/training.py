@@ -5,8 +5,13 @@ the group, and POST ``{trace_id, advantage}`` to the backend (which holds the
 token-level trajectories keyed by ``trace_id`` and runs the optimizer)::
 
     trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
-    job = await Taskset("train", [task(x) for x in xs]).run(agent, group=16)
-    await trainer.reward(job.runs)
+    taskset = Taskset("train", [task(x) for x in xs])
+
+    session = await Job.start("train", group=16)  # one job spans the session
+    for _ in range(steps):
+        batch_start = len(session.runs)
+        await taskset.run(agent, job=session)
+        await trainer.reward(session.runs[batch_start:])
 """
 
 from __future__ import annotations

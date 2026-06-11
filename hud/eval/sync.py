@@ -124,10 +124,10 @@ def _record_to_task(record: dict[str, Any]) -> Task:
     env_name = env_data.get("name") if isinstance(env_data, dict) else None
     if not env_name and isinstance(task_id, str) and ":" in task_id:
         env_name = task_id.split(":", 1)[0]
-    return Task.from_dict(
+    return Task.model_validate(
         {
-            "env": {"name": env_name},
-            "task": task_id,
+            "env": env_name,
+            "id": task_id,
             "args": record.get("args") or {},
             "slug": record.get("slug") or record.get("external_id"),
             "validation": record.get("validation"),
@@ -161,7 +161,7 @@ def upload_taskset(
 def task_upload_payload(task: Task) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "slug": task.slug or task.default_slug(),
-        "env": {"name": task.env.name},
+        "env": {"name": task.env},
         "scenario": platform_task_id(task),
         "args": task.args,
     }
@@ -176,7 +176,7 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
 
 def platform_task_id(task: Task) -> str:
     if ":" not in task.id:
-        return f"{task.env.name}:{task.id}"
+        return f"{task.env}:{task.id}"
     return task.id
 
 

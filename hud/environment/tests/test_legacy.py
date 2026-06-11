@@ -21,8 +21,8 @@ from hud.agents.types import AgentAnswer
 from hud.clients import HudProtocolError
 from hud.environment import Environment, Workspace
 from hud.environment.legacy import _classify_tool
-from hud.environment.runtime import _local
 from hud.eval import Run, Taskset
+from hud.eval.runtime import _local
 
 from .conftest import served
 
@@ -121,7 +121,7 @@ async def test_taskset_concurrent_grouped_rollouts() -> None:
     taskset = Taskset("adds", (add(a=i, b=i + 1) for i in range(4)))
 
     job = await taskset.run(
-        _FnAgent(_solve_add), on=lambda _row: _local(env), group=2, max_concurrent=3
+        _FnAgent(_solve_add), runtime=lambda _row: _local(env), group=2, max_concurrent=3
     )
     runs = job.runs
 
@@ -145,7 +145,7 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
         return _solve_add(prompt)
 
     job = await Taskset("adds", (add(a=i, b=1) for i in range(4))).run(
-        _FnAgent(solve_or_boom), on=lambda _row: _local(env)
+        _FnAgent(solve_or_boom), runtime=lambda _row: _local(env)
     )
     runs = job.runs
 
@@ -268,6 +268,7 @@ async def test_legacy_tools_become_capabilities_end_to_end(
         # function tool -> mcp capability; computer marker -> rfb capability
         assert "mcp/2025-11-25" in protocols
         assert "rfb/3.8" in protocols
-        assert client.binding("rfb").url == "rfb://127.0.0.1:5999"
+        # Loopback address, so the client sees its forwarded stand-in.
+        assert client.binding("rfb").url.startswith("rfb://127.0.0.1:")
         # tasks still serve alongside the synthesized capabilities
         assert "noop" in [t["id"] for t in await client.list_tasks()]

@@ -1,7 +1,9 @@
-"""Job: the platform/batch receipt for one taskset execution.
+"""Job: the platform receipt for one execution — there are no standalone traces.
 
 The live execution atom remains :class:`hud.eval.Run`; a ``Job`` collects the
-graded runs of one batch under one platform job id.
+graded runs of one batch under one platform job id. Every trace reports under
+a job: the scheduler's batch job, or the single-run job :func:`rollout`
+registers when called bare.
 
 Backend reporting contract:
 - ``POST /trace/job/{job_id}/enter`` — register the batch job.
@@ -15,7 +17,8 @@ never depend on the platform.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hud.utils.platform import PlatformClient
@@ -28,12 +31,31 @@ logger = logging.getLogger("hud.eval.job")
 
 @dataclass(slots=True)
 class Job:
-    """Platform/batch receipt for one taskset execution."""
+    """Platform receipt for one execution: the graded runs under one job id."""
 
     id: str
     name: str
-    runs: list[Run]
+    runs: list[Run] = field(default_factory=list)
     group: int = 1
+
+    @classmethod
+    async def start(cls, name: str, *, group: int = 1) -> Job:
+        """Open a job spanning multiple scheduler calls.
+
+        A scheduler call mints its own job by default; pass a started job as
+        ``job=`` to ``Task.run`` / ``Taskset.run`` to accumulate every run of a
+        longer arc — a training session, a chat conversation — under one id.
+        """
+        job = cls(id=uuid.uuid4().hex, name=name, group=group)
+        await job_enter(job.id, name=name, group=group)
+        return job
+
+    @property
+    def reward(self) -> float:
+        """Mean reward across runs (0.0 for an empty job)."""
+        if not self.runs:
+            return 0.0
+        return sum(run.reward for run in self.runs) / len(self.runs)
 
 
 def _reporting_enabled() -> bool:

@@ -19,20 +19,18 @@ import pytest
 
 TOP_LEVEL_DOCS_EXAMPLES_SURFACE = (
     "Chat",
+    "DockerRuntime",
     "Environment",
     "Grade",
+    "HUDRuntime",
     "Job",
-    "RunConfig",
+    "LocalRuntime",
     "Runtime",
     "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
-    "configure",
     "connect",
-    "provision",
-    "spawn",
-    "task",
 )
 
 TOP_LEVEL_ENVIRONMENT_SURFACE = (
@@ -43,22 +41,20 @@ TOP_LEVEL_ENVIRONMENT_SURFACE = (
 
 TOP_LEVEL_EXPORTS = (
     "Chat",
+    "DockerRuntime",
     "Environment",
     "Grade",
+    "HUDRuntime",
     "Job",
+    "LocalRuntime",
     "Run",
-    "RunConfig",
     "Runtime",
     "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
-    "configure",
     "connect",
     "instrument",
-    "provision",
-    "spawn",
-    "task",
 )
 
 
@@ -121,23 +117,22 @@ ENVIRONMENT_PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     "hud.agents.claude": ("ClaudeAgent",),
     "hud.environment": (
         "Environment",
-        "Provider",
-        "Runtime",
+        "Workspace",
         "load_environment",
-        "provision",
-        "spawn",
     ),
     "hud.eval": (
+        "DockerRuntime",
         "Grade",
+        "HUDRuntime",
         "Job",
+        "LocalRuntime",
+        "Provider",
         "Run",
-        "RunConfig",
+        "Runtime",
         "SyncPlan",
         "Task",
         "Taskset",
         "Trace",
-        "configure",
-        "task",
     ),
     "hud.server": (
         "MCPRouter",

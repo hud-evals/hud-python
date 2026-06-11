@@ -1,7 +1,7 @@
 """``hud client`` — drive a running env's control channel from the shell.
 
 A thin CLI over :class:`hud.clients.HudClient`. Point it at an env served by
-``hud dev`` (or any control channel) to inspect it or run a task with a supplied
+``hud serve`` (or any control channel) to inspect it or run a task with a supplied
 answer. The Harbor ``test.sh`` uses ``hud client run`` to grade.
 """
 
@@ -12,13 +12,13 @@ import json
 
 import typer
 
-from hud.environment.runtime import Runtime
+from hud.eval.runtime import Runtime
 from hud.utils.hud_console import HUDConsole
 
 hud_console = HUDConsole()
 
 client_app = typer.Typer(
-    help="Talk to a running env's control channel (served by `hud dev`).",
+    help="Talk to a running env's control channel (served by `hud serve`).",
     rich_markup_mode="rich",
 )
 

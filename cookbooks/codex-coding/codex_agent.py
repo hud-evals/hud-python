@@ -3,8 +3,8 @@
 Build Your Own Codex - A Recreation of OpenAI's Codex CLI
 
 This cookbook shows how to build your own Codex (https://github.com/openai/codex)
-from scratch using the HUD SDK. The environment exposes an ``ssh`` capability
-backed by a ``Workspace``; the ``OpenAIAgent`` drives it with OpenAI's native
+from scratch using the HUD SDK. The environment runs a ``Workspace`` serving an
+``ssh`` capability; the ``OpenAIAgent`` drives it with OpenAI's native
 ``shell`` and ``apply_patch`` tools — the same protocol the ``codex`` CLI uses.
 
 What you get:
@@ -26,10 +26,9 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 import hud
-from hud import spawn
+from hud import LocalRuntime
 from hud.agents.openai import OpenAIAgent
 from hud.agents.types import OpenAIConfig
-from hud.capabilities import Capability
 from hud.settings import settings
 
 # Codex-capable models that support native shell/apply_patch tools
@@ -50,14 +49,15 @@ Use the available tools:
 
 Work in the current directory. When done, verify your work runs correctly."""
 
-# The environment this file *is*: `spawn(__file__)` serves it in a child
+# The environment this file *is*: `LocalRuntime(__file__)` serves it in a child
 # process (which re-imports this module), so the task's prompt and grade
 # arrive over the wire while the agent loop runs here. The workspace root is
-# handed to that child via CODEX_WORK_DIR. The shell capability is a pure
-# declaration: the serving child materializes the backing workspace (SSH keys
-# + socket) when the agent connects.
+# handed to that child via CODEX_WORK_DIR. Attaching the workspace writes
+# nothing: the serving child starts it (SSH keys + socket) and publishes the
+# shell capability when the env comes up.
 WORK_DIR = os.path.abspath(os.environ.get("CODEX_WORK_DIR") or os.getcwd())
-env = hud.Environment("local-codex", capabilities=[Capability.shell(WORK_DIR)])
+env = hud.Environment("local-codex")
+env.workspace(WORK_DIR)
 
 
 @env.task()
@@ -74,8 +74,8 @@ async def run_coding_task(
 ) -> None:
     """Run a coding task locally.
 
-    The environment declares an ``ssh`` capability backed by a ``Workspace`` on
-    your machine; the agent's shell commands and patches land in that directory.
+    The environment runs a ``Workspace`` on your machine serving an ``ssh``
+    capability; the agent's shell commands and patches land in that directory.
     """
     if model not in CODEX_MODELS:
         raise ValueError(
@@ -108,14 +108,15 @@ async def run_coding_task(
     print(f"📋 Task: {task}")
     print("=" * 60)
 
-    run = await coding_task(task_description=task).run(agent, on=spawn(__file__))
+    job = await coding_task(task_description=task).run(agent, runtime=LocalRuntime(__file__))
 
     print("=" * 60)
+    (run,) = job.runs
     if run.trace.isError:
         print(f"❌ Task failed: {run.trace.content}")
         return
     print("✅ Task completed!")
-    print(f"📊 Reward: {run.reward}")
+    print(f"📊 Reward: {job.reward}")
 
 
 def _parse_args() -> argparse.Namespace:

@@ -25,7 +25,7 @@ from hud.utils.hud_console import HUDConsole
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
-    from hud.environment import Runtime
+    from hud.eval.runtime import Runtime
 
 hud_console = HUDConsole()
 
@@ -60,7 +60,7 @@ def _collect(source: str) -> Any:
 
 def _local_env_url(port: int = 8765) -> str | None:
     """Return a control-channel URL if an env is already serving locally on ``port``
-    (e.g. ``hud dev``, or a built image whose CMD serves on :8765), else ``None``."""
+    (e.g. ``hud serve``, or a built image whose CMD serves on :8765), else ``None``."""
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.25):
             return f"tcp://127.0.0.1:{port}"
@@ -83,7 +83,7 @@ def _resolve(
 
     1. ``--url`` — attach to that control channel;
     2. no ``--source`` and a local env already serving on :8765 — attach to it
-       (e.g. inside a built image, or alongside ``hud dev``);
+       (e.g. inside a built image, or alongside ``hud serve``);
     3. otherwise — introspect local source for the task id/slug, and spawn that
        source as the substrate.
 
@@ -94,7 +94,7 @@ def _resolve(
     """
     from contextlib import nullcontext
 
-    from hud.environment import Runtime, spawn
+    from hud.eval.runtime import LocalRuntime, Runtime
 
     attach = url
     if attach is None and source is None:
@@ -118,7 +118,7 @@ def _resolve(
         hud_console.error(f"No task matching {task!r} (available: {available})")
         raise typer.Exit(1)
     selected = matches[0]
-    placement = spawn(_spawn_target(source or "."))(selected)
+    placement = LocalRuntime(_spawn_target(source or "."))(selected)
     return selected.id, args or selected.args, placement
 
 

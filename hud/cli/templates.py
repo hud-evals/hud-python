@@ -13,7 +13,7 @@ COPY . .
 
 # Serve the Environment's control channel (tcp JSON-RPC) on 8765.
 EXPOSE 8765
-CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--port", "8765"]
+CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--host", "0.0.0.0", "--port", "8765"]
 """
 
 # fmt: off
@@ -46,13 +46,12 @@ async def count(sentence: str, letter: str):
 # 2. CAPABILITIES (optional) - give the agent a way to act
 # =============================================================================
 # Capabilities are how the agent interacts with the environment. For shell
-# access, declare a backed shell capability — the agent drives bash over SSH,
-# no in-process "bash tool" required. The declaration is pure data; the env
-# runs a sandboxed workspace for it when a client connects:
+# access, attach a workspace — the agent drives bash over SSH, no in-process
+# "bash tool" required. Attaching writes nothing; the env starts the
+# workspace and publishes its ssh capability when it serves:
 #
-#   from hud.capabilities import Capability
-#
-#   env = Environment(name="{env_name}", capabilities=[Capability.shell("/workspace")])
+#   env = Environment(name="{env_name}")
+#   env.workspace("/workspace")
 #
 # For arbitrary MCP tools, run them on your own MCPServer and attach it:
 #
@@ -69,16 +68,16 @@ async def count(sentence: str, letter: str):
 
 async def test():
     from hud.agents.claude import ClaudeAgent
-    from hud.environment import spawn
+    from hud import LocalRuntime
 
     agent = ClaudeAgent()
 
-    # Calling a task binds a runnable Task; ``on=spawn(__file__)`` serves this
+    # Calling a task binds a runnable Task; ``runtime=LocalRuntime(__file__)`` serves this
     # file in a child process and runs the task against it over the wire.
     task = count(sentence="Strawberry world", letter="r")
-    run = await task.run(agent, on=spawn(__file__))
+    job = await task.run(agent, runtime=LocalRuntime(__file__))
 
-    print("reward:", run.reward)
+    print("reward:", job.reward)
 
 
 if __name__ == "__main__":

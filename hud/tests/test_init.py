@@ -42,19 +42,19 @@ class TestHudInit:
 
         expected_exports = [
             "Chat",
+            "DockerRuntime",
             "Environment",
             "Grade",
             "Job",
+            "HUDRuntime",
             "Run",
             "Runtime",
+            "LocalRuntime",
             "SyncPlan",
             "Task",
             "Taskset",
             "connect",
             "instrument",
-            "provision",
-            "spawn",
-            "task",
         ]
 
         for export in expected_exports:

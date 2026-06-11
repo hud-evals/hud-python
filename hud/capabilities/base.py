@@ -1,4 +1,4 @@
-"""Capability declaration + CapabilityClient ABC."""
+"""Capability declarations + CapabilityClient ABC."""
 
 from __future__ import annotations
 
@@ -33,13 +33,14 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
 
 @dataclass(frozen=True, slots=True)
 class Capability:
-    """``(name, protocol, url, params)`` — declarative metadata for one slice of env access.
+    """``(name, protocol, url, params)`` — concrete wire data for one slice of env access.
 
-    Concrete declarations carry the URL of a daemon the env author runs
-    (``Capability.cdp(url=...)``, ``Capability.ssh(url=...)``). A declaration
-    with an **empty url** is *backed*: the env runs the daemon and resolves
-    the address when it serves a client (``Capability.shell(root)`` → a
-    managed ``Workspace``).
+    Always carries the real address of something serving the protocol —
+    what the manifest publishes and what a :class:`CapabilityClient` dials.
+    A service the *environment* brings up itself publishes one of these at
+    serve time: start the daemon in an ``@env.initialize`` hook and call
+    ``env.add_capability(...)`` (sugar for the common case:
+    ``env.workspace(root)``).
     """
 
     name: str
@@ -67,30 +68,6 @@ class Capability:
     # ─── well-known protocol factories ─────────────────────────────────
 
     @classmethod
-    def shell(
-        cls,
-        root: str | os.PathLike[str],
-        *,
-        name: str = "shell",
-        network: bool = False,
-        guest_path: str = "/workspace",
-        user: str = "agent",
-    ) -> Capability:
-        """``ssh/2``, backed — the env serves a managed ``Workspace`` for it.
-
-        Declares *intent* (a shell rooted at ``root``), not an address: nothing
-        is generated or bound until the env answers a client's ``hello``. For
-        an SSH daemon you run yourself, declare :meth:`ssh` with its URL.
-        """
-        params: dict[str, Any] = {
-            "root": os.fspath(root),
-            "network": network,
-            "guest_path": guest_path,
-            "user": user,
-        }
-        return cls(name=name, protocol="ssh/2", url="", params=params)
-
-    @classmethod
     def ssh(
         cls,
         *,
@@ -98,19 +75,26 @@ class Capability:
         url: str,
         user: str = "agent",
         host_pubkey: str,
+        client_key: str | None = None,
         client_key_path: str | os.PathLike[str] | None = None,
         shell: str | None = None,
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
-        ``shell`` declares the remote shell type (``bash``, ``powershell``,
-        ``cmd``). Defaults to auto-detect from ``sys.platform`` at
-        construction time. Agents read this to format commands correctly.
+        Client auth: ``client_key`` carries the private key *content* (what a
+        managed daemon hands its client — valid in any network namespace);
+        ``client_key_path`` points at a key file and only works when client
+        and daemon share a filesystem. ``shell`` declares the remote shell
+        type (``bash``, ``powershell``, ``cmd``). Defaults to auto-detect
+        from ``sys.platform`` at construction time. Agents read this to
+        format commands correctly.
         """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
             shell = "cmd" if sys.platform == "win32" else "bash"
         params: dict[str, Any] = {"user": user, "host_pubkey": host_pubkey, "shell": shell}
+        if client_key is not None:
+            params["client_key"] = client_key
         if client_key_path is not None:
             params["client_key_path"] = os.fspath(client_key_path)
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)

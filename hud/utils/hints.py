@@ -151,7 +151,7 @@ MCP_SERVER_ERROR = Hint(
         "Ensure all dependencies are installed",
     ],
     docs_url=None,
-    command_examples=["hud dev --verbose"],
+    command_examples=["hud serve --verbose"],
     code="MCP_SERVER_ERROR",
     context=["mcp", "server"],
 )

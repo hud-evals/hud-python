@@ -208,8 +208,8 @@ def _display_usage_example(
         return
 
     task_example: dict[str, Any] = {
-        "env": {"name": env_name},
-        "task": first.get("task") or first.get("id") or "",
+        "env": env_name,
+        "id": first.get("task") or first.get("id") or "",
     }
     if first.get("slug"):
         task_example["slug"] = first["slug"]

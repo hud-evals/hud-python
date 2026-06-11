@@ -146,7 +146,8 @@ class AgentTool(BaseTool):
     async def __call__(self, **kwargs: Any) -> ToolResult:
         from fastmcp.tools import ToolResult
 
-        from hud.environment.runtime import _local
+        from hud.eval.rollout import rollout
+        from hud.eval.runtime import _local
         from hud.telemetry.instrument import instrument
 
         visible = self._param_schema.get("properties", {})
@@ -156,8 +157,10 @@ class AgentTool(BaseTool):
         async def _run() -> ToolResult:
             task = cast("Any", self._task)(**args)
             # The tool executes inside the substrate that hosts its env, so the
-            # sub-rollout places itself on the env this process already owns.
-            run = await task.run(self._agent, on=lambda _row: _local(task.env))
+            # sub-rollout places itself on the env this process already owns
+            # (the factory's live env; the task row only carries its name).
+            env = self._task.env
+            run = await rollout(task, self._agent, runtime=lambda _row: _local(env))
             if run.trace.isError:
                 raise RuntimeError(run.trace.content or "subagent rollout failed")
             return ToolResult(content=[TextContent(type="text", text=run.trace.content or "")])

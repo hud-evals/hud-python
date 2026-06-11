@@ -15,7 +15,7 @@ The contract: an integration module exposes ``detect(path) -> bool`` and
 ``load(path) -> Taskset``. Placement stays an execution-time concern — loaders
 never bake in where the substrate runs; infra integrations are *providers*
 (``Callable[[Task], AsyncContextManager[Runtime]]``) passed at run time via
-``on=``. An integration may also expose the reverse direction (e.g.
+``runtime=``. An integration may also expose the reverse direction (e.g.
 ``integrations.harbor.export``).
 """
 

@@ -78,9 +78,12 @@ _DEFAULT_USER = "agent"
 class Workspace:
     """Directory + bwrap-isolated SSH (bash + chroot'd SFTP).
 
-    The managed backing for ``Capability.shell(root)`` declarations — the env
-    builds one when it answers ``hello``. Construct it directly for full
-    control (mounts, keys, fixed ports) and publish via :meth:`capability`.
+    The standard shell daemon: ``env.workspace(root)`` attaches one to an
+    :class:`~hud.environment.Environment`, which starts it and publishes its
+    concrete ``ssh/2`` capability when the env serves. Construction is pure
+    data — keys, sockets, and the root directory materialize only at serve
+    time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)
+    to publish the capability yourself.
     """
 
     def __init__(
@@ -115,11 +118,6 @@ class Workspace:
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
         )
         self._bwrap = shutil.which("bwrap")
-        if self._bwrap is None and sys.platform != "win32":
-            LOGGER.warning(
-                "bwrap not on PATH; SSH sessions will run WITHOUT isolation. "
-                "Install bubblewrap, or run inside a Linux container that has it.",
-            )
 
         # ssh config
         self._ssh_host = host
@@ -141,6 +139,11 @@ class Workspace:
         """Materialize filesystem credentials and bind the SSH socket."""
         if self._sock is not None:
             return
+        if self._bwrap is None and sys.platform != "win32":
+            LOGGER.warning(
+                "bwrap not on PATH; SSH sessions will run WITHOUT isolation. "
+                "Install bubblewrap, or run inside a Linux container that has it.",
+            )
         self.root.mkdir(parents=True, exist_ok=True)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
@@ -238,15 +241,22 @@ class Workspace:
         return self._ssh_user
 
     def capability(self, name: str = "shell") -> Capability:
-        """The resolved ``ssh`` capability — materializes keys + bind."""
+        """The concrete ``ssh`` capability — materializes keys + bind.
+
+        Carries the managed client key's *content*, so the binding
+        authenticates from anywhere the daemon is reachable — including a
+        client on the other side of a container boundary.
+        """
         from hud.capabilities import Capability
 
+        key_path = self.ssh_client_key_path
         return Capability.ssh(
             name=name,
             url=self.ssh_url,
             user=self.ssh_user,
             host_pubkey=self.ssh_host_pubkey,
-            client_key_path=self.ssh_client_key_path,
+            client_key=key_path.read_text() if key_path else None,
+            client_key_path=key_path,
         )
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
