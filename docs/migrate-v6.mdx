@@ -22,7 +22,7 @@ So you can upgrade the SDK first and keep your environments as-is, then convert 
 |----|----|-------|
 | `Environment("name")` | `Environment(name="name", capabilities=[...])` | positional name still works; declare capabilities up front |
 | `@env.scenario("count")` | `@env.task()` | same `yield prompt` then `yield reward` generator |
-| `@env.tool` / `env.add_tool(ComputerTool())` | a **capability** (`ssh` / `mcp` / `cdp` / `rfb` / `ros2`) | the agent's harness brings the tools now |
+| `@env.tool` / `env.add_tool(ComputerTool())` | a **capability** (`ssh` / `mcp` / `cdp` / `rfb` / `robot`) | the agent's harness brings the tools now |
 | `env("count", word=...)` | `count(word=...)` | keep the `@env.task` return value; calling it builds a `Task` |
 | `task.run("claude")` / `hud.eval(task)` | `await task.run(agent)` | or just `hud eval tasks.py claude` |
 | `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` | v6 serves a control channel, not MCP |
@@ -61,7 +61,7 @@ env = Environment(name="coder")
 env.workspace("/workspace")
 ```
 
-Other tool kinds map the same way: a browser becomes `cdp`, full computer-use becomes `rfb`, a robot becomes `ros2`, and any custom MCP tools become an `mcp` capability via `Capability.mcp(name=..., url=...)`. You no longer hand-wire `ComputerTool()` / `BashTool()` or call `env.as_claude_tools()` — the harness does that.
+Other tool kinds map the same way: a browser becomes `cdp`, full computer-use becomes `rfb`, a robot becomes `robot`, and any custom MCP tools become an `mcp` capability via `Capability.mcp(name=..., url=...)`. You no longer hand-wire `ComputerTool()` / `BashTool()` or call `env.as_claude_tools()` — the harness does that.
 </Step>
 
 <Step title="Rename @env.scenario to @env.task">

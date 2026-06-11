@@ -84,6 +84,10 @@ CMD runs (`python -m hud.environment.server <source>`):
 In practice you serve with `hud serve` and run through `hud eval`, `task.run()`,
 or `Taskset.run()` — placement (`runtime=LocalRuntime(...)`) brings substrates up for you.
 
+<Note>
+A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under `hud serve`, which runs the asyncio loop on main. Run `serve(env, host, port)` on a worker thread instead and keep the main thread for the dependency — see [Robotics](/v6/reference/robots#environment-side).
+</Note>
+
 ## The wire protocol
 
 An environment answers a small JSON-RPC control channel over tcp:

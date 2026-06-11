@@ -115,6 +115,10 @@ asyncio.run(main())
 Build a `Task` two ways: **call the task function** (`fix_bug(...)`) when you have the Python authoring object — the normal path; or use the **`Task(env="name", id="id")`** constructor when you only have the names (args and metadata are explicit fields), as above. Where it runs is always the `runtime=` placement: `Runtime(url)` for a box provisioned elsewhere, `LocalRuntime("env.py")` for a local child process.
 </Note>
 
+<Note>
+GPU environments (e.g. robot sims) take extra `docker run` flags through the placement: `DockerRuntime(image, run_args=["--gpus", "all"])`. For sims with multi-minute boots, prefer one long-lived container + `Runtime(url)` over a fresh `DockerRuntime` container per rollout.
+</Note>
+
 ## Scaling horizontally
 
 Because each rollout gets its own box, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
