@@ -59,7 +59,7 @@ def models_command(
             model.name or model.id or "-",
             model.model_name or model.id or "-",
             model.provider.name or "-",
-            model.sdk_agent_type or model.provider.default_sdk_agent_type or "-",
+            model.sdk_agent_type or "-",
         )
 
     console.print(table)

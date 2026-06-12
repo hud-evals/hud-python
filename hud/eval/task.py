@@ -48,7 +48,6 @@ class Task(BaseModel):
     slug: str | None = None
     validation: list[dict[str, Any]] | None = None
     agent_config: dict[str, Any] | None = None
-    columns: dict[str, Any] | None = None
 
     def default_slug(self) -> str:
         """A stable slug from the task id, disambiguated by an args hash when present."""

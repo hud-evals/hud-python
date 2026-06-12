@@ -65,9 +65,8 @@ def test_compact_dump_omits_unset_metadata() -> None:
     data = Task(env="e", id="t").model_dump(exclude_none=True)
     assert set(data) == {"env", "id", "args"}  # no None slug/validation/etc.
 
-    data2 = Task(env="e", id="t", slug="s", columns={"tier": "easy"}).model_dump(exclude_none=True)
+    data2 = Task(env="e", id="t", slug="s").model_dump(exclude_none=True)
     assert data2["slug"] == "s"
-    assert data2["columns"] == {"tier": "easy"}
 
 
 def test_roundtrip_is_stable_through_plain_pydantic() -> None:
@@ -78,7 +77,6 @@ def test_roundtrip_is_stable_through_plain_pydantic() -> None:
         slug="ask-v1",
         validation=[{"name": "submit", "arguments": {"answer": "x"}}],
         agent_config={"system_prompt": "be precise"},
-        columns={"tier": "hard"},
     ).model_dump(exclude_none=True)
 
     rebuilt = Task.model_validate(original)
@@ -89,7 +87,6 @@ def test_roundtrip_is_stable_through_plain_pydantic() -> None:
     assert rebuilt.slug == "ask-v1"
     assert rebuilt.validation == original["validation"]
     assert rebuilt.agent_config == {"system_prompt": "be precise"}
-    assert rebuilt.columns == {"tier": "hard"}
     # ...and re-serializing yields the same portable dict.
     assert rebuilt.model_dump(exclude_none=True) == original
 
@@ -171,8 +168,8 @@ def test_taskset_to_file_writes_json_and_jsonl(tmp_path) -> None:
     taskset = Taskset(
         "demo",
         [
-            Task(env="e", id="solve", args={"n": 1}, slug="one", columns={"tier": "easy"}),
-            Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two", columns={"tier": "hard"}),
+            Task(env="e", id="solve", args={"n": 1}, slug="one"),
+            Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two"),
         ],
     )
 
@@ -205,20 +202,20 @@ local = Task(env="module-env", id="solve", args={"n": 1}, slug="local")
 def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_request(method: str, url: str, **kwargs: object) -> dict[str, object]:
         assert method == "GET"
-        if url.endswith("/tasks/evalset/demo"):
-            return {"evalset_id": "ts_123", "evalset_name": "Demo"}
-        if url.endswith("/tasks/evalsets/ts_123/tasks-by-id"):
+        if url.endswith("/tasksets/by-name/demo"):
+            return {"taskset_id": "ts_123", "name": "Demo"}
+        if url.endswith("/tasksets/ts_123/export"):
             return {
-                "evalset_name": "Demo",
-                "tasks": {
-                    "1": {
-                        "env": {"name": "e"},  # the platform record shape, normalized on fetch
+                "name": "Demo",
+                "tasks": [
+                    {
+                        # the platform export record shape, normalized on fetch
+                        "env": None,
                         "scenario": "e:solve",
                         "args": {"n": 1},
-                        "slug": "one",
-                        "column_values": {"tier": "easy"},
+                        "name": "one",
                     }
-                },
+                ],
             }
         raise AssertionError(url)
 
@@ -228,7 +225,6 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
     taskset = Taskset.from_api("demo")
 
     assert taskset.name == "Demo"
-    assert taskset["one"].id == "e:solve"
+    assert taskset["one"].id == "solve"  # env prefix is stripped on fetch
     assert taskset["one"].env == "e"
     assert taskset["one"].args == {"n": 1}
-    assert taskset["one"].columns == {"tier": "easy"}

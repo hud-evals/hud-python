@@ -20,12 +20,17 @@ class RegistryEnvironment:
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> RegistryEnvironment:
+        """Map one `RegistryDetailResponse` record (version is the latest build's)."""
         env_id = data.get("id")
         if not isinstance(env_id, str) or not env_id:
             raise ValueError("registry environment record needs an id")
-        display = data.get("name_display") or data.get("name") or "unnamed"
-        version = data.get("latest_version") or ""
-        return cls(id=env_id, name=str(display), version=str(version) if version else "")
+        latest_build = data.get("latest_build")
+        version = latest_build.get("version") if isinstance(latest_build, dict) else None
+        return cls(
+            id=env_id,
+            name=str(data.get("name") or "unnamed"),
+            version=str(version) if version is not None else "",
+        )
 
     @property
     def short_id(self) -> str:
@@ -41,7 +46,7 @@ def get_registry_environment(
     registry_id: str,
 ) -> RegistryEnvironment | None:
     try:
-        data = platform.get(f"/registry/envs/{registry_id}")
+        data = platform.get(f"/registry/{registry_id}")
     except HudRequestError as e:
         if e.status_code == 404:
             return None
@@ -51,17 +56,22 @@ def get_registry_environment(
     return RegistryEnvironment.from_record(data)
 
 
+def _list_records(platform: PlatformClient, params: dict[str, Any]) -> list[dict[str, Any]]:
+    data = platform.get("/registry", params=params)
+    items = data.get("items") if isinstance(data, dict) else None
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
 def list_registry_environments(
     platform: PlatformClient,
     *,
     limit: int = 20,
-    sort_by: str | None = "updated_at",
+    sort_by: str | None = "date",
 ) -> list[RegistryEnvironment]:
     params: dict[str, Any] = {"limit": limit}
     if sort_by:
         params["sort_by"] = sort_by
-    data = platform.get("/registry/envs", params=params)
-    return [RegistryEnvironment.from_record(item) for item in data if isinstance(item, dict)]
+    return [RegistryEnvironment.from_record(item) for item in _list_records(platform, params)]
 
 
 def search_registry_environments(
@@ -70,8 +80,8 @@ def search_registry_environments(
     *,
     limit: int = 5,
 ) -> list[RegistryEnvironment]:
-    data = platform.get("/registry/envs", params={"search": name, "limit": limit})
-    envs = [RegistryEnvironment.from_record(item) for item in data if isinstance(item, dict)]
+    records = _list_records(platform, {"search": name, "limit": limit})
+    envs = [RegistryEnvironment.from_record(item) for item in records]
     exact = [env for env in envs if env.name == name]
     if exact:
         return exact

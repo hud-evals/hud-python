@@ -39,9 +39,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                 gateway_model.name,
                 gateway_model.model_name,
             ):
-                agent_str = (
-                    gateway_model.sdk_agent_type or gateway_model.provider.default_sdk_agent_type
-                )
+                agent_str = gateway_model.sdk_agent_type
                 if agent_str == "operator":
                     raise ValueError(
                         "Operator agent is no longer supported; use openai with a supported "

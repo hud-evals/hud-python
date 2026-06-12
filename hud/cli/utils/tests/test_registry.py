@@ -16,13 +16,13 @@ if TYPE_CHECKING:
     import pytest
 
 
-def test_from_record_prefers_display_name() -> None:
+def test_from_record_maps_registry_detail_response() -> None:
     env = RegistryEnvironment.from_record(
-        {"id": "abc123456", "name": "raw", "name_display": "Pretty", "latest_version": "2"}
+        {"id": "abc123456", "name": "my-env", "latest_build": {"version": 2}}
     )
 
     assert env.id == "abc123456"
-    assert env.name == "Pretty"
+    assert env.name == "my-env"
     assert env.short_id == "abc12345"
     assert env.version_label == " v2"
 
@@ -50,3 +50,27 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
     env = get_registry_environment(PlatformClient("https://api.example", "key"), "abc")
 
     assert env is None
+
+
+def test_search_filters_paginated_registry_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    requested: dict[str, str] = {}
+
+    def fake_request(method: str, url: str, **kwargs: object) -> dict:
+        requested.update(method=method, url=url)
+        return {
+            "items": [
+                {"id": "id-exact", "name": "browser"},
+                {"id": "id-sub", "name": "browser-use"},
+            ],
+            "total": 2,
+        }
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
+
+    envs = resolve_registry_environments(PlatformClient("https://api.example", "key"), "browser")
+
+    assert requested == {
+        "method": "GET",
+        "url": "https://api.example/registry?search=browser&limit=5",
+    }
+    assert [env.id for env in envs] == ["id-exact"]
