@@ -1,44 +1,32 @@
 """Env-side action providers: the action queue + prefix + delay machinery.
 
-A realtime :class:`~hud.environment.robots.bridge.RealtimeRobotBridge` owns one
-``ActionProvider``. The provider holds the buffered action chunk the sim is
-executing, hands out one action per control tick (HOLDing on underrun), accepts
-fresh chunks from the agent, and merges them according to the active inference
-mode. It also exposes the realtime ``meta`` the env attaches to every
-observation (so the agent can decide when to infer and, for RTC, condition on
-the unexecuted prefix and the estimated inference delay).
+A :class:`~hud.environment.robots.bridge.RealtimeRobotBridge` owns one
+``ActionProvider``: it buffers the chunk the sim is executing, hands out one
+action per control tick (HOLDing on underrun), and merges fresh agent chunks per
+the active mode. It also builds the realtime ``meta`` attached to every obs (when
+to infer; for RTC, the unexecuted prefix + estimated delay). Mirrors LeRobot's
+``InferenceEngine`` but on the env side, so swapping modes never touches the env.
 
-The abstraction mirrors LeRobot's ``InferenceEngine`` contract but lives on the
-*environment* side: the env stays simple and model-agnostic, and swapping the
-queueing strategy (the modes below) never touches the env.
-
-The sim clock is wall-clock driven and *always* advances (it models the real
-world, which never freezes): on underrun the provider HOLDs (the env steps a
-no-op so the robot keeps its pose) — it never stalls the sim. The sole exception
-is ``sync_freeze``, the legacy mode that deliberately pauses the clock during
-inference to demonstrate the unrealistic behavior the realtime path avoids.
+The wall-clock sim always advances; on underrun the provider HOLDs (no-op step,
+robot keeps its pose) rather than stalling — except ``sync_freeze``, which pauses
+the clock during inference to demonstrate the behavior the realtime path avoids.
 
 Modes
 -----
-- ``sync``           : the blocking baseline. Execute the chunk to exhaustion,
-                       and only *then* request the next one (request-on-empty,
-                       no overlap). While the model infers, the sim keeps running
-                       and the robot HOLDs — so the inference latency shows up as
-                       underruns. A returned chunk fully replaces the queue.
-- ``sync_freeze``    : like ``sync`` but the sim *freezes* (clock pauses) while the
-                       model infers — the legacy behavior. Latency is hidden (no
-                       ticks elapse) rather than paid as underruns.
+- ``sync``           : blocking baseline. Run the chunk to exhaustion, then request
+                       the next (no overlap); latency shows up as HOLD underruns.
+                       A returned chunk fully replaces the queue.
+- ``sync_freeze``    : like ``sync`` but the sim freezes during inference (legacy);
+                       latency is hidden rather than paid as underruns.
 - ``naive_async``    : free-run; drop the ``d`` actions consumed in flight and
                        replace the postfix wholesale (``queue = chunk[d:]``).
 - ``weighted_async`` : as naive, but blend the overlap with the old tail.
-- ``rtc``            : same queue op as naive, but the agent conditions inference
-                       on the unexecuted prefix + delay so the chunk is already
-                       continuous (Real-Time Chunking).
+- ``rtc``            : same queue op as naive, but the agent conditions on the
+                       unexecuted prefix + delay so chunks join continuously (RTC).
 
-Delay accounting follows RTC Algorithm 1: a small buffer of recently measured
-delays yields a conservative estimate ``d = max(buffer)`` (sent with each obs),
-and the *real* delay of a returned chunk is the number of control ticks consumed
-between the triggering observation and the chunk's arrival.
+Delay accounting follows RTC Algorithm 1: a conservative ``d = max(buffer)`` over
+recently measured delays (sent with each obs); the real delay of a returned chunk
+is the control ticks consumed between its triggering obs and its arrival.
 """
 
 from __future__ import annotations
@@ -165,25 +153,17 @@ class ActionProvider(ABC):
     def obs_meta(self) -> dict[str, Any]:
         """The realtime ``meta`` block the env attaches to every observation.
 
-        Fields (all that the agent needs to decide *when* to infer and, for RTC,
-        *what* to condition on):
-
-        - ``obs_index``: the env's ``tick_index`` at emit time — an episode-scoped,
-          monotonic control-tick counter (incremented once per sim step, HOLDs
-          included; reset to 0 each episode). It is the timestamp the agent stamps
-          onto the chunk it sends back, so the env can later measure the real
-          inference delay as ``tick_index_on_arrival - obs_index``.
-        - ``queue_remaining``: how many unexecuted actions are still buffered. This is
-          the agent's trigger: it infers when ``queue_remaining <= threshold``.
-        - ``delay``: the conservative inference-delay estimate in ticks
-          (``max`` over recently measured delays); RTC conditions on it and the agent
-          echoes it back as ``delay_used``.
-        - ``active_chunk_obs_index``: the ``obs_index`` the most-recently-merged
-          (currently active) chunk was computed from — an ack the agent uses to clear
-          its in-flight ``pending`` guard once its chunk is live in the queue.
+        - ``obs_index``: env ``tick_index`` at emit time (episode-scoped, monotonic,
+          HOLDs included). The agent stamps it onto the chunk it sends so the env can
+          measure delay as ``tick_index_on_arrival - obs_index``.
+        - ``queue_remaining``: unexecuted actions still buffered; the agent's trigger
+          (infer when ``<= threshold``).
+        - ``delay``: conservative delay estimate in ticks (``max`` over recent
+          delays); RTC conditions on it, the agent echoes it as ``delay_used``.
+        - ``active_chunk_obs_index``: the ``obs_index`` the active chunk was computed
+          from — an ack to clear the agent's in-flight ``pending`` guard.
         - ``unexecuted_chunk``: the live chunk's not-yet-executed tail (executable
-          space); RTC builds its prefix conditioning from this (freeze the first
-          ``delay`` actions, soft-mask the rest). ``None`` when the queue is empty.
+          space) for RTC prefix conditioning; ``None`` when the queue is empty.
         """
         with self._lock:
             remaining = 0 if self._queue is None else max(0, len(self._queue) - self._pos)
@@ -219,11 +199,9 @@ class ActionProvider(ABC):
 class SyncActionProvider(ActionProvider):
     """Blocking baseline: run a chunk to exhaustion, HOLD while the next infers.
 
-    The sim never pauses (HOLD-on-underrun like every mode). What makes this the
-    blocking baseline is purely the trigger discipline: the agent only re-infers
-    once the queue is *empty* (request-on-empty, advertised as ``threshold == 0``),
-    so inference never overlaps execution and its latency is paid as HOLD ticks
-    (underruns) every cycle. The fresh chunk fully replaces the (empty) queue.
+    Trigger discipline alone makes it blocking: re-infer only when the queue is
+    empty (``threshold == 0``), so inference never overlaps execution and its
+    latency is paid as HOLD underruns. The fresh chunk fully replaces the queue.
     """
 
     mode: ClassVar[str] = "sync"
@@ -237,13 +215,10 @@ class SyncActionProvider(ActionProvider):
 class SyncFreezeActionProvider(SyncActionProvider):
     """Legacy blocking baseline: the sim *freezes* while the model infers.
 
-    Identical to :class:`SyncActionProvider` (request-on-empty, full-replace merge)
-    except that on underrun it pauses the control clock entirely (``next_action``
-    returns ``None``) and resumes only when the next chunk lands — the original
-    "env freezes on each inference" behavior. Because no ticks elapse during
-    inference, the latency is hidden instead of paid as HOLD underruns, which is
-    precisely the unrealistic artifact this mode exists to demonstrate against the
-    (clock-never-stops) ``sync`` baseline.
+    Like :class:`SyncActionProvider`, but on underrun it pauses the control clock
+    (``next_action`` returns ``None``) until the next chunk lands. No ticks elapse
+    during inference, so latency is hidden rather than paid as HOLD underruns — the
+    unrealistic artifact this mode exists to demonstrate against ``sync``.
     """
 
     mode: ClassVar[str] = "sync_freeze"

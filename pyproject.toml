@@ -158,7 +158,7 @@ robot = [
     "msgpack>=1.0",
 ]
 
-# LeRobot v3 dataset recording (hud.telemetry.lerobot sink)
+# LeRobot v3 dataset recording (hud.environment.robots.data_saving sink)
 lerobot = [
     "hud-python[robot]",
     "lerobot[dataset]",

@@ -1,37 +1,42 @@
-"""LeRobot v3 dataset sink for the HUD trajectory recorder.
+"""Trajectory data saving for robot envs: the framework-default recorder + the
+LeRobot v3 dataset sink.
 
-A :class:`~hud.telemetry.TraceSink` that turns the recorded ``(observation,
-action, reward, done)`` stream of a robot env into a `LeRobot v3 dataset
-<https://github.com/huggingface/lerobot>`_ (``data/*.parquet`` + ``videos/*.mp4``
-+ ``meta/*.json``), ready to load with ``LeRobotDataset(repo_id, root=...)`` for
-offline RL / imitation training.
+:func:`default_recorder` builds the recorder from launch-time env vars alone (the
+author writes zero recorder code); ``RobotEndpoint`` calls it and ``bridge.stop()``
+closes it. Config by env var so the same env module works everywhere:
 
-The dataset's *metadata is generated from the env contract*: the contract's
-feature names/shapes/dtypes/`names` become the LeRobot ``features`` schema, its
-``robot_type`` and ``control_rate`` become the dataset ``robot_type`` / ``fps``,
-and the raw env (and optional model) contract is stashed under
-``meta/hud_contract.json`` for provenance. We extend the schema with two RL
-columns, ``next.reward`` and ``next.done``.
+- ``HUD_RECORD_DIR`` — record every tick as a LeRobot v3 dataset here.
+- ``HUD_HF_REPO`` — also push the dataset to this HF namespace (``HF_TOKEN``);
+  ``HUD_HF_PRIVATE=1`` makes it private.
+- HUD telemetry on (``HUD_API_KEY``) — stream the same ticks to the platform.
 
-All work here runs on the recorder's background thread, so nothing in this module
-ever touches the env's control loop. The heavy LeRobot/`datasets`/`pyarrow`/`av`
-imports are deferred to first use, so importing this module (or running without
-recording) never pulls them in.
+The sink, :class:`LeRobotTraceSink`, is a :class:`~hud.telemetry.TraceSink` that
+turns the recorded ``(observation, action, reward, done)`` stream into a `LeRobot v3
+dataset <https://github.com/huggingface/lerobot>`_ (``data/*.parquet`` +
+``videos/*.mp4`` + ``meta/*.json``). Its schema is generated from the env contract
+(feature names/shapes/dtypes -> LeRobot ``features``; ``robot_type`` / ``control_rate``
+-> ``robot_type`` / ``fps``), extended with the RL columns ``next.reward`` / ``next.done``.
+
+All sink work runs on the recorder's background thread, and the heavy
+LeRobot/``datasets``/``pyarrow``/``av`` imports stay deferred until a dataset is built.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .recorder import TraceSink
+from hud.telemetry.recorder import TraceSink
 
 if TYPE_CHECKING:
-    from .recorder import Frame
+    from hud.telemetry import EpisodeRecorder
+    from hud.telemetry.recorder import Frame
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +134,7 @@ def _as_hwc_uint8(value: Any) -> np.ndarray:
     return np.ascontiguousarray(arr)
 
 
-# ── the sink ──────────────────────────────────────────────────────────────────
+# ── the LeRobot dataset sink ──────────────────────────────────────────────────
 
 
 class LeRobotTraceSink(TraceSink):
@@ -277,4 +282,57 @@ class LeRobotTraceSink(TraceSink):
         (meta_dir / "hud_contract.json").write_text(json.dumps(payload, indent=2))
 
 
-__all__ = ["LeRobotTraceSink", "contract_to_lerobot_features"]
+# ── the framework-default recorder ────────────────────────────────────────────
+
+
+def _lerobot_sink(contract: dict, record_dir: str, *, name: str):
+    """Build the LeRobot dataset sink under ``<record_dir>/<name>_<stamp>/``.
+
+    If ``HUD_HF_REPO`` (an HF namespace) is set, the dataset is also pushed to
+    ``<HUD_HF_REPO>/<name>_<stamp>`` — durable even on ephemeral disk.
+    """
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    root = Path(record_dir) / f"{name}_{stamp}"
+    hf_repo = os.environ.get("HUD_HF_REPO")  # HF namespace -> enables the push
+    push = bool(hf_repo)
+    repo_id = f"{hf_repo}/{name}_{stamp}" if push else f"hud/{name}_{stamp}"
+    private = os.environ.get("HUD_HF_PRIVATE", "0") not in ("0", "", "false", "False")
+    sink = LeRobotTraceSink(
+        contract, root=root, repo_id=repo_id, push_to_hub=push, private=private
+    )
+    dest = f" -> push to hf:{repo_id} ({'private' if private else 'public'})" if push else ""
+    print(f"[env] recording traces -> {root}{dest}", flush=True)
+    return sink
+
+
+def default_recorder(contract: dict, *, name: str) -> EpisodeRecorder | None:
+    """Build the framework-default recorder from launch-time config.
+
+    One :class:`~hud.telemetry.EpisodeRecorder` fanning out to every enabled sink
+    (see the module docstring), or ``None`` if nothing is enabled.
+    """
+    sinks: list = []
+
+    record_dir = os.environ.get("HUD_RECORD_DIR")
+    if record_dir:
+        sinks.append(_lerobot_sink(contract, record_dir, name=name))
+
+    try:
+        from hud.settings import settings
+
+        if settings.telemetry_enabled and settings.api_key:
+            from hud.telemetry.platform_sink import PlatformTraceSink
+
+            sinks.append(PlatformTraceSink(env_name=name))
+            print("[env] streaming ticks to the HUD platform", flush=True)
+    except Exception:  # settings unavailable -> platform streaming off
+        pass
+
+    if not sinks:
+        return None
+    from hud.telemetry import EpisodeRecorder
+
+    return EpisodeRecorder(*sinks)
+
+
+__all__ = ["LeRobotTraceSink", "contract_to_lerobot_features", "default_recorder"]

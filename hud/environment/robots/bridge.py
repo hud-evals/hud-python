@@ -1,21 +1,16 @@
-"""Env-side ``robot`` bridges: own the sim, serve observations/actions over WebSocket.
+"""Env-side ``robot`` bridges: base classes users subclass to wrap their sim.
 
-This is the *server* side of the ``robot`` protocol; the agent-side client lives in
-:mod:`hud.capabilities.robot` (:class:`~hud.capabilities.robot.RobotClient`). Both speak
-the same msgpack + raw-array wire codec, which is defined once in that module and reused
-here.
-
-Two flavors:
+The *server* side of the ``robot`` protocol (agent-side client:
+:class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined
+there. Subclass one of these and implement ``step`` / ``get_observation`` (plus
+``no_op_action`` for realtime) to serve a sim over WebSocket:
 
 - :class:`RobotBridge` — synchronous: steps the sim once per received action.
-- :class:`RealtimeRobotBridge` — free-running: runs its own wall-clock control loop,
-  pops actions from an injected :class:`~hud.environment.robots.action_provider.ActionProvider`,
-  and lets the agent stream whole chunks asynchronously.
+- :class:`RealtimeRobotBridge` — free-running wall-clock loop that pops from an
+  injected :class:`~...action_provider.ActionProvider` and accepts streamed chunks.
 
-Both delegate *which thread runs the (thread-affine) sim* to an injected
-:class:`~hud.environment.robots.sim_runner.SimRunner`, so env-author subclasses stay
-thread-naive: they just implement ``step`` / ``get_observation`` (and ``no_op_action`` for
-the realtime flavor).
+An injected :class:`~...sim_runner.SimRunner` owns *which thread runs the
+(thread-affine) sim*, so subclasses stay thread-naive.
 """
 
 from __future__ import annotations
@@ -52,8 +47,7 @@ class RobotBridge(ABC):
     :meth:`reset`. The base owns the WebSocket serve loop; subclasses own the sim.
 
     - :meth:`reset` initialises the sim for a new episode and returns the task
-      prompt (``task_description``). Call :meth:`_send_observation` at the end of
-      reset to push the first frame to any connected agent.
+      prompt. The base resets scoring state and pushes the first frame for you.
     - :meth:`step` advances the sim by one action. Set ``self.last_reward`` here so
       the per-step reward is captured by the recorder.
     - :meth:`get_observation` returns ``(data, terminated)`` for the current state
@@ -73,46 +67,45 @@ class RobotBridge(ABC):
         recorder: EpisodeRecorder | None = None,
         sim_runner: SimRunner | None = None,
     ) -> None:
-        # Loopback + ephemeral by default: the bridge's concrete address is
-        # published in the manifest from an ``@env.initialize`` hook (after
-        # ``start()``), and the control-channel tunnel makes a loopback bind
-        # reachable from anywhere — so no env ever manages bridge ports.
+        # Loopback + ephemeral by default; the concrete address is published in the
+        # manifest post-``start()`` and tunneled, so no env manages bridge ports.
         self._host = host
         self._port = port
         self._client: Any = None  # robot serves a single agent at a time
         self._server: Any = None
-        # Strategy for *which thread* runs the (thread-affine) simulator. Defaults to
-        # InlineSimRunner — run sim work on the loop thread — which is exactly the
-        # original behavior. Subclasses / envs inject ThreadSimRunner (sim on a worker)
-        # or MainThreadSimRunner (sim on the main thread) when the sim is render-heavy
-        # or must own a specific thread. See hud.environment.robots.sim_runner.
+        # Which thread runs the (thread-affine) sim. Default InlineSimRunner (loop
+        # thread); inject Thread/MainThreadSimRunner when render-heavy or thread-bound.
         self._sim_runner: SimRunner = sim_runner or InlineSimRunner()
-        #: Optional off-loop trajectory recorder (see ``hud.telemetry``). When set,
-        #: the serve loop records one frame per executed action. Subclasses set
-        #: ``self.last_reward`` in ``step`` so the per-step reward is captured.
+        #: Optional off-loop recorder; serve loop records one frame per action, using
+        #: ``self.last_reward`` (set by ``step``). See ``hud.telemetry``.
         self._recorder = recorder
         self.last_reward: float = 0.0
-        # Standard episode scoring state read by ``result()`` and the serve loop.
-        # Subclasses update these in ``reset`` / ``step`` (the contract ``result()``
-        # depends on); declared here so the base never relies on undeclared attrs.
+        # Episode scoring read by ``result()``; subclasses update in ``reset``/``step``.
         self.task_description: str = ""
         self.total_reward: float = 0.0
         self.success: bool = False
         self.terminated: bool = False
-        # The most recent observation we computed (the obs the agent acted on) and
-        # whether it was terminal — paired with the next action for recording.
+        # Most recent obs (the one the agent acted on) + terminal flag, paired with
+        # the next action for recording.
         self._last_obs_data: dict[str, np.ndarray] | None = None
         self._last_terminated: bool = False
 
+    async def _reset(self, **kwargs: Any) -> str:
+        """Internal reset entry (called by the endpoint): reset scoring, run the
+        author's :meth:`reset`, push the first frame."""
+        self.total_reward = 0.0
+        self.success = False
+        self.terminated = False
+        self.task_description = await self.reset(**kwargs)
+        await self._send_observation()  # first frame for an already-connected agent
+        return self.task_description
+
     @abstractmethod
     async def reset(self, **kwargs: Any) -> str:
-        """Reset the sim for a new episode and return the task prompt.
+        """Reset the sim for a new episode; return the task prompt.
 
-        Concrete implementations declare their specific keyword parameters (e.g.
-        ``task_suite``, ``task_id``, ``seed``). Must set ``self.task_description``,
-        ``self.total_reward``, ``self.success``, ``self.terminated`` to their
-        episode-start values, and call ``self._send_observation()`` to push the
-        first frame to a connected agent.
+        Take whatever task kwargs you need (e.g. ``task_id``, ``seed``). The base
+        resets scoring + sends the first obs — just reset your sim and return the prompt.
         """
 
     @abstractmethod
@@ -141,7 +134,7 @@ class RobotBridge(ABC):
         """Attach (or replace) the off-loop recorder.
 
         Used by ``RobotEndpoint`` when it builds the framework-default recorder
-        (see :func:`~hud.environment.robots.recording.default_recorder`), so the
+        (see :func:`~hud.environment.robots.data_saving.default_recorder`), so the
         env author never threads a recorder through by hand.
         """
         self._recorder = recorder
@@ -289,6 +282,15 @@ class RealtimeRobotBridge(RobotBridge):
     def no_op_action(self) -> np.ndarray:
         """A safe HOLD action used when the action queue underruns (async/RTC modes)."""
 
+    async def _reset(self, **kwargs: Any) -> str:
+        # Realtime: the clock loop emits frames, so re-arm the provider instead of sending.
+        self.total_reward = 0.0
+        self.success = False
+        self.terminated = False
+        self.task_description = await self.reset(**kwargs)
+        self._provider.reset()
+        return self.task_description
+
     async def _handle_client(self, ws: Any) -> None:
         # A later connection replaces the previous one (only one agent at a time).
         self._client = ws
@@ -321,15 +323,12 @@ class RealtimeRobotBridge(RobotBridge):
             while self._client is not None:
                 t0 = time.perf_counter()
                 if not self.terminated:
-                    # The sim is wall-clock driven and always advances — it models the
-                    # real world, which never freezes. On underrun the provider returns
-                    # a HOLD (no-op) rather than stalling the clock. Run the (blocking,
-                    # often render-heavy) step on the dedicated sim thread so the event
-                    # loop stays free to stream obs / receive chunks.
-                    #
-                    # Exception: the ``sync_freeze`` provider returns ``None`` on
-                    # underrun to pause the clock (legacy behavior) — skip the step so
-                    # the sim freezes until a fresh chunk lands.
+                    # Wall-clock sim always advances (models the real world): on
+                    # underrun the provider returns a HOLD (no-op), never stalling.
+                    # Run the (often render-heavy) step on the sim thread so the loop
+                    # stays free to stream obs / receive chunks.
+                    # Exception: ``sync_freeze`` returns ``None`` on underrun to pause
+                    # the clock (legacy) — skip the step so the sim freezes till a chunk lands.
                     action = self._provider.next_action(self.no_op_action)
                     if action is not None:
                         obs_before = self._last_obs_data  # obs the agent acted on

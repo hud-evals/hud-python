@@ -10,8 +10,8 @@ an agent over the ``robot`` WebSocket protocol:
   action queue / chunk-merge strategies.
 - :class:`~hud.environment.robots.sim_runner.SimRunner` (+ implementations) — the strategy
   for *which thread* runs the thread-affine simulator.
-- :mod:`~hud.environment.robots.recording` — the framework-default recorder
-  (LeRobot dataset / platform tick stream, configured by ``HUD_RECORD_DIR`` etc.).
+- :mod:`~hud.environment.robots.data_saving` — the framework-default recorder +
+  LeRobot dataset sink (platform tick stream, configured by ``HUD_RECORD_DIR`` etc.).
 - :mod:`~hud.environment.robots.contracts` — advisory contract matching tools
   (env contract vs model contract).
 
@@ -33,7 +33,7 @@ from .action_provider import (
 )
 from .bridge import RealtimeRobotBridge, RobotBridge
 from .endpoint import RobotEndpoint
-from .recording import default_recorder
+from .data_saving import default_recorder
 from .sim_runner import (
     InlineSimRunner,
     MainThreadSimRunner,

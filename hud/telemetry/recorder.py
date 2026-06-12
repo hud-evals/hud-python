@@ -11,8 +11,8 @@ loop down, so this module splits the work in two:
   parquet writes, stats) entirely off the control loop.
 
 ``TraceSink`` is the decoupling seam: the file-backed LeRobot-dataset sink lives in
-:mod:`hud.telemetry.lerobot`, and a future "stream to the HUD platform" sink can
-drop in without touching any environment. It is a sibling of the span ``exporter`` —
+:mod:`hud.environment.robots.data_saving`, and the "stream to the HUD platform" sink
+drops in without touching any environment. It is a sibling of the span ``exporter`` —
 both are background-thread "record what happened during a run and ship it"
 machinery, which is why this lives under :mod:`hud.telemetry`.
 """

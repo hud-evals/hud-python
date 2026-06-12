@@ -5,8 +5,8 @@ This module provides:
 - High-performance span export to HUD API
 - Off-loop trajectory recording for robot envs (EpisodeRecorder + TraceSink)
 
-The LeRobot v3 dataset sink lives in :mod:`hud.telemetry.lerobot` (requires the
-``lerobot`` extra).
+The LeRobot v3 dataset sink (a ``TraceSink``) lives with the robot runtime in
+:mod:`hud.environment.robots.data_saving` (requires the ``lerobot`` extra).
 
 Usage:
     import hud

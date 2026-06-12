@@ -9,8 +9,8 @@ The env-side counterpart of the agent-side :class:`~hud.agents.robot.tracer.Robo
   the LeRobot dataset sink persists, but shipped live as platform spans.
 
 It plugs into the same :class:`~hud.telemetry.recorder.EpisodeRecorder` seam as
-:class:`~hud.telemetry.lerobot.LeRobotTraceSink`, so an env records to disk and
-streams to the platform from **one recorder** with one obs copy per tick::
+:class:`~hud.environment.robots.data_saving.LeRobotTraceSink`, so an env records to
+disk and streams to the platform from **one recorder** with one obs copy per tick::
 
     EpisodeRecorder(LeRobotTraceSink(...), PlatformTraceSink(env_name="libero"))
 

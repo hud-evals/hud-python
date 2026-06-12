@@ -1,9 +1,4 @@
-"""Capability declarations + clients.
-
-The env-side robot runtime (bridges, action providers, sim runners) lives in
-:mod:`hud.environment.robots`; only the agent-side
-:class:`~hud.capabilities.robot.RobotClient` is a capability client and stays here.
-"""
+"""Capability declarations + clients."""
 
 from __future__ import annotations
 
