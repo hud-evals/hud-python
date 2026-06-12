@@ -42,20 +42,22 @@ class Adapter:
         Splits the observation features into image keys vs the single state key, and
         stores the action feature. Override to derive extra env-side parameters.
         """
+        # TODO CLEAN
         self.action_space = action_space or {}
-        self.image_keys = [n for n, f in observation_space.items() if f.get("dtype") == "image"]
-        self.state_key = next(
-            (n for n, f in observation_space.items() if f.get("dtype") != "image"), None
-        )
+        image_types = ("rgb", "bgr", "gray", "depth")
+        self.image_keys = []
+        self.state_key = None
+        for name, feature in observation_space.items():
+            if feature.get("type") in image_types:
+                self.image_keys.append(name)
+            elif self.state_key is None:
+                self.state_key = name
 
     def reset(self) -> None:
-        """Clear per-episode translation state (e.g. a delta→absolute reference).
-
-        Override only if the adapter is stateful across steps within an episode.
-        """
+        """Override only if the adapter is stateful across steps within an episode."""
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> Any:
-        """Translate an env observation + task prompt into the policy's input. Must implement."""
+        """Translate an env observation + task prompt into the policy's input. Must implement - otherwise no point in using adapter"""
         raise NotImplementedError
 
     def adapt_action(self, action: np.ndarray, obs: dict[str, Any]) -> np.ndarray:

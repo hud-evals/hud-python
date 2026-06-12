@@ -8,7 +8,7 @@ to the bridge; the recorder is closed by ``bridge.stop()`` (the env's
 (``python -m hud.environment.server``) always runs on shutdown.
 
 Configuration is by environment variable, so the same declare-only env module
-works everywhere (local child process, container CMD, fleet lane):
+works everywhere (local child process, container CMD, remote sandbox):
 
 - ``HUD_RECORD_DIR`` — record every executed tick as a LeRobot v3 dataset
   under this directory.

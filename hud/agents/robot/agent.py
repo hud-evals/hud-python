@@ -1,16 +1,9 @@
-"""Base v6 agent for any env that exposes a ``robot`` capability.
+"""Episode loop for envs with a ``robot`` capability.
 
-Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter`` in
-``__init__``, and the base owns the rest.
-
-The base calls the adapter and model at the right moments::
-
-    setup_robot      -> adapter.bind(spaces)                          # once after connect
-    on_episode_start -> model.reset(); adapter.reset()                # once per episode
-    select_action    -> adapter.adapt_observation -> model.ainfer -> adapter.adapt_action
-
-Most policies use :class:`~hud.agents.robot.adapter.LeRobotAdapter`; a policy whose
-spaces match the env natively can set ``adapter = None`` (raw pass-through).
+Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter``, and the base
+runs ``bind`` → ``reset`` → ``adapt_observation`` / ``ainfer`` / ``adapt_action`` each
+step. Use :class:`~hud.agents.robot.adapter.LeRobotAdapter` for stock LeRobot wiring;
+``adapter=None`` for pass-through.
 """
 
 from __future__ import annotations
@@ -34,9 +27,8 @@ ROBOT_PROTOCOL = "robot/0.1"
 class RobotAgent(Agent):
     """Drive a ``robot`` side-channel for one :class:`~hud.client.Run`.
 
-    **Subclass contract:** in ``__init__`` set ``self.model`` (a
-    :class:`~hud.agents.robot.model.Model`) and ``self.adapter`` (an
-    :class:`~hud.agents.robot.adapter.Adapter`, or ``None`` for raw pass-through).
+    **Subclass contract:** in ``__init__`` set ``self.model`` (required) and
+    ``self.adapter`` (optional — ``None`` for raw pass-through).
 
     **Override if needed:**
 
@@ -52,8 +44,8 @@ class RobotAgent(Agent):
     #: How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
 
-    #: Runs the policy (preprocess → forward → postprocess). Subclasses set this.
-    model: Model | None = None
+    #: Runs the policy (preprocess → forward → postprocess). Required; set in ``__init__``.
+    model: Model
     #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
@@ -76,16 +68,19 @@ class RobotAgent(Agent):
         only when per-episode env-contract reading or extra setup is needed
         (e.g. ``RealtimeRobotAgent`` reads inference mode/threshold here).
         """
+        
+        # TODO CLEAN
         self._prompt = prompt
-        if self.model is not None:
-            self.model.reset()
-            if self.model.tracer is not None:
-                self.model.tracer.set_episode(
-                    task=getattr(run, "_task_id", None), args=getattr(run, "_args", None)
-                )
+        self.model.reset()
+        if self.model.tracer is not None:
+            self.model.tracer.set_episode(
+                task=getattr(run, "_task_id", None), args=getattr(run, "_args", None)
+            )
         if self.adapter is not None:
             self.adapter.reset()
-
+            
+            
+    # TODO CLEAN
     def _attach_tracer(self, run: Run) -> None:
         """Give the model a default :class:`RobotTracer` when none is set.
 
@@ -94,7 +89,7 @@ class RobotAgent(Agent):
         fresh action chunks) without the user wiring anything. The tracer
         itself is a no-op when the platform isn't configured.
         """
-        if self.model is None or self.model.tracer is not None:
+        if self.model.tracer is not None:
             return
         from .tracer import RobotTracer
 
@@ -110,16 +105,16 @@ class RobotAgent(Agent):
         """Translate the obs, run the model, translate the action back.
 
         Awaits ``model.ainfer`` (which by default runs the policy in a worker
-        thread) so the adapter calls stay on the event loop and a batching model
-        can coalesce across lanes. Override only for a wholly different inference path.
+        thread) so the adapter calls stay on the event loop. Override only for a
+        wholly different inference path.
         """
-        if self.model is None:
-            raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         batch = obs if self.adapter is None else self.adapter.adapt_observation(obs, self._prompt)
         raw = await self.model.ainfer(batch)
         return raw if self.adapter is None else self.adapter.adapt_action(raw, obs)
 
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
+        if getattr(self, "model", None) is None:
+            raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         if max_steps is None:
             max_steps = getattr(self, "max_steps", 520)
         cap = run.client.binding(self.robot_protocol)
@@ -150,9 +145,7 @@ class RobotAgent(Agent):
             else:
                 print(f"[agent] reached max_steps={max_steps}", flush=True)
 
-            run.trace.done = True
             run.trace.content = "done"
-            run.trace.isError = False
         finally:
             await client.close()
 

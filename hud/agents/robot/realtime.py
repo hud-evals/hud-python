@@ -1,19 +1,13 @@
 """Base agent for the realtime (free-running) ``robot`` path.
 
-Where :class:`~hud.agents.robot.agent.RobotAgent` drives a strictly synchronous
-one-action-per-step loop, a realtime agent is a *client*: the env free-runs and
-streams observations (each carrying a ``meta`` block), and the agent decides *when*
-to infer based on how many actions remain buffered env-side. When
-``queue_remaining <= threshold`` it runs a chunk inference and ships the whole chunk
-back via :meth:`RobotClient.send_chunk`; the env-side ``ActionProvider`` merges it
-per the active mode.
+Unlike :class:`~hud.agents.robot.agent.RobotAgent`'s synchronous one-action-per-step
+loop, a realtime agent is a *client*: the env free-runs and streams observations, and
+the agent infers a chunk when ``queue_remaining <= threshold``, shipping it via
+:meth:`RobotClient.send_chunk` for the env-side ``ActionProvider`` to merge.
 
-For RTC the agent also conditions inference on the unexecuted prefix. Rather than
-re-normalizing the env's executable prefix, the agent keeps the *raw* (model-space)
-chunk it last produced and reconstructs the model-space prefix from the observation
-index arithmetic — this is exactly the model-space version of the env's remaining
-queue (the env merge is a plain drop-``d``/replace in RTC mode), so it is both
-correct and free of lossy re-normalization.
+For RTC it also conditions on the unexecuted prefix, reconstructed in model space from
+the last raw chunk + observation indices — avoiding lossy re-normalization of the
+env's executable prefix.
 
 Subclasses implement :meth:`infer_chunk`.
 """
@@ -108,6 +102,8 @@ class RealtimeRobotAgent(RobotAgent):
         return tail if len(tail) > 0 else None
 
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
+        if getattr(self, "model", None) is None:
+            raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         if max_steps is None:
             max_steps = getattr(self, "max_steps", 4000)
         cap = run.client.binding(self.robot_protocol)

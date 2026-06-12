@@ -22,13 +22,12 @@ from __future__ import annotations
 
 from .adapter import Adapter, LeRobotAdapter
 from .agent import ROBOT_PROTOCOL, RobotAgent
-from .model import STEP_COUNTER, LeRobotModel, Model, StepCounter, lerobot_infer
+from .model import LeRobotModel, Model, lerobot_infer
 from .realtime import RealtimeRobotAgent
 from .tracer import RobotTracer
 
 __all__ = [
     "ROBOT_PROTOCOL",
-    "STEP_COUNTER",
     "Adapter",
     "LeRobotAdapter",
     "LeRobotModel",
@@ -36,6 +35,5 @@ __all__ = [
     "RealtimeRobotAgent",
     "RobotAgent",
     "RobotTracer",
-    "StepCounter",
     "lerobot_infer",
 ]

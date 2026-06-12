@@ -182,17 +182,17 @@ def integration_review(
     env: dict,
     model: dict,
     *,
-    supported: bool | None = None,
+    decision_variables: dict | None = None,
 ) -> IntegrationReview | None:
     """Analyze integration gaps for a robot_type match. Returns None if no match."""
     robot_type = env.get("robot_type", "?")
-    if supported is None:
-        supported = match(model, robot_type)
-    if not supported:
+    if decision_variables is None:
+        decision_variables = match(model, robot_type)
+    if decision_variables is None:
         return None
 
-    obs_pairs = pair_observations(env, model)
-    action = match_actions(env, model)
+    obs_pairs = pair_observations(env, model, robot_type)
+    action = match_actions(env, model, robot_type)
 
     env_images = sum(1 for (_, ef), _ in obs_pairs if ef and _is_image(ef))
     env_vectors = sum(1 for (_, ef), _ in obs_pairs if ef and not _is_image(ef))
@@ -204,9 +204,9 @@ def integration_review(
     if action.matched:
         chunk = model.get("chunk_size")
         chunk_note = f", chunk_size={chunk}" if chunk else ""
-        scope.append(f"act: [{action.signature}]{chunk_note}")
+        scope.append(f"act: mode={action.mode!r} [{action.signature}]{chunk_note}")
     else:
-        scope.append(f"act: NO match for [{action.signature}]")
+        scope.append(f"act: NO mode for [{action.signature}]")
 
     problems: list[Gap] = []
 
@@ -222,9 +222,9 @@ def integration_review(
         problems.append(
             Gap(
                 "act",
-                "action signature mismatch",
+                "no action mode matches env signature",
                 f"env signature={action.signature}, "
-                f"model signature={action.model_signature}",
+                f"model modes={list(action.available_signatures)}",
             )
         )
 

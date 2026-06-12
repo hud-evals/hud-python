@@ -16,6 +16,14 @@ from dataclasses import dataclass
 
 Feature = tuple[str, dict | None]
 
+# spec_v0 §3.4 — visual stream color-space / modality tags
+IMAGE_TYPES = frozenset({"rgb", "bgr", "gray", "depth"})
+
+
+def is_image_feature(feature: dict) -> bool:
+    """Whether a contract feature is a visual observation stream."""
+    return feature.get("type") in IMAGE_TYPES or feature.get("dtype") == "image"
+
 
 def match(model: dict, robot_type: str) -> bool:
     """Whether ``model`` supports ``robot_type`` — the v0 gate, truthiness-safe.
@@ -28,10 +36,6 @@ def match(model: dict, robot_type: str) -> bool:
     return robot_type in supported
 
 
-def _is_image(feature: dict) -> bool:
-    return feature.get("type") == "rgb" or feature.get("dtype") == "image"
-
-
 def split_observations(contract: dict) -> tuple[list[Feature], list[Feature]]:
     """Return (image observations, vector observations) from a contract."""
     obs = [
@@ -39,8 +43,8 @@ def split_observations(contract: dict) -> tuple[list[Feature], list[Feature]]:
         for name, feat in contract.get("features", {}).items()
         if feat.get("role") == "observation"
     ]
-    images = [(n, f) for n, f in obs if _is_image(f)]
-    vectors = [(n, f) for n, f in obs if not _is_image(f)]
+    images = [(n, f) for n, f in obs if is_image_feature(f)]
+    vectors = [(n, f) for n, f in obs if not is_image_feature(f)]
     return images, vectors
 
 

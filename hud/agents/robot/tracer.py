@@ -1,30 +1,10 @@
 """``RobotTracer``: agent-side per-step trace spans with keyframe stamps.
 
-Emits one span per **env step** (``robot.step``, ``category="robot"``) through
-the existing ``hud.telemetry`` exporter, so runs stream live into the platform
-viewer with zero new transport: ``rollout`` already binds a per-rollout
-``trace_id`` into the trace context, and ``queue_span`` ships spans
-fire-and-forget on a worker pool.
-
-Every step carries *small* JPEGs of **every camera** the model saw plus the
-executed action — that is the stream the viewer scrubs through as frames.
-Steps where a **fresh action chunk** was inferred are stamped
-``keyframe: true`` and carry full-resolution frames (+ the chunk when the
-caller has it) — the decision-point markers on the viewer's timeline.
-
-Wire shape (what the platform projects into ``robot_step`` events):
-
-- camera frames ride ``request.messages[0].content`` as ``image_url`` items
-  (each stamped with its ``camera`` name), i.e. the exact path the platform's
-  artifact pipeline already offloads to S3 and presigns on read;
-- ``request`` carries ``step`` / ``keyframe`` / ``prompt`` / ``meta``;
-- ``result`` carries the executed ``action`` (+ ``chunk`` / ``chunk_len`` /
-  ``action_dim`` on keyframes).
-
-Measured budget: stress testing sustained ~40 image spans/s with zero loss;
-10 Hz control x a few lanes with ~10-15 KB step frames is well inside that.
-
-Never blocks and never raises: emission failures are logged and swallowed.
+Emits one ``robot.step`` span per env step through ``hud.telemetry`` so rollouts
+stream live into the platform viewer. Each span carries small JPEGs of every
+camera the policy saw plus the executed action; steps with a fresh action chunk
+are stamped ``keyframe: true`` with full-res frames — the viewer's timeline
+markers. Spans ship fire-and-forget; emission never blocks and never raises.
 """
 
 from __future__ import annotations
@@ -110,12 +90,11 @@ def _batch_images(batch: dict[str, Any], *, max_px: int, quality: int) -> dict[s
 class RobotTracer:
     """Emit one platform span per env step, keyframe-stamped at fresh chunks.
 
-    Construct **one per lane** so per-episode context (task id + args) is not
-    clobbered by a sibling lane: ``model`` / ``env`` are cell-level constants set
-    at construction, while ``set_episode`` updates the current task each rollout.
-    Each span carries this as ``request.meta`` so the viewer can label the run.
-    The ``trace_id`` is read from the ambient trace context at emit time, so spans
-    always attribute to the rollout whose task is running.
+    Construct **one per agent**: ``model`` / ``env`` are fixed at construction,
+    while ``set_episode`` updates the current task each rollout. Each span carries
+    this as ``request.meta`` so the viewer can label the run. The ``trace_id`` is
+    read from the ambient trace context at emit time, so spans always attribute to
+    the rollout whose task is running.
     """
 
     def __init__(self, *, model: str | None = None, env: str | None = None) -> None:
