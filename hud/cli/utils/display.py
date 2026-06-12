@@ -1,8 +1,8 @@
 """Rich CLI display for new-flow eval results (``list[Run]``).
 
 Adapted from the legacy ``hud/eval/display.py`` to read :class:`hud.eval.Run`
-(``reward`` + ``trace.content`` + ``trace.isError`` + ``prompt``) rather than the
-legacy ``EvalContext``.
+(``reward`` + ``trace.content`` + ``trace.is_error`` + ``prompt``) rather than
+the legacy ``EvalContext``.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def display_runs(
         return
 
     rewards = [r.reward for r in runs]
-    errors = [r for r in runs if r.trace.isError]
+    errors = [r for r in runs if r.trace.is_error]
     mean_reward = mean(rewards)
     std_reward = pstdev(rewards) if len(rewards) > 1 else 0.0
     success_rate = sum(1 for r in rewards if r > _SUCCESS_THRESHOLD) / len(runs)
@@ -76,7 +76,7 @@ def display_runs(
         table.add_column("Reward", justify="right", style="green", width=8)
         table.add_column("", justify="center", width=3)
         for i, run in enumerate(runs):
-            if run.trace.isError:
+            if run.trace.is_error:
                 status = "[red]✗[/red]"
             elif run.reward > _SUCCESS_THRESHOLD:
                 status = "[green]✓[/green]"

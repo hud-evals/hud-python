@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import mcp.types as mcp_types
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
@@ -25,9 +25,9 @@ from anthropic.types.beta import (
 )
 
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import Citation, ClaudeConfig
+from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
@@ -71,7 +71,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(
-        self, *, prompt: str | list[Any] | None
+        self, *, prompt: list[mcp_types.PromptMessage]
     ) -> RunState[BetaMessageParam]:
         return RunState(messages=self._initial_messages(prompt))
 
@@ -174,7 +174,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> AgentResponse:
+    ) -> AgentStep:
         required_betas = {
             beta for tool in state.tools.values() if (beta := getattr(tool.spec, "beta", None))
         }
@@ -257,10 +257,16 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         if response is None:
             raise ValueError("Claude response missing after retries")
 
-        result = AgentResponse(content="", tool_calls=[], done=True)
+        result = AgentStep(content="", done=True)
+        result.model = response.model
+        result.usage = Usage(
+            prompt_tokens=response.usage.input_tokens,
+            completion_tokens=response.usage.output_tokens,
+            cached_tokens=response.usage.cache_read_input_tokens,
+        )
         text_parts: list[str] = []
         thinking_parts: list[str] = []
-        citations: list[dict[str, object]] = []
+        citations: list[Citation] = []
 
         for block in response.content:
             match block.type:
@@ -280,10 +286,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                 case "text":
                     text_block = cast("BetaTextBlock", block)
                     text_parts.append(text_block.text)
-                    citations.extend(
-                        self._citation(c).model_dump(exclude={"provider_data"})
-                        for c in (text_block.citations or [])
-                    )
+                    citations.extend(self._citation(c) for c in (text_block.citations or []))
                 case "thinking":
                     if block.thinking:
                         thinking_parts.append(block.thinking)

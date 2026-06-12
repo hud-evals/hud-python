@@ -7,9 +7,10 @@ icon: "code"
 The serializable shapes agents, tasks, and graders exchange.
 
 ```python
-from hud import Grade, Run
-from hud.types import Trace
-from hud.agents.types import AgentAnswer, Citation, EvaluationResult, SubScore, ContentResult
+from hud import Grade, Run, Trace
+from hud.types import Step
+from hud.agents.types import AgentStep, Citation, SubagentStep, ToolStep
+from hud.environment import Answer
 ```
 
 ## `Run`
@@ -21,7 +22,9 @@ one over a connected client for manual driving (see
 
 | Member | Type | Description |
 |--------|------|-------------|
-| `run.prompt` | `str \| list \| None` | The task's opening prompt (text, or chat-style message list). |
+| `run.prompt` | `str \| list \| None` | The task's opening prompt as `tasks.start` returned it (text, or chat-style message list). |
+| `run.prompt_messages` | `list[PromptMessage]` | The prompt as normalized user/assistant turns — what agents consume. |
+| `run.prompt_text` | `str` | The prompt flattened to plain text, for string-only backends. |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
 | `run.grade` | `Grade` | Structured grade result. |
 | `run.reward` | `float` | The graded reward (`grade.reward`, set on exit). |
@@ -50,28 +53,46 @@ Structured result from grading one run, parsed from the wire grade frame
 
 ## `Trace`
 
-The agent's trajectory for one rollout — the unit of training data.
+The agent's trajectory for one rollout — an ordered collection of `Step`s plus
+the run summary, and the unit of training data. Every recorded step also
+streams to the platform as one schema-tagged span.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `steps` | `list[Step]` | The ordered trajectory. |
+| `status` | `"completed" \| "error" \| "cancelled" \| None` | How the run ended (`trace.is_error` reads it). |
 | `content` | `str \| None` | The final answer (graded). |
-| `messages` | `list` | The conversation messages. |
-| `citations` | `list[dict]` | Normalized citations. |
-| `samples` | `list[Sample]` | Token-level samples (inline RL mode). |
 | `trace_id` | `str \| None` | Keys server-side trajectories. |
-| `isError` / `done` | `bool` | Status flags. |
+
+`hud.types.Step` is the shared skeleton (source, timing, error, plus the
+harness payloads: prompt `messages` and `task_call` lifecycle RPCs). The
+tool-agent family subclasses it in `hud.agents.types`, flat on the skeleton:
+
+- **`AgentStep`** — the model's turn: `content`, `reasoning`, `tool_calls`,
+  `done`, plus `model`, `usage`, and token-level `sample` when the backend is
+  trainable.
+- **`ToolStep`** — one tool round-trip: the `MCPToolCall` paired with its
+  `MCPToolResult`.
+- **`SubagentStep`** — a nested rollout's `Trace`, embedded whole.
+
+Derived reads go through the trace's two query shapes — `trace.final(get)`
+(newest non-`None` answer wins; `trace.error` is a view on it) and
+`trace.collect(get)` (every answer, in step order). Family vocabulary stays at
+the call site:
+
+```python
+samples = trace.collect(lambda s: s.sample if isinstance(s, AgentStep) else None)
+citations = trace.final(lambda s: s.citations if isinstance(s, AgentStep) else None)
+```
 
 ## Answer & result types
 
-### `AgentAnswer[T]`
+### `Answer[T]`
 
-When a task declares `returns=T`, the answer arrives wrapped:
-
-| Field | Description |
-|-------|-------------|
-| `content` | The parsed structured answer (type `T`). |
-| `raw` | The original answer string. |
-| `citations` | Normalized `Citation`s. |
+When a task declares `returns=T`, the answer arrives wrapped
+(`from hud.environment import Answer`): `content` is the answer parsed into
+`T` (or the original string when parsing failed — grade it accordingly),
+`raw` is always the string as submitted.
 
 ```python
 @env.task(returns=int)
@@ -80,32 +101,13 @@ async def count(word: str = "strawberry"):
     yield 1.0 if answer.content == len(word) else 0.0
 ```
 
-### `SubScore`
-
-One component of a grade: `name`, `value` (0–1), `weight` (default `1.0`; negative = penalty), optional `metadata`.
-
-### `EvaluationResult`
-
-The combined grade payload you can yield from a task:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `reward` | `0.0` | Final score. |
-| `done` | `True` | Episode complete. |
-| `subscores` | `None` | Optional breakdown (shown in the trace). |
-| `info` | `{}` | Extra metadata. |
-| `content` | `None` | Human-readable explanation. |
-| `isError` | `False` | Whether grading itself failed. |
-
-`EvaluationResult.from_float(value)` wraps a bare reward.
-
 ### `Citation`
 
-A normalized citation across providers: `type`, `text`, `source`, `title`, `start_index`, `end_index`, `provider_data`.
+A normalized citation across providers (`hud.agents.types.Citation`): `type`, `text`, `source`, `title`, `start_index`, `end_index`. A reply annotation, not a grading input — provider agents attach them to `AgentStep.citations`, and chat surfaces read the final reply's via the `trace.final(...)` query above. A task that wants to grade sources should declare them in its `returns=` schema so the agent submits them as part of the answer.
 
-### `ContentResult`
+### Grading shapes
 
-Intermediate tool-execution output: `output`, `error`, `base64_image`, `system`, `url` (combinable with `+`). `to_content_blocks()` converts it to the `list[ContentBlock]` an MCP tool returns — the one-liner for vision tools that send text plus a screenshot (see [`Capability.mcp`](/v6/reference/capabilities#capability-mcp)).
+`SubScore` and `EvaluationResult` live with the graders — see [Graders](/v6/reference/graders#subscore-and-evaluationresult).
 
 ## Training types
 
@@ -119,7 +121,7 @@ from hud.eval import TrainingConfig, group_relative
 
 ## Typed task I/O
 
-Declare `input=` / `returns=` on `@env.task` to surface JSON schemas in the manifest and parse the agent's answer into a typed `AgentAnswer[T]`. Any Pydantic model or standard type works.
+Declare `input=` / `returns=` on `@env.task` to surface JSON schemas in the manifest and parse the agent's answer into a typed `Answer[T]`. Any Pydantic model or standard type works.
 
 ## See also
 

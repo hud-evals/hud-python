@@ -123,14 +123,7 @@ def load(path: str | Path) -> Taskset:
     for idx, group in enumerate(sorted_groups, start=1):
         env_name = base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}"
         for harbor_task in group:
-            metadata = harbor_task.config.get("metadata")
-            tasks.append(
-                Task(
-                    env=env_name,
-                    id=harbor_task.task_id,
-                    columns=dict(metadata) if isinstance(metadata, dict) and metadata else None,
-                )
-            )
+            tasks.append(Task(env=env_name, id=harbor_task.task_id))
     return Taskset(base_name, tasks)
 
 

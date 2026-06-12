@@ -11,9 +11,9 @@ from google import genai
 from google.genai import types as genai_types
 
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import Citation, GeminiConfig
+from hud.agents.types import AgentStep, Citation, GeminiConfig, Usage
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
 from .settings import gemini_agent_settings
@@ -78,7 +78,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(
-        self, *, prompt: str | list[Any] | None
+        self, *, prompt: list[mcp_types.PromptMessage]
     ) -> RunState[genai_types.Content]:
         return RunState(messages=self._initial_messages(prompt))
 
@@ -135,7 +135,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> AgentResponse:
+    ) -> AgentStep:
         messages = state.messages
 
         # Drop screenshots from older computer tool turns.
@@ -195,7 +195,15 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         if content is not None:
             messages.append(content)
 
-        result = AgentResponse(content="", tool_calls=[], done=True)
+        result = AgentStep(content="", done=True)
+        result.model = api_response.model_version or self.config.model
+        usage_meta = api_response.usage_metadata
+        if usage_meta is not None:
+            result.usage = Usage(
+                prompt_tokens=usage_meta.prompt_token_count,
+                completion_tokens=usage_meta.candidates_token_count,
+                cached_tokens=usage_meta.cached_content_token_count,
+            )
         text_parts: list[str] = []
         thought_parts: list[str] = []
 
@@ -218,10 +226,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
         grounding_meta = candidate.grounding_metadata
         if grounding_meta is not None:
-            result.citations = [
-                c.model_dump(exclude={"provider_data"})
-                for c in _grounding_citations(grounding_meta)
-            ]
+            result.citations = _grounding_citations(grounding_meta)
 
         if candidate.finish_reason is not None:
             result.finish_reason = candidate.finish_reason.name

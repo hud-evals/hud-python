@@ -25,8 +25,9 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from hud.agents.base import Agent
-from hud.agents.types import BrowserUseConfig
+from hud.agents.types import AgentStep, BrowserUseConfig
 from hud.settings import settings
+from hud.types import Step
 
 if TYPE_CHECKING:
     from hud.eval.rollout import Run
@@ -47,7 +48,7 @@ class BrowserUseAgent(Agent):
     async def __call__(self, run: Run) -> None:
         """Drive browser-use over the run's CDP capability, filling ``run.trace``.
 
-        Reads ``run.prompt`` and the CDP binding off the run, runs the browser-use
+        Reads ``run.prompt_text`` and the CDP binding off the run, runs the browser-use
         loop, and writes the final answer + trajectory metadata onto ``run.trace``
         (graded on exit).
         """
@@ -64,31 +65,38 @@ class BrowserUseAgent(Agent):
 
         llm = ChatAnthropic(model=self.config.model, api_key=api_key, base_url=self.config.base_url)
         browser: Any = Browser(cdp_url=cdp_url)
-        sdk_agent = cast("Any", BrowserUseSdkAgent(task=run.prompt or "", llm=llm, browser=browser))
+        sdk_agent = cast("Any", BrowserUseSdkAgent(task=run.prompt_text, llm=llm, browser=browser))
 
         try:
             history: Any = await sdk_agent.run(max_steps=self.config.max_steps)
         except Exception as exc:
             LOGGER.exception("browser-use run failed")
-            trace.done = True
-            trace.content = str(exc)
-            trace.isError = True
-            trace.info["error"] = str(exc)
+            trace.status = "error"
+            run.record(Step(source="system", error=str(exc)))
             return
         finally:
             with contextlib.suppress(Exception):
                 await browser.stop()
 
         successful = history.is_successful()
-        trace.done = history.is_done()
-        trace.content = history.final_result() or ""
-        trace.isError = successful is False
-        trace.info.update(
+        content = history.final_result() or ""
+        trace.status = "error" if successful is False else "completed"
+        trace.content = content
+        trace.extra.update(
             {
                 "is_successful": successful,
                 "steps": history.number_of_steps(),
                 "urls": history.urls(),
             }
+        )
+        # browser-use owns its own loop; record the run as one coarse agent step
+        # (per-action fidelity would need a browser-use-native serializer).
+        run.record(
+            AgentStep(
+                content=content,
+                done=history.is_done(),
+                error=content if successful is False else None,
+            ),
         )
 
 

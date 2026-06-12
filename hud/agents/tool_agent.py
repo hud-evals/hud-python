@@ -28,15 +28,15 @@ import mcp.types as mcp_types
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool
+from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient
-from hud.telemetry.instrument import instrument
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import MCPToolCall, MCPToolResult, Step
+from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.agents.types import AgentConfig
     from hud.capabilities import CapabilityClient
     from hud.eval.rollout import Run
-    from hud.types import AgentResponse
 
 logger = logging.getLogger(__name__)
 
@@ -50,37 +50,6 @@ def _message_text(message: mcp_types.PromptMessage) -> str:
     if isinstance(content, mcp_types.TextContent):
         return content.text
     return getattr(content, "text", "") or ""
-
-
-def to_prompt_messages(prompt: str | list[Any] | None) -> list[mcp_types.PromptMessage]:
-    """Normalize a task prompt into a list of ``PromptMessage`` turns.
-
-    Accepts the two shapes a ``Run.prompt`` can take: plain text (one user turn)
-    or a list of message dicts / ``PromptMessage`` objects (chat-style, multi-turn).
-    """
-    if prompt is None:
-        prompt = ""
-    if isinstance(prompt, str):
-        return [
-            mcp_types.PromptMessage(
-                role="user",
-                content=mcp_types.TextContent(type="text", text=prompt),
-            ),
-        ]
-    messages: list[mcp_types.PromptMessage] = []
-    for item in prompt:
-        if isinstance(item, mcp_types.PromptMessage):
-            messages.append(item)
-        elif isinstance(item, dict):
-            messages.append(mcp_types.PromptMessage.model_validate(item))
-        else:
-            messages.append(
-                mcp_types.PromptMessage(
-                    role="user",
-                    content=mcp_types.TextContent(type="text", text=str(item)),
-                ),
-            )
-    return messages
 
 
 @dataclass
@@ -119,8 +88,8 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
 
         Opens the capabilities this agent's catalog supports off the connection
         (``run.client.open(protocol)``), builds the tools into a fresh ``RunState``,
-        then runs the loop against ``run.prompt``, accumulating the trajectory onto
-        ``run.trace``. Loop budget and prompting come from the agent's config
+        then runs the loop against ``run.prompt_messages``, accumulating the
+        trajectory onto ``run.trace``. Loop budget and prompting come from the agent's config
         (``max_steps``, ``system_prompt``, ``citations_enabled``). No per-rollout
         state is stored on ``self``, so one instance may drive many concurrent
         rollouts.
@@ -132,7 +101,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             for cap in manifest.bindings:
                 if cap.protocol in wanted and cap.protocol not in connections:
                     connections[cap.protocol] = await run.client.open(cap.protocol)
-        state = await self._initialize_state(prompt=run.prompt)
+        state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(
             run,
@@ -190,27 +159,23 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     ) -> None:
         trace = run.trace
         try:
-            response: AgentResponse | None = None
+            step: AgentStep | None = None
             hit_max = False
 
-            for step in range(1, max_steps + 1):
-                logger.debug("step %d/%d", step, max_steps)
-                response = await instrument(
-                    self.get_response,
-                    category="inference-2",
-                    record_args=False,
-                )(
+            for turn in range(1, max_steps + 1):
+                logger.debug("step %d/%d", turn, max_steps)
+                started_at = now_iso()
+                step = await self.get_response(
                     state,
                     system_prompt=system_prompt,
                     citations_enabled=citations_enabled,
                 )
-                if response.sample is not None:
-                    trace.samples.append(response.sample)
+                step.started_at = step.started_at or started_at
+                step.model = step.model or self.config.model
+                run.record(step)
 
-                if response.done or not response.tool_calls:
-                    follow_up = await auto_respond(
-                        response.content, enabled=self.config.auto_respond
-                    )
+                if step.done or not step.tool_calls:
+                    follow_up = await auto_respond(step.content, enabled=self.config.auto_respond)
                     if follow_up is not None:
                         text = (
                             follow_up.content.text
@@ -218,11 +183,14 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                             else ""
                         )
                         state.messages.append(self._format_user_text(text))
+                        run.record(Step(source="user", messages=[follow_up]))
                         continue
                     break
 
-                for call in response.tool_calls:
+                for call in step.tool_calls:
+                    call_started_at = now_iso()
                     result = await self._dispatch_call(call, state)
+                    run.record(ToolStep(call=call, result=result, started_at=call_started_at))
                     msg = self._format_result(call, result, state)
                     if msg is None:
                         continue
@@ -231,26 +199,18 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     else:
                         state.messages.append(cast("MessageT", msg))
 
-                if step == max_steps:
+                if turn == max_steps:
                     hit_max = True
 
-            trace.done = True
-            trace.messages = state.messages
-            trace.content = response.content if response else ""
-            # Exhausting the step budget is normal termination (the reward tells
-            # the story), not an agent error — record it as a stop reason so the
-            # platform doesn't paint the rollout (and its last tool call) as failed.
-            trace.isError = response.isError if response else False
-            trace.citations = (response.citations if response else None) or []
-            trace.info["stop_reason"] = "max_steps" if hit_max else "done"
+            trace.content = step.content if step else None
+            trace.status = "error" if step is not None and step.error else "completed"
+            trace.extra["stop_reason"] = "max_steps" if hit_max else "done"
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as exc:
             logger.exception("ToolAgent loop failed")
-            trace.done = True
-            trace.content = str(exc)
-            trace.isError = True
-            trace.info["error"] = str(exc)
+            trace.status = "error"
+            run.record(Step(source="system", error=str(exc)))
 
     async def _dispatch_call(
         self,
@@ -277,16 +237,15 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
 
     # ─── provider hooks ───────────────────────────────────────────────
 
-    def _initial_messages(self, prompt: str | list[Any] | None) -> list[MessageT]:
-        """Turn a run prompt (text or message list) into provider messages."""
-        return [
-            self._format_message(message.role, _message_text(message))
-            for message in to_prompt_messages(prompt)
-        ]
+    def _initial_messages(self, prompt: list[mcp_types.PromptMessage]) -> list[MessageT]:
+        """Map normalized prompt turns onto provider messages."""
+        return [self._format_message(message.role, _message_text(message)) for message in prompt]
 
     @abstractmethod
-    async def _initialize_state(self, *, prompt: str | list[Any] | None) -> RunState[MessageT]:
-        """Build fresh run state from the prompt (use ``self._initial_messages``)."""
+    async def _initialize_state(
+        self, *, prompt: list[mcp_types.PromptMessage]
+    ) -> RunState[MessageT]:
+        """Build fresh run state from the prompt turns (use ``self._initial_messages``)."""
 
     @abstractmethod
     async def get_response(
@@ -295,8 +254,12 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> AgentResponse:
-        """Call the provider API with ``state.messages`` + ``state.params``."""
+    ) -> AgentStep:
+        """Call the provider API and return the model's turn as an ``AgentStep``.
+
+        The loop stamps ``started_at``/``model`` fallbacks and records it;
+        a failed call is an ``AgentStep`` with ``error`` set and ``done=True``.
+        """
 
     def _format_user_text(self, text: str) -> MessageT:
         """Wrap a plain text string as a provider user message."""
@@ -316,4 +279,4 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         """Convert a tool result into one or more provider messages, or None to skip."""
 
 
-__all__ = ["RunState", "ToolAgent", "to_prompt_messages"]
+__all__ = ["RunState", "ToolAgent"]

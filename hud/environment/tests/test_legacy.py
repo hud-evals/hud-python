@@ -17,9 +17,8 @@ import pytest
 from pydantic import BaseModel
 
 from hud.agents.base import Agent
-from hud.agents.types import AgentAnswer
 from hud.clients import HudProtocolError
-from hud.environment import Environment, Workspace
+from hud.environment import Answer, Environment, Workspace
 from hud.environment.legacy import _classify_tool
 from hud.eval import Run, Taskset
 from hud.eval.runtime import _local
@@ -150,10 +149,10 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
     runs = job.runs
 
     assert len(runs) == 4
-    failed = [r for r in runs if r.trace.isError]
+    failed = [r for r in runs if r.trace.is_error]
     assert len(failed) == 1  # only a==2 blew up
     assert failed[0].reward == 0.0
-    assert "agent exploded" in (failed[0].trace.content or "")
+    assert "agent exploded" in (failed[0].trace.error or "")
     # Mid-run failure keeps the real run: the prompt and placement survive.
     assert failed[0].prompt == "add:2:1"
     assert failed[0].runtime is not None
@@ -192,7 +191,7 @@ async def test_exception_in_body_cancels_without_evaluating() -> None:
         with pytest.raises(RuntimeError, match="agent failed"):
             async with Run(client, "add", {"a": 1, "b": 1}) as run:
                 raise RuntimeError("agent failed")
-        assert run.trace.isError is True
+        assert run.trace.is_error is True
         assert run.reward == 0.0  # never graded
 
 
@@ -218,18 +217,18 @@ async def test_chat_scenario_yields_message_list_prompt() -> None:
     assert run.reward == 1.0
 
 
-async def test_typed_returns_delivers_agent_answer() -> None:
-    class Answer(BaseModel):
+async def test_typed_returns_delivers_answer_envelope() -> None:
+    class Payload(BaseModel):
         value: int
 
     env = Environment("typed")
     with warnings.catch_warnings():
         _silence_deprecation()
 
-        @env.scenario("typed", returns=Answer)
+        @env.scenario("typed", returns=Payload)
         async def typed():
             ans = yield "give me 42"
-            ok = isinstance(ans, AgentAnswer) and ans.content.value == 42
+            ok = isinstance(ans, Answer) and ans.content.value == 42
             yield 1.0 if ok else 0.0
 
     async with served(env) as client, Run(client, "typed", {}) as run:

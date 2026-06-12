@@ -5,15 +5,15 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import OpenAIChatConfig
+from hud.agents.types import AgentStep, OpenAIChatConfig, Sample, Usage
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Sample
+from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
 from .tools import (
@@ -24,6 +24,9 @@ from .tools import (
     ReadTool,
 )
 from .tools.base import format_chat_result
+
+if TYPE_CHECKING:
+    import mcp.types as mcp_types
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +85,9 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: str | list[Any] | None) -> OpenAIChatRunState:
+    async def _initialize_state(
+        self, *, prompt: list[mcp_types.PromptMessage]
+    ) -> OpenAIChatRunState:
         return OpenAIChatRunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> ChatCompletionMessageParam:
@@ -108,7 +113,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> AgentResponse:
+    ) -> AgentStep:
         del citations_enabled
         chat_state = cast("OpenAIChatRunState", state)
         messages = chat_state.messages
@@ -156,13 +161,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             if "Invalid JSON" in str(e):
                 error_content = "Invalid JSON, response was truncated"
             logger.warning(error_content)
-            return AgentResponse(
-                content=error_content,
-                tool_calls=[],
-                done=True,
-                isError=True,
-                raw=None,
-            )
+            return AgentStep(error=error_content, done=True)
 
         choice = response.choices[0]
         message = choice.message
@@ -214,7 +213,15 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
                 MCPToolCall(id=tc.id, name=provider_name, arguments=arguments),
             )
 
-        return AgentResponse(
+        usage: Usage | None = None
+        if response.usage is not None:
+            details = response.usage.prompt_tokens_details
+            usage = Usage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                cached_tokens=details.cached_tokens if details is not None else None,
+            )
+        return AgentStep(
             content=message.content or "",
             reasoning=reasoning,
             finish_reason=choice.finish_reason,
@@ -223,6 +230,8 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             done=not tool_calls,
             raw=response,
             sample=sample,
+            model=response.model,
+            usage=usage,
         )
 
 

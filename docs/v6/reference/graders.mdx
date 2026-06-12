@@ -9,11 +9,11 @@ Graders turn an agent's answer into a reward. HUD ships reusable ones so you don
 ```python
 from hud.graders import (
     BashGrader, LLMJudgeGrader, Grader,
+    SubScore, EvaluationResult,
     combine, combine_any, combine_all,
     exact_match, contains, contains_any, contains_all,
     numeric_match, f1_score, normalize,
 )
-from hud.agents.types import SubScore
 ```
 
 ## Comparison helpers
@@ -114,7 +114,20 @@ result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 
 ## `SubScore` and `EvaluationResult`
 
-A `SubScore` (`name`, `value` 0–1, `weight`, optional `metadata`) is one component; an `EvaluationResult` carries the combined `reward`, `subscores`, and `info`. See [Types](/v6/reference/types).
+A `SubScore` is one component of a grade: `name`, `value` (0–1), `weight` (default `1.0`; negative = penalty), optional `metadata`.
+
+An `EvaluationResult` is the combined grade payload you can yield from a task:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `reward` | `0.0` | Final score. |
+| `done` | `True` | Episode complete. |
+| `subscores` | `None` | Optional breakdown (shown in the trace). |
+| `info` | `{}` | Extra metadata. |
+| `content` | `None` | Human-readable explanation. |
+| `isError` | `False` | Whether grading itself failed. |
+
+`EvaluationResult.from_float(value)` wraps a bare reward.
 
 ## See also
 

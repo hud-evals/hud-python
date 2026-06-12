@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import ContentBlock, TextContent
 
+from hud.agents.types import AgentStep
 from hud.types import Trace  # noqa: TC001 - used as return type
 
 from .job import Job
@@ -132,15 +133,18 @@ class Chat:
         run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
         self.job.runs.append(run)
         result = run.trace
-        if result.isError:
+        if result.is_error:
             # Don't record the failed turn as an assistant message.
-            raise RuntimeError(result.content or "chat turn failed")
+            raise RuntimeError(result.error or "chat turn failed")
 
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
             "content": {"type": "text", "text": result.content or ""},
         }
-        if result.citations:
-            assistant_msg["citations"] = result.citations
+        citations = result.final(lambda s: s.citations if isinstance(s, AgentStep) else None)
+        if citations:
+            assistant_msg["citations"] = [
+                c.model_dump(mode="json", exclude_none=True) for c in citations
+            ]
         self.messages.append(assistant_msg)
         return result

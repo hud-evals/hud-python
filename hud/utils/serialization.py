@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypeAlias
 
 import pydantic_core
+
+# JSON-compatible scalar/container values. Nested JSON payloads are intentionally
+# opaque to Pydantic; recursive aliases make schema generation fragile across
+# supported Python/Pydantic versions. (Public home: re-exported by ``hud.types``.)
+JsonValue: TypeAlias = str | int | float | bool | None | list[Any] | dict[str, Any]
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 
 def _unserializable_placeholder(value: Any) -> str:

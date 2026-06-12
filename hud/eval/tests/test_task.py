@@ -112,10 +112,10 @@ async def test_no_placement_defaults_to_provision_stub_with_precise_error() -> N
     # rollout comes back as an isolated failed Run carrying the precise error.
     job = await v.run(cast("Agent", object()))
     (run,) = job.runs
-    assert run.trace.isError
-    assert "'hosted-env'" in (run.trace.content or "")
-    assert "runtime=LocalRuntime" in (run.trace.content or "")
-    assert "Runtime(url)" in (run.trace.content or "")
+    assert run.trace.is_error
+    assert "'hosted-env'" in (run.trace.error or "")
+    assert "runtime=LocalRuntime" in (run.trace.error or "")
+    assert "Runtime(url)" in (run.trace.error or "")
 
 
 # ─── taskset collection ────────────────────────────────────────────────

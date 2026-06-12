@@ -67,11 +67,7 @@ def _client() -> AsyncOpenAI:
     return cast("AsyncOpenAI", build_gateway_client("openai"))
 
 
-@instrument(
-    category="agent",
-    name="response_automation",
-    internal_type="user-message",
-)
+@instrument(name="response_automation")
 async def _determine_response(
     agent_message: str,
     *,

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from unittest.mock import patch
 
 from mcp.types import ImageContent, TextContent
 
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace, TraceStep
+from hud.types import MCPToolCall, MCPToolResult
 
 
 def test_mcp_tool_call_str_long_args():
@@ -163,96 +162,3 @@ def test_mcp_tool_result_rich():
         rich_output = result.__rich__()
         assert rich_output == "formatted"
         mock_console.format_tool_result.assert_called_once()
-
-
-def test_agent_response_str_with_reasoning():
-    """Test AgentResponse __str__ includes reasoning."""
-    response = AgentResponse(reasoning="Test reasoning", content="Test content")
-    output = str(response)
-    assert "Reasoning: Test reasoning" in output
-    assert "Content: Test content" in output
-
-
-def test_agent_response_str_with_tool_calls():
-    """Test AgentResponse __str__ includes tool calls."""
-    response = AgentResponse(
-        tool_calls=[
-            MCPToolCall(name="tool1", arguments={"a": 1}),
-            MCPToolCall(name="tool2", arguments={"b": 2}),
-        ]
-    )
-    output = str(response)
-    assert "Tool Calls:" in output
-    assert "tool1" in output
-    assert "tool2" in output
-
-
-def test_agent_response_raw_serializes_safely():
-    """AgentResponse captures raw provider payloads in JSON-safe dumps."""
-
-    @dataclass
-    class RawResponse:
-        raw_data: str
-
-    response = AgentResponse(raw=RawResponse(raw_data="value"))
-    data = response.model_dump(mode="json")
-
-    assert response.raw == RawResponse(raw_data="value")
-    assert data["raw"] == {"raw_data": "value"}
-
-
-def test_agent_response_dump_uses_canonical_field_names():
-    """AgentResponse dumps use the normalized SDK field names."""
-    response = AgentResponse(raw={"raw_data": "value"})
-    response.reasoning = "because"
-    response.citations = [{"source": "https://example.com"}]
-
-    data = response.model_dump(exclude_none=True, mode="json")
-
-    assert data["reasoning"] == "because"
-    assert data["citations"] == [{"source": "https://example.com"}]
-    assert data["raw"] == {"raw_data": "value"}
-
-
-def test_agent_response_citations_default_empty():
-    """AgentResponse.citations defaults to empty list."""
-    result = AgentResponse(content="hello")
-    assert result.citations == []
-
-
-def test_agent_response_citations_roundtrip():
-    """Citations survive serialize/deserialize."""
-    cit = {"type": "url_citation", "source": "https://example.com", "title": "Example"}
-    result = AgentResponse(content="hello", citations=[cit])
-    data = result.model_dump(mode="json")
-    restored = AgentResponse(**data)
-    assert len(restored.citations) == 1
-    assert restored.citations[0]["source"] == "https://example.com"
-
-
-def test_trace_citations_default_empty():
-    """Trace.citations defaults to empty list."""
-    trace = Trace()
-    assert trace.citations == []
-
-
-def test_trace_citations_populated():
-    """Trace can hold citations."""
-    cit = {"type": "grounding", "source": "https://example.com", "text": "some text"}
-    trace = Trace(content="answer", citations=[cit])
-    assert len(trace.citations) == 1
-    assert trace.citations[0]["type"] == "grounding"
-
-
-def test_trace_len():
-    """Test Trace __len__ returns number of steps."""
-    trace = Trace()
-    trace.append(TraceStep(category="mcp"))
-    trace.append(TraceStep(category="agent"))
-    assert len(trace) == 2
-
-
-def test_trace_num_messages():
-    """Test Trace num_messages property."""
-    trace = Trace(messages=[{"role": "user"}, {"role": "assistant"}])
-    assert trace.num_messages == 2

@@ -1,24 +1,34 @@
-"""Agent configuration + result types.
+"""Agent configuration and the tool-agent family's step payloads.
 
 Config classes are defined here separately from agent implementations
 to allow importing them without requiring SDK dependencies (anthropic, google-genai).
-This module also holds the agent-facing result/answer types (``Citation``,
-``AgentAnswer``, ``ScenarioResult``/``EvaluationResult``, ``ContentResult``,
-``SubScore``, ``ToolError``) — the serializable shapes agents and scenarios exchange.
+
+The trajectory section layers the tool-agent family on the core contract:
+:mod:`hud.types` owns the skeleton (ordering, timing, error, span
+transport); this module adds what an LLM tool-use loop produces, flat on
+that skeleton — the model's turn (:class:`AgentStep`), the tool round-trip
+(:class:`ToolStep` pairing an ``MCPToolCall`` with its ``MCPToolResult``),
+nested rollouts (:class:`SubagentStep`), and the token-level training and
+accounting vocabulary (:class:`Sample`, :class:`Usage`). All ship under
+the core ``hud.step.v1`` schema — the platform's serializer for that
+schema understands this family's payload.
 """
 
 from __future__ import annotations
 
-import warnings
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal
 
-from mcp.types import ContentBlock, ImageContent, TextContent
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+)
 
 from hud.agents.tools.hosted import HostedTool
-from hud.types import Trace
-
-T = TypeVar("T")
+from hud.types import MCPToolCall, MCPToolResult, Step, StepSource, Trace
+from hud.utils.serialization import json_safe_value
 
 # Alias to accept both 'model' and 'checkpoint_name' (backwards compat)
 _model_alias = AliasChoices("model", "checkpoint_name")
@@ -150,134 +160,8 @@ class BrowserUseConfig(AgentConfig):
 
 
 # -----------------------------------------------------------------------------
-# Result / answer types (exchanged between agents, tools, and scenarios)
+# Trajectory (tool-agent family step payloads)
 # -----------------------------------------------------------------------------
-
-
-class SubScore(BaseModel):
-    """Individual subscore for debugging and transparency.
-
-    SubScores allow breaking down the final reward into component parts,
-    making it easier to understand what contributed to the evaluation.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(..., description="Name of this subscore component")
-    weight: float = Field(
-        default=1.0,
-        description="Weight of this subscore (for weighted average). "
-        "Negative weights represent penalties.",
-    )
-    value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
-    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
-
-    @property
-    def score(self) -> float:
-        """Alias for value. Deprecated — use .value instead."""
-        return self.value
-
-
-class ScenarioResult(BaseModel):
-    """Result from a scenario's final phase.
-
-    In eval mode, populate reward and subscores for scoring.
-    In production, use content and info for diagnostics and stats.
-    """
-
-    reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
-    done: bool = Field(default=True, description="Whether the task/episode is complete")
-    content: str | None = Field(default=None, description="Human-readable explanation")
-    info: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
-    isError: bool = Field(default=False, description="Whether the evaluation itself failed")
-    subscores: list[SubScore] | None = Field(
-        default=None,
-        description="Optional breakdown of score components for debugging",
-    )
-
-    model_config = ConfigDict(extra="allow")
-
-    @model_validator(mode="after")
-    def _check_subscores(self) -> ScenarioResult:
-        if not self.subscores:
-            return self
-        names = [s.name for s in self.subscores]
-        dupes = [n for n in names if names.count(n) > 1]
-        if dupes:
-            warnings.warn(f"Duplicate subscore names: {set(dupes)}", stacklevel=2)
-        pos_weight_sum = sum(s.weight for s in self.subscores if s.weight > 0)
-        if abs(pos_weight_sum - 1.0) > 0.01:
-            warnings.warn(
-                f"Positive subscore weights should sum to ~1.0 (got {pos_weight_sum:.4f}). "
-                f"Weights represent proportional contributions to the reward.",
-                stacklevel=2,
-            )
-        weighted_sum = sum(s.value * s.weight for s in self.subscores)
-        if abs(weighted_sum - self.reward) > 0.01:
-            warnings.warn(
-                f"Subscores don't match reward: "
-                f"sum(value*weight)={weighted_sum:.4f} but reward={self.reward:.4f}",
-                stacklevel=2,
-            )
-        return self
-
-    @classmethod
-    def from_float(cls, value: float) -> ScenarioResult:
-        """Create a ScenarioResult from a simple float reward."""
-        return cls(reward=value, done=True)
-
-
-EvaluationResult = ScenarioResult
-
-
-class ContentResult(BaseModel):
-    """Represents the intermediate result of a tool execution.
-
-    Often useful for tools that need to return multiple types of content.
-    """
-
-    output: str | None = Field(default=None, description="Output text")
-    error: str | None = Field(default=None, description="Error message")
-    base64_image: str | None = Field(default=None, description="Base64-encoded image")
-    system: str | None = Field(default=None, description="System message")
-    url: str | None = Field(default=None, description="Current page URL (for browser automation)")
-
-    def __add__(self, other: ContentResult) -> ContentResult:
-        def combine_fields(
-            field: str | None, other_field: str | None, concatenate: bool = True
-        ) -> str | None:
-            if field and other_field:
-                if concatenate:
-                    return field + other_field
-                raise ValueError("Cannot combine tool results")
-            return field or other_field
-
-        return ContentResult(
-            output=combine_fields(self.output, other.output),
-            error=combine_fields(self.error, other.error),
-            base64_image=combine_fields(self.base64_image, other.base64_image, False),
-            system=combine_fields(self.system, other.system),
-            url=combine_fields(self.url, other.url, False),
-        )
-
-    def to_text_blocks(self) -> list[TextContent]:
-        """Convert text-only content to TextContent blocks."""
-        blocks: list[TextContent] = []
-        if self.output:
-            blocks.append(TextContent(text=self.output, type="text"))
-        if self.error:
-            blocks.append(TextContent(text=self.error, type="text"))
-        if self.url:
-            blocks.append(TextContent(text=f"__URL__:{self.url}", type="text"))
-        return blocks
-
-    def to_content_blocks(self) -> list[ContentBlock]:
-        """Convert to content blocks including images."""
-        blocks: list[ContentBlock] = list(self.to_text_blocks())
-        if self.base64_image:
-            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
-            blocks.append(ImageContent(data=self.base64_image, mimeType=mime, type="image"))
-        return blocks
 
 
 class Citation(BaseModel):
@@ -286,6 +170,10 @@ class Citation(BaseModel):
     Unifies OpenAI ``url_citation``/``file_citation`` annotations, Claude ``cite``
     blocks, and Gemini grounding into a single shape: a span of agent output linked
     to its source. The ``type`` field preserves the provider-specific category.
+    A reply annotation, not a grading input: provider agents attach these to the
+    turn (``AgentStep.citations``), where chat surfaces and the platform read
+    them — e.g. the final reply's citations are
+    ``trace.final(lambda s: s.citations if isinstance(s, AgentStep) else None)``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -304,31 +192,87 @@ class Citation(BaseModel):
     end_index: int | None = Field(
         default=None, description="End character index in the agent's output text"
     )
-    provider_data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Raw provider-specific data for advanced use",
-    )
 
 
-class AgentAnswer(BaseModel, Generic[T]):
-    """Wrapper holding an agent's structured answer alongside response metadata.
+class Sample(BaseModel):
+    """One model generation in a rollout: tokens conditioned on + tokens produced.
 
-    When a scenario specifies ``returns=SomeModel``, the answer received by the
-    scenario's evaluate phase is an ``AgentAnswer[SomeModel]``: a parsed ``content``,
-    the original ``raw`` string, normalized ``citations``, and optional ``trace``.
+    Token-level data for RL training (Tinker-shaped). ``output_logprobs`` are the
+    per-output-token logprobs under the *sampling* policy (q). Populated only when
+    the model backend is trainable (returns token ids + logprobs); closed/eval-only
+    backends leave it empty.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    prompt_token_ids: list[int] = Field(default_factory=list[int])
+    output_token_ids: list[int] = Field(default_factory=list[int])
+    output_logprobs: list[float] = Field(default_factory=list[float])
 
-    content: T = Field(description="The parsed structured answer")
-    raw: str = Field(default="", description="Original answer string before parsing")
+
+class Usage(BaseModel):
+    """Normalized per-step usage accounting.
+
+    Provider responses report usage under different keys; this is the canonical
+    accounting shape (token-level training data lives in ``Sample``).
+    ``llm_call_count`` is for aggregate steps that wrap several calls.
+    """
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cached_tokens: int | None = None
+    cost_usd: float | None = None
+    llm_call_count: int | None = None
+
+
+class AgentStep(Step):
+    """The model's turn: one LLM call, flat on the step skeleton.
+
+    Provider agents return one from ``get_response()`` and the loop records
+    it directly — timing lands on ``started_at``/``ended_at`` and failures
+    on ``error``, the skeleton's own channels. ``usage`` is the turn's
+    normalized accounting (aggregate turns wrapping several calls report
+    ``llm_call_count``); ``sample`` carries this turn's token-level
+    training data iff the model backend is trainable.
+    """
+
+    source: StepSource = "agent"
+
+    content: str | None = None
+    reasoning: str | None = None
+    tool_calls: list[MCPToolCall] = Field(default_factory=list[MCPToolCall])
+    #: No further tool calls expected — the loop's stop signal.
+    done: bool = False
+    finish_reason: str | None = None
+    refusal: str | None = None
     citations: list[Citation] = Field(default_factory=list[Citation])
-    trace: Trace | None = Field(
-        default=None,
-        description="Full conversation transcript (multi-turn). "
-        "Populated by AgentService for multi-turn sessions.",
-    )
+    raw: Any | None = None
+
+    model: str | None = None
+    usage: Usage | None = None
+    sample: Sample | None = None
+
+    @field_serializer("raw", when_used="json")
+    def _serialize_raw(self, raw: Any | None) -> Any:
+        return json_safe_value(raw)
 
 
-class ToolError(Exception):
-    """An error raised by a tool."""
+class ToolStep(Step):
+    """One tool round-trip: the originating call paired with its result.
+
+    Error-ness of the call is data on the ``result`` (``isError``), not a
+    step failure; ``error`` stays for harness-level faults.
+    """
+
+    source: StepSource = "tool"
+    call: MCPToolCall | None = None
+    result: MCPToolResult | None = None
+
+
+class SubagentStep(Step):
+    """A nested rollout (e.g. an ``AgentTool`` invocation), embedded whole.
+
+    The sub-rollout's own steps stream under its own trace id; this step is
+    the enclosing trace's record of the invocation.
+    """
+
+    source: StepSource = "subagent"
+    subagent: Trace

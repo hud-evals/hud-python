@@ -81,18 +81,17 @@ async def trace_enter(trace_id: str, *, job_id: str | None, group_id: str | None
 
 
 async def trace_exit(run: Run) -> None:
-    """Report one finished rollout (reward / success / error) from its ``Run``."""
+    """Report one finished rollout (status / reward / error) from its ``Run``."""
     if not _reporting_enabled() or run.trace.trace_id is None:
         return
     await _report(
         f"/trace/{run.trace.trace_id}/exit",
         {
-            "prompt": run.prompt,
-            "job_id": run.job_id,
-            "group_id": run.group_id,
+            "status": run.trace.status or "completed",
             "reward": run.reward,
-            "success": not run.trace.isError,
-            "error_message": run.trace.content if run.trace.isError else None,
+            # Recovered step errors stay on the steps; only an errored run
+            # reports a trace-level error.
+            "error": run.trace.error if run.trace.is_error else None,
             "evaluation_result": run.evaluation or None,
         },
     )

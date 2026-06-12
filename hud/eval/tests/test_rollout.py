@@ -16,11 +16,12 @@ import textwrap
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
+import mcp.types as mcp_types
 import pytest
 
 from hud.agents.base import Agent
 from hud.eval import Job, LocalRuntime, Task, Taskset
-from hud.eval.rollout import rollout
+from hud.eval.rollout import Run, rollout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -88,8 +89,8 @@ async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Pat
 
     run = await rollout(_add_task(2, 3), _FnAgent(boom), runtime=LocalRuntime(env_file))
 
-    assert run.trace.isError
-    assert "agent exploded" in (run.trace.content or "")
+    assert run.trace.is_error
+    assert "agent exploded" in (run.trace.error or "")
     assert run.trace_id is not None  # failed runs still key a trajectory
     # The session was live, so the receipt keeps the evidence: the prompt the
     # agent saw and the runtime the rollout executed against.
@@ -106,8 +107,8 @@ async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
 
     run = await rollout(_add_task(1, 1), _FnAgent(_solve_add), runtime=broken_provider)
 
-    assert run.trace.isError
-    assert "no substrate for you" in (run.trace.content or "")
+    assert run.trace.is_error
+    assert "no substrate for you" in (run.trace.error or "")
     assert run.trace_id is not None
     assert run.prompt is None  # nothing ever started
     assert run.runtime is None
@@ -214,3 +215,49 @@ async def test_rollout_threads_job_and_group_ids(env_file: Path) -> None:
     assert run.reward == 1.0
     assert run.job_id == "j1"
     assert run.group_id == "g1"
+
+
+# ─── Run prompt views (what agents consume) ───────────────────────────
+
+
+def _run_with_prompt(prompt: Any) -> Run:
+    run = Run(None, "t", {})
+    run.prompt = prompt
+    return run
+
+
+def test_prompt_messages_wraps_plain_text_as_one_user_turn() -> None:
+    (msg,) = _run_with_prompt("hello").prompt_messages
+    assert msg.role == "user"
+    assert isinstance(msg.content, mcp_types.TextContent)
+    assert msg.content.text == "hello"
+
+
+def test_prompt_messages_no_prompt_is_one_empty_user_turn() -> None:
+    (msg,) = _run_with_prompt(None).prompt_messages
+    assert isinstance(msg.content, mcp_types.TextContent)
+    assert msg.content.text == ""
+
+
+def test_prompt_messages_normalizes_chat_dicts_and_passes_through() -> None:
+    existing = mcp_types.PromptMessage(
+        role="assistant", content=mcp_types.TextContent(type="text", text="prior")
+    )
+    msgs = _run_with_prompt(
+        [
+            {"role": "user", "content": {"type": "text", "text": "hi"}},
+            {"role": "system", "content": "be nice"},  # outside MCP vocab → user
+            existing,
+        ]
+    ).prompt_messages
+    assert [m.role for m in msgs] == ["user", "user", "assistant"]
+    assert msgs[2] is existing
+
+
+def test_prompt_text_flattens_text_turns_and_drops_non_text() -> None:
+    image = mcp_types.PromptMessage(
+        role="user",
+        content=mcp_types.ImageContent(type="image", data="aGk=", mimeType="image/png"),
+    )
+    run = _run_with_prompt([{"role": "user", "content": "first"}, image, "second"])
+    assert run.prompt_text == "first\n\nsecond"

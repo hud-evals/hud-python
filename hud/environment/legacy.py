@@ -99,8 +99,6 @@ class LegacyEnvMixin:
         self._scenario_fns: dict[str, Callable[..., AsyncGenerator[Any, Any]]] = {}
         #: Scenarios marked ``chat=True`` (accept a ``messages`` history param).
         self._scenario_chat_flags: dict[str, bool] = {}
-        #: id -> (returns_type, enable_citations).
-        self._scenario_output_config: dict[str, tuple[type | None, bool]] = {}
         #: id -> (exclude_tools, exclude_sources, allowed_tools).
         self._scenario_exclusions: dict[str, tuple[list[str], list[str], list[str]]] = {}
         #: id -> env var names the scenario requires.
@@ -266,7 +264,9 @@ class LegacyEnvMixin:
         Accepts the full v5 ``scenario`` signature; the generator (``yield prompt``
         then ``yield reward``) is registered as a v6 task and the v5 metadata
         (``chat``/``returns``/tool exclusions/``required_env_vars``) is retained for
-        agents and the task manifest.
+        agents and the task manifest. ``enable_citations`` is accepted but ignored:
+        citations are agent-side in v6 (``AgentConfig.citations_enabled``) and no
+        longer flow into the answer envelope.
         """
         warnings.warn(
             "env.scenario() is deprecated: use @env.task (it accepts the same "
@@ -295,8 +295,6 @@ class LegacyEnvMixin:
             self._scenario_fns[scenario_name] = fn
             if chat:
                 self._scenario_chat_flags[scenario_name] = True
-            if returns is not None or enable_citations:
-                self._scenario_output_config[scenario_name] = (returns, enable_citations)
             if exclude_tools or exclude_sources or allowed_tools:
                 self._scenario_exclusions[scenario_name] = (
                     exclude_tools or [],

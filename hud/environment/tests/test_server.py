@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from hud.clients import HudProtocolError
-from hud.environment import Environment
+from hud.environment import Answer, Environment
 from hud.eval import Run
 
 from .conftest import served
@@ -57,3 +57,9 @@ async def test_score_dict_passes_through_with_extra_keys() -> None:
             run.trace.content = "x"
         assert run.reward == 0.5
         assert run.grade.info == {"detail": "partial credit"}
+
+
+def test_answer_holds_parsed_content_and_raw_string() -> None:
+    answer = Answer(content={"final": "42"}, raw='{"final": "42"}')
+    assert answer.content == {"final": "42"}
+    assert answer.raw == '{"final": "42"}'

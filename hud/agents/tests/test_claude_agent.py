@@ -44,6 +44,16 @@ class FakeAnthropic:
         self.beta = SimpleNamespace(messages=FakeMessages(final))
 
 
+def _final(*content: Any, stop_reason: str) -> Any:
+    """A fake ``BetaMessage``: content blocks plus the always-present envelope."""
+    return SimpleNamespace(
+        content=list(content),
+        stop_reason=stop_reason,
+        model="claude-test-v9",
+        usage=SimpleNamespace(input_tokens=11, output_tokens=7, cache_read_input_tokens=3),
+    )
+
+
 def _agent(final: Any) -> ClaudeAgent:
     from hud.agents.types import ClaudeConfig
 
@@ -65,11 +75,9 @@ def test_format_message_shape() -> None:
 
 
 async def test_get_response_text_and_tool_use() -> None:
-    final = SimpleNamespace(
-        content=[
-            SimpleNamespace(type="text", text="hello", citations=None),
-            SimpleNamespace(type="tool_use", id="t1", name="bash", input={"command": "ls"}),
-        ],
+    final = _final(
+        SimpleNamespace(type="text", text="hello", citations=None),
+        SimpleNamespace(type="tool_use", id="t1", name="bash", input={"command": "ls"}),
         stop_reason="tool_use",
     )
     agent = _agent(final)
@@ -82,11 +90,17 @@ async def test_get_response_text_and_tool_use() -> None:
     assert result.tool_calls[0].arguments == {"command": "ls"}
     assert result.done is False
     assert result.finish_reason == "tool_use"
+    # Model and usage are normalized off the provider response.
+    assert result.model == "claude-test-v9"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 11
+    assert result.usage.completion_tokens == 7
+    assert result.usage.cached_tokens == 3
 
 
 async def test_get_response_done_on_text_only() -> None:
-    final = SimpleNamespace(
-        content=[SimpleNamespace(type="text", text="done", citations=None)],
+    final = _final(
+        SimpleNamespace(type="text", text="done", citations=None),
         stop_reason="end_turn",
     )
     agent = _agent(final)
@@ -97,11 +111,9 @@ async def test_get_response_done_on_text_only() -> None:
 
 
 async def test_get_response_collects_thinking() -> None:
-    final = SimpleNamespace(
-        content=[
-            SimpleNamespace(type="thinking", thinking="pondering"),
-            SimpleNamespace(type="text", text="answer", citations=None),
-        ],
+    final = _final(
+        SimpleNamespace(type="thinking", thinking="pondering"),
+        SimpleNamespace(type="text", text="answer", citations=None),
         stop_reason="end_turn",
     )
     agent = _agent(final)

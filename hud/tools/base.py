@@ -4,7 +4,9 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from hud.agents.types import ContentBlock, EvaluationResult
+from mcp.types import ContentBlock
+
+from hud.graders import EvaluationResult
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -139,7 +141,7 @@ class BaseTool(ABC):
             @bash.before
             async def validate(command: str | None = None, **kwargs):
                 if command and "rm -rf" in command:
-                    raise ToolError("Blocked dangerous command")
+                    raise ValueError("Blocked dangerous command")
                 return None  # Proceed with original args
             ```
         """

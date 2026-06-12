@@ -12,17 +12,17 @@ installed by ``hud/__init__`` at import time:
   :mod:`hud.eval.chat` (the alias serves it). ``ChatService`` (the A2A
   executor) left the SDK entirely.
 - removed ``hud.tools`` submodules (``types``, ``computer``, ``filesystem``,
-  ``executors``, ...) — ``hud.tools.types`` redirects to
-  :mod:`hud.agents.types`; the rest resolve names lazily (marker/no-op).
+  ``executors``, ...) — names resolve lazily (redirect/marker/no-op).
 - removed ``hud.tools`` symbols — :func:`resolve_legacy_name` (hooked from the
-  real modules' ``__getattr__``) redirects result types to
-  :mod:`hud.agents.types`, maps removed computer and shell/edit tools to
-  capability markers consumed by :mod:`hud.environment.legacy` (→ ``rfb`` /
-  ``ssh``), and no-ops the rest. Each resolution emits a
-  ``DeprecationWarning``.
+  real modules' ``__getattr__``) redirects each name to its v6 home
+  (``hud.graders``, ``hud.environment``, ``hud.types``, ``mcp.types``), maps
+  removed computer and shell/edit tools to capability markers consumed by
+  :mod:`hud.environment.legacy` (→ ``rfb`` / ``ssh``), and no-ops the rest.
+  Each resolution emits a ``DeprecationWarning``.
 
-Also home to the :class:`Grade` shim — the v5 grading entry point, replaced by
-:func:`hud.graders.combine`.
+Also home to the v5-only shapes with no v6 counterpart — :class:`Grade` (the
+v5 grading entry point, replaced by :func:`hud.graders.combine`),
+:class:`ContentResult` (v5 tool output), and :class:`ToolError`.
 """
 
 from __future__ import annotations
@@ -39,30 +39,28 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
+from mcp.types import ContentBlock, ImageContent, TextContent
+from pydantic import BaseModel, Field
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
-    from hud.agents.types import EvaluationResult, SubScore
+    from hud.graders import EvaluationResult, SubScore
 
-_MSG = (
-    "this symbol was removed in v6; result types live in hud.agents.types. "
-    "This compat layer keeps old imports working for now."
-)
+_MSG = "this symbol was removed in v6. This compat layer keeps old imports working for now."
 
-#: Removed ``hud.tools`` submodule -> real v6 module to re-export.
-_MODULE_REDIRECTS: dict[str, str] = {
-    "hud.tools.types": "hud.agents.types",
-}
-
-#: Removed top-level ``hud.tools`` symbol -> real v6 module to import it from.
+#: Removed v5 symbol -> v6 home, as ``module`` or ``module:attr`` when renamed.
 _NAME_REDIRECTS: dict[str, str] = {
-    "AgentAnswer": "hud.agents.types",
+    "AgentAnswer": "hud.environment:Answer",
     "Citation": "hud.agents.types",
-    "ContentResult": "hud.agents.types",
-    "EvaluationResult": "hud.agents.types",
-    "ScenarioResult": "hud.agents.types",
-    "SubScore": "hud.agents.types",
-    "ToolError": "hud.agents.types",
+    "ContentBlock": "mcp.types",
+    "ContentResult": "hud._legacy",
+    "EvaluationResult": "hud.graders",
+    "ImageContent": "mcp.types",
+    "ScenarioResult": "hud.graders:EvaluationResult",
+    "SubScore": "hud.graders",
+    "TextContent": "mcp.types",
+    "ToolError": "hud._legacy",
 }
 
 #: Removed lowercase v5 symbols (module-level instances/functions rather than classes).
@@ -97,6 +95,61 @@ class Grade:
         from hud.graders import _combine_subscores
 
         return _combine_subscores(subscores)
+
+
+class ContentResult(BaseModel):
+    """v5 intermediate tool-output shape (no v6 counterpart).
+
+    v5 environment tools build one of these and convert it to MCP content
+    blocks; kept so deployed v5 envs can import and run it unchanged.
+    """
+
+    output: str | None = Field(default=None, description="Output text")
+    error: str | None = Field(default=None, description="Error message")
+    base64_image: str | None = Field(default=None, description="Base64-encoded image")
+    system: str | None = Field(default=None, description="System message")
+    url: str | None = Field(default=None, description="Current page URL (for browser automation)")
+
+    def __add__(self, other: ContentResult) -> ContentResult:
+        def combine_fields(
+            field: str | None, other_field: str | None, concatenate: bool = True
+        ) -> str | None:
+            if field and other_field:
+                if concatenate:
+                    return field + other_field
+                raise ValueError("Cannot combine tool results")
+            return field or other_field
+
+        return ContentResult(
+            output=combine_fields(self.output, other.output),
+            error=combine_fields(self.error, other.error),
+            base64_image=combine_fields(self.base64_image, other.base64_image, False),
+            system=combine_fields(self.system, other.system),
+            url=combine_fields(self.url, other.url, False),
+        )
+
+    def to_text_blocks(self) -> list[TextContent]:
+        """Convert text-only content to TextContent blocks."""
+        blocks: list[TextContent] = []
+        if self.output:
+            blocks.append(TextContent(text=self.output, type="text"))
+        if self.error:
+            blocks.append(TextContent(text=self.error, type="text"))
+        if self.url:
+            blocks.append(TextContent(text=f"__URL__:{self.url}", type="text"))
+        return blocks
+
+    def to_content_blocks(self) -> list[ContentBlock]:
+        """Convert to content blocks including images."""
+        blocks: list[ContentBlock] = list(self.to_text_blocks())
+        if self.base64_image:
+            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
+            blocks.append(ImageContent(data=self.base64_image, mimeType=mime, type="image"))
+        return blocks
+
+
+class ToolError(Exception):
+    """v5 tool failure signal; v6 tools raise ordinary exceptions instead."""
 
 
 class _NoOp:
@@ -165,8 +218,10 @@ def resolve_legacy_name(module_name: str, name: str) -> Any:
         raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
     target = _NAME_REDIRECTS.get(name)
     if target is not None:
-        _warn(f"{module_name}.{name} moved to {target}.{name}")
-        return getattr(importlib.import_module(target), name)
+        module_path, _, attr = target.partition(":")
+        attr = attr or name
+        _warn(f"{module_name}.{name} moved to {module_path}.{attr}")
+        return getattr(importlib.import_module(module_path), attr)
     if "Computer" in name:
         _warn(f"{module_name}.{name} was removed; using a computer-capability marker")
         return LegacyComputerTool
@@ -211,24 +266,6 @@ def _make_legacy_getattr(module_name: str) -> Any:
     return __getattr__
 
 
-def _make_redirect_getattr(module_name: str, target_name: str) -> Any:
-    """Lazily resolve attributes from the redirect target on each access.
-
-    Resolving lazily (instead of copying attrs once at import time) avoids a
-    partial-import race: the target is fully imported by the time an attribute is
-    actually read. Names the target lacks (dropped v5 symbols) fall back to a
-    marker/no-op.
-    """
-
-    def __getattr__(name: str) -> Any:
-        target = importlib.import_module(target_name)
-        if hasattr(target, name):
-            return getattr(target, name)
-        return resolve_legacy_name(module_name, name)
-
-    return __getattr__
-
-
 class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     """Resolve removed-module aliases and **removed** ``hud.tools.*`` submodules.
 
@@ -258,18 +295,8 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             module.__getattr__ = _make_alias_getattr(name, target)  # type: ignore[attr-defined]
             return
 
-        redirect = _MODULE_REDIRECTS.get(name)
-        if redirect is not None:
-            warnings.warn(
-                f"{name} moved to {redirect} ({_MSG})",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            module.__getattr__ = _make_redirect_getattr(name, redirect)  # type: ignore[attr-defined]
-            return
-
-        # Removed submodule (computer, executors, filesystem, ...): resolve names
-        # lazily (computer marker / no-op).
+        # Removed submodule (types, computer, executors, filesystem, ...):
+        # resolve names lazily (redirect / capability marker / no-op).
         module.__path__ = []
         module.__getattr__ = _make_legacy_getattr(name)  # type: ignore[attr-defined]
 

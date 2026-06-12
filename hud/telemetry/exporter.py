@@ -14,6 +14,7 @@ import threading
 from collections import defaultdict
 from typing import Any
 
+from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
 from hud.utils import make_request_sync
 
 logger = logging.getLogger(__name__)
@@ -22,8 +23,8 @@ _MAX_BATCH_SIZE = 100
 _FLUSH_INTERVAL_SECONDS = 1.0
 
 # A queued ``Event`` is a flush marker: the worker uploads the current batch and
-# sets it. Spans carry their own ``task_run_id`` (under ``attributes``), so the
-# worker groups them without any extra per-span bookkeeping. The worker is a
+# sets it. Spans carry their own ``hud.task_run_id`` (under ``attributes``), so
+# the worker groups them without any extra per-span bookkeeping. The worker is a
 # daemon and runs for the life of the process.
 _export_queue: queue.Queue[dict[str, Any] | threading.Event] = queue.Queue()
 _worker: threading.Thread | None = None
@@ -50,7 +51,7 @@ def queue_span(span: dict[str, Any]) -> None:
 
     if not settings.telemetry_enabled or not settings.api_key:
         return
-    if not span.get("attributes", {}).get("task_run_id"):
+    if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
         return
 
     _ensure_worker()
@@ -107,7 +108,7 @@ def _upload(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return []
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for span in batch:
-        grouped[span["attributes"]["task_run_id"]].append(span)
+        grouped[span["attributes"][TASK_RUN_ID_ATTRIBUTE]].append(span)
     for task_run_id, spans in grouped.items():
         _do_upload(task_run_id, spans, settings.hud_telemetry_url, api_key)
     return []

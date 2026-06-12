@@ -98,7 +98,7 @@ from hud import Run
 
 class EchoAgent(Agent):
     async def __call__(self, run: Run) -> None:
-        # Read run.prompt, do work, then write the answer:
+        # Read run.prompt_text, do work, then write the answer:
         run.trace.content = "my answer"
 ```
 

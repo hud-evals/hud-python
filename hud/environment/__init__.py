@@ -16,7 +16,7 @@ from hud.capabilities import Capability
 from hud.server import MCPRouter
 from hud.utils.modules import iter_modules
 
-from .env import Environment
+from .env import Answer, Environment
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
 if TYPE_CHECKING:
@@ -47,6 +47,7 @@ def load_environment(path: str | Path, *, name: str | None = None) -> Environmen
 
 __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
+    "Answer",
     "Capability",
     "Environment",
     "MCPRouter",

@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from .env import Answer
 from .utils import error, read_frame, reply, send_frame, splice
 
 if TYPE_CHECKING:
@@ -82,13 +83,12 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     """Build the value sent into the task gen for evaluation.
 
     Without a declared ``return_type`` the answer value is forwarded unchanged.
-    With one, the agent's answer is parsed into an ``AgentAnswer[T]``
-    (typed ``content`` + citations) — the structured-answer contract.
+    With one, the agent's answer is parsed into an ``Answer[T]`` — the
+    structured-answer contract (parse failures fall back to the raw string
+    on ``content`` so the task can grade them).
     """
     if return_type is None:
         return payload.get("answer")
-
-    from hud.agents.types import AgentAnswer, Citation  # local import: avoid env<->agents cycle
 
     raw_text = payload.get("answer", "")
     adapter = TypeAdapter(return_type)
@@ -100,20 +100,18 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
         )
     except ValidationError:
         content = raw_text
-    citations = [Citation(**c) for c in payload.get("citations") or [] if isinstance(c, dict)]
-    return AgentAnswer(
+    return Answer(
         content=content,
         raw=raw_text if isinstance(raw_text, str) else str(raw_text),
-        citations=citations,
     )
 
 
 def _score_value(result: Any) -> float:
     """Normalize a task's grade yield to a float score, loudly.
 
-    Accepts a number or an object with a numeric ``reward`` attribute (the v5
-    ``EvaluationResult`` shape). Anything else is an authoring bug; grading it
-    silently as 0.0 would hide it.
+    Accepts a number or an object with a numeric ``reward`` attribute (the
+    ``hud.graders.EvaluationResult`` shape). Anything else is an authoring bug;
+    grading it silently as 0.0 would hide it.
     """
     score = getattr(result, "reward", result)
     if isinstance(score, (int, float)):

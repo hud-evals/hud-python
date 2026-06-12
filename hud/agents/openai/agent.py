@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from openai import AsyncOpenAI, Omit
 from openai.types.responses import (
@@ -25,15 +25,18 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import OpenAIConfig
+from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
 from .tools.coding import shell_output
 from .tools.computer import last_image_data
+
+if TYPE_CHECKING:
+    import mcp.types as mcp_types
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: str | list[Any] | None) -> OpenAIRunState:
+    async def _initialize_state(self, *, prompt: list[mcp_types.PromptMessage]) -> OpenAIRunState:
         return OpenAIRunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> ResponseInputItemParam:
@@ -158,7 +161,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         *,
         system_prompt: str | None = None,
         citations_enabled: bool = False,
-    ) -> AgentResponse:
+    ) -> AgentStep:
         oai_state = cast("OpenAIRunState", state)
         messages = oai_state.messages
         new_items: ResponseInputParam = messages[oai_state.message_cursor :]
@@ -171,7 +174,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                     ),
                 ]
             else:
-                return AgentResponse(content="", tool_calls=[], done=True)
+                return AgentStep(content="", done=True)
 
         include_param: list[ResponseIncludable] | Omit = Omit()
         if citations_enabled:
@@ -227,7 +230,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
         text_chunks: list[str] = []
         reasoning_chunks: list[str] = []
-        citations: list[dict[str, object]] = []
+        citations: list[Citation] = []
         tool_calls: list[MCPToolCall] = []
 
         for item in response.output:
@@ -242,23 +245,23 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                             match ann.type:
                                 case "url_citation":
                                     citations.append(
-                                        {
-                                            "type": "url_citation",
-                                            "text": ann.title,
-                                            "source": ann.url,
-                                            "title": ann.title,
-                                            "start_index": ann.start_index,
-                                            "end_index": ann.end_index,
-                                        }
+                                        Citation(
+                                            type="url_citation",
+                                            text=ann.title,
+                                            source=ann.url,
+                                            title=ann.title,
+                                            start_index=ann.start_index,
+                                            end_index=ann.end_index,
+                                        )
                                     )
                                 case "file_citation":
                                     citations.append(
-                                        {
-                                            "type": "file_citation",
-                                            "text": ann.filename,
-                                            "source": ann.file_id,
-                                            "title": ann.filename,
-                                        }
+                                        Citation(
+                                            type="file_citation",
+                                            text=ann.filename,
+                                            source=ann.file_id,
+                                            title=ann.filename,
+                                        )
                                     )
                                 case _:
                                     continue
@@ -303,12 +306,21 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                 case _:
                     continue
 
-        return AgentResponse(
+        usage: Usage | None = None
+        if response.usage is not None:
+            usage = Usage(
+                prompt_tokens=response.usage.input_tokens,
+                completion_tokens=response.usage.output_tokens,
+                cached_tokens=response.usage.input_tokens_details.cached_tokens,
+            )
+        return AgentStep(
             content="".join(text_chunks),
             reasoning="\n".join(reasoning_chunks) if reasoning_chunks else None,
             citations=citations,
             tool_calls=tool_calls,
             done=not tool_calls,
+            model=response.model,
+            usage=usage,
         )
 
 

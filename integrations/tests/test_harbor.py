@@ -26,18 +26,13 @@ def test_detect_recognizes_task_and_dataset_dirs(single_task: Path, tmp_path: Pa
     assert not detect(single_task / "task.toml")  # a file is not a task dir
 
 
-def test_load_single_task_dir_maps_metadata_to_columns(single_task: Path) -> None:
+def test_load_single_task_dir_maps_rows(single_task: Path) -> None:
     taskset = load(single_task)
 
     assert len(taskset) == 1
     row = taskset["cancel-async-tasks"]
     assert row.id == "cancel-async-tasks"
     assert row.args == {}
-    assert row.columns == {
-        "category": "systems",
-        "difficulty": "medium",
-        "tags": ["bash", "linux"],
-    }
     assert row.env == taskset.name
 
 
@@ -75,9 +70,8 @@ def test_load_skips_unparseable_toml_but_keeps_the_rest(tmp_path: Path) -> None:
 
     taskset = load(dataset)
 
-    # Unparseable config degrades to no metadata; the task itself still loads.
+    # Unparseable config degrades gracefully; the task itself still loads.
     assert {task.id for task in taskset} == {"good", "broken"}
-    assert taskset["broken"].columns is None
 
 
 # ─── export: HUD tasks -> Harbor task folders ───────────────────────────

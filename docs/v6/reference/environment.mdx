@@ -38,7 +38,7 @@ Registers an async-generator task. The decorated function **must** be an async g
 | `id` | `str \| None` | Task id (defaults to the function name). |
 | `description` | `str` | Human-readable description, surfaced in the manifest. |
 | `input` | `Any` | Optional type for the agent's input (JSON schema in the manifest). |
-| `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `AgentAnswer[T]`. See [Types](/v6/reference/types). |
+| `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `Answer[T]`. See [Types](/v6/reference/types). |
 
 ```python
 @env.task(id="count", description="Count a letter", returns=int)

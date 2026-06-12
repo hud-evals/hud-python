@@ -39,7 +39,11 @@ def _response(content: str, tool_calls: list[Any]) -> Any:
         model_dump=lambda exclude_none=True: {"role": "assistant", "content": content},
     )
     choice = SimpleNamespace(message=message, finish_reason="stop", logprobs=None)
-    return SimpleNamespace(choices=[choice])
+    return SimpleNamespace(
+        choices=[choice],
+        model="m-v1",
+        usage=SimpleNamespace(prompt_tokens=6, completion_tokens=2, prompt_tokens_details=None),
+    )
 
 
 def _state(agent: OpenAIChatAgent) -> Any:
@@ -52,6 +56,11 @@ async def test_get_response_text_only() -> None:
     assert result.content == "hi"
     assert result.done is True
     assert result.tool_calls == []
+    # Model and usage are normalized off the provider response.
+    assert result.model == "m-v1"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 6
+    assert result.usage.completion_tokens == 2
 
 
 async def test_get_response_with_tool_call() -> None:
@@ -70,6 +79,5 @@ async def test_get_response_with_tool_call() -> None:
 async def test_get_response_error_path() -> None:
     agent = _agent(None, error=RuntimeError("boom"))
     result = await agent.get_response(_state(agent))
-    assert result.isError is True
     assert result.done is True
-    assert result.content is not None and "boom" in result.content
+    assert result.error is not None and "boom" in result.error
