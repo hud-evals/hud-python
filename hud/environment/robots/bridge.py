@@ -9,7 +9,7 @@ there. Subclass one of these and implement ``step`` / ``get_observation`` (plus
 - :class:`RealtimeRobotBridge` — free-running wall-clock loop that pops from an
   injected :class:`~...action_provider.ActionProvider` and accepts streamed chunks.
 
-An injected :class:`~...sim_runner.SimRunner` owns *which thread runs the
+An injected :class:`~.sim_runner.SimRunner` owns *which thread runs the
 (thread-affine) sim*, so subclasses stay thread-naive.
 """
 
@@ -74,7 +74,7 @@ class RobotBridge(ABC):
         self._client: Any = None  # robot serves a single agent at a time
         self._server: Any = None
         # Which thread runs the (thread-affine) sim. Default InlineSimRunner (loop
-        # thread); inject Thread/MainThreadSimRunner when render-heavy or thread-bound.
+        # thread); inject a ThreadSimRunner (or custom) when render-heavy or thread-bound.
         self._sim_runner: SimRunner = sim_runner or InlineSimRunner()
         #: Optional off-loop recorder; serve loop records one frame per action, using
         #: ``self.last_reward`` (set by ``step``). See ``hud.telemetry``.
@@ -270,7 +270,7 @@ class RealtimeRobotBridge(RobotBridge):
 
         Subclasses MUST funnel every operation that touches the simulator/renderer
         (env creation, reset, step, close) through this so they all share one thread.
-        Thin wrapper over the bridge's :class:`~hud.environment.robots.sim_runner.SimRunner`.
+        Thin wrapper over the bridge's :class:`~.sim_runner.SimRunner`.
         """
         return await self._sim_runner.call(fn, *args)
 

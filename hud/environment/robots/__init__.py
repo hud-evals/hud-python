@@ -8,12 +8,10 @@ an agent over the ``robot`` WebSocket protocol:
 - :class:`~hud.environment.robots.action_provider.ActionProvider` (+ subclasses,
   :func:`~hud.environment.robots.action_provider.make_action_provider`) — the realtime
   action queue / chunk-merge strategies.
-- :class:`~hud.environment.robots.sim_runner.SimRunner` (+ implementations) — the strategy
-  for *which thread* runs the thread-affine simulator.
+- :class:`~hud.environment.robots.sim_runner.SimRunner` (``Inline`` / ``Thread``) — the
+  strategy for *which thread* runs the thread-affine simulator.
 - :mod:`~hud.environment.robots.data_saving` — the framework-default recorder +
   LeRobot dataset sink (platform tick stream, configured by ``HUD_RECORD_DIR`` etc.).
-- :mod:`~hud.environment.robots.contracts` — advisory contract matching tools
-  (env contract vs model contract).
 
 The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives under
 :mod:`hud.capabilities` (it is a capability *client*, dialed by the agent); these two ends
@@ -34,17 +32,11 @@ from .action_provider import (
 from .bridge import RealtimeRobotBridge, RobotBridge
 from .endpoint import RobotEndpoint
 from .data_saving import default_recorder
-from .sim_runner import (
-    InlineSimRunner,
-    MainThreadSimRunner,
-    SimRunner,
-    ThreadSimRunner,
-)
+from .sim_runner import InlineSimRunner, SimRunner, ThreadSimRunner
 
 __all__ = [
     "ActionProvider",
     "InlineSimRunner",
-    "MainThreadSimRunner",
     "NaiveAsyncActionProvider",
     "RTCActionProvider",
     "RealtimeRobotBridge",

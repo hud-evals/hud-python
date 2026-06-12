@@ -85,7 +85,7 @@ async def pick_and_place(task_id: str, seed: int = 0):
 This module is declare-only — serve it like any other environment (`hud serve env.py`, a container CMD, or `LocalRuntime("env.py")`).
 
 <Note>
-A simulator that must **own the process main thread** (Isaac Sim / Omniverse) can't run under `hud serve`. Run the SDK server on a worker thread instead — `asyncio.run(hud.environment.server.serve(env, host, port))` in a thread, with a `MainThreadSimRunner` pumping sim work back to the main thread.
+A simulator that must **own the process main thread** (Isaac Sim / Omniverse) can't run under `hud serve`. Run the SDK server on a worker thread instead — `asyncio.run(hud.environment.server.serve(env, host, port))` in a thread, with a custom `SimRunner` that pumps sim work back to the main thread.
 </Note>
 
 ## Agent side
@@ -136,11 +136,7 @@ The **HUD robot spec** exists to make that wiring explicit and checkable. Each e
 }
 ```
 
-The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role` — this is what the `Adapter` wires against. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives in the SDK at `hud/environment/robots/contracts/spec_v0.md`.
-
-### Contract matching (advisory)
-
-The same feature schema also describes a *model* contract — what a policy consumes and emits — so an env/model pairing can be reviewed before anything runs. `hud.environment.robots.contracts` does the comparison: `match` gates on `robot_type` (a plain bool — `if match(model, robot_type):` does what it looks like), `pair_observations` / `match_actions` pair features, `integration_review` reports dtype/shape/frame/rate gaps, and `render_match` prints the wiring diagram. It is advisory and in development — a warning means *check the wiring*, never *this will fail*.
+The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role` — this is what the `Adapter` wires against. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives outside the SDK, alongside the contract corpus and the advisory matching/visualization tooling (`match`, `integration_review`, `render_match`).
 
 ## Realtime control
 
@@ -148,7 +144,7 @@ The default loop is lockstep — the sim waits for each action. `RealtimeRobotBr
 
 On the agent side, **`RealtimeRobotAgent`** is the chunk-streaming counterpart: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
 
-**`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default), `ThreadSimRunner` (dedicated worker — render-heavy sims), `MainThreadSimRunner` (sim owns main, server on a worker).
+**`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default) or `ThreadSimRunner` (dedicated worker — render-heavy sims). Subclass it for exotic topologies (e.g. a sim that owns main with the server on a worker).
 
 ## Recording & telemetry
 
@@ -166,10 +162,9 @@ Both are zero-config:
 | `RobotBridge` / `RealtimeRobotBridge` | `hud.environment.robots` | Env-side serve loop; subclass with your sim |
 | `RobotEndpoint` | `hud.environment.robots` | Episode bookkeeping + default recorder |
 | `ActionProvider`, `make_action_provider` | `hud.environment.robots` | Realtime chunk-merge strategies |
-| `SimRunner` (`Inline`/`Thread`/`MainThread`) | `hud.environment.robots` | Which thread runs the sim |
+| `SimRunner` (`Inline`/`Thread`) | `hud.environment.robots` | Which thread runs the sim |
 | `RobotAgent` / `RealtimeRobotAgent` | `hud.agents.robot` | The episode-loop harness |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
-| `match`, `integration_review`, `render_match` | `hud.environment.robots.contracts` | Advisory contract matching |
 
 ## See also
 
