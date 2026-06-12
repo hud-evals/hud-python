@@ -26,7 +26,7 @@ Integrating a policy against a robot environment means answering three questions
 
 - **`RobotAgent`** — the episode-loop harness: connect to the env, read its schema, then `observe → infer → act` until the env terminates.
 - **`Model`** — the policy seam: `infer(batch) -> action`. `LeRobotModel` wraps a stock LeRobot checkpoint.
-- **`Adapter`** — the space-translation seam between what the env emits and what the policy consumes. `DefaultAdapter` covers the common wiring.
+- **`Adapter`** — the space-translation seam between what the env emits and what the policy consumes. `LeRobotAdapter` covers the common wiring.
 
 **The contract** — the one artifact both sides share: a self-describing JSON schema of the embodiment's observation and action spaces, carried in the capability's manifest params. The agent wires observations to policy inputs purely from the manifest; there is no shared config.
 
@@ -93,7 +93,7 @@ A simulator that must **own the process main thread** (Isaac Sim / Omniverse) ca
 The harness lives in `hud.agents.robot`. `RobotAgent` owns the episode loop — connect to the `robot` binding, read the contract, then `observe → infer → act` until the env terminates. You supply two seams:
 
 - **`Model`** — runs the policy (`infer(batch) -> action`). `LeRobotModel(policy, preprocess, postprocess)` ships the standard LeRobot inference sandwich.
-- **`Adapter`** — translates env ↔ policy spaces. `DefaultAdapter(model_image_keys=...)` maps the env's cameras onto the policy's image slots in contract order, converts HWC uint8 → CHW float, and passes state + prompt through.
+- **`Adapter`** — translates env ↔ policy spaces. `LeRobotAdapter(model_image_keys=...)` maps the env's cameras onto the policy's image slots in contract order, converts HWC uint8 → CHW float, and passes state + prompt through.
 
 A stock LeRobot checkpoint is a complete agent in a few lines:
 
@@ -102,7 +102,7 @@ import torch
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
-from hud.agents.robot.adapter import DefaultAdapter
+from hud.agents.robot.adapter import LeRobotAdapter
 from hud.agents.robot.agent import RobotAgent
 from hud.agents.robot.model import LeRobotModel
 
@@ -113,7 +113,7 @@ class PI05Agent(RobotAgent):
         pre, post = make_pre_post_processors(policy.config, "lerobot/pi05_libero_finetuned",
                                              preprocessor_overrides={"device_processor": {"device": device}})
         self.model = LeRobotModel(policy, pre, post)
-        self.adapter = DefaultAdapter(model_image_keys=list(policy.config.image_features))
+        self.adapter = LeRobotAdapter(model_image_keys=list(policy.config.image_features))
 ```
 
 Run it with the normal engine — `Taskset(...).run(agent, runtime=...)` — against any substrate serving the env.
@@ -168,7 +168,7 @@ Both are zero-config:
 | `ActionProvider`, `make_action_provider` | `hud.environment.robots` | Realtime chunk-merge strategies |
 | `SimRunner` (`Inline`/`Thread`/`MainThread`) | `hud.environment.robots` | Which thread runs the sim |
 | `RobotAgent` / `RealtimeRobotAgent` | `hud.agents.robot` | The episode-loop harness |
-| `Model` / `LeRobotModel`, `Adapter` / `DefaultAdapter` | `hud.agents.robot` | Policy + space-translation seams |
+| `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `match`, `integration_review`, `render_match` | `hud.environment.robots.contracts` | Advisory contract matching |
 
 ## See also

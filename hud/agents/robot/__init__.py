@@ -20,7 +20,7 @@ This subpackage needs the ``robot`` extra (``pip install 'hud-python[robot]'``) 
 
 from __future__ import annotations
 
-from .adapter import Adapter, DefaultAdapter, lerobot_adapt_action, lerobot_adapt_observation
+from .adapter import Adapter, LeRobotAdapter
 from .agent import ROBOT_PROTOCOL, RobotAgent
 from .model import STEP_COUNTER, LeRobotModel, Model, StepCounter, lerobot_infer
 from .realtime import RealtimeRobotAgent
@@ -30,14 +30,12 @@ __all__ = [
     "ROBOT_PROTOCOL",
     "STEP_COUNTER",
     "Adapter",
-    "DefaultAdapter",
+    "LeRobotAdapter",
     "LeRobotModel",
     "Model",
     "RealtimeRobotAgent",
     "RobotAgent",
     "RobotTracer",
     "StepCounter",
-    "lerobot_adapt_action",
-    "lerobot_adapt_observation",
     "lerobot_infer",
 ]
