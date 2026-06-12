@@ -354,8 +354,16 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
     ``server.serve_forever()``.
     """
     channel = _ControlChannel(env)
+    # Live connection handlers, so teardown can cancel them instead of
+    # abandoning them to loop shutdown (-> "Task was destroyed but it is
+    # pending" + GeneratorExit thrown into mid-splice coroutines).
+    active: set[asyncio.Task[None]] = set()
 
     async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            active.add(task)
+            task.add_done_callback(active.discard)
         try:
             first = await read_frame(reader)
             if first is None:
@@ -370,6 +378,7 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 await writer.wait_closed()
 
     server = await asyncio.start_server(accept, host=host, port=port)
+    server._hud_handlers = active  # type: ignore[attr-defined]
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])
     return server
@@ -378,6 +387,7 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
     """Start *env*'s daemons and serve its control channel until cancelled."""
     await env.start()
+    server: asyncio.Server | None = None
     try:
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
@@ -385,6 +395,9 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         async with server:
             await server.serve_forever()
     finally:
+        if server is not None:
+            for task in list(getattr(server, "_hud_handlers", ())):
+                task.cancel()
         await env.stop()
 
 

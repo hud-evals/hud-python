@@ -234,14 +234,15 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 if step == max_steps:
                     hit_max = True
 
-            error: str | None = "max_steps_exceeded" if hit_max else None
             trace.done = True
             trace.messages = state.messages
-            trace.content = response.content if response else (error or "")
-            trace.isError = bool(error) or (response.isError if response else False)
+            trace.content = response.content if response else ""
+            # Exhausting the step budget is normal termination (the reward tells
+            # the story), not an agent error — record it as a stop reason so the
+            # platform doesn't paint the rollout (and its last tool call) as failed.
+            trace.isError = response.isError if response else False
             trace.citations = (response.citations if response else None) or []
-            if error:
-                trace.info["error"] = error
+            trace.info["stop_reason"] = "max_steps" if hit_max else "done"
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as exc:

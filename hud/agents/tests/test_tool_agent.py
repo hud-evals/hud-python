@@ -127,8 +127,10 @@ async def test_loop_dispatches_tool_calls_then_finishes() -> None:
     assert any(m.get("role") == "tool" for m in run.trace.messages)
 
 
-async def test_loop_flags_max_steps_exceeded() -> None:
-    # Always returns a tool call → never "done" → hits max_steps.
+async def test_loop_max_steps_is_normal_termination() -> None:
+    # Always returns a tool call → never "done" → hits max_steps. Exhausting the
+    # configured budget is a stop reason, not an agent error (the platform must
+    # not paint the rollout or its last tool call as failed).
     never_done = [
         AgentResponse(content="", done=False, tool_calls=[MCPToolCall(name="ghost")])
         for _ in range(5)
@@ -138,5 +140,6 @@ async def test_loop_flags_max_steps_exceeded() -> None:
 
     await agent._loop(run, RunState(), max_steps=2)  # type: ignore[arg-type]
 
-    assert run.trace.isError is True
-    assert run.trace.info.get("error") == "max_steps_exceeded"
+    assert run.trace.isError is False
+    assert run.trace.info.get("stop_reason") == "max_steps"
+    assert run.trace.done is True

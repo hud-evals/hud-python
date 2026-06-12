@@ -16,6 +16,7 @@ never depend on the platform.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -98,13 +99,19 @@ async def trace_exit(run: Run) -> None:
 
 
 async def _report(path: str, payload: dict[str, Any]) -> None:
-    try:
-        await PlatformClient.from_settings().apost(
-            path,
-            json={k: v for k, v in payload.items() if v is not None},
-        )
-    except Exception as exc:
-        logger.warning("platform report %s failed: %s", path, exc)
+    body = {k: v for k, v in payload.items() if v is not None}
+    # One bounded retry: reporting is fire-and-forget, and concurrent rollout
+    # bursts have been observed to draw transient rejections (including
+    # spurious 401s) from the platform that succeed moments later.
+    for attempt in (1, 2):
+        try:
+            await PlatformClient.from_settings().apost(path, json=body)
+            return
+        except Exception as exc:
+            if attempt == 2:
+                logger.warning("platform report %s failed: %s", path, exc)
+            else:
+                await asyncio.sleep(0.5)
 
 
 __all__ = ["Job"]
