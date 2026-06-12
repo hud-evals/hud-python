@@ -19,6 +19,9 @@ from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
 from mcp.types import TextContent
 
+from hud.agents.types import SubagentStep
+from hud.utils.time import now_iso
+
 from .base import BaseTool
 
 if TYPE_CHECKING:
@@ -148,21 +151,26 @@ class AgentTool(BaseTool):
 
         from hud.eval.rollout import rollout
         from hud.eval.runtime import _local
-        from hud.telemetry.instrument import instrument
 
         visible = self._param_schema.get("properties", {})
         args = {k: v for k, v in kwargs.items() if k in visible} if visible else dict(kwargs)
 
-        @instrument(category="subagent", name=self.name)
-        async def _run() -> ToolResult:
-            task = cast("Any", self._task)(**args)
-            # The tool executes inside the substrate that hosts its env, so the
-            # sub-rollout places itself on the env this process already owns
-            # (the factory's live env; the task row only carries its name).
-            env = self._task.env
-            run = await rollout(task, self._agent, runtime=lambda _row: _local(env))
-            if run.trace.isError:
-                raise RuntimeError(run.trace.content or "subagent rollout failed")
-            return ToolResult(content=[TextContent(type="text", text=run.trace.content or "")])
-
-        return await _run()
+        started_at = now_iso()
+        task = cast("Any", self._task)(**args)
+        # The tool executes inside the substrate that hosts its env, so the
+        # sub-rollout places itself on the env this process already owns
+        # (the factory's live env; the task row only carries its name).
+        env = self._task.env
+        run = await rollout(task, self._agent, runtime=lambda _row: _local(env))
+        # Report the sub-rollout to the *enclosing* trace (the sub-rollout's own
+        # steps streamed under its own trace id); no-op without an ambient one.
+        SubagentStep(
+            subagent=run.trace,
+            error=run.trace.error if run.trace.is_error else None,
+            started_at=started_at,
+            ended_at=now_iso(),
+            extra={"name": self.name, "arguments": args},
+        ).emit()
+        if run.trace.is_error:
+            raise RuntimeError(run.trace.error or "subagent rollout failed")
+        return ToolResult(content=[TextContent(type="text", text=run.trace.content or "")])

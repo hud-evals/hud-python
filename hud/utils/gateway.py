@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 class GatewayProviderInfo(BaseModel):
     name: str | None = None
-    default_sdk_agent_type: str | None = None
 
 
 class GatewayModelInfo(BaseModel):
@@ -40,7 +39,9 @@ class GatewayModelInfo(BaseModel):
 
 
 class GatewayModelsResponse(BaseModel):
-    models: list[GatewayModelInfo]
+    """`GET /models` — a paginated platform response; only `items` is read."""
+
+    items: list[GatewayModelInfo]
 
 
 def build_gateway_client(provider: str) -> GatewayClient:
@@ -85,7 +86,5 @@ def build_gateway_client(provider: str) -> GatewayClient:
 @lru_cache(maxsize=1)
 def list_gateway_models() -> list[GatewayModelInfo]:
     """Models available through the HUD gateway (the platform model catalog)."""
-    payload = PlatformClient.from_settings().get("/models/")
-    if not isinstance(payload, dict) or "models" not in payload:
-        return []
-    return GatewayModelsResponse.model_validate(payload).models
+    payload = PlatformClient.from_settings().get("/models")
+    return GatewayModelsResponse.model_validate(payload).items

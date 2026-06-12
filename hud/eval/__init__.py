@@ -7,6 +7,12 @@ Define a :class:`Task` (a row pointing at its env), group many into a
 :class:`Job` — the platform receipt. There are no standalone traces: every
 run reports under a job.
 
+This is the top layer: eval composes :mod:`hud.environment` and
+:mod:`hud.agents`, which never import each other and never import eval back —
+agents see eval only through the ``Run`` handle they are driven with. (Sole
+exception: calling an ``@env.task`` declaration constructs the eval ``Task``
+row.)
+
 Placement is a provider passed at execution time (see :mod:`.runtime`):
 ``LocalRuntime`` a local source, ``DockerRuntime`` an image, ``HUDRuntime`` a
 HUD-hosted substrate, or attach to a ``Runtime(url)``::

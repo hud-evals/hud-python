@@ -66,8 +66,8 @@ class TestQueueSpan:
     @pytest.mark.parametrize(
         ("api_key", "enabled", "attributes"),
         [
-            (None, True, {"task_run_id": "123"}),
-            ("test-key", False, {"task_run_id": "123"}),
+            (None, True, {"hud.task_run_id": "123"}),
+            ("test-key", False, {"hud.task_run_id": "123"}),
             ("test-key", True, {}),
         ],
     )
@@ -93,9 +93,9 @@ class TestQueueSpan:
             patch("hud.telemetry.exporter._do_upload", side_effect=upload),
         ):
             _enable(mock_settings)
-            queue_span({"name": "span-1", "attributes": {"task_run_id": "task-1"}})
-            queue_span({"name": "span-2", "attributes": {"task_run_id": "task-1"}})
-            queue_span({"name": "span-3", "attributes": {"task_run_id": "task-2"}})
+            queue_span({"name": "span-1", "attributes": {"hud.task_run_id": "task-1"}})
+            queue_span({"name": "span-2", "attributes": {"hud.task_run_id": "task-1"}})
+            queue_span({"name": "span-3", "attributes": {"hud.task_run_id": "task-2"}})
             assert flush(timeout=1.0)
 
         by_task = {task_run_id: spans for task_run_id, spans, _ in upload.calls}
@@ -109,7 +109,7 @@ class TestQueueSpan:
             patch("hud.telemetry.exporter._do_upload", side_effect=upload),
         ):
             _enable(mock_settings)
-            queue_span({"name": "test", "attributes": {"task_run_id": "task-1"}})
+            queue_span({"name": "test", "attributes": {"hud.task_run_id": "task-1"}})
             assert flush(timeout=1.0)
 
         assert [api_key for _, _, api_key in upload.calls] == ["test-key"]
@@ -126,7 +126,7 @@ class TestFlush:
             patch("hud.telemetry.exporter._do_upload", side_effect=upload),
         ):
             _enable(mock_settings)
-            queue_span({"name": "final-span", "attributes": {"task_run_id": "task-1"}})
+            queue_span({"name": "final-span", "attributes": {"hud.task_run_id": "task-1"}})
             assert flush(timeout=1.0)
 
         assert [span["name"] for _, spans, _ in upload.calls for span in spans] == ["final-span"]

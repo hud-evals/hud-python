@@ -16,7 +16,7 @@ from hud import Run
 
 class MyHarness(Agent):
     async def __call__(self, run: Run) -> None:
-        prompt = run.prompt
+        prompt = run.prompt_text  # or run.prompt_messages for structured turns
         # ... drive your framework against a capability ...
         run.trace.content = "the final answer"
 ```

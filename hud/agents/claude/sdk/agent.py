@@ -16,13 +16,13 @@ import shlex
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.base import Agent
-from hud.agents.types import ClaudeSDKConfig
+from hud.agents.types import AgentStep, ClaudeSDKConfig, Usage
 from hud.settings import settings
+from hud.types import Step
 
 if TYPE_CHECKING:
     from hud.capabilities import RFBClient, SSHClient
     from hud.eval.rollout import Run
-    from hud.types import Trace
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +75,15 @@ class ClaudeSDKAgent(Agent):
                 }
 
         await self._exec(
-            run.trace,
-            prompt=_prompt_text(run.prompt),
+            run,
+            prompt=run.prompt_text,
             max_steps=self.config.max_steps,
             system_prompt=self.config.system_prompt,
         )
 
     async def _exec(
         self,
-        trace: Trace,
+        run: Run,
         *,
         prompt: str,
         max_steps: int = -1,
@@ -135,13 +135,13 @@ class ClaudeSDKAgent(Agent):
         logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
 
         if completed.exit_status != 0 and not stdout.strip():
-            trace.done = True
-            trace.content = stderr or f"claude CLI exited with status {completed.exit_status}"
-            trace.isError = True
-            trace.info.update({"exit_status": completed.exit_status, "stderr": stderr})
+            error = stderr or f"claude CLI exited with status {completed.exit_status}"
+            run.trace.status = "error"
+            run.trace.extra.update({"exit_status": completed.exit_status, "stderr": stderr})
+            run.record(Step(source="system", error=error))
             return
 
-        self._parse_stream_json(trace, stdout, stderr)
+        self._parse_stream_json(run, stdout, stderr)
 
     def _build_env_vars(self) -> dict[str, str]:
         env: dict[str, str] = {}
@@ -226,11 +226,13 @@ class ClaudeSDKAgent(Agent):
         env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
         return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli_cmd}'
 
-    def _parse_stream_json(self, trace: Trace, stdout: str, stderr: str) -> None:
+    def _parse_stream_json(self, run: Run, stdout: str, stderr: str) -> None:
         messages: list[dict[str, Any]] = []
         content_parts: list[str] = []
         is_error = False
         info: dict[str, Any] = {}
+        cost_usd: float | None = None
+        num_turns: int | None = None
 
         for line in stdout.splitlines():
             line = line.strip()
@@ -258,36 +260,32 @@ class ClaudeSDKAgent(Agent):
                 if result_text:
                     content_parts.append(result_text)
                 info["session_id"] = msg.get("session_id")
-                info["num_turns"] = msg.get("num_turns")
                 info["duration_ms"] = msg.get("duration_ms")
                 info["stop_reason"] = msg.get("stop_reason")
-                cost = msg.get("total_cost_usd")
-                if cost is not None:
-                    info["total_cost_usd"] = cost
+                num_turns = msg.get("num_turns")
+                cost_usd = msg.get("total_cost_usd")
 
+        content = "\n".join(content_parts)
+        trace = run.trace
+        trace.status = "error" if is_error else "completed"
+        trace.content = content
+        # Raw CLI stream kept locally; a claude-native serializer can take over
+        # per-turn fidelity later (the CLI session is its own span vocabulary).
+        trace.extra["messages"] = messages
         if stderr:
-            info["stderr"] = stderr
+            trace.extra["stderr"] = stderr
 
-        trace.done = True
-        trace.content = "\n".join(content_parts)
-        trace.isError = is_error
-        trace.messages = messages
-        trace.info.update(info)
-
-
-def _prompt_text(prompt: str | list[Any] | None) -> str:
-    """Flatten a run prompt (text or chat-style message dicts) into CLI text."""
-    if isinstance(prompt, str):
-        return prompt
-    if not prompt:
-        return ""
-    parts: list[str] = []
-    for message in prompt:
-        if isinstance(message, dict):
-            parts.append(str(cast("dict[str, Any]", message).get("content", "")))
-        else:
-            parts.append(str(message))
-    return "\n\n".join(part for part in parts if part)
+        # The CLI run collapses to one coarse agent step with aggregate usage.
+        run.record(
+            AgentStep(
+                content=content,
+                done=True,
+                model=self.config.model,
+                usage=Usage(cost_usd=cost_usd, llm_call_count=num_turns),
+                error=content if is_error else None,
+                extra={k: v for k, v in info.items() if v is not None},
+            ),
+        )
 
 
 __all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]

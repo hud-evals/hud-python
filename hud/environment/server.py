@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from .env import Answer
 from .utils import error, read_frame, reply, send_frame, splice
 
 if TYPE_CHECKING:
@@ -82,13 +83,12 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     """Build the value sent into the task gen for evaluation.
 
     Without a declared ``return_type`` the answer value is forwarded unchanged.
-    With one, the agent's answer is parsed into an ``AgentAnswer[T]``
-    (typed ``content`` + citations) — the structured-answer contract.
+    With one, the agent's answer is parsed into an ``Answer[T]`` — the
+    structured-answer contract (parse failures fall back to the raw string
+    on ``content`` so the task can grade them).
     """
     if return_type is None:
         return payload.get("answer")
-
-    from hud.agents.types import AgentAnswer, Citation  # local import: avoid env<->agents cycle
 
     raw_text = payload.get("answer", "")
     adapter = TypeAdapter(return_type)
@@ -100,20 +100,18 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
         )
     except ValidationError:
         content = raw_text
-    citations = [Citation(**c) for c in payload.get("citations") or [] if isinstance(c, dict)]
-    return AgentAnswer(
+    return Answer(
         content=content,
         raw=raw_text if isinstance(raw_text, str) else str(raw_text),
-        citations=citations,
     )
 
 
 def _score_value(result: Any) -> float:
     """Normalize a task's grade yield to a float score, loudly.
 
-    Accepts a number or an object with a numeric ``reward`` attribute (the v5
-    ``EvaluationResult`` shape). Anything else is an authoring bug; grading it
-    silently as 0.0 would hide it.
+    Accepts a number or an object with a numeric ``reward`` attribute (the
+    ``hud.graders.EvaluationResult`` shape). Anything else is an authoring bug;
+    grading it silently as 0.0 would hide it.
     """
     score = getattr(result, "reward", result)
     if isinstance(score, (int, float)):
@@ -354,8 +352,16 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
     ``server.serve_forever()``.
     """
     channel = _ControlChannel(env)
+    # Live connection handlers, so teardown can cancel them instead of
+    # abandoning them to loop shutdown (-> "Task was destroyed but it is
+    # pending" + GeneratorExit thrown into mid-splice coroutines).
+    active: set[asyncio.Task[None]] = set()
 
     async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            active.add(task)
+            task.add_done_callback(active.discard)
         try:
             first = await read_frame(reader)
             if first is None:
@@ -370,6 +376,7 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 await writer.wait_closed()
 
     server = await asyncio.start_server(accept, host=host, port=port)
+    server._hud_handlers = active  # type: ignore[attr-defined]
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])
     return server
@@ -378,6 +385,7 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
     """Start *env*'s daemons and serve its control channel until cancelled."""
     await env.start()
+    server: asyncio.Server | None = None
     try:
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
@@ -385,6 +393,9 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         async with server:
             await server.serve_forever()
     finally:
+        if server is not None:
+            for task in list(getattr(server, "_hud_handlers", ())):
+                task.cancel()
         await env.stop()
 
 

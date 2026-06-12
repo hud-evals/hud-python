@@ -7,10 +7,11 @@ import warnings
 
 import pytest
 
-from hud.agents.types import EvaluationResult, SubScore
 from hud.graders import (
     BashGrader,
+    EvaluationResult,
     Grader,
+    SubScore,
     combine,
     combine_all,
     combine_any,
@@ -22,6 +23,21 @@ from hud.graders import (
     normalize,
     numeric_match,
 )
+
+
+class TestResultShapes:
+    def test_subscore_score_aliases_value(self) -> None:
+        s = SubScore(name="acc", value=0.75, weight=1.0)
+        assert s.score == 0.75
+
+    def test_evaluation_result_from_float(self) -> None:
+        r = EvaluationResult.from_float(0.25)
+        assert r.reward == 0.25
+        assert r.done is True
+
+    def test_evaluation_result_warns_when_subscores_disagree_with_reward(self) -> None:
+        with pytest.warns(UserWarning):
+            EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
 
 
 class TestNormalize:

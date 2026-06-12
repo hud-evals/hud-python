@@ -1,17 +1,48 @@
+"""Universal SDK shapes, including the trajectory contract.
+
+The trajectory contract: a ``Trace`` is an ordered collection of ``Step``s,
+and recording a step (:meth:`Trace.record`) ships it to the platform as one
+schema-tagged span. ``Step`` here is the shared skeleton every agent family
+and the run harness speak — ordering, source, timing, error — and the
+harness records its own steps directly (``user`` prompt turns, ``task``
+lifecycle calls, ``system`` errors).
+
+Agent families layer their payloads on top by subclassing :class:`Step` —
+the tool-agent family adds LLM responses and tool calls in
+:mod:`hud.agents.types` under the ``hud.step.v1`` schema; other families
+(e.g. robot) bring their own payload fields under their own ``schema_tag``
+and inherit the transport. The platform's serializer registry dispatches on
+the schema tag, so each family decodes losslessly without this module or the
+telemetry pipe (:mod:`hud.telemetry`) knowing any payload shape.
+"""
+
 from __future__ import annotations
 
 import json
 import uuid
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias, TypeVar, cast
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
-from hud.utils.serialization import json_safe_value
+from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.exporter import queue_span
+from hud.telemetry.span import (
+    PAYLOAD_ATTRIBUTE,
+    SCHEMA_ATTRIBUTE,
+    TASK_RUN_ID_ATTRIBUTE,
+    Span,
+    new_span_id,
+    normalize_trace_id,
+)
+from hud.utils.serialization import JsonObject, JsonValue
+from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from hud.agents.claude import ClaudeAgent
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
@@ -23,9 +54,7 @@ if TYPE_CHECKING:
         ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
     ]
 
-# JSON-compatible scalar/container values.
-JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
-JsonObject: TypeAlias = dict[str, JsonValue]
+T = TypeVar("T")
 
 
 class AgentType(str, Enum):
@@ -166,90 +195,95 @@ class MCPToolResult(CallToolResult):
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
-class Sample(BaseModel):
-    """One model generation in a rollout: tokens conditioned on + tokens produced.
+# -----------------------------------------------------------------------------
+# Trajectory contract
+# -----------------------------------------------------------------------------
 
-    Token-level data for RL training (Tinker-shaped). ``output_logprobs`` are the
-    per-output-token logprobs under the *sampling* policy (q). Populated only when
-    the model backend is trainable (returns token ids + logprobs); closed/eval-only
-    backends leave it empty.
+#: Schema tag of the core step stream (the tool-agent family shares it).
+STEP_SCHEMA = "hud.step.v1"
+
+StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
+
+
+class TaskCall(BaseModel):
+    """The task-lifecycle RPC a ``task`` step records.
+
+    ``setup`` is ``tasks.start`` (result carries the opening prompt payload);
+    ``evaluate`` is ``tasks.grade`` (result carries the evaluation dict).
     """
 
-    prompt_token_ids: list[int] = Field(default_factory=list)
-    output_token_ids: list[int] = Field(default_factory=list)
-    output_logprobs: list[float] = Field(default_factory=list)
+    phase: Literal["setup", "evaluate"]
+    name: str
+    arguments: JsonValue = None
+    result: JsonValue = None
 
 
-class AgentResponse(BaseModel):
-    """Result of a single LLM inference call.
+class Step(BaseModel):
+    """One ordered interaction unit in a task run — the shared skeleton.
 
-    Returned by provider agents' ``get_response()`` methods.  Carries the
-    model's text output, any tool calls it wants to make, and provider-
-    specific metadata like reasoning traces and citations.
+    Carries what every family and the harness need: position, ``source``,
+    timing, ``error``, and the harness payloads — ``messages`` (user/system
+    prompt turns, kept as structured ``PromptMessage``s so multimodal content
+    is preserved) and ``task_call`` (task lifecycle RPC). Agent families
+    subclass this with their own payload fields (e.g.
+    :class:`hud.agents.types.AgentStep`) and, for a new wire schema, their
+    own ``schema_tag``.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    #: Schema tag this step ships under; families with their own wire schema
+    #: override it (the platform's serializer registry dispatches on it).
+    schema_tag: ClassVar[str] = STEP_SCHEMA
 
-    # --- FUNCTIONAL ---
-    tool_calls: list[MCPToolCall] = Field(default_factory=list)
-    done: bool = Field(default=False)
+    # Sequential position in the trace, assigned by ``Trace`` (1-based).
+    step_id: int | None = None
+    source: StepSource
 
-    # --- TRAINING ---
-    # Token-level data for THIS turn; present iff the model backend is trainable.
-    sample: Sample | None = Field(default=None)
+    messages: list[types.PromptMessage] = Field(default_factory=list[types.PromptMessage])
+    task_call: TaskCall | None = None
 
-    # --- RESPONSE ---
-    content: str | None = Field(default=None)
-    reasoning: str | None = Field(default=None)
-    finish_reason: str | None = Field(default=None)
-    citations: list[dict[str, Any]] = Field(default_factory=list)
-    refusal: str | None = Field(default=None)
-    isError: bool = Field(default=False)
-    raw: Any | None = Field(default=None)
+    error: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    extra: JsonObject = Field(default_factory=dict)
 
-    # Timestamps
-    start_timestamp: str | None = None
-    end_timestamp: str | None = None
+    model_config = ConfigDict(extra="forbid")
 
-    @field_serializer("raw", when_used="json")
-    def _serialize_raw(self, raw: Any | None) -> Any:
-        return json_safe_value(raw)
+    def emit(self) -> None:
+        """Queue this step for export as a span tagged with its schema.
 
-    def __str__(self) -> str:
-        response = ""
-        if self.reasoning:
-            response += f"Reasoning: {self.reasoning}\n"
-        if self.content:
-            response += f"Content: {self.content}\n"
-        if self.tool_calls:
-            response += f"""Tool Calls: {
-                ", ".join([f"{tc.name}: {tc.arguments}" for tc in self.tool_calls])
-            }"""
-        return response
+        The payload is the step's own dump, so family subclasses ship their
+        full payload under their ``schema_tag`` with no extra wiring. No-op
+        without an ambient trace context (nothing to attribute it to).
+
+        :meth:`Trace.record` calls this for every recorded step; calling it
+        directly is for steps that report outside their own local trace
+        (e.g. a ``SubagentStep`` reporting a sub-rollout to the enclosing
+        trace context).
+        """
+        task_run_id = get_current_trace_id()
+        if not task_run_id:
+            return
+
+        now = now_iso()
+        payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
+        span = Span(
+            name=f"step.{self.source}",
+            trace_id=normalize_trace_id(task_run_id),
+            span_id=new_span_id(),
+            start_time=self.started_at or now,
+            end_time=self.ended_at or now,
+            status_code="ERROR" if self.error else "OK",
+            status_message=self.error,
+            attributes={
+                SCHEMA_ATTRIBUTE: self.schema_tag,
+                TASK_RUN_ID_ATTRIBUTE: task_run_id,
+                PAYLOAD_ATTRIBUTE: payload,
+            },
+        )
+        queue_span(span.model_dump(mode="json"))
 
 
-class TraceStep(BaseModel):
-    """Canonical data for a single span (shared with telemetry)."""
-
-    # HUD identifiers
-    task_run_id: str | None = Field(default=None)
-    job_id: str | None = Field(default=None)
-
-    # Span category - can be any string, but "mcp" and "agent" are privileged on the platform
-    category: Literal["mcp", "agent"] | str = Field(default="mcp")  # noqa: PYI051
-
-    # Generic I/O fields - works for any category
-    request: Any | None = None
-    result: Any | None = None
-
-    # Generic span info
-    type: str = Field(default="CLIENT")
-
-    # Timestamps (optional, for local tracking)
-    start_timestamp: str | None = None
-    end_timestamp: str | None = None
-
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
 
 class HudSpan(BaseModel):
@@ -271,53 +305,108 @@ class HudSpan(BaseModel):
 
 
 class Trace(BaseModel):
-    """The agent's trajectory for one rollout — a pure, serializable datum.
+    """The agent's trajectory for one rollout — ordered ``Step``s that ship as spans.
 
-    Everything the *agent* collects while running: ``messages``, token-level
-    ``samples``, final ``content`` (the graded answer), ``citations``, and whether it
-    errored. The unit of training data. The task lifecycle (prompt, reward, evaluation)
+    A serializable list of ordered ``Step``s plus the run summary: ``status``
+    and the final ``content`` (the graded answer). Everything else the summary
+    exposes is *derived* from the steps — the steps are the record, the
+    summary is a view. :meth:`final` and :meth:`collect` are the two derivation
+    shapes (newest answer wins / every answer in order); ``error`` is a view
+    built on them, and family-specific reads use the same queries with family
+    vocabulary at the call site (e.g. the tool-agent family's reply citations,
+    or its token samples for an external trainer). The unit of training
+    data — family payloads on the steps carry the trainable record.
+    :meth:`record` is the single write path: it appends *and* streams the
+    step to the platform. The task lifecycle (prompt, reward, evaluation)
     and the live connection live on ``Run``, not here.
+
+    ``steps`` hold family subclasses at runtime; dumps serialize each step by
+    its runtime type so family payloads survive serialization.
     """
 
-    done: bool = Field(default=True)
-    info: dict[str, Any] = Field(default_factory=dict)
+    steps: list[SerializeAsAny[Step]] = Field(default_factory=list[Step])
+
+    status: TraceStatus | None = None
     content: str | None = Field(default=None)
-    isError: bool = Field(default=False)
 
-    # Response metadata carried from the final AgentResponse
-    citations: list[dict[str, Any]] = Field(default_factory=list)
+    # Trajectory metadata that has no structured home (provider session info,
+    # external-SDK run stats). Never load-bearing for the platform.
+    extra: JsonObject = Field(default_factory=dict)
 
-    # Trace
-    trace: list[TraceStep] = Field(default_factory=list)
-    messages: list[Any] = Field(default_factory=list)
-
-    # Token-level samples for RL training — one per model call; empty for
-    # eval-only runs. Inline mode (Mode A) fills these; server-side mode (Mode B)
-    # leaves them empty and keys the trajectory by ``trace_id`` instead.
-    # Inline token-level samples (Mode A); empty for eval-only runs.
-    samples: list[Sample] = Field(default_factory=list)
-    # Keys server-side-collected logprobs (Mode B); None for eval-only runs.
+    # Keys the server-side-collected trajectory; None for eval-only runs.
     trace_id: str | None = Field(default=None)
 
-    def __len__(self) -> int:
-        return len(self.trace)
+    model_config = ConfigDict(extra="forbid")
+
+    def final(self, get: Callable[[Step], T | None]) -> T | None:
+        """The newest step's answer to *get* — the finalized-field query.
+
+        Asks steps newest-first and returns the first non-``None`` answer
+        (``None`` from a step means "no answer here", so falsy answers like
+        ``""`` or ``[]`` still win). ``None`` when no step answers. Derived
+        summary fields are views on this — see ``error``.
+        """
+        return next(
+            (value for step in reversed(self.steps) if (value := get(step)) is not None),
+            None,
+        )
+
+    def collect(self, get: Callable[[Step], T | None]) -> list[T]:
+        """Every step's answer to *get*, in step order — the gathering query.
+
+        Steps answering ``None`` are skipped. Family-specific reads keep
+        their vocabulary at the call site, e.g. the tool-agent family's
+        training samples::
+
+            trace.collect(lambda s: s.sample if isinstance(s, AgentStep) else None)
+        """
+        return [value for step in self.steps if (value := get(step)) is not None]
 
     @property
-    def num_messages(self) -> int:
-        return len(self.messages)
+    def is_error(self) -> bool:
+        return self.status == "error"
 
-    def append(self, step: TraceStep) -> None:
-        self.trace.append(step)
+    @property
+    def error(self) -> str | None:
+        """The most recent step error, if any (errors live on steps)."""
+        return self.final(lambda step: step.error)
+
+    @model_validator(mode="after")
+    def _number_steps(self) -> Trace:
+        for index, step in enumerate(self.steps, start=1):
+            step.step_id = index
+        return self
+
+    def record(self, step: Step) -> None:
+        """Append one step and stream it to the platform — the single write path.
+
+        Numbers the step, stamps ``ended_at`` when unset (a step ends when
+        it's recorded), appends it, and emits it as a span (a no-op without
+        an ambient trace context). Callers stamp ``started_at`` themselves
+        when the step wraps awaited work — only the call site knows when
+        that began.
+        """
+        step.step_id = len(self.steps) + 1
+        if step.ended_at is None:
+            step.ended_at = now_iso()
+        self.steps.append(step)
+        step.emit()
+
+    def __len__(self) -> int:
+        return len(self.steps)
 
 
 __all__ = [
-    "AgentResponse",
+    "STEP_SCHEMA",
     "AgentType",
     "HudSpan",
     "JsonObject",
     "JsonValue",
     "MCPToolCall",
     "MCPToolResult",
+    "Step",
+    "StepSource",
+    "TaskCall",
     "Trace",
-    "TraceStep",
+    "TraceStatus",
 ]

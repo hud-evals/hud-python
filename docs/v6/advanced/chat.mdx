@@ -27,7 +27,7 @@ async def assistant(messages: list[PromptMessage]):
     yield 1.0 if answer else 0.0     # grade the final turn however you like
 ```
 
-`run.prompt` becomes the message list, and the bundled agents normalize it into provider turns automatically.
+`run.prompt` becomes the message list, and agents consume it as normalized turns through `run.prompt_messages`.
 
 ## Driving it with `Chat`
 

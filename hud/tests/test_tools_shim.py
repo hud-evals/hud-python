@@ -10,6 +10,8 @@ import warnings
 
 import pytest
 
+from hud.environment import Answer
+
 
 def test_real_tools_import_without_warning() -> None:
     with warnings.catch_warnings():
@@ -23,13 +25,36 @@ def test_real_tools_import_without_warning() -> None:
     assert base_tool.__module__ == "hud.tools.base"
 
 
-def test_result_types_redirect_to_agents_types() -> None:
+def test_result_types_redirect_to_their_v6_homes() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools.types import EvaluationResult
+        from hud.tools.types import AgentAnswer, EvaluationResult, ScenarioResult, TextContent
 
-    # The real type (has the ``from_float`` constructor), not a no-op.
+    # The real types (not no-ops): graders for results, mcp.types for blocks.
     assert EvaluationResult.from_float(0.5).reward == 0.5
+    assert ScenarioResult is EvaluationResult  # renamed in v6
+    assert AgentAnswer is Answer  # renamed in v6
+    assert TextContent(text="x", type="text").text == "x"
+
+
+def test_quarantined_v5_shapes_still_work() -> None:
+    # ContentResult and ToolError have no v6 counterpart; they live in
+    # hud._legacy and keep their v5 behavior for deployed environments.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from hud.tools.bash import ToolError  # type: ignore[import-not-found]
+        from hud.tools.types import ContentResult
+
+    combined = ContentResult(output="a", error="e1") + ContentResult(output="b", error="e2")
+    assert combined.output == "ab"
+    assert combined.error == "e1e2"
+
+    blocks = ContentResult(output="hi", base64_image="iVBORw0KGgo=").to_content_blocks()
+    assert [type(b).__name__ for b in blocks] == ["TextContent", "ImageContent"]
+
+    assert issubclass(ToolError, Exception)
+    with pytest.raises(ToolError, match="boom"):
+        raise ToolError("boom")
 
 
 def test_computer_tool_resolves_to_capability_marker() -> None:

@@ -54,7 +54,7 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_tokens=16384))
 
 ## How an agent uses capabilities
 
-The bundled agents are catalog-driven: on each run they read the environment's manifest, open the capabilities they support (`run.client.open(protocol)`), build their provider tools into fresh per-run state, then loop against `run.prompt`. You don't wire tools — declaring the capability on the environment is enough.
+The bundled agents are catalog-driven: on each run they read the environment's manifest, open the capabilities they support (`run.client.open(protocol)`), build their provider tools into fresh per-run state, then loop against `run.prompt_messages`. You don't wire tools — declaring the capability on the environment is enough.
 
 `__call__` accepts optional tuning:
 

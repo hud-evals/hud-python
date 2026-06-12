@@ -21,13 +21,18 @@ and harbor's prompt-only materialization.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
+import mcp.types as mcp_types
+
 from hud.clients import connect
-from hud.types import Trace
+from hud.telemetry.context import set_trace_context
+from hud.types import Step, TaskCall, Trace
+from hud.utils.time import now_iso
 
 from .job import job_enter, trace_enter, trace_exit
 from .runtime import HUDRuntime
@@ -42,6 +47,31 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.rollout")
+
+
+def _prompt_message(item: Any) -> mcp_types.PromptMessage:
+    """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
+
+    Turns are env-authored: chat-style dicts (plain-string content wrapped as
+    text, roles outside MCP's user/assistant vocabulary such as ``system``
+    coerced to ``user``), already-built ``PromptMessage``s, or anything else
+    stringified. Coercion may be lossy — prompt context is what the agent is
+    given, and the verbatim payload stays on the setup ``task`` step's result.
+    """
+    if isinstance(item, mcp_types.PromptMessage):
+        return item
+    if not isinstance(item, dict):
+        item = {"content": str(item)}
+    role = item.get("role")
+    if role not in ("user", "assistant"):
+        role = "user"
+    content = item.get("content")
+    if isinstance(content, str):
+        return mcp_types.PromptMessage(
+            role=role,
+            content=mcp_types.TextContent(type="text", text=content),
+        )
+    return mcp_types.PromptMessage.model_validate({**item, "role": role})
 
 
 @dataclass(slots=True)
@@ -80,8 +110,10 @@ class Run:
         self._client = client
         self._task_id = task_id
         self._args = args
-        #: The task's opening prompt: plain text, or a list of message dicts
-        #: (``{"role", "content"}``) for chat-style / multi-turn prompts.
+        #: The task's opening prompt as ``tasks.start`` returned it: plain
+        #: text, or a list of message dicts (``{"role", "content"}``) for
+        #: chat-style / multi-turn prompts. Agents consume the normalized
+        #: views: :attr:`prompt_messages` / :attr:`prompt_text`.
         self.prompt: str | list[Any] | None = None
         #: The structured grading result (all-default until graded on exit).
         self.grade = Grade()
@@ -123,9 +155,54 @@ class Run:
         """
         return self._runtime
 
+    @property
+    def prompt_messages(self) -> list[mcp_types.PromptMessage]:
+        """The prompt as normalized ``PromptMessage`` turns.
+
+        The structured form agents consume and the opening ``user`` step
+        records: a text prompt (or none) is one user turn; chat-style lists
+        map turn by turn.
+        """
+        if self.prompt is None or isinstance(self.prompt, str):
+            return [_prompt_message({"content": self.prompt or ""})]
+        return [_prompt_message(item) for item in self.prompt]
+
+    @property
+    def prompt_text(self) -> str:
+        """The prompt flattened to plain text, for string-only agent backends.
+
+        Text content of each turn joined by blank lines; non-text content
+        (images, resources) is dropped — consume :attr:`prompt_messages`
+        where structured turns are supported.
+        """
+        return "\n\n".join(
+            message.content.text
+            for message in self.prompt_messages
+            if isinstance(message.content, mcp_types.TextContent) and message.content.text
+        )
+
+    def record(self, step: Step) -> None:
+        """Record one step on the trace (:meth:`hud.types.Trace.record`)."""
+        self.trace.record(step)
+
     async def __aenter__(self) -> Self:
+        started_at = now_iso()
         started = await self.client.start_task(self._task_id, self._args)
         self.prompt = started.get("prompt")
+        self.record(
+            Step(
+                source="task",
+                task_call=TaskCall(
+                    phase="setup",
+                    name=self._task_id,
+                    arguments=self._args,
+                    result=started,
+                ),
+                started_at=started_at,
+            ),
+        )
+        if self.prompt is not None:
+            self.record(Step(source="user", messages=self.prompt_messages))
         return self
 
     async def __aexit__(
@@ -135,13 +212,29 @@ class Run:
         tb: TracebackType | None,
     ) -> bool:
         if exc_type is not None:
-            self.trace.isError = True
+            cancelled = issubclass(exc_type, asyncio.CancelledError | KeyboardInterrupt)
+            self.trace.status = "cancelled" if cancelled else "error"
             await self.client.cancel()
             return False
         answer: dict[str, Any] = {"answer": self.trace.content}
-        if self.trace.citations:
-            answer["citations"] = self.trace.citations
-        self.grade = Grade.from_dict(await self.client.grade(answer))
+        started_at = now_iso()
+        evaluation = await self.client.grade(answer)
+        self.grade = Grade.from_dict(evaluation)
+        self.record(
+            Step(
+                source="task",
+                task_call=TaskCall(
+                    phase="evaluate",
+                    name=self._task_id,
+                    arguments=answer,
+                    result=evaluation,
+                ),
+                started_at=started_at,
+                error=self.grade.content if self.grade.is_error else None,
+            ),
+        )
+        if self.trace.status is None:
+            self.trace.status = "completed"
         return False
 
     @classmethod
@@ -153,7 +246,7 @@ class Run:
         runtime, partial trace) with the error recorded on the trace.
         """
         run = cls(None, "", {})
-        run.trace = Trace(isError=True, content=error)
+        run.trace = Trace(status="error", steps=[Step(source="system", error=error)])
         return run
 
 
@@ -185,8 +278,6 @@ async def rollout(
     *mid-run* keeps the real run — prompt, placement record, and the partial
     trace the agent built — marked as errored.
     """
-    from hud.telemetry.context import set_trace_context
-
     provider = runtime or HUDRuntime()
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
@@ -210,8 +301,8 @@ async def rollout(
                 run = Run.failed(str(exc))
             else:
                 logger.warning("rollout failed mid-run: %s", exc)
-                run.trace.isError = True
-                run.trace.content = str(exc)
+                run.trace.status = "error"
+                run.record(Step(source="system", error=str(exc)))
         assert run is not None  # the body bound it, or the handler synthesized it
         run.trace.trace_id = trace_id
         run.job_id = job_id

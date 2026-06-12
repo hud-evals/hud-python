@@ -16,6 +16,7 @@ never depend on the platform.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -80,31 +81,36 @@ async def trace_enter(trace_id: str, *, job_id: str | None, group_id: str | None
 
 
 async def trace_exit(run: Run) -> None:
-    """Report one finished rollout (reward / success / error) from its ``Run``."""
+    """Report one finished rollout (status / reward / error) from its ``Run``."""
     if not _reporting_enabled() or run.trace.trace_id is None:
         return
     await _report(
         f"/trace/{run.trace.trace_id}/exit",
         {
-            "prompt": run.prompt,
-            "job_id": run.job_id,
-            "group_id": run.group_id,
+            "status": run.trace.status or "completed",
             "reward": run.reward,
-            "success": not run.trace.isError,
-            "error_message": run.trace.content if run.trace.isError else None,
+            # Recovered step errors stay on the steps; only an errored run
+            # reports a trace-level error.
+            "error": run.trace.error if run.trace.is_error else None,
             "evaluation_result": run.evaluation or None,
         },
     )
 
 
 async def _report(path: str, payload: dict[str, Any]) -> None:
-    try:
-        await PlatformClient.from_settings().apost(
-            path,
-            json={k: v for k, v in payload.items() if v is not None},
-        )
-    except Exception as exc:
-        logger.warning("platform report %s failed: %s", path, exc)
+    body = {k: v for k, v in payload.items() if v is not None}
+    # One bounded retry: reporting is fire-and-forget, and concurrent rollout
+    # bursts have been observed to draw transient rejections (including
+    # spurious 401s) from the platform that succeed moments later.
+    for attempt in (1, 2):
+        try:
+            await PlatformClient.from_settings().apost(path, json=body)
+            return
+        except Exception as exc:
+            if attempt == 2:
+                logger.warning("platform report %s failed: %s", path, exc)
+            else:
+                await asyncio.sleep(0.5)
 
 
 __all__ = ["Job"]

@@ -10,9 +10,9 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
-from typing import TYPE_CHECKING, Any, Generic, ParamSpec, cast
+from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from hud.capabilities import Capability
 
@@ -26,6 +26,22 @@ if TYPE_CHECKING:
     from hud.eval import Task as EvalTask
 
 P = ParamSpec("P")
+T = TypeVar("T")
+
+
+class Answer(BaseModel, Generic[T]):
+    """The maybe-parsed answer a ``returns=``-typed task receives for grading.
+
+    When a task specifies ``returns=SomeModel``, the answer received by the
+    task's evaluate phase is an ``Answer[SomeModel]``: ``content`` is the agent's
+    answer parsed into the declared type (or the original string when parsing
+    failed — grade it accordingly), ``raw`` is always the string as submitted.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    content: T = Field(description="The parsed structured answer")
+    raw: str = Field(default="", description="Original answer string before parsing")
 
 
 class _TaskFactory(Generic[P]):
@@ -56,7 +72,7 @@ class _TaskFactory(Generic[P]):
         #: Type(s) the agent is given as input (a model or union; ``None`` = text).
         self.input_type = input
         #: Type the agent must produce (``None`` = plain text). Drives answer
-        #: deserialization into ``AgentAnswer[T]``.
+        #: deserialization into ``Answer[T]``.
         self.return_type = returns
         self.sig = inspect.signature(func)
         functools.update_wrapper(self, func)
@@ -69,7 +85,11 @@ class _TaskFactory(Generic[P]):
         return entry
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> EvalTask:
-        from hud.eval.task import Task  # local import: avoid env<->eval cycle
+        # The one sanctioned upward import: eval sits above environment and
+        # agents and imports both; neither imports eval. Calling a declaration
+        # is where env hands the row to eval, and the import stays local to
+        # break the load-time cycle. Don't add more edges like this.
+        from hud.eval.task import Task
 
         bound = self.sig.bind(*args, **kwargs)
         return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))

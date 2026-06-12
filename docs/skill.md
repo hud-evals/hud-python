@@ -218,7 +218,7 @@ grader"), [Graders](/v6/reference/graders).
 - Async graders (return `SubScore`): `BashGrader.grade(weight, command=...)`,
   `LLMJudgeGrader.grade(weight, answer=..., criteria=[...])`.
 - Compose: `await Grade.gather(...)` (positive weights normalize to 1.0).
-- Structured answers: `@env.task(returns=MyModel)` → answer is `AgentAnswer[T]`.
+- Structured answers: `@env.task(returns=MyModel)` → answer is `Answer[T]`.
 
 Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 

@@ -11,10 +11,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_write_csv_flattens_args_and_columns(tmp_path: Path) -> None:
+def test_write_csv_flattens_args(tmp_path: Path) -> None:
     rows = [
-        Task(env="e", id="solve", args={"n": 1}, slug="one", columns={"tier": "easy"}),
-        Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two", columns={"tier": "hard"}),
+        Task(env="e", id="solve", args={"n": 1}, slug="one"),
+        Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two"),
     ]
     rows = [row.model_dump() for row in rows]
 
@@ -22,6 +22,6 @@ def test_write_csv_flattens_args_and_columns(tmp_path: Path) -> None:
     _write_csv(out, rows)
 
     csv_text = out.read_text()
-    assert "slug,id,env,arg:n,col:tier" in csv_text
-    assert "one,solve,e,1,easy" in csv_text
-    assert 'two,solve,e,"{""x"": 2}",hard' in csv_text
+    assert "slug,id,env,arg:n" in csv_text
+    assert "one,solve,e,1" in csv_text
+    assert 'two,solve,e,"{""x"": 2}"' in csv_text

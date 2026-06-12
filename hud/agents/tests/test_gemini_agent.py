@@ -44,6 +44,19 @@ def test_format_message_uses_model_role() -> None:
     assert agent._format_message("user", "hi").role == "user"
 
 
+def _api_response(*candidates: Any) -> Any:
+    """A fake ``GenerateContentResponse``: candidates plus the response envelope."""
+    return SimpleNamespace(
+        candidates=list(candidates),
+        model_version="gemini-test-v2",
+        usage_metadata=SimpleNamespace(
+            prompt_token_count=5,
+            candidates_token_count=3,
+            cached_content_token_count=None,
+        ),
+    )
+
+
 async def test_get_response_text_and_function_call() -> None:
     resp_content = SimpleNamespace(
         role="model",
@@ -56,14 +69,12 @@ async def test_get_response_text_and_function_call() -> None:
             ),
         ],
     )
-    response = SimpleNamespace(
-        candidates=[
-            SimpleNamespace(
-                content=resp_content,
-                grounding_metadata=None,
-                finish_reason=SimpleNamespace(name="STOP"),
-            )
-        ]
+    response = _api_response(
+        SimpleNamespace(
+            content=resp_content,
+            grounding_metadata=None,
+            finish_reason=SimpleNamespace(name="STOP"),
+        )
     )
     agent = _agent(response)
 
@@ -73,6 +84,11 @@ async def test_get_response_text_and_function_call() -> None:
     assert [tc.name for tc in result.tool_calls] == ["bash"]
     assert result.done is False
     assert result.finish_reason == "STOP"
+    # Model and usage are normalized off the provider response.
+    assert result.model == "gemini-test-v2"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 5
+    assert result.usage.completion_tokens == 3
 
 
 async def test_get_response_done_text_only() -> None:
@@ -80,10 +96,8 @@ async def test_get_response_done_text_only() -> None:
         role="model",
         parts=[SimpleNamespace(function_call=None, text="answer", thought=None)],
     )
-    response = SimpleNamespace(
-        candidates=[
-            SimpleNamespace(content=resp_content, grounding_metadata=None, finish_reason=None)
-        ]
+    response = _api_response(
+        SimpleNamespace(content=resp_content, grounding_metadata=None, finish_reason=None)
     )
     agent = _agent(response)
     result = await agent.get_response(_state(agent))

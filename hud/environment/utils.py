@@ -57,14 +57,28 @@ async def splice(
     Closes both writers on the way out — under Python 3.12 an unclosed
     connection parks ``Server.wait_closed()`` forever.
     """
-    try:
-        await asyncio.gather(_pump(a[0], b[1]), _pump(b[0], a[1]))
-    finally:
+
+    async def _drain_close() -> None:
         for writer in (a[1], b[1]):
             writer.close()
         for writer in (a[1], b[1]):
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
+
+    try:
+        await asyncio.gather(_pump(a[0], b[1]), _pump(b[0], a[1]))
+    except GeneratorExit:
+        # Force-close: the task was abandoned (loop shutdown threw GeneratorExit
+        # into us). Awaiting here would raise "coroutine ignored GeneratorExit",
+        # so close synchronously and get out.
+        for writer in (a[1], b[1]):
+            writer.close()
+        raise
+    except BaseException:
+        await _drain_close()
+        raise
+    else:
+        await _drain_close()
 
 
 __all__ = ["error", "read_frame", "reply", "send_frame", "splice"]

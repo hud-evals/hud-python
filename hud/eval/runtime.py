@@ -37,8 +37,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from hud.environment.server import PORT_ANNOUNCEMENT, bind
-
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
@@ -217,6 +215,8 @@ async def _local(env: Environment) -> AsyncIterator[Runtime]:
     it (``AgentTool`` sub-rollouts: ``runtime=lambda _: _local(env)``); test
     harnesses enter it directly.
     """
+    from hud.environment.server import bind
+
     await env.start()
     server = await bind(env, "127.0.0.1", 0)
     host, port = server.sockets[0].getsockname()[:2]
@@ -234,6 +234,11 @@ async def _local(env: Environment) -> AsyncIterator[Runtime]:
 
 
 async def _read_port(proc: asyncio.subprocess.Process, source: Path) -> int:
+    # Imported lazily: a module-level import would pre-load hud.environment.server
+    # in every `python -m hud.environment.server` child, tripping runpy's
+    # found-in-sys.modules RuntimeWarning on each spawned rollout.
+    from hud.environment.server import PORT_ANNOUNCEMENT
+
     assert proc.stdout is not None
     while True:
         line = await proc.stdout.readline()

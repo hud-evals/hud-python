@@ -19,7 +19,7 @@ from hud.cli.utils.registry import (
 )
 from hud.cli.utils.source import EnvironmentSource
 from hud.eval import Taskset
-from hud.eval.sync import diff, resolve_taskset_id, taskset_column_definitions, upload_taskset
+from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -53,15 +53,13 @@ def _taskset_target(
 
 
 def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
-    """Spreadsheet view of task rows: one ``arg:``/``col:`` column per key."""
+    """Spreadsheet view of task rows: one ``arg:`` column per key."""
     arg_keys = sorted({key for entry in entries for key in (entry.get("args") or {})})
-    col_keys = sorted({key for entry in entries for key in (entry.get("columns") or {})})
     fieldnames = [
         "slug",
         "id",
         "env",
         *[f"arg:{key}" for key in arg_keys],
-        *[f"col:{key}" for key in col_keys],
     ]
 
     def cell(value: Any) -> Any:
@@ -72,14 +70,12 @@ def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
         writer.writeheader()
         for entry in entries:
             args = entry.get("args") or {}
-            cols = entry.get("columns") or {}
             writer.writerow(
                 {
                     "slug": entry.get("slug") or "",
                     "id": entry.get("id") or "",
                     "env": entry.get("env") or "",
                     **{f"arg:{key}": cell(args.get(key)) for key in arg_keys},
-                    **{f"col:{key}": cell(cols.get(key)) for key in col_keys},
                 }
             )
 
@@ -222,13 +218,13 @@ def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
 
 
 def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
-    returned_id = result.get("evalset_id")
+    returned_id = result.get("taskset_id")
     if not isinstance(returned_id, str) or not returned_id:
         return
     changed = EnvironmentSource.open().save_config({"tasksetId": returned_id})
     if changed:
         console.dim_info("Taskset ID saved to:", ".hud/config.json")
-    console.info(f"  https://hud.ai/evalsets/{returned_id}")
+    console.info(f"  https://hud.ai/tasksets/{returned_id}")
 
 
 @sync_app.command("tasks")
@@ -354,12 +350,7 @@ def sync_tasks_command(
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = upload_taskset(
-            platform,
-            plan.taskset_name,
-            plan.to_apply,
-            columns=taskset_column_definitions(list(local_taskset)),
-        )
+        result = upload_taskset(platform, plan.taskset_name, plan.to_apply)
     except HudRequestError as e:
         _show_upload_error(e, hud_console)
         return

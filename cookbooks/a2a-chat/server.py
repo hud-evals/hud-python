@@ -40,6 +40,7 @@ from a2a.types import (
 
 from hud import Chat, Runtime, LocalRuntime
 from hud.agents import create_agent
+from hud.agents.types import AgentStep
 from hud.eval import Task
 
 if TYPE_CHECKING:
@@ -72,10 +73,15 @@ def _status_event(
 
 
 def _citations_event(context_id: str, task_id: str, trace: Trace) -> TaskArtifactUpdateEvent | None:
-    """Transport reply citations as a structured artifact, if any."""
-    if not trace.citations:
+    """Transport the final reply's citations as a structured artifact, if any."""
+    citations = trace.final(lambda s: s.citations if isinstance(s, AgentStep) else None)
+    if not citations:
         return None
-    payload = {"type": "hud_reply_metadata", "citations": trace.citations, "data": None}
+    payload = {
+        "type": "hud_reply_metadata",
+        "citations": [c.model_dump(mode="json", exclude_none=True) for c in citations],
+        "data": None,
+    }
     return TaskArtifactUpdateEvent(
         context_id=context_id,
         task_id=task_id,

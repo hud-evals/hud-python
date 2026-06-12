@@ -39,10 +39,15 @@ def test_format_message_shapes_user_text() -> None:
     assert msg["role"] == "user"
 
 
+def _api_response(id: str, output: list[Any], usage: Any = None) -> Any:
+    """A fake Responses-API payload: output items plus the response envelope."""
+    return SimpleNamespace(id=id, output=output, model="gpt-test-v1", usage=usage)
+
+
 async def test_get_response_parses_text_and_function_call() -> None:
-    response = SimpleNamespace(
-        id="resp_1",
-        output=[
+    response = _api_response(
+        "resp_1",
+        [
             SimpleNamespace(
                 type="message",
                 content=[ResponseOutputText(type="output_text", text="hi", annotations=[])],
@@ -54,6 +59,11 @@ async def test_get_response_parses_text_and_function_call() -> None:
                 call_id="call_1",
             ),
         ],
+        usage=SimpleNamespace(
+            input_tokens=9,
+            output_tokens=4,
+            input_tokens_details=SimpleNamespace(cached_tokens=2),
+        ),
     )
     agent = _agent(response)
     state = OpenAIRunState(messages=[agent._format_message("user", "go")])
@@ -65,16 +75,23 @@ async def test_get_response_parses_text_and_function_call() -> None:
     assert result.tool_calls[0].arguments == {"command": ["ls"]}
     assert result.done is False
     assert state.last_response_id == "resp_1"
+    # Model and usage are normalized off the provider response.
+    assert result.model == "gpt-test-v1"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 9
+    assert result.usage.completion_tokens == 4
+    assert result.usage.cached_tokens == 2
 
 
 async def test_get_response_done_when_no_tool_calls() -> None:
-    response = SimpleNamespace(id="resp_2", output=[])
+    response = _api_response("resp_2", [])
     agent = _agent(response)
     state = OpenAIRunState(messages=[agent._format_message("user", "hi")])
 
     result = await agent.get_response(state)
     assert result.done is True
     assert result.tool_calls == []
+    assert result.usage is None  # provider omitted usage
 
 
 async def test_get_response_short_circuits_on_consumed_messages() -> None:
@@ -92,9 +109,9 @@ async def test_get_response_short_circuits_on_consumed_messages() -> None:
 
 
 async def test_get_response_parses_shell_call() -> None:
-    response = SimpleNamespace(
-        id="resp_3",
-        output=[
+    response = _api_response(
+        "resp_3",
+        [
             SimpleNamespace(
                 type="shell_call",
                 action=SimpleNamespace(to_dict=lambda: {"command": ["pwd"]}),
