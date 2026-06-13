@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hud.eval.rollout import Run
+    from hud.eval.run import Run
 
 
 class Agent(ABC):

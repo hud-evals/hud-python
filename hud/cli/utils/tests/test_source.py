@@ -27,10 +27,6 @@ def test_normalize_environment_name() -> None:
     assert normalize_environment_name("", default="converted") == "converted"
 
 
-def test_environment_name_override() -> None:
-    assert EnvironmentSource.open(".").environment_name("Custom Env") == "custom-env"
-
-
 def test_environment_name_auto(tmp_path: Path) -> None:
     env = tmp_path / "my_env"
     env.mkdir()
@@ -132,12 +128,45 @@ def test_finds_single_quotes_and_nested_dirs(tmp_path: Path) -> None:
     assert names == {"bar"}
 
 
-def test_keyword_form_is_not_matched(tmp_path: Path) -> None:
-    # Environment(name="kw") is the keyword form — the scanner targets the
-    # positional string form, so it should not match.
+def test_keyword_name_is_matched(tmp_path: Path) -> None:
     _write(tmp_path / "env.py", 'env = Environment(name="kw")\n')
 
-    assert EnvironmentSource.open(tmp_path).environment_name_references() == []
+    refs = EnvironmentSource.open(tmp_path).environment_name_references()
+
+    assert [ref.name for ref in refs] == ["kw"]
+
+
+def test_unnamed_call_reported_with_none(tmp_path: Path) -> None:
+    _write(tmp_path / "env.py", "env = Environment()\n")
+
+    refs = EnvironmentSource.open(tmp_path).environment_name_references()
+
+    assert [ref.name for ref in refs] == [None]
+
+
+def test_non_literal_name_reported_with_none(tmp_path: Path) -> None:
+    _write(tmp_path / "env.py", "env = Environment(name=NAME)\n")
+
+    refs = EnvironmentSource.open(tmp_path).environment_name_references()
+
+    assert [ref.name for ref in refs] == [None]
+
+
+def test_attribute_call_is_matched(tmp_path: Path) -> None:
+    _write(tmp_path / "env.py", 'env = hud.Environment("attr-env")\n')
+
+    refs = EnvironmentSource.open(tmp_path).environment_name_references()
+
+    assert [ref.name for ref in refs] == ["attr-env"]
+
+
+def test_unparseable_file_is_skipped(tmp_path: Path) -> None:
+    _write(tmp_path / "broken.py", "def broken(:\n")
+    _write(tmp_path / "env.py", 'env = Environment("ok")\n')
+
+    refs = EnvironmentSource.open(tmp_path).environment_name_references()
+
+    assert [ref.name for ref in refs] == ["ok"]
 
 
 def test_scanner_does_not_rewrite_mismatched_name(tmp_path: Path) -> None:

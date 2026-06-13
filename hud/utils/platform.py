@@ -21,10 +21,15 @@ class PlatformClient:
     Raises :class:`hud.utils.exceptions.HudRequestError` (with ``status_code``
     and ``response_json``) on HTTP errors and retries transient failures.
     Responses are decoded JSON; callers own the payload shape.
+
+    ``api_url`` is the bare origin (``https://api.hud.ai``); ``api_prefix``
+    (``/v2``) is prepended to every path so feature modules pass version-free
+    endpoints (``/tasks/upload``).
     """
 
     api_url: str
     api_key: str
+    api_prefix: str = "/v2"
 
     @classmethod
     def from_settings(cls) -> PlatformClient:
@@ -32,8 +37,14 @@ class PlatformClient:
 
         return cls(settings.hud_api_url, settings.api_key or "")
 
+    @property
+    def base_url(self) -> str:
+        """Origin + version prefix, e.g. ``https://api.hud.ai/v2``. The base for
+        both REST calls here and the build-log WebSocket in the CLI."""
+        return f"{self.api_url.rstrip('/')}{self.api_prefix}"
+
     def url(self, path: str, params: dict[str, Any] | None = None) -> str:
-        url = f"{self.api_url.rstrip('/')}{path}"
+        url = f"{self.base_url}{path}"
         if params:
             url += "?" + urlencode(params)
         return url

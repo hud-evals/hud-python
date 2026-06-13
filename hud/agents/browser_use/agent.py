@@ -30,7 +30,7 @@ from hud.settings import settings
 from hud.types import Step
 
 if TYPE_CHECKING:
-    from hud.eval.rollout import Run
+    from hud.eval.run import Run
 
 LOGGER = logging.getLogger("hud.agents.browser_use")
 

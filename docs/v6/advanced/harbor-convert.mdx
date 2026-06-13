@@ -20,9 +20,8 @@ run it from a checkout.
 ## Load Harbor tasks
 
 `load(path)` parses a Harbor task dir (or a dataset of them) into a `Taskset`
-directly — one row per task dir (`id` = the dir name, `task.toml` metadata as
-columns), sharing one declarative `Environment` per distinct `environment/`
-build context:
+directly — one row per task dir (`id` = the dir name), sharing one declarative
+`Environment` per distinct `environment/` build context:
 
 ```python
 from integrations.harbor import detect, load
@@ -31,7 +30,7 @@ assert detect("./terminal-bench")
 taskset = load("./terminal-bench")
 
 for task in taskset:
-    print(task.env, task.id, task.columns)
+    print(task.env, task.id)
 ```
 
 Like every task row, the result carries no placement. Run it by supplying one —

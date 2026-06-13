@@ -22,7 +22,7 @@ from hud.types import Step
 
 if TYPE_CHECKING:
     from hud.capabilities import RFBClient, SSHClient
-    from hud.eval.rollout import Run
+    from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
 

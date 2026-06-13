@@ -21,7 +21,7 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.eval import Job, LocalRuntime, Task, Taskset
-from hud.eval.rollout import Run, rollout
+from hud.eval.run import Run, rollout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

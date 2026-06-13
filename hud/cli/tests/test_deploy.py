@@ -9,6 +9,89 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import typer
 
+from hud.cli.deploy import _resolve_environment_name
+from hud.cli.utils.registry import RegistryEnvironment
+from hud.cli.utils.source import EnvironmentSource
+from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
+
+
+class TestResolveEnvironmentName:
+    """Tests for code-authoritative environment name resolution."""
+
+    @staticmethod
+    def _resolve(tmp_path: Path, registry_id: str | None = None) -> str:
+        return _resolve_environment_name(
+            EnvironmentSource.open(tmp_path),
+            registry_id,
+            PlatformClient("https://api.example", "key"),
+            HUDConsole(),
+        )
+
+    def test_single_declared_name_wins(self, tmp_path: Path) -> None:
+        (tmp_path / "env.py").write_text('env = Environment("my-env")\n', encoding="utf-8")
+
+        assert self._resolve(tmp_path) == "my-env"
+
+    def test_repeated_same_name_is_fine(self, tmp_path: Path) -> None:
+        (tmp_path / "a.py").write_text('a = Environment("same")\n', encoding="utf-8")
+        (tmp_path / "b.py").write_text('b = Environment(name="same")\n', encoding="utf-8")
+
+        assert self._resolve(tmp_path) == "same"
+
+    def test_multiple_distinct_names_exit(self, tmp_path: Path) -> None:
+        (tmp_path / "a.py").write_text('a = Environment("one")\n', encoding="utf-8")
+        (tmp_path / "b.py").write_text('b = Environment("two")\n', encoding="utf-8")
+
+        with pytest.raises(typer.Exit):
+            self._resolve(tmp_path)
+
+    def test_unnamed_environment_exit(self, tmp_path: Path) -> None:
+        (tmp_path / "env.py").write_text("env = Environment()\n", encoding="utf-8")
+
+        with pytest.raises(typer.Exit):
+            self._resolve(tmp_path)
+
+    def test_no_references_falls_back_to_directory(self, tmp_path: Path) -> None:
+        env_dir = tmp_path / "My Legacy_Env"
+        env_dir.mkdir()
+        (env_dir / "server.py").write_text("x = 1\n", encoding="utf-8")
+
+        assert self._resolve(env_dir) == "my-legacy-env"
+
+    def test_registry_id_name_mismatch_exit(self, tmp_path: Path) -> None:
+        (tmp_path / "env.py").write_text('env = Environment("code-name")\n', encoding="utf-8")
+        registry_env = RegistryEnvironment(id="r-1", name="other-name")
+
+        with (
+            patch(
+                "hud.cli.deploy.get_registry_environment",
+                return_value=registry_env,
+            ),
+            pytest.raises(typer.Exit),
+        ):
+            self._resolve(tmp_path, registry_id="r-1")
+
+    def test_registry_id_matching_name_passes(self, tmp_path: Path) -> None:
+        (tmp_path / "env.py").write_text('env = Environment("Code Name")\n', encoding="utf-8")
+        registry_env = RegistryEnvironment(id="r-1", name="code-name")
+
+        with patch(
+            "hud.cli.deploy.get_registry_environment",
+            return_value=registry_env,
+        ):
+            assert self._resolve(tmp_path, registry_id="r-1") == "Code Name"
+
+    def test_registry_id_supplies_name_for_legacy_env(self, tmp_path: Path) -> None:
+        (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
+        registry_env = RegistryEnvironment(id="r-1", name="platform-name")
+
+        with patch(
+            "hud.cli.deploy.get_registry_environment",
+            return_value=registry_env,
+        ):
+            assert self._resolve(tmp_path, registry_id="r-1") == "platform-name"
+
 
 class TestCollectEnvironmentVariables:
     """Tests for collect_environment_variables function."""

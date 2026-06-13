@@ -18,6 +18,7 @@ telemetry pipe (:mod:`hud.telemetry`) knowing any payload shape.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
 from enum import Enum
@@ -110,6 +111,21 @@ class AgentType(str, Enum):
                 return "gemini"
             case AgentType.OPENAI_COMPATIBLE:
                 return "openai"
+
+    @classmethod
+    def of(cls, agent: object) -> AgentType | None:
+        """The gateway agent type *agent* is an instance of, or ``None``.
+
+        Reverse of :attr:`cls`. Provider extras (anthropic, google-genai, ...)
+        may be uninstalled, so importing a type's agent class can fail; that
+        simply means *agent* is not that type. ``None`` for a custom ``Agent``
+        subclass that is not one of the gateway shortcuts.
+        """
+        for agent_type in cls:
+            with contextlib.suppress(Exception):
+                if isinstance(agent, agent_type.cls):
+                    return agent_type
+        return None
 
 
 class MCPToolCall(CallToolRequestParams):

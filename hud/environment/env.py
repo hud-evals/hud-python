@@ -12,7 +12,7 @@ import functools
 import inspect
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
 from hud.capabilities import Capability
 
@@ -42,6 +42,30 @@ class Answer(BaseModel, Generic[T]):
 
     content: T = Field(description="The parsed structured answer")
     raw: str = Field(default="", description="Original answer string before parsing")
+
+
+def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
+    """JSON Schema for a task function's parameters — the task's args contract.
+
+    Published in the manifest (`tasks.list`) so the platform can validate
+    stored task args at sync time and render argument forms. Unannotated params
+    accept anything.
+    """
+    fields: dict[str, Any] = {}
+    allow_additional = False
+    for name, param in sig.parameters.items():
+        if param.kind is inspect.Parameter.VAR_KEYWORD:
+            allow_additional = True
+            continue
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            continue
+        annotation = Any if param.annotation is inspect.Parameter.empty else param.annotation
+        default = ... if param.default is inspect.Parameter.empty else param.default
+        fields[name] = (annotation, default)
+    schema = create_model("TaskArgs", **fields).model_json_schema()
+    schema.pop("title", None)
+    schema["additionalProperties"] = allow_additional
+    return schema
 
 
 class _TaskFactory(Generic[P]):
@@ -78,7 +102,11 @@ class _TaskFactory(Generic[P]):
         functools.update_wrapper(self, func)
 
     def manifest_entry(self) -> dict[str, Any]:
-        entry: dict[str, Any] = {"id": self.id, "description": self.description}
+        entry: dict[str, Any] = {
+            "id": self.id,
+            "description": self.description,
+            "args": _args_json_schema(self.sig),
+        }
         for key, typ in (("input", self.input_type), ("returns", self.return_type)):
             if typ is not None:
                 entry[key] = TypeAdapter(typ).json_schema()

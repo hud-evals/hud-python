@@ -70,7 +70,7 @@ def run_command(
 
     async def _run() -> float:
         from hud.clients import connect
-        from hud.eval.rollout import Run
+        from hud.eval.run import Run
 
         async with (
             connect(_runtime(url), ready_timeout=10.0) as client,

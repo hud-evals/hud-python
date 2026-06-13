@@ -226,6 +226,7 @@ class EvalConfig(BaseModel):
         "group_size",
         "auto_respond",
         "gateway",
+        "runtime",
     }
     source: str | None = None
     agent_type: AgentType | None = None
@@ -239,6 +240,9 @@ class EvalConfig(BaseModel):
     auto_respond: bool | None = None
     group_size: int = 1
     gateway: bool = False
+    #: Placement: "local" (spawn each row's env from the source), "hud"
+    #: (platform-hosted execution), or a tcp:// url of an already-served env.
+    runtime: str = "local"
 
     agent_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -261,6 +265,20 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         if self.agent_type is None:
+            return
+
+        # Hosted placement runs the agent on the platform, where LLM calls
+        # always route through the HUD gateway — no local provider key is
+        # involved, and a local gateway model_client could not travel with
+        # the submission anyway. Only HUD_API_KEY matters.
+        if self.runtime == "hud":
+            require_api_key("run platform-hosted evals")
+            if self.gateway:
+                self.gateway = False
+                hud_console.info(
+                    "--gateway is implied by --runtime hud (the hosted runner always "
+                    "routes through the HUD gateway); ignoring the flag locally."
+                )
             return
 
         # Gateway by default: when the provider key is missing but HUD_API_KEY is
@@ -405,6 +423,7 @@ class EvalConfig(BaseModel):
         gateway: bool = False,
         config: list[str] | None = None,
         task_ids: str | None = None,
+        runtime: str | None = None,
     ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
         overrides: dict[str, Any] = {
@@ -415,6 +434,7 @@ class EvalConfig(BaseModel):
                 "max_concurrent": max_concurrent,
                 "max_steps": max_steps,
                 "group_size": group_size,
+                "runtime": runtime,
             }.items()
             if value is not None
         }
@@ -575,25 +595,46 @@ def _spawn_target(source: Path) -> Path:
     return resolved.parent
 
 
+def _resolve_placement(cfg: EvalConfig, source_path: Path) -> Any:
+    """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
+
+    "local" spawns each row's env from the source next to the tasks file;
+    "hud" submits every rollout for platform-hosted execution (agent
+    co-located with the env on a leased instance); a ``tcp://`` url attaches
+    to an env served elsewhere.
+    """
+    from hud.eval import HUDRuntime, LocalRuntime, Runtime
+
+    if cfg.runtime == "local":
+        return LocalRuntime(_spawn_target(source_path))
+    if cfg.runtime == "hud":
+        require_api_key("run platform-hosted evals")
+        return HUDRuntime()
+    if cfg.runtime.startswith("tcp://"):
+        return Runtime(cfg.runtime)
+    hud_console.error(f"Unknown runtime {cfg.runtime!r}. Use 'local', 'hud', or a tcp:// url.")
+    raise typer.Exit(1)
+
+
 async def _run_evaluation(cfg: EvalConfig) -> Any:
     """Run evaluation on the Env/Task/Taskset/Run flow.
 
     Loads a ``Taskset`` from a Python source or JSON/JSONL taskset and runs it
-    on spawned local substrates (``runtime=LocalRuntime(source)`` — each rollout serves
-    its own row's env, so mixed-env tasksets are one job). Returns the ``Job``
-    receipt containing the live execution ``Run`` results.
+    on the configured placement (default: spawned local substrates — each
+    rollout serves its own row's env, so mixed-env tasksets are one job).
+    Returns the ``Job`` receipt containing the live execution ``Run`` results.
     """
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    from hud.eval import LocalRuntime, Taskset
+    from hud.eval import Taskset
 
     source_path = Path(cfg.source)
     if not source_path.exists():
         hud_console.error(
-            f"Task source not found locally: {cfg.source}. Platform-hosted execution "
-            "is not wired up yet; export the taskset (hud sync tasks <name> --export "
-            "tasks.json) and run it from the env's source directory."
+            f"Task source not found locally: {cfg.source}. Export the taskset "
+            "(hud sync tasks <name> --export tasks.json) and run it from the env's "
+            "source directory."
         )
         raise typer.Exit(1)
 
@@ -646,13 +687,11 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         )
 
     agent = _build_agent(cfg)
-    target = _spawn_target(source_path)
+    placement = _resolve_placement(cfg, source_path)
 
-    # Placement comes from the source path the CLI holds: one spawned substrate
-    # per rollout, each serving its own row's env.
     job = await taskset.run(
         agent,
-        runtime=LocalRuntime(target),
+        runtime=placement,
         group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
     )
@@ -704,6 +743,11 @@ def eval_command(
     gateway: bool = typer.Option(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
+    runtime: str | None = typer.Option(
+        None,
+        "--runtime",
+        help="Placement: local (default), hud (platform-hosted), or a tcp:// url",
+    ),
 ) -> None:
     """Run evaluation on datasets or individual tasks with agents.
 
@@ -712,6 +756,7 @@ def eval_command(
         hud eval "My Tasks" claude --full              # Load from platform taskset
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
+        hud eval tasks.json claude --runtime hud       # Execute rollouts on the platform
     """
     hud_console.info("Initializing evaluation...")
 
@@ -739,6 +784,7 @@ def eval_command(
         group_size=group_size,
         config=config,
         gateway=gateway,
+        runtime=runtime,
     )
 
     if cfg.source is None:

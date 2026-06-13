@@ -27,8 +27,8 @@ async def stream_build_logs(
     if console is None:
         console = HUDConsole()
 
-    ws_url = platform.api_url.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url = f"{ws_url.rstrip('/')}/builds/{build_id}/logs?api_key={platform.api_key}"
+    ws_base = platform.base_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_base.rstrip('/')}/builds/{build_id}/logs?api_key={platform.api_key}"
 
     final_status = "UNKNOWN"
     reconnect_count = 0

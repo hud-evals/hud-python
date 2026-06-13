@@ -106,16 +106,15 @@ def test_row_validation_rejects_malformed_entries() -> None:
 # ─── placement ─────────────────────────────────────────────────────────
 
 
-async def test_no_placement_defaults_to_provision_stub_with_precise_error() -> None:
+async def test_no_placement_defaults_to_hosted_execution() -> None:
     v = Task(env="hosted-env", id="solve", args={"n": 1})
-    # Placement fails before launch, so the agent is never invoked and the
-    # rollout comes back as an isolated failed Run carrying the precise error.
+    # No placement means HUD-hosted execution, which serializes the agent
+    # spec before submitting anything; a non-gateway agent therefore fails
+    # before launch as an isolated failed Run carrying the precise error.
     job = await v.run(cast("Agent", object()))
     (run,) = job.runs
     assert run.trace.is_error
-    assert "'hosted-env'" in (run.trace.error or "")
-    assert "runtime=LocalRuntime" in (run.trace.error or "")
-    assert "Runtime(url)" in (run.trace.error or "")
+    assert "gateway agent" in (run.trace.error or "")
 
 
 # ─── taskset collection ────────────────────────────────────────────────
@@ -209,9 +208,10 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
                 "name": "Demo",
                 "tasks": [
                     {
-                        # the platform export record shape, normalized on fetch
-                        "env": None,
-                        "scenario": "e:solve",
+                        # CP export shape: the legacy env qualifier is stripped
+                        # server-side, so env + bare scenario arrive already split.
+                        "env": "e",
+                        "scenario": "solve",
                         "args": {"n": 1},
                         "name": "one",
                     }
@@ -225,6 +225,6 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
     taskset = Taskset.from_api("demo")
 
     assert taskset.name == "Demo"
-    assert taskset["one"].id == "solve"  # env prefix is stripped on fetch
+    assert taskset["one"].id == "solve"
     assert taskset["one"].env == "e"
     assert taskset["one"].args == {"n": 1}

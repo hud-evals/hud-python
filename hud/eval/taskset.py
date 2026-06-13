@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING, Any
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
-from .rollout import rollout
+from .run import rollout
+from .runtime import HUDRuntime
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
 
-    from .rollout import Run
+    from .run import Run
     from .runtime import Provider
     from .task import Task
 
@@ -199,22 +200,24 @@ class Taskset:
         self,
         agent: Agent,
         *,
-        runtime: Provider | None = None,
+        runtime: Provider | HUDRuntime | None = None,
         group: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
     ) -> Job:
         """Run every task x ``group`` with an optional concurrency cap.
 
-        One shared (stateless) ``agent`` drives every run; ``runtime`` is the
-        placement provider, called once per rollout with that rollout's task
-        row — so one provider serves a mixed-env taskset and can size each
-        substrate per row (left unset: HUD-hosted provisioning by env name).
-        Registers one HUD job as the platform receipt and reports each run's
-        trace under it — or, given an open ``job`` (:meth:`Job.start`),
-        accumulates this batch into it instead, so a longer arc (a training
-        session) spans many calls under one id. Returned ``job.runs``
-        preserves expansion order (task-major, then group).
+        One shared (stateless) ``agent`` drives every run. ``runtime`` is the
+        placement: a :class:`~hud.eval.runtime.Provider` (the env served
+        somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
+        or :class:`~hud.eval.runtime.HUDRuntime` to run each rollout on a leased box
+        (left unset: hosted by env name). One provider serves a mixed-env
+        taskset and can size each substrate per row. Registers one HUD job as
+        the platform receipt and reports each run's trace under it — or, given
+        an open ``job`` (:meth:`Job.start`), accumulates this batch into it
+        instead, so a longer arc (a training session) spans many calls under
+        one id. Returned ``job.runs`` preserves expansion order (task-major,
+        then group).
         """
         group = group or (job.group if job else 1)
         if group < 1:
@@ -235,13 +238,22 @@ class Taskset:
             await job_enter(job.id, name=job.name, group=group)
         job_id = job.id
 
+        # Placement is chosen once for the batch: a HUDRuntime runs each rollout on
+        # a leased box, anything else is a Provider driven locally by rollout().
+        # No runtime defaults to hosted.
+        placement = runtime if runtime is not None else HUDRuntime()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+
+        async def _run(task: Task, group_id: str) -> Run:
+            if isinstance(placement, HUDRuntime):
+                return await placement.run(task, agent, job_id=job_id, group_id=group_id)
+            return await rollout(task, agent, runtime=placement, job_id=job_id, group_id=group_id)
 
         async def _one(task: Task, group_id: str) -> Run:
             if sem is None:
-                return await rollout(task, agent, runtime=runtime, job_id=job_id, group_id=group_id)
+                return await _run(task, group_id)
             async with sem:
-                return await rollout(task, agent, runtime=runtime, job_id=job_id, group_id=group_id)
+                return await _run(task, group_id)
 
         logger.info(
             "running %d rollouts (%d tasks x %d group)%s",

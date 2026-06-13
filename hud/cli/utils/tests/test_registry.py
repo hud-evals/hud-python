@@ -71,6 +71,6 @@ def test_search_filters_paginated_registry_list(monkeypatch: pytest.MonkeyPatch)
 
     assert requested == {
         "method": "GET",
-        "url": "https://api.example/registry?search=browser&limit=5",
+        "url": "https://api.example/v2/registry?search=browser&limit=5",
     }
     assert [env.id for env in envs] == ["id-exact"]

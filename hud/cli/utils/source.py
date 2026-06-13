@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import logging
@@ -37,10 +38,16 @@ class ValidationIssue:
 
 @dataclass(frozen=True)
 class EnvironmentNameReference:
+    """One ``Environment(...)`` constructor call found in project source.
+
+    ``name`` is the literal string passed (positionally or as ``name=``);
+    None when the call relies on the default name or passes a non-literal.
+    """
+
     file: Path
     line: int
     text: str
-    name: str
+    name: str | None
 
 
 @dataclass(frozen=True)
@@ -68,7 +75,6 @@ class EnvironmentSource:
     }
     SOURCE_EXCLUDE_FILES: ClassVar[set[str]] = {"hud.lock.yaml"}
     SOURCE_EXCLUDE_SUFFIXES: ClassVar[set[str]] = {".pyc", ".log"}
-    ENV_NAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r'Environment\(["\']([^"\']+)["\']\)')
 
     @classmethod
     def open(cls, directory: str | Path = ".") -> Self:
@@ -105,30 +111,46 @@ class EnvironmentSource:
         )
 
     def environment_name_references(self) -> list[EnvironmentNameReference]:
-        """Find positional ``Environment("name")`` references in project source."""
+        """Find ``Environment(...)`` constructor calls in project source.
+
+        Captures the name passed positionally (``Environment("x")``) or as a
+        keyword (``Environment(name="x")``); calls without a literal name are
+        reported with ``name=None`` so callers can demand an explicit one.
+        """
         references: list[EnvironmentNameReference] = []
         py_files = list(self.root.glob("*.py")) + list(self.root.glob("*/*.py"))
         for py_file in py_files:
             try:
-                lines = py_file.read_text(encoding="utf-8").splitlines()
-            except OSError:
+                source = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(source)
+            except (OSError, SyntaxError):
                 continue
-            for line_no, line in enumerate(lines, 1):
-                references.extend(
+            lines = source.splitlines()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                callee = node.func
+                callee_name = (
+                    callee.id
+                    if isinstance(callee, ast.Name)
+                    else callee.attr
+                    if isinstance(callee, ast.Attribute)
+                    else None
+                )
+                if callee_name != "Environment":
+                    continue
+                references.append(
                     EnvironmentNameReference(
                         file=py_file,
-                        line=line_no,
-                        text=line.strip(),
-                        name=match.group(1),
+                        line=node.lineno,
+                        text=lines[node.lineno - 1].strip() if node.lineno <= len(lines) else "",
+                        name=_environment_call_name(node),
                     )
-                    for match in self.ENV_NAME_PATTERN.finditer(line)
                 )
         return references
 
-    def environment_name(self, override: str | None = None) -> str:
-        if override:
-            return normalize_environment_name(override)
-
+    def environment_name(self) -> str:
+        """Directory-derived fallback name for projects without ``Environment(...)``."""
         directory_name = self.root.name or self.root.parent.name
         return normalize_environment_name(directory_name)
 
@@ -409,6 +431,20 @@ class EnvironmentSource:
             LOGGER.info("Migrated .hud/deploy.json to .hud/config.json")
         except OSError as exc:
             LOGGER.warning("Failed to migrate deploy.json to config.json: %s", exc)
+
+
+def _environment_call_name(node: ast.Call) -> str | None:
+    """The literal name an ``Environment(...)`` call passes, if any."""
+    if node.args:
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            return first.value
+    for keyword in node.keywords:
+        if keyword.arg == "name":
+            if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
+                return keyword.value.value
+            return None
+    return None
 
 
 def _parse_base_image(dockerfile_path: Path) -> str | None:

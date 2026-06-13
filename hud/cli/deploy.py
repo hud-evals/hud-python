@@ -18,7 +18,7 @@ from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
-from hud.cli.utils.source import EnvironmentSource
+from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -43,39 +43,6 @@ def _peek_env_keys(env_path: Path) -> list[str]:
         return sorted(parsed.keys())
     except Exception:
         return []
-
-
-def _handle_name_conflict(
-    error: HudRequestError,
-    console: HUDConsole,
-) -> str | None:
-    """Handle a 409 name conflict from build trigger. Returns registry_id or None."""
-    detail = (error.response_json or {}).get("detail")
-    if not isinstance(detail, dict):
-        console.error("Environment name already exists on your team")
-        return None
-
-    existing_name = detail.get("existing_name", "unknown")
-    existing_id = detail.get("existing_registry_id", "")
-
-    console.warning(f"Environment '{existing_name}' already exists on your team")
-    console.info(f"  Registry ID: {existing_id[:8]}...")
-    console.info("")
-    console.info("  (1) Link to existing environment and rebuild it")
-    console.info("  (2) Cancel")
-
-    try:
-        choice = input("\n  Select [1/2]: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        console.info("\n  Cancelled.")
-        return None
-
-    if choice == "1":
-        console.info(f"  Linking to existing: {existing_id[:8]}...")
-        return existing_id
-
-    console.info("  Cancelled. Use --name to choose a different name.")
-    return None
 
 
 def _parse_key_value_flags(
@@ -159,31 +126,53 @@ def _validate_before_deploy(env_source: EnvironmentSource, console: HUDConsole) 
         console.success("Validation passed")
 
 
-def _resolve_deploy_name(
+def _resolve_environment_name(
     env_source: EnvironmentSource,
-    requested_name: str | None,
     registry_id: str | None,
     platform: PlatformClient,
     console: HUDConsole,
 ) -> str:
-    name = requested_name or env_source.environment_name()
+    """Resolve the environment name from source code.
+
+    The name declared in ``Environment(...)`` is the environment's identity:
+    the platform resolves the target registry by this name (get-or-rebuild).
+    Projects without an ``Environment(...)`` call (legacy MCP environments)
+    fall back to the directory name.
+    """
+    references = env_source.environment_name_references()
+    named = sorted({ref.name for ref in references if ref.name is not None})
+
+    if len(named) > 1:
+        console.error("Multiple Environment names declared in source:")
+        for ref in references:
+            if ref.name is not None:
+                console.error(f"  {ref.file.relative_to(env_source.root)}:{ref.line}: {ref.text}")
+        console.info("A deployable environment must declare exactly one name.")
+        raise typer.Exit(1)
+
+    if references and not named:
+        console.error("Environment(...) is constructed without an explicit name:")
+        for ref in references:
+            console.error(f"  {ref.file.relative_to(env_source.root)}:{ref.line}: {ref.text}")
+        console.info('Give your environment a literal name, e.g. Environment("my-env").')
+        raise typer.Exit(1)
+
+    name = named[0] if named else env_source.environment_name()
+
     if registry_id:
         registry_env = get_registry_environment(platform, registry_id)
-        if registry_env:
-            if requested_name and requested_name != registry_env.name:
-                console.warning(
-                    f"--name '{requested_name}' differs from the deployed name "
-                    f"'{registry_env.name}'."
+        if registry_env is not None:
+            if named and normalize_environment_name(name) != registry_env.name:
+                console.error(
+                    f"Code declares Environment('{name}') but --registry-id targets "
+                    f"'{registry_env.name}'. Rename the environment in code or drop "
+                    "--registry-id to deploy by name."
                 )
-            name = registry_env.name
+                raise typer.Exit(1)
+            if not named:
+                name = registry_env.name
 
     console.info(f"Environment name: {name}")
-    mismatched_refs = [ref for ref in env_source.environment_name_references() if ref.name != name]
-    if mismatched_refs:
-        console.warning(
-            "Local Environment(...) references differ from the deploy target. "
-            "Deploy will not rewrite source; update code or environment config explicitly."
-        )
     return name
 
 
@@ -289,7 +278,6 @@ def _prepare_deploy_plan(
     env_source: EnvironmentSource,
     *,
     env_dir: Path,
-    name: str | None,
     env: list[str] | None,
     env_file: str | None,
     no_env: bool,
@@ -301,15 +289,9 @@ def _prepare_deploy_plan(
     console: HUDConsole,
 ) -> _DeployPlan:
     source_config = env_source.load_config()
-    resolved_registry_id = registry_id
-    stored_registry_id = source_config.get("registryId")
-    if resolved_registry_id is None and isinstance(stored_registry_id, str) and stored_registry_id:
-        resolved_registry_id = stored_registry_id
-        console.info(f"Rebuilding existing environment: {resolved_registry_id[:8]}...")
-    resolved_name = _resolve_deploy_name(
+    resolved_name = _resolve_environment_name(
         env_source,
-        name,
-        resolved_registry_id,
+        registry_id,
         platform,
         console,
     )
@@ -340,7 +322,7 @@ def _prepare_deploy_plan(
 
     return _DeployPlan(
         name=resolved_name,
-        registry_id=resolved_registry_id,
+        registry_id=registry_id,
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
@@ -349,7 +331,6 @@ def _prepare_deploy_plan(
 
 def deploy_environment(
     directory: str = ".",
-    name: str | None = None,
     env: list[str] | None = None,
     env_file: str | None = None,
     no_env: bool = False,
@@ -383,7 +364,6 @@ def deploy_environment(
     plan = _prepare_deploy_plan(
         env_source,
         env_dir=env_dir,
-        name=name,
         env=env,
         env_file=env_file,
         no_env=no_env,
@@ -453,42 +433,31 @@ async def _trigger_build(
     no_cache: bool,
     console: HUDConsole,
 ) -> dict[str, Any] | None:
-    """Trigger the direct build, resolving a 409 name conflict interactively."""
-
-    async def attempt(registry_id: str | None) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "source": "direct",
-            "build_id": build_id,
-            "name": plan.name,
-            "no_cache": no_cache,
-        }
-        if registry_id:
-            payload["registry_id"] = registry_id
-        if plan.env_vars:
-            payload["environment_variables"] = plan.env_vars
-        if plan.build_args:
-            payload["build_args"] = plan.build_args
-        if plan.build_secrets:
-            payload["build_secrets"] = plan.build_secrets
-        return await platform.apost("/builds/trigger", json=payload)
+    """Trigger the direct build. The platform resolves the registry by name
+    (get-or-rebuild), so an existing environment with this name is rebuilt."""
+    payload: dict[str, Any] = {
+        "source": "direct",
+        "build_id": build_id,
+        "name": plan.name,
+        "no_cache": no_cache,
+    }
+    if plan.registry_id:
+        payload["registry_id"] = plan.registry_id
+    if plan.env_vars:
+        payload["environment_variables"] = plan.env_vars
+    if plan.build_args:
+        payload["build_args"] = plan.build_args
+    if plan.build_secrets:
+        payload["build_secrets"] = plan.build_secrets
 
     try:
-        return await attempt(plan.registry_id)
+        return await platform.apost("/builds/trigger", json=payload)
     except HudRequestError as e:
-        if e.status_code != 409:
-            console.error(f"Failed to trigger build: {e.status_code or e}")
-            detail = (e.response_json or {}).get("detail", "")
-            if detail:
-                console.error(f"Error: {detail}")
-            return None
-        conflict = _handle_name_conflict(e, console)
-        if not conflict:
-            return None
-        try:
-            return await attempt(conflict)
-        except Exception as retry_err:
-            console.error(f"Failed to rebuild: {retry_err}")
-            return None
+        console.error(f"Failed to trigger build: {e.status_code or e}")
+        detail = (e.response_json or {}).get("detail", "")
+        if detail:
+            console.error(f"Error: {detail}")
+        return None
     except Exception as e:
         console.error(f"Failed to trigger build: {e}")
         return None
@@ -655,7 +624,6 @@ def deploy_all(
         try:
             deploy_environment(
                 directory=str(env_dir),
-                name=None,
                 env=env,
                 env_file=env_file,
                 no_env=no_env,
@@ -689,12 +657,6 @@ def deploy_all(
 
 def deploy_command(
     directory: str = typer.Argument(".", help="Environment directory"),
-    name: str | None = typer.Option(
-        None,
-        "--name",
-        "-n",
-        help="Environment display name (defaults to directory name)",
-    ),
     all_envs: bool = typer.Option(
         False,
         "--all",
@@ -747,7 +709,9 @@ def deploy_command(
 ) -> None:
     """Deploy HUD environment to the platform.
 
-    Builds from the local Dockerfile and streams remote build logs.
+    The environment name comes from the ``Environment(...)`` declaration in
+    code (directory name for legacy MCP environments). Builds from the local
+    Dockerfile and streams remote build logs.
     """
     if all_envs:
         deploy_all(
@@ -764,7 +728,6 @@ def deploy_command(
 
     deploy_environment(
         directory=directory,
-        name=name,
         env=env,
         env_file=env_file,
         no_env=no_env,

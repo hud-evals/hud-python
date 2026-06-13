@@ -65,6 +65,27 @@ def test_validate_api_keys_openai_compatible_requires_model() -> None:
         cfg.validate_api_keys()
 
 
+def test_validate_api_keys_hosted_needs_only_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted placement: no provider key required, and --gateway is dropped
+    (a local gateway model_client could not travel with the submission)."""
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "api_key", "sk-hud-test")
+    monkeypatch.setattr(settings, "gemini_api_key", None)
+    cfg = EvalConfig(agent_type="gemini", runtime="hud", gateway=True)
+    cfg.validate_api_keys()
+    assert cfg.gateway is False
+
+
+def test_validate_api_keys_hosted_requires_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "api_key", None)
+    cfg = EvalConfig(agent_type="gemini", runtime="hud")
+    with pytest.raises(typer.Exit):
+        cfg.validate_api_keys()
+
+
 def test_load_missing_writes_template(tmp_path: Path) -> None:
     path = tmp_path / ".hud_eval.toml"
     cfg = EvalConfig.load(str(path))

@@ -79,12 +79,11 @@ taskset = Taskset("engineering-work", [
 ])
 ```
 
-`hud eval tasks.py claude --full` runs the whole set; `hud sync tasks my-taskset` publishes it. Give each task a stable `slug` and `columns` so it's identifiable on the platform:
+`hud eval tasks.py claude --full` runs the whole set; `hud sync tasks my-taskset` publishes it. Give each task a stable `slug` so it's identifiable on the platform:
 
 ```python tasks.py
 v = fix_bug(difficulty=3)
 v.slug = "fix-bug-3"
-v.columns = {"difficulty": 3, "suite": "coding"}
 ```
 
 ## Group rollouts for variance

@@ -71,11 +71,10 @@ def build_gateway_client(provider: str) -> GatewayClient:
         from google.genai.types import HttpOptions
 
         return genai.Client(
-            api_key="PLACEHOLDER",
+            api_key=settings.api_key,
             http_options=HttpOptions(
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
-                headers={"Authorization": f"Bearer {settings.api_key}"},
             ),
         )
 

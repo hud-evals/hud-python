@@ -1,22 +1,22 @@
-"""rollout: the execution atom — run one agent over one task, fully recorded.
+"""A run: its record (:class:`Run`) and the local driver that produces one
+(:func:`rollout`).
 
-:func:`rollout` is the single way an agent executes a task, and :class:`Run`
-is its record: the live handle whose lifecycle the atom drives — ``prompt``
-(from ``tasks.start`` on enter), the ``trace`` the agent fills (its answer is
-``run.trace.content``), and the ``grade`` (from ``tasks.grade`` on exit)::
+:func:`rollout` connects to a substrate's control channel (wherever it is —
+loopback, a container, a cloud sandbox), starts the task, drives the agent,
+grades, and tears down, filling a :class:`Run` along the way::
 
     run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
 
-The engine owns the whole lifecycle — acquire the placement, connect, start
-the task, drive the agent, grade and tear down — and the task row stays an
-argument, never a participant. There are no standalone traces: every rollout
-reports under a job — the batch job the scheduler threads through ``job_id``,
-or a single-run job the atom registers itself. ``Taskset.run`` is the
-scheduler over this atom (and ``Task.run`` its single-task form); ``Chat``
-and ``AgentTool`` call the atom per turn / per invocation. The only paths
-that bypass it are deliberate: ``hud task`` CLI (split start/grade lifecycle
-over raw RPCs, composing :func:`hud.clients.connect` + :class:`Run` directly)
-and harbor's prompt-only materialization.
+It is the *client-here* path: the agent loop runs in this process against a
+:class:`~hud.eval.runtime.Provider`'s channel. The same driver runs on the
+daemon (the leased box's agent loop is just ``rollout`` over a
+``DockerRuntime``), in ``Chat`` per turn, and in ``AgentTool`` per invocation.
+Delegated (HUD-hosted) execution is a different act — see
+:class:`hud.eval.runtime.HUDRuntime` — and the scheduler (:meth:`Taskset.run`)
+chooses between them; the atom itself never branches on placement.
+
+:class:`Run` is also the receipt a delegated execution folds its platform
+result into, so it lives here with the atom rather than importing back into it.
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ from hud.types import Step, TaskCall, Trace
 from hud.utils.time import now_iso
 
 from .job import job_enter, trace_enter, trace_exit
-from .runtime import HUDRuntime
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -46,7 +45,7 @@ if TYPE_CHECKING:
     from .runtime import Provider
     from .task import Task
 
-logger = logging.getLogger("hud.eval.rollout")
+logger = logging.getLogger("hud.eval.run")
 
 
 def _prompt_message(item: Any) -> mcp_types.PromptMessage:
@@ -102,8 +101,9 @@ class Grade:
 class Run:
     """Live handle for one task: the task lifecycle plus the agent's ``Trace``.
 
-    ``client`` is absent only on a :meth:`failed` run (a rollout that never
-    launched); accessing it there raises instead of half-working.
+    ``client`` is absent on a :meth:`failed` run (a rollout that never
+    launched) and on delegated runs; accessing it there raises instead of
+    half-working.
     """
 
     def __init__(self, client: HudClient | None, task_id: str, args: dict[str, Any]) -> None:
@@ -128,7 +128,9 @@ class Run:
     def client(self) -> HudClient:
         """The live client driving this run."""
         if self._client is None:
-            raise RuntimeError("this run failed before launch; it has no live client")
+            raise RuntimeError(
+                "this run has no live client (delegated execution, or it failed before launch)"
+            )
         return self._client
 
     @property
@@ -254,40 +256,42 @@ async def rollout(
     task: Task,
     agent: Agent,
     *,
-    runtime: Provider | None = None,
+    runtime: Provider,
     job_id: str | None = None,
     group_id: str | None = None,
+    trace_id: str | None = None,
 ) -> Run:
-    """Drive one task to a graded :class:`Run` (the rollout atom).
+    """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
-    ``runtime`` is the placement provider; left unset it defaults to
-    HUD-hosted provisioning by env name (:class:`~hud.eval.runtime.HUDRuntime`).
-    Each rollout acquires one fresh substrate, connects, and starts
-    the task; the agent fills ``run.trace``; grading happens on exit
-    (``run.reward``). ``job_id``/``group_id`` are batch identities threaded by
-    the scheduler; there are no standalone traces, so when no ``job_id`` is
-    given the atom registers a single-run job itself. The per-rollout
-    ``trace_id`` is
-    bound into the trace context (so ``@instrument`` spans attribute to it —
-    always, even with telemetry off, for local training) and the trace is
-    reported to HUD.
+    The local driver (*client-here*): acquire the provider's substrate,
+    connect, start the task, let ``agent`` fill ``run.trace``, grade on exit
+    (``run.reward``), tear down. The substrate may be anywhere — a local
+    subprocess, a container, a cloud sandbox — the channel bridges it; the
+    agent loop always runs in *this* process. Delegated (HUD-hosted) execution
+    does not come through here; see :class:`hud.eval.runtime.HUDRuntime`.
+
+    ``job_id``/``group_id`` are batch identities threaded by the scheduler;
+    there are no standalone traces, so when no ``job_id`` is given the atom
+    registers a single-run job itself. ``trace_id`` is minted per rollout
+    unless one is threaded in. It is bound into the trace context (so
+    ``@instrument`` spans attribute to it — always, even with telemetry off,
+    for local training) and the trace is reported to HUD.
 
     Failures are isolated so one bad rollout never collapses a batch, without
-    erasing evidence: a failure *before* the run is live (provision,
-    connect, start) yields a synthesized :meth:`Run.failed`; a failure
-    *mid-run* keeps the real run — prompt, placement record, and the partial
-    trace the agent built — marked as errored.
+    erasing evidence: a failure *before* the run is live (provision, connect,
+    start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
+    the real run — prompt, placement record, and the partial trace the agent
+    built — marked as errored.
     """
-    provider = runtime or HUDRuntime()
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
-    trace_id = uuid.uuid4().hex
+    trace_id = trace_id or uuid.uuid4().hex
     with set_trace_context(trace_id):
         await trace_enter(trace_id, job_id=job_id, group_id=group_id)
         run: Run | None = None
         try:
-            async with provider(task) as addr, connect(addr) as client:
+            async with runtime(task) as addr, connect(addr) as client:
                 live = Run(client, task.id, task.args)
                 live._runtime = addr.url  # the placement record for the receipt
                 async with live:  # start on enter; grade on exit

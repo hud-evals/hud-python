@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
-    from .rollout import Run
+    from .run import Run
 
 logger = logging.getLogger("hud.eval.job")
 
