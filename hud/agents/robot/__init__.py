@@ -11,8 +11,8 @@ The harness splits a policy rollout into three seams, each replaceable on its ow
   observation/action spaces (from the contract) and the policy's.
 
 Per-tick platform tracing is emitted by the loop itself: each step records an
-:class:`~hud.agents.types.ObservationStep` + :class:`~hud.agents.types.ActionStep`
-so runs stream live into the HUD trace viewer.
+:class:`~hud.agents.types.ObservationStep`, and each re-inference an
+:class:`~hud.agents.types.InferenceStep`, so runs stream live into the HUD trace viewer.
 
 This subpackage needs the ``robot`` extra (``pip install 'hud-python[robot]'``) for
 ``numpy`` + ``msgpack``; importing :mod:`hud.agents` alone never pulls them in.

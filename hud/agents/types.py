@@ -312,18 +312,26 @@ class ObservationStep(Step):
 
     @classmethod
     def from_obs(cls, obs: dict[str, Any], *, tick: int = 0) -> ObservationStep:
-        """build a step from a raw ``robot`` obs (``{"data": {name: ndarray}, ...}``); rank>=2 arrays are camera frames, rank-1 are numeric state"""
+        """build a step from a raw ``robot`` obs (``{"data": {name: ndarray}, ...}``); rank>=2 arrays are camera frames (JPEG-encoded for the viewer), rank-1 are numeric state"""
         import base64
+        import io
+
+        import numpy as np
+        from PIL import Image
 
         images: dict[str, ImageContent] = {}
         state: dict[str, list[float]] = {}
         for name, arr in obs.get("data", {}).items():
             if arr.ndim >= 2:
-                # raw bytes + shape/dtype; ingest reshapes & offloads to S3 (no PNG encode here)
+                # JPEG for the trace viewer: small over the wire + browser-renderable.
+                # Lossless training frames are captured separately by the env recorder.
+                frame = arr if arr.dtype == np.uint8 else np.clip(arr, 0, 255).astype(np.uint8)
+                buf = io.BytesIO()
+                Image.fromarray(frame).save(buf, format="JPEG", quality=85)
                 images[name] = ImageContent(
                     type="image",
-                    data=base64.b64encode(arr.tobytes()).decode("ascii"),
-                    mimeType=f"image/x-raw;dtype={arr.dtype};shape={','.join(map(str, arr.shape))}",
+                    data=base64.b64encode(buf.getvalue()).decode("ascii"),
+                    mimeType="image/jpeg",
                 )
             else:
                 state[name] = arr.tolist()

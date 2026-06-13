@@ -148,9 +148,8 @@ class RobotAgent(Agent):
             else:
                 print(f"[agent] reached max_steps={max_steps}", flush=True)
 
-            run.trace.done = True
+            run.trace.status = "completed"
             run.trace.content = "done"
-            run.trace.isError = False
         finally:
             await client.close()
 
