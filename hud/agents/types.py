@@ -16,8 +16,9 @@ schema understands this family's payload.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
+from mcp.types import ImageContent
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -27,7 +28,15 @@ from pydantic import (
 )
 
 from hud.agents.tools.hosted import HostedTool
-from hud.types import MCPToolCall, MCPToolResult, Step, StepSource, Trace
+from hud.types import (
+    ROBOT_STEP_SCHEMA,
+    MCPToolCall,
+    MCPToolResult,
+    RobotStepSource,
+    Step,
+    StepSource,
+    Trace,
+)
 from hud.utils.serialization import json_safe_value
 
 # Alias to accept both 'model' and 'checkpoint_name' (backwards compat)
@@ -276,3 +285,68 @@ class SubagentStep(Step):
 
     source: StepSource = "subagent"
     subagent: Trace
+
+
+# -----------------------------------------------------------------------------
+# Robot family step payloads (ship under ROBOT_STEP_SCHEMA)
+# -----------------------------------------------------------------------------
+
+
+class ObservationStep(Step):
+    """What the policy saw at one control tick: camera frames + numeric state.
+
+    Camera ``images`` are MCP ``ImageContent`` keyed by camera name — ingest
+    offloads each to S3 by shape (no bespoke type needed) and presigns it on
+    read. ``state`` holds the non-image observation vectors keyed by feature
+    name (joint positions, gripper, ...). ``tick`` is the 0-based control-tick
+    index, so the viewer can pair it with the matching :class:`ActionStep`.
+    """
+
+    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
+    source: RobotStepSource = "observation"  # type: ignore[assignment]
+
+    tick: int = 0
+    # TODO: note - this reuses the MCP-native ImageContent type
+    images: dict[str, ImageContent] = Field(default_factory=dict[str, ImageContent])
+    state: dict[str, list[float]] = Field(default_factory=dict[str, list[float]])
+
+    @classmethod
+    def from_obs(cls, obs: dict[str, Any], *, tick: int = 0) -> ObservationStep:
+        """build a step from a raw ``robot`` obs (``{"data": {name: ndarray}, ...}``); rank>=2 arrays are camera frames, rank-1 are numeric state"""
+        import base64
+
+        images: dict[str, ImageContent] = {}
+        state: dict[str, list[float]] = {}
+        for name, arr in obs.get("data", {}).items():
+            if arr.ndim >= 2:
+                # raw bytes + shape/dtype; ingest reshapes & offloads to S3 (no PNG encode here)
+                images[name] = ImageContent(
+                    type="image",
+                    data=base64.b64encode(arr.tobytes()).decode("ascii"),
+                    mimeType=f"image/x-raw;dtype={arr.dtype};shape={','.join(map(str, arr.shape))}",
+                )
+            else:
+                state[name] = arr.tolist()
+        return cls(tick=tick, images=images, state=state)
+
+
+class InferenceStep(Step):
+    """What the policy did at one control tick: the ``[T, A]`` action chunk it executed.
+
+    A single executed action is just a length-1 chunk; a re-infer tick carries the
+    full freshly inferred chunk. ``tick`` matches the paired observation.
+    """
+
+    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
+    source: RobotStepSource = "inference"  # type: ignore[assignment]
+
+    # tick id
+    tick: int = 0 # start of inference
+    # end_tick: int = 0 # end of inference - future implementation
+
+    # post model inference (a single action is a length-1 chunk)
+    chunk: list[list[float]] = Field(default_factory=list[list[float]])
+    chunk_length: int = 1
+    
+
+

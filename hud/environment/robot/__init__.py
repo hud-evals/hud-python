@@ -3,15 +3,15 @@
 This package holds everything an *environment* needs to own a simulator and serve it to
 an agent over the ``robot`` WebSocket protocol:
 
-- :class:`~hud.environment.robots.bridge.RobotBridge` /
-  :class:`~hud.environment.robots.bridge.RealtimeRobotBridge` — the server-side bridges.
-- :class:`~hud.environment.robots.action_provider.ActionProvider` (+ subclasses,
-  :func:`~hud.environment.robots.action_provider.make_action_provider`) — the realtime
+- :class:`~hud.environment.robot.bridge.RobotBridge` /
+  :class:`~hud.environment.robot.bridge.RealtimeRobotBridge` — the server-side bridges.
+- :class:`~hud.environment.robot.action_provider.ActionProvider` (+ subclasses,
+  :func:`~hud.environment.robot.action_provider.make_action_provider`) — the realtime
   action queue / chunk-merge strategies.
-- :class:`~hud.environment.robots.sim_runner.SimRunner` (``Inline`` / ``Thread``) — the
+- :class:`~hud.environment.robot.sim_runner.SimRunner` (``Inline`` / ``Thread``) — the
   strategy for *which thread* runs the thread-affine simulator.
-- :mod:`~hud.environment.robots.data_saving` — the framework-default recorder +
-  LeRobot dataset sink (platform tick stream, configured by ``HUD_RECORD_DIR`` etc.).
+- :class:`~hud.environment.robot.data_saving.LeRobotRecorder` — the off-loop LeRobot
+  dataset recorder (platform tick stream, configured by ``HUD_RECORD_DIR`` etc.).
 
 The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives under
 :mod:`hud.capabilities` (it is a capability *client*, dialed by the agent); these two ends
@@ -30,13 +30,14 @@ from .action_provider import (
     make_action_provider,
 )
 from .bridge import RealtimeRobotBridge, RobotBridge
+from .data_saving import LeRobotRecorder
 from .endpoint import RobotEndpoint
-from .data_saving import default_recorder
 from .sim_runner import InlineSimRunner, SimRunner, ThreadSimRunner
 
 __all__ = [
     "ActionProvider",
     "InlineSimRunner",
+    "LeRobotRecorder",
     "NaiveAsyncActionProvider",
     "RTCActionProvider",
     "RealtimeRobotBridge",
@@ -47,6 +48,5 @@ __all__ = [
     "SyncFreezeActionProvider",
     "ThreadSimRunner",
     "WeightedAsyncActionProvider",
-    "default_recorder",
     "make_action_provider",
 ]

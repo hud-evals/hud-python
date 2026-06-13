@@ -1,6 +1,6 @@
 """Env-side action providers: the action queue + prefix + delay machinery.
 
-A :class:`~hud.environment.robots.bridge.RealtimeRobotBridge` owns one
+A :class:`~hud.environment.robot.bridge.RealtimeRobotBridge` owns one
 ``ActionProvider``: it buffers the chunk the sim is executing, hands out one
 action per control tick (HOLDing on underrun), and merges fresh agent chunks per
 the active mode. It also builds the realtime ``meta`` attached to every obs (when

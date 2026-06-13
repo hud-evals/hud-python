@@ -39,7 +39,7 @@ The shape of the work follows from the split: a bridge is written **once per env
 You implement one class — the **bridge** owns the simulator; the framework owns the WebSocket serve loop, the single-agent connection, and recording:
 
 ```python
-from hud.environment.robots import RobotBridge
+from hud.environment.robot import RobotBridge
 
 class MySimBridge(RobotBridge):
     async def reset(self, task_id: str, seed: int = 0) -> str:
@@ -61,7 +61,7 @@ The **endpoint** wraps the bridge for tasks, so a task is exactly two yields:
 ```python
 from hud import Environment
 from hud.capabilities import Capability
-from hud.environment.robots import RobotEndpoint
+from hud.environment.robot import RobotEndpoint
 
 env = Environment(name="my-sim")
 bridge = MySimBridge()
@@ -159,10 +159,10 @@ Both are zero-config:
 |--------|-------|------|
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Declare the `robot/0.1` capability |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
-| `RobotBridge` / `RealtimeRobotBridge` | `hud.environment.robots` | Env-side serve loop; subclass with your sim |
-| `RobotEndpoint` | `hud.environment.robots` | Episode bookkeeping + default recorder |
-| `ActionProvider`, `make_action_provider` | `hud.environment.robots` | Realtime chunk-merge strategies |
-| `SimRunner` (`Inline`/`Thread`) | `hud.environment.robots` | Which thread runs the sim |
+| `RobotBridge` / `RealtimeRobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + default recorder |
+| `ActionProvider`, `make_action_provider` | `hud.environment.robot` | Realtime chunk-merge strategies |
+| `SimRunner` (`Inline`/`Thread`) | `hud.environment.robot` | Which thread runs the sim |
 | `RobotAgent` / `RealtimeRobotAgent` | `hud.agents.robot` | The episode-loop harness |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 

@@ -11,8 +11,9 @@ The harness splits a policy rollout into three seams, each replaceable on its ow
 - :class:`~hud.agents.robot.adapter.Adapter` — translate between the env's
   observation/action spaces (from the contract) and the policy's.
 
-:class:`~hud.agents.robot.tracer.RobotTracer` optionally emits one platform span per
-env step so runs stream live into the HUD trace viewer.
+Per-tick platform tracing is emitted by the loop itself: each step records an
+:class:`~hud.agents.types.ObservationStep` + :class:`~hud.agents.types.ActionStep`
+so runs stream live into the HUD trace viewer.
 
 This subpackage needs the ``robot`` extra (``pip install 'hud-python[robot]'``) for
 ``numpy`` + ``msgpack``; importing :mod:`hud.agents` alone never pulls them in.
@@ -24,7 +25,6 @@ from .adapter import Adapter, LeRobotAdapter
 from .agent import ROBOT_PROTOCOL, RobotAgent
 from .model import LeRobotModel, Model, lerobot_infer
 from .realtime import RealtimeRobotAgent
-from .tracer import RobotTracer
 
 __all__ = [
     "ROBOT_PROTOCOL",
@@ -34,6 +34,5 @@ __all__ = [
     "Model",
     "RealtimeRobotAgent",
     "RobotAgent",
-    "RobotTracer",
     "lerobot_infer",
 ]

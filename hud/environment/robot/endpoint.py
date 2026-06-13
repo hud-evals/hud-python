@@ -6,11 +6,8 @@ generator only calls :meth:`reset` / :meth:`result`::
         yield {"prompt": prompt}
         yield endpoint.result()
 
-``reset / observe / step / result`` is the full episode interface. Crucially, this
-verb set lets the sim run in a *separate process* from the agent (useful for heavy
-sims like Isaac Sim): ``observe`` /``step`` are served over ``robot`` so the whole 
-episode can cross a process (or machine) boundary. They exist here only to 
-complete that set.
+``reset`` / ``result`` is the episode interface; the bridge itself serves
+observations/actions over ``robot``, so the endpoint only owns the recorder lifecycle.
 """
 
 from __future__ import annotations
@@ -18,34 +15,31 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import numpy as np
-
-    from hud.telemetry.recorder import EpisodeRecorder
-
     from .bridge import RobotBridge
+    from .data_saving import LeRobotRecorder
 
 
 class RobotEndpoint:
     """Wraps a bridge with the recorder lifecycle.
 
     Given a ``contract`` (and no explicit ``recorder``), builds + attaches the
-    framework-default recorder (see :func:`~...data_saving.default_recorder`) and
-    closes it via ``bridge.stop()`` — so the author writes zero recorder code.
+    env-var-configured recorder (see :meth:`~...data_saving.LeRobotRecorder.from_env`)
+    and closes it via ``bridge.stop()`` — so the author writes zero recorder code.
     """
 
     def __init__(
         self,
         bridge: RobotBridge,
-        recorder: EpisodeRecorder | None = None,
+        recorder: LeRobotRecorder | None = None,
         *,
         contract: dict[str, Any] | None = None,
         name: str | None = None,
     ) -> None:
         self._bridge = bridge
         if recorder is None and contract is not None:
-            from .data_saving import default_recorder
+            from .data_saving import LeRobotRecorder
 
-            recorder = default_recorder(contract, name=name or "env")
+            recorder = LeRobotRecorder.from_env(contract, name=name or "env")
             if recorder is not None:
                 bridge.attach_recorder(recorder)
         self._recorder = recorder
@@ -56,14 +50,6 @@ class RobotEndpoint:
         if self._recorder is not None:
             self._recorder.start_episode(prompt=prompt, **task_args)
         return prompt
-
-    def observe(self) -> tuple[dict[str, np.ndarray], bool] | None:
-        """Current ``(data, terminated)`` frame (passthrough to ``bridge.get_observation()``)."""
-        return self._bridge.get_observation()
-
-    def step(self, action: np.ndarray) -> None:
-        """Advance the sim by one action (passthrough to ``bridge.step()``)."""
-        self._bridge.step(action)
 
     def result(self, **extra: Any) -> dict[str, Any]:
         """End recording; return ``bridge.result()`` merged with any ``extra`` metadata

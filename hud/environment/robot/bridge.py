@@ -32,9 +32,8 @@ from hud.capabilities.robot import _decode_array, _encode_array, _packb, _unpack
 from .sim_runner import InlineSimRunner, SimRunner, ThreadSimRunner
 
 if TYPE_CHECKING:
-    from hud.telemetry.recorder import EpisodeRecorder
-
     from .action_provider import ActionProvider
+    from .data_saving import LeRobotRecorder
 
 
 # ─── synchronous env-side bridge ─────────────────────────────────────────────
@@ -64,7 +63,7 @@ class RobotBridge(ABC):
         *,
         host: str = "127.0.0.1",
         port: int = 0,
-        recorder: EpisodeRecorder | None = None,
+        recorder: LeRobotRecorder | None = None,
         sim_runner: SimRunner | None = None,
     ) -> None:
         # Loopback + ephemeral by default; the concrete address is published in the
@@ -130,12 +129,12 @@ class RobotBridge(ABC):
             "total_reward": float(self.total_reward),
         }
 
-    def attach_recorder(self, recorder: EpisodeRecorder | None) -> None:
+    def attach_recorder(self, recorder: LeRobotRecorder | None) -> None:
         """Attach (or replace) the off-loop recorder.
 
-        Used by ``RobotEndpoint`` when it builds the framework-default recorder
-        (see :func:`~hud.environment.robots.data_saving.default_recorder`), so the
-        env author never threads a recorder through by hand.
+        Used by ``RobotEndpoint`` when it builds the env-var-configured recorder
+        (see :meth:`~hud.environment.robot.data_saving.LeRobotRecorder.from_env`),
+        so the env author never threads a recorder through by hand.
         """
         self._recorder = recorder
 
@@ -248,7 +247,7 @@ class RealtimeRobotBridge(RobotBridge):
         control_hz: float,
         host: str = "localhost",
         port: int = 9091,
-        recorder: EpisodeRecorder | None = None,
+        recorder: LeRobotRecorder | None = None,
     ) -> None:
         # All sim/GL work runs on ONE dedicated worker thread (ThreadSimRunner): it keeps
         # the event loop free to stream observations / receive chunks (so a render-heavy

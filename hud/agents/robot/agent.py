@@ -1,18 +1,30 @@
-"""Episode loop for envs with a ``robot`` capability.
+"""Base v6 agent for any env that exposes a ``robot`` capability.
 
-Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter``, and the base
-runs ``bind`` → ``reset`` → ``adapt_observation`` / ``ainfer`` / ``adapt_action`` each
-step. Use :class:`~hud.agents.robot.adapter.LeRobotAdapter` for stock LeRobot wiring;
-``adapter=None`` for pass-through.
+Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter`` in
+``__init__``, and the base owns the rest.
+
+The base calls the adapter and model at the right moments::
+
+    setup_robot      -> adapter.bind(spaces)                          # once after connect
+    on_episode_start -> model.reset(); adapter.reset()                # once per episode
+    select_action    -> adapt_observation -> model.ainfer -> pop chunk -> adapt_action
+
+``model.ainfer`` always returns a ``[T, A]`` chunk; :meth:`RobotAgent.select_action`
+executes it open-loop, re-inferring only once the active chunk is spent.
+
+Most policies use :class:`~hud.agents.robot.adapter.DefaultAdapter`; a policy whose
+spaces match the env natively can set ``adapter = None`` (raw pass-through).
 """
 
 from __future__ import annotations
 
+from collections import deque
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
 from hud.agents.base import Agent
+from hud.agents.types import InferenceStep, ObservationStep
 from hud.capabilities.robot import RobotClient
 
 if TYPE_CHECKING:
@@ -27,8 +39,9 @@ ROBOT_PROTOCOL = "robot/0.1"
 class RobotAgent(Agent):
     """Drive a ``robot`` side-channel for one :class:`~hud.client.Run`.
 
-    **Subclass contract:** in ``__init__`` set ``self.model`` (required) and
-    ``self.adapter`` (optional — ``None`` for raw pass-through).
+    **Subclass contract:** in ``__init__`` set ``self.model`` (a
+    :class:`~hud.agents.robot.model.Model`) and ``self.adapter`` (an
+    :class:`~hud.agents.robot.adapter.Adapter`, or ``None`` for raw pass-through).
 
     **Override if needed:**
 
@@ -44,13 +57,19 @@ class RobotAgent(Agent):
     #: How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
 
-    #: Runs the policy (preprocess → forward → postprocess). Required; set in ``__init__``.
-    model: Model
+    #: Runs the policy (preprocess → forward → postprocess). Subclasses set this.
+    model: Model | None = None
     #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
     _prompt: str = ""
     _action_space: dict[str, Any]
+    #: Unexecuted tail of the current policy chunk; popped one action per step.
+    _active_chunk: deque[np.ndarray]
+    #: The live run + control-tick index, so ``select_action`` can record its own InferenceStep.
+    _run: Run
+    _tick: int
+
 
     def setup_robot(self, client: RobotClient) -> None:
         """Discover the env's action/observation layout and bind the adapter to it."""
@@ -62,66 +81,48 @@ class RobotAgent(Agent):
     def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
         """Called once before the observe/act loop begins.
 
-        Stores the prompt, resets the model and adapter, and stamps the rollout's
-        task onto the model's tracer (so platform spans are labeled). Mostly
-        internal — the base always calls it. Override (calling ``super()`` first)
-        only when per-episode env-contract reading or extra setup is needed
-        (e.g. ``RealtimeRobotAgent`` reads inference mode/threshold here).
+        Stores the prompt, resets the model and adapter. Mostly internal — the base
+        always calls it. Override (calling ``super()`` first) only when per-episode
+        env-contract reading or extra setup is needed (e.g. ``RealtimeRobotAgent``
+        reads inference mode/threshold from the contract here).
         """
-        
-        # TODO CLEAN
         self._prompt = prompt
-        self.model.reset()
-        if self.model.tracer is not None:
-            self.model.tracer.set_episode(
-                task=getattr(run, "_task_id", None), args=getattr(run, "_args", None)
-            )
+        self._active_chunk = deque()
+        self._run = run
+        self._tick = 0
+        if self.model is not None:
+            self.model.reset()
         if self.adapter is not None:
             self.adapter.reset()
-            
-            
-    # TODO CLEAN
-    def _attach_tracer(self, run: Run) -> None:
-        """Give the model a default :class:`RobotTracer` when none is set.
-
-        Zero-config platform telemetry: with HUD telemetry configured, every
-        robot rollout streams per-step spans (frames + keyframe markers at
-        fresh action chunks) without the user wiring anything. The tracer
-        itself is a no-op when the platform isn't configured.
-        """
-        if self.model.tracer is not None:
-            return
-        from .tracer import RobotTracer
-
-        manifest = getattr(run.client, "manifest", None)
-        env_name = manifest.server_info.name if manifest is not None else None
-        self.model.tracer = RobotTracer(model=type(self).__name__, env=env_name)
 
     def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
         """Return True to break out of the step loop (before ``select_action``)."""
         return bool(obs.get("terminated"))
 
     async def select_action(self, obs: dict[str, Any]) -> np.ndarray:
-        """Translate the obs, run the model, translate the action back.
-
-        Awaits ``model.ainfer`` (which by default runs the policy in a worker
-        thread) so the adapter calls stay on the event loop. Override only for a
-        wholly different inference path.
-        """
-        batch = obs if self.adapter is None else self.adapter.adapt_observation(obs, self._prompt)
-        raw = await self.model.ainfer(batch)
+        """pop the next model action — re-inferring a fresh ``[T, A]`` chunk via ``model.ainfer`` once the active one is spent (a length-1 chunk just re-infers every step) — and adapt it to env space; override only for a wholly different inference path"""
+        if self.model is None:
+            raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
+        if not self._active_chunk:
+            batch = (
+                obs if self.adapter is None else self.adapter.adapt_observation(obs, self._prompt)
+            )
+            chunk = np.atleast_2d(await self.model.ainfer(batch))  # [T, A]
+            self._active_chunk = deque(chunk)
+            self._run.record(
+                InferenceStep(tick=self._tick, chunk=chunk.tolist(), chunk_length=len(chunk))
+            )
+        self._tick += 1
+        raw = self._active_chunk.popleft()
         return raw if self.adapter is None else self.adapter.adapt_action(raw, obs)
 
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
-        if getattr(self, "model", None) is None:
-            raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         if max_steps is None:
             max_steps = getattr(self, "max_steps", 520)
         cap = run.client.binding(self.robot_protocol)
         client = await RobotClient.connect(cap)
         try:
             self.setup_robot(client)
-            self._attach_tracer(run)
             prompt = run.prompt
             if not isinstance(prompt, str):
                 raise TypeError(
@@ -132,6 +133,8 @@ class RobotAgent(Agent):
 
             for step in range(max_steps):
                 obs = await client.get_observation()
+                run.record(ObservationStep.from_obs(obs, tick=step))
+
                 if self.should_stop(obs, step=step, max_steps=max_steps):
                     print(f"[agent] env reported terminated at step {step}", flush=True)
                     break
@@ -145,7 +148,9 @@ class RobotAgent(Agent):
             else:
                 print(f"[agent] reached max_steps={max_steps}", flush=True)
 
+            run.trace.done = True
             run.trace.content = "done"
+            run.trace.isError = False
         finally:
             await client.close()
 

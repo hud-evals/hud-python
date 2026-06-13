@@ -5,9 +5,9 @@ This module defines the ``robot`` wire format (msgpack + raw numpy array buffers
 observations/actions over it.
 
 The *env-side* counterpart — the server bridges that own the simulator
-(:class:`~hud.environment.robots.bridge.RobotBridge` /
-:class:`~hud.environment.robots.bridge.RealtimeRobotBridge`) — lives in
-:mod:`hud.environment.robots`, and reuses the wire codec defined here.
+(:class:`~hud.environment.robot.bridge.RobotBridge` /
+:class:`~hud.environment.robot.bridge.RealtimeRobotBridge`) — lives in
+:mod:`hud.environment.robot`, and reuses the wire codec defined here.
 """
 
 from __future__ import annotations

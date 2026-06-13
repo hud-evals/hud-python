@@ -9,27 +9,15 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from .tracer import RobotTracer
 
 # ─── LeRobot convention (isolated, explicit, pure function) ──────────────────
 
 
 def lerobot_infer(policy: Any, preprocess: Any, postprocess: Any, batch: Any) -> np.ndarray:
-    """Full LeRobot inference: ``preprocess`` → ``select_action`` → ``postprocess``."""
-    import torch
-
-    with torch.no_grad():
-        action = postprocess(policy.select_action(preprocess(batch)))
-    return action.squeeze(0).cpu().numpy()
-
-
-def lerobot_chunk_infer(policy: Any, preprocess: Any, postprocess: Any, batch: Any) -> np.ndarray:
-    """Chunked sibling of :func:`lerobot_infer`"""
+    """infer one full ``[T, A]`` chunk: ``preprocess`` → ``predict_action_chunk`` → ``postprocess`` (the agent pops it, not LeRobot's ``select_action``)"""
     import torch
 
     with torch.no_grad():
@@ -45,31 +33,23 @@ class Model:
 
     Lifecycle (driven by :class:`~hud.agents.robot.agent.RobotAgent`):
 
-    - :meth:`reset` once per episode — reset per-episode model state (e.g.
-      LeRobot's open-loop action queue).
-    - :meth:`ainfer` every step — the awaited entry point the harness calls;
-      defaults to running :meth:`infer` in a worker thread.
-    - :meth:`infer` every step — run the policy on a prepared batch.
-    """
+    - :meth:`reset` once per episode — reset per-episode state (e.g. ensembler history).
+    - :meth:`ainfer` every inference — awaited entry point; defaults to :meth:`infer` in a thread.
+    - :meth:`infer` every inference — run the policy on a prepared batch.
 
-    #: Optional per-step platform tracer (one span per env step, keyframes at
-    #: fresh chunks). The harness attaches a default one when HUD telemetry is
-    #: configured; models that know their chunk boundaries emit through it.
-    tracer: RobotTracer | None = None
+    Inference returns a ``[T, A]`` chunk (``T = 1`` for single-action policies); the
+    agent pops it (``RobotAgent.select_action``).
+    """
 
     def reset(self) -> None:
         """Reset per-episode model state. Override when the policy is stateful."""
 
     def infer(self, batch: Any) -> np.ndarray:
-        """Run the policy on a prepared batch → a 1-D action vector. Must implement."""
+        """Run the policy on a prepared batch → a ``[T, A]`` action chunk. Must implement."""
         raise NotImplementedError
 
     async def ainfer(self, batch: Any) -> np.ndarray:
-        """Awaited inference entry point — what the harness calls each step.
-
-        Default: run the blocking :meth:`infer` in a worker thread so the event
-        loop stays free.
-        """
+        """awaited inference entry point; defaults to running blocking :meth:`infer` in a worker thread"""
         return await asyncio.to_thread(self.infer, batch)
 
 
@@ -105,15 +85,10 @@ class Ensembler:
 
 
 class LeRobotModel(Model):
-    """Wraps a LeRobot policy with its pre- and post-processor pipelines.
+    """Wraps a LeRobot policy with its pre/post-processors; infers a ``[T, A]`` chunk via :func:`lerobot_infer` (the agent pops it). Subclass and override :meth:`infer` for non-standard policies.
 
-    Ships the LeRobot inference convention via :func:`lerobot_infer`. Subclass and
-    override :meth:`infer` for non-standard policies (e.g. realtime chunk models),
-    while keeping :meth:`reset` and ``policy`` / ``preprocess`` / ``postprocess``.
-
-    Pass an :class:`Ensembler` to swap the default open-loop path (``select_action``
-    pops a chunk, executed step-by-step) for per-step re-inference + temporal
-    ensembling. ``ensembler=None`` (the default) keeps the pop-the-queue path.
+    Pass an :class:`Ensembler` to ensemble overlapping chunks into one action (a
+    length-1 chunk); ``ensembler=None`` (default) returns the raw chunk for open-loop.
     """
 
     def __init__(
@@ -122,13 +97,12 @@ class LeRobotModel(Model):
         self.policy = policy
         self.preprocess = preprocess
         self.postprocess = postprocess
-        #: Optional chunk->action reducer. When set, :meth:`infer` re-infers a
-        #: chunk every step and ensembles it instead of popping ``select_action``.
+        #: Optional chunk->action reducer. When set, :meth:`infer` ensembles each
+        #: freshly inferred chunk into a single action (a length-1 chunk).
         self.ensembler = ensembler
         #: Flipped to False after the first forward; used to print the one-time
         #: CUDA/flow-matching warmup message.
         self._first_inference = True
-        self._step = 0  # env-step index within the episode (for the tracer)
 
     def reset(self) -> None:
         """Reset LeRobot's open-loop action queue (and the ensembler) for the new episode."""
@@ -136,34 +110,9 @@ class LeRobotModel(Model):
             self.policy.reset()
         if self.ensembler is not None:
             self.ensembler.reset()
-        self._step = 0
-
-    def _queue_len(self) -> int | None:
-        """Length of LeRobot's open-loop action queue, or ``None`` if unknown.
-
-        Handles both conventions: the old single deque ``policy._action_queue``
-        (pi05) and the new per-key dict ``policy._queues[ACTION]`` (VLA-JEPA).
-        """
-        queue = getattr(self.policy, "_action_queue", None)
-        if queue is None:
-            # Newer convention: a dict of deques keyed by feature constant. The
-            # action key is the literal "action" (lerobot.utils.constants.ACTION).
-            queues = getattr(self.policy, "_queues", None)
-            if isinstance(queues, dict):
-                queue = queues.get("action")
-        try:
-            return None if queue is None else len(queue)
-        except TypeError:
-            return None
 
     def infer(self, batch: Any) -> np.ndarray:
-        """Run one inference step work also with a ``batch`` (with first-inference log + tracing).
-
-        Default (no :attr:`ensembler`): :func:`lerobot_infer` pops the open-loop
-        queue; fresh chunk iff the queue was empty. Ensembling: re-infer every
-        step via :func:`lerobot_chunk_infer`, reduced to one action. A step that
-        computes a fresh chunk is flagged as a tracer keyframe.
-        """
+        """infer one ``[T, A]`` chunk (one-time warmup log); with an :attr:`ensembler`, reduce it to a length-1 chunk"""
         if self._first_inference:
             print(
                 "[agent] first inference — flow-matching/CUDA warmup on this call, "
@@ -171,37 +120,20 @@ class LeRobotModel(Model):
                 flush=True,
             )
 
+        chunk = lerobot_infer(self.policy, self.preprocess, self.postprocess, batch)
         if self.ensembler is not None:
-            chunk = lerobot_chunk_infer(self.policy, self.preprocess, self.postprocess, batch)
-            result = self.ensembler(chunk)
-            keyframe, chunk_len = True, len(chunk)
-        else:
-            before = self._queue_len()
-            result = lerobot_infer(self.policy, self.preprocess, self.postprocess, batch)
-            # Fresh chunk iff the queue was empty going in. The queued actions are
-            # pre-postprocess (normalized), so only the horizon is recorded: the
-            # popped action + whatever select_action left queued.
-            after = self._queue_len()
-            keyframe = (before == 0) or (before is None and self._step == 0)
-            chunk_len = (after + 1) if (keyframe and after is not None) else None
+            chunk = self.ensembler(chunk)[None, :]  # [A] -> length-1 chunk [1, A]
 
         if self._first_inference:
             print("[agent] first inference done — inference is now fast", flush=True)
             self._first_inference = False
 
-        # TODO Clean
-        if self.tracer is not None:
-            self.tracer.emit_step(
-                batch, result, step=self._step, keyframe=bool(keyframe), chunk_len=chunk_len
-            )
-        self._step += 1
-        return result
+        return chunk
 
 
 __all__ = [
     "Ensembler",
     "LeRobotModel",
     "Model",
-    "lerobot_chunk_infer",
     "lerobot_infer",
 ]

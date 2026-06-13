@@ -201,9 +201,10 @@ class MCPToolResult(CallToolResult):
 
 #: Schema tag of the core step stream (the tool-agent family shares it).
 STEP_SCHEMA = "hud.step.v1"
+ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
-
+RobotStepSource: TypeAlias = Literal["user", "task", "observation", "action"]
 
 class TaskCall(BaseModel):
     """The task-lifecycle RPC a ``task`` step records.
@@ -266,6 +267,7 @@ class Step(BaseModel):
 
         now = now_iso()
         payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
+        # make span from step
         span = Span(
             name=f"step.{self.source}",
             trace_id=normalize_trace_id(task_run_id),
@@ -284,24 +286,6 @@ class Step(BaseModel):
 
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
-
-
-class HudSpan(BaseModel):
-    """A telemetry span ready for export to HUD API."""
-
-    name: str
-    trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
-    span_id: str = Field(pattern=r"^[0-9a-fA-F]{16}$")
-    parent_span_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{16}$")
-    start_time: str
-    end_time: str
-    status_code: str
-    status_message: str | None = None
-    attributes: TraceStep
-    internal_type: str | None = None
-    exceptions: list[dict[str, Any]] | None = None
-
-    model_config = ConfigDict(extra="forbid")
 
 
 class Trace(BaseModel):
@@ -399,7 +383,6 @@ class Trace(BaseModel):
 __all__ = [
     "STEP_SCHEMA",
     "AgentType",
-    "HudSpan",
     "JsonObject",
     "JsonValue",
     "MCPToolCall",

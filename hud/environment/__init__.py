@@ -8,7 +8,7 @@ How a substrate comes up — placement — belongs to the eval engine: see
 contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
 
 The env-side robot runtime (bridges, action providers, sim runners, contract
-tooling, recording glue) lives in :mod:`hud.environment.robots`; import it
+tooling, recording glue) lives in :mod:`hud.environment.robot`; import it
 directly — it pulls optional dependencies (numpy/msgpack, the ``robot`` extra).
 """
 
