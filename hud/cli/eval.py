@@ -648,7 +648,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     if not taskset:
         hud_console.error(
             f"No runnable Tasks found in {cfg.source}. Define a `hud.Environment` with "
-            "`@env.task` and expose Tasks (for example, `t = my_task(arg=...)`)."
+            "`@env.template` and expose Tasks (for example, `t = my_task(arg=...)`)."
         )
         raise typer.Exit(1)
 

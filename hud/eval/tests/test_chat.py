@@ -66,7 +66,7 @@ from hud import Environment
 env = Environment("chat")
 
 
-@env.task()
+@env.template()
 async def assistant(messages: list):
     _answer = yield messages
     yield 1.0

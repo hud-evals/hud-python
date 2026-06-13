@@ -1,6 +1,6 @@
 """Task: one task row — an env name, a task id, bound args, and metadata.
 
-``foo(x, y)`` (an ``@env.task`` factory call) returns one of these. ``env``
+``foo(x, y)`` (an ``@env.template`` factory call) returns one of these. ``env``
 is the environment's *name*: the join key between the data plane (rows) and
 whatever placement can bring that environment up. Running a task never needs
 a live env — the prompt and grading arrive over the wire from the substrate

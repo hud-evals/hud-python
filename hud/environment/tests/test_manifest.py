@@ -20,7 +20,7 @@ class _Point(BaseModel):
 def test_args_schema_captures_params_defaults_and_required() -> None:
     env = Environment("manifests")
 
-    @env.task()
+    @env.template()
     async def fix_bug(difficulty: int, suite: str = "coding"):
         yield "go"
         yield 1.0
@@ -38,7 +38,7 @@ def test_args_schema_captures_params_defaults_and_required() -> None:
 def test_args_schema_for_no_param_task_rejects_args() -> None:
     env = Environment("manifests")
 
-    @env.task()
+    @env.template()
     async def bare():
         yield "go"
         yield 1.0
@@ -51,7 +51,7 @@ def test_args_schema_for_no_param_task_rejects_args() -> None:
 def test_args_schema_var_keyword_allows_additional() -> None:
     env = Environment("manifests")
 
-    @env.task()
+    @env.template()
     async def flexible(n: int, **rest: str):
         yield "go"
         yield 1.0
@@ -64,7 +64,7 @@ def test_args_schema_var_keyword_allows_additional() -> None:
 def test_args_schema_unannotated_param_accepts_anything() -> None:
     env = Environment("manifests")
 
-    @env.task()
+    @env.template()
     async def loose(anything):  # noqa: ANN001
         yield "go"
         yield 1.0
@@ -77,7 +77,7 @@ def test_args_schema_unannotated_param_accepts_anything() -> None:
 def test_input_and_returns_schemas_still_published() -> None:
     env = Environment("manifests")
 
-    @env.task(input=_Point, returns=_Point)
+    @env.template(input=_Point, returns=_Point)
     async def typed():
         yield "go"
         yield 1.0

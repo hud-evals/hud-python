@@ -21,7 +21,7 @@ from mcp.types import PromptMessage
 
 env = Environment(name="assistant")
 
-@env.task()
+@env.template()
 async def assistant(messages: list[PromptMessage]):
     answer = yield messages          # the conversation so far is the prompt
     yield 1.0 if answer else 0.0     # grade the final turn however you like

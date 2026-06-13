@@ -10,7 +10,7 @@ run reports under a job.
 This is the top layer: eval composes :mod:`hud.environment` and
 :mod:`hud.agents`, which never import each other and never import eval back —
 agents see eval only through the ``Run`` handle they are driven with. (Sole
-exception: calling an ``@env.task`` declaration constructs the eval ``Task``
+exception: calling an ``@env.template`` declaration constructs the eval ``Task``
 row.)
 
 Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a

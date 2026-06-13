@@ -74,7 +74,7 @@ from hud import Environment
 
 env = Environment(name="letter-count")
 
-@env.task()
+@env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'? Reply with just the number."
     yield 1.0 if answer and str(word.count(letter)) in answer else 0.0
@@ -85,7 +85,7 @@ tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 Three things are happening:
 
 - `Environment(name=...)` declares **where** the agent acts. This one needs no capabilities — it's a pure prompt-and-grade task.
-- `@env.task()` registers an async-generator task. The **first yield** is the prompt; the value sent back is the agent's answer; the **second yield** is the reward.
+- `@env.template()` registers an async-generator task. The **first yield** is the prompt; the value sent back is the agent's answer; the **second yield** is the reward.
 - Calling `count_letter(word=...)` creates a concrete **Task** — one runnable, parameterized instance. The `tasks` list is a three-task dataset from a single definition.
 
 ## 4. Run it

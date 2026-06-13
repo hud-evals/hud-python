@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 def test_env_task_call_returns_public_task() -> None:
     env = Environment("e")
 
-    @env.task()
+    @env.template()
     async def solve(n: int):
         yield f"solve:{n}"
         yield 1.0

@@ -34,7 +34,7 @@ async def _seed():
     )
     (ROOT / "deploy.log").write_text("11:58 deployed v412: 'remove cart index migration'\n")
 
-@env.task()
+@env.template()
 async def diagnose():
     answer = yield (
         "Checkout started returning 503s at 12:03. The logs and deploy history are "

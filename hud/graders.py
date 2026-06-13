@@ -169,6 +169,19 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
     if positive_weight_sum <= 0:
         raise ValueError("subscores must include at least one positive weight")
 
+    # Surface a likely authoring mistake instead of silently reweighting: if the
+    # declared positive weights don't already sum to ~1.0, the effective weights
+    # after normalization differ from what was written (e.g. 0.5/0.3/0.3 was
+    # meant to be 0.5/0.3/0.2). We still normalize (the result stays in [0,1]),
+    # but the author should see it.
+    if abs(positive_weight_sum - 1.0) > 0.01:
+        warnings.warn(
+            f"grader weights sum to {positive_weight_sum:.4f}, not 1.0; "
+            f"normalizing, but the effective weights differ from what you set. "
+            f"Make the positive weights sum to 1.0 to silence this.",
+            stacklevel=3,
+        )
+
     normalized_subscores: list[SubScore] = []
     metadata: dict[str, Any] = {}
 

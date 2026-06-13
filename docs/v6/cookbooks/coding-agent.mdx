@@ -33,7 +33,7 @@ async def _seed():
     CHECKS.mkdir(exist_ok=True)
     (CHECKS / "test_calc.py").write_text(TEST)        # the authoritative copy
 
-@env.task()
+@env.template()
 async def fix_add(target: str = "test_calc.py"):
     yield f"There's a failing test in {target} in your workspace. Find and fix the bug so the test passes."
     result = await BashGrader.grade(

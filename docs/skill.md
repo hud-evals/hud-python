@@ -41,7 +41,7 @@ from hud import Environment
 
 env = Environment(name="letter-count")
 
-@env.task()
+@env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'?"
     yield 1.0 if answer and str(word.count(letter)) in answer else 0.0
@@ -78,7 +78,7 @@ If you catch yourself writing any of these, stop and convert:
 
 | v5 idiom (wrong) | v6 (right) |
 |------------------|------------|
-| `@env.scenario("name")` | `@env.task()` |
+| `@env.scenario("name")` | `@env.template()` |
 | `@env.tool` / `env.add_tool(BashTool())` | declare a **capability** (`ssh`/`mcp`/`cdp`/`rfb`/`ros2`) |
 | `env("scenario", ...)` | call the task: `count_letter(word=...)` → `Task` |
 | `hud.eval(task)` / `task.run("claude")` | `await task.run(agent)` → `Job` |
@@ -218,7 +218,7 @@ grader"), [Graders](/v6/reference/graders).
 - Async graders (return `SubScore`): `BashGrader.grade(weight, command=...)`,
   `LLMJudgeGrader.grade(weight, answer=..., criteria=[...])`.
 - Compose: `await Grade.gather(...)` (positive weights normalize to 1.0).
-- Structured answers: `@env.task(returns=MyModel)` → answer is `Answer[T]`.
+- Structured answers: `@env.template(returns=MyModel)` → answer is `Answer[T]`.
 
 Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 

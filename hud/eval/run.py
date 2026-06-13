@@ -121,6 +121,9 @@ class Run:
         #: Batch this run belongs to (set by the runner); platform job + GRPO group.
         self.job_id: str | None = None
         self.group_id: str | None = None
+        #: The task slug this run came from (set by the rollout engine). Lets
+        #: ``Job.results`` key runs back to their task without positional zip.
+        self.slug: str | None = None
         # Written by :func:`rollout` once placement is acquired.
         self._runtime: str | None = None
 
@@ -311,6 +314,7 @@ async def rollout(
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id
+        run.slug = task.slug or task.default_slug()
         await trace_exit(run)
     return run
 

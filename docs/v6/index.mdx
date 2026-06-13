@@ -49,7 +49,7 @@ from hud.graders import BashGrader
 env = Environment(name="coder")
 env.workspace("/workspace")   # a directory the agent works in, served as ssh
 
-@env.task()
+@env.template()
 async def fix_tests(target: str = "tests/"):
     yield f"Make the tests in {target} pass."
     result = await BashGrader.grade(weight=1.0, command=f"pytest {target} -q", cwd="/workspace")

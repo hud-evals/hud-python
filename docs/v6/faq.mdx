@@ -75,7 +75,7 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 <AccordionGroup>
 <Accordion title="Environment vs task vs taskset?">
 - **Environment** — where the agent acts; exposes [capabilities](/v6/reference/capabilities) (`ssh`, `cdp`, …).
-- **Task definition** — a `@env.task` async generator that prompts and grades.
+- **Task definition** — a `@env.template` async generator that prompts and grades.
 - **Task** — calling a definition (`count_letter(word="…")`) mints one runnable, parameterized data row.
 - **Taskset** — a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/reference/tasks).
 </Accordion>

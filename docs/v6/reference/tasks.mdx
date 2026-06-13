@@ -5,7 +5,7 @@ icon: "list-check"
 ---
 
 A **`Task`** is a concrete, runnable data point: an environment plus a task id,
-arguments, slug, and metadata. Calling an `@env.task()` function returns a
+arguments, slug, and metadata. Calling an `@env.template()` function returns a
 `Task`. A **`Taskset`** is a named, ordered collection of tasks.
 
 ```python
@@ -15,14 +15,14 @@ from hud.eval import Task, task
 
 ## Authoring Tasks
 
-`@env.task()` registers an async-generator task on an `Environment`. The returned
+`@env.template()` registers an async-generator task on an `Environment`. The returned
 callable is the authoring handle; call it with arguments to create a public
 `Task`.
 
 ```python
 env = Environment("letter-count")
 
-@env.task()
+@env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'?"
     yield 1.0 if answer == str(word.count(letter)) else 0.0
