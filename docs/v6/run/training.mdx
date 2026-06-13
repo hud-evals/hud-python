@@ -77,10 +77,6 @@ advantages = group_relative(rewards, normalize_std=True)  # reward - mean, then 
 
 Feed those advantages into whatever optimizer you run. The same environment trains any model, text or multimodal, unchanged — you only swap the agent.
 
-<Note>
-Robot environments *(beta)* additionally record the lossless training artifact env-side: with `HUD_RECORD_DIR` set, every executed tick lands in a **LeRobot v3 dataset** (with `HUD_HF_REPO` pushing it to the Hugging Face Hub) — separate from the trace, which captures the policy's view. See [Robots](/v6/reference/robots#recording--telemetry).
-</Note>
-
 ## Why grouping matters
 
 GRPO advantages are *relative within a group*: `reward - mean`, optionally divided by the group's std. If every rollout in a group earns the same reward, the advantage is zero and the model learns nothing from that task. A good training task produces a **spread** of rewards across the group — some attempts better than others. That property is a task-design concern, covered in [Designing tasks for signal](/v6/run/signal).

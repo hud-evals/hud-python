@@ -116,18 +116,6 @@ job = await Taskset("libero-demo", TASKS).run(agent, runtime=Runtime("tcp://127.
 
 With `HUD_API_KEY` set, every episode streams to the platform automatically: the trace viewer plays the camera frames back under a scrubber, with **diamond markers at each step where the policy predicted a fresh action chunk** — scrub between markers to watch a chunk execute, click one to jump to the decision point.
 
-## Record a dataset
-
-Recording is env-side and config-only — pass it to the container:
-
-```bash
-docker run -d -p 8765:8765 \
-  -v "$PWD/traces:/data/traces" -e HUD_RECORD_DIR=/data/traces \
-  hud-libero-env
-```
-
-Every executed tick lands in a **LeRobot v3 dataset** (frames, actions, rewards, the contract as provenance). Add `-e HUD_HF_REPO=<namespace> -e HF_TOKEN=...` to push finalized datasets to the Hugging Face Hub. Stop with a grace period (`docker stop -t 60`) so the dataset finalizes.
-
 ## See also
 
 <CardGroup cols={2}>

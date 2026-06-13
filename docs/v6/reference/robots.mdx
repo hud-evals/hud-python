@@ -1,6 +1,6 @@
 ---
 title: "Robots"
-description: "The robot capability: contracts, bridges, the agent harness, and recording."
+description: "The robot capability: contracts, bridges, and the agent harness."
 icon: "robot"
 tag: "Beta"
 ---
@@ -15,12 +15,12 @@ Everything below ships behind the `robot` extra (`pip install hud-python[robot]`
 
 ## Overview
 
-Integrating a policy against a robot environment means answering three questions: who owns the simulator, who runs the policy, and how do their spaces line up. The capability splits each answer into a small, named abstraction — implement the ones on your side, and the framework owns everything in between (the serve loop, the wire protocol, recording, telemetry).
+Integrating a policy against a robot environment means answering three questions: who owns the simulator, who runs the policy, and how do their spaces line up. The capability splits each answer into a small, named abstraction — implement the ones on your side, and the framework owns everything in between (the serve loop, the wire protocol, telemetry).
 
 **Environment side** — owns the simulator and serves frames:
 
 - **`RobotBridge`** — the one class you implement around your sim: `reset` / `step` / `get_observation`. The framework owns the WebSocket serve loop and the single-agent connection.
-- **`RobotEndpoint`** — wraps the bridge for task definitions: episode bookkeeping, results, and the default dataset recorder.
+- **`RobotEndpoint`** — wraps the bridge for task definitions: episode bookkeeping and results.
 
 **Agent side** — runs the policy and streams actions:
 
@@ -36,7 +36,7 @@ The shape of the work follows from the split: a bridge is written **once per env
 
 ## Environment side
 
-You implement one class — the **bridge** owns the simulator; the framework owns the WebSocket serve loop, the single-agent connection, and recording:
+You implement one class — the **bridge** owns the simulator; the framework owns the WebSocket serve loop and the single-agent connection:
 
 ```python
 from hud.environment.robot import RobotBridge
@@ -48,7 +48,7 @@ class MySimBridge(RobotBridge):
         return self.task_description     # becomes the task prompt
 
     def step(self, action) -> None:
-        ...  # advance one tick; set self.last_reward / success / terminated
+        ...  # advance one tick; set success / terminated
 
     def get_observation(self):
         return {"agentview_image": frame, "state": vec}, self.terminated
@@ -146,12 +146,9 @@ On the agent side, **`RealtimeRobotAgent`** (`experimental.agent`) is the chunk-
 
 **`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default) or `ThreadSimRunner` (dedicated worker — render-heavy sims). Subclass it for exotic topologies (e.g. a sim that owns main with the server on a worker).
 
-## Recording & telemetry
+## Telemetry
 
-Both are zero-config:
-
-- **Datasets (env side).** `RobotEndpoint(bridge, contract=...)` builds the framework-default recorder from launch configuration: set `HUD_RECORD_DIR` and every executed tick lands in a **LeRobot v3 dataset** (parquet + mp4, the contract as provenance); add `HUD_HF_REPO` (+ `HF_TOKEN`) to push finalized datasets to the Hub. The recorder finalizes when the bridge stops, so the dataset on disk is always loadable.
-- **Traces (agent side).** With HUD telemetry configured, `RobotAgent` streams one span per step — every camera frame the policy saw plus the executed action — and stamps **keyframes** where a fresh action chunk was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with markers at each chunk-prediction decision point.
+Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per step — every camera frame the policy saw plus the executed action — and stamps **keyframes** where a fresh action chunk was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with markers at each chunk-prediction decision point.
 
 ## API summary
 
@@ -161,7 +158,7 @@ Both are zero-config:
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
 | `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
 | `RealtimeRobotBridge` | `experimental.env` (`demos/experimental`) | Free-running realtime env-side bridge |
-| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + default recorder |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results |
 | `ActionProvider`, `make_action_provider` | `experimental.env` (`demos/experimental`) | Realtime chunk-merge strategies |
 | `SimRunner` (`Inline`/`Thread`) | `hud.environment.robot` | Which thread runs the sim |
 | `RobotAgent` | `hud.agents.robot` | The episode-loop harness |

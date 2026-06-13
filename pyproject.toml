@@ -158,13 +158,6 @@ robot = [
     "msgpack>=1.0",
 ]
 
-# LeRobot v3 dataset recording (hud.environment.robot.data_saving sink)
-lerobot = [
-    "hud-python[robot]",
-    "lerobot[dataset]",
-    "av>=15,<16",
-]
-
 
 [tool.ruff]
 target-version = "py311"

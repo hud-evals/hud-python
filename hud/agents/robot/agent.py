@@ -63,7 +63,10 @@ class RobotAgent(Agent):
     adapter: Adapter | None = None
 
     _prompt: str = ""
-    _action_space: dict[str, Any]
+    #: The env's action / observation contract features (from ``client.spaces()``),
+    #: named ``_env_*`` to mark them as env-side values (not the policy's spaces).
+    _env_action_space: dict[str, Any]
+    _env_obs_space: dict[str, Any]
     #: Unexecuted tail of the current policy chunk; popped one action per step.
     _active_chunk: deque[np.ndarray]
     #: The live run + control-tick index, so ``select_action`` can record its own InferenceStep.
@@ -73,10 +76,9 @@ class RobotAgent(Agent):
 
     def setup_robot(self, client: RobotClient) -> None:
         """Discover the env's action/observation layout and bind the adapter to it."""
-        action_space, obs_space = client.spaces()
-        self._action_space = action_space  # kept for logging / back-compat
+        self._env_action_space, self._env_obs_space = client.spaces()
         if self.adapter is not None:
-            self.adapter.bind(action_space, obs_space)
+            self.adapter.bind(self._env_action_space, self._env_obs_space)
 
     def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
         """Called once before the observe/act loop begins.
@@ -133,7 +135,9 @@ class RobotAgent(Agent):
 
             for step in range(max_steps):
                 obs = await client.get_observation()
-                run.record(ObservationStep.from_obs(obs, tick=step))
+                run.record(
+                    ObservationStep.from_obs(obs, tick=step, obs_space=self._env_obs_space)
+                )
 
                 if self.should_stop(obs, step=step, max_steps=max_steps):
                     print(f"[agent] env reported terminated at step {step}", flush=True)

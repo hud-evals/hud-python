@@ -292,14 +292,28 @@ class SubagentStep(Step):
 # -----------------------------------------------------------------------------
 
 
+class StateFeature(BaseModel):
+    """One observation feature group: its per-dimension labels + values, kept
+    together so a state vector is self-describing (e.g. ``robot0_eef_pos`` ->
+    ``names=[".x", ".y", ".z"], values=[...]``). ``names`` is empty when the
+    contract omits per-dim labels."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    names: list[str] = Field(default_factory=list[str])
+    values: list[float] = Field(default_factory=list[float])
+
+
 class ObservationStep(Step):
     """What the policy saw at one control tick: camera frames + numeric state.
 
     Camera ``images`` are MCP ``ImageContent`` keyed by camera name — ingest
     offloads each to S3 by shape (no bespoke type needed) and presigns it on
-    read. ``state`` holds the non-image observation vectors keyed by feature
-    name (joint positions, gripper, ...). ``tick`` is the 0-based control-tick
-    index, so the viewer can pair it with the matching :class:`ActionStep`.
+    read. ``state`` maps each env-contract feature group (e.g. ``robot0_eef_pos``,
+    ``robot0_gripper_qpos``) to a :class:`StateFeature` carrying that slice's
+    per-dimension ``names`` + ``values`` — so grouping and semantics travel with
+    the data, no side schema. ``tick`` is the 0-based control-tick index, so the
+    viewer can pair it with :class:`InferenceStep`.
     """
 
     schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
@@ -308,23 +322,29 @@ class ObservationStep(Step):
     tick: int = 0
     # TODO: note - this reuses the MCP-native ImageContent type
     images: dict[str, ImageContent] = Field(default_factory=dict[str, ImageContent])
-    state: dict[str, list[float]] = Field(default_factory=dict[str, list[float]])
+    state: dict[str, StateFeature] = Field(default_factory=dict[str, StateFeature])
 
     @classmethod
-    def from_obs(cls, obs: dict[str, Any], *, tick: int = 0) -> ObservationStep:
-        """build a step from a raw ``robot`` obs (``{"data": {name: ndarray}, ...}``); rank>=2 arrays are camera frames (JPEG-encoded for the viewer), rank-1 are numeric state"""
+    def from_obs(
+        cls,
+        obs: dict[str, Any],
+        *,
+        tick: int = 0,
+        obs_space: dict[str, Any] | None = None,
+    ) -> ObservationStep:
+        """build a step from a raw ``robot`` obs (``{"data": {name: ndarray}, ...}``); rank>=2 arrays are JPEG camera frames, rank-1 vectors are split into the contract's named feature groups via ``obs_space``. ``obs_space`` (the env contract from ``client.spaces()``) is read for grouping/labelling only — never stored on the step."""
         import base64
         import io
 
         import numpy as np
         from PIL import Image
 
+        obs_space = obs_space or {}
         images: dict[str, ImageContent] = {}
-        state: dict[str, list[float]] = {}
+        state: dict[str, StateFeature] = {}
         for name, arr in obs.get("data", {}).items():
             if arr.ndim >= 2:
                 # JPEG for the trace viewer: small over the wire + browser-renderable.
-                # Lossless training frames are captured separately by the env recorder.
                 frame = arr if arr.dtype == np.uint8 else np.clip(arr, 0, 255).astype(np.uint8)
                 buf = io.BytesIO()
                 Image.fromarray(frame).save(buf, format="JPEG", quality=85)
@@ -333,8 +353,36 @@ class ObservationStep(Step):
                     data=base64.b64encode(buf.getvalue()).decode("ascii"),
                     mimeType="image/jpeg",
                 )
+                continue
+            vec = arr.tolist()
+            # Split the flat wire vector (e.g. "state") into the contract's named
+            # feature groups: each feature whose key carries this data key as a
+            # dot-segment owns an ``order`` slice + per-dim ``names``. One feature
+            # may span the whole vector (robolab) or several ordered slices tile it
+            # (libero eef_pos + axis_angle + gripper). Fall back to one unlabelled
+            # group under the data key when the contract doesn't tile it exactly.
+            slices: list[tuple[int, int, str, list[str]]] = []
+            for feature_key, feature in obs_space.items():
+                if name not in feature_key.split(".") or not isinstance(feature, dict):
+                    continue
+                order = feature.get("order")
+                if order is None:
+                    continue
+                bounds = str(order).split("-")
+                raw_names = feature.get("names")
+                labels = [str(n) for n in raw_names] if isinstance(raw_names, list) else []
+                slices.append((int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels))
+            slices.sort()
+            covered = [i for start, end, _, _ in slices for i in range(start, end + 1)]
+            if covered == list(range(len(vec))):
+                for start, end, key, labels in slices:
+                    values = vec[start : end + 1]
+                    state[key] = StateFeature(
+                        names=labels if len(labels) == len(values) else [],
+                        values=values,
+                    )
             else:
-                state[name] = arr.tolist()
+                state[name] = StateFeature(values=vec)
         return cls(tick=tick, images=images, state=state)
 
 
