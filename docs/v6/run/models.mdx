@@ -16,9 +16,9 @@ An **evaluation** produces one **trace**: an agent works the task against the en
 Pass a task source and an agent name. The agent names are `claude`, `openai`, `gemini`, and `openai_compatible`:
 
 ```bash
-hud eval tasks.py claude
-hud eval tasks.py openai --model gpt-5
-hud eval tasks.py gemini
+hud eval tasks.py claude --group 3
+hud eval tasks.py openai --model gpt-5 --group 3
+hud eval tasks.py gemini --group 3
 ```
 
 Which path a call takes depends on your keys: with a provider key set (`ANTHROPIC_API_KEY`, etc.) it goes straight to the provider; with only your `HUD_API_KEY`, it routes through the HUD gateway automatically. Pass `--gateway` to force the gateway even when a provider key is present:
@@ -34,7 +34,7 @@ Useful flags:
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`) |
 | `--all` | Run every task instead of just the first |
 | `--model`, `-m` | Pin a specific model id |
-| `--group-size N` | Run each task `N` times (for GRPO / variance) |
+| `--group N` | Run each task `N` times — a group, to see reward variance |
 | `--max-concurrent N` | Cap parallel rollouts |
 | `--max-steps N` | Cap agent steps per task |
 

@@ -46,7 +46,7 @@ async def fix_add(target: str = "test_calc.py"):
 tasks = [fix_add()]
 ```
 
-This task has no `answer = yield` — the deliverable is the **state of the workspace**, not a text answer. The first yield is the prompt; the second is the reward from running the tests.
+This task has no `answer = yield` — the deliverable is the **state of the workspace**, not a text answer.
 
 <Note>
 To start from an existing repo instead of seeding files inline, write it into the workspace root in `@env.initialize`, or pass `mounts=` (see [Capabilities](/v6/reference/capabilities)).

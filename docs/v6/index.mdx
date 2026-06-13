@@ -61,10 +61,10 @@ tasks = [fix_tests()]
 Run it against any model — your `HUD_API_KEY` is the only key you need:
 
 ```bash
-hud eval env.py claude
+hud eval env.py claude --group 3
 ```
 
-Every rollout is traced on the [hud.ai](https://hud.ai) platform.
+`--group 3` runs three rollouts so you can see the reward spread; each is traced on [hud.ai](https://hud.ai).
 
 ## Where to go next
 
