@@ -1,150 +1,103 @@
 ---
-title: "Package & deploy"
-description: "Publish your environment and tasks, and package an image that runs anywhere."
+title: "Run tasks anywhere"
+description: "Package your environment with hud deploy, then run the same task on HUD, your own infra, or a local container — chosen with a runtime."
 icon: "rocket"
 ---
 
-Package once, run anywhere: a built image is the **end product for your tasks** — one build packs every concrete task from a single definition, and because the protocol exposes only capabilities, it runs unchanged on your laptop, in CI, on Kubernetes, or on managed cloud sandboxes.
+A built environment image is the **end product for your tasks**: one build packs every task from a single definition, and because the protocol exposes only capabilities (never a fixed agent), the same image runs unchanged on HUD, on your own infra, in CI, or on your laptop.
 
-## Prerequisites
+Running one task is always the same exchange — start (get the prompt), the agent works, grade (get the reward). That's the [HUD protocol](/v6/index#the-protocol); packaging just decides **where the container that serves it comes from**.
 
-- An environment with tasks (see [Environments](/v6/reference/environment) and [Tasks](/v6/reference/tasks)).
-- A `HUD_API_KEY` for publishing.
-- Docker, for the local build path.
+## Package it: `hud deploy`
 
-## The recommended path: `hud deploy`
-
-`hud deploy` builds **and** publishes your environment to HUD infra in one step. From the environment directory:
+The recommended path. `hud deploy` builds your environment from its `Dockerfile.hud` (scaffolded by `hud init`) on HUD and registers it by the name in your `Environment(...)` declaration — one step, no local Docker required. Then publish your tasks as a named taskset:
 
 ```bash
 hud deploy
 hud sync tasks my-taskset
-hud eval my-taskset --full
 ```
 
-- `hud deploy` builds the image and registers the environment.
-- `hud sync tasks my-taskset` publishes your tasks as a named **taskset**.
-- `hud eval my-taskset --full` runs the taskset with the selected local agent.
+- `hud deploy` uploads the build context, builds the image on HUD, streams the build logs, and registers the environment (rebuilding in place if the name already exists).
+- `hud sync tasks my-taskset` diffs your tasks against the remote taskset and uploads only what changed.
 
-Pass environment variables with `--env KEY=VALUE` (repeatable) or `--env-file .env`.
+Pass build-time config with `--env KEY=VALUE` / `--env-file .env`, `--build-arg`, and `--secret`. From the [platform UI](https://hud.ai) you then run batches, compare models on the same taskset, and browse every trace.
 
-## Publish your tasks as a taskset
+## Pick where it runs: the runtime
 
-A **taskset** is a named dataset of tasks stored on the platform. `hud sync tasks` collects the tasks from your source, **diffs them against the remote taskset, and uploads only what changed**:
+In code, *where* a task runs is a **runtime** you pass at execution time — the task definition never changes. The same `task.run(agent, runtime=…)` call targets any substrate:
 
-```bash
-hud sync tasks my-taskset                 # scan the current dir, sync to "my-taskset"
-hud sync tasks my-taskset tasks.py        # from a specific file
-hud sync tasks my-taskset tasks/          # from a directory
+```python run.py
+from hud import HUDRuntime, LocalRuntime, DockerRuntime, Runtime
+
+HUDRuntime()                       # run on HUD's hosted infra (after hud deploy)
+LocalRuntime("env.py")             # a local child process (fastest iteration)
+DockerRuntime("my-env")            # a fresh local container per rollout
+Runtime("tcp://host:8765")         # attach to a container started elsewhere
 ```
 
-The first sync creates the taskset and stores its ID in `.hud/config.json`, so afterward `hud sync tasks` with no name re-syncs it.
+```python run.py
+from hud.agents import create_agent
 
-| Flag | Effect |
-|------|--------|
-| `--dry-run` | Show the sync plan without uploading. |
-| `--task <slug>` | Only sync the task matching this slug. |
-| `--exclude <slug>` | Exclude tasks by slug (repeatable). |
-| `--force` | Upload every task, skipping the diff comparison. |
-| `--yes`, `-y` | Skip the confirmation prompt (use in CI). |
-| `--export <file>` | Export the remote tasks to `.json` or `.csv` instead of syncing. |
-
-Give each task a stable `slug` so it's identifiable across syncs (it defaults to the task id plus an args hash):
-
-```python tasks.py
-task = fix_bug(difficulty=3)
-task.slug = "fix-bug-3"
+agent = create_agent("claude-sonnet-4-5")
+job = await fix_bug(difficulty=3).run(agent, runtime=HUDRuntime())
+print(job.reward)
 ```
 
-A published taskset is shared infrastructure: teammates run the same dataset without passing files around, and from the [platform UI](https://hud.ai) you can browse every trace and compare models on the same taskset.
+`HUDRuntime` is the natural pair with `hud deploy`: the platform leases an instance, brings your deployed image up on it, and runs the rollout next to it.
 
-## The local path: `docker build`
+## Run on your own infra
 
-For a fully-local workflow, build the image directly with Docker from your environment's `Dockerfile.hud`:
+A **runtime is just a function**: given a task, start a container somewhere and yield its control-channel URL. That one function is the entire integration surface for any sandbox provider — Daytona, Modal, E2B, Runloop, or your own Kubernetes:
+
+```python run.py
+from contextlib import asynccontextmanager
+from hud import Runtime
+
+@asynccontextmanager
+async def modal_runtime(task):
+    sandbox = await start_my_sandbox(image="my-env")   # your infra spins the container up
+    try:
+        yield Runtime(f"tcp://{sandbox.host}:{sandbox.port}")
+    finally:
+        await sandbox.terminate()                       # …and tears it down
+
+job = await fix_bug(difficulty=3).run(agent, runtime=modal_runtime)
+```
+
+`DockerRuntime` and `LocalRuntime` are just the built-in versions of this. Anything that can start your image and hand back a URL plugs in with no change to the environment or the task — that's what "run anywhere" means concretely.
+
+## A self-contained image
+
+For a fully-local artifact with no HUD account, build the image directly from the scaffolded `Dockerfile.hud` and drive a task with the packaged CLI — `docker exec` runs the commands *inside* the container, so nothing needs to be exposed:
 
 ```bash
 docker build -f Dockerfile.hud -t my-env .
-```
 
-<Note>
-**Reproducible by construction.** Each rollout gets its **own fresh environment** — so results reproduce across runs and machines, and one rollout never leaks state into the next. Keep any per-task setup in [`@env.initialize`](/v6/reference/environment#lifecycle-hooks) so every run starts from the same state.
-</Note>
-
-Once built, the image is self-contained and serves the control channel. Run it and drive a task (here `fix_bug`, a task in your environment) with the packaged CLI — `docker exec` runs the commands *inside* the container, so no port needs publishing:
-
-```bash
 docker run -d --name run1 my-env
-docker exec run1 hud task start fix_bug
-docker exec run1 hud task grade fix_bug --answer "…"
+docker exec run1 hud task start fix_bug          # -> the prompt
+docker exec run1 hud task grade fix_bug --answer "…"   # -> the reward
 docker rm -f run1
 ```
 
-`hud task start` returns the task's prompt; `hud task grade` returns the reward. Inside the image they attach to the env serving locally — no source needed. This is the escape hatch for plugging a build into **your own** rollout infra.
+`hud task start` returns the prompt; the agent works; `hud task grade` returns the reward — no source, no open port (`hud task list` shows what an image exposes).
 
 <Note>
-Use `hud task list` to see what tasks an image or source exposes.
+**Reproducible by construction.** Each rollout gets its **own fresh container**, so results reproduce across runs and machines and one rollout never leaks state into the next. Keep per-task setup in [`@env.initialize`](/v6/reference/environment#lifecycle-hooks) so every run starts from the same state.
 </Note>
-
-## Driving a packaged box from code
-
-A running box serves the control channel at a URL — `Runtime(url)` is that address, passed as the task's placement. To reach the box from the **host**, publish the control-channel port when you start it:
-
-```bash
-docker run -d --name run1 -p 8765:8765 my-env
-```
-
-Then attach by task **id** (you don't need the Python task factory — construct a `Task` row directly):
-
-```python run.py
-import asyncio
-from hud import Runtime
-from hud.eval import Task
-from hud.agents import create_agent
-
-async def main():
-    task = Task(env="my-env", id="fix_bug")   # a pure data row
-    agent = create_agent("claude-sonnet-4-5")
-    job = await task.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
-    print(job.reward)
-
-asyncio.run(main())
-```
-
-<Note>
-Build a `Task` two ways: **call the task function** (`fix_bug(...)`) when you have the Python authoring object — the normal path; or use the **`Task(env="name", id="id")`** constructor when you only have the names (args and metadata are explicit fields), as above. Where it runs is always the `runtime=` placement: `Runtime(url)` for a box provisioned elsewhere, `LocalRuntime("env.py")` for a local child process.
-</Note>
-
-## Scaling horizontally
-
-Because each rollout gets its own box, you scale by running more of them. `Taskset.run` fans out with a concurrency cap:
-
-```python run.py
-from hud import LocalRuntime
-from hud.eval import Taskset
-
-taskset = Taskset("bugs", [fix_bug(difficulty=d) for d in range(20)])
-job = await taskset.run(
-    agent, runtime=LocalRuntime("env.py"), max_concurrent=10,
-)
-rewards = [run.reward for run in job.runs]
-```
 
 ## Next steps
 
 <CardGroup cols={2}>
-<Card title="Train on your tasks" icon="dumbbell" href="/v6/run/training">
-  Turn the rewards you just collected into GRPO advantages.
+<Card title="Run on any model" icon="robot" href="/v6/run/models">
+  The agent side: any model or harness drives the same task.
 </Card>
 <Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
   Compose a taskset that actually trains.
 </Card>
-<Card title="Run on any model" icon="robot" href="/v6/run/models">
-  Compare models across the same taskset.
+<Card title="Train on your tasks" icon="dumbbell" href="/v6/run/training">
+  Turn the rewards you collected into GRPO advantages.
 </Card>
 <Card title="Harbor interop" icon="anchor" href="/v6/advanced/harbor-convert">
   Load existing benchmarks straight into the runtime.
-</Card>
-<Card title="CLI reference" icon="terminal" href="/v6/reference/cli">
-  Every command and flag: deploy, sync, eval, task.
 </Card>
 </CardGroup>

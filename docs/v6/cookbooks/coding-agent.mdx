@@ -49,7 +49,7 @@ tasks = [fix_add()]
 This task has no `answer = yield` — the deliverable is the **state of the workspace**, not a text answer. The first yield is the prompt; the second is the reward from running the tests.
 
 <Note>
-**The agent and the grader share the workspace directory.** `env.workspace(ROOT)` serves a real local directory; the agent's edits over the `ssh` capability land in it. The grader runs `python -m pytest` with `cwd=str(ROOT)`, so the (fixed) `calc.py` imports from the workspace while the test file itself comes from `checks/`, which the agent can't reach. Inside the sandbox and built images the directory mounts at `/workspace` automatically. To start from an existing repo instead of seeding files inline, write it into the root in `@env.initialize`, or pass extra `mounts=` (see [Capabilities](/v6/reference/capabilities)).
+To start from an existing repo instead of seeding files inline, write it into the workspace root in `@env.initialize`, or pass `mounts=` (see [Capabilities](/v6/reference/capabilities)).
 </Note>
 
 ## Run it
@@ -57,21 +57,20 @@ This task has no `answer = yield` — the deliverable is the **state of the work
 Point a coding agent at the environment. `claude` opens the `ssh` capability, edits `calc.py`, and the grader re-runs the test:
 
 ```bash
-hud eval env.py claude --gateway
+hud eval env.py claude
 ```
 
 For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSDKAgent` in code:
 
 ```python run.py
 import asyncio
-from hud import LocalRuntime
 from hud.agents import ClaudeSDKAgent
 from hud.agents.types import ClaudeSDKConfig
 from env import fix_add
 
 async def main():
     agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
-    job = await fix_add().run(agent, runtime=LocalRuntime("env.py"))
+    job = await fix_add().run(agent)
     print("reward:", job.reward)
 
 asyncio.run(main())
@@ -92,7 +91,7 @@ tasks = [fix_add(target=t) for t in ("test_calc.py", "test_utils.py", "test_io.p
 ```
 
 <Note>
-**Platform notes.** `bwrap` isolation applies on Linux; on macOS/Windows the shell runs without it (fine for iteration). `BashGrader` runs commands via `/bin/bash`, so grading needs bash — macOS/Linux, WSL, or a built image; on native Windows it scores `0.0` with a "/bin/bash not found" error. Inside a built image both isolation and bash are always available. See [Capabilities](/v6/reference/capabilities).
+`BashGrader` needs bash, so on native Windows it scores `0.0` — grade from macOS/Linux, WSL, or a built image.
 </Note>
 
 ## See also

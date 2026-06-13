@@ -21,7 +21,7 @@ hud eval tasks.py openai --model gpt-5
 hud eval tasks.py gemini
 ```
 
-By default this calls the provider directly (needs that provider's key). Add `--gateway` to route through HUD with just your `HUD_API_KEY`:
+Which path a call takes depends on your keys: with a provider key set (`ANTHROPIC_API_KEY`, etc.) it goes straight to the provider; with only your `HUD_API_KEY`, it routes through the HUD gateway automatically. Pass `--gateway` to force the gateway even when a provider key is present:
 
 ```bash
 hud eval tasks.py claude --gateway
@@ -44,13 +44,12 @@ Every agent implements one method — `await agent(run)` — which drives a live
 
 ```python run.py
 import asyncio
-from hud import LocalRuntime
 from hud.agents import create_agent
 from tasks import count_letter
 
 async def main():
     agent = create_agent("claude-sonnet-4-5")
-    job = await count_letter(word="strawberry").run(agent, runtime=LocalRuntime("tasks.py"))
+    job = await count_letter(word="strawberry").run(agent)
     print(job.reward)
 
 asyncio.run(main())

@@ -1,7 +1,8 @@
 """``hud.tools`` v5 compat: type redirects, computer markers, and no-ops.
 
-``hud.tools`` is the real tools package; only symbols/submodules removed in the
-v6 teardown go through the compat fallback (with a ``DeprecationWarning``).
+``hud.tools`` was removed in v6 (shell/file/computer/browser access is a
+capability, not a tool). The whole package now resolves through the compat
+fallback, each access emitting a ``DeprecationWarning``.
 """
 
 from __future__ import annotations
@@ -13,16 +14,16 @@ import pytest
 from hud.environment import Answer
 
 
-def test_real_tools_import_without_warning() -> None:
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        import hud.tools
+def test_basetool_and_agenttool_resolve_to_noops() -> None:
+    # ``BaseTool`` / ``AgentTool`` were removed in v6; importing them must not
+    # raise, but resolves to a no-op stand-in with a DeprecationWarning.
+    import hud.tools
 
-        agent_tool = hud.tools.AgentTool
-        base_tool = hud.tools.BaseTool
-
-    assert agent_tool.__module__ == "hud.tools.agent"
-    assert base_tool.__module__ == "hud.tools.base"
+    for name in ("BaseTool", "AgentTool"):
+        with pytest.warns(DeprecationWarning):
+            cls = getattr(hud.tools, name)
+        assert cls.__module__ == "hud._legacy"
+        assert cls() is not None
 
 
 def test_result_types_redirect_to_their_v6_homes() -> None:

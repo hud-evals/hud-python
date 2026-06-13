@@ -48,7 +48,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout (defaults to HUD-hosted provisioning by the task's env name).
+`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout (with no runtime it serves the task's source locally when minted in-process, else HUD-hosted by the task's env name).
 
 ### Managing history
 

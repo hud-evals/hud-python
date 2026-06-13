@@ -733,7 +733,7 @@ def eval_command(
         "--auto-respond",
         help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
-    group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
+    group_size: int | None = typer.Option(None, "--group", "--group-size", help="Runs per task"),
     task_ids: str | None = typer.Option(
         None,
         "--task-ids",

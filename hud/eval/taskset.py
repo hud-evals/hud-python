@@ -22,7 +22,7 @@ from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HUDRuntime
+from .runtime import HUDRuntime, LocalRuntime
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -240,7 +240,12 @@ class Taskset:
 
         # Placement is chosen once for the batch: a HUDRuntime runs each rollout on
         # a leased box, anything else is a Provider driven locally by rollout().
-        # No runtime defaults to hosted.
+        # No runtime: serve the tasks' shared source locally if they were minted
+        # in-process from one file (the common authoring case); otherwise (mixed
+        # or wire-loaded rows with no source) default to HUD-hosted.
+        if runtime is None:
+            sources = {t._source for t in task_list if t._source is not None}
+            runtime = LocalRuntime(next(iter(sources))) if len(sources) == 1 else None
         placement = runtime if runtime is not None else HUDRuntime()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 

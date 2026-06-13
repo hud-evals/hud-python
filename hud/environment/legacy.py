@@ -14,7 +14,7 @@ surface and *adapts* it to v6:
 - registered tools are classified and, on serve, turned into capabilities:
   shell/edit → ``ssh`` (spins up a :class:`~hud.environment.Workspace`), computer
   → ``rfb`` (detects a VNC / ``HUD_RFB_URL``), everything else → ``mcp`` (a local
-  :class:`~hud.server.MCPServer`). Each path is best-effort: a failure warns and
+  ``fastmcp.FastMCP`` server). Each path is best-effort: a failure warns and
   is skipped so the env's *tasks* still serve.
 
 Every entry point emits a ``DeprecationWarning`` pointing at the v6 equivalent.

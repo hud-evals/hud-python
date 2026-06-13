@@ -49,7 +49,7 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
 
-Run it: `hud eval tasks.py claude --gateway`. Cite [Quickstart](/v6/quickstart)
+Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/quickstart)
 and [Tasks](/v6/reference/tasks).
 
 **Capabilities** give the agent something to act on (declare on the env; the
@@ -203,7 +203,7 @@ asks for work the grader ignores; or a worse rollout can outscore a better one.
 
 **Tell the user:** Align them — what the prompt sets up, the grader tests.
 Enforce score–quality monotonicity: better substantive work must never score
-lower. Compose graders with `Grade.gather` so subscores make a partial reward
+lower. Compose graders with `combine` so subscores make a partial reward
 legible and monotonicity violations visible.
 
 **Cite:** [/v6/run/signal](/v6/run/signal) ("Align the prompt and the
@@ -217,7 +217,7 @@ grader"), [Graders](/v6/reference/graders).
   `f1_score` from `hud.graders`.
 - Async graders (return `SubScore`): `BashGrader.grade(weight, command=...)`,
   `LLMJudgeGrader.grade(weight, answer=..., criteria=[...])`.
-- Compose: `await Grade.gather(...)` (positive weights normalize to 1.0).
+- Compose: `await combine(...)` (positive weights normalize to 1.0).
 - Structured answers: `@env.template(returns=MyModel)` → answer is `Answer[T]`.
 
 Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).

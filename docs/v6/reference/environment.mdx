@@ -31,9 +31,7 @@ Environment(name="environment", *, version="0.0.1", capabilities=None)
 @env.template(*, id=None, description="", input=None, returns=None)
 ```
 
-Registers an async-generator **template**. The decorated function **must** be an async generator (`async def` with `yield`) or `@env.template` raises `TypeError`. The decorated callable creates a public [`Task`](/v6/reference/tasks) when called with task arguments.
-
-<Note>`@env.task` is a deprecated alias of `@env.template` — it still works but warns. The name changed because the decorated object is a *template* that mints `Task` rows when called, not a task itself.</Note>
+Registers a **template**: an async generator that `yield`s a prompt and a reward. Calling the decorated object mints a public [`Task`](/v6/reference/tasks).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
