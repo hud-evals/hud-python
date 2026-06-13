@@ -208,9 +208,10 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
                 "name": "Demo",
                 "tasks": [
                     {
-                        # the platform export record shape, normalized on fetch
-                        "env": None,
-                        "scenario": "e:solve",
+                        # CP export shape: the legacy env qualifier is stripped
+                        # server-side, so env + bare scenario arrive already split.
+                        "env": "e",
+                        "scenario": "solve",
                         "args": {"n": 1},
                         "name": "one",
                     }
@@ -224,6 +225,6 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
     taskset = Taskset.from_api("demo")
 
     assert taskset.name == "Demo"
-    assert taskset["one"].id == "solve"  # env prefix is stripped on fetch
+    assert taskset["one"].id == "solve"
     assert taskset["one"].env == "e"
     assert taskset["one"].args == {"n": 1}
