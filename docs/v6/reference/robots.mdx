@@ -64,22 +64,21 @@ from hud.capabilities import Capability
 from hud.environment.robot import RobotEndpoint
 
 env = Environment(name="my-sim")
-bridge = MySimBridge()
-endpoint = RobotEndpoint(bridge, contract=CONTRACT, name="my-sim")
+endpoint = RobotEndpoint(MySimBridge())  # the env drives the bridge only through the endpoint
 
 @env.initialize
 async def _up():
-    await bridge.start()
-    env.add_capability(Capability.robot(name="robot", url=bridge.url, contract=CONTRACT))
+    await endpoint.start()
+    env.add_capability(Capability.robot(name="robot", url=await endpoint.url(), contract=CONTRACT))
 
 @env.shutdown
 async def _down():
-    await bridge.stop()
+    await endpoint.stop()
 
 @env.task()
 async def pick_and_place(task_id: str, seed: int = 0):
     prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
-    yield endpoint.result()  # {"score", "success", "total_reward"}
+    yield await endpoint.result()  # {"score", "success", "total_reward"}
 ```
 
 This module is declare-only — serve it like any other environment (`hud serve env.py`, a container CMD, or `LocalRuntime("env.py")`).

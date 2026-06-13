@@ -355,23 +355,27 @@ class ObservationStep(Step):
                 )
                 continue
             vec = arr.tolist()
-            # Split the flat wire vector (e.g. "state") into the contract's named
-            # feature groups: each feature whose key carries this data key as a
-            # dot-segment owns an ``order`` slice + per-dim ``names``. One feature
-            # may span the whole vector (robolab) or several ordered slices tile it
-            # (libero eef_pos + axis_angle + gripper). Fall back to one unlabelled
-            # group under the data key when the contract doesn't tile it exactly.
+            # Label the flat wire vector (e.g. "state") from the contract. Each
+            # feature whose key carries this data key as a dot-segment describes
+            # it, in one of two layouts:
+            #  - ordered slices that tile the vector -> split into named groups
+            #    (libero_pro eef_pos + axis_angle + gripper; robolab single slice)
+            #  - a single feature keyed exactly by the data key whose ``names`` span
+            #    the whole vector -> one named group (libero_ee_del's flat "state")
+            # Fall back to one unlabelled group when neither fits.
             slices: list[tuple[int, int, str, list[str]]] = []
+            direct: list[str] | None = None
             for feature_key, feature in obs_space.items():
                 if name not in feature_key.split(".") or not isinstance(feature, dict):
                     continue
-                order = feature.get("order")
-                if order is None:
-                    continue
-                bounds = str(order).split("-")
                 raw_names = feature.get("names")
                 labels = [str(n) for n in raw_names] if isinstance(raw_names, list) else []
-                slices.append((int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels))
+                order = feature.get("order")
+                if order is not None:
+                    bounds = str(order).split("-")
+                    slices.append((int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels))
+                elif feature_key.split(".")[-1] == name and len(labels) == len(vec):
+                    direct = labels
             slices.sort()
             covered = [i for start, end, _, _ in slices for i in range(start, end + 1)]
             if covered == list(range(len(vec))):
@@ -381,6 +385,8 @@ class ObservationStep(Step):
                         names=labels if len(labels) == len(values) else [],
                         values=values,
                     )
+            elif direct is not None:
+                state[name] = StateFeature(names=direct, values=vec)
             else:
                 state[name] = StateFeature(values=vec)
         return cls(tick=tick, images=images, state=state)
