@@ -112,23 +112,11 @@ def fetch_taskset_tasks(
 
 
 def _record_to_task(record: dict[str, Any]) -> Task:
-    """Map one platform export record onto the portable row shape.
-
-    The platform may store the scenario name env-prefixed (e.g. ``"e:solve"``).
-    Local task ids are always env-local (envs register scenarios unprefixed,
-    and ``:`` is rejected in scenario names), so the prefix is stripped here —
-    it only recovers the env name when the record omits ``env``.
-    ``task_upload_payload`` re-composes it on upload.
-    """
-    task_id = record.get("scenario") or ""
-    env_name = record.get("env")
-    if isinstance(task_id, str) and ":" in task_id:
-        prefix, task_id = task_id.split(":", 1)
-        env_name = env_name or prefix
+    """Map one platform export record onto the portable row shape."""
     return Task.model_validate(
         {
-            "env": env_name,
-            "id": task_id,
+            "env": record.get("env"),
+            "id": record.get("scenario") or "",
             "args": record.get("args") or {},
             "slug": record.get("name"),
             "validation": record.get("validation"),
@@ -155,10 +143,15 @@ def upload_taskset(
 
 
 def task_upload_payload(task: Task) -> dict[str, Any]:
+    """One upload item: env name + bare task id, the v6 wire identity.
+
+    The platform resolves `(env, task_id)` against the env's latest build
+    manifest and validates `args` against the task's schema.
+    """
     payload: dict[str, Any] = {
         "name": task.slug or task.default_slug(),
         "env": {"name": task.env},
-        "scenario": platform_task_id(task),
+        "task_id": task.id,
         "args": task.args,
     }
     if task.validation is not None:
@@ -166,11 +159,6 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
     if task.agent_config:
         payload["agent_config"] = task.agent_config
     return payload
-
-
-def platform_task_id(task: Task) -> str:
-    """The platform's composite wire key; local ``Task.id`` is always env-local."""
-    return f"{task.env}:{task.id}"
 
 
 def _task_signature(task: Task) -> str:
@@ -191,7 +179,6 @@ __all__ = [
     "SyncPlan",
     "diff",
     "fetch_taskset_tasks",
-    "platform_task_id",
     "resolve_taskset_id",
     "task_upload_payload",
     "upload_taskset",

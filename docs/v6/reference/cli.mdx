@@ -41,7 +41,9 @@ hud serve env.py -p 9000
 
 ### `hud deploy`
 
-Build **and** publish to HUD infra in one step.
+Build **and** publish to HUD infra in one step. The environment's name comes
+from the `Environment(...)` declaration in code; deploying the same name again
+rebuilds that environment.
 
 ```bash
 hud deploy
@@ -49,7 +51,6 @@ hud deploy
 
 | Option | Description |
 |--------|-------------|
-| `--name`, `-n` | Display name (defaults to directory). |
 | `--all`, `-a` | Deploy all environments in the directory. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
 | `--env-file` | Path to a `.env` file. |

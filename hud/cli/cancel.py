@@ -82,29 +82,22 @@ def cancel_command(
             hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
             result = await cancel_task(job_id, trace_id)  # type: ignore[arg-type]
 
-            status = result.get("status", "unknown")
-            if status in ("revoked", "terminated"):
-                hud_console.success(f"Task cancelled: {result.get('message', '')}")
-            elif status == "not_found":
-                hud_console.warning(f"Task not found: {result.get('message', '')}")
+            # Two-phase cancel: "accepted" = marked cancelling; "noop" = nothing
+            # to do (already terminal, or not found).
+            if result.get("status") == "accepted":
+                hud_console.success("Task cancellation requested.")
             else:
-                hud_console.info(f"Status: {status} - {result.get('message', '')}")
+                hud_console.warning("Task not found or already finished.")
 
         else:
             hud_console.info(f"Cancelling job {job_id}...")
             result = await cancel_job(job_id)  # type: ignore[arg-type]
 
-            total = result.get("total_found", 0)
             cancelled = result.get("cancelled", 0)
-
-            if total == 0:
-                hud_console.warning(f"No tasks found for job {job_id}")
+            if cancelled == 0:
+                hud_console.warning(f"No active tasks found for job {job_id}")
             else:
-                hud_console.success(
-                    f"Cancelled {cancelled}/{total} tasks "
-                    f"({result.get('running_terminated', 0)} running, "
-                    f"{result.get('queued_revoked', 0)} queued)"
-                )
+                hud_console.success(f"Cancellation requested for {cancelled} task(s).")
 
     try:
         asyncio.run(_cancel())

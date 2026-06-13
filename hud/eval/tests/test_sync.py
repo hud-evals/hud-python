@@ -43,20 +43,19 @@ def test_diff_classifies_create_update_unchanged_and_remote_only() -> None:
     assert "Create: 1" in plan.summary()
 
 
-def test_fetched_tasks_strip_env_prefix_to_runnable_local_ids(
+def test_fetched_tasks_map_canonical_export_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The platform may store scenario names env-prefixed ("e:solve"); locally a
-    # Task.id must stay env-local ("solve") so start_task resolves against the
-    # env's unprefixed scenario registry. The prefix recovers env when the
-    # record omits the env field.
+    # The CP export emits the canonical {env, scenario} pair (any legacy v5 env
+    # qualifier is stripped server-side), so the SDK maps the fields straight
+    # onto Task without re-deriving anything from the names.
     requested: dict[str, str] = {}
     payload = {
         "taskset_id": "ts-id",
         "name": "demo",
         "tasks": [
-            {"scenario": "e:solve", "env": "myenv", "name": "a", "args": {"n": 1}},
-            {"scenario": "e:solve", "name": "b"},
+            {"scenario": "solve", "env": "myenv", "name": "a", "args": {"n": 1}},
+            {"scenario": "fix_bug", "env": "other", "name": "b"},
         ],
     }
 
@@ -68,12 +67,12 @@ def test_fetched_tasks_strip_env_prefix_to_runnable_local_ids(
 
     name, tasks = fetch_taskset_tasks(PlatformClient("https://api.example", "token"), "ts-id")
 
-    assert requested == {"method": "GET", "url": "https://api.example/tasksets/ts-id/export"}
+    assert requested == {"method": "GET", "url": "https://api.example/v2/tasksets/ts-id/export"}
     assert name == "demo"
-    assert [(t.env, t.id) for t in tasks] == [("myenv", "solve"), ("e", "solve")]
-    # Round-trip: a fetched task diffs as unchanged against its local twin.
-    plan = diff(Taskset("d", [_row("a", 1)]), Taskset("d", [tasks[0]]))
-    assert [t.slug for t in plan.unchanged] == ["a"]
+    assert [(t.env, t.id, t.slug) for t in tasks] == [
+        ("myenv", "solve", "a"),
+        ("other", "fix_bug", "b"),
+    ]
 
 
 def test_resolve_taskset_id_looks_up_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,7 +86,10 @@ def test_resolve_taskset_id_looks_up_by_name(monkeypatch: pytest.MonkeyPatch) ->
 
     resolved = resolve_taskset_id(PlatformClient("https://api.example", "token"), "My Demo")
 
-    assert requested == {"method": "GET", "url": "https://api.example/tasksets/by-name/My%20Demo"}
+    assert requested == {
+        "method": "GET",
+        "url": "https://api.example/v2/tasksets/by-name/My%20Demo",
+    }
     assert resolved == ("ts-id", "demo")
 
 
@@ -112,7 +114,7 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result == {"ok": True}
     assert posted["method"] == "POST"
-    assert posted["url"] == "https://api.example/tasks/upload"
+    assert posted["url"] == "https://api.example/v2/tasks/upload"
     assert posted["api_key"] == "token"
     assert posted["json"] == {
         "taskset_name": "demo",
@@ -120,12 +122,16 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
             {
                 "name": "solve-one",
                 "env": {"name": "e"},
-                "scenario": "e:solve",
+                "task_id": "solve",
                 "args": {"n": 1},
             },
         ],
     }
 
 
-def test_task_upload_payload_prefixes_task_id_with_env_name() -> None:
-    assert task_upload_payload(Task(env="e", id="solve", args={"n": 1}))["scenario"] == "e:solve"
+def test_task_upload_payload_sends_env_and_bare_task_id() -> None:
+    payload = task_upload_payload(Task(env="e", id="solve", args={"n": 1}))
+
+    assert payload["env"] == {"name": "e"}
+    assert payload["task_id"] == "solve"
+    assert "scenario" not in payload

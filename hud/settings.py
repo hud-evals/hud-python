@@ -60,7 +60,7 @@ class Settings(BaseSettings):
 
     hud_api_url: str = Field(
         default="https://api.hud.ai",
-        description="Base URL for the HUD API server",
+        description="Base URL (origin) for the HUD API server",
         validation_alias="HUD_API_URL",
     )
 
