@@ -399,7 +399,7 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         await env.stop()
 
 
-async def _serve_until_terminated(env: Environment, port: int) -> None:
+async def _serve_until_terminated(env: Environment, host: str, port: int) -> None:
     main_task = asyncio.current_task()
     assert main_task is not None
     # SIGTERM (the spawn provider's teardown) cancels serving so env.stop()
@@ -407,7 +407,7 @@ async def _serve_until_terminated(env: Environment, port: int) -> None:
     with contextlib.suppress(NotImplementedError):
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
     with contextlib.suppress(asyncio.CancelledError):
-        await serve(env, port=port)
+        await serve(env, host, port)
 
 
 def main() -> None:
@@ -416,9 +416,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Serve a HUD environment from source.")
     parser.add_argument("path", help="A .py file or a directory defining an Environment.")
     parser.add_argument("--env", default=None, help="Environment name when several are defined.")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Interface to bind (0.0.0.0 inside containers)."
+    )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
-    asyncio.run(_serve_until_terminated(load_environment(args.path, name=args.env), args.port))
+    asyncio.run(
+        _serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
+    )
 
 
 if __name__ == "__main__":

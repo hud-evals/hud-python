@@ -32,7 +32,7 @@ from hud.agents.types import AgentStep
 from hud.types import Trace  # noqa: TC001 - used as return type
 
 from .job import Job
-from .rollout import rollout
+from .run import rollout
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
@@ -94,9 +94,11 @@ class Chat:
                 on each :meth:`send`.
             agent: The :class:`~hud.agents.base.Agent` driving every turn
                 (stateless per run, e.g. ``create_agent("claude-sonnet-4-5")``).
-            runtime: Placement provider for each turn's rollout (e.g.
-                ``LocalRuntime("env.py")``); defaults to HUD-hosted provisioning
-                by the task's env name.
+            runtime: The env placement each turn's rollout runs against — a
+                :class:`~hud.eval.runtime.Provider` such as
+                ``LocalRuntime("env.py")`` or ``Runtime("tcp://...")``. Chat is
+                interactive and local: it drives the agent loop in this process,
+                so hosted placement does not apply.
         """
         self._task = task
         self._agent = agent
@@ -128,6 +130,11 @@ class Chat:
         task = self._task.model_copy(
             update={"args": {**self._task.args, "messages": list(self.messages)}},
         )
+        if self._runtime is None:
+            raise RuntimeError(
+                "Chat needs a runtime to converse against — pass an env placement, "
+                'e.g. runtime=Runtime("tcp://...") or runtime=LocalRuntime("env.py").'
+            )
         if self.job is None:  # one job spans the whole conversation
             self.job = await Job.start(self._task.id)
         run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)

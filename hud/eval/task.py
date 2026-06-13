@@ -11,7 +11,7 @@ The model *is* the row: field names are the wire keys, so plain pydantic
 (``Task.model_validate(entry)`` / ``task.model_dump()``) is the whole codec —
 there is no bespoke serialization layer.
 
-Placement is ``runtime: Provider | None`` (see :mod:`.runtime`).
+Placement is ``runtime: Provider | HUDRuntime | None`` (see :mod:`.runtime`).
 Execution lives entirely in :mod:`.rollout` and scheduling in
 :mod:`.taskset` — :meth:`Task.run` is the single-task form of
 ``Taskset.run``, so the row is always an argument to the engine, never a
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
 
     from .job import Job
-    from .runtime import Provider
+    from .runtime import HUDRuntime, Provider
 
 
 class Task(BaseModel):
@@ -64,7 +64,7 @@ class Task(BaseModel):
         self,
         agent: Agent,
         *,
-        runtime: Provider | None = None,
+        runtime: Provider | HUDRuntime | None = None,
         group: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
@@ -74,8 +74,8 @@ class Task(BaseModel):
         Identical scheduling semantics — one HUD job as the receipt (or an
         open ``job`` from :meth:`Job.start` to accumulate into), ``group``
         repeats sharing a group_id, ``max_concurrent`` capping parallelism —
-        over a taskset of one. ``runtime`` is the placement provider; left
-        unset it defaults to HUD-hosted provisioning by ``env`` name.
+        over a taskset of one. ``runtime`` is the placement; left unset it
+        defaults to HUD-hosted provisioning by ``env`` name.
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 

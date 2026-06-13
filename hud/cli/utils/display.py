@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from hud.eval.rollout import Run
+    from hud.eval.run import Run
 
 _SUCCESS_THRESHOLD = 0.7
 

@@ -13,9 +13,10 @@ agents see eval only through the ``Run`` handle they are driven with. (Sole
 exception: calling an ``@env.task`` declaration constructs the eval ``Task``
 row.)
 
-Placement is a provider passed at execution time (see :mod:`.runtime`):
-``LocalRuntime`` a local source, ``DockerRuntime`` an image, ``HUDRuntime`` a
-HUD-hosted substrate, or attach to a ``Runtime(url)``::
+Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a
+local source, ``DockerRuntime`` an image, ``Runtime(url)`` an env served
+elsewhere (all :class:`Provider`s driven here), or ``HUDRuntime`` to run the
+rollout on a HUD-leased box with the agent co-located with the env::
 
     from hud.eval import LocalRuntime, Taskset
 
@@ -31,7 +32,7 @@ from hud.types import Trace
 
 from .chat import Chat
 from .job import Job
-from .rollout import Grade, Run, rollout
+from .run import Grade, Run, rollout
 from .runtime import DockerRuntime, HUDRuntime, LocalRuntime, Provider, Runtime
 from .sync import SyncPlan
 from .task import Task

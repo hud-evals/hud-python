@@ -149,7 +149,7 @@ class AgentTool(BaseTool):
     async def __call__(self, **kwargs: Any) -> ToolResult:
         from fastmcp.tools import ToolResult
 
-        from hud.eval.rollout import rollout
+        from hud.eval.run import rollout
         from hud.eval.runtime import _local
 
         visible = self._param_schema.get("properties", {})
