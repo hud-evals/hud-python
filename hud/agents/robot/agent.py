@@ -83,8 +83,8 @@ class RobotAgent(Agent):
 
         Stores the prompt, resets the model and adapter. Mostly internal — the base
         always calls it. Override (calling ``super()`` first) only when per-episode
-        env-contract reading or extra setup is needed (e.g. ``RealtimeRobotAgent``
-        reads inference mode/threshold from the contract here).
+        env-contract reading or extra setup is needed (e.g. a realtime chunk-streaming
+        agent reads inference mode/threshold from the contract here).
         """
         self._prompt = prompt
         self._active_chunk = deque()

@@ -4,9 +4,8 @@ This module defines the ``robot`` wire format (msgpack + raw numpy array buffers
 :class:`RobotClient`, the agent-side capability client that dials a robot env and exchanges
 observations/actions over it.
 
-The *env-side* counterpart — the server bridges that own the simulator
-(:class:`~hud.environment.robot.bridge.RobotBridge` /
-:class:`~hud.environment.robot.bridge.RealtimeRobotBridge`) — lives in
+The *env-side* counterpart — the server bridge that owns the simulator
+(:class:`~hud.environment.robot.bridge.RobotBridge`) — lives in
 :mod:`hud.environment.robot`, and reuses the wire codec defined here.
 """
 

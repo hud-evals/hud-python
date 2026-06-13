@@ -1,13 +1,9 @@
-"""Env-side ``robot`` bridges: base classes users subclass to wrap their sim.
+"""Env-side ``robot`` bridge: the base class users subclass to wrap their sim.
 
 The *server* side of the ``robot`` protocol (agent-side client:
 :class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined
-there. Subclass one of these and implement ``step`` / ``get_observation`` (plus
-``no_op_action`` for realtime) to serve a sim over WebSocket:
-
-- :class:`RobotBridge` — synchronous: steps the sim once per received action.
-- :class:`RealtimeRobotBridge` — free-running wall-clock loop that pops from an
-  injected :class:`~...action_provider.ActionProvider` and accepts streamed chunks.
+there. Subclass :class:`RobotBridge` and implement ``step`` / ``get_observation`` to
+serve a sim over WebSocket — it steps the sim once per received action.
 
 An injected :class:`~.sim_runner.SimRunner` owns *which thread runs the
 (thread-affine) sim*, so subclasses stay thread-naive.
@@ -15,9 +11,7 @@ An injected :class:`~.sim_runner.SimRunner` owns *which thread runs the
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
@@ -29,14 +23,10 @@ import websockets.exceptions
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
 from hud.capabilities.robot import _decode_array, _encode_array, _packb, _unpackb
 
-from .sim_runner import InlineSimRunner, SimRunner, ThreadSimRunner
+from .sim_runner import InlineSimRunner, SimRunner
 
 if TYPE_CHECKING:
-    from .action_provider import ActionProvider
     from .data_saving import LeRobotRecorder
-
-
-# ─── synchronous env-side bridge ─────────────────────────────────────────────
 
 
 class RobotBridge(ABC):
@@ -213,200 +203,4 @@ class RobotBridge(ABC):
             await self._client.send(_packb(msg))
 
 
-# ─── realtime (free-running) env-side bridge ─────────────────────────────────
-
-
-class RealtimeRobotBridge(RobotBridge):
-    """A ``robot`` bridge whose env advances on its own wall clock.
-
-    Unlike :class:`RobotBridge` (which steps once per received action), a realtime
-    bridge runs a control-rate clock loop that is fully decoupled from inference:
-    every tick it pops the next action from an injected :class:`ActionProvider`
-    (the env-side action queue), steps the sim, and pushes an observation enriched
-    with ``meta`` (``obs_index`` / ``queue_remaining`` / ``delay`` / ``unexecuted_chunk``).
-
-    The agent is a *client* that decides when to infer (from ``queue_remaining``)
-    and replies with whole chunks via :meth:`RobotClient.send_chunk`; the provider
-    merges them according to the active inference mode. The sim is wall-clock driven
-    and never "freezes" during inference (it HOLDs via :meth:`no_op_action` on
-    underrun in every mode, ``sync`` included — there ``sync``'s blocking cost simply
-    shows up as those HOLD underruns since it only re-infers once the queue empties).
-    The one exception is the legacy ``sync_freeze`` mode, whose provider returns
-    ``None`` on underrun so the clock loop skips the step and the sim pauses until a
-    chunk arrives.
-
-    Subclasses still implement :meth:`step` / :meth:`get_observation` and must add
-    :meth:`no_op_action`. The queueing/prefix/delay machinery is owned entirely by
-    the provider, so the env stays simple and model-agnostic.
-    """
-
-    def __init__(
-        self,
-        *,
-        provider: ActionProvider,
-        control_hz: float,
-        host: str = "localhost",
-        port: int = 9091,
-        recorder: LeRobotRecorder | None = None,
-    ) -> None:
-        # All sim/GL work runs on ONE dedicated worker thread (ThreadSimRunner): it keeps
-        # the event loop free to stream observations / receive chunks (so a render-heavy
-        # step never throttles I/O), while guaranteeing the sim's GL context stays
-        # thread-affine (mujoco/EGL contexts are bound to the thread that created them).
-        super().__init__(
-            host=host, port=port, recorder=recorder,
-            sim_runner=ThreadSimRunner(thread_name_prefix="realtime-sim"),
-        )
-        self._provider = provider
-        self._control_period = 1.0 / float(control_hz)
-        self._send_task: asyncio.Task | None = None
-        # Lightweight (scalar-only) realtime meta for the most recent observation,
-        # attached to each recorded frame's ``info``.
-        self._last_meta: dict[str, Any] = {}
-
-    async def run_on_sim_thread(self, fn: Any, *args: Any) -> Any:
-        """Run a blocking sim/GL call on the dedicated sim thread (await the result).
-
-        Subclasses MUST funnel every operation that touches the simulator/renderer
-        (env creation, reset, step, close) through this so they all share one thread.
-        Thin wrapper over the bridge's :class:`~.sim_runner.SimRunner`.
-        """
-        return await self._sim_runner.call(fn, *args)
-
-    async def stop(self) -> None:
-        await super().stop()
-        self._sim_runner.shutdown()
-
-    @abstractmethod
-    def no_op_action(self) -> np.ndarray:
-        """A safe HOLD action used when the action queue underruns (async/RTC modes)."""
-
-    async def _reset(self, **kwargs: Any) -> str:
-        # Realtime: the clock loop emits frames, so re-arm the provider instead of sending.
-        self.total_reward = 0.0
-        self.success = False
-        self.terminated = False
-        self.task_description = await self.reset(**kwargs)
-        self._provider.reset()
-        return self.task_description
-
-    async def _handle_client(self, ws: Any) -> None:
-        # A later connection replaces the previous one (only one agent at a time).
-        self._client = ws
-        self._provider.reset()
-        clock = asyncio.create_task(self._clock_loop())
-        try:
-            async for raw in ws:
-                msg = _unpackb(raw)
-                if "chunk" in msg:
-                    self._provider.submit_chunk(
-                        _decode_array(msg["chunk"]),
-                        obs_index=msg.get("obs_index"),
-                        delay_used=msg.get("delay_used"),
-                    )
-                # legacy single-action messages are ignored on the realtime path
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        finally:
-            clock.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await clock
-            if self._client is ws:
-                self._client = None
-
-    async def _clock_loop(self) -> None:
-        """Advance the sim at ``control_hz``, independent of agent inference."""
-        try:
-            # Emit the post-reset observation first so the client has an initial frame.
-            await self._send_observation_rt()
-            while self._client is not None:
-                t0 = time.perf_counter()
-                if not self.terminated:
-                    # Wall-clock sim always advances (models the real world): on
-                    # underrun the provider returns a HOLD (no-op), never stalling.
-                    # Run the (often render-heavy) step on the sim thread so the loop
-                    # stays free to stream obs / receive chunks.
-                    # Exception: ``sync_freeze`` returns ``None`` on underrun to pause
-                    # the clock (legacy) — skip the step so the sim freezes till a chunk lands.
-                    action = self._provider.next_action(self.no_op_action)
-                    if action is not None:
-                        obs_before = self._last_obs_data  # obs the agent acted on
-                        meta_before = self._last_meta
-                        await self.run_on_sim_thread(self.step, action)
-                        if self._recorder is not None and obs_before is not None:
-                            # Record every executed tick (HOLDs included) so the
-                            # trajectory stays dense at the control rate.
-                            self._recorder.record_frame(
-                                obs_before, action, self.last_reward, self.terminated,
-                                info=meta_before,
-                            )
-                await self._send_observation_rt()
-                if self.terminated:
-                    break
-                await asyncio.sleep(max(0.0, self._control_period - (time.perf_counter() - t0)))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # surface otherwise-silent task failures
-            import traceback
-
-            print(f"[env] clock loop crashed: {exc!r}", flush=True)
-            traceback.print_exc()
-            raise
-
-    async def _send_observation_rt(self) -> None:
-        """Push the current observation plus the provider's realtime ``meta`` block.
-
-        The send is best-effort and time-bounded: a slow client must never stall
-        the control clock (realtime invariant), and a stale dropped observation is
-        harmless since the agent only ever needs the latest frame.
-        """
-        if self._client is None:
-            return
-        out = self.get_observation()
-        if out is None:
-            return
-        data, terminated = out
-        meta = self._provider.obs_meta()
-        # Stash the latest obs + scalar meta so the next executed action can be
-        # paired with it for recording (drop the heavy ``unexecuted_chunk`` array).
-        self._last_obs_data = data
-        self._last_terminated = bool(terminated)
-        self._last_meta = {
-            "obs_index": int(meta["obs_index"]),
-            "queue_remaining": int(meta["queue_remaining"]),
-            "delay": int(meta["delay"]),
-            "active_chunk_obs_index": int(meta.get("active_chunk_obs_index", -1)),
-        }
-        unexecuted_chunk = meta.get("unexecuted_chunk")
-        msg = {
-            "terminated": bool(terminated),
-            "data": {name: _encode_array(arr) for name, arr in data.items()},
-            "meta": {
-                "obs_index": int(meta["obs_index"]),
-                "queue_remaining": int(meta["queue_remaining"]),
-                "delay": int(meta["delay"]),
-                "active_chunk_obs_index": int(meta.get("active_chunk_obs_index", -1)),
-                "unexecuted_chunk": _encode_array(unexecuted_chunk) if unexecuted_chunk is not None else None,
-            },
-        }
-        payload = _packb(msg)
-        client = self._client
-        if terminated:
-            # Ensure the client reliably sees the terminal frame.
-            with contextlib.suppress(websockets.exceptions.ConnectionClosed):
-                await client.send(payload)
-            return
-        # Single-flight, non-blocking: if the previous obs is still being flushed
-        # (a busy/slow client), drop this frame rather than stall the control clock.
-        # The agent only ever needs the latest observation.
-        if self._send_task is not None and not self._send_task.done():
-            return
-
-        async def _send() -> None:
-            with contextlib.suppress(websockets.exceptions.ConnectionClosed):
-                await client.send(payload)
-
-        self._send_task = asyncio.create_task(_send())
-
-
-__all__ = ["RealtimeRobotBridge", "RobotBridge"]
+__all__ = ["RobotBridge"]

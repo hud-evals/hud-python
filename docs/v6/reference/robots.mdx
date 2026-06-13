@@ -30,7 +30,7 @@ Integrating a policy against a robot environment means answering three questions
 
 **The contract** — the one artifact both sides share: a self-describing JSON schema of the embodiment's observation and action spaces, carried in the capability's manifest params. The agent wires observations to policy inputs purely from the manifest; there is no shared config.
 
-Each side has a **realtime** variant (`RealtimeRobotBridge` / `RealtimeRobotAgent`) for when the sim clock must not wait on inference — the env advances on its own wall clock while the agent streams action chunks asynchronously.
+Each side has a **realtime** variant (`RealtimeRobotBridge` / `RealtimeRobotAgent`) for when the sim clock must not wait on inference — the env advances on its own wall clock while the agent streams action chunks asynchronously. These live in the experimental scaffolding (`demos/experimental`, outside the published SDK) so they can iterate independently.
 
 The shape of the work follows from the split: a bridge is written **once per environment**, a model + adapter **once per policy**, and the contract tells you — before you run anything — whether a given pairing wires up. That's the path from "new checkpoint" to "scored episodes on a benchmark" in an afternoon.
 
@@ -140,9 +140,9 @@ The agent reads it back via `RobotClient.spaces()`, which splits features into a
 
 ## Realtime control
 
-The default loop is lockstep — the sim waits for each action. `RealtimeRobotBridge` decouples the sim clock from inference: it advances at `control_hz` on its own wall clock, popping actions from an injected **`ActionProvider`** while the agent streams whole action chunks asynchronously. Providers implement the merge strategy — `sync` (blocking baseline), `naive_async` (drop-and-replace), `weighted_async` (blended overlap), and `rtc` (real-time chunking with an execution horizon) — via `make_action_provider(mode, ...)`. On underrun the sim HOLDs (`no_op_action`) rather than freezing, because the real world doesn't pause for inference.
+The default loop is lockstep — the sim waits for each action. The realtime path lives in the experimental scaffolding (`demos/experimental`, outside the published SDK), built on top of the SDK's `RobotBridge` / `RobotAgent`. `RealtimeRobotBridge` (`experimental.env`) decouples the sim clock from inference: it advances at `control_hz` on its own wall clock, popping actions from an injected **`ActionProvider`** while the agent streams whole action chunks asynchronously. Providers implement the merge strategy — `sync` (blocking baseline), `naive_async` (drop-and-replace), `weighted_async` (blended overlap), and `rtc` (real-time chunking with an execution horizon) — via `make_action_provider(mode, ...)`. On underrun the sim HOLDs (`no_op_action`) rather than freezing, because the real world doesn't pause for inference.
 
-On the agent side, **`RealtimeRobotAgent`** is the chunk-streaming counterpart: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
+On the agent side, **`RealtimeRobotAgent`** (`experimental.agent`) is the chunk-streaming counterpart: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
 
 **`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default) or `ThreadSimRunner` (dedicated worker — render-heavy sims). Subclass it for exotic topologies (e.g. a sim that owns main with the server on a worker).
 
@@ -159,11 +159,13 @@ Both are zero-config:
 |--------|-------|------|
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Declare the `robot/0.1` capability |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
-| `RobotBridge` / `RealtimeRobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
+| `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
+| `RealtimeRobotBridge` | `experimental.env` (`demos/experimental`) | Free-running realtime env-side bridge |
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + default recorder |
-| `ActionProvider`, `make_action_provider` | `hud.environment.robot` | Realtime chunk-merge strategies |
+| `ActionProvider`, `make_action_provider` | `experimental.env` (`demos/experimental`) | Realtime chunk-merge strategies |
 | `SimRunner` (`Inline`/`Thread`) | `hud.environment.robot` | Which thread runs the sim |
-| `RobotAgent` / `RealtimeRobotAgent` | `hud.agents.robot` | The episode-loop harness |
+| `RobotAgent` | `hud.agents.robot` | The episode-loop harness |
+| `RealtimeRobotAgent` | `experimental.agent` (`demos/experimental`) | Chunk-streaming realtime agent harness |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 
 ## See also
