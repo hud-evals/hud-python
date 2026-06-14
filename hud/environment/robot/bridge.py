@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING, Any
 import websockets
 import websockets.exceptions
 
-# The robot wire codec is defined alongside the agent-side client; reuse it so both
+# The openpi/0 wire codec is defined alongside the agent-side client; reuse it so both
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
-from hud.capabilities.robot import _decode_array, _encode_array, _packb, _unpackb
+from hud.capabilities.robot import _packb, _unpackb
 
 from .sim_runner import InlineSimRunner, SimRunner
 
@@ -59,6 +59,8 @@ class RobotBridge(ABC):
         self._port = port
         self._client: Any = None  # robot serves a single agent at a time
         self._server: Any = None
+        # Connect-time metadata frame (sent first on each connection); subclasses may set it.
+        self.metadata: dict[str, Any] = {}
         # Which thread runs the (thread-affine) sim. Default InlineSimRunner (loop
         # thread); inject a ThreadSimRunner (or custom) when render-heavy or thread-bound.
         self._sim_runner: SimRunner = sim_runner or InlineSimRunner()
@@ -138,13 +140,21 @@ class RobotBridge(ABC):
         # A later connection replaces the previous one (only one agent at a time).
         self._client = ws
         try:
+            await ws.send(_packb(self.metadata))  # connect-time metadata frame
             await self._send_observation()  # current obs on connect (if ready)
             async for raw in ws:
-                action = _decode_array(_unpackb(raw)["data"])
+                action = _unpackb(raw)["actions"]  # codec already returns an ndarray
                 await self._sim_runner.call(self.step, action)  # on the sim thread
                 await self._send_observation()
         except websockets.exceptions.ConnectionClosed:
             pass
+        except Exception:
+            # Surface failures as a string frame (a traceback) instead of a silent close.
+            import traceback
+
+            with contextlib.suppress(Exception):
+                await ws.send(traceback.format_exc())
+            raise
         finally:
             if self._client is ws:
                 self._client = None
@@ -157,10 +167,8 @@ class RobotBridge(ABC):
         if out is None:
             return
         data, terminated = out
-        msg = {
-            "terminated": bool(terminated),
-            "data": {name: _encode_array(arr) for name, arr in data.items()},
-        }
+        # openpi-style flat obs dict: array fields at the top level, terminated alongside.
+        msg = {**data, "terminated": bool(terminated)}
         with contextlib.suppress(websockets.exceptions.ConnectionClosed):
             await self._client.send(_packb(msg))
 

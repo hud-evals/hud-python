@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from .adapter import Adapter
     from .model import Model
 
-ROBOT_PROTOCOL = "robot/0.1"
+ROBOT_PROTOCOL = "openpi/0"
 
 
 class RobotAgent(Agent):
@@ -46,7 +46,7 @@ class RobotAgent(Agent):
 
     **Override if needed:**
 
-    - :attr:`robot_protocol` — class attr if not ``robot/0.1``
+    - :attr:`robot_protocol` — class attr if not ``openpi/0``
     - :meth:`on_episode_start` — mostly internal; override (with ``super()``) to
       add per-episode setup (e.g. reading the env contract).
     - :meth:`should_stop` — custom early-exit condition beyond ``obs["terminated"]``
