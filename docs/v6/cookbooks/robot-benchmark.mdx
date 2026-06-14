@@ -13,11 +13,10 @@ This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation ben
 
 ## The environment
 
-The env module is declare-only — a sim **bridge**, an **endpoint**, and two-yield tasks (this is `demos/benchmarks/envs/libero/env.py`, abbreviated):
+The env module is declare-only — a sim **bridge**, an **endpoint**, and two-yield templates (this is `demos/benchmarks/envs/libero/env.py`, abbreviated):
 
 ```python env.py
 from hud import Environment
-from hud.capabilities import Capability
 from hud.environment.robot import RobotEndpoint
 from libero_sim_bridge import LiberoSimBridge
 
@@ -27,13 +26,13 @@ endpoint = RobotEndpoint(LiberoSimBridge(use_delta=True))  # drive the bridge th
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(Capability.robot(name="robot", url=await endpoint.url(), contract=CONTRACT))
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
 
 @env.shutdown
 async def _down():
     await endpoint.stop()
 
-@env.task(id="libero_spatial")
+@env.template(id="libero_spatial")
 async def libero_spatial(libero_task_id: int, init_state_id: int = 0):
     prompt = await endpoint.reset(task_suite="libero_spatial",
                                   task_id=libero_task_id, init_state_id=init_state_id)

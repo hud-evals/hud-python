@@ -56,11 +56,10 @@ class MySimBridge(RobotBridge):
 
 Observation dict keys must equal the contract's feature leaf-names. The bridge binds an **ephemeral loopback port** by default — its concrete address is published at serve time, and clients reach it through the control channel's [capability tunnel](/v6/reference/capabilities#bindings-are-always-reachable), so a robot container still publishes only one port.
 
-The **endpoint** wraps the bridge for tasks, so a task is exactly two yields:
+The **endpoint** wraps the bridge for episode control; each **template** is exactly two yields:
 
 ```python
 from hud import Environment
-from hud.capabilities import Capability
 from hud.environment.robot import RobotEndpoint
 
 env = Environment(name="my-sim")
@@ -69,13 +68,13 @@ endpoint = RobotEndpoint(MySimBridge())  # the env drives the bridge only throug
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(Capability.robot(name="robot", url=await endpoint.url(), contract=CONTRACT))
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
 
 @env.shutdown
 async def _down():
     await endpoint.stop()
 
-@env.task()
+@env.template()
 async def pick_and_place(task_id: str, seed: int = 0):
     prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
     yield await endpoint.result()  # {"score", "success", "total_reward"}
@@ -153,7 +152,8 @@ Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per st
 
 | Symbol | Where | Role |
 |--------|-------|------|
-| `Capability.robot(name, url, contract)` | `hud.capabilities` | Declare the `robot/0.1` capability |
+| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `robot/0.1` capability after `start()` |
+| `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
 | `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
 | `RealtimeRobotBridge` | `experimental.env` (`demos/experimental`) | Free-running realtime env-side bridge |

@@ -82,9 +82,7 @@ class LeRobotAdapter(Adapter):
             "task": prompt,
         }
         for model_key, env_key in zip(self.model_image_keys, self.image_keys, strict=False):
-            batch[model_key] = (
-                torch_mod.from_numpy(data[env_key]).permute(2, 0, 1).float() / 255.0
-            )
+            batch[model_key] = torch_mod.from_numpy(data[env_key]).permute(2, 0, 1).float() / 255.0
         return batch
 
     def adapt_action(self, action: ActionArray, obs: dict[str, Any]) -> ActionArray:

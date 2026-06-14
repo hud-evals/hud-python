@@ -12,7 +12,7 @@ The base calls the adapter and model at the right moments::
 ``model.ainfer`` always returns a ``[T, A]`` chunk; :meth:`RobotAgent.select_action`
 executes it open-loop, re-inferring only once the active chunk is spent.
 
-Most policies use :class:`~hud.agents.robot.adapter.DefaultAdapter`; a policy whose
+Most policies use :class:`~hud.agents.robot.adapter.LeRobotAdapter`; a policy whose
 spaces match the env natively can set ``adapter = None`` (raw pass-through).
 """
 

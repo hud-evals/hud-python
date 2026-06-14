@@ -17,9 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from hud.capabilities import Capability
 
 from .legacy import LegacyEnvMixin
+from .workspace import Workspace
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+    from pathlib import Path
 
     from hud.eval import Task as EvalTask
 
@@ -261,6 +263,32 @@ class Environment(LegacyEnvMixin):
         if cap is None:
             raise KeyError(f"unknown capability: {name!r}")
         return cap
+
+    def workspace(
+        self,
+        root: Path | str,
+        *,
+        name: str = "shell",
+        **kwargs: Any,
+    ) -> Workspace:
+        """Attach a :class:`Workspace` serving ``name`` over ``ssh/2``.
+
+        Registers the start → publish → stop lifecycle on this env's hooks;
+        nothing touches the filesystem until the env actually serves. Extra
+        kwargs go to :class:`Workspace` (``network=``, ``env=``, ...).
+        """
+        ws = Workspace(root, **kwargs)
+
+        @self.initialize
+        async def _up() -> None:
+            await ws.start()
+            self.add_capability(ws.capability(name))
+
+        @self.shutdown
+        async def _down() -> None:
+            await ws.stop()
+
+        return ws
 
     # ─── substrate-run daemon lifecycle ──────────────────────────────────
 

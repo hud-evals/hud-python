@@ -39,8 +39,8 @@ class Capability:
     what the manifest publishes and what a :class:`CapabilityClient` dials.
     A service the *environment* brings up itself publishes one of these at
     serve time: start the daemon in an ``@env.initialize`` hook and call
-    ``env.add_capability(helper.capability())`` (e.g. ``Workspace`` for ``ssh``
-    or ``RobotEndpoint`` for ``robot``).
+    ``env.add_capability(...)`` (sugar for the common case:
+    ``env.workspace(root)``).
     """
 
     name: str
