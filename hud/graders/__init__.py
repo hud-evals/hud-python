@@ -44,6 +44,7 @@ __all__ = [
     "Grader",
     "LLMJudgeGrader",
     "SubScore",
+    "_combine_subscores",
     "combine",
     "combine_all",
     "combine_any",

@@ -28,8 +28,9 @@ from hud.agents.types import InferenceStep, ObservationStep
 from hud.capabilities.robot import RobotClient
 
 if TYPE_CHECKING:
-    from hud.eval.rollout import Run
+    from hud.eval.run import Run
 
+    from ._types import ActionArray
     from .adapter import Adapter
     from .model import Model
 
@@ -68,11 +69,10 @@ class RobotAgent(Agent):
     _env_action_space: dict[str, Any]
     _env_obs_space: dict[str, Any]
     #: Unexecuted tail of the current policy chunk; popped one action per step.
-    _active_chunk: deque[np.ndarray]
+    _active_chunk: deque[ActionArray]
     #: The live run + control-tick index, so ``select_action`` can record its own InferenceStep.
     _run: Run
     _tick: int
-
 
     def setup_robot(self, client: RobotClient) -> None:
         """Discover the env's action/observation layout and bind the adapter to it."""
@@ -81,12 +81,9 @@ class RobotAgent(Agent):
             self.adapter.bind(self._env_action_space, self._env_obs_space)
 
     def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
-        """Called once before the observe/act loop begins.
+        """Store the prompt and reset the model and adapter before the act loop.
 
-        Stores the prompt, resets the model and adapter. Mostly internal — the base
-        always calls it. Override (calling ``super()`` first) only when per-episode
-        env-contract reading or extra setup is needed (e.g. a realtime chunk-streaming
-        agent reads inference mode/threshold from the contract here).
+        Override (calling ``super()`` first) only for extra per-episode setup.
         """
         self._prompt = prompt
         self._active_chunk = deque()
@@ -101,8 +98,10 @@ class RobotAgent(Agent):
         """Return True to break out of the step loop (before ``select_action``)."""
         return bool(obs.get("terminated"))
 
-    async def select_action(self, obs: dict[str, Any]) -> np.ndarray:
-        """pop the next model action — re-inferring a fresh ``[T, A]`` chunk via ``model.ainfer`` once the active one is spent (a length-1 chunk just re-infers every step) — and adapt it to env space; override only for a wholly different inference path"""
+    async def select_action(self, obs: dict[str, Any]) -> ActionArray:
+        """Pop the next action, re-inferring a ``[T, A]`` chunk once the active one is
+        spent, then adapt it to env space. Override only for a different inference path.
+        """
         if self.model is None:
             raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         if not self._active_chunk:
@@ -119,8 +118,7 @@ class RobotAgent(Agent):
         return raw if self.adapter is None else self.adapter.adapt_action(raw, obs)
 
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
-        if max_steps is None:
-            max_steps = getattr(self, "max_steps", 520)
+        step_limit = max_steps if max_steps is not None else int(getattr(self, "max_steps", 520))
         cap = run.client.binding(self.robot_protocol)
         client = await RobotClient.connect(cap)
         try:
@@ -131,15 +129,13 @@ class RobotAgent(Agent):
                     f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}"
                 )
             self.on_episode_start(run, client, prompt=prompt)
-            print(f"[agent] episode started: {prompt!r} (max_steps={max_steps})", flush=True)
+            print(f"[agent] episode started: {prompt!r} (max_steps={step_limit})", flush=True)
 
-            for step in range(max_steps):
+            for step in range(step_limit):
                 obs = await client.get_observation()
-                run.record(
-                    ObservationStep.from_obs(obs, tick=step, obs_space=self._env_obs_space)
-                )
+                run.record(ObservationStep.from_obs(obs, tick=step, obs_space=self._env_obs_space))
 
-                if self.should_stop(obs, step=step, max_steps=max_steps):
+                if self.should_stop(obs, step=step, max_steps=step_limit):
                     print(f"[agent] env reported terminated at step {step}", flush=True)
                     break
 
@@ -148,9 +144,9 @@ class RobotAgent(Agent):
 
                 if self.log_every and step % self.log_every == 0:
                     preview = np.array2string(action, precision=3, suppress_small=True)
-                    print(f"[agent] step {step}/{max_steps} action={preview}", flush=True)
+                    print(f"[agent] step {step}/{step_limit} action={preview}", flush=True)
             else:
-                print(f"[agent] reached max_steps={max_steps}", flush=True)
+                print(f"[agent] reached max_steps={step_limit}", flush=True)
 
             run.trace.status = "completed"
             run.trace.content = "done"

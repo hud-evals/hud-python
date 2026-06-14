@@ -7,9 +7,12 @@ Use :class:`LeRobotAdapter` for LeRobot models; subclass for custom wiring;
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ._types import ActionArray
 
 # ─── the abstraction ──────────────────────────────────────────────────────────
 
@@ -17,14 +20,10 @@ import numpy as np
 class Adapter:
     """Translate between an env's observation/action spaces and a policy's.
 
-    Lifecycle (driven by :class:`~hud.agents.robot.agent.RobotAgent`):
-
-    - :meth:`bind` once after connect.
-    - :meth:`reset` once per episode (for stateful adapters - e.g. a delta to absolute needs a starting reference to give absolute vals)
-    - :meth:`adapt_observation` / :meth:`adapt_action` every step.
-
-    Construct with the policy's image-slot names (``model_image_keys``); everything
-    env-side is learned in :meth:`bind`.
+    Driven by :class:`~hud.agents.robot.agent.RobotAgent`: :meth:`bind` once after
+    connect, :meth:`reset` once per episode, then :meth:`adapt_observation` /
+    :meth:`adapt_action` each step. Construct with the policy's image-slot names;
+    everything env-side is learned in :meth:`bind`.
     """
 
     def __init__(self, *, model_image_keys: list[str] | None = None) -> None:
@@ -37,10 +36,10 @@ class Adapter:
         self.state_key: str | None = None
 
     def bind(self, action_space: dict[str, Any], observation_space: dict[str, Any]) -> None:
-        """as in "bind model to env" - learn the env's layout from the contract (``client.spaces()``).
+        """Learn the env's layout from the contract (``client.spaces()``).
 
-        Splits the observation features into image keys vs the single state key, and
-        stores the action feature. Override to derive extra env-side parameters.
+        Splits observation features into image keys vs the single state key and stores
+        the action feature. Override to derive extra env-side parameters.
         """
         # TODO CLEAN
         self.action_space = action_space or {}
@@ -57,10 +56,10 @@ class Adapter:
         """Override only if the adapter is stateful across steps within an episode."""
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> Any:
-        """Translate an env observation + task prompt into the policy's input. Must implement - otherwise no point in using adapter"""
+        """Translate an env observation + task prompt into the policy's input."""
         raise NotImplementedError
 
-    def adapt_action(self, action: np.ndarray, obs: dict[str, Any]) -> np.ndarray:
+    def adapt_action(self, action: ActionArray, obs: dict[str, Any]) -> ActionArray:
         """Translate a policy action into the env's action space (default identity)."""
         return action
 
@@ -69,24 +68,26 @@ class LeRobotAdapter(Adapter):
     """Vanilla LeRobot adapter for a standard image/state env.
 
     Maps env cameras onto the model's image slots in order, converts HWC ``uint8`` to
-    CHW ``float`` in ``[0, 1]``, and passes state + prompt through. Actions are
-    identity today (postprocess already returns env-space actions). Subclass
-    :class:`Adapter` for resize/pad, action reshaping, etc.
+    CHW ``float`` in ``[0, 1]``, and passes state + prompt through. Actions are identity
+    (postprocess already returns env-space actions); subclass for resize/pad/reshaping.
     """
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
+        torch_mod: Any = torch
         data = obs["data"]
         batch: dict[str, Any] = {
-            "observation.state": torch.from_numpy(data[self.state_key].astype(np.float32)),
+            "observation.state": torch_mod.from_numpy(data[self.state_key].astype(np.float32)),
             "task": prompt,
         }
         for model_key, env_key in zip(self.model_image_keys, self.image_keys, strict=False):
-            batch[model_key] = torch.from_numpy(data[env_key]).permute(2, 0, 1).float() / 255.0
+            batch[model_key] = (
+                torch_mod.from_numpy(data[env_key]).permute(2, 0, 1).float() / 255.0
+            )
         return batch
 
-    def adapt_action(self, action: np.ndarray, obs: dict[str, Any]) -> np.ndarray:
+    def adapt_action(self, action: ActionArray, obs: dict[str, Any]) -> ActionArray:
         return action
 
 

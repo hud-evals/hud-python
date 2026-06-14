@@ -1,14 +1,14 @@
 """Env-run daemons publish capabilities at serve time, never at declaration.
 
-``env.workspace(root)`` (and, generally, ``env.add_capability(...)`` from an
-``@env.initialize`` hook) defers everything — keys, sockets, the directory —
-until the env actually serves. The manifest carries the published address,
-and ``env.stop()`` runs the matching shutdown hooks.
+Publication is protocol-agnostic: a capability backer is started from an
+``@env.initialize`` hook and published with ``env.add_capability(...)``, deferring
+everything — keys, sockets — until the env actually serves. The manifest carries
+the published address, and ``env.stop()`` runs the matching shutdown hooks.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import pytest
 
@@ -16,74 +16,6 @@ from hud.capabilities import Capability
 from hud.environment import Environment
 
 from .conftest import served
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
-def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
-    env = Environment("pure")
-    env.workspace(tmp_path / "root")
-
-    assert env.capabilities == []  # published at serve time, not declaration
-    assert not (tmp_path / "root").exists()
-
-
-async def test_serving_publishes_the_workspace_capability(tmp_path: Path) -> None:
-    env = Environment("ws-env")
-    env.workspace(tmp_path / "root")
-
-    async with served(env) as client:
-        cap = client.binding("shell")
-        assert cap.protocol == "ssh/2"
-        assert cap.url.startswith("ssh://")
-        assert cap.params["host_pubkey"].startswith("ssh-ed25519")
-        assert (tmp_path / "root" / ".hud" / "ssh" / "host_ed25519").exists()
-
-
-async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
-    from hud.clients import connect
-    from hud.eval.runtime import _local
-
-    env = Environment("ws-env")
-    env.workspace(tmp_path / "root")
-
-    # Client-side urls are per-connection (forwarded); the daemon's identity
-    # is its host key, which only stays stable if the workspace is reused.
-    async with _local(env) as runtime:
-        async with connect(runtime) as client:
-            first = client.binding("shell").params["host_pubkey"]
-        async with connect(runtime) as client:
-            assert client.binding("shell").params["host_pubkey"] == first
-
-
-async def test_stop_tears_down_the_workspace(tmp_path: Path) -> None:
-    import asyncio
-    from urllib.parse import urlsplit
-
-    env = Environment("ws-env")
-    env.workspace(tmp_path / "root")
-
-    async with served(env):
-        # The substrate-local address (the manifest carries a forwarded one).
-        backing_port = urlsplit(env.capability("shell").url).port
-        assert backing_port is not None
-
-    with pytest.raises(OSError):
-        _, writer = await asyncio.open_connection("127.0.0.1", backing_port)
-        writer.close()
-
-
-async def test_restarting_replaces_the_published_address_without_duplicates(
-    tmp_path: Path,
-) -> None:
-    env = Environment("ws-env")
-    env.workspace(tmp_path / "root")
-
-    async with served(env):
-        pass
-    async with served(env):
-        assert [c.name for c in env.capabilities] == ["shell"]
 
 
 async def test_any_initialize_hook_can_publish_a_capability() -> None:

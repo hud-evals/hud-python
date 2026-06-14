@@ -65,7 +65,7 @@ def test_args_schema_unannotated_param_accepts_anything() -> None:
     env = Environment("manifests")
 
     @env.template()
-    async def loose(anything):  # noqa: ANN001
+    async def loose(anything):
         yield "go"
         yield 1.0
 

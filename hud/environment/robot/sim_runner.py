@@ -16,7 +16,10 @@ import asyncio
 import threading
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class SimRunner(ABC):
@@ -27,7 +30,7 @@ class SimRunner(ABC):
     async def call(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run ``fn(*args)`` on the sim thread, awaited on the loop."""
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> None:  # noqa: B027  # optional hook: default no-op, subclasses override if they own threads
         """Release any owned thread(s). Idempotent."""
 
 

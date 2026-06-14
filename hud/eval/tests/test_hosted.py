@@ -80,7 +80,9 @@ def test_hosted_spec_rejects_custom_model_client() -> None:
 async def test_run_rejects_non_gateway_agent() -> None:
     """An agent that can't serialize its identity yields a failed Run, not a crash."""
     run = await HUDRuntime(poll_interval=0.0).run(
-        Task(env="e", id="x"), object(), job_id="j"  # type: ignore[arg-type]
+        Task(env="e", id="x"),
+        object(),  # type: ignore[arg-type]
+        job_id="j",  # type: ignore[arg-type]
     )
     assert run.trace.is_error
     assert "gateway agent" in (run.trace.error or "")

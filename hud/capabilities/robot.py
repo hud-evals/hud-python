@@ -21,7 +21,6 @@ import websockets.exceptions
 
 from .base import Capability, CapabilityClient
 
-
 # ─── wire codec (msgpack + raw array buffers, no base64) ─────────────────────
 
 
@@ -89,10 +88,12 @@ class RobotClient(CapabilityClient):
         Realtime (free-running) bridges also attach a ``"meta"`` block carrying the
         realtime control state used for async/RTC inference::
 
-            {"obs_index": int,            # episode control-tick counter at emit time
-             "queue_remaining": int,      # actions still buffered env-side
-             "delay": int,                # env's conservative inference-delay estimate (ticks)
-             "unexecuted_chunk": ndarray|None}  # [T, A] not-yet-executed tail (executable space); RTC prefix source
+            {
+                "obs_index": int,  # episode control-tick counter at emit time
+                "queue_remaining": int,  # actions still buffered env-side
+                "delay": int,  # env's conservative inference-delay estimate (ticks)
+                "unexecuted_chunk": ndarray | None,
+            }  # [T, A] not-yet-executed tail (executable space); RTC prefix source
 
         Legacy sync bridges omit ``"meta"`` entirely, so it is only present when the
         env is realtime.

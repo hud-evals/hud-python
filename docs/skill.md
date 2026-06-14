@@ -63,7 +63,7 @@ env.workspace("/workspace")
 ```
 
 `ssh` (shell+files; `env.workspace(root)` runs the sandbox for you),
-`mcp`, `cdp` (browser), `rfb` (computer-use), `ros2` (robot). Cite
+`mcp`, `cdp` (browser), `rfb` (computer-use), `robot` (robot policies). Cite
 [Environments](/v6/reference/environment) and
 [Capabilities](/v6/reference/capabilities).
 
@@ -79,7 +79,7 @@ If you catch yourself writing any of these, stop and convert:
 | v5 idiom (wrong) | v6 (right) |
 |------------------|------------|
 | `@env.scenario("name")` | `@env.template()` |
-| `@env.tool` / `env.add_tool(BashTool())` | declare a **capability** (`ssh`/`mcp`/`cdp`/`rfb`/`ros2`) |
+| `@env.tool` / `env.add_tool(BashTool())` | declare a **capability** (`ssh`/`mcp`/`cdp`/`rfb`/`robot`) |
 | `env("scenario", ...)` | call the task: `count_letter(word=...)` → `Task` |
 | `hud.eval(task)` / `task.run("claude")` | `await task.run(agent)` → `Job` |
 | `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` |

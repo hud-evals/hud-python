@@ -222,6 +222,7 @@ ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
 RobotStepSource: TypeAlias = Literal["observation", "inference"]
 
+
 class TaskCall(BaseModel):
     """The task-lifecycle RPC a ``task`` step records.
 

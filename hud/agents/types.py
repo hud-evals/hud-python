@@ -16,7 +16,7 @@ schema understands this family's payload.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 
 from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import (
@@ -332,7 +332,7 @@ class ObservationStep(Step):
         tick: int = 0,
         obs_space: dict[str, Any] | None = None,
     ) -> ObservationStep:
-        """build a step from a raw ``robot`` obs (``{"data": {name: ndarray}, ...}``); rank>=2 arrays are JPEG camera frames, rank-1 vectors are split into the contract's named feature groups via ``obs_space``. ``obs_space`` (the env contract from ``client.spaces()``) is read for grouping/labelling only — never stored on the step."""
+        """Build an observation step from a raw ``robot`` obs dict."""
         import base64
         import io
 
@@ -368,12 +368,19 @@ class ObservationStep(Step):
             for feature_key, feature in obs_space.items():
                 if name not in feature_key.split(".") or not isinstance(feature, dict):
                     continue
-                raw_names = feature.get("names")
-                labels = [str(n) for n in raw_names] if isinstance(raw_names, list) else []
-                order = feature.get("order")
+                feature_meta = cast("dict[str, Any]", feature)
+                raw_names = feature_meta.get("names")
+                labels = (
+                    [str(n) for n in cast("list[Any]", raw_names)]
+                    if isinstance(raw_names, list)
+                    else []
+                )
+                order = feature_meta.get("order")
                 if order is not None:
                     bounds = str(order).split("-")
-                    slices.append((int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels))
+                    slices.append(
+                        (int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels)
+                    )
                 elif feature_key.split(".")[-1] == name and len(labels) == len(vec):
                     direct = labels
             slices.sort()
@@ -403,13 +410,12 @@ class InferenceStep(Step):
     source: RobotStepSource = "inference"  # type: ignore[assignment]
 
     # tick id
-    tick: int = 0 # start of inference
+    tick: int = 0  # start of inference
     # end_tick: int = 0 # end of inference - future implementation
 
     # post model inference (a single action is a length-1 chunk)
     chunk: list[list[float]] = Field(default_factory=list[list[float]])
     chunk_length: int = 1
-    
 
 
 class ContentResult(BaseModel):
@@ -420,6 +426,7 @@ class ContentResult(BaseModel):
     computer-use, browsers — don't hand-roll the same block list::
 
         from hud.agents.types import ContentResult
+
 
         @server.tool
         async def look() -> list[ContentBlock]:

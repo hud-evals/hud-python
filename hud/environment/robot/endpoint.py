@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any
 from hud.environment.utils import error, read_frame, reply, send_frame
 
 if TYPE_CHECKING:
+    from hud.capabilities import Capability
+
     from .bridge import RobotBridge
 
 
@@ -60,34 +62,55 @@ class RobotEndpoint:
     def _is_remote(self) -> bool:
         return self._bridge is None
 
+    def _local_bridge(self) -> RobotBridge:
+        bridge = self._bridge
+        if bridge is None:
+            raise RuntimeError("local bridge required")
+        return bridge
+
     # ── control surface (same whether local or remote) ───────────────────
     async def url(self) -> str:
         """The bridge's ``ws://`` address — publish it as the robot capability."""
         if self._is_remote:
             return (await self._call("url"))["url"]
-        return self._bridge.url
+        return self._local_bridge().url
+
+    async def capability(self, *, name: str = "robot", contract: dict[str, Any]) -> Capability:
+        """The ``robot`` capability for this bridge — mirrors ``Workspace.capability()``.
+
+        Publish it from an ``@env.initialize`` hook after :meth:`start` (the URL only
+        exists once the bridge has bound its socket)::
+
+            @env.initialize
+            async def _up():
+                await endpoint.start()
+                env.add_capability(await endpoint.capability(contract=CONTRACT))
+        """
+        from hud.capabilities import Capability
+
+        return Capability.robot(name=name, url=await self.url(), contract=contract)
 
     async def start(self) -> None:
         if self._is_remote:
             await self._call("start")
         else:
-            await self._bridge.start()
+            await self._local_bridge().start()
 
     async def stop(self) -> None:
         if self._is_remote:
             await self._call("stop")
         else:
-            await self._bridge.stop()
+            await self._local_bridge().stop()
 
     async def reset(self, **task_args: Any) -> str:
         """Start a new episode; return the task prompt."""
         if self._is_remote:
             return (await self._call("reset", task_args))["prompt"]
-        return await self._bridge._reset(**task_args)
+        return await self._local_bridge()._reset(**task_args)
 
     async def result(self, **extra: Any) -> dict[str, Any]:
         """The episode score dict, merged with any caller ``extra`` metadata."""
-        res = await self._call("result") if self._is_remote else self._bridge.result()
+        res = await self._call("result") if self._is_remote else self._local_bridge().result()
         res = {**res, **extra}
         print(
             f"[env] result: success={res.get('success')} "
@@ -95,9 +118,9 @@ class RobotEndpoint:
             flush=True,
         )
         return res
-    
-    
+
     """ in your simulation program where bridge is started """
+
     # ── serving: expose a local bridge so a remote endpoint can drive it ──
     async def serve(self, host: str = "127.0.0.1", port: int = 9100) -> asyncio.AbstractServer:
         """Serve this (local) bridge's control surface over JSON-RPC.
@@ -126,7 +149,7 @@ class RobotEndpoint:
             await writer.wait_closed()
 
     async def _dispatch(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        b = self._bridge
+        b = self._local_bridge()
         if method == "url":
             return {"url": b.url}
         if method == "reset":
@@ -142,21 +165,24 @@ class RobotEndpoint:
         raise ValueError(f"unknown method {method!r}")
 
     # ── remote link (no-ops when local) ──────────────────────────────────
-    async def connect(self, *, timeout: float = 240.0, retry_every: float = 2.0) -> None:
-        """Dial the serving process, retrying until it's up (a remote sim can take
-        minutes to boot). No-op for a local endpoint."""
+    async def connect(self, *, connect_timeout_s: float = 240.0, retry_every: float = 2.0) -> None:
+        """Dial the serving process, retrying until it's up. No-op for a local endpoint."""
         if not self._is_remote:
             return
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + timeout
-        while True:
-            try:
-                self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
-                return
-            except OSError:
-                if loop.time() >= deadline:
-                    raise
-                await asyncio.sleep(retry_every)
+        try:
+            async with asyncio.timeout(connect_timeout_s):
+                while True:
+                    try:
+                        self._reader, self._writer = await asyncio.open_connection(
+                            self._host, self._port
+                        )
+                        return
+                    except OSError:
+                        await asyncio.sleep(retry_every)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"timed out connecting to {self._host}:{self._port} after {connect_timeout_s}s"
+            ) from exc
 
     async def close(self) -> None:
         """Drop the link (no-op when local; does not stop the bridge)."""

@@ -122,8 +122,7 @@ def load(path: str | Path) -> Taskset:
     tasks: list[Task] = []
     for idx, group in enumerate(sorted_groups, start=1):
         env_name = base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}"
-        for harbor_task in group:
-            tasks.append(Task(env=env_name, id=harbor_task.task_id))
+        tasks.extend(Task(env=env_name, id=harbor_task.task_id) for harbor_task in group)
     return Taskset(base_name, tasks)
 
 

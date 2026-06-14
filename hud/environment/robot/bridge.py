@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import websockets
 import websockets.exceptions
 
@@ -24,6 +23,9 @@ import websockets.exceptions
 from hud.capabilities.robot import _decode_array, _encode_array, _packb, _unpackb
 
 from .sim_runner import InlineSimRunner, SimRunner
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 class RobotBridge(ABC):
@@ -115,9 +117,7 @@ class RobotBridge(ABC):
         ``@env.initialize`` hook *after* ``await bridge.start()``.
         """
         if self._port == 0:
-            raise RuntimeError(
-                "bridge bound to an ephemeral port; call start() before reading url"
-            )
+            raise RuntimeError("bridge bound to an ephemeral port; call start() before reading url")
         return f"ws://{self._host}:{self._port}"
 
     async def start(self) -> None:
