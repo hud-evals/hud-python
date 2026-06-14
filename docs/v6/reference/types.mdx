@@ -112,11 +112,10 @@ A normalized citation across providers (`hud.agents.types.Citation`): `type`, `t
 ## Training types
 
 ```python
-from hud.eval import TrainingConfig, group_relative
+from hud.eval import group_relative
 ```
 
-- **`Rewarded`** — the protocol `reward()` needs: anything with `trace_id: str | None` and `reward: float` (a `Run` qualifies).
-- **`TrainingConfig`** — `learning_rate`, `kl_coef`, `max_grad_norm`, `batch_groups`, `normalize_advantage`. See [Training](/v6/run/training).
+- **`Rewarded`** — the protocol training needs: anything with `trace_id: str | None` and `reward: float` (a `Run` qualifies).
 - **`group_relative(rewards, *, normalize_std=True)`** — GRPO advantages over one group.
 
 ## Typed task I/O

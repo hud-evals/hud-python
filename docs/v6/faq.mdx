@@ -36,7 +36,7 @@ See [Run on any model](/v6/run/models).
 </Accordion>
 
 <Accordion title="Do I need a GPU?">
-No — not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. For **training**, the managed backend (`HudTrainingClient`) runs the optimizer for you, so you need no local GPU; if you plug in your **own** trainer (your GRPO/PPO loop, or a stack like Tinker/slime/Fireworks), that trainer brings its own compute. See [Train on rewards](/v6/run/training).
+No — not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. **Training** feeds HUD's rewards into your own GRPO/PPO loop (or a stack like Tinker, slime, or Fireworks), which brings its own compute. See [Train on rewards](/v6/run/training).
 </Accordion>
 
 <Accordion title="My environment imports a package hud can't find — why?">
@@ -60,13 +60,12 @@ The CLI and SDK run on macOS, Windows, and Linux. Two caveats: `ssh` sandbox iso
 Two data paths to know about:
 - **Gateway** (the default with just `HUD_API_KEY`, or forced with `--gateway` / `create_agent`): model calls route through HUD's OpenAI-compatible endpoint at `inference.hud.ai`, which forwards to the provider.
 - **Tracing**: when `HUD_API_KEY` is set, each rollout's trace is recorded on the [hud.ai](https://hud.ai) platform so you can replay it. Run without the key (or with a provider key directly) to skip the gateway.
-- **Training**: the managed trainer sends only **reward signals** (`trace_id` + advantage) to the backend, **never token data**. See [Train on rewards](/v6/run/training).
 
 For data-handling specifics, see [hud.ai](https://hud.ai) or contact the team.
 </Accordion>
 
 <Accordion title="How much does it cost?">
-Running locally with your own provider key (`hud serve`, `hud eval ... claude`) incurs no HUD charge beyond your provider's usage. The **gateway** and **managed training** use hosted compute. For current pricing, quotas, and any free tier, see [hud.ai](https://hud.ai/project/api-keys).
+Running locally with your own provider key (`hud serve`, `hud eval ... claude`) incurs no HUD charge beyond your provider's usage. The **gateway** uses hosted compute. For current pricing, quotas, and any free tier, see [hud.ai](https://hud.ai/project/api-keys).
 </Accordion>
 </AccordionGroup>
 
