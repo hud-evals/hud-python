@@ -22,14 +22,13 @@ dependencies = [
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
-    "toml>=0.10.2",
-    "watchfiles>=0.21.0",
     "questionary==2.1.0",
     "prompt-toolkit==3.0.51",
-    "scarf-sdk>=0.1.0",
     "asyncssh>=2.23.0",
     "asyncvnc>=1.3.0",
-    "pillow>=11.3.0",
+    # >=11.0: 11.2.x is what Isaac Sim's kit python pins (prebundled, symlink-
+    # deduped); requiring 11.3 would force an upgrade that bricks the sim.
+    "pillow>=11.0.0",
     "websockets>=15.0.1",
 ]
 classifiers = [
@@ -110,17 +109,9 @@ packages = ["hud"]
 [project.optional-dependencies]
 # Agent implementations, AI providers, datasets, and telemetry
 agents = [
-    # MCP-use client (legacy)
-    "mcp-use==1.5.0",
-    "langchain>=1.1.0",  # Required by mcp-use
     # AI providers
     "anthropic>=0.78.0",
     "google-genai",
-    "openai-agents",
-    # Image processing for screenshots/grounding
-    "pillow>=11.1.0",
-    # Jupyter kernel support
-    "tornado>=6.5.2",
 ]
 
 # AWS Bedrock support for ClaudeAgent
@@ -139,15 +130,18 @@ dev = [
     "pytest-mock",
     "pytest-cov",
     "pyright==1.1.407",
-    # Optional integrations (for type checking)
-    "llama-index-core",
-    "google-adk",
 ]
 
 # Alias for backwards compatibility
 agent = ["hud-python[agents]"]
 browseruse = [
     "browser-use>=0.11.13",
+]
+
+# Robot capability (robot protocol wire codec + bridges + agent harness)
+robot = [
+    "numpy>=1.24",
+    "msgpack>=1.0",
 ]
 
 
@@ -190,6 +184,11 @@ lint.ignore = [
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
+# Robot runtime/harness: bare prints are deliberate operator feedback on env/agent loops.
+"hud/environment/robot/**" = ["T201"]
+"hud/agents/robot/**" = ["T201"]
+"hud/capabilities/robot.py" = ["T201"]
+"hud/telemetry/lerobot.py" = ["T201"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
 "**/cookbooks/**/*.py" = ["ALL"]
 "scripts/*.py" = ["T201", "INP001"]  # dev scripts: print is the interface

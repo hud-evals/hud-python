@@ -31,7 +31,7 @@ env = Environment(name="{env_name}")
 # 1. TASKS - a prompt for the agent, then how to score its answer
 # =============================================================================
 
-@env.task(id="count")
+@env.template(id="count")
 async def count(sentence: str, letter: str):
     """Agent must count a letter; we check if it got the answer right."""
     # Yield the prompt, receive the agent's final answer back via ``asend``.
@@ -53,12 +53,11 @@ async def count(sentence: str, letter: str):
 #   env = Environment(name="{env_name}")
 #   env.workspace("/workspace")
 #
-# For arbitrary MCP tools, run them on your own MCPServer and attach it:
+# For arbitrary MCP tools, run them on a FastMCP server and attach it:
 #
-#   from hud.server import MCPServer
-#   from hud.tools import BaseTool
-#   server = MCPServer(name="{env_name}-tools")
-#   server.add_tool(MyTool())  # any BaseTool subclass
+#   from fastmcp import FastMCP
+#   server = FastMCP(name="{env_name}-tools")
+#   server.tool(my_tool_fn)  # a plain function: type hints + docstring -> schema
 #   env.capabilities.append(Capability.mcp(name="tools", url="http://127.0.0.1:8765/mcp"))
 
 

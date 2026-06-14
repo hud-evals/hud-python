@@ -1,0 +1,124 @@
+---
+title: "Robot benchmark"
+description: "Run a VLA policy against a containerized robot sim, graded by task success."
+icon: "robot"
+tag: "Beta"
+---
+
+<Note>
+The `robot` capability is in **beta** — see the [Robots reference](/v6/reference/robots).
+</Note>
+
+This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation benchmark) packaged as a Docker image: three episodes, each in a fresh container, graded by the sim's own success check. The policy runs in *your* process on your GPU; the container is CPU-only and publishes exactly one port.
+
+## The environment
+
+The env module is declare-only — a sim **bridge**, an **endpoint**, and two-yield templates (this is `demos/benchmarks/envs/libero/env.py`, abbreviated):
+
+```python env.py
+from hud import Environment
+from hud.environment.robot import RobotEndpoint
+from libero_sim_bridge import LiberoSimBridge
+
+env = Environment(name="libero")
+endpoint = RobotEndpoint(LiberoSimBridge(use_delta=True))  # drive the bridge through the endpoint
+
+@env.initialize
+async def _up():
+    await endpoint.start()
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
+
+@env.shutdown
+async def _down():
+    await endpoint.stop()
+
+@env.template(id="libero_spatial")
+async def libero_spatial(libero_task_id: int, init_state_id: int = 0):
+    prompt = await endpoint.reset(task_suite="libero_spatial",
+                                  task_id=libero_task_id, init_state_id=init_state_id)
+    yield {"prompt": prompt}
+    yield await endpoint.result()
+```
+
+The image's CMD serves it with the standard entry point (`hud serve env.py --host 0.0.0.0 --port 8765`); build once from the repo root:
+
+```bash
+docker build -f demos/benchmarks/envs/libero/Dockerfile -t hud-libero-env .
+```
+
+## The agent
+
+A stock LeRobot checkpoint needs no custom Model or Adapter:
+
+```python run_libero.py
+import asyncio
+import torch
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+
+from hud.agents.robot.adapter import LeRobotAdapter
+from hud.agents.robot.agent import RobotAgent
+from hud.agents.robot.model import LeRobotModel
+from hud.eval import DockerRuntime, Task, Taskset
+
+CHECKPOINT = "lerobot/pi05_libero_finetuned"
+
+class PI05Agent(RobotAgent):
+    max_steps = 400
+
+    def __init__(self):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        policy = PI05Policy.from_pretrained(CHECKPOINT).to(device).eval()
+        pre, post = make_pre_post_processors(
+            policy.config, CHECKPOINT,
+            preprocessor_overrides={"device_processor": {"device": device}},
+        )
+        self.model = LeRobotModel(policy, pre, post)
+        self.adapter = LeRobotAdapter(model_image_keys=list(policy.config.image_features))
+
+TASKS = [
+    Task(env="libero", id="libero_spatial", args={"libero_task_id": t, "init_state_id": 0})
+    for t in range(3)
+]
+
+async def main():
+    job = await Taskset("libero-demo", TASKS).run(
+        PI05Agent(), runtime=DockerRuntime("hud-libero-env"), max_concurrent=1,
+    )
+    rewards = [run.reward for run in job.runs]
+    print(f"success_rate={sum(rewards) / len(rewards):.2f}")
+
+asyncio.run(main())
+```
+
+## Run it
+
+```bash
+python run_libero.py
+```
+
+`DockerRuntime` is the placement: each rollout `docker run`s a fresh container, publishes the control port, connects, and removes the container afterward. The agent reads the env's **contract** from the manifest at connect time and wires cameras/state/actions itself — there is no shared config between this script and the image. The robot WebSocket binds container-loopback and rides the control port via capability tunneling.
+
+For heavy sims (or sweeps), skip the per-episode boot with one long-lived container:
+
+```bash
+docker run -d --name libero-env -p 8765:8765 hud-libero-env
+```
+
+```python
+from hud.eval.runtime import Runtime
+job = await Taskset("libero-demo", TASKS).run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
+```
+
+## Read the trace
+
+With `HUD_API_KEY` set, every episode streams to the platform automatically: the trace viewer plays the camera frames back under a scrubber, with **diamond markers at each step where the policy predicted a fresh action chunk** — scrub between markers to watch a chunk execute, click one to jump to the decision point.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Robots reference" icon="robot" href="/v6/reference/robots">
+  Contracts, bridges, realtime control, and the harness API.
+</Card>
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy" />
+</CardGroup>

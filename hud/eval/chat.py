@@ -9,7 +9,7 @@ Example::
 
     from hud import Chat
     from hud.agents import create_agent
-    from tasks import assistant  # an @env.task taking ``messages``
+    from tasks import assistant  # an @env.template taking ``messages``
 
     chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
     r1 = await chat.send("Book me a flight")

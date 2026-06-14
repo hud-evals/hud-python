@@ -8,18 +8,17 @@ boundary.
 
 from __future__ import annotations
 
+import asyncio
 import os
-from typing import TYPE_CHECKING
+import sys
+from pathlib import Path  # noqa: TC003  # runtime use in _install_fake_docker
 
 import pytest
 
 from hud.eval.runtime import DockerRuntime
 from hud.eval.task import Task
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-FAKE_DOCKER = """\
+FAKE_DOCKER_SH = """\
 #!/bin/sh
 echo "$@" >> "$DOCKER_LOG"
 case "$1" in
@@ -28,6 +27,46 @@ case "$1" in
   logs) echo "ImportError: boom" ;;
 esac
 """
+
+FAKE_DOCKER_CMD = """\
+@echo off
+echo %*>>"%DOCKER_LOG%"
+if "%1"=="run" (
+  echo cid-42
+  exit /b 0
+)
+if "%1"=="port" (
+  {port_behavior}
+  exit /b 0
+)
+if "%1"=="logs" (
+  echo ImportError: boom
+  exit /b 0
+)
+exit /b 0
+"""
+
+
+def _port_behavior_for_windows(port_behavior: str) -> str:
+    if port_behavior == "echo 127.0.0.1:43210":
+        return "echo 127.0.0.1:43210"
+    if port_behavior == ":":
+        return "rem noop"
+    raise ValueError(f"unsupported port_behavior: {port_behavior!r}")
+
+
+async def _docker_via(fake_exe: Path, *args: str, check: bool = True) -> tuple[str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        str(fake_exe),
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await proc.communicate()
+    if check and proc.returncode != 0:
+        detail = err.decode("utf-8", "replace").strip() or out.decode("utf-8", "replace").strip()
+        raise RuntimeError(f"docker {' '.join(args)} failed ({proc.returncode}): {detail}")
+    return out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 @pytest.fixture
@@ -39,9 +78,27 @@ def docker_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return log
 
 
-def _install_fake_docker(tmp_path: Path, *, port_behavior: str) -> None:
+def _install_fake_docker(
+    tmp_path: Path,
+    *,
+    port_behavior: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform == "win32":
+        exe = tmp_path / "docker.cmd"
+        exe.write_text(
+            FAKE_DOCKER_CMD.format(port_behavior=_port_behavior_for_windows(port_behavior))
+        )
+        import hud.eval.runtime as runtime_module
+
+        async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
+            return await _docker_via(exe, *args, check=check)
+
+        monkeypatch.setattr(runtime_module, "_docker", _docker)
+        return
+
     exe = tmp_path / "docker"
-    exe.write_text(FAKE_DOCKER.format(port_behavior=port_behavior))
+    exe.write_text(FAKE_DOCKER_SH.format(port_behavior=port_behavior))
     exe.chmod(0o755)
 
 
@@ -50,9 +107,9 @@ def _row() -> Task:
 
 
 async def test_acquisition_publishes_ephemeral_port_and_removes_container(
-    tmp_path: Path, docker_log: Path
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210")
+    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
 
     provider = DockerRuntime("img:tag", run_args=("-e", "X=1"))
     async with provider(_row()) as runtime:
@@ -65,10 +122,10 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
 
 
 async def test_container_that_dies_before_serving_fails_with_its_logs(
-    tmp_path: Path, docker_log: Path
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # ``docker port`` on an exited container prints nothing.
-    _install_fake_docker(tmp_path, port_behavior=":")
+    _install_fake_docker(tmp_path, port_behavior=":", monkeypatch=monkeypatch)
 
     provider = DockerRuntime("img:tag")
     with pytest.raises(RuntimeError, match="exited before serving") as err:

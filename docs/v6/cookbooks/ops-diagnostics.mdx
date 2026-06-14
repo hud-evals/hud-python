@@ -34,7 +34,7 @@ async def _seed():
     )
     (ROOT / "deploy.log").write_text("11:58 deployed v412: 'remove cart index migration'\n")
 
-@env.task()
+@env.template()
 async def diagnose():
     answer = yield (
         "Checkout started returning 503s at 12:03. The logs and deploy history are "
@@ -70,7 +70,7 @@ It satisfies the [signal](/v6/run/signal) principles:
 ## Run it
 
 ```bash
-hud eval env.py claude --gateway
+hud eval env.py claude
 ```
 
 Inspect the trace at [hud.ai](https://hud.ai) to see which files the agent read and how it reasoned — useful for spotting whether the reward tracks real investigation.

@@ -1,4 +1,7 @@
-"""Agent implementations."""
+"""Agent implementations.
+
+The robot policy harness lives in :mod:`hud.agents.robot` (requires the ``robot`` extra).
+"""
 
 from __future__ import annotations
 
@@ -33,6 +36,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
             gateway_models = list_gateway_models()
         except Exception:
             gateway_models = []
+        gateway_models = list(gateway_models)
         for gateway_model in gateway_models:
             if model in (
                 gateway_model.id,
@@ -61,7 +65,26 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                 provider_name = gateway_model.provider.name or "openai"
                 break
         else:
-            raise ValueError(f"Model '{model}' not found")
+            import difflib
+
+            known = [c.value for c in AgentType] + [
+                n
+                for gm in gateway_models
+                for n in (gm.id, gm.name, gm.model_name)
+                if isinstance(n, str)
+            ]
+            near = difflib.get_close_matches(model, known, n=3, cutoff=0.5)
+            hint = (
+                f" Did you mean: {', '.join(near)}?"
+                if near
+                else " Run `hud models` to list available models."
+            )
+            source = (
+                "the HUD gateway registry"
+                if gateway_models
+                else "the HUD gateway registry (empty — is HUD_API_KEY set?)"
+            )
+            raise ValueError(f"Model {model!r} not found in {source}.{hint}")
 
     kwargs.setdefault("model", model_id)
     kwargs.setdefault("model_client", build_gateway_client(provider_name))

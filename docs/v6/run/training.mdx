@@ -1,81 +1,43 @@
 ---
 title: "Train on rewards"
-description: "Turn rewarded rollouts into training signal for any model."
+description: "Turn rewarded rollouts into training signal for your own GRPO/PPO loop."
 icon: "dumbbell"
 ---
 
-The rewards are the signal: the tasks you evaluate are already training data — every rollout returns a `Run` carrying a `trace_id` and a `reward`. Run a **group** per task and turn the rewards into **GRPO advantages**.
+The rewards are the signal: the tasks you evaluate are already training data — every rollout returns a `Run` carrying a `trace_id` and a `reward`. Run a **group** per task, turn the rewards into **GRPO advantages**, and feed them into your own optimizer.
 
 ## Prerequisites
 
 - A task and an agent (see [Tasks](/v6/reference/tasks) and [Models](/v6/run/models)).
-- A `HUD_API_KEY` for the managed training backend.
 - A task with **spread** in its rewards — a group that all scores `0.0` (or all `1.0`) produces zero advantage and teaches nothing. See [Designing tasks for signal](/v6/run/signal).
 
-## The managed path
+## Plug into your own trainer
 
-`HudTrainingClient` is agent-agnostic: collect a group of rewarded rollouts, and it computes group-relative advantages and POSTs `{trace_id, advantage}` to the backend, which holds the token-level trajectories keyed by `trace_id` and runs the optimizer.
+HUD is the environment-and-reward source for your GRPO/PPO loop. Run a group per task, then turn each group's rewards into advantages with `group_relative()`:
 
 ```python train.py
 import asyncio
+
 from hud.agents import create_agent
-from hud.eval import HudTrainingClient, Taskset, TrainingConfig
+from hud.eval import Taskset, group_relative
 from tasks import count_letter
 
 async def main():
     agent = create_agent("claude-sonnet-4-5")
-    trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
-
     words = ["strawberry", "raspberry", "blueberry", "blackberry"]
     taskset = Taskset("letters", [count_letter(word=w) for w in words])
-    job = await taskset.run(agent, group=16)
-    await trainer.reward(job.runs)
+
+    job = await taskset.run(agent, group=16)        # 16 rollouts per task
+    for runs in job.results.values():               # one GRPO group per task
+        rewards = [r.reward for r in runs]
+        advantages = group_relative(rewards, normalize_std=True)  # reward - mean, / std
+        for run, adv in zip(runs, advantages):
+            ...  # feed (run.trace_id, adv) into your optimizer step
 
 asyncio.run(main())
 ```
 
-`group=16` runs each task 16 times; the repeats share a GRPO group. `trainer.reward(job.runs)` computes advantages over each group and enqueues them — it returns once enqueued, without waiting for an optimizer step. Only the reward signals cross the wire, never token data.
-
-### One job per session
-
-Each `taskset.run()` call mints its own job. A multi-step training loop should
-report as one arc: open a job with `Job.start()` and pass it to every batch —
-the runs accumulate under one id:
-
-```python
-from hud.eval import Job
-
-session = await Job.start("letters-train", group=16)
-for step in range(10):
-    batch_start = len(session.runs)
-    await taskset.run(agent, job=session)          # group defaults to the job's
-    await trainer.reward(session.runs[batch_start:])
-```
-
-### Tuning the run
-
-`TrainingConfig` carries the managed-tier knobs:
-
-| Field | Default | Meaning |
-|-------|---------|---------|
-| `learning_rate` | `1e-5` | Optimizer step size |
-| `kl_coef` | `0.0` | KL penalty coefficient |
-| `max_grad_norm` | `1.0` | Gradient clipping |
-| `batch_groups` | `1` | Groups to accumulate before one optimizer step |
-| `normalize_advantage` | `True` | Divide group advantages by their std (GRPO) |
-
-## Plug into your own trainer
-
-HUD can be purely the environment-and-reward source for your own GRPO/PPO loop. The signal is just the `Rewarded` protocol — anything carrying a `trace_id` and a `reward` (a `Run` qualifies) — plus the `group_relative()` helper:
-
-```python advantages.py
-from hud.eval import group_relative
-
-rewards = [r.reward for r in runs]
-advantages = group_relative(rewards, normalize_std=True)  # reward - mean, then / std
-```
-
-Feed those advantages into whatever optimizer you run. The same environment trains any model, text or multimodal, unchanged — you only swap the agent.
+The signal is just the `Rewarded` protocol — anything carrying a `trace_id` and a `reward`, which a `Run` satisfies — plus the `group_relative()` helper. Feed the advantages into whatever you run: your own loop, or a stack like [Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or [Fireworks](https://fireworks.ai/). The same environment trains any model, text or multimodal, unchanged — you only swap the agent.
 
 ## Why grouping matters
 
@@ -88,7 +50,7 @@ GRPO advantages are *relative within a group*: `reward - mean`, optionally divid
   Build tasks that produce within-group spread and resist reward hacking.
 </Card>
 <Card title="Reference: types" icon="brackets-curly" href="/v6/reference/types">
-  `Run`, `Rewarded`, `TrainingConfig`, and the result shapes.
+  `Run`, `Rewarded`, `group_relative`, and the result shapes.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">
   Choose the policy you're training.

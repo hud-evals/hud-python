@@ -6,6 +6,10 @@ protocol); ``load_environment`` selects one from authored ``.py`` source;
 How a substrate comes up — placement — belongs to the eval engine: see
 :mod:`hud.eval.runtime` (:class:`~hud.eval.runtime.Runtime`, the ``Provider``
 contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
+
+The env-side robot runtime (bridges, action providers, sim runners, contract
+tooling, recording glue) lives in :mod:`hud.environment.robot`; import it
+directly — it pulls optional dependencies (numpy/msgpack, the ``robot`` extra).
 """
 
 from __future__ import annotations
@@ -13,7 +17,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hud.capabilities import Capability
-from hud.server import MCPRouter
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
@@ -21,8 +24,6 @@ from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-ToolRouter = MCPRouter
 
 
 def load_environment(path: str | Path, *, name: str | None = None) -> Environment:
@@ -50,10 +51,8 @@ __all__ = [
     "Answer",
     "Capability",
     "Environment",
-    "MCPRouter",
     "Mount",
     "MountKind",
-    "ToolRouter",
     "Workspace",
     "load_environment",
 ]

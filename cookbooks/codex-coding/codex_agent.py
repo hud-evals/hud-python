@@ -60,7 +60,7 @@ env = hud.Environment("local-codex")
 env.workspace(WORK_DIR)
 
 
-@env.task()
+@env.template()
 async def coding_task(task_description: str):
     yield PROMPT_TEMPLATE.format(task_description=task_description)
     yield 1.0  # simple success - task completed

@@ -36,7 +36,7 @@ from hud import Environment
 env = Environment("sums")
 
 
-@env.task()
+@env.template()
 async def add(a: int, b: int):
     answer = yield f"add:{a}:{b}"
     yield 1.0 if answer == str(a + b) else 0.0
@@ -171,13 +171,13 @@ alpha = Environment("alpha")
 beta = Environment("beta")
 
 
-@alpha.task()
+@alpha.template()
 async def add_a(a: int, b: int):
     answer = yield f"alpha:{a}:{b}"
     yield 1.0 if answer == str(a + b) else 0.0
 
 
-@beta.task()
+@beta.template()
 async def add_b(a: int, b: int):
     answer = yield f"beta:{a}:{b}"
     yield 1.0 if answer == str(a + b) else 0.0

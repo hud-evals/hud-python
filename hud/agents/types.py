@@ -16,8 +16,9 @@ schema understands this family's payload.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal, cast
 
+from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -27,7 +28,15 @@ from pydantic import (
 )
 
 from hud.agents.tools.hosted import HostedTool
-from hud.types import MCPToolCall, MCPToolResult, Step, StepSource, Trace
+from hud.types import (
+    ROBOT_STEP_SCHEMA,
+    MCPToolCall,
+    MCPToolResult,
+    RobotStepSource,
+    Step,
+    StepSource,
+    Trace,
+)
 from hud.utils.serialization import json_safe_value
 
 # Alias to accept both 'model' and 'checkpoint_name' (backwards compat)
@@ -276,3 +285,166 @@ class SubagentStep(Step):
 
     source: StepSource = "subagent"
     subagent: Trace
+
+
+# -----------------------------------------------------------------------------
+# Robot family step payloads (ship under ROBOT_STEP_SCHEMA)
+# -----------------------------------------------------------------------------
+
+
+class StateFeature(BaseModel):
+    """One observation feature group: its per-dimension labels + values, kept
+    together so a state vector is self-describing (e.g. ``robot0_eef_pos`` ->
+    ``names=[".x", ".y", ".z"], values=[...]``). ``names`` is empty when the
+    contract omits per-dim labels."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    names: list[str] = Field(default_factory=list[str])
+    values: list[float] = Field(default_factory=list[float])
+
+
+class ObservationStep(Step):
+    """What the policy saw at one control tick: camera frames + numeric state.
+
+    Camera ``images`` are MCP ``ImageContent`` keyed by camera name — ingest
+    offloads each to S3 by shape (no bespoke type needed) and presigns it on
+    read. ``state`` maps each env-contract feature group (e.g. ``robot0_eef_pos``,
+    ``robot0_gripper_qpos``) to a :class:`StateFeature` carrying that slice's
+    per-dimension ``names`` + ``values`` — so grouping and semantics travel with
+    the data, no side schema. ``tick`` is the 0-based control-tick index, so the
+    viewer can pair it with :class:`InferenceStep`.
+    """
+
+    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
+    source: RobotStepSource = "observation"  # type: ignore[assignment]
+
+    tick: int = 0
+    # TODO: note - this reuses the MCP-native ImageContent type
+    images: dict[str, ImageContent] = Field(default_factory=dict[str, ImageContent])
+    state: dict[str, StateFeature] = Field(default_factory=dict[str, StateFeature])
+
+    @classmethod
+    def from_obs(
+        cls,
+        obs: dict[str, Any],
+        *,
+        tick: int = 0,
+        obs_space: dict[str, Any] | None = None,
+    ) -> ObservationStep:
+        """Build an observation step from a raw ``robot`` obs dict."""
+        import base64
+        import io
+
+        import numpy as np
+        from PIL import Image
+
+        obs_space = obs_space or {}
+        images: dict[str, ImageContent] = {}
+        state: dict[str, StateFeature] = {}
+        for name, arr in obs.get("data", {}).items():
+            if arr.ndim >= 2:
+                # JPEG for the trace viewer: small over the wire + browser-renderable.
+                frame = arr if arr.dtype == np.uint8 else np.clip(arr, 0, 255).astype(np.uint8)
+                buf = io.BytesIO()
+                Image.fromarray(frame).save(buf, format="JPEG", quality=85)
+                images[name] = ImageContent(
+                    type="image",
+                    data=base64.b64encode(buf.getvalue()).decode("ascii"),
+                    mimeType="image/jpeg",
+                )
+                continue
+            vec = arr.tolist()
+            # Label the flat wire vector (e.g. "state") from the contract. Each
+            # feature whose key carries this data key as a dot-segment describes
+            # it, in one of two layouts:
+            #  - ordered slices that tile the vector -> split into named groups
+            #    (libero_pro eef_pos + axis_angle + gripper; robolab single slice)
+            #  - a single feature keyed exactly by the data key whose ``names`` span
+            #    the whole vector -> one named group (libero_ee_del's flat "state")
+            # Fall back to one unlabelled group when neither fits.
+            slices: list[tuple[int, int, str, list[str]]] = []
+            direct: list[str] | None = None
+            for feature_key, feature in obs_space.items():
+                if name not in feature_key.split(".") or not isinstance(feature, dict):
+                    continue
+                feature_meta = cast("dict[str, Any]", feature)
+                raw_names = feature_meta.get("names")
+                labels = (
+                    [str(n) for n in cast("list[Any]", raw_names)]
+                    if isinstance(raw_names, list)
+                    else []
+                )
+                order = feature_meta.get("order")
+                if order is not None:
+                    bounds = str(order).split("-")
+                    slices.append(
+                        (int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels)
+                    )
+                elif feature_key.split(".")[-1] == name and len(labels) == len(vec):
+                    direct = labels
+            slices.sort()
+            covered = [i for start, end, _, _ in slices for i in range(start, end + 1)]
+            if covered == list(range(len(vec))):
+                for start, end, key, labels in slices:
+                    values = vec[start : end + 1]
+                    state[key] = StateFeature(
+                        names=labels if len(labels) == len(values) else [],
+                        values=values,
+                    )
+            elif direct is not None:
+                state[name] = StateFeature(names=direct, values=vec)
+            else:
+                state[name] = StateFeature(values=vec)
+        return cls(tick=tick, images=images, state=state)
+
+
+class InferenceStep(Step):
+    """What the policy did at one control tick: the ``[T, A]`` action chunk it executed.
+
+    A single executed action is just a length-1 chunk; a re-infer tick carries the
+    full freshly inferred chunk. ``tick`` matches the paired observation.
+    """
+
+    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
+    source: RobotStepSource = "inference"  # type: ignore[assignment]
+
+    # tick id
+    tick: int = 0  # start of inference
+    # end_tick: int = 0 # end of inference - future implementation
+
+    # post model inference (a single action is a length-1 chunk)
+    chunk: list[list[float]] = Field(default_factory=list[list[float]])
+    chunk_length: int = 1
+
+
+class ContentResult(BaseModel):
+    """Ergonomic builder for a custom MCP tool's ``list[ContentBlock]`` return.
+
+    A ``@server.tool`` returns content blocks; this assembles the common
+    text (+ optional image) case in one line so vision tools — games,
+    computer-use, browsers — don't hand-roll the same block list::
+
+        from hud.agents.types import ContentResult
+
+
+        @server.tool
+        async def look() -> list[ContentBlock]:
+            return ContentResult(output=status, base64_image=png_b64).to_content_blocks()
+    """
+
+    output: str | None = None
+    error: str | None = None
+    base64_image: str | None = None
+
+    def to_content_blocks(self) -> list[ContentBlock]:
+        """Text block(s) for ``output``/``error``, plus an image for ``base64_image``."""
+        blocks: list[ContentBlock] = []
+        if self.output:
+            blocks.append(TextContent(type="text", text=self.output))
+        if self.error:
+            blocks.append(TextContent(type="text", text=self.error))
+        if self.base64_image:
+            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
+            blocks.append(ImageContent(type="image", data=self.base64_image, mimeType=mime))
+        return blocks

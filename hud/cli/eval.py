@@ -648,7 +648,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     if not taskset:
         hud_console.error(
             f"No runnable Tasks found in {cfg.source}. Define a `hud.Environment` with "
-            "`@env.task` and expose Tasks (for example, `t = my_task(arg=...)`)."
+            "`@env.template` and expose Tasks (for example, `t = my_task(arg=...)`)."
         )
         raise typer.Exit(1)
 
@@ -733,7 +733,7 @@ def eval_command(
         "--auto-respond",
         help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
-    group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
+    group_size: int | None = typer.Option(None, "--group", "--group-size", help="Runs per task"),
     task_ids: str | None = typer.Option(
         None,
         "--task-ids",

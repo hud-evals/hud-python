@@ -32,7 +32,6 @@ import importlib.abc
 import importlib.util
 import sys
 import warnings
-from pathlib import Path
 
 # Import ``ModuleType`` by name — a plain ``import types`` would be rebound to the
 # legacy ``hud.tools.types`` submodule once it's imported, breaking ``create_module``.
@@ -73,8 +72,6 @@ _MODULE_ALIASES: dict[str, str] = {
     "hud.services": "hud.eval.chat",
     "hud.services.chat": "hud.eval.chat",
 }
-
-_TOOLS_DIR = Path(__file__).parent / "tools"
 
 
 class Grade:
@@ -242,11 +239,6 @@ def _alias_target(fullname: str) -> str | None:
     return None
 
 
-def _is_real_tools_submodule(fullname: str) -> bool:
-    relative = fullname.removeprefix("hud.tools.").replace(".", "/")
-    return (_TOOLS_DIR / f"{relative}.py").exists() or (_TOOLS_DIR / relative).is_dir()
-
-
 def _make_alias_getattr(fullname: str, target_name: str) -> Any:
     def __getattr__(name: str) -> Any:
         if name == "Grade" and target_name == "hud.graders":
@@ -267,10 +259,12 @@ def _make_legacy_getattr(module_name: str) -> Any:
 
 
 class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """Resolve removed-module aliases and **removed** ``hud.tools.*`` submodules.
+    """Resolve removed-module aliases and the removed ``hud.tools`` package.
 
-    Real ``hud.tools`` submodules (``base``, ``agent``) are skipped so the
-    normal import machinery handles them.
+    ``hud.tools`` (``BaseTool``, ``AgentTool``, and its submodules) was removed in
+    v6 — shell/file/computer/browser access is a capability, not a tool. The
+    package and all its names now resolve here (redirect / capability marker /
+    no-op) so deployed v5 envs still import without error.
     """
 
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
@@ -278,7 +272,7 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             if _alias_target(fullname) is None:
                 return None  # unknown legacy name: fail with ModuleNotFoundError
             return importlib.util.spec_from_loader(fullname, self)
-        if fullname.startswith("hud.tools.") and not _is_real_tools_submodule(fullname):
+        if fullname == "hud.tools" or fullname.startswith("hud.tools."):
             return importlib.util.spec_from_loader(fullname, self)
         return None
 

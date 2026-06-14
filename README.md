@@ -6,9 +6,9 @@
   </picture>
 </div>
 
-HUD is a platform for building RL environments for AI agents. Define an environment, write tasks, and run them as evals and training across any model, at any scale.
+HUD is a platform for building RL environments for AI agents, across coding, browser, computer-use, and robotics. Define an environment, write tasks, and run them as evals and training across any model, at any scale.
 
-To learn more, check out our [Documentation](https://docs.hud.ai) and [API Reference](https://docs.hud.ai/reference).
+To learn more, see the [documentation](https://docs.hud.ai) and [API reference](https://docs.hud.ai/reference/environment).
 
 [![PyPI](https://img.shields.io/pypi/v/hud-python?style=flat-square)](https://pypi.org/project/hud-python/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -31,7 +31,8 @@ pip install hud-python
 Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys) and set it:
 
 ```bash
-export HUD_API_KEY=your-key-here
+hud set HUD_API_KEY=your-key-here
+# or: export HUD_API_KEY=your-key-here
 ```
 
 Then scaffold your first environment:
@@ -42,51 +43,62 @@ hud init my-env
 
 ![Agent running on SheetBench](https://raw.githubusercontent.com/hud-evals/hud-python/main/docs/src/images/trace_sheet.gif)
 
-## The HUD protocol
+## The protocol
 
-HUD is **protocol-first**. An agent and an environment exchange just three things: a **manifest** (the environment's capabilities and tasks), a **task-start** that returns the prompt, and a **task-grade** that returns the reward. In between, the agent just *works*, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
+HUD is **protocol-first**. An agent and an environment exchange just three things: a **manifest** (the environment's capabilities and tasks), **`tasks.start`** that returns the prompt, and **`tasks.grade`** that returns the reward. In between, the agent just *works*, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
 
 ```mermaid
 sequenceDiagram
     participant Agent
     participant Env as Environment
-    participant Caps as Capabilities (ssh · mcp · cdp · rfb · ros2)
+    participant Caps as Capabilities (ssh · mcp · cdp · rfb · robot)
     Agent->>Env: manifest exchange
     Env-->>Agent: capabilities + tasks
-    Agent->>Env: task-start
+    Agent->>Env: tasks.start
     Env-->>Agent: prompt
     rect rgb(238,238,238)
     Note over Agent,Caps: the agent works, driving capabilities directly
     Agent->>Caps: shell · browser · GUI · tools · robot
     Caps-->>Agent: observations
     end
-    Agent->>Env: task-grade
+    Agent->>Env: tasks.grade
     Env-->>Agent: reward
 ```
 
-## Package once, run anywhere
+Because the protocol only exposes **capabilities** (never a fixed agent), an environment outlives any single harness: new harnesses and models keep running against the same environments, benchmarks, and tasks.
 
-A built image is the **end product for your tasks**: one build packs **many task variants** from a single definition. Because the protocol only exposes **capabilities** (never a fixed agent), an environment outlives any single harness: new harnesses and models keep running against the same old environments, benchmarks, and tasks. It runs on any infra, from your laptop and CI to a Kubernetes fleet or managed cloud-sandbox providers for horizontal scaling:
+## Package & run anywhere
+
+A built image is the **end product for your tasks**: one build packs every task from a single definition. The recommended path is **`hud deploy`**, which builds and registers your environment on HUD in one step; then sync a taskset and run remotely:
+
+```bash
+hud deploy
+hud sync tasks my-taskset
+hud eval my-taskset --remote
+```
+
+For local iteration, the same protocol works against a container on your laptop:
 
 ```bash
 hud build .
-
 docker run -d --name run1 my-env
-docker exec run1 hud task-start fix_bug
-docker exec run1 hud task-grade fix_bug --answer "…"
+docker exec run1 hud task start fix_bug
+docker exec run1 hud task grade fix_bug --answer "…"
 docker rm -f run1
 ```
 
-## Environments & tasks
+→ [Package & deploy](https://docs.hud.ai/run/deploy)
 
-A task is an async generator: yield a **prompt**, receive the agent's **answer**, yield a **score**. Vary its arguments and one function becomes a whole dataset of **variants**, no duplication. The simplest needs no tools, just a prompt and a grader:
+## Environments & templates
+
+A **template** is an async generator registered with `@env.template()`: `yield` a prompt, receive the agent's answer, `yield` a reward. Calling the template mints a runnable **Task**; one function spans a whole dataset of variants. The simplest needs no capabilities — just a prompt and a grader:
 
 ```python
 from hud import Environment
 
 env = Environment(name="letter-count")
 
-@env.task()
+@env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'? Reply with just the number."
     yield 1.0 if answer and str(word.count(letter)) in answer else 0.0
@@ -97,65 +109,65 @@ tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 Run it immediately against any model:
 
 ```bash
-hud eval tasks.py claude
+hud eval tasks.py claude --group 3
 ```
 
-Every rollout is traced on the [hud.ai](https://hud.ai) platform when your `HUD_API_KEY` is set. A task that needs tools or an interactive environment declares **capabilities** (below); everything else (variants, grading, batching) stays identical.
+Each graded evaluation is a **trace** (the SDK's live handle is a `Run`). With `HUD_API_KEY` set, every rollout is recorded on [hud.ai](https://hud.ai). Tasks that need a shell, browser, GUI, or robot declare **capabilities** (below); everything else — variants, grading, batching — stays identical.
+
+→ [Quickstart](https://docs.hud.ai/quickstart) · [Tasks & tasksets](https://docs.hud.ai/reference/tasks)
 
 ## Capabilities & harnesses
 
-A **capability** is a connection the environment exposes; a **harness** opens the ones it needs and defines its own **tool spec**: the actions it gives the model. The same environment serves a one-shot Q&A or a full computer-use rollout, depending on which capabilities the harness opens.
+A **capability** is a connection the environment exposes; a **harness** attaches its own tools to it. The same environment serves a one-shot Q&A or a full computer-use rollout, depending on which capabilities the harness opens.
 
-| Capability | What it exposes |
-|------------|-----------------|
-| **`ssh`**  | Shell + files (bash, SFTP) in a sandboxed workspace |
-| **`mcp`**  | Tools over the Model Context Protocol: HUD's native tools or your own MCP server |
-| **`cdp`**  | Browser control over the Chrome DevTools Protocol |
-| **`rfb`**  | Full computer-use over VNC: screen + keyboard/mouse |
-| **`ros2`** | Robot control + sensor topics over ROS 2 |
+| Protocol | What it exposes |
+|----------|-----------------|
+| **`ssh`** | Shell + files in a sandboxed workspace (`env.workspace(root)`) |
+| **`mcp`** | Tools over the Model Context Protocol |
+| **`cdp`** | Browser control over the Chrome DevTools Protocol |
+| **`rfb`** | Full computer-use over VNC: screen + keyboard/mouse |
+| **`robot`** *(beta)* | Schema-driven robot observation/action loop over WebSocket |
 
-**Ships natively:** Claude, OpenAI (Responses), OpenAI-compatible (any vLLM/OpenAI endpoint), Gemini, and Claude Code (the `claude` CLI over SSH). `create_agent("claude-sonnet-4-5")` (or `gpt-…`, `gemini-…`, `grok-…`) routes any model through the HUD gateway and wires the matching capability-backed tools.
+**Ships natively:** Claude, OpenAI (Responses), OpenAI-compatible endpoints, and Gemini via `create_agent("claude-sonnet-4-5")` (or `gpt-…`, `gemini-…`). The harness wires capability-backed tools for the model you choose at run time.
 
-**Bring your own:** a harness is just *attach to a capability + define a tool spec*, so wrapping another agent (`browser-use` on `cdp`, your own policy on `ssh` / `mcp` / `ros2`) is a thin adapter, no protocol work. → [Capabilities](https://docs.hud.ai/concepts) · [Models](https://hud.ai/models)
+**Bring your own:** a harness attaches to a capability and defines a tool spec — wrap `browser-use` on `cdp`, a VLA policy on `robot`, or your own agent on `ssh` / `mcp`. No protocol work required.
 
-## Deploy & scale on the platform
+→ [Capabilities](https://docs.hud.ai/reference/capabilities) · [Models](https://docs.hud.ai/run/models) · [Robots](https://docs.hud.ai/reference/robots)
 
-`hud build` is for fully-local workflows. **The easier, recommended path is to skip it and just run `hud deploy`**, which builds and publishes your environment in one step. Then register your tasks and run them on hosted infra:
+## Deploy on the platform
 
-```bash
-hud deploy
-hud sync tasks my-taskset
-hud eval my-taskset --remote
-```
+From the [platform UI](https://hud.ai) you can run batches, compare models on the same taskset, and inspect every trace.
 
-From the [platform UI](https://hud.ai) you can run batches, compare models, and inspect every rollout. → [Deploy](https://docs.hud.ai/quick-links/deploy) · [Leaderboards](https://hud.ai/leaderboards)
+→ [Deploy](https://docs.hud.ai/run/deploy) · [Leaderboards](https://hud.ai/leaderboards)
 
-## Train on your tasks
+## Train on rewards
 
-Every rollout returns a `Run` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a group per task and turn the rewards into GRPO advantages:
+Every rollout returns a `Run` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and turn the rewards into GRPO advantages with `group_relative()`:
 
 ```python
-from hud.eval import HudTrainingClient, Taskset, TrainingConfig
+from hud.agents import create_agent
+from hud.eval import Taskset, group_relative
 
-trainer = HudTrainingClient(TrainingConfig(learning_rate=1e-5))
-runs = await Taskset(count_letter(word=w) for w in words).run(agent, group=16)
-await trainer.reward(runs)
+agent = create_agent("claude-sonnet-4-5")
+job = await Taskset(count_letter(word=w) for w in words).run(agent, group=16)
+for runs in job.results.values():
+    advantages = group_relative([r.reward for r in runs], normalize_std=True)
+    ...  # feed (run.trace_id, adv) into your optimizer
 ```
 
-**Plug into any trainer:** the signal is just `Rewarded` (`trace_id` + `reward`) plus the `group_relative()` helper, so HUD is purely the environment-and-reward source for your own GRPO/PPO loop. The same environment trains any model, text or multimodal, unchanged.
+HUD is the environment-and-reward source for your own GRPO/PPO loop — the same environment trains any model, text or multimodal, unchanged.
 
-## Import existing tasks
-
-Already have tasks in another format? `hud convert ./tasks` brings existing Harbor tasks into a HUD environment.
+→ [Training](https://docs.hud.ai/run/training) · [Designing tasks for signal](https://docs.hud.ai/run/signal)
 
 ## Links
 
-- 📖 [Documentation](https://docs.hud.ai)
-- ⌨️ [CLI Reference](https://docs.hud.ai/reference/cli/overview)
-- 🏆 [Leaderboards](https://hud.ai/leaderboards)
-- 🌐 [Environment Templates](https://hud.ai/environments)
-- 🤖 [Supported Models](https://hud.ai/models)
-- 💬 [Discord](https://discord.gg/wkjtmHYYjm)
+- [Documentation](https://docs.hud.ai)
+- [Quickstart](https://docs.hud.ai/quickstart)
+- [CLI reference](https://docs.hud.ai/reference/cli)
+- [Leaderboards](https://hud.ai/leaderboards)
+- [Environment templates](https://hud.ai/environments)
+- [Supported models](https://hud.ai/models)
+- [Discord](https://discord.gg/wkjtmHYYjm)
 
 ## Enterprise
 
@@ -167,7 +179,7 @@ Building agents at scale? We work with teams on custom environments, benchmarks,
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Key areas: [Agents](hud/agents/) · [Environments](hud/environment/) · [Native Tools](hud/native/tools/)
+Key areas: [Agents](hud/agents/) · [Environments](hud/environment/) · [Capabilities](hud/capabilities/) · [Eval](hud/eval/)
 
 <a href="https://github.com/hud-evals/hud-python/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=hud-evals/hud-python&max=50" />

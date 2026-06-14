@@ -95,7 +95,7 @@ When a task declares `returns=T`, the answer arrives wrapped
 `raw` is always the string as submitted.
 
 ```python
-@env.task(returns=int)
+@env.template(returns=int)
 async def count(word: str = "strawberry"):
     answer = yield f"How many letters in '{word}'?"
     yield 1.0 if answer.content == len(word) else 0.0
@@ -121,7 +121,7 @@ from hud.eval import TrainingConfig, group_relative
 
 ## Typed task I/O
 
-Declare `input=` / `returns=` on `@env.task` to surface JSON schemas in the manifest and parse the agent's answer into a typed `Answer[T]`. Any Pydantic model or standard type works.
+Declare `input=` / `returns=` on `@env.template` to surface JSON schemas in the manifest and parse the agent's answer into a typed `Answer[T]`. Any Pydantic model or standard type works.
 
 ## See also
 

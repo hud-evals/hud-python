@@ -29,8 +29,8 @@ Not for the quickstart. `hud eval`, `hud serve`, and gateway runs need **no Dock
 
 <Accordion title="Do I need an API key?">
 You need **one** of:
-- A **`HUD_API_KEY`** ([hud.ai/project/api-keys](https://hud.ai/project/api-keys)) — routes models through the HUD gateway with `--gateway` and traces every rollout. One key for everything.
-- A **provider key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) — to call that provider directly without `--gateway`.
+- A **`HUD_API_KEY`** ([hud.ai/project/api-keys](https://hud.ai/project/api-keys)) — routes models through the HUD gateway (the default when no provider key is set) and traces every rollout. One key for everything.
+- A **provider key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) — to call that provider directly instead of the gateway.
 
 See [Run on any model](/v6/run/models).
 </Accordion>
@@ -44,12 +44,12 @@ A globally installed CLI (`uv tool install hud-python`) runs in its **own** Pyth
 
 ```bash
 uv add hud-python
-uv run hud eval tasks.py claude --gateway
+uv run hud eval tasks.py claude
 ```
 </Accordion>
 
 <Accordion title="What platforms are supported (macOS / Windows / Linux)?">
-The CLI and SDK run on macOS, Windows, and Linux. Two caveats: the `ssh` capability's sandbox isolation uses `bwrap` (bubblewrap), which is **Linux-only** — off Linux the shell server still runs but **without** isolation (on Windows, sessions run through `cmd.exe`) — and `BashGrader` needs bash, so on native Windows it scores `0.0`. Both are fine for local iteration and fully resolved inside a built Linux image. See [Capabilities](/v6/reference/capabilities).
+The CLI and SDK run on macOS, Windows, and Linux. Two caveats: `ssh` sandbox isolation is **Linux-only** (the shell still runs without it elsewhere), and `BashGrader` needs bash, so on native Windows it scores `0.0`. Both are fine for local iteration and resolved inside a built Linux image. See [Capabilities](/v6/reference/capabilities).
 </Accordion>
 </AccordionGroup>
 
@@ -58,7 +58,7 @@ The CLI and SDK run on macOS, Windows, and Linux. Two caveats: the `ssh` capabil
 <AccordionGroup>
 <Accordion title="What does HUD see? Is my data private?">
 Two data paths to know about:
-- **Gateway** (`--gateway` / `create_agent`): model calls route through HUD's OpenAI-compatible endpoint at `inference.hud.ai`, which forwards to the provider.
+- **Gateway** (the default with just `HUD_API_KEY`, or forced with `--gateway` / `create_agent`): model calls route through HUD's OpenAI-compatible endpoint at `inference.hud.ai`, which forwards to the provider.
 - **Tracing**: when `HUD_API_KEY` is set, each rollout's trace is recorded on the [hud.ai](https://hud.ai) platform so you can replay it. Run without the key (or with a provider key directly) to skip the gateway.
 - **Training**: the managed trainer sends only **reward signals** (`trace_id` + advantage) to the backend, **never token data**. See [Train on rewards](/v6/run/training).
 
@@ -75,7 +75,7 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 <AccordionGroup>
 <Accordion title="Environment vs task vs taskset?">
 - **Environment** — where the agent acts; exposes [capabilities](/v6/reference/capabilities) (`ssh`, `cdp`, …).
-- **Task definition** — a `@env.task` async generator that prompts and grades.
+- **Task definition** — a `@env.template` async generator that prompts and grades.
 - **Task** — calling a definition (`count_letter(word="…")`) mints one runnable, parameterized data row.
 - **Taskset** — a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/reference/tasks).
 </Accordion>
@@ -98,6 +98,10 @@ Evals are a complete use on their own — write tasks, run them across models, r
 
 <Accordion title="Can I bring an existing benchmark or tasks?">
 Yes. The Harbor integration loads Harbor-format tasks straight into a `Taskset` (`integrations.harbor.load`), no conversion round-trip needed. And a whole benchmark can become one generative task definition. See [Harbor interop](/v6/advanced/harbor-convert).
+</Accordion>
+
+<Accordion title="Does HUD support robotics / VLA policies?">
+Yes, in **beta**: the `robot/0.1` capability is a schema-driven observation/action loop over WebSocket for simulator and robot environments, with a LeRobot-ready agent harness and trace playback with action-chunk markers. See the [Robots reference](/v6/reference/robots) and the [robot benchmark cookbook](/v6/cookbooks/robot-benchmark).
 </Accordion>
 
 <Accordion title="I'm upgrading from v5 — what changed?">

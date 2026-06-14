@@ -217,8 +217,10 @@ class MCPToolResult(CallToolResult):
 
 #: Schema tag of the core step stream (the tool-agent family shares it).
 STEP_SCHEMA = "hud.step.v1"
+ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
+RobotStepSource: TypeAlias = Literal["observation", "inference"]
 
 
 class TaskCall(BaseModel):
@@ -282,6 +284,7 @@ class Step(BaseModel):
 
         now = now_iso()
         payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
+        # make span from step
         span = Span(
             name=f"step.{self.source}",
             trace_id=normalize_trace_id(task_run_id),

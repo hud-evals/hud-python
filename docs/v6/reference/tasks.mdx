@@ -5,24 +5,24 @@ icon: "list-check"
 ---
 
 A **`Task`** is a concrete, runnable data point: an environment plus a task id,
-arguments, slug, and metadata. Calling an `@env.task()` function returns a
+arguments, slug, and metadata. Calling an `@env.template()` function returns a
 `Task`. A **`Taskset`** is a named, ordered collection of tasks.
 
 ```python
 from hud import Environment, Taskset
-from hud.eval import Task, task
+from hud.eval import Task
 ```
 
 ## Authoring Tasks
 
-`@env.task()` registers an async-generator task on an `Environment`. The returned
+`@env.template()` registers an async-generator task on an `Environment`. The returned
 callable is the authoring handle; call it with arguments to create a public
 `Task`.
 
 ```python
 env = Environment("letter-count")
 
-@env.task()
+@env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'?"
     yield 1.0 if answer == str(word.count(letter)) else 0.0
@@ -65,7 +65,7 @@ The contract is structural — a class holding real state (a platform session, a
 | Provider | Description |
 |----------|-------------|
 | `LocalRuntime(path)` | Serve the row's env from a local `.py` source in a child process (the same serving path a container CMD runs). `env=` pins one explicitly. |
-| `DockerRuntime(image)` | `docker run` a fresh container per rollout from an image whose CMD serves the control channel (the scaffolded `Dockerfile.hud`). `port=` (default 8765) is the in-container port; `run_args=` passes extra `docker run` flags. The control port is the only one published — capability connections (workspace SSH, CDP, ...) tunnel through it. |
+| `DockerRuntime(image)` | `docker run` a fresh container per rollout from an image whose CMD serves the control channel (the scaffolded `Dockerfile.hud`). `port=` (default 8765) is the in-container port; `run_args=` passes extra `docker run` flags. The control port is the only one published. |
 | `Runtime(url)` | Attach to an already-served control channel (provisioned elsewhere; no lifecycle). |
 | `HUDRuntime()` | Run each rollout on a HUD-hosted substrate by the row's env name — the agent co-located with the env on the instance (the default when `runtime=` is omitted). |
 
