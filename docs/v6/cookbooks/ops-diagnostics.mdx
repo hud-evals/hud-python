@@ -56,7 +56,7 @@ async def diagnose():
 tasks = [diagnose()]
 ```
 
-The answer is the agent's **text diagnosis** (`answer = yield ...`). The judge scores it against weighted criteria; `LLMJudgeGrader` needs `pip install rubric`.
+The answer is the agent's **text diagnosis** (`answer = yield ...`). The judge scores it against weighted criteria via the HUD gateway, no extra install needed.
 
 ## Why this is a good training task
 

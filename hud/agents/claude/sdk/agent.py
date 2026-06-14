@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.base import Agent
@@ -25,6 +26,45 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
+
+WINDOWS_SHELLS = ("cmd", "powershell")
+#: Bare ``claude`` install bootstrap for POSIX shells (no-op when already present).
+_POSIX_INSTALL_CHECK = (
+    "command -v claude >/dev/null 2>&1 || "
+    "{ curl -fsSL https://claude.ai/install.sh | bash -s -- 2>/dev/null; "
+    'export PATH="$HOME/.local/bin:$PATH"; }'
+)
+
+
+@dataclass(slots=True)
+class RemoteInvocation:
+    """How to run an assembled CLI command on the remote workspace shell.
+
+    ``command`` is what gets exec'd over SSH. When ``script_name`` is set, that
+    file must be written (with ``script_body``) before exec'ing ``command``.
+    """
+
+    command: str
+    script_name: str | None = None
+    script_body: str | None = None
+
+
+def build_remote_invocation(shell: str, run_cmd: str) -> RemoteInvocation:
+    """Build the remote exec command for ``run_cmd`` under the given login shell.
+
+    Windows shells can't take the assembled command inline — ``cmd.exe`` mangles
+    the quotes — so it is written to a batch file and invoked through ``cmd /c``.
+    A bare ``.hud_run.bat`` is rejected as an unknown command, and silently fails
+    to run under a PowerShell default shell, so ``cmd /c`` is required for both.
+    POSIX shells take the command inline, prefixed with a one-shot install check.
+    """
+    if shell in WINDOWS_SHELLS:
+        return RemoteInvocation(
+            command="cmd /c .hud_run.bat",
+            script_name=".hud_run.bat",
+            script_body=f"@echo off\r\n{run_cmd}\r\n",
+        )
+    return RemoteInvocation(command=f"{_POSIX_INSTALL_CHECK} && {run_cmd}")
 
 
 class ClaudeSDKAgent(Agent):
@@ -107,24 +147,17 @@ class ClaudeSDKAgent(Agent):
             mcp_config_path=mcp_config_path,
         )
 
-        if self._shell in ("cmd", "powershell"):
-            # Write command to bat file — cmd.exe mangles inline quotes.
-            bat_content = f"@echo off\r\n{run_cmd}\r\n"
+        invocation = build_remote_invocation(self._shell, run_cmd)
+        if invocation.script_name is not None:
+            assert invocation.script_body is not None
+            # cmd.exe mangles inline quotes, so the command rides a batch file.
             async with (
                 self._ssh.conn.start_sftp_client() as sftp,
-                sftp.open(".hud_run.bat", "wb") as f,
+                sftp.open(invocation.script_name, "wb") as f,
             ):
-                await f.write(bat_content.encode("utf-8"))
-            full_cmd = ".hud_run.bat"
-        else:
-            parts: list[str] = [
-                "command -v claude >/dev/null 2>&1 || "
-                "{ curl -fsSL https://claude.ai/install.sh | bash -s -- 2>/dev/null; "
-                'export PATH="$HOME/.local/bin:$PATH"; }',
-                run_cmd,
-            ]
-            full_cmd = " && ".join(parts)
+                await f.write(invocation.script_body.encode("utf-8"))
 
+        full_cmd = invocation.command
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
         logger.info("Full command: %s", full_cmd)
 
@@ -190,7 +223,7 @@ class ClaudeSDKAgent(Agent):
         mcp_config_path: str | None = None,
     ) -> str:
         env_vars = self._build_env_vars()
-        is_win = self._shell in ("cmd", "powershell")
+        is_win = self._shell in WINDOWS_SHELLS
         self._win_redirect = False
 
         def q(s: str) -> str:
@@ -288,4 +321,4 @@ class ClaudeSDKAgent(Agent):
         )
 
 
-__all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]
+__all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig", "RemoteInvocation", "build_remote_invocation"]

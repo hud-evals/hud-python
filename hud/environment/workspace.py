@@ -26,6 +26,31 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 _warned_no_bwrap = False
 
 
+class _PrefixSFTPServer(asyncssh.SFTPServer):
+    """Chroot SFTP whose root is also addressable as the guest mount path.
+
+    ``bash`` runs at the guest mount (``/workspace`` via bwrap on Linux, or the
+    root dir on Windows), so agents naturally write to ``/workspace/env.py``.
+    The chroot already makes the root ``/``, so a leading ``/workspace`` would
+    otherwise resolve to ``<root>/workspace/...`` and fail. Strip the guest
+    prefix first so SFTP and bash agree on what ``/workspace`` means.
+    """
+
+    def __init__(
+        self, chan: asyncssh.SSHServerChannel[bytes], *, chroot: bytes, guest_prefix: bytes
+    ) -> None:
+        super().__init__(chan, chroot=chroot)
+        self._guest_prefix = guest_prefix.rstrip(b"/")
+
+    def map_path(self, path: bytes) -> bytes:
+        if self._guest_prefix and self._guest_prefix not in (b"", b"/"):
+            if path == self._guest_prefix:
+                path = b"/"
+            elif path.startswith(self._guest_prefix + b"/"):
+                path = path[len(self._guest_prefix) :]
+        return super().map_path(path)
+
+
 # ─────────────────────────── mount declarations ───────────────────────────
 
 
@@ -212,7 +237,10 @@ class Workspace:
             self._serve_task = None
         if self._acceptor is not None:
             self._acceptor.close()
-            await self._acceptor.wait_closed()
+            # close() initiates shutdown; wait_closed() can hang on Windows when a
+            # client connection lingers, so bound it rather than block teardown.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._acceptor.wait_closed(), 5.0)
             self._acceptor = None
         elif self._sock is not None:
             self._sock.close()
@@ -406,7 +434,11 @@ class Workspace:
         process.exit(sub.returncode if sub.returncode is not None else 0)
 
     def _sftp_factory(self, chan: asyncssh.SSHServerChannel[bytes]) -> asyncssh.SFTPServer:
-        return asyncssh.SFTPServer(chan, chroot=str(self.root).encode())
+        return _PrefixSFTPServer(
+            chan,
+            chroot=str(self.root).encode(),
+            guest_prefix=self._guest_path.encode(),
+        )
 
 
 __all__ = [

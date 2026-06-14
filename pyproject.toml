@@ -19,6 +19,8 @@ dependencies = [
     "fastmcp==3.0.2",
     # For all inference agents
     "openai>=2.26.0",
+    "anthropic>=0.78.0",
+    "google-genai",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
@@ -107,12 +109,9 @@ packages = ["hud"]
 "hud/py.typed" = "hud/py.typed"
 
 [project.optional-dependencies]
-# Agent implementations, AI providers, datasets, and telemetry
-agents = [
-    # AI providers
-    "anthropic>=0.78.0",
-    "google-genai",
-]
+# AI providers (openai, anthropic, google-genai) are now core dependencies; this
+# extra is kept empty so `hud-python[agents]` and the `agent` alias still resolve.
+agents = []
 
 # AWS Bedrock support for ClaudeAgent
 bedrock = [

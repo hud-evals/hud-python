@@ -60,7 +60,7 @@ async def fix_tests():
 
 ## `LLMJudgeGrader`
 
-Scores an answer against rubric criteria with an LLM judge (uses the HUD gateway). Requires `pip install rubric`.
+Scores an answer against weighted criteria with an LLM judge (uses the HUD gateway). Each criterion is graded `MET`/`UNMET` in parallel and combined by weight; no extra install needed.
 
 ```python
 result = await LLMJudgeGrader.grade(
