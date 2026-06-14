@@ -12,7 +12,7 @@ A **capability** is a connection the environment exposes; a harness attaches its
 | `mcp`  | `mcp/2025-11-25` | Your own tools over the Model Context Protocol | `fastmcp` |
 | `cdp`  | `cdp/1.3` | Browser control over the Chrome DevTools Protocol | Chromium (`playwright`) |
 | `rfb`  | `rfb/3.8` | Full computer-use over VNC: screen + keyboard/mouse | `Xvfb` + `x11vnc` |
-| `robot` | `robot/0.1` | Schema-driven robot observation/action loop over WebSocket *(beta)* | robot bridge |
+| `robot` | `openpi/0` | Schema-driven robot observation/action loop over WebSocket *(beta)* | robot bridge |
 
 ```python
 from hud.capabilities import Capability
@@ -221,7 +221,7 @@ async def _down():
 Capability.robot(*, name="robot", url, contract)
 ```
 
-The `robot/0.1` control loop *(beta)*. `contract` is the environment's full self-describing schema — `robot_type`, `control_rate`, and every observation/action feature — carried in the manifest params so the agent wires itself with no shared config. The serving bridge binds an ephemeral loopback port, so publish this from an `@env.initialize` hook after `await bridge.start()`:
+The `openpi/0` control loop *(beta)*. This is an **openpi-like** protocol: it reuses openpi's wire format (msgpack with transparent, recursive numpy serialization) and its flat observation/action naming schema (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. It differs fundamentally in **role assignment** — in openpi a policy *server* answers inference requests; here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts in the world, replying with actions). `contract` is the environment's full self-describing schema — `robot_type`, `control_rate`, and every observation/action feature — carried in the manifest params so the agent wires itself with no shared config. The serving bridge binds an ephemeral loopback port, so publish this from an `@env.initialize` hook after `await bridge.start()`:
 
 ```python
 @env.initialize
@@ -274,7 +274,7 @@ A harness opens a capability to get a live client. The capability clients live i
 | `MCPClient` | `mcp/2025-11-25` |
 | `CDPClient` | `cdp/1.3` |
 | `RFBClient` | `rfb/3.8` |
-| `RobotClient` | `robot/0.1` — joins the registry on first open (the `robot` extra: numpy/msgpack) |
+| `RobotClient` | `openpi/0` — joins the registry on first open (the `robot` extra: numpy/openpi-client) |
 
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 

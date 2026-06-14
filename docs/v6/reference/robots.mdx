@@ -6,12 +6,12 @@ tag: "Beta"
 ---
 
 <Note>
-The `robot` capability is in **beta**. The wire protocol is versioned `robot/0.1`; the contract schema is v0. Expect additive changes while the design settles.
+The `robot` capability is in **beta**. The wire protocol is versioned `openpi/0`; the contract schema is v0. Expect additive changes while the design settles.
 </Note>
 
-HUD runs robot environments the same way it runs everything else — an environment declares tasks and capabilities, an agent drives a live `Run` — but a policy at 10 Hz can't ride discrete tool calls. The `robot` capability is a **schema-driven observation/action loop over WebSocket** (msgpack + raw arrays): the environment owns the simulator and serves frames; the agent runs the policy and streams actions back.
+HUD runs robot environments the same way it runs everything else — an environment declares tasks and capabilities, an agent drives a live `Run` — but a policy at 10 Hz can't ride discrete tool calls. The `robot` capability is a **schema-driven observation/action loop over WebSocket**. It is **openpi-like** — it reuses openpi's wire format (msgpack with transparent, recursive numpy serialization) and flat observation/action naming (`observation/...` keys, `actions`) — but flips the roles: the **environment is the server** (owns the simulator, serves frames) and the **agent is the client** (runs the policy, streams actions back). On connect the env sends a metadata frame, then pushes observations; failures surface as a string traceback frame rather than a silent close.
 
-Everything below ships behind the `robot` extra (`pip install hud-python[robot]` — numpy + msgpack).
+Everything below ships behind the `robot` extra (`pip install hud-python[robot]` — numpy + openpi-client).
 
 ## Overview
 
@@ -152,7 +152,7 @@ Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per st
 
 | Symbol | Where | Role |
 |--------|-------|------|
-| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `robot/0.1` capability after `start()` |
+| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
 | `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |

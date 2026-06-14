@@ -138,10 +138,10 @@ browseruse = [
     "browser-use>=0.11.13",
 ]
 
-# Robot capability (robot protocol wire codec + bridges + agent harness)
+# Robot capability (openpi/0 protocol wire codec + bridges + agent harness)
 robot = [
     "numpy>=1.24",
-    "msgpack>=1.0",
+    "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
 ]
 
 

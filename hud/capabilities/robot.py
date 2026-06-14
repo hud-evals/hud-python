@@ -1,8 +1,10 @@
-"""The ``robot`` protocol: wire codec + the agent-side client.
+"""The ``openpi/0`` protocol: wire codec + the agent-side client.
 
-This module defines the ``robot`` wire format (msgpack + raw numpy array buffers) and
-:class:`RobotClient`, the agent-side capability client that dials a robot env and exchanges
-observations/actions over it.
+``openpi/0`` is openpi-like — it reuses openpi's msgpack-numpy wire format and flat
+observation/action naming — but flips the roles: here the *env* is the WebSocket
+server (it owns the world) and the *agent* is the client (it acts in the world).
+:class:`RobotClient` is that agent-side client; it dials a robot env and exchanges
+observations/actions over the socket.
 
 The *env-side* counterpart — the server bridge that owns the simulator
 (:class:`~hud.environment.robot.bridge.RobotBridge`) — lives in
@@ -18,40 +20,24 @@ from typing import Any, ClassVar, Self
 import numpy as np
 import websockets
 import websockets.exceptions
+from openpi_client import msgpack_numpy
 
 from .base import Capability, CapabilityClient
 
-# ─── wire codec (msgpack + raw array buffers, no base64) ─────────────────────
-
-
-def _encode_array(arr: Any) -> dict[str, Any]:
-    a = np.ascontiguousarray(arr)
-    return {"shape": list(a.shape), "dtype": str(a.dtype), "data": a.tobytes()}
-
-
-def _decode_array(d: dict[str, Any]) -> np.ndarray:
-    return np.frombuffer(d["data"], dtype=np.dtype(d["dtype"])).reshape(d["shape"]).copy()
-
-
-def _packb(obj: Any) -> bytes:
-    import msgpack
-
-    return msgpack.packb(obj, use_bin_type=True)
-
-
-def _unpackb(data: bytes) -> Any:
-    import msgpack
-
-    return msgpack.unpackb(data, raw=False)
+# ─── wire codec ──────────────────────────────────────────────────────────────
+# openpi's msgpack-numpy codec: numpy arrays nested anywhere in a message serialize
+# transparently and recursively, so neither end wraps obs/action fields by hand.
+_packb = msgpack_numpy.packb
+_unpackb = msgpack_numpy.unpackb
 
 
 # ─── agent-side client ───────────────────────────────────────────────────────
 
 
 class RobotClient(CapabilityClient):
-    """Live ``robot`` connection: send actions, receive observations."""
+    """Live ``openpi/0`` connection: send actions, receive observations."""
 
-    protocol: ClassVar[str] = "robot"
+    protocol: ClassVar[str] = "openpi"
 
     def __init__(self, capability: Capability, ws: Any) -> None:
         self.capability = capability
@@ -80,41 +66,40 @@ class RobotClient(CapabilityClient):
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
         ws = await websockets.connect(cap.url, max_size=None)
+        # Consume the connect-time metadata frame (always first); a string frame is the env's error convention.
+        raw = await ws.recv()
+        if isinstance(raw, str):
+            raise RuntimeError(f"robot env error on connect:\n{raw}")
         return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
 
-        Realtime (free-running) bridges also attach a ``"meta"`` block carrying the
-        realtime control state used for async/RTC inference::
+        On the wire the env sends an openpi-style *flat* dict (``{name: ndarray, ...}``)
+        with ``terminated`` (and, for realtime bridges, ``meta``) as sibling keys; we
+        regroup the array fields under ``"data"`` for the agent harness. Arrays — nested
+        anywhere, including inside ``meta`` (e.g. ``unexecuted_chunk``) — are already
+        decoded by the codec.
 
-            {
-                "obs_index": int,  # episode control-tick counter at emit time
-                "queue_remaining": int,  # actions still buffered env-side
-                "delay": int,  # env's conservative inference-delay estimate (ticks)
-                "unexecuted_chunk": ndarray | None,
-            }  # [T, A] not-yet-executed tail (executable space); RTC prefix source
+        Realtime (free-running) bridges attach a ``"meta"`` block carrying the realtime
+        control state used for async/RTC inference (``obs_index``, ``queue_remaining``,
+        ``delay``, ``unexecuted_chunk``); sync bridges omit it.
 
-        Legacy sync bridges omit ``"meta"`` entirely, so it is only present when the
-        env is realtime.
+        Raises if the env reported an error (a string traceback frame).
         """
         msg = await self._queue.get()
-        data = {name: _decode_array(d) for name, d in msg["data"].items()}
-        out: dict[str, Any] = {"data": data, "terminated": bool(msg.get("terminated", False))}
-        meta = msg.get("meta")
+        if "error" in msg:
+            raise RuntimeError(f"robot env error:\n{msg['error']}")
+        terminated = bool(msg.pop("terminated", False))
+        meta = msg.pop("meta", None)
+        out: dict[str, Any] = {"data": msg, "terminated": terminated}
         if meta is not None:
-            decoded = dict(meta)
-            unexecuted_chunk = meta.get("unexecuted_chunk")
-            decoded["unexecuted_chunk"] = (
-                _decode_array(unexecuted_chunk) if unexecuted_chunk is not None else None
-            )
-            out["meta"] = decoded
+            out["meta"] = meta
         return out
 
     async def send_action(self, action: Any) -> None:
-        """Encode the action and send it (legacy single-action sync path)."""
-        arr = np.asarray(action, dtype=np.float32)
-        await self._ws.send(_packb({"data": _encode_array(arr)}))
+        """Send a single action under the openpi ``"actions"`` key (sync path)."""
+        await self._ws.send(_packb({"actions": np.asarray(action, dtype=np.float32)}))
 
     async def send_chunk(
         self, chunk: Any, *, obs_index: int | None = None, delay_used: int | None = None
@@ -125,8 +110,7 @@ class RobotClient(CapabilityClient):
         can measure the real inference delay (ticks consumed in flight); ``delay_used``
         is the delay the agent conditioned on (informational).
         """
-        arr = np.asarray(chunk, dtype=np.float32)
-        msg: dict[str, Any] = {"chunk": _encode_array(arr)}
+        msg: dict[str, Any] = {"actions": np.asarray(chunk, dtype=np.float32)}
         if obs_index is not None:
             msg["obs_index"] = int(obs_index)
         if delay_used is not None:
@@ -143,9 +127,11 @@ class RobotClient(CapabilityClient):
     async def _recv_loop(self) -> None:
         try:
             async for raw in self._ws:
+                # A string frame is the env's error convention (a traceback), not an obs.
+                msg = {"error": raw} if isinstance(raw, str) else _unpackb(raw)
                 if self._queue.full():
                     self._queue.get_nowait()
-                await self._queue.put(_unpackb(raw))
+                await self._queue.put(msg)
         except websockets.exceptions.ConnectionClosed:
             pass
         except asyncio.CancelledError:

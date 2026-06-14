@@ -173,18 +173,20 @@ class Capability:
         url: str,
         contract: dict[str, Any],
     ) -> Capability:
-        """``robot/0.1`` — schema-driven action/observation loop over WebSocket.
+        """``openpi/0`` — schema-driven action/observation loop over WebSocket.
 
-        ``contract`` is the env's full self-describing config: ``robot_type``,
-        ``control_rate``, and a ``features`` map where each feature declares its
-        ``role`` (``"action"`` / ``"observation"``), layout (``dtype`` / ``shape``
-        / ``names``) and normalization ``stats``. It round-trips verbatim through
-        the manifest, so the agent gets everything it needs to wire a policy
-        without a shared config file. ``RobotClient.spaces()`` splits the
+        openpi-like: reuses openpi's msgpack-numpy wire format and flat obs/action
+        naming, but the env is the server and the agent is the client (see
+        :mod:`hud.capabilities.robot`). ``contract`` is the env's full self-describing
+        config: ``robot_type``, ``control_rate``, and a ``features`` map where each
+        feature declares its ``role`` (``"action"`` / ``"observation"``), layout
+        (``dtype`` / ``shape`` / ``names``) and normalization ``stats``. It round-trips
+        verbatim through the manifest, so the agent gets everything it needs to wire a
+        policy without a shared config file. ``RobotClient.spaces()`` splits the
         contract's features into action/observation spaces by ``role``.
         """
         normalized = normalize_url(url, default_scheme="ws", default_port=9091)
-        return cls(name=name, protocol="robot/0.1", url=normalized, params={"contract": contract})
+        return cls(name=name, protocol="openpi/0", url=normalized, params={"contract": contract})
 
 
 class CapabilityClient(ABC):
