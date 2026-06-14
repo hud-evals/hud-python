@@ -142,6 +142,13 @@ class Settings(BaseSettings):
         validation_alias="HUD_TELEMETRY_ENABLED",
     )
 
+    telemetry_local_dir: str | None = Field(
+        default=None,
+        description="If set, also write each telemetry span to <dir>/<trace_id>.jsonl "
+        "locally. Independent of the backend exporter — works with no API key.",
+        validation_alias="HUD_TELEMETRY_LOCAL_DIR",
+    )
+
     hud_logging: bool = Field(
         default=True,
         description="Enable fancy logging for the HUD SDK",

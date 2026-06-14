@@ -18,6 +18,7 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor, wait
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -55,14 +56,38 @@ _pool: ThreadPoolExecutor | None = None
 _client: httpx.Client | None = None
 _lock = threading.Lock()
 
+# Local file exporter — the second export target, independent of the backend.
+_local_lock = threading.Lock()
+
+
+def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
+    """Append one span as a JSON line to ``<local_dir>/<trace_id>.jsonl``.
+
+    Runs regardless of ``telemetry_enabled`` / ``api_key``: set
+    ``HUD_TELEMETRY_LOCAL_DIR`` to dump every span (the agent's steps — reasoning,
+    tool calls, results) to disk with no backend. Best-effort.
+    """
+    if not local_dir:
+        return
+    try:
+        path = Path(local_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        trace_id = span.get("trace_id") or "unknown"
+        line = json.dumps(span, ensure_ascii=False)
+        with _local_lock, (path / f"{trace_id}.jsonl").open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:  # noqa: BLE001 - local export must never break a rollout
+        logger.debug("local span export failed", exc_info=True)
+
 
 def queue_span(span: dict[str, Any]) -> None:
-    """Queue a span for batched, parallel background export."""
+    """Export a span: to the local file exporter (if set) and the HUD backend."""
     from hud.settings import settings
 
-    if not settings.telemetry_enabled or not settings.api_key:
-        return
     if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
+        return
+    _export_local(span, settings.telemetry_local_dir)
+    if not settings.telemetry_enabled or not settings.api_key:
         return
     _ensure_worker()
     _queue.put(span)

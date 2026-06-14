@@ -146,6 +146,12 @@ class Workspace:
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
         )
         self._bwrap = shutil.which("bwrap")
+        # Without bwrap there is no `/workspace` mount — the sandbox *is* the real
+        # directory, so address it by its real path. Otherwise `cd /workspace`
+        # lands in a phantom dir and the editor/SFTP/bash disagree on where files
+        # are. Only override the default; respect an explicit guest_path.
+        if self._bwrap is None and guest_path == "/workspace":
+            self._guest_path = self.root.as_posix()
         # ssh config
         self._ssh_host = host
         self._ssh_port = port
