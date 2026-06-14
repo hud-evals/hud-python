@@ -18,8 +18,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hud.utils.platform import PlatformClient
 from hud.telemetry import flush
+from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout

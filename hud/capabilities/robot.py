@@ -66,7 +66,8 @@ class RobotClient(CapabilityClient):
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
         ws = await websockets.connect(cap.url, max_size=None)
-        # Consume the connect-time metadata frame (always first); a string frame is the env's error convention.
+        # Consume the connect-time metadata frame (always first); a string frame
+        # is the env's error convention.
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
