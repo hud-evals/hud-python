@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hud.utils.platform import PlatformClient
+from hud.telemetry import flush
 
 from .job import Job, job_enter
 from .run import rollout
@@ -268,6 +269,7 @@ class Taskset:
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
         job.runs.extend(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
+        await asyncio.to_thread(flush, timeout=90.0)
         return job
 
 

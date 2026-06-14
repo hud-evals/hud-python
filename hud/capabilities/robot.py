@@ -39,12 +39,8 @@ class RobotClient(CapabilityClient):
 
     protocol: ClassVar[str] = "openpi"
 
-    def __init__(
-        self, capability: Capability, ws: Any, metadata: dict[str, Any] | None = None
-    ) -> None:
+    def __init__(self, capability: Capability, ws: Any) -> None:
         self.capability = capability
-        #: The env's connect-time metadata frame (first frame on the socket).
-        self.server_metadata: dict[str, Any] = dict(metadata or {})
         self._ws = ws
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1)
         self._mailman = asyncio.create_task(self._recv_loop())
@@ -70,8 +66,11 @@ class RobotClient(CapabilityClient):
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
         ws = await websockets.connect(cap.url, max_size=None)
-        metadata = _unpackb(await ws.recv())  # env sends a metadata frame on connect
-        return cls(cap, ws, metadata)
+        # Consume the connect-time metadata frame (always first); a string frame is the env's error convention.
+        raw = await ws.recv()
+        if isinstance(raw, str):
+            raise RuntimeError(f"robot env error on connect:\n{raw}")
+        return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
