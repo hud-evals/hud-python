@@ -28,10 +28,10 @@ Environment(name="environment", *, version="0.0.1", capabilities=None)
 ## Registering tasks
 
 ```text
-@env.task(*, id=None, description="", input=None, returns=None)
+@env.template(*, id=None, description="", input=None, returns=None)
 ```
 
-Registers an async-generator task. The decorated function **must** be an async generator (`async def` with `yield`) or `@env.task` raises `TypeError`. The decorated callable creates a public [`Task`](/v6/reference/tasks) when called with task arguments.
+Registers a **template**: an async generator that `yield`s a prompt and a reward. Calling the decorated object mints a public [`Task`](/v6/reference/tasks).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -41,7 +41,7 @@ Registers an async-generator task. The decorated function **must** be an async g
 | `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `Answer[T]`. See [Types](/v6/reference/types). |
 
 ```python
-@env.task(id="count", description="Count a letter", returns=int)
+@env.template(id="count", description="Count a letter", returns=int)
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s in '{word}'?"
     yield 1.0 if str(word.count(letter)) in str(answer.content) else 0.0

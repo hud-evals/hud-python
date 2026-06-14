@@ -56,11 +56,19 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_tokens=16384))
 
 The bundled agents are catalog-driven: on each run they read the environment's manifest, open the capabilities they support (`run.client.open(protocol)`), build their provider tools into fresh per-run state, then loop against `run.prompt_messages`. You don't wire tools — declaring the capability on the environment is enough.
 
-`__call__` accepts optional tuning:
+`__call__(run)` takes only the run; tuning like `max_steps`, `system_prompt`, and `citations_enabled` is read from the agent's **config**:
 
 ```python
-await agent(run, max_steps=10, system_prompt=None, citations_enabled=False)
+agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
 ```
+
+## Settings precedence
+
+When the same knob (e.g. `model`, `max_steps`) is set in more than one place, the order is: **explicit kwarg/config field > CLI flag > defaults**. Concretely:
+
+- `create_agent("…", max_steps=30)` and `ClaudeConfig(max_steps=30)` set the config field directly.
+- `hud eval … --max-steps 30 --model …` overrides the config defaults for that run.
+- Unset everywhere → the config's built-in default (`max_steps=10`).
 
 ## Bring your own harness
 

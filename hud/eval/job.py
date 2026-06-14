@@ -58,6 +58,20 @@ class Job:
             return 0.0
         return sum(run.reward for run in self.runs) / len(self.runs)
 
+    @property
+    def results(self) -> dict[str, list[Run]]:
+        """Runs grouped by task slug — the safe alternative to positional zip.
+
+        List-valued because ``group > 1`` produces several runs per task, and
+        in slug order within each group. Use this instead of ``zip(tasks,
+        job.runs)``, which silently misaligns once grouping or task ordering
+        changes.
+        """
+        out: dict[str, list[Run]] = {}
+        for run in self.runs:
+            out.setdefault(run.slug or "", []).append(run)
+        return out
+
 
 def _reporting_enabled() -> bool:
     from hud.settings import settings

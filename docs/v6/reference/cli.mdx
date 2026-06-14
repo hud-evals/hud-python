@@ -66,7 +66,7 @@ Each rollout runs on a fresh local substrate spawned from the source (the
 
 ```bash
 hud eval tasks.py claude
-hud eval tasks.py claude --gateway --full
+hud eval tasks.py claude --full
 ```
 
 | Option | Description |
@@ -74,8 +74,8 @@ hud eval tasks.py claude --gateway --full
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |
 | `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
-| `--gateway`, `-g` | Route LLM calls through the HUD gateway (only needs `HUD_API_KEY`). |
-| `--group-size` | Runs per task. |
+| `--gateway`, `-g` | Force LLM calls through the HUD gateway. Implied when only `HUD_API_KEY` is set (no provider key); pass it to force the gateway when a provider key is also present. |
+| `--group` (alias `--group-size`) | Runs per task — a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
 | `--max-steps` | Cap steps per task. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |

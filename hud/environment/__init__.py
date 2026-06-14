@@ -17,7 +17,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hud.capabilities import Capability
-from hud.server import MCPRouter
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
@@ -25,8 +24,6 @@ from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-ToolRouter = MCPRouter
 
 
 def load_environment(path: str | Path, *, name: str | None = None) -> Environment:
@@ -54,10 +51,8 @@ __all__ = [
     "Answer",
     "Capability",
     "Environment",
-    "MCPRouter",
     "Mount",
     "MountKind",
-    "ToolRouter",
     "Workspace",
     "load_environment",
 ]

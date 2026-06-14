@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
-from mcp.types import ImageContent
+from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -412,3 +412,32 @@ class InferenceStep(Step):
     
 
 
+class ContentResult(BaseModel):
+    """Ergonomic builder for a custom MCP tool's ``list[ContentBlock]`` return.
+
+    A ``@server.tool`` returns content blocks; this assembles the common
+    text (+ optional image) case in one line so vision tools — games,
+    computer-use, browsers — don't hand-roll the same block list::
+
+        from hud.agents.types import ContentResult
+
+        @server.tool
+        async def look() -> list[ContentBlock]:
+            return ContentResult(output=status, base64_image=png_b64).to_content_blocks()
+    """
+
+    output: str | None = None
+    error: str | None = None
+    base64_image: str | None = None
+
+    def to_content_blocks(self) -> list[ContentBlock]:
+        """Text block(s) for ``output``/``error``, plus an image for ``base64_image``."""
+        blocks: list[ContentBlock] = []
+        if self.output:
+            blocks.append(TextContent(type="text", text=self.output))
+        if self.error:
+            blocks.append(TextContent(type="text", text=self.error))
+        if self.base64_image:
+            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
+            blocks.append(ImageContent(type="image", data=self.base64_image, mimeType=mime))
+        return blocks

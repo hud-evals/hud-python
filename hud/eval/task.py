@@ -1,6 +1,6 @@
 """Task: one task row — an env name, a task id, bound args, and metadata.
 
-``foo(x, y)`` (an ``@env.task`` factory call) returns one of these. ``env``
+``foo(x, y)`` (an ``@env.template`` factory call) returns one of these. ``env``
 is the environment's *name*: the join key between the data plane (rows) and
 whatever placement can bring that environment up. Running a task never needs
 a live env — the prompt and grading arrive over the wire from the substrate
@@ -24,7 +24,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
@@ -38,8 +38,8 @@ class Task(BaseModel):
 
     Pure data — holds no execution state, so one ``Task`` can drive many
     concurrent rollouts. ``run`` it for a graded :class:`~hud.eval.job.Job`;
-    placement comes from ``runtime=`` (a provider) or defaults to HUD-hosted
-    provisioning by ``env``.
+    placement comes from ``runtime=`` (a provider), else the source the task was
+    minted from (local), else HUD-hosted provisioning by ``env`` name.
     """
 
     env: str = Field(min_length=1)
@@ -48,6 +48,15 @@ class Task(BaseModel):
     slug: str | None = None
     validation: list[dict[str, Any]] | None = None
     agent_config: dict[str, Any] | None = None
+    #: Arbitrary metadata fields surfaced as filterable columns / leaderboard
+    #: facets on the platform (e.g. ``{"difficulty": "easy", "suite": "coding"}``).
+    columns: dict[str, Any] | None = None
+
+    #: In-process only: the source file the template was defined in, captured
+    #: when a template factory mints the task. Lets ``run`` default to serving
+    #: that source locally. Excluded from the wire (a row loaded from JSON has
+    #: none, and falls back to HUD-hosted placement).
+    _source: str | None = PrivateAttr(default=None)
 
     def default_slug(self) -> str:
         """A stable slug from the task id, disambiguated by an args hash when present."""
@@ -75,11 +84,13 @@ class Task(BaseModel):
         open ``job`` from :meth:`Job.start` to accumulate into), ``group``
         repeats sharing a group_id, ``max_concurrent`` capping parallelism —
         over a taskset of one. ``runtime`` is the placement; left unset it
-        defaults to HUD-hosted provisioning by ``env`` name.
+        serves the task's source locally when minted in-process, else falls
+        back to HUD-hosted provisioning by ``env`` name.
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 
-        return await Taskset(self.default_slug(), [self]).run(
+        taskset = Taskset(self.default_slug(), [self])
+        return await taskset.run(
             agent, runtime=runtime, group=group, max_concurrent=max_concurrent, job=job
         )
 

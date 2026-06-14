@@ -82,7 +82,7 @@ from hud import Environment
 env = Environment("demo")
 
 
-@env.task()
+@env.template()
 async def solve(n: int = 1):
     yield f"solve {n}"
     yield 1.0

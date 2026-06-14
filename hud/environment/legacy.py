@@ -14,7 +14,7 @@ surface and *adapts* it to v6:
 - registered tools are classified and, on serve, turned into capabilities:
   shell/edit → ``ssh`` (spins up a :class:`~hud.environment.Workspace`), computer
   → ``rfb`` (detects a VNC / ``HUD_RFB_URL``), everything else → ``mcp`` (a local
-  :class:`~hud.server.MCPServer`). Each path is best-effort: a failure warns and
+  ``fastmcp.FastMCP`` server). Each path is best-effort: a failure warns and
   is skipped so the env's *tasks* still serve.
 
 Every entry point emits a ``DeprecationWarning`` pointing at the v6 equivalent.
@@ -160,16 +160,25 @@ class LegacyEnvMixin:
             await self._ensure_mcp_capability(buckets["mcp"])
 
     async def _ensure_mcp_capability(self, tools: list[Any]) -> None:
-        """Serve ``tools`` on a local MCPServer (http) + publish an ``mcp`` capability."""
+        """Serve ``tools`` on a local FastMCP server (http) + publish an ``mcp`` capability."""
         try:
-            from hud.capabilities import Capability
-            from hud.server import MCPServer
+            from fastmcp import FastMCP
 
-            server = MCPServer(name=f"{self.name}-tools")
+            from hud.capabilities import Capability
+
+            server = FastMCP(name=f"{self.name}-tools")
             added = 0
             for tool in tools:
                 try:
-                    server.add_tool(tool)
+                    # A v5 BaseTool exposes a FastMCP FunctionTool at ``.mcp``; a plain
+                    # callable registers via ``.tool``; a FastMCP Tool adds directly.
+                    mcp_tool = getattr(tool, "mcp", None)
+                    if mcp_tool is not None:
+                        server.add_tool(mcp_tool)
+                    elif callable(tool):
+                        server.tool(tool)
+                    else:
+                        server.add_tool(tool)
                     added += 1
                 except Exception:
                     LOGGER.warning(
@@ -259,7 +268,7 @@ class LegacyEnvMixin:
         returns: type | None = None,
         enable_citations: bool = False,
     ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
-        """[deprecated] Register a scenario as a v6 task. Prefer ``@env.task``.
+        """[deprecated] Register a scenario as a v6 task. Prefer ``@env.template``.
 
         Accepts the full v5 ``scenario`` signature; the generator (``yield prompt``
         then ``yield reward``) is registered as a v6 task and the v5 metadata
@@ -269,7 +278,7 @@ class LegacyEnvMixin:
         longer flow into the answer envelope.
         """
         warnings.warn(
-            "env.scenario() is deprecated: use @env.task (it accepts the same "
+            "env.scenario() is deprecated: use @env.template (it accepts the same "
             "yield-prompt-then-reward generator).",
             DeprecationWarning,
             stacklevel=2,
@@ -287,7 +296,7 @@ class LegacyEnvMixin:
                 )
 
             desc = description or (fn.__doc__ or "").strip().split("\n", 1)[0]
-            register = cast("Any", self).task  # provided by Environment
+            register = cast("Any", self).template  # provided by Environment
             task: _TaskFactory[P] = register(id=scenario_name, description=desc, returns=returns)(
                 fn
             )
@@ -312,11 +321,11 @@ class LegacyEnvMixin:
     def __call__(self, name: str, /, **args: Any) -> Any:
         """[deprecated] ``env("scenario")`` → the registered task factory or ``Task``.
 
-        With no args, returns the callable registered by ``@env.task`` (e.g. for
+        With no args, returns the callable registered by ``@env.template`` (e.g. for
         ``AgentTool``). With args, returns the bound :class:`~hud.eval.Task`.
         """
         warnings.warn(
-            "env('scenario') is deprecated: keep a reference to the @env.task return "
+            "env('scenario') is deprecated: keep a reference to the @env.template return "
             "value and call it to build a Task.",
             DeprecationWarning,
             stacklevel=2,

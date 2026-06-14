@@ -52,7 +52,7 @@ Keep environment state **frozen across rollouts**: every run of a task should se
 One task definition should span a range. Parameterize the generator and create a concrete task per point:
 
 ```python tasks.py
-@env.task()
+@env.template()
 async def fix_bug(difficulty: int = 1):
     answer = yield f"Fix the level-{difficulty} bug in your workspace."
     result = await BashGrader.grade(weight=1.0, command="pytest -q")

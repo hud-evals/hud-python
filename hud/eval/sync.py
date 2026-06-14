@@ -121,6 +121,7 @@ def _record_to_task(record: dict[str, Any]) -> Task:
             "slug": record.get("name"),
             "validation": record.get("validation"),
             "agent_config": record.get("agent_config"),
+            "columns": record.get("columns"),
         }
     )
 
@@ -158,6 +159,8 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
         payload["validation"] = task.validation
     if task.agent_config:
         payload["agent_config"] = task.agent_config
+    if task.columns:
+        payload["columns"] = task.columns
     return payload
 
 
@@ -167,6 +170,8 @@ def _task_signature(task: Task) -> str:
         sig_data["validation"] = task.validation
     if task.agent_config:
         sig_data["agent_config"] = task.agent_config
+    if task.columns:
+        sig_data["columns"] = task.columns
     return f"{task.id}|" + json.dumps(
         sig_data,
         sort_keys=True,

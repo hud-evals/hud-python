@@ -19,7 +19,7 @@ from .conftest import served
 async def test_dict_grade_without_numeric_score_errors_loudly() -> None:
     env = Environment("badgrade")
 
-    @env.task()
+    @env.template()
     async def reward_keyed():
         yield "go"
         yield {"reward": 1.0}  # wrong key: the wire grade frame is {"score": ...}
@@ -33,7 +33,7 @@ async def test_dict_grade_without_numeric_score_errors_loudly() -> None:
 async def test_non_numeric_grade_errors_loudly() -> None:
     env = Environment("badgrade")
 
-    @env.task()
+    @env.template()
     async def stringy():
         yield "go"
         yield "great job"
@@ -47,7 +47,7 @@ async def test_non_numeric_grade_errors_loudly() -> None:
 async def test_score_dict_passes_through_with_extra_keys() -> None:
     env = Environment("richgrade")
 
-    @env.task()
+    @env.template()
     async def rich():
         yield "go"
         yield {"score": 0.5, "info": {"detail": "partial credit"}}

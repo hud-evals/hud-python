@@ -23,7 +23,7 @@ from hud.environment import Environment
 env = Environment(name="chat")
 
 
-@env.task()
+@env.template()
 async def chat_simple(messages: list[PromptMessage]):
     """Minimal chat -- passes PromptMessages straight through.
 
@@ -34,7 +34,7 @@ async def chat_simple(messages: list[PromptMessage]):
     yield 1.0
 
 
-@env.task()
+@env.template()
 async def chat_full(messages: list[PromptMessage]):
     """Full-featured chat with system prompt and eval.
 

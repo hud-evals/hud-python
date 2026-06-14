@@ -1,0 +1,72 @@
+---
+title: "Subagents as tools"
+description: "Expose a specialist sub-agent as a plain MCP tool an orchestrator can call."
+icon: "diagram-project"
+---
+
+An MCP tool is just a function. A **subagent** is just a function that runs an agent over a task and returns its answer. Put the two together and an orchestrating agent can call a specialist sub-agent as a single tool call — no special class, nothing HUD-specific beyond the rollout you already write.
+
+This is the pattern: write the function, register it as a tool on a plain [FastMCP](https://github.com/jlowin/fastmcp) server, and expose that server as an [`mcp` capability](/v6/reference/capabilities).
+
+## 1. Write the subagent as a function
+
+Calling an `@env.template` mints a task; running it drives a fresh rollout whose `Job` carries the result. Wrap that in a function and return the agent's answer:
+
+```python subagents.py
+from hud.agents import create_agent
+from tasks import investigate   # an @env.template you defined
+
+# One stateless agent instance drives every call.
+_specialist = create_agent("claude-haiku-4-5")
+
+async def investigate_issue(issue_id: str) -> str:
+    """Investigate an issue and return the root-cause findings."""
+    job = await investigate(issue_id=issue_id).run(_specialist)
+    return job.runs[0].trace.content or ""
+```
+
+The function's signature and docstring are all an MCP server needs to build the tool schema: `issue_id: str` becomes the one parameter, the docstring becomes the description.
+
+## 2. Register it as an MCP tool
+
+Use a baseline FastMCP server — type hints + docstring become the schema, no subclass required:
+
+```python subagents.py
+from fastmcp import FastMCP
+
+tools = FastMCP(name="specialists")
+tools.tool(investigate_issue)        # or write @tools.tool above the function
+```
+
+That's the whole "tool" — a function on a server. You can register as many specialists as you like the same way.
+
+## 3. Expose it as an `mcp` capability
+
+An orchestrating environment declares an `mcp` capability pointing at that server, so any harness that opens it sees `investigate_issue` as a callable tool:
+
+```python env.py
+from hud.environment import Environment
+from hud.capabilities import Capability
+
+env = Environment(
+    name="orchestrator",
+    capabilities=[Capability.mcp(name="specialists", url="http://127.0.0.1:8080/mcp")],
+)
+```
+
+Run the FastMCP server alongside the environment so the URL is live — for local iteration, `tools.run(transport="http", host="127.0.0.1", port=8080)`; in a built image, start it from your container entrypoint or an [`@env.initialize`](/v6/build/environments#lifecycle-hooks) hook. See [Capabilities](/v6/reference/capabilities) for the `mcp` capability details.
+
+## How it looks to the orchestrator
+
+The orchestrating agent opens the `mcp` capability, sees one tool — `investigate_issue(issue_id)` — calls it, and gets the specialist's findings back as the tool result. From its side it's a single tool call; underneath, a whole sub-rollout ran. Each subagent rollout streams under its own trace, so you can inspect the specialist's work separately from the orchestrator's.
+
+Because the tool is an ordinary function, everything composes normally: add retries, fan out to several specialists, post-process the answer, or swap `create_agent("claude-haiku-4-5")` for any other model — all in plain Python.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Run on any model" icon="robot" href="/v6/run/models" />
+<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
+<Card title="Patterns" icon="shapes" href="/v6/advanced/patterns" />
+</CardGroup>

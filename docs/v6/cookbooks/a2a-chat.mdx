@@ -27,7 +27,7 @@ from hud.environment import Environment
 
 env = Environment(name="chat")
 
-@env.task()
+@env.template()
 async def chat_simple(messages: list[PromptMessage]):
     yield messages   # the conversation so far is the prompt
     yield 1.0

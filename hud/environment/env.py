@@ -69,7 +69,7 @@ def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
 
 
 class _TaskFactory(Generic[P]):
-    """Registered ``@env.task`` callable that creates concrete public tasks.
+    """Registered ``@env.template`` callable that creates concrete public tasks.
 
     The server side (:class:`~hud.environment.server.TaskRunner`) drives its
     async-generator ``func`` (prompt → score); calling this object with args
@@ -120,7 +120,13 @@ class _TaskFactory(Generic[P]):
         from hud.eval.task import Task
 
         bound = self.sig.bind(*args, **kwargs)
-        return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
+        task = Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
+        # Record where this template was defined so ``task.run()`` can default to
+        # serving that source locally (in-process only; never crosses the wire).
+        source = inspect.getsourcefile(self.func)
+        if source is not None:
+            task._source = source
+        return task
 
 
 class Environment(LegacyEnvMixin):
@@ -159,7 +165,8 @@ class Environment(LegacyEnvMixin):
         for entry in capabilities or []:
             self.add_capability(entry)
         self._started = False
-        #: Registered task factories by id (the ``@env.task`` registry).
+        #: Registered task templates by id (the ``@env.template`` registry).
+        #: Each value mints concrete :class:`~hud.eval.Task` rows when called.
         self.tasks: dict[str, _TaskFactory[Any]] = {}
         # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
         # stands up). Run once by the serving substrate around its lifetime.
@@ -169,7 +176,12 @@ class Environment(LegacyEnvMixin):
 
     # ─── task registration ───────────────────────────────────────────
 
-    def task(
+    @property
+    def templates(self) -> dict[str, _TaskFactory[Any]]:
+        """The registered ``@env.template`` factories by id (alias of ``tasks``)."""
+        return self.tasks
+
+    def template(
         self,
         *,
         id: str | None = None,
@@ -177,26 +189,27 @@ class Environment(LegacyEnvMixin):
         input: Any = None,
         returns: Any = None,
     ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
-        """Register an async-generator task (``id`` defaults to the function name).
+        """Register a **task template** — an async generator that mints tasks.
 
-        The task yields a prompt, then — once the answer is sent back — a reward.
-        Either form works (both normalized to the wire protocol): friendly (``yield
-        prompt`` → ``yield reward``) or explicit (``yield {"prompt": ...}`` → ``yield
-        {"score": ...}``). ``input``/``returns`` optionally declare the agent's I/O
-        types (surfaced in the manifest as JSON schemas). The decorated callable
-        returns a concrete :class:`~hud.eval.Task` when called with task args.
+        The generator yields a prompt, then — once the answer is sent back — a
+        reward. Either form works (both normalized to the wire protocol):
+        friendly (``yield prompt`` → ``yield reward``) or explicit (``yield
+        {"prompt": ...}`` → ``yield {"score": ...}``). ``input``/``returns``
+        optionally declare the agent's I/O types (surfaced in the manifest as
+        JSON schemas). The decorated callable is a *template*: calling it with
+        args returns a concrete :class:`~hud.eval.Task` row.
         """
 
         def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
             if not inspect.isasyncgenfunction(func):
                 raise TypeError(
-                    f"@env.task: {getattr(func, '__qualname__', func)} must be an async "
+                    f"@env.template: {getattr(func, '__qualname__', func)} must be an async "
                     "generator function (`async def ...:` with `yield`)",
                 )
             task_id = id or func.__name__
             if task_id in self.tasks:
                 raise ValueError(
-                    f"task {task_id!r} already registered on env {self.name!r}",
+                    f"template {task_id!r} already registered on env {self.name!r}",
                 )
             task = _TaskFactory(
                 self,

@@ -61,7 +61,7 @@ def init_command(
     hud_console.command_example(f"cd {target}", "1. Enter the package")
     hud_console.info("")
     hud_console.info("2. Define task definitions in env.py")
-    hud_console.info("   A @env.task is an async generator: it yields a prompt, then")
+    hud_console.info("   A @env.template is an async generator: it yields a prompt, then")
     hud_console.info("   (after the agent answers) yields a reward.")
     hud_console.info("")
     hud_console.info("3. List the tasks to run in tasks.py")

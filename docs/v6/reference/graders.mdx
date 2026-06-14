@@ -31,7 +31,7 @@ Each returns a `float` (`0.0`–`1.0`) you can yield directly or wrap in a `SubS
 | `normalize` | `normalize(text) -> str` | lowercased, punctuation/articles stripped |
 
 ```python
-@env.task()
+@env.template()
 async def capital(country: str = "France"):
     answer = yield f"What is the capital of {country}?"
     yield exact_match(answer, "Paris")
@@ -42,7 +42,7 @@ async def capital(country: str = "France"):
 Runs a shell command via `/bin/bash -lc` and scores by exit code (`1.0` if it exits `0`). Async; returns a `SubScore`. Needs bash — macOS, Linux, WSL, or a built image; on native Windows it scores `0.0` with a `/bin/bash not found` error.
 
 ```python
-@env.task()
+@env.template()
 async def fix_tests():
     answer = yield "Make the tests pass."
     result = await BashGrader.grade(weight=1.0, command="pytest -q", cwd="/workspace")
@@ -79,7 +79,7 @@ result = await LLMJudgeGrader.grade(
 `combine` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
 
 ```python
-@env.task()
+@env.template()
 async def composed(answer: str = ""):
     answer = yield "Solve the task."
     yield await combine(

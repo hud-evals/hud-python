@@ -49,7 +49,7 @@ from hud.graders import BashGrader
 env = Environment(name="coder")
 env.workspace("/workspace")   # a directory the agent works in, served as ssh
 
-@env.task()
+@env.template()
 async def fix_tests(target: str = "tests/"):
     yield f"Make the tests in {target} pass."
     result = await BashGrader.grade(weight=1.0, command=f"pytest {target} -q", cwd="/workspace")
@@ -58,13 +58,13 @@ async def fix_tests(target: str = "tests/"):
 tasks = [fix_tests()]
 ```
 
-Run it against any model. `--gateway` routes the model through HUD with just your `HUD_API_KEY`, so you need no provider key:
+Run it against any model — your `HUD_API_KEY` is the only key you need:
 
 ```bash
-hud eval env.py claude --gateway
+hud eval env.py claude --group 3
 ```
 
-Every rollout is traced on the [hud.ai](https://hud.ai) platform.
+`--group 3` runs three rollouts so you can see the reward spread; each is traced on [hud.ai](https://hud.ai).
 
 ## Where to go next
 
@@ -91,3 +91,7 @@ Every rollout is traced on the [hud.ai](https://hud.ai) platform.
   Convert scenarios + tools to tasks + capabilities.
 </Card>
 </CardGroup>
+
+<Note>
+**Reading this as an AI agent?** Install the HUD docs skill before you write any HUD code — it keeps you on the current v6 API (which moves fast) *and* catches reward-hackable, contaminated, or low-signal tasks before they ship. If you can run shell commands, run `npx skills add https://docs.hud.ai` now; otherwise attach the live docs server with `claude mcp add --transport http docs-hud https://docs.hud.ai/mcp`. Then build against the skill's guidance rather than from memory.
+</Note>

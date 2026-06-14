@@ -21,9 +21,9 @@ So you can upgrade the SDK first and keep your environments as-is, then convert 
 | v5 | v6 | Notes |
 |----|----|-------|
 | `Environment("name")` | `Environment(name="name", capabilities=[...])` | positional name still works; declare capabilities up front |
-| `@env.scenario("count")` | `@env.task()` | same `yield prompt` then `yield reward` generator |
+| `@env.scenario("count")` | `@env.template()` | same `yield prompt` then `yield reward` generator |
 | `@env.tool` / `env.add_tool(ComputerTool())` | a **capability** (`ssh` / `mcp` / `cdp` / `rfb` / `robot`) | the agent's harness brings the tools now |
-| `env("count", word=...)` | `count(word=...)` | keep the `@env.task` return value; calling it builds a `Task` |
+| `env("count", word=...)` | `count(word=...)` | keep the `@env.template` return value; calling it builds a `Task` |
 | `task.run("claude")` / `hud.eval(task)` | `await task.run(agent)` | or just `hud eval tasks.py claude` |
 | `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` | v6 serves a control channel, not MCP |
 | `.slug`, `.columns` on a task | `.slug`, `.columns` on the `Task` | unchanged |
@@ -64,19 +64,19 @@ env.workspace("/workspace")
 Other tool kinds map the same way: a browser becomes `cdp`, full computer-use becomes `rfb`, a robot becomes `robot`, and any custom MCP tools become an `mcp` capability via `Capability.mcp(name=..., url=...)`. You no longer hand-wire `ComputerTool()` / `BashTool()` or call `env.as_claude_tools()` — the harness does that.
 </Step>
 
-<Step title="Rename @env.scenario to @env.task">
+<Step title="Rename @env.scenario to @env.template">
 The generator body is identical — `yield` a prompt, receive the answer, `yield` a reward. Just swap the decorator and keep a reference to the returned `Task`:
 
 ```python title="env.py (v6)"
 from hud.graders import BashGrader
 
-@env.task()
+@env.template()
 async def fix_tests(target: str = "tests/"):
     answer = yield f"Make the tests in {target} pass."
     yield await BashGrader.grade(command=f"pytest {target} -q")
 ```
 
-`@env.task()` also accepts `id=`, `description=`, and optional `input=` / `returns=` types (surfaced as JSON schemas in the manifest). The v5 scenario options (`chat`, `returns`, `exclude_tools`, ...) still parse through the compatibility layer if you keep `@env.scenario`.
+`@env.template()` also accepts `id=`, `description=`, and optional `input=` / `returns=` types (surfaced as JSON schemas in the manifest). The decorated function is a *template* that mints `Task` rows when called. The v5 scenario options (`chat`, `returns`, `exclude_tools`, ...) still parse through the compatibility layer if you keep `@env.scenario`.
 </Step>
 
 <Step title="Build tasks by calling the task function">
@@ -127,13 +127,15 @@ Because every old import still resolves (the SDK ships shims) and registered too
 
 ### Imports to update
 
-In v6, `hud.tools` keeps the standalone tools, but every import that was removed still resolves with a `DeprecationWarning`:
+In v6, `hud.tools` was removed entirely — tools are capabilities now — but every old import still resolves with a `DeprecationWarning`:
 
 | v5 import | What it resolves to now | What to do |
 |-----------|-------------------------|------------|
-| Tools: `AgentTool`, `BaseTool` | unchanged — still real classes in `hud.tools` | keep — register on your own `MCPServer` for an `mcp` capability |
+| `AgentTool`, `BaseTool` | **removed** — resolve to a no-op stand-in | drop the class; expose a sub-agent as a plain function on a FastMCP server and attach it as an `mcp` capability — see [Subagents as tools](/v6/advanced/subagents) |
 | Result types: `EvaluationResult`, `ScenarioResult`, `SubScore`, `AgentAnswer`, `Citation` | redirected to their v6 homes: `hud.graders` (`ScenarioResult` is now `EvaluationResult`), `hud.environment` (`AgentAnswer` is now `Answer`, without `citations`), `hud.agents.types` | change the import to the module the warning names |
-| v5-only shapes: `ContentResult`, `ToolError` | served from the compat layer (no v6 counterpart) | replace — return MCP content blocks / raise ordinary exceptions |
+| `ContentResult` | supported in v6 at `hud.agents.types` | `from hud.agents.types import ContentResult` — `.to_content_blocks()` builds a tool's `list[ContentBlock]` from text + an optional image |
+| `ToolError` | removed (no v6 counterpart) | return an error result (`ContentResult(error=...).to_content_blocks()`) or raise an ordinary exception — the loop surfaces it to the agent and continues |
+| `hud.server.MCPServer` | **removed** — now plain `fastmcp.FastMCP` (a deprecation shim keeps the old import working and warns) | `from fastmcp import FastMCP` (same `@server.tool` / `run_async`); manage its lifecycle with `@env.initialize` / `@env.shutdown` |
 | Shell/edit tools: `BashTool`, `EditTool`, `ShellTool`, `ApplyPatchTool`, ... | **removed** — resolve to a marker that synthesizes an `ssh` capability at serve | call `env.workspace(root)` instead |
 | Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | **removed** — resolve to a marker that synthesizes an `rfb` capability at serve | declare an `rfb` (computer-use) or `cdp` (browser) capability instead |
 | Anything else under `hud.tools`: `PlaywrightTool`, `JupyterTool`, `MemoryTool`, filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it — declare a capability (`cdp` for browser) or serve your own tool over `mcp` |
