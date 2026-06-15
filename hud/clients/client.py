@@ -355,7 +355,7 @@ async def _connect_ready(
 
 
 @asynccontextmanager
-async def connect(runtime: Runtime, *, ready_timeout: float = 120.0) -> AsyncIterator[HudClient]:
+async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIterator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
 
     Takes the :class:`~hud.eval.runtime.Runtime` a provider yielded (or
