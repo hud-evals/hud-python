@@ -53,25 +53,25 @@ class Settings(BaseSettings):
         )
 
     hud_telemetry_url: str = Field(
-        default="https://telemetry.hud.ai/v3/api",
+        default="https://telemetry.beta.hud.ai/v3/api",
         description="Base URL for the HUD API",
         validation_alias="HUD_TELEMETRY_URL",
     )
 
     hud_api_url: str = Field(
-        default="https://api.hud.ai",
+        default="https://api.beta.hud.ai",
         description="Base URL (origin) for the HUD API server",
         validation_alias="HUD_API_URL",
     )
 
     hud_web_url: str = Field(
-        default="https://hud.ai",
+        default="https://beta.hud.ai",
         description="Base URL of the HUD web app (used as a fallback for CLI login)",
         validation_alias="HUD_WEB_URL",
     )
 
     hud_gateway_url: str = Field(
-        default="https://inference.hud.ai",
+        default="https://inference.beta.hud.ai",
         description="Base URL for the HUD inference gateway",
         validation_alias="HUD_GATEWAY_URL",
     )
