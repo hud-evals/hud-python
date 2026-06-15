@@ -226,13 +226,8 @@ class ClaudeSDKAgent(Agent):
         is_win = self._shell in WINDOWS_SHELLS
         self._win_redirect = False
 
-        def q(s: str) -> str:
-            if is_win:
-                escaped = s.replace('"', '""')
-                return f'"{escaped}"'
-            return shlex.quote(s)
-
-        cli_parts = [
+        # Raw args list (no shell quoting) — used directly for Windows Python launcher.
+        base_args: list[str] = [
             "claude",
             "--verbose",
             "--output-format=stream-json",
@@ -240,22 +235,38 @@ class ClaudeSDKAgent(Agent):
             f"--permission-mode={self.config.permission_mode}",
         ]
         if max_steps > 0:
-            cli_parts.append(f"--max-turns={max_steps}")
+            base_args.append(f"--max-turns={max_steps}")
         if system_prompt:
-            cli_parts.extend(["--system-prompt", q(system_prompt)])
+            base_args.extend(["--system-prompt", system_prompt])
         for tool in self.config.allowed_tools:
-            cli_parts.extend(["--allowedTools", tool])
+            base_args.extend(["--allowedTools", tool])
         if mcp_config_path:
-            cli_parts.extend(["--mcp-config", mcp_config_path])
-
-        cli_parts.extend(["--", q(prompt)])
-
-        cli_cmd = " ".join(cli_parts)
+            base_args.extend(["--mcp-config", mcp_config_path])
 
         if is_win:
+            # On Windows, two problems combine:
+            #  1. claude is installed as claude.cmd (Node.js wrapper) — Python's
+            #     subprocess.run can't execute .cmd files via CreateProcess directly.
+            #  2. Embedding the prompt inline in the bat file breaks — cmd.exe parses
+            #     line-by-line, so newlines inside quoted strings split the command.
+            # Solution: use `cmd /c claude [args]` (no inline prompt) and feed the
+            # prompt via stdin from .hud_prompt.txt. claude --print reads stdin as
+            # the initial message when no -- argument is provided.
             set_parts = [f"set {k}={v}" for k, v in env_vars.items()]
-            return " && ".join([*set_parts, cli_cmd])
+            cmd_args = ["cmd", "/c", "claude"] + base_args[1:] # noqa: RUF005
+            py_args_repr = "[" + ",".join(f"'{a}'" for a in cmd_args) + "]"
+            python_launcher = (
+                'python -c "'
+                "import subprocess,sys;"
+                f"r=subprocess.run({py_args_repr},stdin=open('.hud_prompt.txt','rb'));"
+                'sys.exit(r.returncode)"'
+            )
+            return " && ".join([*set_parts, python_launcher])
 
+        # POSIX path: shell-quote everything and embed prompt inline.
+        cli_parts = [shlex.quote(a) for a in base_args]
+        cli_parts.extend(["--", shlex.quote(prompt)])
+        cli_cmd = " ".join(cli_parts)
         env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
         return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli_cmd}'
 

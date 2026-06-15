@@ -76,7 +76,7 @@ def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
         line = json.dumps(span, ensure_ascii=False)
         with _local_lock, (path / f"{trace_id}.jsonl").open("a", encoding="utf-8") as f:
             f.write(line + "\n")
-    except Exception:  # noqa: BLE001 - local export must never break a rollout
+    except Exception:
         logger.debug("local span export failed", exc_info=True)
 
 

@@ -143,7 +143,16 @@ class ClaudeSDKConfig(AgentConfig):
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     allowed_tools: list[str] = Field(
-        default_factory=lambda: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        default_factory=lambda: [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "WebSearch",
+            "WebFetch",
+        ],
     )
 
 

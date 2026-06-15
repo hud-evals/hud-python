@@ -408,6 +408,83 @@ class Workspace:
 
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         argv = self.shell_argv(process.command)
+        # Merge workspace env overrides so callers can inject PATH / env vars even
+        # when bwrap is unavailable (bwrap_argv handles this itself via --setenv).
+        proc_env: dict[str, str] | None = {**os.environ, **self.env} if self.env else None
+
+        if sys.platform == "win32":
+            # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
+            # IOCP machinery for process-exit notification.  When the IOCP event fires
+            # after the subprocess coroutine has already returned (a race that can
+            # happen even when communicate() calls wait() internally), it corrupts
+            # asyncssh's IOCP state and permanently breaks the SSH session.
+            # Running subprocess.run() in a thread-pool executor sidesteps IOCP
+            # entirely: the blocking WaitForSingleObject in the worker thread drains
+            # the process exit before the Future resolves, leaving no pending events.
+            #
+            # Also: shell_argv() used to wrap the SSH command in ["cmd.exe", "/c",
+            # command], but Python's list2cmdline would requote that, leaving a
+            # trailing '"' on the last token. Fixed by splitting process.command
+            # directly with shlex.split so list2cmdline never adds an extra layer.
+            # Additionally, cmd.exe launched via CreateProcess does NOT search the
+            # CWD for batch files (only PATH), so relative .bat paths are resolved
+            # to absolute below.
+            import functools
+            import shlex
+            import subprocess as _subprocess
+
+            if process.command:
+                try:
+                    win_argv: list[str] = shlex.split(process.command, posix=False)
+                except ValueError:
+                    win_argv = ["cmd.exe", "/c", process.command]
+                # cmd.exe launched via CreateProcess/subprocess does NOT search
+                # the CWD for batch files — only directories on PATH. Resolve
+                # relative .bat paths to absolute so cmd.exe finds them.
+                if win_argv and win_argv[0].lower() in ("cmd", "cmd.exe"):
+                    win_argv = [
+                        str(self.root / arg)
+                        if (arg.lower().endswith(".bat") and not os.path.isabs(arg))
+                        else arg
+                        for arg in win_argv
+                    ]
+            else:
+                win_argv = ["cmd.exe"]
+
+            try:
+                loop = asyncio.get_running_loop()
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        functools.partial(
+                            _subprocess.run,
+                            win_argv,
+                            stdin=_subprocess.DEVNULL,
+                            stdout=_subprocess.PIPE,
+                            stderr=_subprocess.PIPE,
+                            cwd=str(self.root),
+                            env=proc_env,
+                            timeout=3600,
+                        ),
+                    ),
+                    timeout=3660.0,
+                )
+            except FileNotFoundError as exc:
+                process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
+                process.exit(127)
+                return
+            except (TimeoutError, _subprocess.TimeoutExpired):
+                process.stderr.write(b"workspace: command timed out after 3600s\n")
+                process.exit(1)
+                return
+
+            if result.stdout:
+                process.stdout.write(result.stdout)
+            if result.stderr:
+                process.stderr.write(result.stderr)
+            process.exit(result.returncode)
+            return
+
         try:
             sub = await asyncio.create_subprocess_exec(
                 *argv,
@@ -415,19 +492,24 @@ class Workspace:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.root),
+                env=proc_env,
             )
         except FileNotFoundError as exc:
             process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
             process.exit(127)
             return
 
-        # On Windows, process.redirect + sub.wait() hangs because asyncio
-        # pipes don't signal EOF properly for cmd.exe subprocesses.
-        # Use communicate() which handles this correctly.
         try:
-            stdout_data, stderr_data = await sub.communicate(
-                input=None,
+            stdout_data, stderr_data = await asyncio.wait_for(
+                sub.communicate(input=None),
+                timeout=3600.0,
             )
+        except TimeoutError:
+            sub.kill()
+            await sub.wait()
+            process.stderr.write(b"workspace: command timed out after 3600s\n")
+            process.exit(1)
+            return
         except asyncio.CancelledError:
             sub.kill()
             await sub.wait()

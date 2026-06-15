@@ -165,6 +165,7 @@ class Environment(LegacyEnvMixin):
         for entry in capabilities or []:
             self.add_capability(entry)
         self._started = False
+        self._hooks_done = False  # True only after all @env.initialize hooks have completed
         #: Registered task templates by id (the ``@env.template`` registry).
         #: Each value mints concrete :class:`~hud.eval.Task` rows when called.
         self.tasks: dict[str, _TaskFactory[Any]] = {}
@@ -255,6 +256,15 @@ class Environment(LegacyEnvMixin):
                 f"capability {cap.name!r} has no url; start the service in an "
                 "@env.initialize hook and publish its concrete address",
             )
+        if self._hooks_done:
+            import logging
+
+            logging.getLogger("hud.environment").warning(
+                "add_capability(%r) called after @env.initialize hooks have already run — "
+                "the capability will not appear in any already-negotiated agent manifest. "
+                "Move this call inside an @env.initialize hook.",
+                cap.name,
+            )
         self.capabilities = [c for c in self.capabilities if c.name != cap.name] + [cap]
 
     def capability(self, name: str) -> Capability:
@@ -304,6 +314,7 @@ class Environment(LegacyEnvMixin):
         self._started = True
         for hook in self._on_start:
             await hook()
+        self._hooks_done = True
 
     async def stop(self) -> None:
         """Run ``@env.shutdown`` hooks in reverse order (best-effort)."""
@@ -311,3 +322,4 @@ class Environment(LegacyEnvMixin):
             with contextlib.suppress(Exception):
                 await hook()
         self._started = False
+        self._hooks_done = False
