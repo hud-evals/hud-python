@@ -184,6 +184,47 @@ def test_no_references_is_a_pass(tmp_path: Path) -> None:
     assert EnvironmentSource.open(tmp_path).environment_name_references() == []
 
 
+# ─── served environment (Dockerfile entrypoint) ──────────────────────────
+
+
+def test_served_module_parses_exec_form(tmp_path: Path) -> None:
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "dev", "env:env", "--port", "8765"]\n')
+
+    assert EnvironmentSource.open(tmp_path).served_environment_module() == "env"
+
+
+def test_served_module_parses_shell_form(tmp_path: Path) -> None:
+    _write(tmp_path / "Dockerfile", "CMD hud serve app:app\n")
+
+    assert EnvironmentSource.open(tmp_path).served_environment_module() == "app"
+
+
+def test_served_module_defaults_when_target_omitted(tmp_path: Path) -> None:
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "--port", "8765"]\n')
+
+    assert EnvironmentSource.open(tmp_path).served_environment_module() == "env"
+
+
+def test_served_module_none_without_entrypoint(tmp_path: Path) -> None:
+    _write(tmp_path / "Dockerfile", 'CMD ["python", "main.py"]\n')
+
+    assert EnvironmentSource.open(tmp_path).served_environment_module() is None
+
+
+def test_served_name_ignores_in_process_subagent(tmp_path: Path) -> None:
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "dev", "env:env", "--port", "8765"]\n')
+    _write(tmp_path / "env.py", 'env = Environment(name="trace-explorer")\n')
+    _write(tmp_path / "verify.py", 'verify_env = Environment(name="qa-verifier")\n')
+
+    assert EnvironmentSource.open(tmp_path).served_environment_name() == "trace-explorer"
+
+
+def test_served_name_none_without_dockerfile(tmp_path: Path) -> None:
+    _write(tmp_path / "env.py", 'env = Environment(name="solo")\n')
+
+    assert EnvironmentSource.open(tmp_path).served_environment_name() is None
+
+
 # ─── validation ────────────────────────────────────────────────────────
 
 

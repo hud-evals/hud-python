@@ -46,6 +46,17 @@ class TestResolveEnvironmentName:
         with pytest.raises(typer.Exit):
             self._resolve(tmp_path)
 
+    def test_entrypoint_disambiguates_subagent(self, tmp_path: Path) -> None:
+        (tmp_path / "Dockerfile").write_text(
+            'CMD ["hud", "dev", "env:env", "--port", "8765"]\n', encoding="utf-8"
+        )
+        (tmp_path / "env.py").write_text('env = Environment("trace-explorer")\n', encoding="utf-8")
+        (tmp_path / "verify.py").write_text(
+            'verify_env = Environment("qa-verifier")\n', encoding="utf-8"
+        )
+
+        assert self._resolve(tmp_path) == "trace-explorer"
+
     def test_unnamed_environment_exit(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text("env = Environment()\n", encoding="utf-8")
 

@@ -126,6 +126,46 @@ def _validate_before_deploy(env_source: EnvironmentSource, console: HUDConsole) 
         console.success("Validation passed")
 
 
+def _resolve_declared_name(env_source: EnvironmentSource, console: HUDConsole) -> str | None:
+    """The environment name declared in code, or None for legacy MCP projects.
+
+    Prefers the Environment served by the Dockerfile entrypoint
+    (``hud serve module:attr``), so a project may define auxiliary in-process
+    Environments — e.g. a verification sub-agent — without making the
+    deployable identity ambiguous. Otherwise a lone declared name wins, and the
+    choice is only an error when nothing disambiguates between several names.
+    """
+    served = env_source.served_environment_name()
+    if served is not None:
+        return served
+
+    references = env_source.environment_name_references()
+    if not references:
+        return None
+
+    named = sorted({ref.name for ref in references if ref.name is not None})
+
+    if len(named) > 1:
+        console.error("Multiple Environment names declared in source:")
+        for ref in references:
+            if ref.name is not None:
+                console.error(f"  {ref.file.relative_to(env_source.root)}:{ref.line}: {ref.text}")
+        console.info(
+            "Name the served Environment via the Dockerfile entrypoint "
+            "(e.g. `hud serve env:env`), or declare exactly one name."
+        )
+        raise typer.Exit(1)
+
+    if not named:
+        console.error("Environment(...) is constructed without an explicit name:")
+        for ref in references:
+            console.error(f"  {ref.file.relative_to(env_source.root)}:{ref.line}: {ref.text}")
+        console.info('Give your environment a literal name, e.g. Environment("my-env").')
+        raise typer.Exit(1)
+
+    return named[0]
+
+
 def _resolve_environment_name(
     env_source: EnvironmentSource,
     registry_id: str | None,
@@ -139,37 +179,20 @@ def _resolve_environment_name(
     Projects without an ``Environment(...)`` call (legacy MCP environments)
     fall back to the directory name.
     """
-    references = env_source.environment_name_references()
-    named = sorted({ref.name for ref in references if ref.name is not None})
-
-    if len(named) > 1:
-        console.error("Multiple Environment names declared in source:")
-        for ref in references:
-            if ref.name is not None:
-                console.error(f"  {ref.file.relative_to(env_source.root)}:{ref.line}: {ref.text}")
-        console.info("A deployable environment must declare exactly one name.")
-        raise typer.Exit(1)
-
-    if references and not named:
-        console.error("Environment(...) is constructed without an explicit name:")
-        for ref in references:
-            console.error(f"  {ref.file.relative_to(env_source.root)}:{ref.line}: {ref.text}")
-        console.info('Give your environment a literal name, e.g. Environment("my-env").')
-        raise typer.Exit(1)
-
-    name = named[0] if named else env_source.environment_name()
+    declared = _resolve_declared_name(env_source, console)
+    name = declared if declared is not None else env_source.environment_name()
 
     if registry_id:
         registry_env = get_registry_environment(platform, registry_id)
         if registry_env is not None:
-            if named and normalize_environment_name(name) != registry_env.name:
+            if declared is not None and normalize_environment_name(name) != registry_env.name:
                 console.error(
                     f"Code declares Environment('{name}') but --registry-id targets "
                     f"'{registry_env.name}'. Rename the environment in code or drop "
                     "--registry-id to deploy by name."
                 )
                 raise typer.Exit(1)
-            if not named:
+            if declared is None:
                 name = registry_env.name
 
     console.info(f"Environment name: {name}")

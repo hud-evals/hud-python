@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -148,6 +149,34 @@ class EnvironmentSource:
                     )
                 )
         return references
+
+    def served_environment_module(self) -> str | None:
+        dockerfile = self.dockerfile
+        if dockerfile is None:
+            return None
+        try:
+            content = dockerfile.read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+        for tokens in _dockerfile_command_tokens(content):
+            spec = _hud_serve_spec(tokens)
+            if spec is not None:
+                return spec.partition(":")[0]
+        return None
+
+    def served_environment_name(self) -> str | None:
+        module = self.served_environment_module()
+        if module is None:
+            return None
+
+        served_file = (self.root / module).with_suffix(".py").resolve()
+        names = {
+            ref.name
+            for ref in self.environment_name_references()
+            if ref.file.resolve() == served_file and ref.name is not None
+        }
+        return next(iter(names)) if len(names) == 1 else None
 
     def environment_name(self) -> str:
         """Directory-derived fallback name for projects without ``Environment(...)``."""
@@ -431,6 +460,72 @@ class EnvironmentSource:
             LOGGER.info("Migrated .hud/deploy.json to .hud/config.json")
         except OSError as exc:
             LOGGER.warning("Failed to migrate deploy.json to config.json: %s", exc)
+
+
+def _dockerfile_instructions(content: str) -> list[str]:
+    """Logical Dockerfile instructions, joining ``\\`` line continuations."""
+    instructions: list[str] = []
+    buffer = ""
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            buffer += line[:-1].strip() + " "
+            continue
+        buffer += line
+        instructions.append(buffer.strip())
+        buffer = ""
+    if buffer.strip():
+        instructions.append(buffer.strip())
+    return instructions
+
+
+def _command_tokens(remainder: str) -> list[str]:
+    """Tokens of a CMD/ENTRYPOINT body in either exec (JSON) or shell form."""
+    if remainder.startswith("["):
+        try:
+            parsed = json.loads(remainder)
+        except json.JSONDecodeError:
+            return []
+        return [str(token) for token in parsed] if isinstance(parsed, list) else []
+    try:
+        return shlex.split(remainder)
+    except ValueError:
+        return remainder.split()
+
+
+def _dockerfile_command_tokens(content: str) -> list[list[str]]:
+    """Token lists for each CMD/ENTRYPOINT instruction in a Dockerfile."""
+    commands: list[list[str]] = []
+    for instruction in _dockerfile_instructions(content):
+        keyword, _, remainder = instruction.partition(" ")
+        if keyword.upper() not in {"CMD", "ENTRYPOINT"}:
+            continue
+        tokens = _command_tokens(remainder.strip())
+        if tokens:
+            commands.append(tokens)
+    return commands
+
+
+def _hud_serve_spec(tokens: list[str]) -> str | None:
+    """The serve target from a ``hud serve|dev <spec>`` token list.
+
+    Returns the explicit ``module[:attr]`` spec, ``"env"`` when ``hud serve`` is
+    invoked with no target (the runtime default), or ``None`` when the tokens
+    contain no ``hud serve``/``hud dev`` invocation.
+    """
+    for index, token in enumerate(tokens):
+        if Path(token).name != "hud":
+            continue
+        rest = tokens[index + 1 :]
+        if not rest or rest[0] not in {"serve", "dev"}:
+            continue
+        target = rest[1] if len(rest) > 1 else None
+        if target is None or target.startswith("-"):
+            return "env"
+        return target
+    return None
 
 
 def _environment_call_name(node: ast.Call) -> str | None:
