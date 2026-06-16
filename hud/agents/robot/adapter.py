@@ -89,7 +89,17 @@ class LeRobotAdapter(Adapter):
         return action
 
 
+class OpenPIAdapter(Adapter):
+    """unwraps obs['data'] to OpenPI wire keys, attaches prompt; actions are passthrough"""
+
+    def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
+        out = dict(obs["data"])
+        out.setdefault("prompt", prompt)
+        return out
+
+
 __all__ = [
     "Adapter",
     "LeRobotAdapter",
+    "OpenPIAdapter",
 ]
