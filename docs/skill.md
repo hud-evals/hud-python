@@ -67,8 +67,70 @@ env.workspace("/workspace")
 [Environments](/v6/reference/environment) and
 [Capabilities](/v6/reference/capabilities).
 
+### MCP capability — in-process tool server
+
+Declare tools on a `FastMCP` server, start it in `@env.initialize`, and publish
+the URL via `env.add_capability(Capability.mcp(...))`. Always pair with
+`@env.shutdown` to release the port.
+
+```python
+import asyncio, contextlib, socket
+from fastmcp import FastMCP
+from hud.capabilities import Capability
+from hud.environment import Environment
+
+server = FastMCP(name="my-env")
+env = Environment(name="my-env")
+_task: asyncio.Task | None = None
+
+@server.tool
+async def do_thing(x: int) -> str:
+    return f"result: {x}"
+
+@env.initialize
+async def _start() -> None:
+    global _task
+    if _task is None:
+        s = socket.socket(); s.bind(("", 0)); port = s.getsockname()[1]; s.close()
+        _task = asyncio.create_task(
+            server.run_async(transport="http", host="127.0.0.1", port=port, show_banner=False)
+        )
+        await asyncio.sleep(0.3)
+        env.add_capability(Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp"))
+
+@env.shutdown
+async def _stop() -> None:
+    global _task
+    if _task is not None:
+        _task.cancel()
+        with contextlib.suppress(Exception): await _task
+        _task = None
+
+@env.template()
+async def my_task(param: str = "default"):
+    answer = yield f"Use the do_thing tool with x=42. Param hint: {param}"
+    yield 1.0 if answer and "result: 42" in answer else 0.0
+```
+
+The agent sees MCP tools alongside HUD's own harness tools — no extra wiring
+needed in the template. Cite [Capabilities](/v6/reference/capabilities).
+
 **Run / scale / train:** [Models](/v6/run/models),
 [Deploy](/v6/run/deploy), [Training](/v6/run/training).
+
+---
+
+## Local iteration and process model
+
+`hud eval env.py model` is the canonical test loop — no cloud account, docker,
+or SSH required for a local MCP env. Use a cheap model while building; switch
+to the target model to validate. Override the default 10-step budget with
+`--max-steps`.
+
+Each rollout runs in a **fresh subprocess**: module-level state resets between
+tasks, so don't rely on cross-rollout persistence. Always pair `@env.initialize`
+with `@env.shutdown` — the subprocess exits when the rollout ends, and OS
+resources (ports, file handles) are not released otherwise.
 
 ---
 
@@ -226,6 +288,7 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 
 ## Verify before you call it done
 
+- `hud eval env.py haiku` runs without error and returns a non-zero reward.
 - Imports resolve against the installed `hud` package (don't invent symbols).
 - The grader's cheapest path scores at or below the floor.
 - A group of rollouts shows reward spread.

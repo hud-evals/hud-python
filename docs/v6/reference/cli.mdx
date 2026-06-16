@@ -59,15 +59,25 @@ hud deploy
 
 ### `hud eval`
 
-Run an agent over a local task source (a `.py`, directory, or JSON/JSONL file).
-Each rollout runs on a fresh local substrate spawned from the source (the
-`LocalRuntime` placement). To run a platform taskset locally, export it first:
-`hud sync tasks <name> --export tasks.json`.
+The primary local iteration loop: run an agent over a task source (`.py`, directory, or JSON/JSONL), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env — no shared state between tasks.
 
 ```bash
-hud eval tasks.py claude
-hud eval tasks.py claude --full
+hud eval env.py claude              # one task, one rollout
+hud eval env.py haiku               # cheaper model for fast iteration
+hud eval env.py claude --max-steps 30
+hud eval env.py claude --all        # every task, not just the first
+hud eval env.py claude --full       # every task, auto-respond, 100 steps
 ```
+
+**What you don't need for a local run:**
+- A HUD API key — local evals don't hit the platform
+- `hud serve` running — `hud eval` spawns the env subprocess for you
+- Docker — unless your env explicitly uses `DockerRuntime`
+- An SSH connection — the gateway timeout only applies when `env.workspace()` is declared
+
+For a platform taskset, export first: `hud sync tasks <name> --export tasks.json`, then `hud eval tasks.json claude`.
+
+**Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
 
 | Option | Description |
 |--------|-------------|
@@ -77,9 +87,13 @@ hud eval tasks.py claude --full
 | `--gateway`, `-g` | Force LLM calls through the HUD gateway. Implied when only `HUD_API_KEY` is set (no provider key); pass it to force the gateway when a provider key is also present. |
 | `--group` (alias `--group-size`) | Runs per task — a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
-| `--max-steps` | Cap steps per task. |
+| `--max-steps` | Cap steps per task (default 10). |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
+| `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
+| `--very-verbose`, `-vv` | Debug-level logs. |
+| `--runtime` | Placement: `local` (default), `hud` (platform-hosted), or `tcp://host:port`. |
+| `--yes`, `-y` | Skip confirmation prompt. |
 
 ## Run a packaged image
 

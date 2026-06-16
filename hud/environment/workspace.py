@@ -132,6 +132,9 @@ class Workspace:
         authorized_client_keys: list[Path] | None = None,
     ) -> None:
         self.root: Path = Path(root).resolve()
+        # Unique id for this instance's credential subdirectory so parallel
+        # Workspace objects sharing the same root don't race on key generation.
+        self._cred_id = os.urandom(8).hex()
 
         # Path the root is mounted at inside the sandbox (and the default cwd).
         # Defaults to /workspace; set to the root's real path for callers that
@@ -253,6 +256,7 @@ class Workspace:
         self._sock = None
         self._bound_host = None
         self._bound_port = None
+        shutil.rmtree(self.root / ".hud" / "ssh" / self._cred_id, ignore_errors=True)
 
     # ─── ssh accessors / capability ───────────────────────────────────
 
@@ -368,7 +372,7 @@ class Workspace:
     # ─── ssh server internals ─────────────────────────────────────────
 
     def _credentials_dir(self) -> Path:
-        d = self.root / ".hud" / "ssh"
+        d = self.root / ".hud" / "ssh" / self._cred_id
         d.mkdir(parents=True, exist_ok=True)
         return d
 

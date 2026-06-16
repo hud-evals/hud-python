@@ -185,7 +185,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             hit_max = False
 
             for turn in range(1, max_steps + 1):
-                logger.debug("step %d/%d", turn, max_steps)
+                logger.info("step %d/%d", turn, max_steps)
                 started_at = now_iso()
                 step = await self.get_response(
                     state,
@@ -195,6 +195,9 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 step.started_at = step.started_at or started_at
                 step.model = step.model or self.config.model
                 run.record(step)
+
+                if step.tool_calls:
+                    logger.info("  → %s", ", ".join(c.name for c in step.tool_calls))
 
                 if step.done or not step.tool_calls:
                     follow_up = await auto_respond(step.content, enabled=self.config.auto_respond)

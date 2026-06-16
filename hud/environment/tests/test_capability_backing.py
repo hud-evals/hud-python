@@ -38,7 +38,8 @@ async def test_serving_publishes_the_workspace_capability(tmp_path: Path) -> Non
         assert cap.protocol == "ssh/2"
         assert cap.url.startswith("ssh://")
         assert cap.params["host_pubkey"].startswith("ssh-ed25519")
-        assert (tmp_path / "root" / ".hud" / "ssh" / "host_ed25519").exists()
+        ssh_dir = tmp_path / "root" / ".hud" / "ssh"
+        assert any(ssh_dir.rglob("host_ed25519"))
 
 
 async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:

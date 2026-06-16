@@ -42,7 +42,7 @@ task = count_letter(word="raspberry")  # -> hud.eval.Task
 | `slug` | `str \| None` | Stable id for sync/filtering/registry. |
 | `columns` | `dict \| None` | Metadata for filtering and leaderboards. |
 | `validation` | `list[dict] \| None` | Sync/platform metadata. |
-| `agent_config` | `dict \| None` | Sync/platform metadata. |
+| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). Applied during platform-hosted execution. |
 
 The env on a task is a *name*, never a live object: it is the join key between
 the row and whatever placement can bring that environment up. Running a task

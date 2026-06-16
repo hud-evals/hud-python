@@ -284,7 +284,9 @@ async def rollout(
     erasing evidence: a failure *before* the run is live (provision, connect,
     start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
     the real run — prompt, placement record, and the partial trace the agent
-    built — marked as errored.
+    built — marked as errored. Either way the logged warning names the lifecycle
+    phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``) so
+    callers can tell where the failure landed without reading the trace.
     """
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
@@ -293,23 +295,27 @@ async def rollout(
     with set_trace_context(trace_id):
         await trace_enter(trace_id, job_id=job_id, group_id=group_id)
         run: Run | None = None
+        _phase = "provisioning"
         try:
             async with runtime(task) as addr, connect(addr) as client:
+                _phase = "starting task"
                 live = Run(client, task.id, task.args)
                 live._runtime = addr.url  # the placement record for the receipt
                 async with live:  # start on enter; grade on exit
                     run = live  # bound only once live: an earlier failure synthesizes
+                    _phase = "agent loop"
                     await agent(run)
+                    _phase = "grading"
         except TimeoutError:
             raise
         except Exception as exc:
             if run is None:
-                logger.warning("rollout failed before launch: %s", exc)
-                run = Run.failed(str(exc))
+                logger.warning("rollout failed before launch (%s): %s", _phase, exc)
+                run = Run.failed(f"[{_phase}] {exc}")
             else:
-                logger.warning("rollout failed mid-run: %s", exc)
+                logger.warning("rollout failed mid-run (%s): %s", _phase, exc)
                 run.trace.status = "error"
-                run.record(Step(source="system", error=str(exc)))
+                run.record(Step(source="system", error=f"[{_phase}] {exc}"))
         assert run is not None  # the body bound it, or the handler synthesized it
         run.trace.trace_id = trace_id
         run.job_id = job_id
