@@ -10,6 +10,9 @@ The harness splits a policy rollout into three seams, each replaceable on its ow
 - :class:`~hud.agents.robot.adapter.Adapter` — translate between the env's
   observation/action spaces (from the contract) and the policy's.
 
+Wrap an agent in :class:`~hud.agents.robot.batching.BatchedAgent` to run many rollouts
+concurrently off one batched GPU forward (``max_concurrent`` rollouts, shared model).
+
 Per-tick platform tracing is emitted by the loop itself: each step records an
 :class:`~hud.agents.types.ObservationStep`, and each re-inference an
 :class:`~hud.agents.types.InferenceStep`, so runs stream live into the HUD trace viewer.
@@ -22,14 +25,16 @@ from __future__ import annotations
 
 from .adapter import Adapter, LeRobotAdapter
 from .agent import ROBOT_PROTOCOL, RobotAgent
-from .model import LeRobotModel, Model, lerobot_infer
+from .batching import BatchedAgent, BatchedModel
+from .model import LeRobotModel, Model
 
 __all__ = [
     "ROBOT_PROTOCOL",
     "Adapter",
+    "BatchedAgent",
+    "BatchedModel",
     "LeRobotAdapter",
     "LeRobotModel",
     "Model",
     "RobotAgent",
-    "lerobot_infer",
 ]
