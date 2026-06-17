@@ -28,6 +28,12 @@ class BatchedModel(Model):
     ``max_wait_s`` for stragglers — which avoids stalling when fewer rollouts are live,
     e.g. the tail of a suite), stacks them into one ``[N, ...]`` batch, runs a single
     forward, and scatters the ``[N, T, A]`` rows back to each caller.
+
+    ``inner`` must be an in-process, stateless model whose :meth:`~Model.infer` runs the
+    whole ``[N, ...]`` batch in one forward (e.g. :class:`~hud.agents.robot.model.LeRobotModel`).
+    :class:`~hud.agents.robot.model.RemoteModel` is **not** supported: it does one WebSocket
+    request per env and the OpenPI server protocol has no batched-request shape, so a stacked
+    batch would be mis-sent as a single env. Run one agent per rollout against it instead.
     """
 
     def __init__(self, inner: Model, *, batch_size: int, max_wait_s: float = 0.05) -> None:
@@ -37,11 +43,6 @@ class BatchedModel(Model):
         # Bound to the running loop on first ainfer (the harness owns the loop).
         self._queue: asyncio.Queue[tuple[Any, asyncio.Future[ActionArray]]] | None = None
         self._worker: asyncio.Task[None] | None = None
-
-    def reset(self) -> None:
-        # Shared across concurrent episodes; only safe because inner is stateless
-        # across calls (per-episode state lives on the agent, not here).
-        self.inner.reset()
 
     def infer(self, batch: Any) -> ActionArray:
         return self.inner.infer(batch)
@@ -98,7 +99,11 @@ class BatchedAgent(Agent):
     Per run: a shallow clone of ``agent`` (its own episode state) sharing a per-run
     adapter copy and the single :class:`BatchedModel`, so concurrent ``ainfer`` calls
     coalesce into one forward. Relies on the agent keeping per-run state out of
-    ``__init__`` (assigned in ``on_episode_start``) so the clones stay isolated.
+    ``__init__`` (assigned in ``on_episode_start``) so the clones stay isolated, and on
+    the model being stateless (no per-episode ``reset``) since it is shared across clones.
+
+    Requires an in-process batchable model; :class:`~hud.agents.robot.model.RemoteModel`
+    is not supported (the OpenPI server protocol has no batched-request shape).
     """
 
     def __init__(self, agent: RobotAgent, *, batch_size: int, max_wait_s: float = 0.05) -> None:

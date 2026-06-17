@@ -23,12 +23,11 @@ if TYPE_CHECKING:
 class Model:
     """Owns a policy and its inference mechanics.
 
-    Driven by :class:`~hud.agents.robot.agent.RobotAgent`: :meth:`reset` once per
-    episode, then :meth:`ainfer` (awaited; one rollout) each inference.
+    Stateless by contract: the agent owns all per-episode state (the open-loop chunk), so a
+    single model can be shared and batched across concurrent rollouts. There is deliberately
+    no ``reset`` hook — anything that resets per episode belongs on the agent, not here.
+    Driven by :class:`~hud.agents.robot.agent.RobotAgent`, which awaits :meth:`ainfer`.
     """
-
-    def reset(self) -> None:
-        """Reset per-episode model state. Override when the policy is stateful."""
 
     def infer(self, batch: Any) -> ActionArray:
         """runs policy on a batch, returns [N, T, A] action chunk"""
@@ -40,9 +39,12 @@ class Model:
 
 
 class LeRobotModel(Model):
-    """LeRobot policy with pre/post-processors: ``preprocess`` → ``predict_action_chunk`` →
+    """    LeRobot policy with pre/post-processors: ``preprocess`` → ``predict_action_chunk`` →
     ``postprocess``. ``preprocess`` adds the batch dim for an unbatched sample and is a no-op
     for an already-stacked one, so :meth:`infer` handles both single and batched inputs.
+
+    Stateless: ``predict_action_chunk`` is a pure forward and the agent owns the open-loop
+    chunk, so LeRobot's internal action queue is never consumed here — hence no ``reset``.
     """
 
     def __init__(self, policy: Any, preprocess: Any, postprocess: Any) -> None:
@@ -52,11 +54,6 @@ class LeRobotModel(Model):
         #: Flipped to False after the first forward; used to print the one-time
         #: CUDA/flow-matching warmup message.
         self._first_inference = True
-
-    def reset(self) -> None:
-        """Reset LeRobot's open-loop action queue for the new episode."""
-        if hasattr(self.policy, "reset"):
-            self.policy.reset()
 
     def infer(self, batch: Any) -> ActionArray:
         """run batch dict (N dim) → [N, T, A] chunk"""
@@ -75,6 +72,11 @@ class LeRobotModel(Model):
 class RemoteModel(Model):
     """Weightless client to an OpenPI-WebSocket policy server: ships the adapter's request
     dict, returns the server's chunk. All pre/post-processing lives in the adapter + server.
+
+    Not batchable: each :meth:`infer` is one WebSocket request for one env and always adds a
+    single leading batch dim, and the OpenPI server protocol currently has no batched-request
+    shape. Do not wrap in :class:`~hud.agents.robot.batching.BatchedModel` — use one
+    :class:`~hud.agents.robot.agent.RobotAgent` per concurrent rollout instead.
     """
 
     def __init__(self, host: str = "localhost", port: int = 8000, *, response_key: str = "actions") -> None:
@@ -92,13 +94,9 @@ class RemoteModel(Model):
             print(f"[agent] connecting to openpi server ws://{self.host}:{self.port} — on hold...", flush=True)
             self._client = websocket_client_policy.WebsocketClientPolicy(self.host, self.port)
 
-    def reset(self) -> None:
-        """Connect before the act loop (once per episode), so blocking happens at a known point."""
-        self.connect()
-
     def infer(self, batch: Any) -> ActionArray:
         """Ship one request dict → the server's ``[T, A]`` chunk, returned as ``[1, T, A]``."""
-        self.connect()  # safety net if reset() wasn't called
+        self.connect()  # lazy connect on first call (blocks until the server is up)
         chunk = np.asarray(self._client.infer(batch)[self.response_key], dtype=np.float32)
         return chunk[None]  # add the leading N=1 batch dim
 

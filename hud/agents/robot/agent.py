@@ -6,7 +6,7 @@ Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter`` in
 The base calls the adapter and model at the right moments::
 
     setup_robot      -> adapter.bind(spaces)                          # once after connect
-    on_episode_start -> model.reset(); adapter.reset()                # once per episode
+    on_episode_start -> adapter.reset()                               # once per episode (model is stateless)
     select_action    -> adapt_observation -> model.ainfer -> pop chunk -> adapt_action
 
 ``model.ainfer`` always returns a ``[T, A]`` chunk; :meth:`RobotAgent.select_action`
@@ -86,9 +86,10 @@ class RobotAgent(Agent):
             self.adapter.bind(self._env_action_space, self._env_obs_space)
 
     def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
-        """Store the prompt and reset the model and adapter before the act loop.
+        """Store the prompt and reset per-episode state before the act loop.
 
-        Override (calling ``super()`` first) only for extra per-episode setup.
+        The model is stateless (per-episode state lives here, not on the shared model), so
+        only the adapter is reset. Override (calling ``super()`` first) for extra setup.
         """
         self._prompt = prompt
         self._active_chunk = deque()
@@ -96,8 +97,6 @@ class RobotAgent(Agent):
         self._tick = 0
         # Start camera video at env's control rate; capture trace id for encoder span attribution.
         self._video = video.VideoStreamer(fps=client.get_control_rate(), trace_id=get_current_trace_id())
-        if self.model is not None:
-            self.model.reset()
         if self.adapter is not None:
             self.adapter.reset()
 
