@@ -37,13 +37,15 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from hud.types import Step
 from hud.utils.platform import PlatformClient
 
-from .run import Grade, Run
+from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -648,6 +650,7 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
 
 #: Platform trace statuses that end a hosted rollout.
 _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
+_CLOUD_READY_TIMEOUT = 300.0
 
 
 class HUDRuntime:
@@ -668,9 +671,20 @@ class HUDRuntime:
     propagating, so abandoned rollouts do not hold instances open.
     """
 
-    def __init__(self, *, poll_interval: float = 5.0, run_timeout: float = 3600.0) -> None:
+    def __init__(
+        self,
+        *,
+        mode: str = "hosted",
+        poll_interval: float = 5.0,
+        run_timeout: float = 3600.0,
+        runtime_url: str | None = None,
+    ) -> None:
+        if mode not in ("hosted", "cloud"):
+            raise ValueError("mode must be 'hosted' or 'cloud'")
+        self.mode = mode
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
+        self.runtime_url = runtime_url
 
     async def run(
         self,
@@ -690,6 +704,16 @@ class HUDRuntime:
         local cancel propagate, having first asked the platform to release the
         lease.
         """
+        if self.mode == "cloud":
+            return await rollout(
+                task,
+                agent,
+                runtime=self,
+                trace_id=trace_id,
+                job_id=job_id,
+                group_id=group_id,
+            )
+
         trace_id = trace_id or uuid.uuid4().hex
         try:
             state = await self._submit_and_await(
@@ -706,6 +730,95 @@ class HUDRuntime:
         run.job_id = job_id
         run.group_id = group_id
         return run
+
+    def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
+        if self.mode != "cloud":
+            raise TypeError("HUDRuntime(mode='hosted') is not a local provider")
+        return self._cloud_session(task)
+
+    @asynccontextmanager
+    async def _cloud_session(self, task: Task) -> AsyncIterator[Runtime]:
+        from hud.settings import settings as sdk_settings
+
+        api_key = sdk_settings.api_key
+        if not api_key:
+            raise RuntimeError("HUD cloud runtime requires HUD_API_KEY")
+        runtime_url = (self.runtime_url or sdk_settings.hud_runtime_url).rstrip("/")
+        session_id = await self._create_cloud_session(runtime_url, api_key, task)
+        server: asyncio.Server | None = None
+        try:
+            server = await asyncio.start_server(
+                lambda reader, writer: self._forward_cloud_connection(
+                    runtime_url,
+                    api_key,
+                    session_id,
+                    reader,
+                    writer,
+                ),
+                "127.0.0.1",
+                0,
+            )
+            port = server.sockets[0].getsockname()[1]
+            yield Runtime(
+                f"tcp://127.0.0.1:{port}",
+                params={
+                    "session_id": session_id,
+                    "gateway_url": runtime_url,
+                    "ready_timeout": min(self.run_timeout, _CLOUD_READY_TIMEOUT),
+                },
+            )
+        finally:
+            if server is not None:
+                server.close()
+                await server.wait_closed()
+            await self._delete_cloud_session(runtime_url, api_key, session_id)
+
+    async def _create_cloud_session(self, runtime_url: str, api_key: str, task: Task) -> str:
+        payload: dict[str, Any] = {"environment": task.env}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{runtime_url}/runtime/sessions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        session_id = body.get("id")
+        if not isinstance(session_id, str):
+            raise RuntimeError("Runtime gateway did not return a session id")
+        return session_id
+
+    async def _delete_cloud_session(self, runtime_url: str, api_key: str, session_id: str) -> None:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            with contextlib.suppress(Exception):
+                await client.delete(
+                    f"{runtime_url}/runtime/sessions/{session_id}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+
+    async def _forward_cloud_connection(
+        self,
+        runtime_url: str,
+        api_key: str,
+        session_id: str,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        import websockets
+
+        ws_url = _runtime_tunnel_ws_url(runtime_url, session_id)
+        try:
+            async with websockets.connect(
+                ws_url,
+                additional_headers={"Authorization": f"Bearer {api_key}"},
+                max_size=None,
+            ) as websocket:
+                await _splice_websocket(reader, writer, websocket)
+        finally:
+            if not writer.is_closing():
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
 
     async def _submit_and_await(
         self,
@@ -788,6 +901,39 @@ class HUDRuntime:
             await platform.apost("/rollouts/cancel", json={"trace_id": trace_id})
         except Exception as exc:
             logger.warning("hosted rollout %s cancel failed: %s", trace_id, exc)
+
+
+def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:
+    parts = urlsplit(runtime_url.rstrip("/"))
+    scheme = "wss" if parts.scheme == "https" else "ws"
+    path = f"{parts.path.rstrip('/')}/runtime/tunnels/{session_id}"
+    return urlunsplit((scheme, parts.netloc, path, "", ""))
+
+
+async def _splice_websocket(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    websocket: Any,
+) -> None:
+    async def tcp_to_ws() -> None:
+        while data := await reader.read(65536):
+            await websocket.send(data)
+
+    async def ws_to_tcp() -> None:
+        async for message in websocket:
+            data = message.encode("utf-8") if isinstance(message, str) else message
+            writer.write(data)
+            await writer.drain()
+
+    tasks = [
+        asyncio.create_task(tcp_to_ws()),
+        asyncio.create_task(ws_to_tcp()),
+    ]
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*done, return_exceptions=True)
+    await asyncio.gather(*pending, return_exceptions=True)
 
 
 __all__ = [

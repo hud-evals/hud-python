@@ -30,6 +30,7 @@ In code, *where* a task runs is a **runtime** you pass at execution time — the
 from hud import HUDRuntime, LocalRuntime, DockerRuntime, Runtime
 
 HUDRuntime()                       # run on HUD's hosted infra (after hud deploy)
+HUDRuntime(mode="cloud")           # local agent loop against a HUD-hosted env
 LocalRuntime("env.py")             # a local child process (fastest iteration)
 DockerRuntime("my-env")            # a fresh local container per rollout
 Runtime("tcp://host:8765")         # attach to a container started elsewhere
@@ -43,7 +44,7 @@ job = await fix_bug(difficulty=3).run(agent, runtime=HUDRuntime())
 print(job.reward)
 ```
 
-`HUDRuntime` is the natural pair with `hud deploy`: the platform leases an instance, brings your deployed image up on it, and runs the rollout next to it.
+`HUDRuntime()` is the natural pair with `hud deploy`: the platform leases an instance, brings your deployed image up on it, and runs the rollout next to it. `HUDRuntime(mode="cloud")` leases the same kind of environment but keeps the agent loop in your local process through the runtime tunnel.
 
 ## Run on your own infra
 
