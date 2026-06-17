@@ -253,7 +253,7 @@ class ClaudeSDKAgent(Agent):
             # prompt via stdin from .hud_prompt.txt. claude --print reads stdin as
             # the initial message when no -- argument is provided.
             set_parts = [f"set {k}={v}" for k, v in env_vars.items()]
-            cmd_args = ["cmd", "/c", "claude"] + base_args[1:] # noqa: RUF005
+            cmd_args = ["cmd", "/c", "claude"] + base_args[1:]  # noqa: RUF005
             py_args_repr = "[" + ",".join(f"'{a}'" for a in cmd_args) + "]"
             python_launcher = (
                 'python -c "'

@@ -218,8 +218,18 @@ class ModalRuntime:
         self.port = port
         # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint; the image's
         # WORKDIR selects which env.py is served. Override for a non-default layout.
-        self.command = tuple(command) if command is not None else (
-            "hud", "serve", "env.py", "--host", "0.0.0.0", "--port", str(port),
+        self.command = (
+            tuple(command)
+            if command is not None
+            else (
+                "hud",
+                "serve",
+                "env.py",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(port),
+            )
         )
         self.app_name = app_name
         self.timeout = timeout
@@ -231,7 +241,7 @@ class ModalRuntime:
         # concurrent first acquisitions build/look up exactly once.
         self._image = image
         self._resolved: Any = None
-        self._image_lock = asyncio.Lock() # inly build out an as of yet unbuilt image once
+        self._image_lock = asyncio.Lock()  # inly build out an as of yet unbuilt image once
 
     async def _image_obj(self) -> Any:
         if self._resolved is not None:
