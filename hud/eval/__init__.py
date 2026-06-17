@@ -33,7 +33,15 @@ from hud.types import Trace
 from .chat import Chat
 from .job import Job
 from .run import Grade, Run, rollout
-from .runtime import DockerRuntime, HUDRuntime, LocalRuntime, Provider, Runtime
+from .runtime import (
+    DaytonaRuntime,
+    DockerRuntime,
+    HUDRuntime,
+    LocalRuntime,
+    ModalRuntime,
+    Provider,
+    Runtime,
+)
 from .sync import SyncPlan
 from .task import Task
 from .taskset import Taskset
@@ -41,12 +49,14 @@ from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relativ
 
 __all__ = [
     "Chat",
+    "DaytonaRuntime",
     "DockerRuntime",
     "Grade",
     "HUDRuntime",
     "HudTrainingClient",
     "Job",
     "LocalRuntime",
+    "ModalRuntime",
     "Provider",
     "Rewarded",
     "Run",
