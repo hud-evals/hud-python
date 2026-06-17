@@ -34,6 +34,7 @@ from .chat import Chat
 from .job import Job
 from .run import Grade, Run, rollout
 from .runtime import (
+    DaytonaRuntime,
     DockerRuntime,
     HUDRuntime,
     LocalRuntime,
@@ -48,6 +49,7 @@ from .training import HudTrainingClient, Rewarded, TrainingConfig, group_relativ
 
 __all__ = [
     "Chat",
+    "DaytonaRuntime",
     "DockerRuntime",
     "Grade",
     "HUDRuntime",

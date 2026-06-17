@@ -285,6 +285,101 @@ class ModalRuntime:
                 await sb.terminate.aio()
 
 
+class DaytonaRuntime:
+    """The Daytona provider: each acquisition creates a fresh sandbox from a snapshot.
+
+    The Daytona :class:`ModalRuntime` — boots a sandbox from a pre-built *snapshot*
+    (the durable handle, the snapshot equivalent of Modal's image name), starts the
+    env's control channel inside it, then reaches it over an SSH local-forward:
+    Daytona exposes services only as HTTPS previews, but :func:`hud.clients.connect`
+    dials ``tcp://``, so the raw control channel is tunneled over SSH to a local
+    port. Yields its :class:`Runtime`, deletes the sandbox on exit.
+
+    Pass a snapshot name — ``DaytonaRuntime("hud-libero-env")`` — optionally with an
+    ``image`` (Dockerfile/registry ref) to build that snapshot once if it is missing.
+    Resources (cpu/memory/gpu) live on the snapshot, not here. *workdir* defaults to
+    ``/app`` (the scaffolded ``Dockerfile.hud`` WORKDIR) since a Daytona session
+    starts in ``~``, not the image's WORKDIR; override only for a non-standard layout.
+    Requires the ``daytona`` extra and ``DAYTONA_API_KEY``.
+    """
+
+    def __init__(
+        self,
+        snapshot_name: str,
+        *,
+        image: Any = None,
+        command: str = "hud serve env.py --host 0.0.0.0 --port 8765",
+        workdir: str | None = "/app",
+        port: int = 8765,
+        ssh_host: str = "ssh.app.daytona.io",
+        ssh_expires_minutes: int = 60,
+        create_timeout: float = 120.0,
+    ) -> None:
+        self.snapshot_name = snapshot_name
+        self.command = command
+        self.workdir = workdir
+        self.port = port
+        self.ssh_host = ssh_host
+        self.ssh_expires_minutes = ssh_expires_minutes
+        self.create_timeout = create_timeout
+        # Build the snapshot from *image* once if it's missing; lock so concurrent
+        # first acquisitions resolve exactly once.
+        self._image = image
+        self._resolved = False
+        self._snapshot_lock = asyncio.Lock()
+
+    async def _ensure_snapshot(self, daytona: Any) -> str:
+        if self._resolved:
+            return self.snapshot_name
+        async with self._snapshot_lock:
+            if not self._resolved:
+                if self._image is not None:
+                    from daytona import CreateSnapshotParams
+
+                    try:
+                        await daytona.snapshot.get(self.snapshot_name)
+                    except Exception:  # not found: build it under this name
+                        await daytona.snapshot.create(
+                            CreateSnapshotParams(name=self.snapshot_name, image=self._image)
+                        )
+                self._resolved = True
+        return self.snapshot_name
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        import asyncssh
+        from daytona import AsyncDaytona, CreateSandboxFromSnapshotParams, SessionExecuteRequest
+
+        async with AsyncDaytona() as daytona:
+            snapshot = await self._ensure_snapshot(daytona)
+            sandbox = await daytona.create(
+                CreateSandboxFromSnapshotParams(snapshot=snapshot), timeout=self.create_timeout
+            )
+            try:
+                # Start the env server in a background session (the snapshot's CMD is
+                # not the sandbox's main process). connect() retries the handshake,
+                # so we don't poll for readiness here.
+                session: str = "hud-serve"
+                await sandbox.process.create_session(session)
+                cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
+                await sandbox.process.execute_session_command(
+                    session, SessionExecuteRequest(command=cmd, run_async=True)
+                )
+                ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
+                async with asyncssh.connect(
+                    self.ssh_host, username=ssh.token, known_hosts=None
+                ) as conn:
+                    listener = await conn.forward_local_port("127.0.0.1", 0, "127.0.0.1", self.port)
+                    yield Runtime(
+                        f"tcp://127.0.0.1:{listener.get_port()}",
+                        params={"provider": "daytona", "instance_id": sandbox.id},
+                    )
+            finally:
+                # check-free teardown: never shadow the run's own error.
+                with contextlib.suppress(Exception):
+                    await daytona.delete(sandbox)
+
+
 async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
     """Run a docker CLI command and return decoded ``(stdout, stderr)``."""
     proc = await asyncio.create_subprocess_exec(
@@ -507,6 +602,7 @@ class HUDRuntime:
 
 
 __all__ = [
+    "DaytonaRuntime",
     "DockerRuntime",
     "HUDRuntime",
     "LocalRuntime",
