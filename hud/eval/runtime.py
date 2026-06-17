@@ -183,6 +183,108 @@ class DockerRuntime:
             await _docker("rm", "--force", container, check=False)
 
 
+class ModalRuntime:
+    """The Modal provider: each acquisition ``Sandbox.create``s a fresh container.
+
+    The cloud :class:`DockerRuntime` — boots a sandbox from a pre-built image,
+    exposes the env's control channel as a raw-TCP tunnel (``unencrypted_ports``,
+    the only kind :func:`hud.clients.connect` dials), yields its :class:`Runtime`,
+    terminates on exit. Acquisitions are independent, so a batch fans out into
+    isolated containers (one ``sb-…`` id each).
+
+    The image resolves once (so concurrent rollouts can't race a build): pass a
+    published name — ``ModalRuntime("hud-libero-env")``, the preferred durable
+    handle — or, as an escape hatch, an ``Image`` to build lazily on first use.
+    Requires the ``modal`` extra and a configured token.
+    """
+
+    def __init__(
+        self,
+        image_name: str | None = None,
+        *,
+        image: Any = None,
+        command: Sequence[str] | None = None,
+        app_name: str = "hud-envs",
+        port: int = 8765,
+        timeout: float = 3600.0,
+        ready_timeout: float = 600.0,
+        gpu: str | None = None,
+        memory: int | None = None,
+        cpu: float | None = None,
+    ) -> None:
+        if (image_name is None) == (image is None):
+            raise ValueError("pass exactly one of image_name= (preferred) or image=")
+        self.image_name = image_name
+        self.port = port
+        # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint; the image's
+        # WORKDIR selects which env.py is served. Override for a non-default layout.
+        self.command = tuple(command) if command is not None else (
+            "hud", "serve", "env.py", "--host", "0.0.0.0", "--port", str(port),
+        )
+        self.app_name = app_name
+        self.timeout = timeout
+        self.ready_timeout = ready_timeout
+        self.gpu = gpu
+        self.memory = memory
+        self.cpu = cpu
+        # Resolved (named) or built-once (from Dockerfile) image, behind a lock so
+        # concurrent first acquisitions build/look up exactly once.
+        self._image = image
+        self._resolved: Any = None
+        self._image_lock = asyncio.Lock() # inly build out an as of yet unbuilt image once
+
+    async def _image_obj(self) -> Any:
+        if self._resolved is not None:
+            return self._resolved
+        import modal
+
+        async with self._image_lock:
+            if self._resolved is None:
+                if self.image_name is not None:
+                    self._resolved = modal.Image.from_name(self.image_name)
+                else:
+                    # Build before any sandbox is created so the fan-out can't race it.
+                    # build() is idempotent: a no-op for an already-built image.
+                    app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
+                    await self._image.build.aio(app=app)
+                    self._resolved = self._image
+        return self._resolved
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        import modal
+
+        image = await self._image_obj()
+        app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
+        extra: dict[str, Any] = {}
+        if self.gpu is not None:
+            extra["gpu"] = self.gpu
+        if self.memory is not None:
+            extra["memory"] = self.memory
+        if self.cpu is not None:
+            extra["cpu"] = self.cpu
+        sb = await modal.Sandbox.create.aio(
+            *self.command,
+            app=app,
+            image=image,
+            unencrypted_ports=[self.port],
+            readiness_probe=modal.Probe.with_tcp(self.port),
+            timeout=self.timeout,
+            **extra,
+        )
+        try:
+            await sb.wait_until_ready.aio(timeout=self.ready_timeout)
+            host, port = (await sb.tunnels.aio())[self.port].tcp_socket
+            yield Runtime(
+                f"tcp://{host}:{port}",
+                params={"provider": "modal", "instance_id": sb.object_id},
+            )
+        finally:
+            # check-free teardown: never shadow the run's own error.
+            with contextlib.suppress(Exception):
+                await sb.terminate.aio()
+
+
 async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
     """Run a docker CLI command and return decoded ``(stdout, stderr)``."""
     proc = await asyncio.create_subprocess_exec(
@@ -408,6 +510,7 @@ __all__ = [
     "DockerRuntime",
     "HUDRuntime",
     "LocalRuntime",
+    "ModalRuntime",
     "Provider",
     "Runtime",
 ]

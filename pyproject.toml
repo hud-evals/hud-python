@@ -143,6 +143,11 @@ robot = [
     "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
 ]
 
+# Modal placement (ModalRuntime): per-rollout cloud sandboxes from a built image
+modal = [
+    "modal>=1.0",
+]
+
 
 [tool.ruff]
 target-version = "py311"

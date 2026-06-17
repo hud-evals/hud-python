@@ -33,7 +33,14 @@ from hud.types import Trace
 from .chat import Chat
 from .job import Job
 from .run import Grade, Run, rollout
-from .runtime import DockerRuntime, HUDRuntime, LocalRuntime, Provider, Runtime
+from .runtime import (
+    DockerRuntime,
+    HUDRuntime,
+    LocalRuntime,
+    ModalRuntime,
+    Provider,
+    Runtime,
+)
 from .sync import SyncPlan
 from .task import Task
 from .taskset import Taskset
@@ -47,6 +54,7 @@ __all__ = [
     "HudTrainingClient",
     "Job",
     "LocalRuntime",
+    "ModalRuntime",
     "Provider",
     "Rewarded",
     "Run",
