@@ -365,8 +365,11 @@ class DaytonaRuntime:
 
         async with AsyncDaytona() as daytona:
             snapshot = await self._ensure_snapshot(daytona)
+            # ephemeral: these sandboxes are per-rollout and deleted on exit anyway,
+            # and some regions only permit ephemeral sandboxes.
             sandbox = await daytona.create(
-                CreateSandboxFromSnapshotParams(snapshot=snapshot), timeout=int(self.create_timeout)
+                CreateSandboxFromSnapshotParams(snapshot=snapshot, ephemeral=True),
+                timeout=int(self.create_timeout),
             )
             try:
                 # Start the env server in a background session (the snapshot's CMD is
