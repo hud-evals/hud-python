@@ -141,6 +141,7 @@ browseruse = [
 robot = [
     "numpy>=1.24",
     "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
+    "av>=12",  # PyAV (ffmpeg): H.264/CMAF camera-frame video streaming for traces
 ]
 
 

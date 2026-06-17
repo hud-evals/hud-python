@@ -220,7 +220,7 @@ STEP_SCHEMA = "hud.step.v1"
 ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
-RobotStepSource: TypeAlias = Literal["observation", "inference"]
+RobotStepSource: TypeAlias = Literal["observation", "inference", "video_segment"]
 
 
 class TaskCall(BaseModel):
@@ -266,19 +266,11 @@ class Step(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    def emit(self) -> None:
-        """Queue this step for export as a span tagged with its schema.
-
-        The payload is the step's own dump, so family subclasses ship their
-        full payload under their ``schema_tag`` with no extra wiring. No-op
-        without an ambient trace context (nothing to attribute it to).
-
-        :meth:`Trace.record` calls this for every recorded step; calling it
-        directly is for steps that report outside their own local trace
-        (e.g. a ``SubagentStep`` reporting a sub-rollout to the enclosing
-        trace context).
-        """
-        task_run_id = get_current_trace_id()
+    def emit(self, *, trace_id: str | None = None) -> None:
+        """Export this step as a span with its schema. No-op if trace context is missing. 
+        Pass trace_id when emitting outside the rollout thread (e.g. from a background thread)."""
+   
+        task_run_id = trace_id or get_current_trace_id()
         if not task_run_id:
             return
 

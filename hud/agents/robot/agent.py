@@ -26,6 +26,9 @@ import numpy as np
 from hud.agents.base import Agent
 from hud.agents.types import InferenceStep, ObservationStep
 from hud.capabilities.robot import RobotClient
+from hud.telemetry.context import get_current_trace_id
+
+from . import video
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
@@ -73,6 +76,8 @@ class RobotAgent(Agent):
     #: The live run + control-tick index, so ``select_action`` can record its own InferenceStep.
     _run: Run
     _tick: int
+    #: Streams each camera to per-camera H.264 video; owns the encoder threads.
+    _video: video.VideoStreamer | None = None
 
     def setup_robot(self, client: RobotClient) -> None:
         """Discover the env's action/observation layout and bind the adapter to it."""
@@ -89,6 +94,8 @@ class RobotAgent(Agent):
         self._active_chunk = deque()
         self._run = run
         self._tick = 0
+        # Start camera video at env's control rate; capture trace id for encoder span attribution.
+        self._video = video.VideoStreamer(fps=client.get_control_rate(), trace_id=get_current_trace_id())
         if self.model is not None:
             self.model.reset()
         if self.adapter is not None:
@@ -134,6 +141,7 @@ class RobotAgent(Agent):
             for step in range(step_limit):
                 obs = await client.get_observation()
                 run.record(ObservationStep.from_obs(obs, tick=step, obs_space=self._env_obs_space))
+                self._video.record(obs)
 
                 if self.should_stop(obs, step=step, max_steps=step_limit):
                     print(f"[agent] env reported terminated at step {step}", flush=True)
@@ -151,7 +159,9 @@ class RobotAgent(Agent):
             run.trace.status = "completed"
             run.trace.content = "done"
         finally:
-            await client.close()
+            if self._video is not None:
+                self._video.finalize() # flush all camera tails so crashed run still leaves video
+            await client.close() 
 
 
 __all__ = ["ROBOT_PROTOCOL", "RobotAgent"]
