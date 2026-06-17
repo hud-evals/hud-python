@@ -502,6 +502,7 @@ async def _deploy_async(
         console.error(f"Failed to get upload URL: {e.status_code or e}")
         if e.status_code == 401:
             from hud.settings import settings
+
             console.error(f"Invalid API key. Get a new one at {settings.hud_web_url}/settings")
         return _DeployResult(success=False)
     except Exception as e:

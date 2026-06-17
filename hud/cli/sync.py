@@ -224,7 +224,9 @@ def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
     changed = EnvironmentSource.open().save_config({"tasksetId": returned_id})
     if changed:
         console.dim_info("Taskset ID saved to:", ".hud/config.json")
-    console.info(f"  https://hud.ai/tasksets/{returned_id}")
+    from hud.settings import settings
+
+    console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
 
 
 @sync_app.command("tasks")

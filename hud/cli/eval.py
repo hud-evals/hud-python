@@ -43,16 +43,16 @@ def _resolve_model_from_catalog(model_id: str) -> tuple[AgentType, str] | None:
     """
     try:
         from hud.utils.gateway import list_gateway_models
+
         models = list_gateway_models()
     except Exception:
         return None
     for m in models:
-        if m.model_name == model_id or m.id == model_id:
-            if m.sdk_agent_type:
-                try:
-                    return AgentType(m.sdk_agent_type), m.model_name or model_id
-                except ValueError:
-                    pass
+        if (m.model_name == model_id or m.id == model_id) and m.sdk_agent_type:
+            try:
+                return AgentType(m.sdk_agent_type), m.model_name or model_id
+            except ValueError:
+                pass
     return None
 
 
@@ -736,7 +736,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",
+        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",  # noqa: E501
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(

@@ -85,6 +85,7 @@ async def job_enter(job_id: str, *, name: str, group: int) -> None:
         return
     await _report(f"/trace/job/{job_id}/enter", {"name": name, "group": group})
     from hud.settings import settings
+
     logger.info("job: %s/jobs/%s", settings.hud_web_url, job_id)
 
 

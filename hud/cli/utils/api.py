@@ -16,7 +16,7 @@ def require_api_key(action: str = "perform this action") -> str:
         hud_console.error("No HUD API key found")
         hud_console.info(f"A HUD API key is required to {action}.")
         hud_console.info("Run: hud login")
-        hud_console.info("Or get your key at: https://hud.ai/settings")
+        hud_console.info(f"Or get your key at: {settings.hud_web_url}/settings")
         hud_console.info("Set it via: hud set HUD_API_KEY=your-key-here")
         raise typer.Exit(1)
     return settings.api_key

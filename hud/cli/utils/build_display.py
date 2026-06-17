@@ -32,6 +32,7 @@ def display_build_summary(
 
     if platform_url is None:
         from hud.settings import settings
+
         platform_url = settings.hud_web_url
 
     rich_console = Console()
