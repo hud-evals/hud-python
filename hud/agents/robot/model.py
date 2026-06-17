@@ -30,11 +30,18 @@ class Model:
     """
 
     def infer(self, batch: Any) -> ActionArray:
-        """runs policy on a batch, returns [N, T, A] action chunk"""
+        """Run the policy on an ``[N, ...]`` batch, return an ``[N, T, A]`` chunk.
+
+        Implementations MUST keep the leading batch dim ``N`` (even for ``N == 1``):
+        :meth:`ainfer` indexes ``[0]`` and :class:`~hud.agents.robot.batching.BatchedModel`
+        scatters rows along it, so a squeezed ``[T, A]`` silently breaks both.
+        """
         raise NotImplementedError
 
     async def ainfer(self, batch: Any) -> ActionArray:
-        """Awaited single-rollout entry: run :meth:`infer` in a thread, return its ``[T, A]``."""
+        """Awaited single-rollout entry: run :meth:`infer` in a thread, return its single
+        ``[T, A]`` row. Indexing ``[0]`` assumes :meth:`infer` honors the ``[N, T, A]`` contract.
+        """
         return (await asyncio.to_thread(self.infer, batch))[0]
 
 
@@ -65,7 +72,9 @@ class LeRobotModel(Model):
         if self._first_inference:
             print("[agent] first inference done — inference is now fast", flush=True)
             self._first_inference = False
-        return chunk.float().cpu().numpy()
+        arr = chunk.float().cpu().numpy()
+        assert arr.ndim == 3, f"expected [N, T, A] chunk, got {arr.shape}"  # LeRobot keeps the N dim
+        return arr
    
 
 

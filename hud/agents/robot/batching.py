@@ -104,13 +104,19 @@ class BatchedAgent(Agent):
 
     Requires an in-process batchable model; :class:`~hud.agents.robot.model.RemoteModel`
     is not supported (the OpenPI server protocol has no batched-request shape).
+
+    Takes ownership of ``agent``: it swaps ``agent.model`` for a :class:`BatchedModel` wrapper
+    in place (so the wrapper is shared by every per-run clone). The passed-in instance is
+    therefore permanently batched — hand :class:`BatchedAgent` a dedicated agent and don't
+    also use that same instance for direct, unbatched :class:`RobotAgent` rollouts.
     """
 
     def __init__(self, agent: RobotAgent, *, batch_size: int, max_wait_s: float = 0.05) -> None:
         if agent.model is None:
             raise RuntimeError("BatchedAgent needs agent.model set")
         self._template = agent
-        # Wrap once; every per-run clone shares this batcher by reference.
+        # Wrap once, in place: the passed-in agent is now permanently batched (see class doc).
+        # Every per-run clone shares this batcher by reference.
         agent.model = BatchedModel(agent.model, batch_size=batch_size, max_wait_s=max_wait_s)
 
     async def __call__(self, run: Run, **kwargs: Any) -> None:
