@@ -226,7 +226,7 @@ class ModalRuntime:
                 "serve",
                 "env.py",
                 "--host",
-                "0.0.0.0",
+                "0.0.0.0",  # noqa: S104 - serving inside the sandbox; the tunnel is the only ingress
                 "--port",
                 str(port),
             )
