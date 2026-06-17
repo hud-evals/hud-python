@@ -15,7 +15,7 @@ def display_build_summary(
     status_response: dict[str, Any],
     registry_id: str,
     console: HUDConsole | None = None,
-    platform_url: str = "https://hud.ai",
+    platform_url: str | None = None,
     env_name: str | None = None,
 ) -> None:
     """Display a rich summary of a completed build.
@@ -29,6 +29,10 @@ def display_build_summary(
     """
     if console is None:
         console = HUDConsole()
+
+    if platform_url is None:
+        from hud.settings import settings
+        platform_url = settings.hud_web_url
 
     rich_console = Console()
 

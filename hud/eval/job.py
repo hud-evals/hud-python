@@ -84,7 +84,8 @@ async def job_enter(job_id: str, *, name: str, group: int) -> None:
     if not _reporting_enabled():
         return
     await _report(f"/trace/job/{job_id}/enter", {"name": name, "group": group})
-    logger.info("job: https://hud.ai/jobs/%s", job_id)
+    from hud.settings import settings
+    logger.info("job: %s/jobs/%s", settings.hud_web_url, job_id)
 
 
 async def trace_enter(trace_id: str, *, job_id: str | None, group_id: str | None) -> None:

@@ -1,4 +1,12 @@
-[data-theme="dark"] {
+/* Brand fonts (exact match to the platform/marketing site):
+   - Farnham Headline (display serif) via the Adobe Typekit kit `ghs4ttt`.
+   - Apfel Grotezk (body sans) via the @fontsource package over jsDelivr.
+   Imported here so the families are available; docs.json `fonts` applies them.
+   `docs.hud.ai` must stay an authorized domain on the Typekit kit. */
+@import url("https://use.typekit.net/ghs4ttt.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/apfel-grotezk@5.2.5/index.css");
+
+.dark {
   --tw-prose-body: #d4d4d8;
   --tw-prose-headings: #fafafa;
   --tw-prose-links: #e4e4e7;
@@ -18,8 +26,193 @@
   background-color: rgba(113, 113, 122, 0.12) !important;
   font-weight: 500 !important;
 }
-[data-theme="dark"] .nav-tag-pill-text,
 .dark .nav-tag-pill-text {
   color: #a1a1aa !important;
   background-color: rgba(161, 161, 170, 0.16) !important;
+}
+
+/* ── HUD website design language ──────────────────────────────────────────
+   Echo the platform/marketing site (sites/shared/src/tokens): warm-neutral
+   text, hairline borders, a gold selection highlight, and tighter editorial
+   headings to pair with the Farnham serif heading font set in docs.json. */
+
+/* Light-mode prose: warm near-black body + muted gray, matching the site
+   tokens (--default-font #0a0a0a, --subtext-color #737373, hairline #e5e5e5). */
+html:not(.dark) {
+  --tw-prose-body: #262626;
+  --tw-prose-headings: #0a0a0a;
+  --tw-prose-bold: #0a0a0a;
+  --tw-prose-links: #0a0a0a;
+  --tw-prose-quotes: #525252;
+  --tw-prose-counters: #737373;
+  --tw-prose-bullets: #d4d4d4;
+  --tw-prose-hr: #e5e5e5;
+  --tw-prose-th-borders: #e5e5e5;
+  --tw-prose-td-borders: #f0f0f0;
+}
+
+/* Body text: Inter (matches the platform's product body font; insurance
+   alongside docs.json `fonts.family`). */
+body {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Three-tier type, matching the platform:
+   - Main heading (page title + content H1): Farnham display serif.
+   - Subheadings (H2–H4) and "subheading" chrome: Apfel Grotezk.
+   - Body: Inter (above).
+   Scoped to the content area so nav/sidebar chrome is untouched. */
+#page-title,
+#content h1 {
+  font-family: "farnham-headline", "Farnham Headline", ui-serif, Georgia, serif !important;
+  letter-spacing: -0.015em;
+}
+#content h2,
+#content h3,
+#content h4 {
+  font-family: "Apfel Grotezk", "Inter", ui-sans-serif, system-ui, sans-serif !important;
+  letter-spacing: -0.01em;
+}
+
+/* Warm gold text selection (site accent --accent #ffc98c). */
+::selection {
+  background-color: rgba(255, 201, 140, 0.45);
+  color: #0a0a0a;
+}
+
+/* Icon-only social links: Mintlify requires a `label`, so it stays (for
+   accessibility) but we hide the visible text and show only the brand icon.
+   Removing the inner flex gap keeps the icon centered with no trailing space. */
+.navbar-link {
+  font-size: 0 !important;
+}
+.navbar-link a {
+  gap: 0 !important;
+}
+.navbar-link svg,
+.navbar-link i {
+  font-size: 1rem !important;
+}
+
+/* ── Film grain ───────────────────────────────────────────────────────────
+   The POC's signature filmic texture (it ships a grain PNG; here we generate
+   equivalent noise inline so the docs need no asset). Fixed, non-interactive,
+   blended subtly over the whole canvas. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+  mix-blend-mode: overlay;
+  opacity: 0.045;
+}
+.dark body::after {
+  opacity: 0.07;
+}
+
+/* ── Editorial page title ─────────────────────────────────────────────────
+   Larger, lighter-weight serif H1 with a sliver of breathing room, echoing
+   the site's Farnham display headings. */
+#page-title {
+  font-weight: 500;
+  font-size: 2.6rem;
+  line-height: 1.08;
+}
+
+/* Remove the section eyebrow / breadcrumb shown above the page title. */
+.eyebrow {
+  display: none !important;
+}
+
+/* ── Content polish (scoped to #content; uses stable HTML elements) ──────── */
+
+/* Inline code: neutral muted chip (matches the platform's `bg-muted` surfaces),
+   not a gold accent. */
+#content :not(pre) > code {
+  background-color: oklch(0.96 0.003 325.6);
+  border: 1px solid oklch(0.922 0.005 325.62);
+  border-radius: 5px;
+  padding: 0.12em 0.36em;
+  font-weight: 500;
+}
+.dark #content :not(pre) > code {
+  background-color: oklch(0.263 0.024 320.12);
+  border-color: oklch(1 0 0 / 0.1);
+}
+
+/* Blockquotes: gold left rule, like a pull-quote. */
+#content blockquote {
+  border-left: 2px solid #c0960c;
+  padding-left: 1rem;
+}
+
+/* Tables + rules: hairline borders matching the site's #e5e5e5. */
+#content hr {
+  border-color: #e5e5e5;
+}
+#content table {
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+#content th {
+  background-color: rgba(0, 0, 0, 0.02);
+  font-weight: 600;
+}
+.dark #content table {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.dark #content th {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────
+   Match the current platform/POC card (components/ui/card.tsx): a flat `bg-card`
+   surface with a single hairline `border-border` and NO drop shadow. Gentle
+   rounding (clean, not brutalist). The hover edge is the theme's amber primary.
+   Values are the platform's exact oklch tokens. */
+.card {
+  background: oklch(1 0 0) !important;
+  border: 1px solid oklch(0.922 0.005 325.62) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  transition: border-color 150ms ease;
+}
+.dark .card {
+  background: oklch(0.212 0.019 322.12) !important;
+  border-color: oklch(1 0 0 / 0.1) !important;
+}
+
+/* ── Code blocks ──────────────────────────────────────────────────────────
+   Flat hairline container, no drop shadow — matching the platform's bordered
+   editor surface. (Syntax colors stay dark via docs.json styling.codeblocks.) */
+.code-block,
+.code-group {
+  border: 1px solid oklch(0.922 0.005 325.62) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+.dark .code-block,
+.dark .code-group {
+  border-color: oklch(1 0 0 / 0.1) !important;
+}
+
+/* Accordions: flat hairline surface to match cards. */
+.accordion {
+  border: 1px solid oklch(0.922 0.005 325.62) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+.dark .accordion {
+  border-color: oklch(1 0 0 / 0.1) !important;
+}
+
+/* Callouts (Note/Warning/Tip): match the card radius + hairline language. */
+.callout {
+  border-radius: 12px !important;
 }

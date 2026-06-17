@@ -1,16 +1,36 @@
 {
   "$schema": "https://mintlify.com/schema.json",
   "name": "HUD",
-  "theme": "maple",
+  "theme": "aspen",
   "logo": {
     "light": "/logo/hud_logo.svg",
-    "dark": "/logo/hud_logo_dark.svg"
+    "dark": "/logo/hud_logo_dark.svg",
+    "href": "https://hud.ai"
   },
   "favicon": "/favicon.ico",
   "colors": {
     "primary": "#c0960c",
-    "light": "#ffffff",
-    "dark": "#5b21b6"
+    "light": "#ffd180",
+    "dark": "#1c1408"
+  },
+  "fonts": {
+    "family": "Inter",
+    "heading": {
+      "family": "farnham-headline",
+      "weight": 500
+    }
+  },
+  "appearance": {
+    "default": "light"
+  },
+  "background": {
+    "color": {
+      "light": "#fafafa",
+      "dark": "#17151b"
+    }
+  },
+  "styling": {
+    "codeblocks": "dark"
   },
   "css": "/custom.css",
   "icons": {
@@ -35,10 +55,6 @@
       "type": "github",
       "href": "https://github.com/hud-evals/hud-python"
     }
-  },
-  "topbarCtaButton": {
-    "name": "Dashboard",
-    "url": "https://hud.ai"
   },
   "navigation": {
     "tabs": [

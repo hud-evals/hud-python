@@ -79,7 +79,10 @@ class EnvironmentSource:
 
     @classmethod
     def open(cls, directory: str | Path = ".") -> Self:
-        return cls(Path(directory).expanduser().resolve())
+        p = Path(directory).expanduser().resolve()
+        if p.is_file():
+            p = p.parent
+        return cls(p)
 
     @property
     def hud_dir(self) -> Path:

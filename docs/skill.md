@@ -132,6 +132,65 @@ tasks, so don't rely on cross-rollout persistence. Always pair `@env.initialize`
 with `@env.shutdown` — the subprocess exits when the rollout ends, and OS
 resources (ports, file handles) are not released otherwise.
 
+## Local → platform
+
+Once `hud eval env.py model` passes locally, two commands push it to the platform:
+
+```bash
+hud deploy .            # package and deploy the environment (gives it a platform id)
+hud sync tasks env.py   # upload the tasks list, linked to the deployed environment
+```
+
+Then run at scale across models with `group=` for reward spread:
+
+```python
+from hud import Taskset
+from hud.agents import load_agent
+
+taskset = Taskset.from_api("my-env")
+for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-4o"]:
+    job = await taskset.run(load_agent(model), group=8)
+    print(f"{model}: {job.reward:.2f}")
+```
+
+Cite [Deploy](/v6/run/deploy), [Models](/v6/run/models), [Training](/v6/run/training).
+
+---
+
+## Containerization checklist
+
+env.py runs inside a container during `hud deploy` introspection and on every
+platform job. Three patterns that work locally fail in containers:
+
+**Bind on all interfaces.** `hud serve` defaults to `127.0.0.1`, which is
+unreachable from outside the container. Always pass `--host 0.0.0.0` in the
+Dockerfile CMD:
+
+```dockerfile
+CMD ["hud", "serve", "env.py", "--host", "0.0.0.0"]
+```
+
+**Declare every tool your `@env.initialize` hook needs.** If the hook calls
+`uv`, `git`, or any binary not already in the base image, add it to the
+Dockerfile explicitly — don't assume it's there:
+
+```dockerfile
+RUN pip install uv   # if your initialize hook calls uv
+```
+
+**Don't traverse parents for local paths.** `Path(__file__).parents[2]` crashes
+when env.py runs at `/app/env.py` (only one parent). Anchor from `_HERE` and
+guard with existence:
+
+```python
+_HERE = Path(__file__).resolve().parent
+_local_src = next((p for p in _HERE.parents if (p / "pyproject.toml").exists()), None)
+# _local_src is None in a container; fall back to a git URL or skip
+```
+
+Local-dev-only code (`.env` loading, source-tree detection) should always be
+conditional on the relevant files actually existing, never on assumed path depth.
+
 ---
 
 ## Never write v5

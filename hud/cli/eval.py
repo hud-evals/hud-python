@@ -36,6 +36,26 @@ def _is_bedrock_arn(model: str | None) -> bool:
     return model is not None and bool(_BEDROCK_ARN_PATTERN.match(model))
 
 
+def _resolve_model_from_catalog(model_id: str) -> tuple[AgentType, str] | None:
+    """Look up a model in the gateway catalog and return (agent_type, model_name).
+
+    Returns None if the model isn't found or the catalog is unreachable.
+    """
+    try:
+        from hud.utils.gateway import list_gateway_models
+        models = list_gateway_models()
+    except Exception:
+        return None
+    for m in models:
+        if m.model_name == model_id or m.id == model_id:
+            if m.sdk_agent_type:
+                try:
+                    return AgentType(m.sdk_agent_type), m.model_name or model_id
+                except ValueError:
+                    pass
+    return None
+
+
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
 
@@ -440,7 +460,18 @@ class EvalConfig(BaseModel):
         }
 
         if agent is not None:
-            overrides["agent_type"] = agent
+            try:
+                AgentType(agent)
+                overrides["agent_type"] = agent
+            except ValueError:
+                resolved = _resolve_model_from_catalog(agent)
+                if resolved is not None:
+                    agent_type, model_name = resolved
+                    overrides["agent_type"] = agent_type.value
+                    if "model" not in overrides:
+                        overrides["model"] = model_name
+                else:
+                    overrides["agent_type"] = agent  # let validator surface the error
 
         if task_ids is not None:
             overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
@@ -696,7 +727,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         max_concurrent=cfg.max_concurrent,
     )
     if job.runs and settings.telemetry_enabled and settings.api_key:
-        hud_console.info(f"https://hud.ai/jobs/{job.id}")
+        hud_console.info(f"{settings.hud_web_url}/jobs/{job.id}")
 
     return job
 
@@ -705,7 +736,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Agent: claude, openai, gemini, openai_compatible",
+        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(
@@ -752,11 +783,12 @@ def eval_command(
     """Run evaluation on datasets or individual tasks with agents.
 
     Examples:
+        hud eval tasks.json claude-sonnet-4-6
         hud eval tasks.json claude
-        hud eval "My Tasks" claude --full              # Load from platform taskset
+        hud eval "My Tasks" claude-sonnet-4-6 --full   # Load from platform taskset
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
-        hud eval tasks.json claude --runtime hud       # Execute rollouts on the platform
+        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Execute rollouts on the platform
     """
     hud_console.info("Initializing evaluation...")
 

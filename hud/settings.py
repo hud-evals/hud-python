@@ -27,20 +27,18 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """
-        Customize settings source precedence to include a user-level env file.
+        Customize settings source precedence.
 
         Precedence (highest to lowest):
         - init_settings (explicit kwargs)
         - env_settings (process environment)
-        - dotenv_settings (project .env)
-        - user_dotenv_settings (~/.hud/.env)  ← added
+        - dotenv_settings (.env in CWD)
+        - user_dotenv_settings (~/.hud/.env, written by `hud set`)
         - file_secret_settings
         """
-
-        user_env_path = Path.home() / ".hud" / ".env"
         user_dotenv_settings = DotEnvSettingsSource(
             settings_cls,
-            env_file=user_env_path,
+            env_file=Path.home() / ".hud" / ".env",
             env_file_encoding="utf-8",
         )
 

@@ -113,6 +113,18 @@ app.add_typer(sync_app, name="sync")
 
 def main() -> None:
     """Main entry point for the CLI."""
+    global console
+    # Windows cmd.exe uses the system code page (e.g. cp1252) which can't
+    # encode the emoji that Rich uses. Rewrap stdout/stderr as UTF-8 so
+    # Rich's legacy Windows renderer never hits a charmap error.
+    if sys.platform == "win32":
+        import io
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "buffer"):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+        console = Console()  # recreate against the new stdout
+
     if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
         from .utils.version_check import display_update_prompt
 

@@ -406,13 +406,11 @@ def deploy_environment(
                 plan=plan,
                 platform=platform,
                 console=hud_console,
+                env_dir=env_dir,
             )
         )
     finally:
         tarball_path.unlink(missing_ok=True)
-
-    if result.registry_id:
-        _save_deploy_link(env_dir, result.registry_id, hud_console, env_name=plan.name)
 
     if not result.success:
         raise typer.Exit(1)
@@ -492,6 +490,7 @@ async def _deploy_async(
     plan: _DeployPlan,
     platform: PlatformClient,
     console: HUDConsole,
+    env_dir: Path | None = None,
 ) -> _DeployResult:
     """Async deployment flow: upload context, trigger build, stream logs."""
     console.progress_message("Getting upload URL...")
@@ -502,7 +501,8 @@ async def _deploy_async(
     except HudRequestError as e:
         console.error(f"Failed to get upload URL: {e.status_code or e}")
         if e.status_code == 401:
-            console.error("Invalid API key. Get a new one at https://hud.ai/settings")
+            from hud.settings import settings
+            console.error(f"Invalid API key. Get a new one at {settings.hud_web_url}/settings")
         return _DeployResult(success=False)
     except Exception as e:
         console.error(f"Failed to get upload URL: {e}")
@@ -536,6 +536,10 @@ async def _deploy_async(
 
     build_id = trigger_data["id"]
     registry_id = trigger_data["registry_id"]
+
+    # Save immediately after trigger so rebuilds work even if streaming crashes.
+    if env_dir and registry_id:
+        _save_deploy_link(env_dir, registry_id, console, env_name=plan.name)
 
     console.success(f"Build triggered [{time.time() - step_start:.1f}s]")
     console.info(f"Build ID: {build_id}")
@@ -679,7 +683,7 @@ def deploy_all(
 
 
 def deploy_command(
-    directory: str = typer.Argument(".", help="Environment directory"),
+    directory: str = typer.Argument(".", help="Environment directory or env.py file"),
     all_envs: bool = typer.Option(
         False,
         "--all",
@@ -732,9 +736,10 @@ def deploy_command(
 ) -> None:
     """Deploy HUD environment to the platform.
 
-    The environment name comes from the ``Environment(...)`` declaration in
-    code (directory name for legacy MCP environments). Builds from the local
-    Dockerfile and streams remote build logs.
+    Accepts a directory or an env.py file — if a file is given, its parent
+    directory is used. The environment name comes from the ``Environment(...)``
+    declaration in code. Builds from the local Dockerfile and streams remote
+    build logs.
     """
     if all_envs:
         deploy_all(
