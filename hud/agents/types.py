@@ -341,28 +341,17 @@ class ObservationStep(Step):
         tick: int = 0,
         obs_space: dict[str, Any] | None = None,
     ) -> ObservationStep:
-        """Build an observation step from a raw ``robot`` obs dict."""
-        import base64
-        import io
+        """Build an observation step (numeric ``state``) from a raw ``robot`` obs dict.
 
-        import numpy as np
-        from PIL import Image
-
+        Camera frames are streamed as per-camera H.264 video, not stored per-tick
+        here (see :class:`~hud.agents.robot.video.SegmentEncoder`), so image arrays
+        are skipped.
+        """
         obs_space = obs_space or {}
-        images: dict[str, ImageContent] = {}
         state: dict[str, StateFeature] = {}
         for name, arr in obs.get("data", {}).items():
             if arr.ndim >= 2:
-                # JPEG for the trace viewer: small over the wire + browser-renderable.
-                frame = arr if arr.dtype == np.uint8 else np.clip(arr, 0, 255).astype(np.uint8)
-                buf = io.BytesIO()
-                Image.fromarray(frame).save(buf, format="JPEG", quality=85)
-                images[name] = ImageContent(
-                    type="image",
-                    data=base64.b64encode(buf.getvalue()).decode("ascii"),
-                    mimeType="image/jpeg",
-                )
-                continue
+                continue  # camera frames travel as video, not per-tick images
             vec = arr.tolist()
             # Label the flat wire vector (e.g. "state") from the contract. Each
             # feature whose key carries this data key as a dot-segment describes
@@ -405,7 +394,7 @@ class ObservationStep(Step):
                 state[name] = StateFeature(names=direct, values=vec)
             else:
                 state[name] = StateFeature(values=vec)
-        return cls(tick=tick, images=images, state=state)
+        return cls(tick=tick, state=state)
 
 
 class InferenceStep(Step):
@@ -425,6 +414,30 @@ class InferenceStep(Step):
     # post model inference (a single action is a length-1 chunk)
     chunk: list[list[float]] = Field(default_factory=list[list[float]])
     chunk_length: int = 1
+
+
+class VideoSegmentStep(Step):
+    """One CMAF (fragmented-MP4) fragment of a camera's H.264 stream.
+
+    Replaces per-tick JPEG frames: the episode's frames for one camera are
+    encoded into a single H.264 stream cut into ``index``-ordered segments — an
+    ``init`` segment (codec config, ``index=0``) then media fragments. ``segment``
+    is the fragment bytes wrapped as a ``video`` content block so the ingest
+    artifact pipeline offloads it to S3 exactly like an image (but counted as a
+    file, not a screenshot). The viewer feeds the ordered segments to one
+    ``<video>`` via MSE; ``fps`` maps a control tick to video time.
+    """
+
+    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
+    source: RobotStepSource = "video_segment"  # type: ignore[assignment]
+
+    camera: str = ""
+    #: Position in the camera's stream; ``index`` 0 is the init segment.
+    index: int = 0
+    fps: int = 10
+    #: ``{"type": "video", "data": <base64 mp4>, "mimeType": "video/mp4"}`` —
+    #: the ingest artifact walker offloads this blob to S3 and redacts it inline.
+    segment: dict[str, Any] = Field(default_factory=dict[str, Any])
 
 
 class ContentResult(BaseModel):
