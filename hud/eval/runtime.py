@@ -318,7 +318,7 @@ class DaytonaRuntime:
         snapshot_name: str,
         *,
         image: Any = None,
-        command: str = "hud serve env.py --host 0.0.0.0 --port 8765",
+        command: str | None = None,
         workdir: str | None = "/app",
         port: int = 8765,
         ssh_host: str = "ssh.app.daytona.io",
@@ -326,7 +326,9 @@ class DaytonaRuntime:
         create_timeout: float = 120.0,
     ) -> None:
         self.snapshot_name = snapshot_name
-        self.command = command
+        # Default command serves on *port*, so the SSH forward target always
+        # matches what's listening; override only for a non-default layout.
+        self.command = command or f"hud serve env.py --host 0.0.0.0 --port {port}"
         self.workdir = workdir
         self.port = port
         self.ssh_host = ssh_host
