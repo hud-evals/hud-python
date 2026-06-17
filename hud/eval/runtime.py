@@ -279,11 +279,12 @@ class ModalRuntime:
             image=image,
             unencrypted_ports=[self.port],
             readiness_probe=modal.Probe.with_tcp(self.port),
-            timeout=self.timeout,
+            # Modal types both timeouts as int seconds; floats raise at proto encode.
+            timeout=int(self.timeout),
             **extra,
         )
         try:
-            await sb.wait_until_ready.aio(timeout=self.ready_timeout)
+            await sb.wait_until_ready.aio(timeout=int(self.ready_timeout))
             host, port = (await sb.tunnels.aio())[self.port].tcp_socket
             yield Runtime(
                 f"tcp://{host}:{port}",
@@ -365,7 +366,7 @@ class DaytonaRuntime:
         async with AsyncDaytona() as daytona:
             snapshot = await self._ensure_snapshot(daytona)
             sandbox = await daytona.create(
-                CreateSandboxFromSnapshotParams(snapshot=snapshot), timeout=self.create_timeout
+                CreateSandboxFromSnapshotParams(snapshot=snapshot), timeout=int(self.create_timeout)
             )
             try:
                 # Start the env server in a background session (the snapshot's CMD is
