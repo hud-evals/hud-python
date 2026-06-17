@@ -347,14 +347,16 @@ class DaytonaRuntime:
         async with self._snapshot_lock:
             if not self._resolved:
                 if self._image is not None:
-                    from daytona import CreateSnapshotParams
+                    from daytona import CreateSnapshotParams, DaytonaNotFoundError
 
                     try:
                         await daytona.snapshot.get(self.snapshot_name)
-                    except Exception:  # not found: build it under this name
+                    except DaytonaNotFoundError:  # genuinely missing: build it under this name
                         await daytona.snapshot.create(
                             CreateSnapshotParams(name=self.snapshot_name, image=self._image)
                         )
+                    # any other error (auth, rate-limit, network) propagates: don't mask it
+                    # with a needless create, and don't recreate an existing snapshot.
                 self._resolved = True
         return self.snapshot_name
 
