@@ -1,4 +1,4 @@
-"""ClaudeSDKAgent remote-command construction over the workspace SSH.
+"""ClaudeCLIAgent remote-command construction over the workspace SSH.
 
 The agent runs the ``claude`` CLI on the remote workspace. These cover how the
 command is assembled per login shell — especially the Windows path, where the
@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import pytest
 
-from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
+from hud.agents.claude.cli.agent import ClaudeCLIAgent, build_remote_invocation
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
 
@@ -98,8 +98,8 @@ _STREAM_JSON = (
 )
 
 
-def _agent_with_conn(shell: str, conn: _FakeConn) -> ClaudeSDKAgent:
-    agent = ClaudeSDKAgent()
+def _agent_with_conn(shell: str, conn: _FakeConn) -> ClaudeCLIAgent:
+    agent = ClaudeCLIAgent()
     agent._ssh = cast("Any", SimpleNamespace(conn=conn))
     agent._shell = shell
     return agent
@@ -109,9 +109,10 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     sink: dict[str, bytes] = {}
     conn = _FakeConn(sink, SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0))
     agent = _agent_with_conn("cmd", conn)
+    agent.config.max_steps = 5
 
     run = _fake_run()
-    await agent._exec(run, prompt="build it", max_steps=5)
+    await agent._exec(run, prompt="build it")
 
     assert conn.ran == ["cmd /c .hud_run.bat"]
     assert sink[".hud_run.bat"].startswith(b"@echo off\r\n")
@@ -124,9 +125,10 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     sink: dict[str, bytes] = {}
     conn = _FakeConn(sink, SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0))
     agent = _agent_with_conn("bash", conn)
+    agent.config.max_steps = 5
 
     run = _fake_run()
-    await agent._exec(run, prompt="build it", max_steps=5)
+    await agent._exec(run, prompt="build it")
 
     assert ".hud_run.bat" not in sink
     assert len(conn.ran) == 1
@@ -139,9 +141,10 @@ async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
     sink: dict[str, bytes] = {}
     conn = _FakeConn(sink, SimpleNamespace(stdout="", stderr="boom", exit_status=1))
     agent = _agent_with_conn("cmd", conn)
+    agent.config.max_steps = 1
 
     run = _fake_run()
-    await agent._exec(run, prompt="x", max_steps=1)
+    await agent._exec(run, prompt="x")
 
     assert run.trace.status == "error"
     assert run.trace.extra["exit_status"] == 1

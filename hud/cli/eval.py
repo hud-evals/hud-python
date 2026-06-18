@@ -117,6 +117,12 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
     AgentPreset("GPT-5.4", AgentType.OPENAI, "gpt-5.4"),
     AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3-1-pro"),
+    AgentPreset("Codex CLI", AgentType.CODEX, "gpt-5.4"),
+    AgentPreset("OpenCode", AgentType.OPENCODE, "openai/gpt-5.4"),
+    AgentPreset("Aider", AgentType.AIDER, "openai/gpt-5.4"),
+    AgentPreset("Grok Build", AgentType.GROK_BUILD, "grok-build-0.1"),
+    AgentPreset("mini-SWE-agent", AgentType.MINI_SWE_AGENT, "openai/gpt-5.4"),
+    AgentPreset("Terminus-2", AgentType.TERMINUS_2, "openai/gpt-5.4"),
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
@@ -169,6 +175,30 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
+# model = "my-model"
+
+[codex]
+# model = "gpt-5.4"
+
+[opencode]
+# model = "openai/gpt-5.4"
+
+[aider]
+# model = "openai/gpt-5.4"
+
+[grok_build]
+# model = "grok-build-0.1"
+
+[mini_swe_agent]
+# model = "openai/gpt-5.4"
+
+[terminus_2]
+# model = "openai/gpt-5.4"
+# max_steps = 10
+
+[cli]
+# command = "my-agent"
+# args = ["--message-file", "{prompt_file}"]
 # model = "my-model"
 """
 
@@ -736,7 +766,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",  # noqa: E501
+        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible, codex, opencode, aider, grok_build, mini_swe_agent, terminus_2, cli)",  # noqa: E501
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(

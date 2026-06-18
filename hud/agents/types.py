@@ -126,20 +126,44 @@ class OpenAIChatConfig(AgentConfig):
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
-# -----------------------------------------------------------------------------
-# Claude Code (CLI over SSH)
+# CLI agents (CLI over SSH)
 # -----------------------------------------------------------------------------
 
 
-class ClaudeSDKConfig(AgentConfig):
-    """Configuration for ClaudeSDKAgent (runs the ``claude`` CLI over SSH).
+class CLIConfig(AgentConfig):
+    """Configuration for a non-interactive coding-agent CLI run over SSH.
+
+    ``args`` accepts ``{prompt}``, ``{prompt_file}``, ``{model}``, ``{max_steps}``, and
+    ``{mcp_config}`` placeholders. The prompt is always written to
+    ``.hud_prompt.txt`` first so CLIs can use file-based input.
+    """
+
+    model_name: str = "CLI"
+    command: str = ""
+    args: list[str] = Field(default_factory=list[str])
+    extra_env: dict[str, str] = Field(default_factory=dict)
+    use_hud_gateway: bool = True
+    mcp_config: bool = False
+    stdin: bool = False
+    result_file: str | None = None
+    install_check: str | None = None
+
+
+# -----------------------------------------------------------------------------
+# Claude CLI (over SSH)
+# -----------------------------------------------------------------------------
+
+
+class ClaudeCLIConfig(CLIConfig):
+    """Configuration for ClaudeCLIAgent (runs the ``claude`` CLI over SSH).
 
     ``system_prompt`` is inherited from ``AgentConfig``. ``max_steps`` maps to the
     CLI's ``--max-turns``; values <= 0 leave the turn budget to the CLI (unlimited).
     """
 
-    model_name: str = "Claude Code"
+    model_name: str = "Claude CLI"
     model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
+    command: str = "claude"
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     allowed_tools: list[str] = Field(
@@ -152,6 +176,125 @@ class ClaudeSDKConfig(AgentConfig):
             "Grep",
             "WebSearch",
             "WebFetch",
+        ],
+    )
+
+
+class OpenCodeConfig(CLIConfig):
+    """Configuration for OpenCode's non-interactive ``opencode run`` mode."""
+
+    model_name: str = "OpenCode"
+    model: str = Field(default="openai/gpt-5.4", validation_alias=_model_alias)
+    command: str = "opencode"
+    args: list[str] = Field(
+        default_factory=lambda: [
+            "run",
+            "--format",
+            "json",
+            "--model",
+            "{model}",
+            "--dangerously-skip-permissions",
+            "{prompt}",
+        ],
+    )
+
+
+class CodexConfig(CLIConfig):
+    """Configuration for Codex CLI's non-interactive ``codex exec`` mode."""
+
+    model_name: str = "Codex CLI"
+    model: str = Field(default="gpt-5.4", validation_alias=_model_alias)
+    command: str = "codex"
+    use_hud_gateway: bool = False
+    args: list[str] = Field(
+        default_factory=lambda: [
+            "exec",
+            "--model",
+            "{model}",
+            "--sandbox",
+            "workspace-write",
+            "--skip-git-repo-check",
+            "{prompt}",
+        ],
+    )
+
+
+class GrokBuildConfig(CLIConfig):
+    """Configuration for Grok Build's headless ``grok -p`` mode."""
+
+    model_name: str = "Grok Build"
+    model: str = Field(default="grok-build-0.1", validation_alias=_model_alias)
+    command: str = "grok"
+    use_hud_gateway: bool = False
+    install_check: str | None = "mkdir -p /tmp/hud-grok-home"
+    args: list[str] = Field(
+        default_factory=lambda: [
+            "-p",
+            "{prompt}",
+            "-m",
+            "{model}",
+            "--always-approve",
+        ],
+    )
+
+
+class AiderConfig(CLIConfig):
+    """Configuration for Aider's one-shot ``--message-file`` mode."""
+
+    model_name: str = "Aider"
+    model: str = Field(default="openai/gpt-5.4", validation_alias=_model_alias)
+    command: str = "aider"
+    args: list[str] = Field(
+        default_factory=lambda: [
+            "--model",
+            "{model}",
+            "--yes-always",
+            "--no-auto-commits",
+            "--message-file",
+            "{prompt_file}",
+        ],
+    )
+
+
+class Terminus2Config(CLIConfig):
+    """Configuration for Harbor Terminus-2 run via ``uv --with harbor``."""
+
+    model_name: str = "Terminus-2"
+    model: str = Field(default="openai/gpt-5.4", validation_alias=_model_alias)
+    command: str = "uv"
+    use_hud_gateway: bool = False
+    args: list[str] = Field(
+        default_factory=lambda: [
+            "--no-config",
+            "run",
+            "--no-project",
+            "--quiet",
+            "--python",
+            "3.12",
+            "--with",
+            "harbor==0.6.6",
+            "python",
+            ".hud_terminus2.py",
+        ],
+    )
+    max_steps: int = 10
+    result_file: str | None = ".hud_terminus2_logs/trajectory.json"
+
+
+class MiniSweAgentConfig(CLIConfig):
+    """Configuration for mini-SWE-agent's local ``mini`` CLI."""
+
+    model_name: str = "mini-SWE-agent"
+    model: str = Field(default="openai/gpt-5.4", validation_alias=_model_alias)
+    command: str = "mini"
+    args: list[str] = Field(
+        default_factory=lambda: [
+            "--model",
+            "{model}",
+            "--task",
+            "{prompt}",
+            "--yolo",
+            "--exit-immediately",
         ],
     )
 

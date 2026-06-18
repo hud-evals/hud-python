@@ -32,6 +32,24 @@ def test_parse_agent_type_accepts_known_value() -> None:
     assert cfg.agent_type.value == "openai"
 
 
+@pytest.mark.parametrize(
+    "agent",
+    [
+        "codex",
+        "opencode",
+        "aider",
+        "grok_build",
+        "mini_swe_agent",
+        "terminus_2",
+        "cli",
+    ],
+)
+def test_parse_agent_type_accepts_cli_agents(agent: str) -> None:
+    cfg = EvalConfig(agent_type=agent)
+    assert cfg.agent_type is not None
+    assert cfg.agent_type.value == agent
+
+
 def test_parse_agent_type_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="Invalid agent"):
         EvalConfig(agent_type="not-an-agent")
@@ -96,13 +114,18 @@ def test_load_missing_writes_template(tmp_path: Path) -> None:
 def test_load_parses_sections(tmp_path: Path) -> None:
     path = tmp_path / ".hud_eval.toml"
     path.write_text(
-        '[eval]\nagent = "openai"\nmax_steps = 5\n\n[openai]\nmodel = "gpt-4o"\n',
+        '[eval]\nagent = "openai"\nmax_steps = 5\n\n[openai]\nmodel = "gpt-4o"\n\n'
+        '[codex]\nmodel = "gpt-5"\n\n[opencode]\nmodel = "openai/gpt-5"\n\n'
+        '[grok_build]\nmodel = "grok-build-0.1"\n',
         encoding="utf-8",
     )
     cfg = EvalConfig.load(str(path))
     assert cfg.agent_type is not None and cfg.agent_type.value == "openai"
     assert cfg.max_steps == 5
     assert cfg.agent_config["openai"]["model"] == "gpt-4o"
+    assert cfg.agent_config["codex"]["model"] == "gpt-5"
+    assert cfg.agent_config["opencode"]["model"] == "openai/gpt-5"
+    assert cfg.agent_config["grok_build"]["model"] == "grok-build-0.1"
 
 
 def test_load_resolves_env_var_placeholders(
@@ -123,6 +146,12 @@ def test_merge_cli_overrides_fields() -> None:
     assert merged.agent_type is not None and merged.agent_type.value == "openai"
     assert merged.task_ids == ["a", "b"]
     assert merged.max_steps == 7
+
+
+def test_merge_cli_accepts_cli_agent() -> None:
+    merged = EvalConfig().merge_cli(agent="codex", model="gpt-5")
+    assert merged.agent_type is not None and merged.agent_type.value == "codex"
+    assert merged.model == "gpt-5"
 
 
 def test_merge_cli_namespaced_config() -> None:
@@ -150,3 +179,13 @@ def test_eval_max_steps_lands_in_agent_config() -> None:
     )
     agent = eval_mod._build_agent(cfg)
     assert agent.config.max_steps == 17
+
+
+def test_build_agent_constructs_cli_agent() -> None:
+    from hud.agents.cli import CodexAgent
+
+    cfg = EvalConfig(agent_type="codex", model="gpt-5")
+    agent = eval_mod._build_agent(cfg)
+
+    assert isinstance(agent, CodexAgent)
+    assert agent.config.model == "gpt-5"

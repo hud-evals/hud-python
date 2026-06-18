@@ -13,7 +13,19 @@ async def __call__(self, run: Run) -> None
 It fills `run.trace` in place; the answer it produces is `run.trace.content`, graded when the run exits. Agents are **stateless per run**, so one instance can drive many concurrent rollouts.
 
 ```python
-from hud.agents import create_agent, ClaudeAgent, OpenAIAgent, GeminiAgent, OpenAIChatAgent
+from hud.agents import (
+    create_agent,
+    ClaudeAgent,
+    OpenAIAgent,
+    GeminiAgent,
+    OpenAIChatAgent,
+    CodexAgent,
+    OpenCodeAgent,
+    AiderAgent,
+    GrokBuildAgent,
+    MiniSweAgent,
+    Terminus2Agent,
+)
 ```
 
 ## `create_agent`
@@ -22,7 +34,7 @@ from hud.agents import create_agent, ClaudeAgent, OpenAIAgent, GeminiAgent, Open
 create_agent(model: str, **kwargs) -> Agent
 ```
 
-Builds an agent routed through the HUD gateway for any model id the gateway knows (`claude-...`, `gpt-...`, `gemini-...`, `grok-...`). Extra `kwargs` pass through to the provider config.
+Builds an agent for any model id the HUD gateway knows (`claude-...`, `gpt-...`, `gemini-...`, `grok-...`) or for a built-in agent type such as `cli`, `codex`, `opencode`, `aider`, `grok_build`, `mini_swe_agent`, or `terminus_2`. Extra `kwargs` pass through to the agent config.
 
 ```python
 agent = create_agent("claude-sonnet-4-5")
@@ -30,9 +42,9 @@ agent = create_agent("claude-sonnet-4-5")
 
 For direct provider access with your own API key, construct a provider agent instead.
 
-## Provider agents
+## Built-in agents
 
-Each provider agent takes an optional config from `hud.agents.types`:
+Each built-in agent takes an optional config from `hud.agents.types`:
 
 | Agent | Config | Default model |
 |-------|--------|---------------|
@@ -40,7 +52,13 @@ Each provider agent takes an optional config from `hud.agents.types`:
 | `OpenAIAgent` | `OpenAIConfig` | `gpt-5.4` |
 | `GeminiAgent` | `GeminiConfig` | `gemini-3-pro-preview` |
 | `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5-mini` |
-| `ClaudeSDKAgent` | `ClaudeSDKConfig` | `claude-sonnet-4-5` |
+| `ClaudeCLIAgent` | `ClaudeCLIConfig` | `claude-sonnet-4-5` |
+| `CodexAgent` | `CodexConfig` | `gpt-5.4` |
+| `OpenCodeAgent` | `OpenCodeConfig` | `openai/gpt-5.4` |
+| `AiderAgent` | `AiderConfig` | `openai/gpt-5.4` |
+| `GrokBuildAgent` | `GrokBuildConfig` | `grok-build-0.1` |
+| `MiniSweAgent` | `MiniSweAgentConfig` | `openai/gpt-5.4` |
+| `Terminus2Agent` | `Terminus2Config` | `openai/gpt-5.4` |
 
 ```python
 from hud.agents import ClaudeAgent
@@ -50,7 +68,23 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_tokens=16384))
 ```
 
 - **`OpenAIChatAgent`** speaks OpenAI Chat Completions — point `base_url` at any compatible server (vLLM, local models).
-- **`ClaudeSDKAgent`** runs the `claude` CLI (Claude Code) over an `ssh` capability.
+- **`ClaudeCLIAgent`** runs the `claude` CLI over an `ssh` capability and subclasses `CLIAgent`.
+- **`CodexAgent`**, **`OpenCodeAgent`**, **`AiderAgent`**, **`GrokBuildAgent`**, **`MiniSweAgent`**, and **`Terminus2Agent`** run popular coding CLIs over an `ssh` capability. Install the CLI in the workspace image for CLI-backed agents. `Terminus2Agent` installs Harbor into the run with `uv --with harbor==0.6.6`.
+
+For another CLI, use the generic adapter:
+
+```python
+from hud.agents import CLIAgent
+from hud.agents.types import CLIConfig
+
+agent = CLIAgent(CLIConfig(
+    command="my-agent",
+    args=["--message-file", "{prompt_file}"],
+    model="my-model",
+))
+```
+
+`args` supports `{prompt}`, `{prompt_file}`, `{model}`, and `{mcp_config}` placeholders. The prompt is always written to `.hud_prompt.txt` before the CLI runs.
 
 ## How an agent uses capabilities
 
@@ -70,7 +104,7 @@ When the same knob (e.g. `model`, `max_steps`) is set in more than one place, th
 - `hud eval … --max-steps 30 --model …` overrides the config defaults for that run.
 - Unset everywhere → the config's built-in default (`max_steps=10`).
 
-## Bring your own harness
+## Bring your own agent
 
 Subclass `Agent` and implement `__call__`. Write the answer to `run.trace.content`:
 
