@@ -162,10 +162,10 @@ class Environment(LegacyEnvMixin):
         #: from an ``@env.initialize`` hook; :meth:`workspace` wires the
         #: common ssh case).
         self.capabilities: list[Capability] = []
+        self._hooks_done = False  # True only after all @env.initialize hooks have completed
         for entry in capabilities or []:
             self.add_capability(entry)
         self._started = False
-        self._hooks_done = False  # True only after all @env.initialize hooks have completed
         #: Registered task templates by id (the ``@env.template`` registry).
         #: Each value mints concrete :class:`~hud.eval.Task` rows when called.
         self.tasks: dict[str, _TaskFactory[Any]] = {}
