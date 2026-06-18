@@ -95,6 +95,13 @@ class RuntimeConfig(BaseModel):
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
 
+    def with_overrides(self, override: RuntimeConfig | None) -> RuntimeConfig:
+        if override is None:
+            return self
+        return RuntimeConfig.model_validate(
+            self.model_dump() | override.model_dump(exclude_unset=True)
+        )
+
 
 class Provider(Protocol):
     """Server placement: called with the task row being placed, acquire one
@@ -190,13 +197,12 @@ class LocalRuntime:
 class DockerRuntime:
     """The container provider: each acquisition ``docker run``s a fresh *image*.
 
-    The image's CMD serves the env's control channel on *port* inside the
+    ``runtime_config.image`` selects the container image. The image's CMD serves
+    the env's control channel on *port* inside the
     container (the scaffolded ``Dockerfile.hud`` serves 8765). Each
     acquisition publishes that port on an ephemeral loopback port, yields its
     :class:`Runtime`, and force-removes the container on exit. *run_args* are
-    extra ``docker run`` flags (``-e``, ``--gpus``, volumes); per-task
-    heterogeneity (this row on one image, that row on another) is a custom
-    provider reading the row.
+    extra provider-specific ``docker run`` flags (``-e``, volumes).
 
     Acquisition returns as soon as the port mapping exists — the env may
     still be importing behind it. Protocol-level readiness is the client's
@@ -205,13 +211,11 @@ class DockerRuntime:
 
     def __init__(
         self,
-        image: str | None = None,
         *,
         port: int = 8765,
         run_args: Sequence[str] = (),
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
-        self.image = image
         self.port = port
         self.run_args = tuple(run_args)
         config = None
@@ -221,15 +225,9 @@ class DockerRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        config = task.runtime_config or self.runtime_config or RuntimeConfig()
-        if config.image is None and self.image is not None:
-            config = RuntimeConfig(
-                image=self.image,
-                resources=config.resources,
-                limits=config.limits,
-            )
+        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         if config.image is None:
-            raise ValueError("DockerRuntime requires image or runtime_config.image")
+            raise ValueError("DockerRuntime requires runtime_config.image")
         if config.limits is not None and config.limits.model_dump(exclude_none=True):
             raise ValueError("DockerRuntime does not support runtime_config limits")
 
@@ -295,11 +293,6 @@ class ModalRuntime:
         command: Sequence[str] | None = None,
         app_name: str = "hud-envs",
         port: int = 8765,
-        timeout: float = 3600.0,
-        ready_timeout: float = 600.0,
-        gpu: str | None = None,
-        memory: int | None = None,
-        cpu: float | None = None,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
         self.image_name = image_name
@@ -320,11 +313,6 @@ class ModalRuntime:
             )
         )
         self.app_name = app_name
-        self.timeout = timeout
-        self.ready_timeout = ready_timeout
-        self.gpu = gpu
-        self.memory = memory
-        self.cpu = cpu
         config = None
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
@@ -337,7 +325,7 @@ class ModalRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        config = task.runtime_config or self.runtime_config or RuntimeConfig()
+        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         import modal
 
         app = None
@@ -366,21 +354,15 @@ class ModalRuntime:
         resources = config.resources
         if resources is not None and resources.cpu is not None:
             sandbox_kwargs["cpu"] = resources.cpu
-        elif self.cpu is not None:
-            sandbox_kwargs["cpu"] = self.cpu
         if resources is not None and resources.memory_mb is not None:
             sandbox_kwargs["memory"] = resources.memory_mb
-        elif self.memory is not None:
-            sandbox_kwargs["memory"] = self.memory
         if resources is not None and resources.gpu is not None:
             gpu_type = resources.gpu.type or "any"
             gpu = gpu_type if resources.gpu.count == 1 else f"{gpu_type}:{resources.gpu.count}"
             sandbox_kwargs["gpu"] = gpu
-        elif self.gpu is not None:
-            sandbox_kwargs["gpu"] = self.gpu
 
-        run_timeout = int(self.timeout)
-        ready_timeout = int(self.ready_timeout)
+        run_timeout = 3600
+        ready_timeout = 600
         if config.limits is not None:
             run_timeout = config.limits.run_timeout_s or run_timeout
             ready_timeout = config.limits.startup_timeout_s or ready_timeout
@@ -437,7 +419,6 @@ class DaytonaRuntime:
         port: int = 8765,
         ssh_host: str = "ssh.app.daytona.io",
         ssh_expires_minutes: int = 24 * 60,
-        create_timeout: float = 120.0,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
         self.snapshot_name = snapshot_name
@@ -448,7 +429,6 @@ class DaytonaRuntime:
         self.port = port
         self.ssh_host = ssh_host
         self.ssh_expires_minutes = ssh_expires_minutes
-        self.create_timeout = create_timeout
         config = None
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
@@ -475,7 +455,7 @@ class DaytonaRuntime:
         )
 
         async with AsyncDaytona() as daytona:
-            config = task.runtime_config or self.runtime_config or RuntimeConfig()
+            config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
             daytona_resources = None
             if config.resources is not None:
                 resource_kwargs: dict[str, Any] = {}
@@ -532,7 +512,7 @@ class DaytonaRuntime:
                     ephemeral=True,
                 )
 
-            create_timeout = int(self.create_timeout)
+            create_timeout = 120
             if config.limits is not None and config.limits.startup_timeout_s is not None:
                 create_timeout = config.limits.startup_timeout_s
             # ephemeral: these sandboxes are per-rollout and deleted on exit anyway,

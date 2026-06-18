@@ -327,7 +327,10 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
 ) -> None:
     _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
 
-    provider = DockerRuntime("img:tag", run_args=("-e", "X=1"))
+    provider = DockerRuntime(
+        run_args=("-e", "X=1"),
+        runtime_config=RuntimeConfig(image="img:tag"),
+    )
     async with provider(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:43210"
         calls = docker_log.read_text().splitlines()
@@ -368,15 +371,53 @@ async def test_task_runtime_config_overrides_default_image(
 
     task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(image="img:task"))
 
-    async with DockerRuntime("img:default")(task) as runtime:
-        assert runtime.config == RuntimeConfig(image="img:task")
+    async with DockerRuntime(
+        runtime_config=RuntimeConfig(
+            image="img:default",
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+        ),
+    )(task) as runtime:
+        assert runtime.config == RuntimeConfig(
+            image="img:task",
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+        )
 
-    assert docker_log.read_text().splitlines()[0].endswith("img:task")
+    assert docker_log.read_text().splitlines()[0] == (
+        "run --detach --cpus 2 --memory 4096m --publish 127.0.0.1::8765 img:task"
+    )
+
+
+def test_runtime_config_overrides_only_explicit_top_level_fields() -> None:
+    default = RuntimeConfig(
+        resources=RuntimeResources(
+            cpu=2,
+            memory_mb=4096,
+            gpu=RuntimeGPU(type="A10G", count=2),
+        ),
+        limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
+    )
+
+    assert default.with_overrides(RuntimeConfig(image="img:task")) == RuntimeConfig(
+        image="img:task",
+        resources=RuntimeResources(
+            cpu=2,
+            memory_mb=4096,
+            gpu=RuntimeGPU(type="A10G", count=2),
+        ),
+        limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
+    )
+    assert default.with_overrides(
+        RuntimeConfig(resources=RuntimeResources(cpu=4))
+    ) == RuntimeConfig(
+        resources=RuntimeResources(cpu=4),
+        limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
+    )
+    assert default.with_overrides(RuntimeConfig(resources=None)).resources is None
 
 
 async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
     with pytest.raises(ValueError, match="GPU"):
-        async with DockerRuntime("img")(
+        async with DockerRuntime()(
             Task(
                 env="any-env",
                 id="t",
@@ -389,7 +430,7 @@ async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
             pass
 
     with pytest.raises(ValueError, match="limits"):
-        async with DockerRuntime("img")(
+        async with DockerRuntime()(
             Task(
                 env="any-env",
                 id="t",
@@ -402,19 +443,24 @@ async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
             pass
 
 
-def test_docker_runtime_accepts_one_default_config_source() -> None:
+def test_docker_runtime_accepts_runtime_config_defaults() -> None:
     provider = DockerRuntime(runtime_config=RuntimeConfig(image="img:tag"))
     assert provider.runtime_config == RuntimeConfig(image="img:tag")
 
     provider = DockerRuntime(
-        "img:tag",
-        runtime_config=RuntimeConfig(resources=RuntimeResources(cpu=2)),
+        runtime_config=RuntimeConfig(image="img:tag", resources=RuntimeResources(cpu=2)),
     )
-    assert provider.image == "img:tag"
-    assert provider.runtime_config == RuntimeConfig(resources=RuntimeResources(cpu=2))
+    assert provider.runtime_config == RuntimeConfig(
+        image="img:tag",
+        resources=RuntimeResources(cpu=2),
+    )
 
-    provider = DockerRuntime("img:tag", runtime_config=RuntimeConfig(image="other:tag"))
-    assert provider.runtime_config == RuntimeConfig(image="other:tag")
+    task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(image="other:tag"))
+    assert provider.runtime_config is not None
+    assert provider.runtime_config.with_overrides(task.runtime_config) == RuntimeConfig(
+        image="other:tag",
+        resources=RuntimeResources(cpu=2),
+    )
 
 
 async def test_modal_runtime_config_flows_into_modal_sdk(
@@ -454,26 +500,35 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
     assert calls["terminated"] is True
 
 
-async def test_modal_runtime_config_accepts_legacy_resource_args(
+async def test_modal_task_runtime_config_overlays_provider_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_modal(monkeypatch)
     provider = ModalRuntime(
-        "img:tag",
-        cpu=2,
-        memory=4096,
-        gpu="A10G",
+        runtime_config=RuntimeConfig(
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+            limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
+        ),
     )
+    task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(image="img:task"))
 
-    async with provider(_row()) as runtime:
-        assert runtime.config is None
+    async with provider(task) as runtime:
+        assert runtime.config == RuntimeConfig(
+            image="img:task",
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+            limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
+        )
 
-    kwargs = calls["sandbox_kwargs"]
-    assert isinstance(kwargs, dict)
-    assert {key: kwargs[key] for key in ("cpu", "memory", "gpu")} == {
+    assert calls["registry_image"] == "img:task"
+    assert calls["ready_timeout"] == 30
+    assert calls["sandbox_kwargs"] == {
+        "app": "app",
+        "image": _ModalImageRef("registry", "img:task"),
+        "unencrypted_ports": [8765],
+        "readiness_probe": ("tcp", 8765),
+        "timeout": 120,
         "cpu": 2,
         "memory": 4096,
-        "gpu": "A10G",
     }
 
 
@@ -540,6 +595,36 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert calls["client_closed"] is True
 
 
+async def test_daytona_task_runtime_config_overlays_provider_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_daytona(monkeypatch)
+    provider = DaytonaRuntime(
+        runtime_config=RuntimeConfig(
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+            limits=RuntimeLimits(startup_timeout_s=45),
+        ),
+    )
+    task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(image="img:task"))
+
+    async with provider(task) as runtime:
+        assert runtime.config == RuntimeConfig(
+            image="img:task",
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+            limits=RuntimeLimits(startup_timeout_s=45),
+        )
+
+    create_call = calls["create"]
+    assert isinstance(create_call, tuple)
+    create_params, create_timeout = create_call
+    assert create_params == _CreateSandboxFromImageParams(
+        image=_DaytonaImage("img:task"),
+        ephemeral=True,
+        resources=_DaytonaResources(cpu=2, memory=4),
+    )
+    assert create_timeout == 45
+
+
 async def test_daytona_runtime_config_rejects_unsupported_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -565,7 +650,7 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
     # ``docker port`` on an exited container prints nothing.
     _install_fake_docker(tmp_path, port_behavior=":", monkeypatch=monkeypatch)
 
-    provider = DockerRuntime("img:tag")
+    provider = DockerRuntime(runtime_config=RuntimeConfig(image="img:tag"))
     with pytest.raises(RuntimeError, match="exited before serving") as err:
         async with provider(_row()):
             pass
