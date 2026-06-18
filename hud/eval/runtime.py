@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from hud.types import Step
 from hud.utils.platform import PlatformClient
 
@@ -50,6 +52,55 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
+
+
+class RuntimeGPU(BaseModel):
+    """Requested GPU resources, provider-neutral where possible."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str | None = Field(default=None, min_length=1)
+    count: int = Field(default=1, ge=1)
+
+
+class RuntimeResources(BaseModel):
+    """Requested compute resources for a runtime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cpu: float | None = Field(default=None, gt=0)
+    memory_mb: int | None = Field(default=None, gt=0)
+    gpu: RuntimeGPU | None = None
+
+
+class RuntimeLimits(BaseModel):
+    """Runtime lifecycle limits in seconds."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    startup_timeout_s: int | None = Field(default=None, gt=0)
+    run_timeout_s: int | None = Field(default=None, gt=0)
+
+
+class RuntimeConfig(BaseModel):
+    """Portable task-environment launch requirements.
+
+    ``Task.runtime_config`` is requested construction input. ``Runtime.config``
+    is the effective config used to construct a runtime.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    image: str | None = Field(default=None, min_length=1)
+    resources: RuntimeResources | None = None
+    limits: RuntimeLimits | None = None
+
+    def with_overrides(self, override: RuntimeConfig | None) -> RuntimeConfig:
+        if override is None:
+            return self
+        return RuntimeConfig.model_validate(
+            self.model_dump() | override.model_dump(exclude_unset=True)
+        )
 
 
 class Provider(Protocol):
@@ -71,16 +122,17 @@ class Runtime:
     """The connectable address of a provisioned substrate.
 
     ``url`` is the control-channel address (``tcp://127.0.0.1:7000`` for a
-    local process, ``tcp://sandbox-abc.hud.so:443`` for a hosted box);
+    local process, ``tcp://sandbox-abc.hud.so:443`` for a hosted box).
     ``params`` carries connection-time data a transport may need (auth token,
-    sandbox id). Constructed directly, it is also a provider — the borrowed,
-    shared case: it ignores the placement request and yields itself with a
-    no-op lifecycle, since whoever provisioned the substrate owns its
-    teardown.
+    sandbox id). ``config`` is the effective runtime configuration used to
+    construct the runtime. Constructed directly, it is also a provider — the
+    borrowed, shared case: it yields itself with a no-op lifecycle, since
+    whoever provisioned the substrate owns its teardown.
     """
 
     url: str
     params: dict[str, Any] = field(default_factory=dict)
+    config: RuntimeConfig | None = None
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
@@ -117,6 +169,8 @@ class LocalRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        if task.runtime_config is not None:
+            raise ValueError("LocalRuntime does not support task runtime_config")
         if not self.source.exists():
             raise FileNotFoundError(f"LocalRuntime: source not found: {self.source}")
         cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
@@ -143,28 +197,62 @@ class LocalRuntime:
 class DockerRuntime:
     """The container provider: each acquisition ``docker run``s a fresh *image*.
 
-    The image's CMD serves the env's control channel on *port* inside the
+    The positional *image* is shorthand for ``runtime_config.image``. The image's
+    CMD serves the env's control channel on *port* inside the
     container (the scaffolded ``Dockerfile.hud`` serves 8765). Each
     acquisition publishes that port on an ephemeral loopback port, yields its
     :class:`Runtime`, and force-removes the container on exit. *run_args* are
-    extra ``docker run`` flags (``-e``, ``--gpus``, volumes); per-task
-    heterogeneity (this row on one image, that row on another) is a custom
-    provider reading the row.
+    extra provider-specific ``docker run`` flags (``-e``, volumes).
 
     Acquisition returns as soon as the port mapping exists — the env may
     still be importing behind it. Protocol-level readiness is the client's
     job: ``connect`` retries the handshake until the channel answers.
     """
 
-    def __init__(self, image: str, *, port: int = 8765, run_args: Sequence[str] = ()) -> None:
-        self.image = image
+    def __init__(
+        self,
+        image: str | None = None,
+        *,
+        port: int = 8765,
+        run_args: Sequence[str] = (),
+        runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+    ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
+        config = RuntimeConfig(image=image) if image is not None else RuntimeConfig()
+        if runtime_config is not None:
+            config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
+        self.runtime_config = config if config.model_dump(exclude_none=True) else None
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        if config.image is None:
+            raise ValueError("DockerRuntime requires runtime_config.image")
+        if config.limits is not None and config.limits.model_dump(exclude_none=True):
+            raise ValueError("DockerRuntime does not support runtime_config limits")
+
+        resource_args: list[str] = []
+        resources = config.resources
+        if resources is not None:
+            if resources.cpu is not None:
+                cpu = str(int(resources.cpu)) if resources.cpu.is_integer() else str(resources.cpu)
+                resource_args.extend(("--cpus", cpu))
+            if resources.memory_mb is not None:
+                resource_args.extend(("--memory", f"{resources.memory_mb}m"))
+            if resources.gpu is not None:
+                if resources.gpu.type is not None:
+                    raise ValueError("DockerRuntime cannot select GPUs by type")
+                resource_args.extend(("--gpus", str(resources.gpu.count)))
+
         out, _ = await _docker(
-            "run", "--detach", *self.run_args, "--publish", f"127.0.0.1::{self.port}", self.image
+            "run",
+            "--detach",
+            *self.run_args,
+            *resource_args,
+            "--publish",
+            f"127.0.0.1::{self.port}",
+            config.image,
         )
         container = out.strip()
         try:
@@ -172,15 +260,293 @@ class DockerRuntime:
             if not mapping.strip():
                 logs_out, logs_err = await _docker("logs", "--tail", "40", container, check=False)
                 raise RuntimeError(
-                    f"container for image {self.image!r} exited before serving port "
+                    f"container for image {config.image!r} exited before serving port "
                     f"{self.port}:\n{(logs_err or logs_out).strip()}",
                 )
             host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-            yield Runtime(f"tcp://127.0.0.1:{host_port}")
+            yield Runtime(f"tcp://127.0.0.1:{host_port}", config=config)
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.
             await _docker("rm", "--force", container, check=False)
+
+
+class ModalRuntime:
+    """The Modal provider: each acquisition ``Sandbox.create``s a fresh container.
+
+    The cloud :class:`DockerRuntime` — boots a sandbox from a pre-built image,
+    exposes the env's control channel as a raw-TCP tunnel (``unencrypted_ports``,
+    the only kind :func:`hud.clients.connect` dials), yields its :class:`Runtime`,
+    terminates on exit. Acquisitions are independent, so a batch fans out into
+    isolated containers (one ``sb-…`` id each).
+
+    The image resolves once (so concurrent rollouts can't race a build): pass a
+    published name — ``ModalRuntime("hud-libero-env")``, the preferred durable
+    handle — or, as an escape hatch, an ``Image`` to build lazily on first use.
+    Requires the ``modal`` extra and a configured token.
+    """
+
+    def __init__(
+        self,
+        image_name: str | None = None,
+        *,
+        image: Any = None,
+        command: Sequence[str] | None = None,
+        app_name: str = "hud-envs",
+        port: int = 8765,
+        runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+    ) -> None:
+        self.image_name = image_name
+        self.port = port
+        # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint; the image's
+        # WORKDIR selects which env.py is served. Override for a non-default layout.
+        self.command = (
+            tuple(command)
+            if command is not None
+            else (
+                "hud",
+                "serve",
+                "env.py",
+                "--host",
+                "0.0.0.0",  # noqa: S104 - serving inside the sandbox; the tunnel is the only ingress
+                "--port",
+                str(port),
+            )
+        )
+        self.app_name = app_name
+        config = None
+        if runtime_config is not None:
+            config = RuntimeConfig.model_validate(runtime_config)
+        self.runtime_config = config
+        # Resolved (named) or built-once (from Dockerfile) image, behind a lock so
+        # concurrent first acquisitions build/look up exactly once.
+        self._image = image
+        self._resolved: Any = None
+        self._image_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        import modal
+
+        app = None
+        if config.image is not None:
+            image = modal.Image.from_registry(config.image)
+        elif self.image_name is not None:
+            image = modal.Image.from_name(self.image_name)
+        elif self._image is None:
+            raise ValueError("ModalRuntime requires image=, image_name=, or runtime_config.image")
+        else:
+            if self._resolved is None:
+                async with self._image_lock:
+                    if self._resolved is None:
+                        app = await modal.App.lookup.aio(
+                            self.app_name,
+                            create_if_missing=True,
+                        )
+                        await self._image.build.aio(app=app)
+                        self._resolved = self._image
+            image = self._resolved
+
+        if app is None:
+            app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
+
+        sandbox_kwargs: dict[str, float | int | str] = {}
+        resources = config.resources
+        if resources is not None and resources.cpu is not None:
+            sandbox_kwargs["cpu"] = resources.cpu
+        if resources is not None and resources.memory_mb is not None:
+            sandbox_kwargs["memory"] = resources.memory_mb
+        if resources is not None and resources.gpu is not None:
+            gpu_type = resources.gpu.type or "any"
+            gpu = gpu_type if resources.gpu.count == 1 else f"{gpu_type}:{resources.gpu.count}"
+            sandbox_kwargs["gpu"] = gpu
+
+        run_timeout = 3600
+        ready_timeout = 600
+        if config.limits is not None:
+            run_timeout = config.limits.run_timeout_s or run_timeout
+            ready_timeout = config.limits.startup_timeout_s or ready_timeout
+
+        sb = await modal.Sandbox.create.aio(
+            *self.command,
+            app=app,
+            image=image,
+            unencrypted_ports=[self.port],
+            readiness_probe=modal.Probe.with_tcp(self.port),
+            # Modal types both timeouts as int seconds; floats raise at proto encode.
+            timeout=run_timeout,
+            **sandbox_kwargs,
+        )
+        try:
+            await sb.wait_until_ready.aio(timeout=ready_timeout)
+            host, port = (await sb.tunnels.aio())[self.port].tcp_socket
+            yield Runtime(
+                f"tcp://{host}:{port}",
+                params={"provider": "modal", "instance_id": sb.object_id},
+                config=config if config.model_dump(exclude_none=True) else None,
+            )
+        finally:
+            # check-free teardown: never shadow the run's own error.
+            with contextlib.suppress(Exception):
+                await sb.terminate.aio()
+
+
+class DaytonaRuntime:
+    """The Daytona provider: each acquisition creates a fresh sandbox from a snapshot.
+
+    The Daytona :class:`ModalRuntime` — boots a sandbox from a pre-built *snapshot*
+    (the durable handle, the snapshot equivalent of Modal's image name), starts the
+    env's control channel inside it, then reaches it over an SSH local-forward:
+    Daytona exposes services only as HTTPS previews, but :func:`hud.clients.connect`
+    dials ``tcp://``, so the raw control channel is tunneled over SSH to a local
+    port. Yields its :class:`Runtime`, deletes the sandbox on exit.
+
+    Pass a snapshot name — ``DaytonaRuntime("hud-libero-env")`` — optionally with an
+    ``image`` (Dockerfile/registry ref) to build that snapshot once if it is missing.
+    Resources (cpu/memory/gpu) live on the snapshot, not here. *workdir* defaults to
+    ``/app`` (the scaffolded ``Dockerfile.hud`` WORKDIR) since a Daytona session
+    starts in ``~``, not the image's WORKDIR; override only for a non-standard layout.
+    Requires the ``daytona`` extra and ``DAYTONA_API_KEY``.
+    """
+
+    def __init__(
+        self,
+        snapshot_name: str | None = None,
+        *,
+        image: Any = None,
+        command: str | None = None,
+        workdir: str | None = "/app",
+        port: int = 8765,
+        ssh_host: str = "ssh.app.daytona.io",
+        ssh_expires_minutes: int = 24 * 60,
+        runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+    ) -> None:
+        self.snapshot_name = snapshot_name
+        # Default command serves on *port*, so the SSH forward target always
+        # matches what's listening; override only for a non-default layout.
+        self.command = command or f"hud serve env.py --host 0.0.0.0 --port {port}"
+        self.workdir = workdir
+        self.port = port
+        self.ssh_host = ssh_host
+        self.ssh_expires_minutes = ssh_expires_minutes
+        config = None
+        if runtime_config is not None:
+            config = RuntimeConfig.model_validate(runtime_config)
+        self.runtime_config = config
+        # Build the snapshot from *image* once if it's missing; lock so concurrent
+        # first acquisitions resolve exactly once.
+        self._image = image
+        self._resolved = False
+        self._snapshot_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        import asyncssh
+        from daytona import (
+            AsyncDaytona,
+            CreateSandboxFromImageParams,
+            CreateSandboxFromSnapshotParams,
+            CreateSnapshotParams,
+            DaytonaNotFoundError,
+            GpuType,
+            Image,
+            Resources,
+            SessionExecuteRequest,
+        )
+
+        async with AsyncDaytona() as daytona:
+            config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+            if config.limits is not None and config.limits.run_timeout_s is not None:
+                raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
+
+            daytona_resources = None
+            if config.resources is not None:
+                resource_kwargs: dict[str, Any] = {}
+                if config.resources.cpu is not None:
+                    resource_kwargs["cpu"] = config.resources.cpu
+                if config.resources.memory_mb is not None:
+                    resource_kwargs["memory"] = max(
+                        1,
+                        (config.resources.memory_mb + 1023) // 1024,
+                    )
+                if config.resources.gpu is not None:
+                    resource_kwargs["gpu"] = config.resources.gpu.count
+                    if config.resources.gpu.type is not None:
+                        resource_kwargs["gpu_type"] = [GpuType(config.resources.gpu.type)]
+                if resource_kwargs:
+                    daytona_resources = Resources(**resource_kwargs)
+
+            if config.image is not None:
+                kwargs: dict[str, Any] = {
+                    "image": Image.base(config.image),
+                    "ephemeral": True,
+                }
+                if daytona_resources is not None:
+                    kwargs["resources"] = daytona_resources
+                sandbox_params = CreateSandboxFromImageParams(**kwargs)
+            else:
+                if daytona_resources is not None:
+                    raise ValueError(
+                        "DaytonaRuntime cannot override resources for snapshot_name; "
+                        "use runtime_config.image"
+                    )
+                if self.snapshot_name is None:
+                    raise ValueError(
+                        "DaytonaRuntime requires snapshot_name or runtime_config.image"
+                    )
+                if not self._resolved:
+                    async with self._snapshot_lock:
+                        if not self._resolved:
+                            if self._image is not None:
+                                try:
+                                    await daytona.snapshot.get(self.snapshot_name)
+                                except DaytonaNotFoundError:
+                                    await daytona.snapshot.create(
+                                        CreateSnapshotParams(
+                                            name=self.snapshot_name,
+                                            image=self._image,
+                                        )
+                                    )
+                            self._resolved = True
+                sandbox_params = CreateSandboxFromSnapshotParams(
+                    snapshot=self.snapshot_name,
+                    ephemeral=True,
+                )
+
+            create_timeout = 120
+            if config.limits is not None and config.limits.startup_timeout_s is not None:
+                create_timeout = config.limits.startup_timeout_s
+            # ephemeral: these sandboxes are per-rollout and deleted on exit anyway,
+            # and some regions only permit ephemeral sandboxes.
+            sandbox = await daytona.create(
+                sandbox_params,
+                timeout=create_timeout,
+            )
+            try:
+                # Start the env server in a background session (the snapshot's CMD is
+                # not the sandbox's main process). connect() retries the handshake,
+                # so we don't poll for readiness here.
+                session: str = "hud-serve"
+                await sandbox.process.create_session(session)
+                cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
+                await sandbox.process.execute_session_command(
+                    session, SessionExecuteRequest(command=cmd, run_async=True)
+                )
+                ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
+                async with asyncssh.connect(
+                    self.ssh_host, username=ssh.token, known_hosts=None
+                ) as conn:
+                    listener = await conn.forward_local_port("127.0.0.1", 0, "127.0.0.1", self.port)
+                    yield Runtime(
+                        f"tcp://127.0.0.1:{listener.get_port()}",
+                        params={"provider": "daytona", "instance_id": sandbox.id},
+                        config=config if config.model_dump(exclude_none=True) else None,
+                    )
+            finally:
+                # check-free teardown: never shadow the run's own error.
+                with contextlib.suppress(Exception):
+                    await daytona.delete(sandbox)
 
 
 async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
@@ -332,6 +698,8 @@ class HUDRuntime:
         group_id: str | None,
         trace_id: str,
     ) -> dict[str, Any]:
+        if task.runtime_config is not None:
+            raise ValueError("HUDRuntime does not support task runtime_config yet")
         spec_of = getattr(agent, "hosted_spec", None)
         if not callable(spec_of):
             raise ValueError(
@@ -405,9 +773,15 @@ class HUDRuntime:
 
 
 __all__ = [
+    "DaytonaRuntime",
     "DockerRuntime",
     "HUDRuntime",
     "LocalRuntime",
+    "ModalRuntime",
     "Provider",
     "Runtime",
+    "RuntimeConfig",
+    "RuntimeGPU",
+    "RuntimeLimits",
+    "RuntimeResources",
 ]

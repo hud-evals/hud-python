@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from hud.environment import Environment
-from hud.eval import Task, Taskset
+from hud.eval import (
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeResources,
+    Task,
+    Taskset,
+)
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
@@ -89,6 +95,30 @@ def test_roundtrip_is_stable_through_plain_pydantic() -> None:
     assert rebuilt.agent_config == {"system_prompt": "be precise"}
     # ...and re-serializing yields the same portable dict.
     assert rebuilt.model_dump(exclude_none=True) == original
+
+
+def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
+    original = Task(
+        env="browser",
+        id="checkout",
+        runtime_config=RuntimeConfig(
+            image="hud-browser:firefox",
+            resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+        ),
+    ).model_dump(exclude_none=True)
+
+    rebuilt = Task.model_validate(original)
+
+    assert rebuilt.runtime_config == RuntimeConfig(
+        image="hud-browser:firefox",
+        resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+    )
+    assert rebuilt.model_dump(exclude_none=True) == original
+
+
+def test_runtime_config_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError, match="Extra inputs"):
+        RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
 
 
 def test_row_validation_rejects_malformed_entries() -> None:
