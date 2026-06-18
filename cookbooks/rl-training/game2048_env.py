@@ -199,7 +199,9 @@ async def play(target: int = 256):
 
     max_tile = game.max_tile()
     # Reward: normalized log2 progress from the start tile (2) to the target.
-    reward = (math.log2(max_tile) - 1) / (math.log2(target) - 1)
+    # A target of 2 (or less) is the start tile itself — already met, so full reward.
+    denom = math.log2(target) - 1
+    reward = 1.0 if denom <= 0 else (math.log2(max_tile) - 1) / denom
     yield EvaluationResult(
         reward=max(0.0, min(1.0, reward)),
         content=str(max_tile),
