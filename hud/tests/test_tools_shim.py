@@ -103,8 +103,13 @@ def test_jupyter_and_playwright_resolve_to_noops() -> None:
     # Dropped in v6: registering them in a v5 env silently does nothing.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools import JupyterTool, PlaywrightTool  # pyright: ignore[reportAttributeAccessIssue]
-        from hud.tools.playwright import PlaywrightTool as deep_playwright  # pyright: ignore[reportAttributeAccessIssue]
+        from hud.tools import (  # pyright: ignore[reportAttributeAccessIssue]
+            JupyterTool,
+            PlaywrightTool,
+        )
+        from hud.tools.playwright import (  # pyright: ignore[reportAttributeAccessIssue]
+            PlaywrightTool as deep_playwright,
+        )
 
     for tool_cls in (JupyterTool, PlaywrightTool, deep_playwright):
         instance = tool_cls(cdp_url="http://localhost:9222")

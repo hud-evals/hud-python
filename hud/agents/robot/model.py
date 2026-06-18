@@ -98,7 +98,7 @@ class RemoteModel(Model):
     ) -> None:
         self.host = host
         self.port = port
-        #: Key under which the server returns the chunk — "actions" (stock OpenPI) or "action" (Cosmos).
+        #: Server chunk key — "actions" (stock OpenPI) or "action" (Cosmos).
         self.response_key = response_key
         self._client: Any = None
 

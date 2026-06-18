@@ -5,8 +5,8 @@ Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter`` in
 
 The base calls the adapter and model at the right moments::
 
-    setup_robot      -> adapter.bind(spaces)                          # once after connect
-    on_episode_start -> adapter.reset()                               # once per episode (model is stateless)
+    setup_robot      -> adapter.bind(spaces)       # once after connect
+    on_episode_start -> adapter.reset()            # per episode; model is stateless
     select_action    -> adapt_observation -> model.ainfer -> pop chunk -> adapt_action
 
 ``model.ainfer`` always returns a ``[T, A]`` chunk; :meth:`RobotAgent.select_action`

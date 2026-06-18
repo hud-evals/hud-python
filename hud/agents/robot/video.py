@@ -18,10 +18,12 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,8 @@ SegmentCallback = Callable[[int, bytes], None]
 
 
 class SegmentEncoder:
-    """Encode one camera's (each camera ges its own) frames to CMAF, dispatching the init segment then one media
-    fragment per ~``segment_seconds`` via ``on_segment`` (called on the encoder thread).
+    """Encode one camera's frames to CMAF: init segment, then one media fragment per
+    ~``segment_seconds`` via ``on_segment`` (called on the encoder thread).
 
     Doubles as the file-like sink PyAV muxes into: ``write`` accumulates bytes and
     dispatches each complete top-level MP4 box as soon as it is whole.
@@ -45,7 +47,7 @@ class SegmentEncoder:
         *,
         fps: int,
         segment_seconds: float = 2.0,  # how many secs of video per segment
-        crf: int = 23,  # quality of the video: 0 is best quality, 51 is worst quality (23 is middle quality)
+        crf: int = 23,  # x264 quality: 0=best, 51=worst
         max_queued_frames: int = 16,
     ) -> None:
         self.camera = camera
@@ -71,7 +73,7 @@ class SegmentEncoder:
             self._queue.put_nowait(np.array(frame, copy=True))  # NOTE drops under backpressure
 
     def finalize(self, timeout: float = 15.0) -> None:
-        """Called on episode end to flush the tail fragment and stop the encoder thread (best-effort)."""
+        """Flush the tail fragment and stop the encoder thread (best-effort)."""
         try:
             self._queue.put_nowait(
                 None
