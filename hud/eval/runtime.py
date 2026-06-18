@@ -258,23 +258,31 @@ async def _drain(stream: asyncio.StreamReader) -> None:
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
-    # Child leads its own group (pgid == pid), so SIGTERM the whole group to
-    # reap env-spawned grandchildren too, then SIGKILL stragglers. Windows has
-    # no killpg — fall back to the direct child.
+    # No process groups on Windows: best-effort on the direct child only.
+    if not hasattr(os, "killpg"):
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), 10.0)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+        return
+    # Child leads its own group (pgid == pid). SIGTERM the whole group so the
+    # env server runs env.stop() (its @env.shutdown hooks reap the daemons it
+    # owns) and exits; give the leader up to 10s. Then SIGKILL the group
+    # unconditionally — env.stop() runs within the leader's lifetime, so a
+    # grandchild still alive once the leader exits is an unmanaged straggler
+    # (e.g. one that ignored SIGTERM), and the leader exiting fast must not
+    # let it skip the kill. The pgid stays reserved while the group has any
+    # member, so signalling it after the leader is reaped is safe (an empty
+    # group raises ProcessLookupError, suppressed).
     with contextlib.suppress(ProcessLookupError):
-        if hasattr(os, "killpg"):
-            os.killpg(proc.pid, signal.SIGTERM)
-        else:
-            proc.terminate()
-    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    with contextlib.suppress(TimeoutError):
         await asyncio.wait_for(proc.wait(), 10.0)
-    except TimeoutError:
-        with contextlib.suppress(ProcessLookupError):
-            if hasattr(os, "killpg"):
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()
-        await proc.wait()
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    await proc.wait()
 
 
 #: Platform trace statuses that end a hosted rollout.
