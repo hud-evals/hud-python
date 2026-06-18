@@ -12,6 +12,7 @@ the atom and return a :class:`Job`.
 
 from __future__ import annotations
 
+import asyncio
 import textwrap
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -20,8 +21,10 @@ import mcp.types as mcp_types
 import pytest
 
 from hud.agents.base import Agent
+from hud.environment import Environment
 from hud.eval import Job, LocalRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
+from hud.eval.runtime import _local
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -97,6 +100,42 @@ async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Pat
     assert run.prompt == "add:2:3"
     assert run.runtime is not None
     assert run.reward == 0.0  # never graded
+
+
+class _SlowAgent(Agent):
+    """Answers, then hangs — to exercise the agent-loop timeout."""
+
+    def __init__(self, fn: Any) -> None:
+        self._fn = fn
+
+    async def __call__(self, run: Any) -> None:
+        run.trace.content = self._fn(run.prompt)
+        await asyncio.sleep(30)
+
+
+async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
+    # In-process env (no subprocess spawn) so only the agent loop, not setup,
+    # races the short deadline.
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    run = await rollout(
+        _add_task(2, 3),
+        _SlowAgent(_solve_add),
+        runtime=lambda _row: _local(env),
+        rollout_timeout=0.5,
+    )
+
+    # The deadline fired mid-loop, but the run was live with an answer already
+    # recorded, so it is graded rather than discarded as a zero-reward cancel.
+    assert run.reward == 1.0
+    assert run.trace.status == "completed"
+    assert run.trace.extra.get("stop_reason") == "timeout"
+    assert run.trace_id is not None
 
 
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
