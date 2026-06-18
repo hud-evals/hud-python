@@ -29,6 +29,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import signal
 import sys
 import uuid
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
@@ -125,6 +127,8 @@ class LocalRuntime:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             cwd=self.source if self.source.is_dir() else self.source.parent,
+            # Start child in its own session for clean signal handling.
+            start_new_session=True,
         )
         try:
             port = await asyncio.wait_for(_read_port(proc, self.source), self.ready_timeout)
@@ -254,11 +258,22 @@ async def _drain(stream: asyncio.StreamReader) -> None:
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
-    proc.terminate()
+    # Child leads its own group (pgid == pid), so SIGTERM the whole group to
+    # reap env-spawned grandchildren too, then SIGKILL stragglers. Windows has
+    # no killpg — fall back to the direct child.
+    with contextlib.suppress(ProcessLookupError):
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGTERM)
+        else:
+            proc.terminate()
     try:
         await asyncio.wait_for(proc.wait(), 10.0)
     except TimeoutError:
-        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
         await proc.wait()
 
 
