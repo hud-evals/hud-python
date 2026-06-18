@@ -41,6 +41,10 @@ from .runtime import (
     ModalRuntime,
     Provider,
     Runtime,
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
 )
 from .sync import SyncPlan
 from .task import Task
@@ -61,6 +65,10 @@ __all__ = [
     "Rewarded",
     "Run",
     "Runtime",
+    "RuntimeConfig",
+    "RuntimeGPU",
+    "RuntimeLimits",
+    "RuntimeResources",
     "SyncPlan",
     "Task",
     "Taskset",
