@@ -54,14 +54,15 @@ class BaseTrainingClient:
         model_id = await self._resolve_model_id()
         return f"{self._base_url}/v1/models/{model_id}/train/{suffix}"
 
-    async def _post(self, suffix: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(
+        self, suffix: str, payload: dict[str, Any], *, max_retries: int = 0
+    ) -> dict[str, Any]:
         url = await self._train_url(suffix)
-        # Training POSTs (forward_backward, optim_step, backward) are stateful,
-        # non-idempotent mutations: a silent retry double-applies the optimizer /
-        # gradient and collides on the checkpoint name. Fail loud instead of
-        # retrying; the caller decides whether it is safe to repeat.
+        # forward_backward/backward accumulate gradients in place and are not
+        # idempotent, so they default to no retry (a retry double-counts a batch).
+        # optim_step is deduped server-side and opts into retries explicitly.
         return await make_request(
-            "POST", url, json=payload, api_key=self._api_key, max_retries=0
+            "POST", url, json=payload, api_key=self._api_key, max_retries=max_retries
         )
 
     async def _get(self, suffix: str) -> dict[str, Any]:
@@ -85,7 +86,11 @@ class BaseTrainingClient:
     ) -> OptimStepResult:
         """Apply accumulated gradients, then checkpoint + promote: one compound
         step that saves state + sampler weights and advances the model's active
-        checkpoint, so the gateway serves the updated weights."""
+        checkpoint, so the gateway serves the updated weights.
+
+        Safe to retry: the service dedups against the model's checkpoint counter
+        and the in-flight step, so a network retry returns the already-committed
+        step instead of applying the optimizer twice."""
         request = OptimStepRequest(
             learning_rate=learning_rate,
             beta1=beta1,
@@ -93,5 +98,5 @@ class BaseTrainingClient:
             eps=eps,
             weight_decay=weight_decay,
         )
-        data = await self._post("optim-step", request.model_dump())
+        data = await self._post("optim-step", request.model_dump(), max_retries=3)
         return OptimStepResult.model_validate(data)

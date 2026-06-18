@@ -264,6 +264,7 @@ async def rollout(
     job_id: str | None = None,
     group_id: str | None = None,
     trace_id: str | None = None,
+    rollout_timeout: float | None = None,
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
@@ -297,7 +298,9 @@ async def rollout(
         await trace_enter(trace_id, job_id=job_id, group_id=group_id)
         run: Run | None = None
         _phase = "provisioning"
-        try:
+
+        async def _drive() -> None:
+            nonlocal run, _phase
             async with runtime(task) as addr, connect(addr) as client:
                 _phase = "starting task"
                 live = Run(client, task.id, task.args)
@@ -311,8 +314,30 @@ async def rollout(
                     async with file_tracking_observer(client):
                         await agent(run)
                     _phase = "grading"
+
+        try:
+            # ``rollout_timeout`` is a hard wall-clock deadline for the whole
+            # rollout. A client read-timeout is not enough: a wedged upstream
+            # that trickles bytes (or holds the stream) resets the read timer
+            # forever, so a single stuck sampling call can hang the rollout — and
+            # the batch waits on it — indefinitely. wait_for cancels the rollout
+            # (tearing the substrate down) when the deadline passes.
+            if rollout_timeout is not None:
+                await asyncio.wait_for(_drive(), rollout_timeout)
+            else:
+                await _drive()
         except TimeoutError:
-            raise
+            # The deadline (or a runtime's startup ready_timeout) fired. Isolate
+            # it like any other rollout failure so one wedged rollout never
+            # collapses the batch, keeping any partial trace it built.
+            detail = f"timed out after {rollout_timeout:.0f}s" if rollout_timeout else "timed out"
+            if run is None:
+                logger.warning("rollout failed before launch (%s): %s", _phase, detail)
+                run = Run.failed(f"[{_phase}] {detail}")
+            else:
+                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
+                run.trace.status = "error"
+                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
         except Exception as exc:
             if run is None:
                 logger.warning("rollout failed before launch (%s): %s", _phase, exc)

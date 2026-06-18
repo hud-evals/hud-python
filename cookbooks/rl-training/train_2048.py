@@ -48,6 +48,7 @@ async def main(
     target: int,
     learning_rate: float,
     max_concurrent: int,
+    rollout_timeout: float,
 ) -> None:
     model = os.environ["HUD_MODEL"]
 
@@ -68,10 +69,17 @@ async def main(
         batch_start = len(session.runs)
 
         t0 = time.perf_counter()
-        await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
+        await taskset.run(
+            agent,
+            runtime=runtime,
+            job=session,
+            max_concurrent=max_concurrent,
+            rollout_timeout=rollout_timeout,  # a wedged game can't stall the batch
+        )
         rollout_s = time.perf_counter() - t0
         batch = session.runs[batch_start:]
         tokens = _output_tokens(batch)
+        failed = sum(1 for run in batch if run.trace.status == "error")
 
         t1 = time.perf_counter()
         fb = await trainer.forward_backward(
@@ -93,7 +101,7 @@ async def main(
             f"step {step:2d} | reward {mean_reward:.3f} best_tile {best_tile:4d} "
             f"| rollout {rollout_s:5.1f}s {tokens:6d}tok {tok_per_s:4.0f}tok/s "
             f"| train {train_s:5.1f}s loss {loss:+.4f} "
-            f"| optim {result.step} datums {fb.num_datums}",
+            f"| optim {result.step} datums {fb.num_datums} failed {failed}/{len(batch)}",
             flush=True,
         )
 
@@ -107,6 +115,9 @@ if __name__ == "__main__":
     parser.add_argument("--target", type=int, default=256, help="win tile (reward scale)")
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--max-concurrent", type=int, default=8)
+    parser.add_argument(
+        "--timeout", type=float, default=300.0, help="per-game wall-clock cap (s)"
+    )
     args = parser.parse_args()
     asyncio.run(
         main(
@@ -116,5 +127,6 @@ if __name__ == "__main__":
             target=args.target,
             learning_rate=args.learning_rate,
             max_concurrent=args.max_concurrent,
+            rollout_timeout=args.timeout,
         )
     )
