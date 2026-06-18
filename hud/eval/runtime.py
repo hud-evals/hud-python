@@ -197,8 +197,8 @@ class LocalRuntime:
 class DockerRuntime:
     """The container provider: each acquisition ``docker run``s a fresh *image*.
 
-    ``runtime_config.image`` selects the container image. The image's CMD serves
-    the env's control channel on *port* inside the
+    The positional *image* is shorthand for ``runtime_config.image``. The image's
+    CMD serves the env's control channel on *port* inside the
     container (the scaffolded ``Dockerfile.hud`` serves 8765). Each
     acquisition publishes that port on an ephemeral loopback port, yields its
     :class:`Runtime`, and force-removes the container on exit. *run_args* are
@@ -211,6 +211,7 @@ class DockerRuntime:
 
     def __init__(
         self,
+        image: str | None = None,
         *,
         port: int = 8765,
         run_args: Sequence[str] = (),
@@ -218,10 +219,10 @@ class DockerRuntime:
     ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
-        config = None
+        config = RuntimeConfig(image=image) if image is not None else RuntimeConfig()
         if runtime_config is not None:
-            config = RuntimeConfig.model_validate(runtime_config)
-        self.runtime_config = config
+            config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
+        self.runtime_config = config if config.model_dump(exclude_none=True) else None
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:

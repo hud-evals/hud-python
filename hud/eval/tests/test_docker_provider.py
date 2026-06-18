@@ -327,10 +327,7 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
 ) -> None:
     _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
 
-    provider = DockerRuntime(
-        run_args=("-e", "X=1"),
-        runtime_config=RuntimeConfig(image="img:tag"),
-    )
+    provider = DockerRuntime("img:tag", run_args=("-e", "X=1"))
     async with provider(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:43210"
         calls = docker_log.read_text().splitlines()
@@ -372,8 +369,8 @@ async def test_task_runtime_config_overrides_default_image(
     task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(image="img:task"))
 
     async with DockerRuntime(
+        "img:default",
         runtime_config=RuntimeConfig(
-            image="img:default",
             resources=RuntimeResources(cpu=2, memory_mb=4096),
         ),
     )(task) as runtime:
@@ -444,20 +441,26 @@ async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
 
 
 def test_docker_runtime_accepts_runtime_config_defaults() -> None:
-    provider = DockerRuntime(runtime_config=RuntimeConfig(image="img:tag"))
+    provider = DockerRuntime("img:tag")
     assert provider.runtime_config == RuntimeConfig(image="img:tag")
 
-    provider = DockerRuntime(
-        runtime_config=RuntimeConfig(image="img:tag", resources=RuntimeResources(cpu=2)),
+    provider_with_resources = DockerRuntime(
+        "img:tag",
+        runtime_config=RuntimeConfig(resources=RuntimeResources(cpu=2)),
     )
-    assert provider.runtime_config == RuntimeConfig(
+    assert provider_with_resources.runtime_config == RuntimeConfig(
         image="img:tag",
         resources=RuntimeResources(cpu=2),
     )
 
+    provider = DockerRuntime("img:tag", runtime_config=RuntimeConfig(image="other:tag"))
+    assert provider.runtime_config == RuntimeConfig(image="other:tag")
+
     task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(image="other:tag"))
-    assert provider.runtime_config is not None
-    assert provider.runtime_config.with_overrides(task.runtime_config) == RuntimeConfig(
+    assert provider_with_resources.runtime_config is not None
+    assert provider_with_resources.runtime_config.with_overrides(
+        task.runtime_config
+    ) == RuntimeConfig(
         image="other:tag",
         resources=RuntimeResources(cpu=2),
     )
@@ -650,7 +653,7 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
     # ``docker port`` on an exited container prints nothing.
     _install_fake_docker(tmp_path, port_behavior=":", monkeypatch=monkeypatch)
 
-    provider = DockerRuntime(runtime_config=RuntimeConfig(image="img:tag"))
+    provider = DockerRuntime("img:tag")
     with pytest.raises(RuntimeError, match="exited before serving") as err:
         async with provider(_row()):
             pass
