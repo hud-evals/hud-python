@@ -300,18 +300,23 @@ async def rollout(
         run: Run | None = None
         _phase = "provisioning"
 
-        async def _bounded(awaitable: Any) -> Any:
-            """Bound one phase by ``rollout_timeout`` (a no-op when unset).
+        loop = asyncio.get_running_loop()
+        deadline = None if rollout_timeout is None else loop.time() + rollout_timeout
 
-            A client read-timeout is not enough on its own: a wedged upstream that
-            trickles bytes resets the read timer forever, so a single stuck
-            sampling call could hang the rollout — and the batch waits on it —
-            indefinitely. A timeout cancels just this phase, surfacing as
-            ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
+        async def _bounded(awaitable: Any) -> Any:
+            """Bound work by the rollout's single wall-clock ``deadline``.
+
+            One shared deadline across provision, connect, and the agent loop —
+            not a fresh budget per phase — so the bounded work cannot exceed
+            ``rollout_timeout`` in total. A client read-timeout is not enough on
+            its own: a wedged upstream that trickles bytes resets the read timer
+            forever, so a single stuck sampling call could otherwise hang the
+            rollout — and the batch waits on it — indefinitely. A breach surfaces
+            as ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
             """
-            if rollout_timeout is None:
+            if deadline is None:
                 return await awaitable
-            return await asyncio.wait_for(awaitable, rollout_timeout)
+            return await asyncio.wait_for(awaitable, max(deadline - loop.time(), 0.0))
 
         async def _drive() -> None:
             nonlocal run, _phase
@@ -357,9 +362,9 @@ async def rollout(
         try:
             await _drive()
         except TimeoutError:
-            # A setup-phase deadline (provision/connect/grade) fired — the
-            # agent-loop timeout is handled inside _drive. Isolate it so one
-            # wedged rollout never collapses the batch, keeping any partial trace.
+            # A setup-phase deadline (provision/connect) fired — the agent-loop
+            # timeout is handled inside _drive. Isolate it so one wedged rollout
+            # never collapses the batch, keeping any partial trace.
             detail = f"timed out after {rollout_timeout:.0f}s" if rollout_timeout else "timed out"
             if run is None:
                 logger.warning("rollout failed before launch (%s): %s", _phase, detail)
