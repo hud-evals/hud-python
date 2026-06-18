@@ -75,7 +75,7 @@ hud eval env.py claude --full       # every task, auto-respond, 100 steps
 - Docker — unless your env explicitly uses `DockerRuntime`
 - An SSH connection — the gateway timeout only applies when `env.workspace()` is declared
 
-For a platform taskset, export first: `hud sync tasks <name> --export tasks.json`, then `hud eval tasks.json claude`.
+For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claude`. The tasks are fetched from the platform and the rollouts run remotely by default, since the env source is not on disk.
 
 **Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
 
@@ -92,7 +92,7 @@ For a platform taskset, export first: `hud sync tasks <name> --export tasks.json
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
-| `--runtime` | Placement: `local` (default), `hud` (HUD runtime tunnel), or `tcp://host:port`. |
+| `--runtime` | Placement: `local`, `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
 | `--remote` | Run the whole rollout remotely on the HUD platform. |
 | `--yes`, `-y` | Skip confirmation prompt. |
 

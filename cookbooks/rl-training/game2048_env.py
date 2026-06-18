@@ -125,7 +125,8 @@ class Game2048:
         if any(0 in row for row in self.board):
             return False
         return not any(
-            self._transform(d) != [r for r, _ in (self._merge_left(row) for row in self._transform(d))]
+            self._transform(d)
+            != [r for r, _ in (self._merge_left(row) for row in self._transform(d))]
             for d in _MOVES
         )
 

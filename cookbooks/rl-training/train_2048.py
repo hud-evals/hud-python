@@ -115,9 +115,7 @@ if __name__ == "__main__":
     parser.add_argument("--target", type=int, default=256, help="win tile (reward scale)")
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--max-concurrent", type=int, default=8)
-    parser.add_argument(
-        "--timeout", type=float, default=300.0, help="per-game wall-clock cap (s)"
-    )
+    parser.add_argument("--timeout", type=float, default=300.0, help="per-game wall-clock cap (s)")
     args = parser.parse_args()
     asyncio.run(
         main(

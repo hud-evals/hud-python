@@ -39,13 +39,13 @@ async def main(*, target: int, max_steps: int) -> None:
         lambda s: s.sample if isinstance(s, AgentStep) and s.sample else None
     )
     trainable = [s for s in samples if s.output_token_ids]
-    moves = sum(
-        1 for step in run.trace.steps if isinstance(step, AgentStep) and step.tool_calls
-    )
+    moves = sum(1 for step in run.trace.steps if isinstance(step, AgentStep) and step.tool_calls)
     print(f"reward={run.reward:.3f} status={run.trace.status}", flush=True)
-    print(f"agent turns={len(samples)} (with tool calls={moves}) "
-          f"trainable turns={len(trainable)} "
-          f"tokens={sum(len(s.output_token_ids) for s in trainable)}")
+    print(
+        f"agent turns={len(samples)} (with tool calls={moves}) "
+        f"trainable turns={len(trainable)} "
+        f"tokens={sum(len(s.output_token_ids) for s in trainable)}"
+    )
     print(f"final: {run.evaluation}")
 
 
