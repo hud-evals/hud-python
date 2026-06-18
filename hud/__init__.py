@@ -29,6 +29,7 @@ from .eval import (
     Taskset,
 )
 from .telemetry.instrument import instrument
+from .train import TrainingClient
 from .types import Trace
 
 _install_v5_compat()
@@ -52,6 +53,7 @@ __all__ = [
     "Task",
     "Taskset",
     "Trace",
+    "TrainingClient",
     "connect",
     "instrument",
 ]

@@ -128,7 +128,10 @@ as `Taskset`s — no conversion step. See [Harbor interop](/v6/advanced/harbor-c
 |---------|-------------|
 | `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
 | `hud login` | Authenticate with HUD. |
-| `hud models` | List gateway models. |
+| `hud models list` | List gateway models. |
+| `hud models fork <model> --name <slug>` | Fork a trainable model from an existing one. |
+| `hud models checkpoints <model>` | List a model's checkpoint tree. |
+| `hud models head <model> [--set <checkpoint-id>]` | Show — or set (rollback/select) — a model's active checkpoint. |
 | `hud cancel` | Cancel a running job. |
 | `hud version` | Show the CLI version. |
 

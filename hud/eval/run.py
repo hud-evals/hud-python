@@ -149,7 +149,7 @@ class Run:
 
     @property
     def trace_id(self) -> str | None:
-        """Keys the agent's trajectory (satisfies the training ``Rewarded`` protocol)."""
+        """Keys the agent's trajectory; pass the ``Run`` (or this id) to training."""
         return self.trace.trace_id
 
     @property
