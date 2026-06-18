@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import math
 import os
 import time
 
@@ -92,9 +91,9 @@ async def main(
 
         rewards = [run.reward for run in batch]
         mean_reward = sum(rewards) / len(rewards)
-        # The grade boundary returns only the score, so invert the env's reward
-        # (normalized log2 tile progress) to recover the best tile reached.
-        best_tile = round(2 ** (max(rewards) * (math.log2(target) - 1) + 1))
+        # Read the best tile straight from the env's grade info: the reward is
+        # clamped to [0, 1], so inverting it would cap best_tile at --target.
+        best_tile = max(int(run.grade.info.get("max_tile", 0)) for run in batch)
         tok_per_s = tokens / rollout_s if rollout_s > 0 else 0.0
         loss = fb.metrics.get("loss:sum", float("nan"))
         print(
