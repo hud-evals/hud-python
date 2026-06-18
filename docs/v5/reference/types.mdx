@@ -27,6 +27,28 @@ task = env("scenario_name", arg1="value")  # Returns Task
 | `group_id` | `str \| None` | Group ID for parallel runs |
 | `index` | `int` | Index in parallel execution |
 | `variants` | `dict[str, Any] \| None` | Variant assignment |
+| `runtime_config` | `RuntimeConfig \| None` | Optional per-task image, resource, and limit requests |
+
+### RuntimeConfig
+
+`RuntimeConfig` lets a task request a runtime image, compute resources, and
+lifecycle limits. Use it when tasks in the same taskset need different launch
+requirements.
+
+```python
+from hud import RuntimeConfig, RuntimeResources, Task
+
+task = Task(
+    env="browser",
+    id="checkout",
+    runtime_config=RuntimeConfig(
+        image="hud-browser:firefox",
+        resources=RuntimeResources(cpu=2, memory_mb=4096),
+    ),
+)
+```
+
+Runtimes that support these fields apply them when launching the task.
 
 ## EvalContext
 

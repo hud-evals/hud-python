@@ -143,6 +143,16 @@ robot = [
     "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
 ]
 
+# Modal placement (ModalRuntime): per-rollout cloud sandboxes from a built image
+modal = [
+    "modal>=1.0",
+]
+
+# Daytona placement (DaytonaRuntime): per-rollout cloud sandboxes from a snapshot
+daytona = [
+    "daytona>=0.100",
+]
+
 
 [tool.ruff]
 target-version = "py311"

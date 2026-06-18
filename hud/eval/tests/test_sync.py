@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hud.eval import Task, Taskset
+from hud.eval.runtime import RuntimeConfig
 from hud.eval.sync import (
     diff,
     fetch_taskset_tasks,
@@ -135,3 +136,15 @@ def test_task_upload_payload_sends_env_and_bare_task_id() -> None:
     assert payload["env"] == {"name": "e"}
     assert payload["task_id"] == "solve"
     assert "scenario" not in payload
+
+
+def test_task_upload_payload_includes_runtime_config() -> None:
+    task = Task(
+        env="e",
+        id="solve",
+        runtime_config=RuntimeConfig(image="img:tag"),
+    )
+
+    payload = task_upload_payload(task)
+
+    assert payload["runtime_config"] == {"image": "img:tag"}
