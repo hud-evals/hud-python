@@ -28,9 +28,19 @@ from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.graders import EvaluationResult
 
-_PORT = 8047
 _SIZE = 4
 _MOVES = {"up", "down", "left", "right"}
+
+
+def _free_port() -> int:
+    """Pick a free loopback port. Each env process (one per concurrent game)
+    needs its own FastMCP port, so a fixed port would collide under grouping."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+_PORT = _free_port()
 
 
 class Game2048:

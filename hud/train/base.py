@@ -56,7 +56,13 @@ class BaseTrainingClient:
 
     async def _post(self, suffix: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = await self._train_url(suffix)
-        return await make_request("POST", url, json=payload, api_key=self._api_key)
+        # Training POSTs (forward_backward, optim_step, backward) are stateful,
+        # non-idempotent mutations: a silent retry double-applies the optimizer /
+        # gradient and collides on the checkpoint name. Fail loud instead of
+        # retrying; the caller decides whether it is safe to repeat.
+        return await make_request(
+            "POST", url, json=payload, api_key=self._api_key, max_retries=0
+        )
 
     async def _get(self, suffix: str) -> dict[str, Any]:
         url = await self._train_url(suffix)
