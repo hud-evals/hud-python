@@ -62,7 +62,7 @@ def test_computer_tool_resolves_to_capability_marker() -> None:
     import hud.tools
 
     with pytest.warns(DeprecationWarning):
-        computer_cls = hud.tools.HudComputerTool
+        computer_cls = hud.tools.HudComputerTool  # pyright: ignore[reportAttributeAccessIssue]
 
     instance = computer_cls(width=800, height=600)
     assert getattr(instance, "_legacy_capability_kind", None) == "computer"
@@ -73,8 +73,8 @@ def test_shell_tool_resolves_to_capability_marker() -> None:
     # ``ssh`` capability at serve time via the shell marker.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools import BashTool
-        from hud.tools.coding import EditTool
+        from hud.tools import BashTool  # pyright: ignore[reportAttributeAccessIssue]
+        from hud.tools.coding import EditTool  # pyright: ignore[reportAttributeAccessIssue]
 
     for tool_cls in (BashTool, EditTool):
         instance = tool_cls(base_path="/tmp")
@@ -94,7 +94,7 @@ def test_removed_name_from_real_module_falls_back_to_noop() -> None:
 def test_removed_submodule_resolves_names() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools.filesystem import ReadTool
+        from hud.tools.filesystem import ReadTool  # pyright: ignore[reportAttributeAccessIssue]
 
         assert ReadTool() is not None
 
@@ -103,8 +103,8 @@ def test_jupyter_and_playwright_resolve_to_noops() -> None:
     # Dropped in v6: registering them in a v5 env silently does nothing.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from hud.tools import JupyterTool, PlaywrightTool
-        from hud.tools.playwright import PlaywrightTool as deep_playwright
+        from hud.tools import JupyterTool, PlaywrightTool  # pyright: ignore[reportAttributeAccessIssue]
+        from hud.tools.playwright import PlaywrightTool as deep_playwright  # pyright: ignore[reportAttributeAccessIssue]
 
     for tool_cls in (JupyterTool, PlaywrightTool, deep_playwright):
         instance = tool_cls(cdp_url="http://localhost:9222")
@@ -116,7 +116,7 @@ def test_unknown_symbol_is_noop_not_error() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        noop = hud.tools.SomethingThatNeverExisted
+        noop = hud.tools.SomethingThatNeverExisted  # pyright: ignore[reportAttributeAccessIssue]
         assert noop() is not None
 
 
@@ -127,7 +127,7 @@ def test_hud_native_aliases_preserve_module_identity() -> None:
     from hud.tools.base import BaseTool
 
     assert native_base.BaseTool is BaseTool
-    assert hud.native.combine is combine
+    assert hud.native.combine is combine  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_hud_services_alias_resolves_chat() -> None:

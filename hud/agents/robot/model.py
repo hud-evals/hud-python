@@ -12,6 +12,7 @@ stateless across calls, so one model can be shared and batched across concurrent
 from __future__ import annotations
 
 import asyncio
+import importlib
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -46,7 +47,7 @@ class Model:
 
 
 class LeRobotModel(Model):
-    """    LeRobot policy with pre/post-processors: ``preprocess`` → ``predict_action_chunk`` →
+    """LeRobot policy with pre/post-processors: ``preprocess`` → ``predict_action_chunk`` →
     ``postprocess``. ``preprocess`` adds the batch dim for an unbatched sample and is a no-op
     for an already-stacked one, so :meth:`infer` handles both single and batched inputs.
 
@@ -64,18 +65,22 @@ class LeRobotModel(Model):
 
     def infer(self, batch: Any) -> ActionArray:
         """run batch dict (N dim) → [N, T, A] chunk"""
-        import torch  # pyright: ignore[reportMissingImports]
+        torch: Any = importlib.import_module("torch")
         if self._first_inference:
-            print("[agent] first inference — flow-matching/CUDA warmup; this may take a while", flush=True)
+            print(
+                "[agent] first inference — flow-matching/CUDA warmup; this may take a while",
+                flush=True,
+            )
         with torch.no_grad():
             chunk = self.postprocess(self.policy.predict_action_chunk(self.preprocess(batch)))
         if self._first_inference:
             print("[agent] first inference done — inference is now fast", flush=True)
             self._first_inference = False
         arr = chunk.float().cpu().numpy()
-        assert arr.ndim == 3, f"expected [N, T, A] chunk, got {arr.shape}"  # LeRobot keeps the N dim
+        assert arr.ndim == 3, (
+            f"expected [N, T, A] chunk, got {arr.shape}"
+        )  # LeRobot keeps the N dim
         return arr
-   
 
 
 class RemoteModel(Model):
@@ -88,7 +93,9 @@ class RemoteModel(Model):
     :class:`~hud.agents.robot.agent.RobotAgent` per concurrent rollout instead.
     """
 
-    def __init__(self, host: str = "localhost", port: int = 8000, *, response_key: str = "actions") -> None:
+    def __init__(
+        self, host: str = "localhost", port: int = 8000, *, response_key: str = "actions"
+    ) -> None:
         self.host = host
         self.port = port
         #: Key under which the server returns the chunk — "actions" (stock OpenPI) or "action" (Cosmos).
@@ -98,10 +105,13 @@ class RemoteModel(Model):
     def connect(self) -> None:
         """Open the websocket (idempotent); blocks until the server is up."""
         if self._client is None:
-            from openpi_client import websocket_client_policy
+            mod: Any = importlib.import_module("openpi_client.websocket_client_policy")
 
-            print(f"[agent] connecting to openpi server ws://{self.host}:{self.port} — on hold...", flush=True)
-            self._client = websocket_client_policy.WebsocketClientPolicy(self.host, self.port)
+            print(
+                f"[agent] connecting to openpi server ws://{self.host}:{self.port} — on hold...",
+                flush=True,
+            )
+            self._client = mod.WebsocketClientPolicy(self.host, self.port)
 
     def infer(self, batch: Any) -> ActionArray:
         """Ship one request dict → the server's ``[T, A]`` chunk, returned as ``[1, T, A]``."""

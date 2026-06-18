@@ -267,9 +267,9 @@ class Step(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def emit(self, *, trace_id: str | None = None) -> None:
-        """Export this step as a span with its schema. No-op if trace context is missing. 
+        """Export this step as a span with its schema. No-op if trace context is missing.
         Pass trace_id when emitting outside the rollout thread (e.g. from a background thread)."""
-   
+
         task_run_id = trace_id or get_current_trace_id()
         if not task_run_id:
             return

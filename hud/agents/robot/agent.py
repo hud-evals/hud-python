@@ -96,7 +96,9 @@ class RobotAgent(Agent):
         self._run = run
         self._tick = 0
         # Start camera video at env's control rate; capture trace id for encoder span attribution.
-        self._video = video.VideoStreamer(fps=client.get_control_rate(), trace_id=get_current_trace_id())
+        self._video = video.VideoStreamer(
+            fps=client.get_control_rate(), trace_id=get_current_trace_id()
+        )
         if self.adapter is not None:
             self.adapter.reset()
 
@@ -140,6 +142,7 @@ class RobotAgent(Agent):
             for step in range(step_limit):
                 obs = await client.get_observation()
                 run.record(ObservationStep.from_obs(obs, tick=step, obs_space=self._env_obs_space))
+                assert self._video is not None  # set in on_episode_start above
                 self._video.record(obs)
 
                 if self.should_stop(obs, step=step, max_steps=step_limit):
@@ -159,8 +162,8 @@ class RobotAgent(Agent):
             run.trace.content = "done"
         finally:
             if self._video is not None:
-                self._video.finalize() # flush all camera tails so crashed run still leaves video
-            await client.close() 
+                self._video.finalize()  # flush all camera tails so crashed run still leaves video
+            await client.close()
 
 
 __all__ = ["ROBOT_PROTOCOL", "RobotAgent"]

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import importlib
 import logging
 import queue
 import threading
@@ -20,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +41,11 @@ class SegmentEncoder:
     def __init__(
         self,
         camera: str,
-        on_segment: SegmentCallback, # called on each finished segment
+        on_segment: SegmentCallback,  # called on each finished segment
         *,
         fps: int,
-        segment_seconds: float = 2.0, # how many secs of video per segment
-        crf: int = 23, # quality of the video: 0 is best quality, 51 is worst quality (23 is middle quality)
+        segment_seconds: float = 2.0,  # how many secs of video per segment
+        crf: int = 23,  # quality of the video: 0 is best quality, 51 is worst quality (23 is middle quality)
         max_queued_frames: int = 16,
     ) -> None:
         self.camera = camera
@@ -51,27 +53,29 @@ class SegmentEncoder:
         self._on_segment = on_segment
         self._gop = max(1, round(self.fps * segment_seconds))  # keyframe interval in # of "frames"
         self._crf = int(crf)
-        self._queue: queue.Queue[np.ndarray | None] = queue.Queue(max_queued_frames)
+        self._queue: queue.Queue[NDArray[Any] | None] = queue.Queue(max_queued_frames)
         # Box-assembly state, touched only on the encoder thread.
         self._buf = bytearray()
-        self._pos = self._scan = 0 # position in the buffer and the scan position
-        self._index = 0 # counter for the number of segments emitted
-        self._init_sent = False # flag to indicate if the init segment has been sent
-        self._pending = b"" # buffer for the pending data
+        self._pos = self._scan = 0  # position in the buffer and the scan position
+        self._index = 0  # counter for the number of segments emitted
+        self._init_sent = False  # flag to indicate if the init segment has been sent
+        self._pending = b""  # buffer for the pending data
         self._thread = threading.Thread(
             target=self._run, name=f"hud-robot-video-{camera}", daemon=True
         )
         self._thread.start()
 
-    def submit(self, frame: np.ndarray) -> None:
+    def submit(self, frame: NDArray[Any]) -> None:
         """Hand one frame to the encoder; non-blocking, dropping under backpressure."""
         with contextlib.suppress(queue.Full):
-            self._queue.put_nowait(np.array(frame, copy=True)) # NOTE drops under backpressure
+            self._queue.put_nowait(np.array(frame, copy=True))  # NOTE drops under backpressure
 
     def finalize(self, timeout: float = 15.0) -> None:
         """Called on episode end to flush the tail fragment and stop the encoder thread (best-effort)."""
         try:
-            self._queue.put_nowait(None) # tries to drop item in mailbox; if queue is full, raises queue.Full
+            self._queue.put_nowait(
+                None
+            )  # tries to drop item in mailbox; if queue is full, raises queue.Full
         except queue.Full:  # make room for the stop sentinel rather than hang
             with contextlib.suppress(queue.Empty):
                 self._queue.get_nowait()
@@ -107,7 +111,7 @@ class SegmentEncoder:
             if self._init_sent and btype == b"mdat":
                 self._dispatch(self._pending)
                 self._pending = b""
-        return len(b) # return the number of bytes written
+        return len(b)  # return the number of bytes written
 
     def seek(self, offset: int, whence: int = 0) -> int:
         self._pos = (0, self._pos, len(self._buf))[whence] + offset
@@ -132,15 +136,15 @@ class SegmentEncoder:
         from fractions import Fraction
 
         container = stream = None
-        n = 0 # counts frames actually encoded
+        n = 0  # counts frames actually encoded
         try:
-            import av  # pyright: ignore[reportMissingImports]
+            av: Any = importlib.import_module("av")
 
             while (arr := self._queue.get()) is not None:
                 frame = _to_rgb24(arr)
                 if frame is None:
                     continue
-                if container is None: # first frame -> open the container
+                if container is None:  # first frame -> open the container
                     h, w = frame.shape[:2]
                     container = av.open(
                         self,
@@ -162,6 +166,7 @@ class SegmentEncoder:
                         "crf": str(self._crf),
                         "x264-params": f"keyint={self._gop}:min-keyint={self._gop}:scenecut=0",
                     }
+                assert stream is not None
                 vframe = av.VideoFrame.from_ndarray(frame, format="rgb24")
                 vframe.pts, vframe.time_base = n, Fraction(1, self.fps)
                 for packet in stream.encode(vframe):
@@ -170,7 +175,7 @@ class SegmentEncoder:
         except Exception:  # isolate encoder faults from the rollout
             logger.warning("video encode failed (camera %s)", self.camera, exc_info=True)
         finally:
-            if container is not None:
+            if container is not None and stream is not None:
                 with contextlib.suppress(Exception):
                     for packet in stream.encode(None):  # flush, writing the final fragment
                         container.mux(packet)
@@ -185,7 +190,7 @@ class VideoStreamer:
 
     def __init__(self, *, fps: int, trace_id: str | None) -> None:
         try:
-            import av  # noqa: F401  # pyright: ignore[reportMissingImports]
+            importlib.import_module("av")
         except Exception as exc:
             raise RuntimeError(
                 "robot video streaming requires PyAV — `pip install 'hud-python[robot]'`"
@@ -229,7 +234,7 @@ class VideoStreamer:
         return SegmentEncoder(camera, on_segment, fps=fps)
 
 
-def _to_rgb24(arr: np.ndarray) -> np.ndarray | None:
+def _to_rgb24(arr: NDArray[Any]) -> NDArray[np.uint8] | None:
     """Coerce a raw camera array to contiguous HxWx3 uint8 with even dims
     (yuv420p needs even width/height). Returns ``None`` if it isn't an image."""
     if arr.ndim == 2:

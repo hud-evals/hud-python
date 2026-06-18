@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib
 from typing import TYPE_CHECKING, Any
 
 from hud.agents.base import Agent
@@ -73,11 +74,11 @@ class BatchedModel(Model):
                     break
             samples = [b for b, _ in items]
             try:
-                import torch  # pyright: ignore[reportMissingImports]
+                torch: Any = importlib.import_module("torch")
 
                 # Collate N raw observations into one [N, ...] batch: stack tensor
                 # fields on a new leading dim, gather scalars/strings into a list.
-                stacked = {
+                stacked: dict[str, Any] = {
                     k: torch.stack([s[k] for s in samples])
                     if torch.is_tensor(samples[0][k])
                     else [s[k] for s in samples]
