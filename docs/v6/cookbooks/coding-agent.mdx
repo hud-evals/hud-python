@@ -60,16 +60,16 @@ Point a coding agent at the environment. `claude` opens the `ssh` capability, ed
 hud eval env.py claude
 ```
 
-For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSDKAgent` in code:
+For the `claude` CLI driving the shell over SSH, use the `ClaudeCLIAgent` in code:
 
 ```python run.py
 import asyncio
-from hud.agents import ClaudeSDKAgent
-from hud.agents.types import ClaudeSDKConfig
+from hud.agents import ClaudeCLIAgent
+from hud.agents.types import ClaudeCLIConfig
 from env import fix_add
 
 async def main():
-    agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-4-5"))
     job = await fix_add().run(agent)
     print("reward:", job.reward)
 

@@ -4,7 +4,7 @@ description: "Evaluate a task with Claude, OpenAI, Gemini, or any OpenAI-compati
 icon: "robot"
 ---
 
-An **evaluation** produces one **trace**: an agent works the task against the environment and gets graded. Because the environment only exposes **capabilities** (never a fixed agent), any model or harness plugs in — you choose the agent at run time, not at authoring time.
+An **evaluation** produces one **trace**: an agent works the task against the environment and gets graded. Because the environment only exposes **capabilities** (never a fixed agent), any model or agent runtime plugs in — you choose the agent at run time, not at authoring time.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ An **evaluation** produces one **trace**: an agent works the task against the en
 
 ## The fastest path: `hud eval`
 
-Pass a task source and an agent name. The agent names are `claude`, `openai`, `gemini`, and `openai_compatible`:
+Pass a task source and an agent name. The provider agent names are `claude`, `openai`, `gemini`, and `openai_compatible`; CLI-backed agents include `cli`, `codex`, `opencode`, `aider`, `grok_build`, `mini_swe_agent`, and `terminus_2`:
 
 ```bash
 hud eval tasks.py claude --group 3
@@ -68,7 +68,18 @@ from hud.agents.types import ClaudeConfig
 agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5"))
 ```
 
-The provider agents are `ClaudeAgent`, `OpenAIAgent`, `GeminiAgent`, and `OpenAIChatAgent`, each with a matching config in `hud.agents.types` (`ClaudeConfig`, `OpenAIConfig`, `GeminiConfig`, `OpenAIChatConfig`). `ClaudeSDKAgent` runs the `claude` CLI (Claude Code) over an `ssh` capability.
+The provider agents are `ClaudeAgent`, `OpenAIAgent`, `GeminiAgent`, and `OpenAIChatAgent`, each with a matching config in `hud.agents.types` (`ClaudeConfig`, `OpenAIConfig`, `GeminiConfig`, `OpenAIChatConfig`). `ClaudeCLIAgent` runs the `claude` CLI over an `ssh` capability and subclasses `CLIAgent`.
+
+For coding CLIs, use `CodexAgent`, `OpenCodeAgent`, `AiderAgent`, `GrokBuildAgent`, `MiniSweAgent`, `Terminus2Agent`, or the generic `CLIAgent`:
+
+```python
+from hud.agents import OpenCodeAgent
+from hud.agents.types import OpenCodeConfig
+
+agent = OpenCodeAgent(OpenCodeConfig(model="openai/gpt-5.4"))
+```
+
+These adapters run inside the environment workspace over `ssh`, so install the underlying CLI binary in the workspace image when the agent is CLI-backed. `Terminus2Agent` installs Harbor into the run with `uv --with harbor==0.6.6`.
 
 ## Your own vLLM / OpenAI-compatible endpoint
 
@@ -87,11 +98,11 @@ agent = OpenAIChatAgent(OpenAIChatConfig(
 
 From the CLI, the equivalent is `hud eval tasks.py openai_compatible --model my-model` with the `base_url` set in your eval config.
 
-## Bring your own harness
+## Bring your own agent
 
-A harness is just *attach to a capability + define a tool spec*, so wrapping another agent framework is a thin adapter — no protocol work. Subclass `Agent` and implement `__call__`:
+An agent adapter is just *attach to a capability + define a tool spec*, so wrapping another agent framework is thin — no protocol work. Subclass `Agent` and implement `__call__`:
 
-```python harness.py
+```python agent.py
 from hud.agents.base import Agent
 from hud import Run
 
@@ -116,6 +127,6 @@ class EchoAgent(Agent):
   Every agent class, config, and the `Run` contract.
 </Card>
 <Card title="Capabilities" icon="plug" href="/v6/reference/capabilities">
-  What a harness can attach to.
+  What an agent can attach to.
 </Card>
 </CardGroup>

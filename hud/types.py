@@ -45,14 +45,57 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from hud.agents.claude import ClaudeAgent
+    from hud.agents.cli import (
+        AiderAgent,
+        CLIAgent,
+        CodexAgent,
+        GrokBuildAgent,
+        MiniSweAgent,
+        OpenCodeAgent,
+        Terminus2Agent,
+    )
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
-    from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+    from hud.agents.types import (
+        AiderConfig,
+        ClaudeConfig,
+        CLIConfig,
+        CodexConfig,
+        GeminiConfig,
+        GrokBuildConfig,
+        MiniSweAgentConfig,
+        OpenAIChatConfig,
+        OpenAIConfig,
+        OpenCodeConfig,
+        Terminus2Config,
+    )
 
-    AgentClass: TypeAlias = type[ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent]
+    AgentClass: TypeAlias = type[
+        AiderAgent
+        | ClaudeAgent
+        | CLIAgent
+        | CodexAgent
+        | GeminiAgent
+        | GrokBuildAgent
+        | MiniSweAgent
+        | OpenAIAgent
+        | OpenAIChatAgent
+        | OpenCodeAgent
+        | Terminus2Agent
+    ]
     AgentConfigClass: TypeAlias = type[
-        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
+        AiderConfig
+        | ClaudeConfig
+        | CLIConfig
+        | CodexConfig
+        | GeminiConfig
+        | GrokBuildConfig
+        | MiniSweAgentConfig
+        | OpenAIChatConfig
+        | OpenAIConfig
+        | OpenCodeConfig
+        | Terminus2Config
     ]
 
 T = TypeVar("T")
@@ -63,6 +106,13 @@ class AgentType(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
+    CLI = "cli"
+    CODEX = "codex"
+    OPENCODE = "opencode"
+    AIDER = "aider"
+    GROK_BUILD = "grok_build"
+    MINI_SWE_AGENT = "mini_swe_agent"
+    TERMINUS_2 = "terminus_2"
 
     @property
     def cls(self) -> AgentClass:
@@ -83,11 +133,51 @@ class AgentType(str, Enum):
                 from hud.agents import OpenAIChatAgent
 
                 return OpenAIChatAgent
+            case AgentType.CLI:
+                from hud.agents import CLIAgent
+
+                return CLIAgent
+            case AgentType.CODEX:
+                from hud.agents import CodexAgent
+
+                return CodexAgent
+            case AgentType.OPENCODE:
+                from hud.agents import OpenCodeAgent
+
+                return OpenCodeAgent
+            case AgentType.AIDER:
+                from hud.agents import AiderAgent
+
+                return AiderAgent
+            case AgentType.GROK_BUILD:
+                from hud.agents import GrokBuildAgent
+
+                return GrokBuildAgent
+            case AgentType.MINI_SWE_AGENT:
+                from hud.agents import MiniSweAgent
+
+                return MiniSweAgent
+            case AgentType.TERMINUS_2:
+                from hud.agents import Terminus2Agent
+
+                return Terminus2Agent
 
     @property
     def config_cls(self) -> AgentConfigClass:
         """Get config class without importing agent (avoids SDK dependency)."""
-        from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+        from hud.agents.types import (
+            AiderConfig,
+            ClaudeConfig,
+            CLIConfig,
+            CodexConfig,
+            GeminiConfig,
+            GrokBuildConfig,
+            MiniSweAgentConfig,
+            OpenAIChatConfig,
+            OpenAIConfig,
+            OpenCodeConfig,
+            Terminus2Config,
+        )
 
         match self:
             case AgentType.CLAUDE:
@@ -98,6 +188,20 @@ class AgentType(str, Enum):
                 return GeminiConfig
             case AgentType.OPENAI_COMPATIBLE:
                 return OpenAIChatConfig
+            case AgentType.CLI:
+                return CLIConfig
+            case AgentType.CODEX:
+                return CodexConfig
+            case AgentType.OPENCODE:
+                return OpenCodeConfig
+            case AgentType.AIDER:
+                return AiderConfig
+            case AgentType.GROK_BUILD:
+                return GrokBuildConfig
+            case AgentType.MINI_SWE_AGENT:
+                return MiniSweAgentConfig
+            case AgentType.TERMINUS_2:
+                return Terminus2Config
 
     @property
     def gateway_provider(self) -> str:
@@ -110,6 +214,17 @@ class AgentType(str, Enum):
             case AgentType.GEMINI:
                 return "gemini"
             case AgentType.OPENAI_COMPATIBLE:
+                return "openai"
+            case (
+                AgentType.CLI
+                | AgentType.CODEX
+                | AgentType.OPENCODE
+                | AgentType.AIDER
+                | AgentType.GROK_BUILD
+                | AgentType.TERMINUS_2
+            ):
+                return "openai"
+            case AgentType.MINI_SWE_AGENT:
                 return "openai"
 
     @classmethod

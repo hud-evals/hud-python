@@ -13,7 +13,24 @@ from hud.utils.gateway import build_gateway_client, list_gateway_models
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from hud.agents.claude import ClaudeAgent, ClaudeSDKAgent, ClaudeSDKConfig
+    from hud.agents.base import Agent
+    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent, ClaudeCLIConfig
+    from hud.agents.cli import (
+        AiderAgent,
+        AiderConfig,
+        CLIAgent,
+        CLIConfig,
+        CodexAgent,
+        CodexConfig,
+        GrokBuildAgent,
+        GrokBuildConfig,
+        MiniSweAgent,
+        MiniSweAgentConfig,
+        OpenCodeAgent,
+        OpenCodeConfig,
+        Terminus2Agent,
+        Terminus2Config,
+    )
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
@@ -22,14 +39,22 @@ if TYPE_CHECKING:
     GatewayAgent: TypeAlias = ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
 
 
-def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
-    """Create an agent routed through the HUD gateway.
+_GATEWAY_AGENT_TYPES = {
+    AgentType.CLAUDE,
+    AgentType.OPENAI,
+    AgentType.GEMINI,
+    AgentType.OPENAI_COMPATIBLE,
+}
+
+
+def create_agent(model: str, **kwargs: Any) -> Agent:
+    """Create an agent for a gateway model id or a built-in agent type.
 
     For direct API access with provider API keys, instantiate the agent classes directly.
     """
     agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
     if agent_type is not None:
-        model_id = model
+        model_id = model if agent_type in _GATEWAY_AGENT_TYPES else None
         provider_name = agent_type.gateway_provider
     else:
         try:
@@ -86,31 +111,61 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
             )
             raise ValueError(f"Model {model!r} not found in {source}.{hint}")
 
-    kwargs.setdefault("model", model_id)
-    kwargs.setdefault("model_client", build_gateway_client(provider_name))
+    if model_id is not None:
+        kwargs.setdefault("model", model_id)
+    if agent_type in _GATEWAY_AGENT_TYPES:
+        kwargs.setdefault("model_client", build_gateway_client(provider_name))
     # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
     return agent_type.cls(cast("Any", config))
 
 
 _LAZY_EXPORTS = {
+    "AiderAgent": ("hud.agents.cli", "AiderAgent"),
+    "AiderConfig": ("hud.agents.cli", "AiderConfig"),
     "ClaudeAgent": ("hud.agents.claude", "ClaudeAgent"),
-    "ClaudeSDKAgent": ("hud.agents.claude", "ClaudeSDKAgent"),
-    "ClaudeSDKConfig": ("hud.agents.claude", "ClaudeSDKConfig"),
+    "ClaudeCLIAgent": ("hud.agents.claude", "ClaudeCLIAgent"),
+    "ClaudeCLIConfig": ("hud.agents.claude", "ClaudeCLIConfig"),
+    "CLIAgent": ("hud.agents.cli", "CLIAgent"),
+    "CLIConfig": ("hud.agents.cli", "CLIConfig"),
+    "CodexAgent": ("hud.agents.cli", "CodexAgent"),
+    "CodexConfig": ("hud.agents.cli", "CodexConfig"),
     "GeminiAgent": ("hud.agents.gemini", "GeminiAgent"),
+    "GrokBuildAgent": ("hud.agents.cli", "GrokBuildAgent"),
+    "GrokBuildConfig": ("hud.agents.cli", "GrokBuildConfig"),
     "MCPAgent": ("hud.agents.tool_agent", "ToolAgent"),
+    "MiniSweAgent": ("hud.agents.cli", "MiniSweAgent"),
+    "MiniSweAgentConfig": ("hud.agents.cli", "MiniSweAgentConfig"),
     "OpenAIAgent": ("hud.agents.openai", "OpenAIAgent"),
     "OpenAIChatAgent": ("hud.agents.openai_compatible", "OpenAIChatAgent"),
+    "OpenCodeAgent": ("hud.agents.cli", "OpenCodeAgent"),
+    "OpenCodeConfig": ("hud.agents.cli", "OpenCodeConfig"),
+    "Terminus2Agent": ("hud.agents.cli", "Terminus2Agent"),
+    "Terminus2Config": ("hud.agents.cli", "Terminus2Config"),
 }
 
 __all__ = [
+    "AiderAgent",
+    "AiderConfig",
+    "CLIAgent",
+    "CLIConfig",
     "ClaudeAgent",
-    "ClaudeSDKAgent",
-    "ClaudeSDKConfig",
+    "ClaudeCLIAgent",
+    "ClaudeCLIConfig",
+    "CodexAgent",
+    "CodexConfig",
     "GeminiAgent",
+    "GrokBuildAgent",
+    "GrokBuildConfig",
     "MCPAgent",
+    "MiniSweAgent",
+    "MiniSweAgentConfig",
     "OpenAIAgent",
     "OpenAIChatAgent",
+    "OpenCodeAgent",
+    "OpenCodeConfig",
+    "Terminus2Agent",
+    "Terminus2Config",
     "create_agent",
 ]
 

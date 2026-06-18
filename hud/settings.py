@@ -122,6 +122,12 @@ class Settings(BaseSettings):
         validation_alias="OPENROUTER_API_KEY",
     )
 
+    xai_api_key: str | None = Field(
+        default=None,
+        description="API key for xAI models and Grok Build",
+        validation_alias="XAI_API_KEY",
+    )
+
     wandb_api_key: str | None = Field(
         default=None,
         description="API key for Weights & Biases",
