@@ -457,6 +457,9 @@ class DaytonaRuntime:
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+            if config.limits is not None and config.limits.run_timeout_s is not None:
+                raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
+
             daytona_resources = None
             if config.resources is not None:
                 resource_kwargs: dict[str, Any] = {}
@@ -488,8 +491,6 @@ class DaytonaRuntime:
                         "DaytonaRuntime cannot override resources for snapshot_name; "
                         "use runtime_config.image"
                     )
-                if config.limits is not None and config.limits.run_timeout_s is not None:
-                    raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
                 if self.snapshot_name is None:
                     raise ValueError(
                         "DaytonaRuntime requires snapshot_name or runtime_config.image"

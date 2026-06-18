@@ -646,6 +646,15 @@ async def test_daytona_runtime_config_rejects_unsupported_fields(
         )(_row()):
             pass
 
+    with pytest.raises(ValueError, match="run_timeout_s"):
+        async with DaytonaRuntime(
+            runtime_config=RuntimeConfig(
+                image="img:tag",
+                limits=RuntimeLimits(run_timeout_s=60),
+            ),
+        )(_row()):
+            pass
+
 
 async def test_container_that_dies_before_serving_fails_with_its_logs(
     tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
