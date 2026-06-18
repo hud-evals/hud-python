@@ -170,10 +170,10 @@ def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         assert isinstance(port, int)
         return _FakeModalSandbox(calls, port)
 
-    modal.Image = Image
-    modal.App = SimpleNamespace(lookup=SimpleNamespace(aio=lookup))
-    modal.Probe = SimpleNamespace(with_tcp=lambda port: ("tcp", port))
-    modal.Sandbox = SimpleNamespace(create=SimpleNamespace(aio=create))
+    setattr(modal, "Image", Image)
+    setattr(modal, "App", SimpleNamespace(lookup=SimpleNamespace(aio=lookup)))
+    setattr(modal, "Probe", SimpleNamespace(with_tcp=lambda port: ("tcp", port)))
+    setattr(modal, "Sandbox", SimpleNamespace(create=SimpleNamespace(aio=create)))
     monkeypatch.setitem(sys.modules, "modal", modal)
     return calls
 
@@ -307,16 +307,16 @@ def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     def connect(*args: object, **kwargs: object) -> _FakeSSHConnect:
         return _FakeSSHConnect(calls, args, kwargs)
 
-    daytona.AsyncDaytona = AsyncDaytona
-    daytona.CreateSnapshotParams = _CreateSnapshotParams
-    daytona.CreateSandboxFromSnapshotParams = _CreateSandboxFromSnapshotParams
-    daytona.CreateSandboxFromImageParams = _CreateSandboxFromImageParams
-    daytona.DaytonaNotFoundError = RuntimeError
-    daytona.Image = SimpleNamespace(base=lambda name: _DaytonaImage(name))
-    daytona.Resources = _DaytonaResources
-    daytona.GpuType = _DaytonaGpuType
-    daytona.SessionExecuteRequest = _SessionExecuteRequest
-    asyncssh.connect = connect
+    setattr(daytona, "AsyncDaytona", AsyncDaytona)
+    setattr(daytona, "CreateSnapshotParams", _CreateSnapshotParams)
+    setattr(daytona, "CreateSandboxFromSnapshotParams", _CreateSandboxFromSnapshotParams)
+    setattr(daytona, "CreateSandboxFromImageParams", _CreateSandboxFromImageParams)
+    setattr(daytona, "DaytonaNotFoundError", RuntimeError)
+    setattr(daytona, "Image", SimpleNamespace(base=lambda name: _DaytonaImage(name)))
+    setattr(daytona, "Resources", _DaytonaResources)
+    setattr(daytona, "GpuType", _DaytonaGpuType)
+    setattr(daytona, "SessionExecuteRequest", _SessionExecuteRequest)
+    setattr(asyncssh, "connect", connect)
     monkeypatch.setitem(sys.modules, "daytona", daytona)
     monkeypatch.setitem(sys.modules, "asyncssh", asyncssh)
     return calls
@@ -357,8 +357,7 @@ async def test_runtime_config_supplies_image_and_resources(
 
     calls = docker_log.read_text().splitlines()
     assert calls[0] == (
-        "run --detach --cpus 2 --memory 4096m --gpus 1 "
-        "--publish 127.0.0.1::8765 img:firefox"
+        "run --detach --cpus 2 --memory 4096m --gpus 1 --publish 127.0.0.1::8765 img:firefox"
     )
 
 
@@ -509,7 +508,9 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
         assert runtime.params == {"provider": "daytona", "instance_id": "sandbox-1"}
         assert runtime.config == config
 
-    create_params, create_timeout = calls["create"]
+    create_call = calls["create"]
+    assert isinstance(create_call, tuple)
+    create_params, create_timeout = create_call
     assert create_params == _CreateSandboxFromImageParams(
         image=_DaytonaImage("img:tag"),
         ephemeral=True,
@@ -529,7 +530,7 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
             run_async=True,
         ),
     )
-    assert calls["ssh_expires"] == 60
+    assert calls["ssh_expires"] == 24 * 60
     assert calls["ssh_connect"] == (
         ("ssh.app.daytona.io",),
         {"username": "ssh-token", "known_hosts": None},

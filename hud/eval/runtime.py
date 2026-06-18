@@ -346,9 +346,7 @@ class ModalRuntime:
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
         elif self._image is None:
-            raise ValueError(
-                "ModalRuntime requires image=, image_name=, or runtime_config.image"
-            )
+            raise ValueError("ModalRuntime requires image=, image_name=, or runtime_config.image")
         else:
             if self._resolved is None:
                 async with self._image_lock:
@@ -438,7 +436,7 @@ class DaytonaRuntime:
         workdir: str | None = "/app",
         port: int = 8765,
         ssh_host: str = "ssh.app.daytona.io",
-        ssh_expires_minutes: int = 60,
+        ssh_expires_minutes: int = 24 * 60,
         create_timeout: float = 120.0,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
@@ -509,13 +507,8 @@ class DaytonaRuntime:
                         "DaytonaRuntime cannot override resources for snapshot_name; "
                         "use runtime_config.image"
                     )
-                if (
-                    config.limits is not None
-                    and config.limits.run_timeout_s is not None
-                ):
-                    raise ValueError(
-                        "DaytonaRuntime does not support runtime_config.run_timeout_s"
-                    )
+                if config.limits is not None and config.limits.run_timeout_s is not None:
+                    raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
                 if self.snapshot_name is None:
                     raise ValueError(
                         "DaytonaRuntime requires snapshot_name or runtime_config.image"
