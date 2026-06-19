@@ -296,6 +296,18 @@ body::after {
   fill: #eaf3ff !important;
   stroke: #7aa9e0 !important;
 }
+/* Dark mode only: the Capabilities box (light blue) and the "agent works"
+   highlight band (light gray) keep their light fills in dark mode, leaving
+   mermaid's light text unreadable on them. Darken just those two so the text
+   reads — light-mode visuals are untouched. */
+.dark #content .mermaid rect.actor[name="Caps"] {
+  fill: #15314f !important;
+  stroke: #5a8fd0 !important;
+}
+.dark #content .mermaid rect.rect,
+.dark #content .mermaid rect[fill="rgb(238,238,238)"] {
+  fill: #2b2b30 !important;
+}
 
 /* ── "Core Principles" boxes ──────────────────────────────────────────────
    Custom JSX divs sit outside Mintlify's prose scope, so the bold lead-in

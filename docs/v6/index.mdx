@@ -4,6 +4,30 @@ description: "Define any environment, once. Spin it up anywhere. Evaluate and tr
 icon: "book"
 mode: "wide"
 ---
+
+## Motivation
+
+AI agents are now doing real knowledge work -
+writing code, browsing the web, controlling robots.
+To measure an agent, you need a controlled world it can act in - one you can reset and reproduce exactly.
+
+That world is what's called the **environment**: a specific, reproducible setup
+(a codebase in a known state, a configured browser, a robot simulator)
+together with a set of **tasks** - specific challenges the agent could tackle inside it.
+
+The agent attempts those tasks. But what is an agent? An *agent* is a model with a "loop" built around it: read the world, decide, act, read again.
+To act inside the environment, the model needs **tools** - ways to interact with that environment.
+The **harness** is the code that builds that loop -
+it takes what the agent observes, formats it for the model, and routes the model's output back as actions.
+
+When the agent finishes, the environment scores the result.
+That number is the **reward**.
+
+Reward is how you **learn** -
+whether that means a human comparing models to understand what works and what doesn't,
+or a model being trained to do better next time.
+Everything in HUD is in service of that: run, measure, learn.
+
 [HUD](https://hud.ai) is a platform for building RL environments. You define an environment, write tasks for that environment, and run them for evals and training with any model, at any scale. 
 Our SDK is an [open-source](https://github.com/hud-evals/hud-python) Python framework for all of this. 
 
@@ -11,7 +35,7 @@ The full workflow flows in five steps:
 
 ```mermaid
 flowchart LR
-    A(["1#160;·#160;Declare#160;your#160;environment"]) --> B(["2 · Choose your taskset"]) --> C(["3 · Choose your substrate"]) --> D(["4 · Run your agent"]) --> E(["5 · Churn the RL loop"])
+    A(["1#160;·#160;Declare#160;your#160;environment"]) --> B(["2 · Choose your taskset"]) --> C(["3 · Choose your runtime"]) --> D(["4 · Run your agent"]) --> E(["5 · Learn"])
     classDef s1 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
     classDef s2 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
     classDef s3 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
@@ -102,7 +126,7 @@ The SDK lets you effortlessly switch between running your environment locally fo
 [Modal](https://modal.com/), or [E2B](https://e2b.dev/) for scale, or [deploy to the HUD platform](/v6/run/deploy).
 The environment definition never changes - just the [Runtime](/v6/run/deploy#pick-where-it-runs-the-runtime) you pass:
 
-<Accordion title="Part 3: Choose your substrate">
+<Accordion title="Part 3: Choose your runtime">
 
 There are **two main ways** to run your declared environments.
 
@@ -163,7 +187,7 @@ hud eval env.py claude --group 3
 
 </Accordion>
 
-<Accordion title="Part 5: Churn the RL loop">
+<Accordion title="Part 5: Learn">
 
 The rewards can then be used for your [training](/v6/run/training): run a group per task 
 and feed the spread straight into your own GRPO/PPO loop - or a stack like 
