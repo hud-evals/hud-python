@@ -8,6 +8,7 @@ platform's *environments/new* flow offers. See :mod:`hud.cli.presets`.
 
 from __future__ import annotations
 
+import shutil
 import sys
 import tarfile
 from pathlib import Path
@@ -103,9 +104,15 @@ def init_command(
     hud_console.header(f"HUD Init: {name}")
     if chosen is not None:
         hud_console.info(f"Downloading {chosen.owner}/{chosen.repo} …")
+        created = not target.exists()
         try:
             materialize_preset(chosen, target)
         except (httpx.HTTPError, tarfile.TarError, ValueError, OSError) as exc:
+            # Don't leave a half-written tree behind — it would trip the
+            # non-empty-directory guard on the next run. Only remove a directory
+            # this run created (never a dir the user already had).
+            if created and target.exists():
+                shutil.rmtree(target, ignore_errors=True)
             hud_console.error(f"Failed to fetch preset {chosen.id!r}: {exc}")
             raise typer.Exit(1) from exc
         hud_console.status_item(f"{chosen.owner}/{chosen.repo}", "✓")

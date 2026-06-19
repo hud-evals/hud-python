@@ -10,15 +10,19 @@ Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate on
 
 ### `hud init`
 
-Scaffold a new environment package: `env.py` (tasks + capabilities), `tasks.py`, `Dockerfile.hud`, and `pyproject.toml`. Purely local — no network, no API key.
+Scaffold a new environment package in a fresh `<name>` directory (created under `--dir`, default the current directory). With no preset it writes a minimal local scaffold — `env.py` (tasks + capabilities), `tasks.py`, `Dockerfile.hud`, and `pyproject.toml` — no network, no API key. With `--preset` (or the interactive picker shown in a TTY) it instead downloads a starter environment from GitHub — the same set the platform's *environments/new* flow offers.
 
 ```bash
-hud init my-env                 # create ./my-env
-hud init my-env --dir envs      # create ./envs/my-env
+hud init my-env                   # minimal local scaffold (interactive picker in a TTY)
+hud init my-env --preset browser  # download the "browser" starter from GitHub
+hud init my-env --dir envs        # create ./envs/my-env
 ```
+
+`hud init` always creates the new `<name>` directory and refuses to write into an existing non-empty one unless `--force` is passed.
 
 | Option | Description |
 |--------|-------------|
+| `--preset`, `-p` | Starter to download: `blank`, `browser`, `deepresearch`, `cua`, `autonomous-businesses`, `verilog`. Omit for the interactive picker (TTY) or the minimal local scaffold. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 
