@@ -11,8 +11,8 @@ It is the *client-here* path: the agent loop runs in this process against a
 :class:`~hud.eval.runtime.Provider`'s channel. The same driver runs on the
 daemon (the leased box's agent loop is just ``rollout`` over a
 ``DockerRuntime``), in ``Chat`` per turn, and in ``AgentTool`` per invocation.
-Delegated (HUD-hosted) execution is a different act — see
-:class:`hud.eval.runtime.HUDRuntime` — and the scheduler (:meth:`Taskset.run`)
+Delegated hosted execution is a different act — see
+:class:`hud.eval.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
 chooses between them; the atom itself never branches on placement.
 
 :class:`Run` is also the receipt a delegated execution folds its platform
@@ -271,8 +271,8 @@ async def rollout(
     connect, start the task, let ``agent`` fill ``run.trace``, grade on exit
     (``run.reward``), tear down. The substrate may be anywhere — a local
     subprocess, a container, a cloud sandbox — the channel bridges it; the
-    agent loop always runs in *this* process. Delegated (HUD-hosted) execution
-    does not come through here; see :class:`hud.eval.runtime.HUDRuntime`.
+    agent loop always runs in *this* process. Delegated hosted execution
+    does not come through here; see :class:`hud.eval.runtime.HostedRuntime`.
 
     ``job_id``/``group_id`` are batch identities threaded by the scheduler;
     there are no standalone traces, so when no ``job_id`` is given the atom

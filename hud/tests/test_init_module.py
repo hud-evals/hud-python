@@ -27,6 +27,7 @@ class TestInitModule:
             "Grade",
             "Job",
             "HUDRuntime",
+            "HostedRuntime",
             "Run",
             "Runtime",
             "RuntimeConfig",

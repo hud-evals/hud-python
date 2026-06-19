@@ -74,6 +74,12 @@ class Settings(BaseSettings):
         validation_alias="HUD_GATEWAY_URL",
     )
 
+    hud_runtime_url: str = Field(
+        default="https://mcp.hud.ai",
+        description="Base URL for the HUD runtime tunnel gateway",
+        validation_alias="HUD_RUNTIME_URL",
+    )
+
     api_key: str | None = Field(
         default=None,
         description="API key for authentication with the HUD API",
