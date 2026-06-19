@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
 
 _CONFIG_PATH = ".hud_eval.toml"
+_PLACEMENT_CONFLICT_ERROR = "--runtime and --remote are mutually exclusive placement options"
 
 
 def _resolve_env_vars(obj: Any) -> Any:
@@ -455,6 +456,9 @@ class EvalConfig(BaseModel):
         remote: bool = False,
     ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
+        if runtime is not None and remote:
+            raise ValueError(_PLACEMENT_CONFLICT_ERROR)
+
         overrides: dict[str, Any] = {
             key: value
             for key, value in {
@@ -484,6 +488,9 @@ class EvalConfig(BaseModel):
         if task_ids is not None:
             overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
 
+        if runtime is not None:
+            overrides["remote"] = False
+
         for key, value in {
             "all": all,
             "verbose": verbose,
@@ -494,9 +501,6 @@ class EvalConfig(BaseModel):
         }.items():
             if value:
                 overrides[key] = True
-
-        if runtime is not None:
-            overrides["remote"] = False
 
         if full:
             overrides["all"] = True
@@ -826,24 +830,28 @@ def eval_command(
     else:
         cfg = EvalConfig.load()
 
-    cfg = cfg.merge_cli(
-        source=source,
-        agent=agent,
-        model=model,
-        all=all,
-        full=full,
-        max_concurrent=max_concurrent,
-        max_steps=max_steps,
-        task_ids=task_ids,
-        verbose=verbose,
-        very_verbose=very_verbose,
-        auto_respond=auto_respond,
-        group_size=group_size,
-        config=config,
-        gateway=gateway,
-        runtime=runtime,
-        remote=remote,
-    )
+    try:
+        cfg = cfg.merge_cli(
+            source=source,
+            agent=agent,
+            model=model,
+            all=all,
+            full=full,
+            max_concurrent=max_concurrent,
+            max_steps=max_steps,
+            task_ids=task_ids,
+            verbose=verbose,
+            very_verbose=very_verbose,
+            auto_respond=auto_respond,
+            group_size=group_size,
+            config=config,
+            gateway=gateway,
+            runtime=runtime,
+            remote=remote,
+        )
+    except ValueError as e:
+        hud_console.error(str(e))
+        raise typer.Exit(1) from None
 
     if cfg.source is None:
         try:
