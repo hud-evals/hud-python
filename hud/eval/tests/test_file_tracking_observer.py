@@ -49,6 +49,16 @@ class _FakeClient:
         return self._ft
 
 
+class _OpenFailsClient:
+    """A bound capability whose open() fails (e.g. a refused tunnel)."""
+
+    def binding(self, name: str) -> object:
+        return object()
+
+    async def open(self, name: str) -> object:
+        raise ConnectionError("tunnel refused")
+
+
 def _record_emitters(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Any], list[Any]]:
     diffs: list[Any] = []
     snapshots: list[Any] = []
@@ -100,3 +110,19 @@ async def test_successful_setup_anchors_and_polls(monkeypatch: pytest.MonkeyPatc
     assert len(snapshots) == 1  # manifest anchor emitted once
     assert ft.diff_calls >= 1
     assert diffs  # at least one diff streamed
+
+
+async def test_open_failure_does_not_break_the_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "telemetry_enabled", True)
+    diffs, snapshots = _record_emitters(monkeypatch)
+
+    # A failed open must degrade to a no-op, not raise into the agent loop.
+    ran = False
+    async with observer.file_tracking_observer(_OpenFailsClient()):  # type: ignore[arg-type]
+        ran = True
+
+    assert ran
+    assert diffs == []
+    assert snapshots == []
