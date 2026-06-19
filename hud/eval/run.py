@@ -11,8 +11,8 @@ It is the *client-here* path: the agent loop runs in this process against a
 :class:`~hud.eval.runtime.Provider`'s channel. The same driver runs on the
 daemon (the leased box's agent loop is just ``rollout`` over a
 ``DockerRuntime``), in ``Chat`` per turn, and in ``AgentTool`` per invocation.
-Delegated (HUD-hosted) execution is a different act — see
-:class:`hud.eval.runtime.HUDRuntime` — and the scheduler (:meth:`Taskset.run`)
+Delegated hosted execution is a different act — see
+:class:`hud.eval.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
 chooses between them; the atom itself never branches on placement.
 
 :class:`Run` is also the receipt a delegated execution folds its platform
@@ -34,6 +34,7 @@ from hud.telemetry.context import set_trace_context
 from hud.types import Step, TaskCall, Trace
 from hud.utils.time import now_iso
 
+from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
@@ -270,8 +271,8 @@ async def rollout(
     connect, start the task, let ``agent`` fill ``run.trace``, grade on exit
     (``run.reward``), tear down. The substrate may be anywhere — a local
     subprocess, a container, a cloud sandbox — the channel bridges it; the
-    agent loop always runs in *this* process. Delegated (HUD-hosted) execution
-    does not come through here; see :class:`hud.eval.runtime.HUDRuntime`.
+    agent loop always runs in *this* process. Delegated hosted execution
+    does not come through here; see :class:`hud.eval.runtime.HostedRuntime`.
 
     ``job_id``/``group_id`` are batch identities threaded by the scheduler;
     there are no standalone traces, so when no ``job_id`` is given the atom
@@ -304,7 +305,11 @@ async def rollout(
                 async with live:  # start on enter; grade on exit
                     run = live  # bound only once live: an earlier failure synthesizes
                     _phase = "agent loop"
-                    await agent(run)
+                    # File tracking (when enabled) streams workspace diffs to
+                    # telemetry for the duration of the agent loop; setup churn is
+                    # skipped because the run is already started here.
+                    async with file_tracking_observer(client):
+                        await agent(run)
                     _phase = "grading"
         except TimeoutError:
             raise

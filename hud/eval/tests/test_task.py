@@ -4,8 +4,7 @@ The model is the row: plain pydantic (``model_validate``/``model_dump``) is the
 whole codec for ``hud sync`` and the JSON/JSONL taskset path. ``env`` is carried
 as its name, the join key to whatever placement can bring that environment up.
 Placement is never part of the row — without an ``runtime=`` provider, execution
-defaults to the (not yet wired) HUD-hosted provisioner, which raises a precise
-error.
+defaults to the HUD runtime tunnel by env name.
 """
 
 from __future__ import annotations
@@ -17,6 +16,8 @@ import pytest
 
 from hud.environment import Environment
 from hud.eval import (
+    HUDRuntime,
+    Run,
     RuntimeConfig,
     RuntimeGPU,
     RuntimeResources,
@@ -136,15 +137,25 @@ def test_row_validation_rejects_malformed_entries() -> None:
 # ─── placement ─────────────────────────────────────────────────────────
 
 
-async def test_no_placement_defaults_to_hosted_execution() -> None:
+async def test_no_placement_defaults_to_hud_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hud.eval.taskset as taskset_mod
+
+    seen: dict[str, object] = {}
+
+    async def fake_rollout(task: Task, agent: Agent, **kwargs: object) -> Run:
+        seen.update(kwargs)
+        run = Run(None, task.id, {})
+        run.trace.status = "completed"
+        return run
+
+    monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
+
     v = Task(env="hosted-env", id="solve", args={"n": 1})
-    # No placement means HUD-hosted execution, which serializes the agent
-    # spec before submitting anything; a non-gateway agent therefore fails
-    # before launch as an isolated failed Run carrying the precise error.
     job = await v.run(cast("Agent", object()))
+
     (run,) = job.runs
-    assert run.trace.is_error
-    assert "gateway agent" in (run.trace.error or "")
+    assert run.trace.status == "completed"
+    assert isinstance(seen["runtime"], HUDRuntime)
 
 
 # ─── taskset collection ────────────────────────────────────────────────

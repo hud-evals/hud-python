@@ -35,16 +35,12 @@ async def assistant(messages: list[PromptMessage]):
 
 ```python chat.py
 import asyncio
-from hud import Chat, LocalRuntime
+from hud import Chat
 from hud.agents import create_agent
 from tasks import assistant
 
 async def main():
-    chat = Chat(
-        assistant(messages=[]),
-        create_agent("claude-sonnet-4-5"),
-        runtime=LocalRuntime("env.py"),   # where each turn's rollout runs
-    )
+    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
     print(r2.content)            # the assistant's latest reply
@@ -52,7 +48,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud` (also available as `hud.eval.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`. `Chat` is interactive and runs the agent loop in this process, so a `runtime=` is **required** — pass any placement provider (`LocalRuntime("env.py")`, `Runtime("tcp://...")`, …) to say where each turn's rollout runs. Unlike `Task.run`, there is no implicit fallback; `send` raises if no runtime was given.
+`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout (with no runtime it serves the task's source locally when minted in-process, else uses the HUD runtime tunnel by the task's env name).
 
 ### Managing history
 
@@ -69,11 +65,7 @@ The conversation history **is** the public `chat.messages` list — persist it, 
 
 ```python
 app = FastAPI()
-chat = Chat(
-    assistant(messages=[]),
-    create_agent("claude-sonnet-4-5"),
-    runtime=LocalRuntime("env.py"),
-)
+chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
 
 @app.post("/api/chat")
 async def chat_endpoint(message: str):

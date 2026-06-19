@@ -27,9 +27,10 @@ Pass build-time config with `--env KEY=VALUE` / `--env-file .env`, `--build-arg`
 In code, *where* a task runs is a **runtime** you pass at execution time — the task definition never changes. The same `task.run(agent, runtime=…)` call targets any substrate:
 
 ```python run.py
-from hud import HUDRuntime, LocalRuntime, DockerRuntime, Runtime
+from hud import HUDRuntime, HostedRuntime, LocalRuntime, DockerRuntime, Runtime
 
-HUDRuntime()                       # run on HUD's hosted infra (after hud deploy)
+HUDRuntime()                       # local agent loop against a HUD-hosted env
+HostedRuntime()                    # run the whole rollout on HUD's hosted infra
 LocalRuntime("env.py")             # a local child process (fastest iteration)
 DockerRuntime("my-env")            # a fresh local container per rollout
 Runtime("tcp://host:8765")         # attach to a container started elsewhere
@@ -43,7 +44,7 @@ job = await fix_bug(difficulty=3).run(agent, runtime=HUDRuntime())
 print(job.reward)
 ```
 
-`HUDRuntime` is the natural pair with `hud deploy`: the platform leases an instance, brings your deployed image up on it, and runs the rollout next to it.
+`HUDRuntime()` is the natural pair with `hud deploy`: the platform leases an instance, brings your deployed image up on it, and the SDK drives the env through the runtime tunnel. Use `HostedRuntime()` when the whole rollout should run remotely on the platform.
 
 ## Run on your own infra
 

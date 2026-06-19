@@ -1,0 +1,47 @@
+"""filetracking/1 wire roundtrip: serve a FileTracker, drive it via the client."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from hud.capabilities import Capability, FileTrackingClient
+from hud.environment.file_tracker import FileTracker
+from hud.environment.file_tracking import serve_file_tracking
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+async def test_diff_snapshot_advance_roundtrip(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("x\n")
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    server = await serve_file_tracking(tracker)
+    host, port = server.sockets[0].getsockname()[:2]
+    client = await FileTrackingClient.connect(Capability.filetracking(url=f"tcp://{host}:{port}"))
+    try:
+        # Nothing changed yet.
+        assert (await client.diff())["files_changed"] == 0
+
+        # An edit shows up as a diff on the next pull.
+        (tmp_path / "a.txt").write_text("x\ny\n")
+        diff = await client.diff()
+        assert diff["files_changed"] == 1
+        assert diff["patches"][0]["path"] == "a.txt"
+
+        # diff() advanced the baseline, so a re-pull is empty.
+        assert (await client.diff())["files_changed"] == 0
+
+        # snapshot() returns the full manifest.
+        snapshot = await client.snapshot()
+        assert any(entry["path"] == "a.txt" for entry in snapshot["files"])
+
+        # advance() re-baselines without erroring.
+        (tmp_path / "b.txt").write_text("z\n")
+        await client.advance()
+        assert (await client.diff())["files_changed"] == 0
+    finally:
+        await client.close()
+        server.close()
+        await server.wait_closed()

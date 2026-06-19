@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import itertools
 import logging
+import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,7 @@ from hud.capabilities import (
     Capability,
     CapabilityClient,
     CDPClient,
+    FileTrackingClient,
     MCPClient,
     RFBClient,
     SSHClient,
@@ -36,7 +38,7 @@ LOGGER = logging.getLogger("hud.clients")
 
 #: protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
-    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
+    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient, FileTrackingClient)
 }
 
 
@@ -354,6 +356,18 @@ async def _connect_ready(
             return client
 
 
+def _runtime_ready_timeout(runtime: Runtime, default: float) -> float:
+    raw = runtime.params.get("ready_timeout")
+    if raw is None:
+        return default
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise ValueError("runtime.params['ready_timeout'] must be a positive finite number")
+    timeout = float(raw)
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("runtime.params['ready_timeout'] must be a positive finite number")
+    return timeout
+
+
 @asynccontextmanager
 async def connect(runtime: Runtime, *, ready_timeout: float = 120.0) -> AsyncIterator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
@@ -371,7 +385,7 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 120.0) -> AsyncIte
     client = await _connect_ready(
         parts.hostname or "127.0.0.1",
         parts.port or 0,
-        ready_timeout=ready_timeout,
+        ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
     )
     try:
         yield client

@@ -47,6 +47,7 @@ class TestHudInit:
             "Grade",
             "Job",
             "HUDRuntime",
+            "HostedRuntime",
             "Run",
             "Runtime",
             "RuntimeConfig",

@@ -17,11 +17,11 @@ The provider contract is structural (anything callable as ``(task) -> async
 context manager of Runtime``), so per-task heterogeneity (this row on 1 GPU,
 that one on 4, different images) is just a provider that reads the row.
 
-The *other* placement — :class:`HUDRuntime`, running the whole rollout off-box
-on a HUD sandbox — also lives here; the scheduler (:meth:`Taskset.run`)
-chooses between it and a provider. A hosted box's own driver is
-itself a ``Provider`` (its ``DockerRuntime``) driven by the same ``rollout``
-atom — co-location all the way down.
+The delegated placement — :class:`HostedRuntime`, running the whole rollout
+off-box on a HUD sandbox — also lives here; the scheduler (:meth:`Taskset.run`)
+chooses between it and providers. A hosted box's own driver is itself a
+``Provider`` (its ``DockerRuntime``) driven by the same ``rollout`` atom —
+co-location all the way down.
 """
 
 from __future__ import annotations
@@ -37,13 +37,15 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from hud.types import Step
 from hud.utils.platform import PlatformClient
 
-from .run import Grade, Run
+from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -648,13 +650,136 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
 
 #: Platform trace statuses that end a hosted rollout.
 _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
+_RUNTIME_READY_TIMEOUT = 300.0
 
 
 class HUDRuntime:
+    """HUD tunnel placement: local agent loop against a HUD-hosted environment.
+
+    The SDK creates a runtime session by environment name, exposes the remote
+    control channel through a local TCP listener, and lets the normal rollout
+    atom drive it from this process.
+    """
+
+    def __init__(self, *, run_timeout: float = 3600.0, runtime_url: str | None = None) -> None:
+        self.run_timeout = run_timeout
+        self.runtime_url = runtime_url
+
+    async def run(
+        self,
+        task: Task,
+        agent: Agent,
+        *,
+        job_id: str,
+        group_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> Run:
+        return await rollout(
+            task,
+            agent,
+            runtime=self,
+            trace_id=trace_id,
+            job_id=job_id,
+            group_id=group_id,
+        )
+
+    def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
+        return self._runtime_session(task)
+
+    @asynccontextmanager
+    async def _runtime_session(self, task: Task) -> AsyncIterator[Runtime]:
+        from hud.settings import settings as sdk_settings
+
+        if task.runtime_config is not None:
+            raise ValueError("HUDRuntime does not support task runtime_config yet")
+        api_key = sdk_settings.api_key
+        if not api_key:
+            raise RuntimeError("HUD runtime tunnel requires HUD_API_KEY")
+        runtime_url = (self.runtime_url or sdk_settings.hud_runtime_url).rstrip("/")
+        session_id = await self._create_runtime_session(runtime_url, api_key, task)
+        server: asyncio.Server | None = None
+        try:
+            server = await asyncio.start_server(
+                lambda reader, writer: self._forward_runtime_connection(
+                    runtime_url,
+                    api_key,
+                    session_id,
+                    reader,
+                    writer,
+                ),
+                "127.0.0.1",
+                0,
+            )
+            port = server.sockets[0].getsockname()[1]
+            yield Runtime(
+                f"tcp://127.0.0.1:{port}",
+                params={
+                    "session_id": session_id,
+                    "gateway_url": runtime_url,
+                    "ready_timeout": min(self.run_timeout, _RUNTIME_READY_TIMEOUT),
+                },
+            )
+        finally:
+            if server is not None:
+                server.close()
+                await server.wait_closed()
+            await self._delete_runtime_session(runtime_url, api_key, session_id)
+
+    async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
+        payload: dict[str, Any] = {"environment": task.env}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{runtime_url}/runtime/sessions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        session_id = body.get("id")
+        if not isinstance(session_id, str):
+            raise RuntimeError("Runtime gateway did not return a session id")
+        return session_id
+
+    async def _delete_runtime_session(
+        self, runtime_url: str, api_key: str, session_id: str
+    ) -> None:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            with contextlib.suppress(Exception):
+                await client.delete(
+                    f"{runtime_url}/runtime/sessions/{session_id}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+
+    async def _forward_runtime_connection(
+        self,
+        runtime_url: str,
+        api_key: str,
+        session_id: str,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        import websockets
+
+        ws_url = _runtime_tunnel_ws_url(runtime_url, session_id)
+        try:
+            async with websockets.connect(
+                ws_url,
+                additional_headers={"Authorization": f"Bearer {api_key}"},
+                max_size=None,
+            ) as websocket:
+                await _splice_websocket(reader, writer, websocket)
+        finally:
+            if not writer.is_closing():
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+
+
+class HostedRuntime:
     """HUD-hosted placement: runs the rollout on a leased box and returns its ``Run``.
 
     The *client-elsewhere* placement. Where a :class:`Provider` yields a channel
-    this process drives, ``HUDRuntime`` runs the whole rollout off-box: the
+    this process drives, ``HostedRuntime`` runs the whole rollout off-box: the
     platform leases an instance, brings the env's container up on it, and runs
     the agent right next to it (the instance-side driver is just
     :func:`hud.eval.run.rollout` over a ``DockerRuntime`` — co-location all the
@@ -668,7 +793,12 @@ class HUDRuntime:
     propagating, so abandoned rollouts do not hold instances open.
     """
 
-    def __init__(self, *, poll_interval: float = 5.0, run_timeout: float = 3600.0) -> None:
+    def __init__(
+        self,
+        *,
+        poll_interval: float = 5.0,
+        run_timeout: float = 3600.0,
+    ) -> None:
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
 
@@ -717,7 +847,7 @@ class HUDRuntime:
         trace_id: str,
     ) -> dict[str, Any]:
         if task.runtime_config is not None:
-            raise ValueError("HUDRuntime does not support task runtime_config yet")
+            raise ValueError("HostedRuntime does not support task runtime_config yet")
         spec_of = getattr(agent, "hosted_spec", None)
         if not callable(spec_of):
             raise ValueError(
@@ -790,10 +920,54 @@ class HUDRuntime:
             logger.warning("hosted rollout %s cancel failed: %s", trace_id, exc)
 
 
+def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:
+    parts = urlsplit(runtime_url.rstrip("/"))
+    scheme = "wss" if parts.scheme == "https" else "ws"
+    path = f"{parts.path.rstrip('/')}/runtime/tunnels/{session_id}"
+    return urlunsplit((scheme, parts.netloc, path, "", ""))
+
+
+async def _splice_websocket(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    websocket: Any,
+) -> None:
+    async def tcp_to_ws() -> None:
+        while data := await reader.read(65536):
+            await websocket.send(data)
+
+    async def ws_to_tcp() -> None:
+        async for message in websocket:
+            data = message.encode("utf-8") if isinstance(message, str) else message
+            writer.write(data)
+            await writer.drain()
+
+    tasks = [
+        asyncio.create_task(tcp_to_ws()),
+        asyncio.create_task(ws_to_tcp()),
+    ]
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        done_results = await asyncio.gather(*done, return_exceptions=True)
+        await asyncio.gather(*pending, return_exceptions=True)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    for result in done_results:
+        if isinstance(result, BaseException):
+            raise result
+
+
 __all__ = [
     "DaytonaRuntime",
     "DockerRuntime",
     "HUDRuntime",
+    "HostedRuntime",
     "LocalRuntime",
     "ModalRuntime",
     "Provider",

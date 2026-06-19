@@ -13,6 +13,7 @@ import asyncio
 
 import pytest
 
+import hud.clients.client as client_module
 from hud.clients import connect
 from hud.environment.utils import read_frame, send_frame
 from hud.eval.runtime import Runtime
@@ -51,6 +52,43 @@ async def test_connect_retries_through_accept_then_eof_until_the_env_serves() ->
         await server.wait_closed()
 
     assert attempts == 3
+
+
+async def test_connect_uses_runtime_ready_timeout_param(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, float | int | str] = {}
+
+    class _FakeClient:
+        async def close(self) -> None:
+            pass
+
+    async def fake_connect_ready(
+        host: str,
+        port: int,
+        *,
+        ready_timeout: float,
+        interval: float = 0.5,
+    ) -> _FakeClient:
+        seen["host"] = host
+        seen["port"] = port
+        seen["ready_timeout"] = ready_timeout
+        seen["interval"] = interval
+        return _FakeClient()
+
+    monkeypatch.setattr(client_module, "_connect_ready", fake_connect_ready)
+
+    async with client_module.connect(
+        Runtime("tcp://127.0.0.1:1234", params={"ready_timeout": 300.0})
+    ):
+        pass
+
+    assert seen == {
+        "host": "127.0.0.1",
+        "port": 1234,
+        "ready_timeout": 300.0,
+        "interval": 0.5,
+    }
 
 
 async def test_connect_gives_up_at_the_deadline_when_the_env_never_serves() -> None:

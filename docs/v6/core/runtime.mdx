@@ -7,7 +7,7 @@ icon: "server"
 A **runtime** decides *where* the environment runs for a rollout. The task definition never changes - you pass a runtime at execution time and the same taskset runs locally, in a container, on a cloud sandbox, or on HUD's hosted infra.
 
 ```python
-from hud.eval import LocalRuntime, DockerRuntime, ModalRuntime, DaytonaRuntime, HUDRuntime, Runtime
+from hud.eval import LocalRuntime, DockerRuntime, ModalRuntime, DaytonaRuntime, HUDRuntime, HostedRuntime, Runtime
 
 await TASKS.run(agent, runtime=LocalRuntime("env.py"))
 ```
@@ -22,7 +22,8 @@ A runtime is just a function: given a task, bring up the env's control channel s
 | `DockerRuntime` | `docker run`s a fresh container per rollout from an image. | Reproducible local runs; parity with production. |
 | `ModalRuntime` | Boots a fresh [Modal](https://modal.com/) cloud sandbox per rollout from a published image. | Cloud scale without managing infra. |
 | `DaytonaRuntime` | Creates a fresh [Daytona](https://www.daytona.io/) sandbox per rollout from a snapshot. | Cloud scale on Daytona. |
-| `HUDRuntime` | Runs the whole rollout off-box on a HUD-leased instance. | Hosted infra after `hud deploy`. |
+| `HUDRuntime` | Leases the env on HUD infra but keeps the agent loop local, tunneling to the remote control channel. | Cloud env with a local agent (the default when `runtime=` is omitted). |
+| `HostedRuntime` | Submits the whole rollout to the platform; the agent runs remotely next to the env. | Fully off-box runs after `hud deploy`. |
 | `Runtime(url)` | Attaches to a substrate already serving elsewhere. | A long-lived container or sandbox you provisioned yourself. |
 
 ## Choosing placement
@@ -34,7 +35,7 @@ await ts.run(agent, runtime=LocalRuntime("env.py"))   # local
 await ts.run(agent, runtime=DockerRuntime("my-env"))  # container
 ```
 
-**Omit `runtime=`** and placement is inferred from where the tasks came from: a taskset minted in-process from a single `.py` source serves that source locally (`LocalRuntime`, the common authoring case), while rows loaded from a file or the platform fall back to HUD-hosted provisioning by env name.
+**Omit `runtime=`** and placement is inferred from where the tasks came from: a taskset minted in-process from a single `.py` source serves that source locally (`LocalRuntime`, the common authoring case), while rows loaded from a file or the platform fall back to `HUDRuntime` - the env leased on HUD infra by name, driven by the local agent.
 
 A runtime is called once per rollout with the **task row** being placed, so one runtime can serve a mixed-env taskset - and placement can vary per task with no engine involvement:
 
@@ -96,11 +97,24 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 ### `HUDRuntime`
 
 ```python
-HUDRuntime(*, poll_interval=5.0, run_timeout=3600.0)
+HUDRuntime(*, run_timeout=3600.0, runtime_url=None)
+```
+
+- **`run_timeout`** - bound on one rollout end to end, including instance startup.
+- **`runtime_url`** - override the HUD runtime endpoint the tunnel connects to.
+
+The agent loop runs locally; the SDK leases the env by name and tunnels to its remote control channel.
+
+### `HostedRuntime`
+
+```python
+HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
 ```
 
 - **`poll_interval`** - seconds between trace polls while the remote rollout runs.
-- **`run_timeout`** - bound on one rollout end to end, including instance startup.
+- **`run_timeout`** - bound on one rollout end to end, including instance provisioning.
+
+The whole rollout runs off-box: the platform leases an instance, brings the env up, and runs the agent right next to it.
 
 ### `Runtime`
 
