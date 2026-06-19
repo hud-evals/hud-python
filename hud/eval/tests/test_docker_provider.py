@@ -116,10 +116,18 @@ def _row() -> Task:
     return Task(env="any-env", id="t")
 
 
+async def _docker_calls(docker_log: Path) -> list[str]:
+    return (await asyncio.to_thread(docker_log.read_text)).splitlines()
+
+
 @dataclass(frozen=True)
 class _ModalImageRef:
     kind: str
     name: str
+    env_vars: dict[str, str] | None = None
+
+    def env(self, vars: dict[str, str]) -> _ModalImageRef:
+        return _ModalImageRef(self.kind, self.name, dict(vars))
 
 
 class _FakeModalSandbox:
@@ -156,6 +164,11 @@ def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         def from_registry(name: str) -> _ModalImageRef:
             calls["registry_image"] = name
             return _ModalImageRef("registry", name)
+
+        @staticmethod
+        def from_id(image_id: str) -> _ModalImageRef:
+            calls["modal_image_id"] = image_id
+            return _ModalImageRef("id", image_id)
 
     async def lookup(app_name: str, *, create_if_missing: bool) -> str:
         calls["app_lookup"] = (app_name, create_if_missing)
@@ -330,11 +343,11 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
     provider = DockerRuntime("img:tag", run_args=("-e", "X=1"))
     async with provider(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:43210"
-        calls = docker_log.read_text().splitlines()
+        calls = await _docker_calls(docker_log)
         assert calls[0] == "run --detach -e X=1 --publish 127.0.0.1::8765 img:tag"
         assert calls[1] == "port cid-42 8765"
 
-    assert docker_log.read_text().splitlines()[-1] == "rm --force cid-42"
+    assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
 
 
 async def test_runtime_config_supplies_image_and_resources(
@@ -355,7 +368,7 @@ async def test_runtime_config_supplies_image_and_resources(
         assert runtime.url == "tcp://127.0.0.1:43210"
         assert runtime.config == task.runtime_config
 
-    calls = docker_log.read_text().splitlines()
+    calls = await _docker_calls(docker_log)
     assert calls[0] == (
         "run --detach --cpus 2 --memory 4096m --gpus 1 --publish 127.0.0.1::8765 img:firefox"
     )
@@ -379,7 +392,7 @@ async def test_task_runtime_config_overrides_default_image(
             resources=RuntimeResources(cpu=2, memory_mb=4096),
         )
 
-    assert docker_log.read_text().splitlines()[0] == (
+    assert (await _docker_calls(docker_log))[0] == (
         "run --detach --cpus 2 --memory 4096m --publish 127.0.0.1::8765 img:task"
     )
 
@@ -492,6 +505,7 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
     assert calls["sandbox_kwargs"] == {
         "app": "app",
         "image": _ModalImageRef("registry", "img:tag"),
+        "workdir": None,
         "unencrypted_ports": [8765],
         "readiness_probe": ("tcp", 8765),
         "timeout": 120,
@@ -501,6 +515,26 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
     }
     assert calls["ready_timeout"] == 30
     assert calls["terminated"] is True
+
+
+async def test_modal_runtime_accepts_modal_image_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    config = RuntimeConfig(image="modal://im-built")
+
+    async with ModalRuntime(runtime_config=config)(_row()) as runtime:
+        assert runtime.config == config
+
+    assert calls["modal_image_id"] == "im-built"
+    assert calls["sandbox_kwargs"] == {
+        "app": "app",
+        "image": _ModalImageRef("id", "im-built"),
+        "workdir": None,
+        "unencrypted_ports": [8765],
+        "readiness_probe": ("tcp", 8765),
+        "timeout": 3600,
+    }
 
 
 async def test_modal_task_runtime_config_overlays_provider_defaults(
@@ -527,6 +561,7 @@ async def test_modal_task_runtime_config_overlays_provider_defaults(
     assert calls["sandbox_kwargs"] == {
         "app": "app",
         "image": _ModalImageRef("registry", "img:task"),
+        "workdir": None,
         "unencrypted_ports": [8765],
         "readiness_probe": ("tcp", 8765),
         "timeout": 120,
@@ -544,6 +579,40 @@ async def test_modal_runtime_config_image_overrides_image_name(
         assert runtime.config == config
 
     assert calls["registry_image"] == "img:tag"
+
+
+async def test_modal_runtime_can_override_workdir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    config = RuntimeConfig(image="img:tag")
+    provider = ModalRuntime(runtime_config=config, workdir="/app")
+
+    async with provider(_row()) as runtime:
+        assert runtime.config == config
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["workdir"] == "/app"
+
+
+async def test_modal_runtime_applies_env_vars_to_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    config = RuntimeConfig(image="img:tag")
+    provider = ModalRuntime(runtime_config=config, env_vars={"TOKEN": "secret"})
+
+    async with provider(_row()) as runtime:
+        assert runtime.config == config
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["image"] == _ModalImageRef(
+        "registry",
+        "img:tag",
+        {"TOKEN": "secret"},
+    )
 
 
 async def test_daytona_runtime_config_flows_into_daytona_sdk(
@@ -668,6 +737,6 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
             pass
 
     assert "ImportError: boom" in str(err.value)
-    calls = docker_log.read_text().splitlines()
+    calls = await _docker_calls(docker_log)
     assert "logs --tail 40 cid-42" in calls
     assert calls[-1] == "rm --force cid-42"  # cleanup still runs on failure

@@ -24,12 +24,14 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
+_VALID_RUNTIMES = {"modal"}
 
 
 @dataclass(frozen=True)
 class _DeployPlan:
     name: str
     registry_id: str | None
+    runtime: str | None
     env_vars: dict[str, str]
     build_args: dict[str, str]
     build_secrets: dict[str, str]
@@ -59,6 +61,18 @@ def _parse_key_value_flags(
             continue
         values[parsed[0]] = parsed[1]
     return values
+
+
+def _normalize_runtime(runtime: str | None, console: HUDConsole) -> str | None:
+    if runtime is None:
+        return None
+    normalized = runtime.strip().lower()
+    if normalized in _VALID_RUNTIMES:
+        return normalized
+    console.error(
+        f"Invalid runtime {runtime!r}; expected one of: {', '.join(sorted(_VALID_RUNTIMES))}"
+    )
+    raise typer.Exit(1)
 
 
 def _load_env_vars(path: Path, console: HUDConsole, *, warn_missing: bool) -> dict[str, str]:
@@ -307,6 +321,7 @@ def _prepare_deploy_plan(
     registry_id: str | None,
     build_args: list[str] | None,
     build_secrets: list[str] | None,
+    runtime: str | None,
     verbose: bool,
     platform: PlatformClient,
     console: HUDConsole,
@@ -346,6 +361,7 @@ def _prepare_deploy_plan(
     return _DeployPlan(
         name=resolved_name,
         registry_id=registry_id,
+        runtime=_normalize_runtime(runtime, console),
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
@@ -362,6 +378,7 @@ def deploy_environment(
     registry_id: str | None = None,
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
+    runtime: str | None = None,
 ) -> None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
@@ -393,6 +410,7 @@ def deploy_environment(
         registry_id=registry_id,
         build_args=build_args,
         build_secrets=build_secrets,
+        runtime=runtime,
         verbose=verbose,
         platform=platform,
         console=hud_console,
@@ -437,10 +455,11 @@ async def _create_build_upload(platform: PlatformClient) -> _BuildUpload:
 
 async def _upload_build_context(upload_url: str, tarball_path: Path) -> None:
     """PUT the tarball to the presigned S3 URL (not a platform API call)."""
+    content = await asyncio.to_thread(tarball_path.read_bytes)
     async with httpx.AsyncClient(timeout=300.0) as s3_client:
         response = await s3_client.put(
             upload_url,
-            content=tarball_path.read_bytes(),
+            content=content,
             headers={"Content-Type": "application/gzip"},
         )
         response.raise_for_status()
@@ -464,6 +483,8 @@ async def _trigger_build(
     }
     if plan.registry_id:
         payload["registry_id"] = plan.registry_id
+    if plan.runtime:
+        payload["runtime_provider"] = plan.runtime
     if plan.env_vars:
         payload["environment_variables"] = plan.env_vars
     if plan.build_args:
@@ -622,6 +643,7 @@ def deploy_all(
     verbose: bool = False,
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
+    runtime: str | None = None,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -660,6 +682,7 @@ def deploy_all(
                 registry_id=None,
                 build_args=build_args,
                 build_secrets=build_secrets,
+                runtime=runtime,
             )
             succeeded.append(env_dir.name)
         except (typer.Exit, SystemExit):
@@ -734,6 +757,11 @@ def deploy_command(
         help="Existing registry ID for rebuilds (advanced)",
         hidden=True,
     ),
+    runtime: str | None = typer.Option(
+        None,
+        "--runtime",
+        help="Persist Modal as the hosted runtime for this registry",
+    ),
 ) -> None:
     """Deploy HUD environment to the platform.
 
@@ -752,6 +780,7 @@ def deploy_command(
             verbose=verbose,
             build_args=build_args,
             build_secrets=secrets,
+            runtime=runtime,
         )
         return
 
@@ -765,4 +794,5 @@ def deploy_command(
         registry_id=registry_id,
         build_args=build_args,
         build_secrets=secrets,
+        runtime=runtime,
     )
