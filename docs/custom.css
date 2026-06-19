@@ -143,6 +143,23 @@ body::after {
   border-color: oklch(1 0 0 / 0.1);
 }
 
+/* Tight list: collapse the inter-item spacing for a compact, inline-feeling
+   bulleted list (used on the intro's "what's in an environment" breakdown). */
+#content .tight-list ul {
+  margin-top: -1.1rem !important;
+  margin-bottom: -1.1rem !important;
+}
+#content .tight-list li {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+  line-height: 1.4 !important;
+}
+/* loose markdown lists wrap each item's text in a <p>; kill its margins too */
+#content .tight-list li > p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
 /* Blockquotes: gold left rule, like a pull-quote. */
 #content blockquote {
   border-left: 2px solid #c0960c;

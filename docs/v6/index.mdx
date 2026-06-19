@@ -1,53 +1,72 @@
 ---
 title: "Introduction"
-description: "Build, evaluate, and train AI agents on RL environments you define once and run anywhere."
+description: "Define any environment, once. Spin it up anywhere. Evaluate and train any AI agent inside it."
 icon: "book"
+mode: "wide"
 ---
+[HUD](https://hud.ai) is a platform for building RL environments. You define an environment, write tasks for that environment, and run them for evals and training with any model, at any scale. 
+Our SDK is an [open-source](https://github.com/hud-evals/hud-python) Python framework for all of this.
+ 
+## Define any environment
 
-HUD is a platform for building RL environments for AI agents: environments that any model or harness can run, across coding, browser, computer-use, and robotics. You define an environment, write tasks, and run them as evals and training across any model, at any scale.
+An environment is some closed container for your agent to act in. Fundamentally it's defined by:
 
-A few beliefs shape everything in the SDK:
+<div className="tight-list">
 
-1. **Environments should outlast the agents that run them.** The systems an agent works on (a shell, a browser, a filesystem) have barely changed in a decade, and the tasks built on them are just as stable. Writing an environment is nothing new: you expose the system as it already is, through a capability like an `ssh` shell, and that same environment still runs in five years when the next real-time harness or model ships. Nothing to rebuild.
+- the **contents** of the container ([Environments](/v6/reference/environment))
+- the **tasks** (and their rewards) to be performed inside it ([Tasks & Tasksets](/v6/reference/tasks))
+- the **capabilities** the agent can use to perform these tasks ([Capabilities](/v6/reference/capabilities))
 
-2. **Tasks should be generative, not declarative.** A task definition should span a *space* of challenges over a substrate, which is exactly the structure a synthetic pipeline needs to generate from. An entire benchmark like SWE-bench or Terminal-Bench can live as one generative task definition whose concrete tasks cover every instance, served from a single image. One environment holds any number of tasks; there's no separate image per task.
+</div>
 
-3. **HUD owns the environment and the reward, and nothing else.** That minimalism is what lets everything around it vary. The same reward-from-rollout loop trains a coding, computer-use, browser, or robotics agent, so an environment exposes a bounded connection the agent drives directly: `ssh` into a sandboxed workspace, `cdp` for a browser, `rfb` for a screen, `robot` for a simulator or robot control loop, at action rates that discrete calls or MCP round-trips can't carry. The environment ships as one standardized image that runs on any rollout infra like [Daytona](https://www.daytona.io/), [Modal](https://modal.com/), or [E2B](https://e2b.dev/), and a trainer needs only the rewards and a model API, so feeding rollouts into your own GRPO/PPO loop or a stack like [Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or [Fireworks](https://fireworks.ai/) takes no environment-side glue.
+The v6 SDK leverages modular abstractions for all of these, letting you build on or reuse existing parts. 
 
-## The protocol
+## Spin it up anywhere
 
-HUD is protocol-first. An agent and an environment exchange just three things: a manifest (the environment's capabilities and tasks), `tasks.start` that returns the prompt, and `tasks.grade` that returns the reward. In between, the agent just works, driving the capabilities itself. HUD owns only that thin envelope, so any model or harness plugs into any environment.
+Once defined, an environment shouldn't care where it runs - it should just work. 
+The SDK lets you effortlessly switch between running your environment locally for development, on [Daytona](https://www.daytona.io/), 
+[Modal](https://modal.com/), or [E2B](https://e2b.dev/) for scale, or [deploy to the HUD platform](/v6/run/deploy).
+The environment definition never changes - just the [Runtime](/v6/run/deploy#pick-where-it-runs-the-runtime). 
+ 
+## Evaluate and train any AI agent inside it
 
-```mermaid
-sequenceDiagram
-    participant Agent
-    participant Env as Environment
-    participant Caps as Capabilities (ssh · mcp · cdp · rfb · robot)
-    Agent->>Env: manifest exchange
-    Env-->>Agent: capabilities + tasks
-    Agent->>Env: tasks.start
-    Env-->>Agent: prompt
-    rect rgb(238,238,238)
-    Note over Agent,Caps: the agent works, driving capabilities directly
-    Agent->>Caps: shell · browser · GUI · tools · robot
-    Caps-->>Agent: observations
-    end
-    Agent->>Env: tasks.grade
-    Env-->>Agent: reward
-```
+Since an environment only exposes capabilities, any agent plugs in. For standard models the 
+[HUD inference gateway](/v6/run/models) lets you switch between models like
+Claude, GPT, or Gemini just by choosing the model name.
+Run rollouts in parallel with full isolation out of the box.
+Every rollout is traced on the [Platform](https://hud.ai), so you can see exactly 
+what the agent did realtime and how it was graded. 
 
-Because the protocol only exposes capabilities (never a fixed agent), an environment outlives any single harness: new harnesses and models keep running against the same environments, benchmarks, and tasks.
+Those same rewards are then your [training signal](/v6/run/training): run a group per task 
+and feed the spread straight into your own GRPO/PPO loop - or a stack like 
+[Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or [Fireworks](https://fireworks.ai/).
+
+
+HUD is protocol-first: an agent and an environment exchange just three things — a manifest, `tasks.start`, and `tasks.grade` — and in between the agent just works. That thin envelope lets any model or harness plug into any environment. See [The protocol](/v6/protocol).
 
 ## A complete environment
 
-Here's the whole loop in one file: an environment that gives the agent a shell and files, and a task that asks it to make a test suite pass and grades the result by running the tests.
+Here's the whole loop in one file: an environment that gives the agent a shell and files, seeds the starting state on `@env.initialize` (and tears it down on `env.stop()`), and a task that asks it to make a test suite pass and grades the result by running the tests.
 
 ```python env.py
+from pathlib import Path
 from hud.environment import Environment
 from hud.graders import BashGrader
 
+ROOT = Path("/workspace")
+
 env = Environment(name="coder")
-env.workspace("/workspace")   # a directory the agent works in, served as ssh
+env.workspace(ROOT)           # a directory the agent works in, served as ssh
+
+@env.initialize               # runs once before serving — seed the task's starting state
+async def _seed():
+    (ROOT / "tests").mkdir(parents=True, exist_ok=True)
+    (ROOT / "calc.py").write_text("def add(a, b):\n    return a - b\n")          # bug to fix
+    (ROOT / "tests/test_calc.py").write_text("from calc import add\n\ndef test(): assert add(2, 2) == 4\n")
+
+@env.shutdown                 # runs on env.stop() — tear down anything _seed brought up
+async def _cleanup():
+    ...
 
 @env.template()
 async def fix_tests(target: str = "tests/"):
@@ -65,6 +84,33 @@ hud eval env.py claude --group 3
 ```
 
 `--group 3` runs three rollouts so you can see the reward spread; each is traced on [hud.ai](https://hud.ai).
+
+
+
+## Core Principles of SDK 
+
+A few beliefs shape everything in the SDK:
+
+<div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+  <div style={{background:"var(--colors-background-subtle,#f3f4f6)",borderRadius:"8px",padding:"16px 20px"}}>
+    **Environments should outlast the agents that run them.**
+    The systems an agent works on (a shell, a browser, a filesystem) have barely changed in a decade,
+    and the tasks built on them are just as stable.
+  </div>
+  <div style={{background:"var(--colors-background-subtle,#f3f4f6)",borderRadius:"8px",padding:"16px 20px"}}>
+    **Tasks should be generative, not declarative.**
+    A task definition should be like a template and span a *space* of challenges - exactly 
+    the structure a synthetic pipeline needs. An entire benchmark like SWE-bench or Terminal-Bench 
+    can live as one generative task definition
+    One environment holds any number of tasks; there's no separate image per task.
+  </div>
+  <div style={{background:"var(--colors-background-subtle,#f3f4f6)",borderRadius:"8px",padding:"16px 20px"}}>
+    **Everything except the environment and reward should be swappable.**
+    The model, the harness, the infra you run on - all yours to change.
+    HUD just hands the agent a direct connection to the environment (`ssh` for a shell, `cdp` for a browser, `rfb` for a screen, `robot` for a simulator) and returns a reward.
+  </div>
+</div>
+
 
 ## Where to go next
 
