@@ -122,6 +122,10 @@ class DiffResult:
     files_scanned: int
     files_changed: int
     truncated: bool = False  # True if the diff payload was capped by _MAX_DIFF_BYTES
+    # Paths dropped by the byte cap. Internal-only (never serialized): the
+    # tracker uses it to keep those files pending so they re-diff on a later
+    # poll instead of being silently baselined away.
+    skipped_paths: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for JSON transport (the filetracking/1 wire shape)."""
@@ -243,6 +247,15 @@ class FileTracker:
 
         current = self._scan()
         diff = self._diff(self._previous_snapshot, current)
+        # Keep budget-skipped files pending: revert each to its previous state in
+        # the new baseline (drop added-but-skipped files) so the next scan still
+        # sees them as changed and re-diffs them, rather than dropping the change.
+        for path in diff.skipped_paths:
+            old_entry = self._previous_snapshot.files.get(path)
+            if old_entry is None:
+                current.files.pop(path, None)
+            else:
+                current.files[path] = old_entry
         self._previous_snapshot = current
 
         if diff.files_changed > 0:
@@ -402,21 +415,21 @@ class FileTracker:
         return False
 
     def _collect_gitignore_patterns(self) -> list[str]:
-        """Read ``.gitignore`` from the root and one level of subdirectories."""
-        patterns: list[str] = []
+        """Read the root ``.gitignore`` only.
+
+        Patterns are matched tree-wide (see :meth:`_matches`), which is only
+        sound for ignore rules that are themselves root-scoped. Nested
+        per-directory ``.gitignore`` files are intentionally not loaded: applying
+        a subdirectory's rules globally would wrongly exclude (or fail to
+        exclude) paths elsewhere in the tree. The built-in
+        ``DEFAULT_EXCLUDE_PATTERNS`` already drop the dominant noise
+        (``node_modules/``, ``.venv/``, ``__pycache__/``, build artifacts), so a
+        root-only honor is enough for a telemetry noise filter.
+        """
         root_gitignore = self._root / ".gitignore"
-        if root_gitignore.is_file():
-            patterns.extend(self._parse_gitignore(root_gitignore))
-        else:
-            try:
-                with os.scandir(self._root) as scanner:
-                    for entry in scanner:
-                        if entry.is_dir(follow_symlinks=False):
-                            sub = Path(entry.path) / ".gitignore"
-                            if sub.is_file():
-                                patterns.extend(self._parse_gitignore(sub))
-            except (PermissionError, OSError):
-                pass
+        if not root_gitignore.is_file():
+            return []
+        patterns = self._parse_gitignore(root_gitignore)
         if patterns:
             LOGGER.info("Loaded %d gitignore patterns", len(patterns))
         return patterns
@@ -484,7 +497,7 @@ class FileTracker:
 
         patches: list[PatchEntry] = []
         total_bytes = 0
-        skipped = 0
+        skipped_paths: list[str] = []
         for path, old_entry, new_entry, status in changed:
             size_before = old_entry.size if old_entry else 0
             size_after = new_entry.size if new_entry else 0
@@ -492,7 +505,7 @@ class FileTracker:
 
             patch_bytes = len(patch_text.encode("utf-8", errors="replace"))
             if total_bytes + patch_bytes > self._MAX_DIFF_BYTES:
-                skipped += 1
+                skipped_paths.append(path)
                 continue
             total_bytes += patch_bytes
             patches.append(
@@ -505,14 +518,14 @@ class FileTracker:
                 )
             )
 
-        total_changed = len(patches) + skipped
-        if skipped:
+        total_changed = len(patches) + len(skipped_paths)
+        if skipped_paths:
             LOGGER.warning(
                 "Diff size cap (%d MB): %d/%d changed files included, %d skipped",
                 self._MAX_DIFF_BYTES // (1024 * 1024),
                 len(patches),
                 total_changed,
-                skipped,
+                len(skipped_paths),
             )
         return DiffResult(
             patches=patches,
@@ -520,7 +533,8 @@ class FileTracker:
             scan_duration_ms=new.scan_duration_ms,
             files_scanned=len(new.files),
             files_changed=total_changed,
-            truncated=skipped > 0,
+            truncated=len(skipped_paths) > 0,
+            skipped_paths=skipped_paths,
         )
 
     def _patch_text(

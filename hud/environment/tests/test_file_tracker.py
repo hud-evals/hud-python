@@ -110,6 +110,50 @@ def test_per_file_diff_cap_emits_a_placeholder(
     assert "too large to diff" in diff.patches[0].patch
 
 
+def test_budget_skipped_files_stay_pending_until_emitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.txt").write_text("a1\n")
+    (tmp_path / "b.txt").write_text("b1\n")
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    (tmp_path / "a.txt").write_text("a2\n")
+    (tmp_path / "b.txt").write_text("b2\n")
+
+    # Cap so small no patch fits: both changes are skipped this poll.
+    monkeypatch.setattr(FileTracker, "_MAX_DIFF_BYTES", 1)
+    first = tracker.take_snapshot()
+    assert first.truncated
+    assert first.patches == []
+    assert set(first.skipped_paths) == {"a.txt", "b.txt"}
+
+    # Next poll with headroom: the skipped changes must not be lost — the
+    # baseline kept them pending, so they re-diff now.
+    monkeypatch.setattr(FileTracker, "_MAX_DIFF_BYTES", 50 * 1024 * 1024)
+    second = tracker.take_snapshot()
+    by_path = {p.rel_path: p for p in second.patches}
+    assert set(by_path) == {"a.txt", "b.txt"}
+    assert "a2" in by_path["a.txt"].patch
+
+
+def test_nested_gitignore_is_not_honored_or_leaked(tmp_path: Path) -> None:
+    # Root has no .gitignore; a nested package does. With root-only honoring the
+    # nested rule must neither take effect locally nor leak tree-wide (the old
+    # basename match would have excluded "data.txt" everywhere).
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / ".gitignore").write_text("data.txt\n")
+    (pkg / "data.txt").write_text("local\n")
+    (tmp_path / "data.txt").write_text("root\n")
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    manifest_paths = {entry["path"] for entry in tracker.current_manifest()}
+    assert "data.txt" in manifest_paths
+    assert "pkg/data.txt" in manifest_paths
+
+
 def test_manifest_carries_paths_and_hashes(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("x\n")
     tracker = FileTracker(tmp_path)
