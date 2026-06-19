@@ -166,6 +166,23 @@ class Capability:
         return cls(name=name, protocol="mcp/2025-11-25", url=normalized, params=params)
 
     @classmethod
+    def filetracking(
+        cls,
+        *,
+        name: str = "filetracking",
+        url: str,
+    ) -> Capability:
+        """``filetracking/1`` — observation-only workspace diff/snapshot stream.
+
+        A dedicated protocol (not MCP): the env serves diff/snapshot/advance over
+        a small framed-JSON wire, the client pulls and re-emits the results as
+        ``hud.filetracking.v1`` telemetry. Because the protocol is not in any
+        agent's client catalog, ``ToolAgent`` never opens it as a tool.
+        """
+        normalized = normalize_url(url, default_scheme="tcp", default_port=None)
+        return cls(name=name, protocol="filetracking/1", url=normalized, params={})
+
+    @classmethod
     def robot(
         cls,
         *,

@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
     from hud.capabilities import Capability
 
+    from .file_tracker import FileTracker
+
 LOGGER = logging.getLogger("hud.environment.workspace")
 
 # Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
@@ -130,6 +132,7 @@ class Workspace:
         user: str = _DEFAULT_USER,
         host_key_path: Path | None = None,
         authorized_client_keys: list[Path] | None = None,
+        track_files: bool = False,
     ) -> None:
         self.root: Path = Path(root).resolve()
         # Unique id for this instance's credential subdirectory so parallel
@@ -170,6 +173,13 @@ class Workspace:
         self._sock: socket.socket | None = None
         self._bound_host: str | None = None
         self._bound_port: int | None = None
+        # File tracking: an observation-only filetracking/1 server over the same
+        # root. Materialized at start() when enabled.
+        self._track_files = track_files
+        self._file_tracker: FileTracker | None = None
+        self._ft_server: asyncio.Server | None = None
+        self._ft_host: str | None = None
+        self._ft_port: int | None = None
 
     def _prepare_runtime(self) -> None:
         """Materialize filesystem credentials and bind the SSH socket."""
@@ -232,6 +242,20 @@ class Workspace:
             self._serve_task = asyncio.get_event_loop().create_task(self._serve())
         # Yield so the acceptor binds before first use.
         await asyncio.sleep(0)
+        if self._track_files and self._ft_server is None:
+            await self._start_file_tracking()
+
+    async def _start_file_tracking(self) -> None:
+        """Take the baseline snapshot and bind the filetracking/1 server."""
+        from .file_tracker import FileTracker
+        from .file_tracking import serve_file_tracking
+
+        tracker = FileTracker(self.root)
+        # The baseline walk is CPU-bound; keep it off the event loop.
+        await asyncio.get_running_loop().run_in_executor(None, tracker.take_baseline)
+        self._file_tracker = tracker
+        self._ft_server = await serve_file_tracking(tracker, host=self._ssh_host)
+        self._ft_host, self._ft_port = self._ft_server.sockets[0].getsockname()[:2]
 
     async def stop(self) -> None:
         """Stop accepting SSH sessions and release the socket.
@@ -239,6 +263,13 @@ class Workspace:
         Credentials stay on disk; a later :meth:`start` re-binds (fresh port
         unless one was pinned) and reuses them.
         """
+        if self._ft_server is not None:
+            self._ft_server.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._ft_server.wait_closed(), 5.0)
+            self._ft_server = None
+            self._ft_host = self._ft_port = None
+            self._file_tracker = None
         if self._serve_task is not None:
             self._serve_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -304,6 +335,19 @@ class Workspace:
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
         )
+
+    @property
+    def tracks_files(self) -> bool:
+        """Whether this workspace serves a ``filetracking/1`` capability."""
+        return self._track_files
+
+    def file_tracking_capability(self, name: str = "filetracking") -> Capability:
+        """The concrete ``filetracking/1`` capability (requires ``track_files=True``)."""
+        from hud.capabilities import Capability
+
+        if self._ft_port is None:
+            raise RuntimeError("file tracking not started; call start() with track_files=True")
+        return Capability.filetracking(name=name, url=f"tcp://{self._ft_host}:{self._ft_port}")
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
 
