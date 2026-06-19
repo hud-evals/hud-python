@@ -22,11 +22,26 @@ class TestInitModule:
 
         expected = [
             "Chat",
+            "DockerRuntime",
             "Environment",
-            "EvalContext",
-            "eval",
+            "Grade",
+            "Job",
+            "HUDRuntime",
+            "HostedRuntime",
+            "Run",
+            "Runtime",
+            "RuntimeConfig",
+            "RuntimeGPU",
+            "RuntimeLimits",
+            "RuntimeResources",
+            "LocalRuntime",
+            "SyncPlan",
+            "Task",
+            "Taskset",
+            "Trace",
+            "TrainingClient",
+            "connect",
             "instrument",
-            "trace",  # Deprecated alias for eval
         ]
 
         assert set(hud.__all__) == set(expected)

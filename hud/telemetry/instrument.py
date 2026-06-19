@@ -1,16 +1,14 @@
-"""Instrumentation decorator for HUD telemetry.
+"""``@instrument``: OTel-shaped debug spans for any function.
 
-This module provides a lightweight @instrument decorator that records
-function calls and sends them to the HUD telemetry backend.
+Records one span per call — name, timing, status, args/result as span events —
+and queues it for export. Spans from this decorator are diagnostics: they carry
+no domain schema tag, so the platform surfaces them in debug tooling only. The
+canonical run record is the ``Step`` stream (``hud.types``), not this.
 
 Usage:
     @hud.instrument
     async def my_function(arg1, arg2):
         ...
-
-    # Within an eval context, calls are recorded and sent to HUD
-    async with env.eval("task") as ctx:
-        result = await my_function("a", "b")
 """
 
 from __future__ import annotations
@@ -18,26 +16,22 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
-import json
 import logging
 import time
-import uuid
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
-import pydantic_core
-
+from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
-from hud.types import MCPToolResult, TraceStep
-from hud.utils.serialization import json_safe_value
-
-
-def _get_trace_id() -> str | None:
-    """Lazy import to avoid circular dependency with eval.context."""
-    from hud.eval.context import get_current_trace_id
-
-    return get_current_trace_id()
-
+from hud.telemetry.span import (
+    PAYLOAD_ATTRIBUTE,
+    TASK_RUN_ID_ATTRIBUTE,
+    Span,
+    SpanEvent,
+    new_span_id,
+    normalize_trace_id,
+)
+from hud.utils.serialization import JsonObject, JsonValue, json_safe_value
+from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -49,45 +43,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _serialize_value(value: Any, max_items: int = 10) -> Any:
-    """Serialize a value for recording."""
+def _serialize_value(value: Any, max_items: int = 10) -> JsonValue:
+    """Serialize a value for recording (domain-agnostic; pydantic models dump)."""
     if isinstance(value, str | int | float | bool | type(None)):
         return value
 
-    if isinstance(value, MCPToolResult):
-        try:
-            serialized = json.loads(pydantic_core.to_json(value, fallback=str))
-        except Exception:
-            return {
-                "isError": value.isError,
-                "content": [{"type": "text", "text": "Tool executed successfully"}]
-                if not value.isError
-                else [],
-            }
+    if isinstance(value, list):
+        items = cast("list[Any]", value)
+        value = items[:max_items] if len(items) > max_items else items
+    elif isinstance(value, tuple):
+        items = list(cast("tuple[Any, ...]", value))
+        value = items[:max_items] if len(items) > max_items else items
+    elif isinstance(value, dict):
+        mapping = cast("dict[Any, Any]", value)
+        value = dict(list(mapping.items())[:max_items]) if len(mapping) > max_items else mapping
 
-        has_content = bool(serialized.get("content"))
-        has_structured = serialized.get("structuredContent") is not None
-        if not value.isError and not has_content and not has_structured:
-            serialized["content"] = [{"type": "text", "text": "Tool executed successfully"}]
-        return serialized
-
-    if isinstance(value, list | tuple):
-        value = value[:max_items] if len(value) > max_items else value
-    elif isinstance(value, dict) and len(value) > max_items:
-        value = dict(list(value.items())[:max_items])
-
-    return json_safe_value(value)
-
-
-def _now_iso() -> str:
-    """Get current time as ISO-8601 string."""
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _normalize_trace_id(trace_id: str) -> str:
-    """Normalize trace_id to 32-character hex string."""
-    clean = trace_id.replace("-", "")
-    return clean[:32].ljust(32, "0")
+    return cast("JsonValue", json_safe_value(value))
 
 
 @overload
@@ -95,10 +66,6 @@ def instrument(
     func: None = None,
     *,
     name: str | None = None,
-    category: str = "function",
-    span_type: str | None = None,
-    method: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
@@ -106,74 +73,39 @@ def instrument(
 
 @overload
 def instrument(
-    func: Callable[P, R],
+    func: Callable[P, Awaitable[R]],
     *,
     name: str | None = None,
-    category: str = "function",
-    span_type: str | None = None,
-    method: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
-) -> Callable[P, R]: ...
+) -> Callable[P, Awaitable[R]]: ...
 
 
 @overload
 def instrument(
-    func: Callable[P, Awaitable[R]],
+    func: Callable[P, R],
     *,
     name: str | None = None,
-    category: str = "function",
-    span_type: str | None = None,
-    method: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
-) -> Callable[P, Awaitable[R]]: ...
+) -> Callable[P, R]: ...
 
 
 def instrument(
     func: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
-    category: str = "function",
-    span_type: str | None = None,
-    method: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[..., Any]:
-    """Instrument a function to record spans within eval context.
-
-    This decorator records function calls as spans and sends them to the HUD API.
+    """Record each call of ``func`` as an OTel-shaped debug span.
 
     Args:
-        func: The function to instrument
-        name: Custom span name (defaults to module.function)
-        category: Span category (e.g., "agent", "tool", "function", "mcp")
-        span_type: Alias for category (deprecated, use category instead)
-        method: MCP method name (e.g., "tools/call", "resources/read").
-            When set, produces MCP spans: name becomes "{method}.mcp",
-            type becomes "SERVER", and request is structured as
-            {"method": ..., "params": ...}.
-        internal_type: Internal span type (e.g., "user-message")
-        record_args: Whether to record function arguments
-        record_result: Whether to record function result
-
-    Returns:
-        The instrumented function
-
-    Examples:
-        @hud.instrument
-        async def process_data(items: list[str]) -> dict:
-            return {"count": len(items)}
-
-        @hud.instrument(category="agent")
-        async def call_model(messages: list) -> str:
-            return await model.generate(messages)
+        func: The function to instrument.
+        name: Custom span name (defaults to ``module.qualname``).
+        record_args: Record bound call arguments as a ``hud.request`` event.
+        record_result: Record the return value as a ``hud.result`` event.
     """
-    effective_category = span_type if span_type is not None else category
-    effective_method = method
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if hasattr(func, "_hud_instrumented"):
@@ -197,96 +129,86 @@ def instrument(
             end_time: str,
             result: Any = None,
             error: str | None = None,
-        ) -> dict[str, Any]:
-            """Build a HudSpan-compatible span record."""
-            is_mcp = effective_method is not None
+        ) -> Span:
+            events: list[SpanEvent] = []
 
-            extra_attrs: dict[str, Any] = {}
-            if is_mcp:
-                extra_attrs["method_name"] = effective_method
-
-            attributes = TraceStep(
-                task_run_id=task_run_id,
-                category="mcp" if is_mcp else effective_category,
-                type="SERVER" if is_mcp else "CLIENT",
-                start_timestamp=start_time,
-                end_timestamp=end_time,
-                **extra_attrs,
-            )
-
-            # Record arguments as request
             if record_args and sig:
                 try:
                     bound_args = sig.bind(*args, **kwargs)
                     bound_args.apply_defaults()
-                    args_dict = {
+                    args_dict: JsonObject = {
                         k: _serialize_value(v)
                         for k, v in bound_args.arguments.items()
                         if k not in ("self", "cls")
                     }
                     if args_dict:
-                        if is_mcp:
-                            attributes.request = {
-                                "method": effective_method,
-                                "params": args_dict,
-                            }
-                        else:
-                            attributes.request = args_dict
-                except Exception as e:
-                    logger.debug("Failed to serialize args: %s", e)
+                        events.append(
+                            SpanEvent(
+                                name="hud.request",
+                                timestamp=start_time,
+                                attributes={PAYLOAD_ATTRIBUTE: args_dict},
+                            )
+                        )
+                except Exception as exc:
+                    logger.debug("Failed to serialize args: %s", exc)
 
-            # Record result
             if record_result and result is not None and error is None:
                 try:
-                    serialized = _serialize_value(result)
-                    if is_mcp and effective_method == "prompts/get":
-                        if isinstance(serialized, str):
-                            serialized = {
-                                "messages": [
-                                    {
-                                        "role": "user",
-                                        "content": {
-                                            "type": "text",
-                                            "text": serialized,
-                                        },
-                                    }
-                                ]
-                            }
-                    elif is_mcp and effective_method == "resources/read":
-                        if isinstance(serialized, list):
-                            serialized = {"contents": serialized}
-                        elif isinstance(serialized, dict) and "reward" in serialized:
-                            uri = args_dict.get("uri", "") if args_dict else ""
-                            serialized = {
-                                "contents": [{"uri": uri, "text": json.dumps(serialized)}]
-                            }
-                    attributes.result = serialized
-                except Exception as e:
-                    logger.debug("Failed to serialize result: %s", e)
+                    events.append(
+                        SpanEvent(
+                            name="hud.result",
+                            timestamp=end_time,
+                            attributes={PAYLOAD_ATTRIBUTE: _serialize_value(result)},
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to serialize result: %s", exc)
 
-            # Build span
-            span_id = uuid.uuid4().hex[:16]
-            effective_name = f"{effective_method}.mcp" if is_mcp else span_name
-            span: dict[str, Any] = {
-                "name": effective_name,
-                "trace_id": _normalize_trace_id(task_run_id),
-                "span_id": span_id,
-                "parent_span_id": None,
-                "start_time": start_time,
-                "end_time": end_time,
-                "status_code": "ERROR" if error else "OK",
-                "status_message": error,
-                "attributes": attributes.model_dump(mode="json", exclude_none=True),
-                "exceptions": [{"message": error}] if error else None,
-            }
-            if internal_type:
-                span["internal_type"] = internal_type
-            return span
+            if error is not None:
+                events.append(
+                    SpanEvent(
+                        name="exception",
+                        timestamp=end_time,
+                        attributes={"exception.message": error},
+                    )
+                )
+
+            return Span(
+                name=span_name,
+                trace_id=normalize_trace_id(task_run_id),
+                span_id=new_span_id(),
+                start_time=start_time,
+                end_time=end_time,
+                status_code="ERROR" if error else "OK",
+                status_message=error,
+                attributes={
+                    TASK_RUN_ID_ATTRIBUTE: task_run_id,
+                    "code.function": func_qualname,
+                    "code.namespace": func_module,
+                },
+                events=events,
+            )
+
+        def _emit_span(
+            task_run_id: str | None,
+            args: tuple[Any, ...],
+            kwargs: dict[str, Any],
+            start_time: str,
+            start_perf: float,
+            result: Any,
+            error: str | None,
+        ) -> None:
+            if task_run_id is None:
+                return
+            end_time = now_iso()
+            span = _build_span(task_run_id, args, kwargs, start_time, end_time, result, error)
+            queue_span(span.model_dump(mode="json"))
+            logger.debug("Span: %s (%.2fms)", span_name, (time.perf_counter() - start_perf) * 1000)
 
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            task_run_id = _get_trace_id()
-            start_time = _now_iso()
+            task_run_id = get_current_trace_id()
+            start_time = now_iso()
             start_perf = time.perf_counter()
             error: str | None = None
             result: Any = None
@@ -298,20 +220,12 @@ def instrument(
                 error = f"{type(e).__name__}: {e}"
                 raise
             finally:
-                end_time = _now_iso()
-                duration_ms = (time.perf_counter() - start_perf) * 1000
-
-                if task_run_id:
-                    span = _build_span(
-                        task_run_id, args, kwargs, start_time, end_time, result, error
-                    )
-                    queue_span(span)
-                    logger.debug("Span: %s (%.2fms)", span_name, duration_ms)
+                _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            task_run_id = _get_trace_id()
-            start_time = _now_iso()
+            task_run_id = get_current_trace_id()
+            start_time = now_iso()
             start_perf = time.perf_counter()
             error: str | None = None
             result: Any = None
@@ -323,15 +237,7 @@ def instrument(
                 error = f"{type(e).__name__}: {e}"
                 raise
             finally:
-                end_time = _now_iso()
-                duration_ms = (time.perf_counter() - start_perf) * 1000
-
-                if task_run_id:
-                    span = _build_span(
-                        task_run_id, args, kwargs, start_time, end_time, result, error
-                    )
-                    queue_span(span)
-                    logger.debug("Span: %s (%.2fms)", span_name, duration_ms)
+                _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
         wrapper = async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
         wrapper._hud_instrumented = True  # type: ignore[attr-defined]

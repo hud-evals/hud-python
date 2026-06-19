@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+from unittest.mock import patch
 
 import pytest
-from mcp import types
 
+from hud.telemetry.context import set_trace_context
 from hud.telemetry.instrument import _serialize_value, instrument
 from hud.types import MCPToolResult
 
@@ -28,7 +30,6 @@ def test_serialize_value_list_truncation():
     """Test _serialize_value truncates long lists."""
     long_list = list(range(20))
     result = _serialize_value(long_list, max_items=5)
-    assert len(result) == 5
     assert result == [0, 1, 2, 3, 4]
 
 
@@ -42,7 +43,7 @@ def test_serialize_value_tuple_truncation():
     """Test _serialize_value truncates long tuples."""
     long_tuple = tuple(range(20))
     result = _serialize_value(long_tuple, max_items=5)
-    assert len(result) == 5
+    assert result == [0, 1, 2, 3, 4]
 
 
 def test_serialize_value_dict():
@@ -55,6 +56,7 @@ def test_serialize_value_dict_truncation():
     """Test _serialize_value truncates large dicts."""
     large_dict = {f"key{i}": i for i in range(20)}
     result = _serialize_value(large_dict, max_items=5)
+    assert isinstance(result, dict)
     assert len(result) == 5
 
 
@@ -87,24 +89,12 @@ def test_serialize_value_fallback():
     assert "WeirdObj" in result
 
 
-def test_serialize_value_empty_tool_result_gets_success_fallback():
-    """Silent successful MCP tool results should be trace-readable."""
+def test_serialize_value_pydantic_model_dumps_generically():
+    """Domain models serialize through the generic pydantic path (no special-casing)."""
     result = _serialize_value(MCPToolResult(content=[], isError=False))
     assert isinstance(result, dict)
     assert result["isError"] is False
-    assert result["content"] == [{"type": "text", "text": "Tool executed successfully"}]
-
-
-def test_serialize_value_tool_result_preserves_real_content():
-    """Tool results with text content should keep that content."""
-    result = _serialize_value(
-        MCPToolResult(
-            content=[types.TextContent(type="text", text="real output")],
-            isError=False,
-        )
-    )
-    assert isinstance(result, dict)
-    assert result["content"][0]["text"] == "real output"
+    assert result["content"] == []
 
 
 @pytest.mark.asyncio
@@ -123,7 +113,7 @@ async def test_instrument_async_basic():
 async def test_instrument_async_with_params():
     """Test instrument with custom parameters."""
 
-    @instrument(name="custom_name", category="custom_type")
+    @instrument(name="custom_name")
     async def test_func(x: int) -> int:
         return x * 2
 
@@ -167,18 +157,6 @@ async def test_instrument_async_no_record_result():
     assert result == "test"
 
 
-@pytest.mark.asyncio
-async def test_instrument_async_with_category():
-    """Test instrument with custom category."""
-
-    @instrument(category="agent")
-    async def test_func() -> int:
-        return 42
-
-    result = await test_func()
-    assert result == 42
-
-
 def test_instrument_sync_basic():
     """Test instrument decorator on sync function."""
 
@@ -193,7 +171,7 @@ def test_instrument_sync_basic():
 def test_instrument_sync_with_params():
     """Test instrument on sync function with parameters."""
 
-    @instrument(name="sync_custom", category="sync_type")
+    @instrument(name="sync_custom")
     def test_func(x: int) -> int:
         return x * 2
 
@@ -232,17 +210,6 @@ def test_instrument_sync_no_record_result():
 
     result = test_func()
     assert result == "test"
-
-
-def test_instrument_sync_with_category():
-    """Test instrument sync with custom category."""
-
-    @instrument(category="tool")
-    def test_func() -> int:
-        return 42
-
-    result = test_func()
-    assert result == 42
 
 
 def test_instrument_already_instrumented():
@@ -386,6 +353,65 @@ def test_instrument_with_parentheses():
         return x + 1
 
     assert test_func(5) == 6
+
+
+@pytest.mark.asyncio
+async def test_instrument_emits_debug_span_under_trace_context():
+    """Spans carry the namespaced run id, no schema tag, and request/result events."""
+    captured: list[dict[str, Any]] = []
+
+    @instrument(name="diag")
+    async def fn(x: int) -> str:
+        return "ok"
+
+    with (
+        patch("hud.telemetry.instrument.queue_span", side_effect=captured.append),
+        set_trace_context("run-123"),
+    ):
+        assert await fn(2) == "ok"
+
+    (span,) = captured
+    assert span["name"] == "diag"
+    assert span["attributes"]["hud.task_run_id"] == "run-123"
+    assert "hud.schema" not in span["attributes"]
+    assert span["status_code"] == "OK"
+    assert [event["name"] for event in span["events"]] == ["hud.request", "hud.result"]
+    assert span["events"][0]["attributes"]["hud.payload"] == {"x": 2}
+
+
+@pytest.mark.asyncio
+async def test_instrument_records_exception_event():
+    captured: list[dict[str, Any]] = []
+
+    @instrument(name="boom")
+    async def fn() -> None:
+        raise ValueError("bad")
+
+    with (
+        patch("hud.telemetry.instrument.queue_span", side_effect=captured.append),
+        set_trace_context("run-123"),
+        pytest.raises(ValueError, match="bad"),
+    ):
+        await fn()
+
+    (span,) = captured
+    assert span["status_code"] == "ERROR"
+    assert span["status_message"] == "ValueError: bad"
+    assert span["events"][-1]["name"] == "exception"
+
+
+@pytest.mark.asyncio
+async def test_instrument_emits_nothing_without_trace_context():
+    captured: list[dict[str, Any]] = []
+
+    @instrument
+    async def fn() -> int:
+        return 1
+
+    with patch("hud.telemetry.instrument.queue_span", side_effect=captured.append):
+        assert await fn() == 1
+
+    assert captured == []
 
 
 @pytest.mark.asyncio

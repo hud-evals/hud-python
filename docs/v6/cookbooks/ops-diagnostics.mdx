@@ -1,0 +1,89 @@
+---
+title: "Ops diagnostics"
+description: "An investigation task where the agent integrates evidence to produce a diagnosis."
+icon: "stethoscope"
+---
+
+A complete, runnable example of an **investigation** task: the agent reads several artifacts, integrates the evidence, and produces a root-cause diagnosis graded by an LLM judge. This is the shape of a good training task — multi-step, multi-channel, and graded on substance.
+
+## The environment
+
+We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files — no single artifact contains the answer.
+
+```python env.py
+from pathlib import Path
+
+from hud.environment import Environment
+from hud.graders import LLMJudgeGrader
+
+ROOT = Path("/workspace/incident")
+env = Environment(name="ops-diagnostics")
+env.workspace("/workspace")
+
+@env.initialize
+async def _seed():
+    ROOT.mkdir(parents=True, exist_ok=True)
+    (ROOT / "api.log").write_text(
+        "12:01 INFO  request /checkout ok 120ms\n"
+        "12:02 WARN  db pool wait 1400ms\n"
+        "12:03 ERROR /checkout 503 upstream timeout\n"
+    )
+    (ROOT / "db.log").write_text(
+        "12:02 connections=100/100 saturated\n"
+        "12:02 slow query: SELECT * FROM carts (no index on user_id)\n"
+    )
+    (ROOT / "deploy.log").write_text("11:58 deployed v412: 'remove cart index migration'\n")
+
+@env.template()
+async def diagnose():
+    answer = yield (
+        "Checkout started returning 503s at 12:03. The logs and deploy history are "
+        "in the incident/ directory of your workspace. What is the root cause, and "
+        "what's the evidence?"
+    )
+    result = await LLMJudgeGrader.grade(
+        weight=1.0,
+        answer=answer,
+        question="Root cause of the checkout 503s",
+        criteria=[
+            "Identifies the removed cart index (deploy v412) as the root cause",
+            "Connects DB pool saturation and the slow cart query to the 503s",
+            ("Cites specific log evidence rather than guessing", 2.0),
+        ],
+    )
+    yield result.value
+
+tasks = [diagnose()]
+```
+
+The answer is the agent's **text diagnosis** (`answer = yield ...`). The judge scores it against weighted criteria via the HUD gateway, no extra install needed.
+
+## Why this is a good training task
+
+It satisfies the [signal](/v6/run/signal) principles:
+
+- **Multi-channel integration** — the cause (a removed index) is in `deploy.log`, but the symptom path runs through `db.log` and `api.log`. No single file is decisive, so the agent must *integrate*.
+- **Multi-step** — the agent reads several files, forms a hypothesis, and checks it against the evidence.
+- **Substance over surface** — the judge credits a correct, evidence-cited diagnosis, not keywords. A generic "it's a database issue" with no evidence scores low.
+- **No leakage** — no file names the root cause as "the bug"; the agent has to derive it.
+
+## Run it
+
+```bash
+hud eval env.py claude
+```
+
+Inspect the trace at [hud.ai](https://hud.ai) to see which files the agent read and how it reasoned — useful for spotting whether the reward tracks real investigation.
+
+## Build a spread
+
+Vary the incident to mint a dataset with a difficulty range — some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/run/signal)).
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent" />
+<Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
+</CardGroup>

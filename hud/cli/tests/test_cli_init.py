@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import tempfile
 from unittest.mock import patch
 
 import pytest
@@ -25,98 +23,6 @@ class TestCLICommands:
         result = runner.invoke(app)
         assert result.exit_code == 2
         assert "Usage:" in result.output
-
-    def test_analyze_docker_image(self) -> None:
-        """Test analyze command with Docker image."""
-        with patch("hud.cli.analyze.asyncio.run") as mock_run:
-            result = runner.invoke(app, ["analyze", "test-image:latest"])
-            assert result.exit_code == 0
-            mock_run.assert_called_once()
-            coro = mock_run.call_args[0][0]
-            assert coro.__name__ == "analyze_from_metadata"
-
-    def test_analyze_with_docker_args(self) -> None:
-        """Test analyze command with additional Docker arguments."""
-        with patch("hud.cli.analyze.asyncio.run") as mock_run:
-            result = runner.invoke(
-                app, ["analyze", "test-image", "--", "-e", "KEY=value", "-p", "8080:8080"]
-            )
-            assert result.exit_code == 0
-            mock_run.assert_called_once()
-
-    def test_analyze_with_config_file(self) -> None:
-        """Test analyze command with config file."""
-        import os
-
-        fd, temp_path = tempfile.mkstemp(suffix=".json")
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump({"test": {"command": "python", "args": ["server.py"]}}, f)
-
-            with patch("hud.cli.analyze.asyncio.run") as mock_run:
-                result = runner.invoke(app, ["analyze", "dummy", "--config", temp_path])
-                assert result.exit_code == 0
-                mock_run.assert_called_once()
-                coro = mock_run.call_args[0][0]
-                assert coro.__name__ == "analyze_environment_from_config"
-        finally:
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                logger.exception("Error deleting temp file")
-
-    def test_analyze_no_arguments_shows_error(self) -> None:
-        """Test analyze without arguments shows error."""
-        result = runner.invoke(app, ["analyze"])
-        assert result.exit_code == 1
-        assert "Error" in result.output
-
-    def test_analyze_output_formats(self) -> None:
-        """Test analyze with different output formats."""
-        for format_type in ["interactive", "json", "markdown"]:
-            with patch("hud.cli.analyze.asyncio.run"):
-                result = runner.invoke(app, ["analyze", "test-image", "--format", format_type])
-                assert result.exit_code == 0
-
-    def test_debug_docker_image(self) -> None:
-        """Test debug command with Docker image."""
-        with patch("hud.cli.debug.asyncio.run") as mock_run:
-            mock_run.return_value = 5
-            result = runner.invoke(app, ["debug", "test-image:latest"])
-            assert result.exit_code == 0
-            mock_run.assert_called_once()
-
-    def test_debug_with_max_phase(self) -> None:
-        """Test debug command with max phase limit."""
-        with patch("hud.cli.debug.asyncio.run") as mock_run:
-            mock_run.return_value = 3
-            result = runner.invoke(app, ["debug", "test-image", "--max-phase", "3"])
-            assert result.exit_code == 0
-
-    def test_debug_with_config_file(self) -> None:
-        """Test debug command with config file."""
-        import os
-
-        fd, temp_path = tempfile.mkstemp(suffix=".json")
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump({"test": {"command": "python", "args": ["server.py"]}}, f)
-
-            with patch("hud.cli.debug.asyncio.run") as mock_run:
-                mock_run.return_value = 5
-                result = runner.invoke(app, ["debug", "dummy", "--config", temp_path])
-                assert result.exit_code == 0
-        finally:
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                logger.exception("Error deleting temp file")
-
-    def test_debug_no_arguments_shows_error(self) -> None:
-        """Test debug without arguments shows error."""
-        result = runner.invoke(app, ["debug"])
-        assert result.exit_code == 1
-        assert "Error" in result.output
 
     def test_version_command(self) -> None:
         """Test version command."""
@@ -146,11 +52,11 @@ class TestCLICommands:
         assert result.exit_code == 2
 
     def test_help_command(self) -> None:
-        """Test help command shows proper info."""
+        """Test help command lists v6 commands."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "analyze" in result.output
-        assert "debug" in result.output
+        assert "eval" in result.output
+        assert "deploy" in result.output
 
 
 class TestMainFunction:

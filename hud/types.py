@@ -1,260 +1,131 @@
+"""Universal SDK shapes, including the trajectory contract.
+
+The trajectory contract: a ``Trace`` is an ordered collection of ``Step``s,
+and recording a step (:meth:`Trace.record`) ships it to the platform as one
+schema-tagged span. ``Step`` here is the shared skeleton every agent family
+and the run harness speak — ordering, source, timing, error — and the
+harness records its own steps directly (``user`` prompt turns, ``task``
+lifecycle calls, ``system`` errors).
+
+Agent families layer their payloads on top by subclassing :class:`Step` —
+the tool-agent family adds LLM responses and tool calls in
+:mod:`hud.agents.types` under the ``hud.step.v1`` schema; other families
+(e.g. robot) bring their own payload fields under their own ``schema_tag``
+and inherit the transport. The platform's serializer registry dispatches on
+the schema tag, so each family decodes losslessly without this module or the
+telemetry pipe (:mod:`hud.telemetry`) knowing any payload shape.
+"""
+
 from __future__ import annotations
 
+import contextlib
 import json
-import logging
 import uuid
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias, TypeVar, cast
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
-from hud.settings import settings
-from hud.utils.env import resolve_env_vars as _resolve_env_vars
-from hud.utils.tool_shorthand import normalize_to_tool_call_dict
+from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.exporter import queue_span
+from hud.telemetry.span import (
+    PAYLOAD_ATTRIBUTE,
+    SCHEMA_ATTRIBUTE,
+    TASK_RUN_ID_ATTRIBUTE,
+    Span,
+    new_span_id,
+    normalize_trace_id,
+)
+from hud.utils.serialization import JsonObject, JsonValue
+from hud.utils.time import now_iso
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-# Guard to ensure we only log missing HUD_API_KEY once
-_missing_api_key_error_logged: bool = False
+    from hud.agents.claude import ClaudeAgent
+    from hud.agents.gemini import GeminiAgent
+    from hud.agents.openai import OpenAIAgent
+    from hud.agents.openai_compatible import OpenAIChatAgent
+    from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+
+    AgentClass: TypeAlias = type[ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent]
+    AgentConfigClass: TypeAlias = type[
+        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
+    ]
+
+T = TypeVar("T")
 
 
 class AgentType(str, Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
-    OPERATOR = "operator"
     GEMINI = "gemini"
-    GEMINI_CUA = "gemini_cua"
     OPENAI_COMPATIBLE = "openai_compatible"
-    INTEGRATION_TEST = "integration_test"
 
     @property
-    def cls(self) -> type:
-        if self == AgentType.CLAUDE:
-            from hud.agents.claude import ClaudeAgent
+    def cls(self) -> AgentClass:
+        match self:
+            case AgentType.CLAUDE:
+                from hud.agents import ClaudeAgent
 
-            return ClaudeAgent
-        elif self == AgentType.OPENAI:
-            from hud.agents import OpenAIAgent
+                return ClaudeAgent
+            case AgentType.OPENAI:
+                from hud.agents import OpenAIAgent
 
-            return OpenAIAgent
-        elif self == AgentType.OPERATOR:
-            from hud.agents import OperatorAgent
+                return OpenAIAgent
+            case AgentType.GEMINI:
+                from hud.agents import GeminiAgent
 
-            return OperatorAgent
-        elif self == AgentType.GEMINI:
-            from hud.agents.gemini import GeminiAgent
+                return GeminiAgent
+            case AgentType.OPENAI_COMPATIBLE:
+                from hud.agents import OpenAIChatAgent
 
-            return GeminiAgent
-        elif self == AgentType.GEMINI_CUA:
-            from hud.agents.gemini_cua import GeminiCUAAgent
-
-            return GeminiCUAAgent
-        elif self == AgentType.OPENAI_COMPATIBLE:
-            from hud.agents.openai_chat import OpenAIChatAgent
-
-            return OpenAIChatAgent
-        elif self == AgentType.INTEGRATION_TEST:
-            from hud.agents.misc.integration_test_agent import IntegrationTestRunner
-
-            return IntegrationTestRunner
-        else:
-            raise ValueError(f"Unsupported agent type: {self}")
+                return OpenAIChatAgent
 
     @property
-    def config_cls(self) -> type:
+    def config_cls(self) -> AgentConfigClass:
         """Get config class without importing agent (avoids SDK dependency)."""
-        from hud.agents.types import (
-            ClaudeConfig,
-            GeminiConfig,
-            GeminiCUAConfig,
-            OpenAIChatConfig,
-            OpenAIConfig,
-            OperatorConfig,
-        )
+        from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 
-        mapping: dict[AgentType, type] = {
-            AgentType.CLAUDE: ClaudeConfig,
-            AgentType.OPENAI: OpenAIConfig,
-            AgentType.OPERATOR: OperatorConfig,
-            AgentType.GEMINI: GeminiConfig,
-            AgentType.GEMINI_CUA: GeminiCUAConfig,
-            AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
-            AgentType.INTEGRATION_TEST: BaseAgentConfig,
-        }
-        if self not in mapping:
-            raise ValueError(f"Unsupported agent type for config: {self}")
-        return mapping[self]
+        match self:
+            case AgentType.CLAUDE:
+                return ClaudeConfig
+            case AgentType.OPENAI:
+                return OpenAIConfig
+            case AgentType.GEMINI:
+                return GeminiConfig
+            case AgentType.OPENAI_COMPATIBLE:
+                return OpenAIChatConfig
 
+    @property
+    def gateway_provider(self) -> str:
+        """Default provider client used when this agent type is a gateway shortcut."""
+        match self:
+            case AgentType.CLAUDE:
+                return "anthropic"
+            case AgentType.OPENAI:
+                return "openai"
+            case AgentType.GEMINI:
+                return "gemini"
+            case AgentType.OPENAI_COMPATIBLE:
+                return "openai"
 
-class BaseAgentConfig(BaseModel):
-    """Agent configuration for LLM-specific settings.
-
-    Note: allowed_tools, disallowed_tools, response_tool_name, append_setup_output,
-    and initial_screenshot are kept for backwards compatibility with v4 task configs
-    but are no longer applied at the agent level. These should be configured on the
-    Environment/Task instead.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
-
-    # LLM-specific setting
-    system_prompt: str | None = None
-
-    # Deprecated: kept for backwards compat with v4 task configs
-    # allowed_tools/disallowed_tools are applied at Environment level
-    # append_setup_output is applied by EvalContext -> agent
-    # response_tool_name and initial_screenshot are parsed but NOT implemented
-    allowed_tools: list[str] | None = None
-    disallowed_tools: list[str] | None = None
-    response_tool_name: str | None = None  # Not implemented
-    append_setup_output: bool = False
-    append_setup_tool: bool = False  # Alias for append_setup_output
-    initial_screenshot: bool = False  # Not implemented
-
-
-class LegacyTask(BaseModel):
-    """
-    DEPRECATED: Use Task from env() instead.
-
-    A task configuration that can be used to create a task.
-
-    The mcp_config field supports environment variable substitution using
-    template placeholders in the format ${VAR_NAME} or ${VAR_NAME:default_value}.
-
-    .. deprecated:: 0.5.0
-        LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0
-        (no earlier than March 1st, 2026).
-
-        Use one of these migration paths:
-
-        1. Quick conversion: ``Task.from_v4(legacy_task)`` converts LegacyTask to Task
-        2. Full migration: Use ``@env.scenario()`` with setup code before first yield
-           and evaluate code after first yield
-
-        See https://docs.hud.ai/migration for the full migration guide.
-
-    Example (deprecated):
-        mcp_config: {
-            "hud": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
-                "headers": {
-                    "Authorization": "Bearer ${HUD_API_KEY}",
-                    "Mcp-Image": "your-mcp-image"
-                }
-            }
-        }
-    """
-
-    id: str | None = None
-    prompt: str
-    mcp_config: dict[str, Any]
-    setup_tool: MCPToolCall | list[MCPToolCall] | None = None
-    evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
-    integration_test_tool: MCPToolCall | list[MCPToolCall] | None = None
-    agent_config: BaseAgentConfig | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    def __init__(self, **data: Any) -> None:
-        """Initialize LegacyTask with deprecation warning."""
-        import warnings
-
-        warnings.warn(
-            "LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0 "
-            "(no earlier than March 1st, 2026). "
-            "Use Task.from_v4() for quick conversion, or migrate to @env.scenario(). "
-            "See https://docs.hud.ai/migration for details.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(**data)
-
-    @field_validator("mcp_config", "metadata", mode="before")
     @classmethod
-    def parse_json_strings(cls, v: Any) -> Any:
-        """Parse JSON strings into dictionaries."""
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
+    def of(cls, agent: object) -> AgentType | None:
+        """The gateway agent type *agent* is an instance of, or ``None``.
 
-                raise HudConfigError(f"Invalid JSON string: {e}") from e
-        return v
-
-    @field_validator("agent_config", mode="before")
-    @classmethod
-    def parse_agent_config(cls, v: Any) -> BaseAgentConfig | None:
-        """Parse agent_config into BaseAgentConfig."""
-        if v is None:
-            return None
-        if isinstance(v, BaseAgentConfig):
-            return v
-        if isinstance(v, str):
-            try:
-                v = json.loads(v)
-            except json.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
-
-                raise HudConfigError(f"Invalid JSON string for agent_config: {e}") from e
-        if isinstance(v, dict):
-            return BaseAgentConfig(**v)
-        return v
-
-    @field_validator("setup_tool", "evaluate_tool", "integration_test_tool", mode="before")
-    @classmethod
-    def convert_dict_to_tool_call(cls, v: Any, info: Any) -> Any:
-        """Convert dict (with shorthands) to MCPToolCall instance.
-
-        Supports nested forms by walking to the deepest tool name and its arguments.
-        Examples:
-        - {"name": "navigate", "arguments": {...}} -> name=navigate
-        - {"navigate": {...}} -> name=navigate
-        - {"setup": {"navigate": {...}}} -> name=navigate
-        - {"name": "setup", "arguments": {"name": "navigate", "arguments": {...}}}
-          -> name=navigate
-        - Lists are normalized element-wise
+        Reverse of :attr:`cls`. Provider extras (anthropic, google-genai, ...)
+        may be uninstalled, so importing a type's agent class can fail; that
+        simply means *agent* is not that type. ``None`` for a custom ``Agent``
+        subclass that is not one of the gateway shortcuts.
         """
-        if v is None:
-            return None
-
-        # Parse JSON string if needed
-        if isinstance(v, str):
-            try:
-                v = json.loads(v)
-            except json.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
-
-                raise HudConfigError(f"Invalid JSON string: {e}") from e
-
-        normalized = normalize_to_tool_call_dict(v)
-
-        if isinstance(normalized, dict):
-            return MCPToolCall(**normalized)
-        if isinstance(normalized, list):
-            return [MCPToolCall(**item) if isinstance(item, dict) else item for item in normalized]
-        return v
-
-    @field_validator("mcp_config", mode="before")
-    @classmethod
-    def resolve_env_vars(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """
-        Automatically resolve environment variables in mcp_config.
-
-        Supports ${VAR_NAME} syntax with variable substitution from
-        system environment variables and settings (including HUD_API_KEY, etc.)
-
-        Missing variables resolve to empty strings.
-        """
-        # Warn once if HUD_API_KEY is not set
-        if not settings.api_key:
-            global _missing_api_key_error_logged
-            if not _missing_api_key_error_logged:
-                logger.error("HUD_API_KEY is not set, tracing and remote training will not work")
-                _missing_api_key_error_logged = True
-
-        return _resolve_env_vars(v)
+        for agent_type in cls:
+            with contextlib.suppress(Exception):
+                if isinstance(agent, agent_type.cls):
+                    return agent_type
+        return None
 
 
 class MCPToolCall(CallToolRequestParams):
@@ -262,6 +133,7 @@ class MCPToolCall(CallToolRequestParams):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
     annotation: str | None = None  # Optional explanation of why this action is taken
+    provider_name: str | None = None  # Original provider tool name when it differs from MCP name
 
     def __str__(self) -> str:
         """Format tool call as plain text."""
@@ -339,156 +211,202 @@ class MCPToolResult(CallToolResult):
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
-class InferenceResult(BaseModel):
-    """Result of a single LLM inference call.
+# -----------------------------------------------------------------------------
+# Trajectory contract
+# -----------------------------------------------------------------------------
 
-    Returned by provider agents' ``get_response()`` methods.  Carries the
-    model's text output, any tool calls it wants to make, and provider-
-    specific metadata like reasoning traces and citations.
+#: Schema tag of the core step stream (the tool-agent family shares it).
+STEP_SCHEMA = "hud.step.v1"
+ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
+
+StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
+RobotStepSource: TypeAlias = Literal["observation", "inference"]
+
+
+class TaskCall(BaseModel):
+    """The task-lifecycle RPC a ``task`` step records.
+
+    ``setup`` is ``tasks.start`` (result carries the opening prompt payload);
+    ``evaluate`` is ``tasks.grade`` (result carries the evaluation dict).
     """
 
-    # --- FUNCTIONAL ---
-    tool_calls: list[MCPToolCall] = Field(default_factory=list)
-    done: bool = Field(default=False)
-
-    # --- TELEMETRY [hud.ai] ---
-    # Responses
-    content: str | None = Field(default=None)
-    reasoning: str | None = Field(default=None)
-    info: dict[str, Any] = Field(default_factory=dict)
-    isError: bool = Field(default=False)
-    raw: Any | None = Field(default=None)  # Include raw response for access to Choice objects
-
-    # --- RESPONSE METADATA ---
-    # Populated by provider agents when citations are available.
-    # Uses dict form of Citation (provider-normalized) so InferenceResult
-    # doesn't depend on hud.tools.types at import time.
-    citations: list[dict[str, Any]] = Field(default_factory=list)
-
-    # Timestamps
-    start_timestamp: str | None = None
-    end_timestamp: str | None = None
-
-    def __str__(self) -> str:
-        response = ""
-        if self.reasoning:
-            response += f"Reasoning: {self.reasoning}\n"
-        if self.content:
-            response += f"Content: {self.content}\n"
-        if self.tool_calls:
-            response += f"""Tool Calls: {
-                ", ".join([f"{tc.name}: {tc.arguments}" for tc in self.tool_calls])
-            }"""
-        if self.raw:
-            response += f"Raw: {self.raw}"
-        return response
-
-
-# Backwards-compatible alias (deprecated — use InferenceResult)
-AgentResponse = InferenceResult
-
-
-class TraceStep(BaseModel):
-    """Canonical data for a single span (shared with telemetry)."""
-
-    # HUD identifiers
-    task_run_id: str | None = Field(default=None)
-    job_id: str | None = Field(default=None)
-
-    # Span category - can be any string, but "mcp" and "agent" are privileged on the platform
-    category: Literal["mcp", "agent"] | str = Field(default="mcp")  # noqa: PYI051
-
-    # Generic I/O fields - works for any category
-    request: Any | None = None
-    result: Any | None = None
-
-    # Generic span info
-    type: str = Field(default="CLIENT")
-
-    # Timestamps (optional, for local tracking)
-    start_timestamp: str | None = None
-    end_timestamp: str | None = None
-
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
-
-
-class HudSpan(BaseModel):
-    """A telemetry span ready for export to HUD API."""
-
+    phase: Literal["setup", "evaluate"]
     name: str
-    trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
-    span_id: str = Field(pattern=r"^[0-9a-fA-F]{16}$")
-    parent_span_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{16}$")
+    arguments: JsonValue = None
+    result: JsonValue = None
 
-    start_time: str  # ISO format
-    end_time: str  # ISO format
 
-    status_code: str  # "UNSET", "OK", "ERROR"
-    status_message: str | None = None
+class Step(BaseModel):
+    """One ordered interaction unit in a task run — the shared skeleton.
 
-    attributes: TraceStep
-    exceptions: list[dict[str, Any]] | None = None
-    internal_type: str | None = None
+    Carries what every family and the harness need: position, ``source``,
+    timing, ``error``, and the harness payloads — ``messages`` (user/system
+    prompt turns, kept as structured ``PromptMessage``s so multimodal content
+    is preserved) and ``task_call`` (task lifecycle RPC). Agent families
+    subclass this with their own payload fields (e.g.
+    :class:`hud.agents.types.AgentStep`) and, for a new wire schema, their
+    own ``schema_tag``.
+    """
+
+    #: Schema tag this step ships under; families with their own wire schema
+    #: override it (the platform's serializer registry dispatches on it).
+    schema_tag: ClassVar[str] = STEP_SCHEMA
+
+    # Sequential position in the trace, assigned by ``Trace`` (1-based).
+    step_id: int | None = None
+    source: StepSource
+
+    messages: list[types.PromptMessage] = Field(default_factory=list[types.PromptMessage])
+    task_call: TaskCall | None = None
+
+    error: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    extra: JsonObject = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 
+    def emit(self) -> None:
+        """Queue this step for export as a span tagged with its schema.
+
+        The payload is the step's own dump, so family subclasses ship their
+        full payload under their ``schema_tag`` with no extra wiring. No-op
+        without an ambient trace context (nothing to attribute it to).
+
+        :meth:`Trace.record` calls this for every recorded step; calling it
+        directly is for steps that report outside their own local trace
+        (e.g. a ``SubagentStep`` reporting a sub-rollout to the enclosing
+        trace context).
+        """
+        task_run_id = get_current_trace_id()
+        if not task_run_id:
+            return
+
+        now = now_iso()
+        payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
+        # make span from step
+        span = Span(
+            name=f"step.{self.source}",
+            trace_id=normalize_trace_id(task_run_id),
+            span_id=new_span_id(),
+            start_time=self.started_at or now,
+            end_time=self.ended_at or now,
+            status_code="ERROR" if self.error else "OK",
+            status_message=self.error,
+            attributes={
+                SCHEMA_ATTRIBUTE: self.schema_tag,
+                TASK_RUN_ID_ATTRIBUTE: task_run_id,
+                PAYLOAD_ATTRIBUTE: payload,
+            },
+        )
+        queue_span(span.model_dump(mode="json"))
+
+
+TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
+
 
 class Trace(BaseModel):
-    """Unified result from agent execution (task or prompt).
+    """The agent's trajectory for one rollout — ordered ``Step``s that ship as spans.
 
-    Fields:
-    - done: Whether the run is complete
-    - reward: The reward for the run
-    - info: Additional metadata for the run
-    - content: The final content/response from the agent
-    - isError: Whether the execution resulted in an error
-    - citations: Provider-normalized citations from the final inference
-    - trace: The steps taken in the run (empty if not tracing)
+    A serializable list of ordered ``Step``s plus the run summary: ``status``
+    and the final ``content`` (the graded answer). Everything else the summary
+    exposes is *derived* from the steps — the steps are the record, the
+    summary is a view. :meth:`final` and :meth:`collect` are the two derivation
+    shapes (newest answer wins / every answer in order); ``error`` is a view
+    built on them, and family-specific reads use the same queries with family
+    vocabulary at the call site (e.g. the tool-agent family's reply citations,
+    or its token samples for an external trainer). The unit of training
+    data — family payloads on the steps carry the trainable record.
+    :meth:`record` is the single write path: it appends *and* streams the
+    step to the platform. The task lifecycle (prompt, reward, evaluation)
+    and the live connection live on ``Run``, not here.
+
+    ``steps`` hold family subclasses at runtime; dumps serialize each step by
+    its runtime type so family payloads survive serialization.
     """
 
-    reward: float = Field(default=0.0)
-    done: bool = Field(default=True)
-    info: dict[str, Any] = Field(default_factory=dict)
+    steps: list[SerializeAsAny[Step]] = Field(default_factory=list[Step])
+
+    status: TraceStatus | None = None
     content: str | None = Field(default=None)
-    isError: bool = Field(default=False)
 
-    # Response metadata carried from the final InferenceResult
-    citations: list[dict[str, Any]] = Field(default_factory=list)
+    # Trajectory metadata that has no structured home (provider session info,
+    # external-SDK run stats). Never load-bearing for the platform.
+    extra: JsonObject = Field(default_factory=dict)
 
-    # Metadata
-    task: LegacyTask | None = Field(default=None)
+    # Keys the server-side-collected trajectory; None for eval-only runs.
+    trace_id: str | None = Field(default=None)
 
-    # Trace
-    trace: list[TraceStep] = Field(default_factory=list)
-    messages: list[Any] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
 
-    def __len__(self) -> int:
-        return len(self.trace)
+    def final(self, get: Callable[[Step], T | None]) -> T | None:
+        """The newest step's answer to *get* — the finalized-field query.
+
+        Asks steps newest-first and returns the first non-``None`` answer
+        (``None`` from a step means "no answer here", so falsy answers like
+        ``""`` or ``[]`` still win). ``None`` when no step answers. Derived
+        summary fields are views on this — see ``error``.
+        """
+        return next(
+            (value for step in reversed(self.steps) if (value := get(step)) is not None),
+            None,
+        )
+
+    def collect(self, get: Callable[[Step], T | None]) -> list[T]:
+        """Every step's answer to *get*, in step order — the gathering query.
+
+        Steps answering ``None`` are skipped. Family-specific reads keep
+        their vocabulary at the call site, e.g. the tool-agent family's
+        training samples::
+
+            trace.collect(lambda s: s.sample if isinstance(s, AgentStep) else None)
+        """
+        return [value for step in self.steps if (value := get(step)) is not None]
 
     @property
-    def num_messages(self) -> int:
-        return len(self.messages)
+    def is_error(self) -> bool:
+        return self.status == "error"
 
-    def append(self, step: TraceStep) -> None:
-        self.trace.append(step)
+    @property
+    def error(self) -> str | None:
+        """The most recent step error, if any (errors live on steps)."""
+        return self.final(lambda step: step.error)
 
+    @model_validator(mode="after")
+    def _number_steps(self) -> Trace:
+        for index, step in enumerate(self.steps, start=1):
+            step.step_id = index
+        return self
 
-# Re-export Task for backwards compatibility (after module defs to avoid circular import)
-from hud.eval.task import Task  # noqa: E402
+    def record(self, step: Step) -> None:
+        """Append one step and stream it to the platform — the single write path.
 
-# Type alias for functions that accept v5 Task, v4 LegacyTask, or raw dicts
-TaskInput = Task | LegacyTask | dict[str, Any]
+        Numbers the step, stamps ``ended_at`` when unset (a step ends when
+        it's recorded), appends it, and emits it as a span (a no-op without
+        an ambient trace context). Callers stamp ``started_at`` themselves
+        when the step wraps awaited work — only the call site knows when
+        that began.
+        """
+        step.step_id = len(self.steps) + 1
+        if step.ended_at is None:
+            step.ended_at = now_iso()
+        self.steps.append(step)
+        step.emit()
+
+    def __len__(self) -> int:
+        return len(self.steps)
+
 
 __all__ = [
-    "AgentResponse",
+    "STEP_SCHEMA",
     "AgentType",
-    "HudSpan",
-    "InferenceResult",
-    "LegacyTask",
+    "JsonObject",
+    "JsonValue",
     "MCPToolCall",
     "MCPToolResult",
-    "Task",
-    "TaskInput",
+    "Step",
+    "StepSource",
+    "TaskCall",
     "Trace",
-    "TraceStep",
+    "TraceStatus",
 ]

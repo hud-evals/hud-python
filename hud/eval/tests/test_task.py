@@ -1,347 +1,271 @@
-"""Tests for hud.eval.task module."""
+"""``Task`` construction, the portable row shape, and taskset collection.
+
+The model is the row: plain pydantic (``model_validate``/``model_dump``) is the
+whole codec for ``hud sync`` and the JSON/JSONL taskset path. ``env`` is carried
+as its name, the join key to whatever placement can bring that environment up.
+Placement is never part of the row — without an ``runtime=`` provider, execution
+defaults to the HUD runtime tunnel by env name.
+"""
 
 from __future__ import annotations
 
+import json
+from typing import TYPE_CHECKING, cast
+
 import pytest
 
-from hud.eval.task import Task, TaskAgentConfig
-
-
-class TestTaskSerialization:
-    """Tests for Task serialization and roundtrip."""
-
-    def test_v5_task_roundtrip(self) -> None:
-        """v5 Task serializes and deserializes correctly."""
-        task = Task(
-            env={"name": "browser", "include": ["navigate", "click"]},
-            scenario="checkout",
-            id="task-1",
-            args={"user_id": "alice"},
-        )
-
-        # Serialize
-        data = task.model_dump(mode="json")
-
-        # Should have v5 format
-        assert "env" in data
-        assert data["env"]["name"] == "browser"
-        assert data["scenario"] == "checkout"
-        assert data["id"] == "task-1"
-
-        # Recreate from serialized data
-        task2 = Task(**data)
-
-        # Serialize again
-        data2 = task2.model_dump(mode="json")
-
-        # Should be identical
-        assert data == data2
-
-    def test_v4_task_roundtrip(self) -> None:
-        """v4 Task serializes (flattens) and deserializes correctly."""
-        v4_dict = {
-            "prompt": "Go to google.com and search for cats",
-            "mcp_config": {
-                "browser": {"url": "http://localhost:8080"},
-            },
-            "evaluate_tool": {"name": "check_url", "arguments": {"contains": "google"}},
-            "setup_tool": {"name": "navigate", "arguments": {"url": "about:blank"}},
-            "id": "v4-task-1",
-            "agent_config": {"system_prompt": "You are a helpful assistant"},
-            "metadata": {"category": "navigation"},
-        }
-
-        # Create Task from v4 dict
-        task = Task.from_v4(v4_dict)
-
-        # Serialize (should flatten to v4 format)
-        data = task.model_dump(mode="json")
-
-        # Should have v4 format (flat, not nested env)
-        assert "prompt" in data
-        assert "mcp_config" in data
-        assert "evaluate_tool" in data
-        assert data["prompt"] == "Go to google.com and search for cats"
-        assert data["id"] == "v4-task-1"
-
-        # Recreate from serialized data
-        task2 = Task(**data)
-
-        # Serialize again
-        data2 = task2.model_dump(mode="json")
-
-        # Should be identical
-        assert data == data2
-
-    def test_v4_preserves_agent_config(self) -> None:
-        """v4 Task preserves agent_config through roundtrip."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {"system_prompt": "Custom system prompt"},
-        }
-
-        task = Task.from_v4(v4_dict)
-        data = task.model_dump(mode="json")
-
-        # agent_config should preserve system_prompt and restore tool filters
-        agent_config = data.get("agent_config")
-        assert agent_config is not None
-        assert agent_config["system_prompt"] == "Custom system prompt"
-        # allowed_tools defaults to ["*"] when not specified (restored during serialization)
-        assert agent_config["allowed_tools"] == ["*"]
-        # These have default False values from TaskAgentConfig
-        assert agent_config["append_setup_output"] is False
-        assert agent_config["append_setup_tool"] is False
-
-        # Roundtrip
-        task2 = Task(**data)
-        assert task2.agent_config is not None
-        assert isinstance(task2.agent_config, TaskAgentConfig)
-        assert task2.agent_config.system_prompt == "Custom system prompt"
-        # Tool filters should be on Environment after roundtrip
-        assert task2.env is not None
-        assert task2.env._agent_include is None  # ["*"] → None
-
-    def test_v4_preserves_metadata(self) -> None:
-        """v4 Task preserves metadata through roundtrip."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "metadata": {"key1": "value1", "key2": 42},
-        }
-
-        task = Task.from_v4(v4_dict)
-        data = task.model_dump(mode="json")
-
-        assert data.get("metadata") == {"key1": "value1", "key2": 42}
-
-        # Roundtrip
-        task2 = Task(**data)
-        assert task2.metadata == {"key1": "value1", "key2": 42}
-
-
-class TestTaskValidation:
-    """Tests for Task validation."""
-
-    def test_v5_allows_none_env(self) -> None:
-        """v5 Task allows None env (for blank evals)."""
-        task = Task(scenario="test")  # env=None is valid
-        assert task.env is None
-        assert task.scenario == "test"
-
-    def test_v4_requires_evaluate_tool(self) -> None:
-        """v4 Task requires evaluate_tool for validation."""
-        from hud.eval.utils import validate_v4_task
-
-        with pytest.raises(ValueError, match="evaluate_tool"):
-            validate_v4_task(
-                {
-                    "prompt": "test",
-                    "mcp_config": {"server": {}},
-                    # Missing evaluate_tool
-                }
-            )
-
-    def test_agent_config_accepts_dict(self) -> None:
-        """agent_config can be provided as dict and gets converted."""
-        task = Task(
-            env={"name": "browser"},
-            agent_config={"system_prompt": "Hello"},
-        )
-
-        assert isinstance(task.agent_config, TaskAgentConfig)
-        assert task.agent_config.system_prompt == "Hello"
-
-
-class TestValidationAnnotation:
-    """Tests that annotation is preserved through validation sequences (golden traces)."""
-
-    def test_validation_preserves_annotation_from_mcp_tool_call(self) -> None:
-        """Annotation set on MCPToolCall objects survives Task construction."""
-        from hud.types import MCPToolCall
-
-        task = Task(
-            env={"name": "browser"},
-            scenario="checkout",
-            validation=[
-                MCPToolCall(name="click", arguments={"x": 1}, annotation="Open the cart"),
-                MCPToolCall(name="submit", arguments={}, annotation="Confirm purchase"),
-            ],
-        )
-
-        assert task.validation is not None
-        assert task.validation[0].annotation == "Open the cart"
-        assert task.validation[1].annotation == "Confirm purchase"
-
-    def test_validation_preserves_annotation_from_dict(self) -> None:
-        """Annotation in raw dicts is preserved through convert_validation."""
-        task = Task(
-            env={"name": "browser"},
-            scenario="checkout",
-            validation=[  # type: ignore[arg-type]
-                {"name": "click", "arguments": {"x": 1}, "annotation": "Open the cart"},
-                {"name": "submit", "arguments": {}},
-            ],
-        )
-
-        assert task.validation is not None
-        assert task.validation[0].annotation == "Open the cart"
-        assert task.validation[1].annotation is None
-
-    def test_v5_validation_annotation_roundtrip(self) -> None:
-        """Annotation survives full Task serialize -> deserialize roundtrip."""
-        from hud.types import MCPToolCall
-
-        task = Task(
-            env={"name": "browser"},
-            scenario="checkout",
-            validation=[
-                MCPToolCall(name="click", arguments={"x": 1}, annotation="Step 1"),
-            ],
-        )
-
-        data = task.model_dump(mode="json")
-        restored = Task(**data)
-
-        assert restored.validation is not None
-        assert restored.validation[0].annotation == "Step 1"
-        assert restored.validation[0].name == "click"
-        assert restored.validation[0].arguments == {"x": 1}
-
-
-class TestV4AgentConfigToolFilters:
-    """Tests for v4 agent_config.allowed_tools and disallowed_tools processing."""
-
-    def test_v4_extracts_allowed_tools(self) -> None:
-        """v4 allowed_tools is extracted and stored on Environment."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["browser_*", "file_read"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        assert task.env._agent_include == ["browser_*", "file_read"]
-
-    def test_v4_extracts_disallowed_tools(self) -> None:
-        """v4 disallowed_tools is extracted and stored on Environment."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "disallowed_tools": ["*setup*", "*evaluate*", "checkout_branch"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        assert task.env._agent_exclude == ["*setup*", "*evaluate*", "checkout_branch"]
-
-    def test_v4_wildcard_star_allowed_converts_to_none(self) -> None:
-        """v4 allowed_tools=['*'] converts to None (meaning include all)."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        # ["*"] should be converted to None
-        assert task.env._agent_include is None
-
-    def test_v4_both_allowed_and_disallowed(self) -> None:
-        """v4 supports both allowed_tools and disallowed_tools together."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-                "disallowed_tools": ["*setup*", "*evaluate*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        assert task.env is not None
-        assert task.env._agent_include is None  # ["*"] → None
-        assert task.env._agent_exclude == ["*setup*", "*evaluate*"]
-
-    @pytest.mark.asyncio
-    async def test_v4_tool_filters_applied_in_as_tools(self) -> None:
-        """v4 tool filters are applied when calling env.as_tools()."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-                "disallowed_tools": ["*setup*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-        env = task.env
-        assert env is not None
-
-        # Add local tools to test filtering
-        @env.tool()
-        def my_setup_tool() -> str:
-            """Should be filtered out."""
-            return "setup"
-
-        @env.tool()
-        def run_query() -> str:
-            """Should be visible."""
-            return "query"
-
-        await env._build_routing()
-
-        tools = env.as_tools()
-        tool_names = [t.name for t in tools]
-
-        assert "my_setup_tool" not in tool_names
-        assert "run_query" in tool_names
-
-    def test_v4_tool_filters_preserved_in_serialization(self) -> None:
-        """v4 tool filters are preserved when serializing for remote execution."""
-        v4_dict = {
-            "prompt": "Test prompt",
-            "mcp_config": {"server": {"url": "http://localhost"}},
-            "evaluate_tool": {"name": "check", "arguments": {}},
-            "agent_config": {
-                "allowed_tools": ["*"],
-                "disallowed_tools": ["*setup*", "*evaluate*", "*grade*"],
-            },
-        }
-
-        task = Task.from_v4(v4_dict)
-
-        # Serialize (this is what gets sent to remote execution)
-        data = task.model_dump(mode="json")
-
-        # agent_config must include the tool filters for remote execution
-        assert "agent_config" in data
-        assert data["agent_config"]["allowed_tools"] == ["*"]
-        assert data["agent_config"]["disallowed_tools"] == ["*setup*", "*evaluate*", "*grade*"]
-
-        # Verify roundtrip works (remote worker will deserialize this)
-        task2 = Task(**data)
-        assert task2.env is not None
-        assert task2.env._agent_include is None  # ["*"] → None
-        assert task2.env._agent_exclude == ["*setup*", "*evaluate*", "*grade*"]
+from hud.environment import Environment
+from hud.eval import (
+    HUDRuntime,
+    Run,
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeResources,
+    Task,
+    Taskset,
+)
+
+if TYPE_CHECKING:
+    from hud.agents.base import Agent
+
+
+def test_env_task_call_returns_public_task() -> None:
+    env = Environment("e")
+
+    @env.template()
+    async def solve(n: int):
+        yield f"solve:{n}"
+        yield 1.0
+
+    runnable = solve(n=3)
+    assert isinstance(runnable, Task)
+    assert runnable.id == "solve"
+    assert runnable.args == {"n": 3}
+    assert runnable.env == "e"  # the row carries the env's name, not the object
+
+
+def test_default_slug_is_task_id_without_args() -> None:
+    v = Task(env="e", id="solve")
+    assert v.default_slug() == "solve"
+
+
+def test_default_slug_is_deterministic_with_args() -> None:
+    a = Task(env="e", id="solve", args={"b": 2, "a": 1})
+    b = Task(env="e", id="solve", args={"a": 1, "b": 2})  # key order differs
+    assert a.default_slug() == b.default_slug()  # stable: keys sorted
+    assert a.default_slug().startswith("solve-")
+    assert a.default_slug() != Task(env="e", id="solve", args={"a": 9}).default_slug()
+
+
+# ─── the portable row shape ────────────────────────────────────────────
+
+
+def test_env_serializes_as_name_reference() -> None:
+    v = Task(env="team-intel", id="ask", args={"x": 1})
+    data = v.model_dump(exclude_none=True)
+    assert data["env"] == "team-intel"
+    assert data["id"] == "ask"
+    assert data["args"] == {"x": 1}
+
+
+def test_compact_dump_omits_unset_metadata() -> None:
+    data = Task(env="e", id="t").model_dump(exclude_none=True)
+    assert set(data) == {"env", "id", "args"}  # no None slug/validation/etc.
+
+    data2 = Task(env="e", id="t", slug="s").model_dump(exclude_none=True)
+    assert data2["slug"] == "s"
+
+
+def test_roundtrip_is_stable_through_plain_pydantic() -> None:
+    original = Task(
+        env="team-intel",
+        id="ask",
+        args={"difficulty": 3},
+        slug="ask-v1",
+        validation=[{"name": "submit", "arguments": {"answer": "x"}}],
+        agent_config={"system_prompt": "be precise"},
+    ).model_dump(exclude_none=True)
+
+    rebuilt = Task.model_validate(original)
+
+    assert rebuilt.env == "team-intel"  # the name is the reference
+    assert rebuilt.id == "ask"
+    assert rebuilt.args == {"difficulty": 3}
+    assert rebuilt.slug == "ask-v1"
+    assert rebuilt.validation == original["validation"]
+    assert rebuilt.agent_config == {"system_prompt": "be precise"}
+    # ...and re-serializing yields the same portable dict.
+    assert rebuilt.model_dump(exclude_none=True) == original
+
+
+def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
+    original = Task(
+        env="browser",
+        id="checkout",
+        runtime_config=RuntimeConfig(
+            image="hud-browser:firefox",
+            resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+        ),
+    ).model_dump(exclude_none=True)
+
+    rebuilt = Task.model_validate(original)
+
+    assert rebuilt.runtime_config == RuntimeConfig(
+        image="hud-browser:firefox",
+        resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+    )
+    assert rebuilt.model_dump(exclude_none=True) == original
+
+
+def test_runtime_config_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError, match="Extra inputs"):
+        RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
+
+
+def test_row_validation_rejects_malformed_entries() -> None:
+    # pydantic.ValidationError is a ValueError: callers catch one exception type.
+    with pytest.raises(ValueError, match="env"):
+        Task.model_validate({"id": "t"})
+    with pytest.raises(ValueError, match="env"):
+        Task.model_validate({"env": {"name": "e"}, "id": "t"})  # an object is not a name
+    with pytest.raises(ValueError, match="id"):
+        Task.model_validate({"env": "e"})
+    with pytest.raises(ValueError, match="args"):
+        Task.model_validate({"env": "e", "id": "t", "args": "nope"})
+
+
+# ─── placement ─────────────────────────────────────────────────────────
+
+
+async def test_no_placement_defaults_to_hud_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hud.eval.taskset as taskset_mod
+
+    seen: dict[str, object] = {}
+
+    async def fake_rollout(task: Task, agent: Agent, **kwargs: object) -> Run:
+        seen.update(kwargs)
+        run = Run(None, task.id, {})
+        run.trace.status = "completed"
+        return run
+
+    monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
+
+    v = Task(env="hosted-env", id="solve", args={"n": 1})
+    job = await v.run(cast("Agent", object()))
+
+    (run,) = job.runs
+    assert run.trace.status == "completed"
+    assert isinstance(seen["runtime"], HUDRuntime)
+
+
+# ─── taskset collection ────────────────────────────────────────────────
+
+
+def test_taskset_is_ordered_and_keyed_by_slug() -> None:
+    first = Task(env="e", id="solve", args={"n": 1}, slug="first")
+    second = Task(env="e", id="solve", args={"n": 2}, slug="second")
+
+    tasks = Taskset("demo", [first, second])
+
+    assert list(tasks) == [first, second]
+    assert tasks["first"] is first
+    assert list(tasks.filter(["second"])) == [second]
+    assert list(tasks.exclude(["first"])) == [second]
+    assert list(tasks.items()) == [("first", first), ("second", second)]
+    assert tasks.environment_names() == {"e"}
+
+
+def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:
+    entries = [
+        Task(env="e", id="solve", args={"n": 1}, slug="one").model_dump(exclude_none=True),
+        Task(env="e", id="solve", args={"n": 2}, slug="two").model_dump(exclude_none=True),
+    ]
+
+    json_path = tmp_path / "tasks.json"
+    json_path.write_text(json.dumps(entries), encoding="utf-8")
+    jsonl_path = tmp_path / "tasks.jsonl"
+    jsonl_path.write_text("\n".join(json.dumps(entry) for entry in entries), encoding="utf-8")
+
+    assert [t.slug for t in Taskset.from_file(json_path)] == ["one", "two"]
+    assert [t.slug for t in Taskset.from_file(jsonl_path)] == ["one", "two"]
+
+
+def test_file_roundtrip_keeps_rows_and_env_names(tmp_path) -> None:
+    authored = [
+        Task(env="authored", id="solve", args={"n": 1}, slug="one"),
+        Task(env="authored", id="solve", args={"n": 2}, slug="two"),
+    ]
+    out = Taskset("demo", authored).to_file(tmp_path / "tasks.json")
+
+    loaded = Taskset.from_file(out)
+
+    assert [t.slug for t in loaded] == ["one", "two"]
+    assert all(t.env == "authored" for t in loaded)
+    assert list(loaded) == authored  # rows survive the file intact (value equality)
+
+
+def test_taskset_to_file_writes_json_and_jsonl(tmp_path) -> None:
+    taskset = Taskset(
+        "demo",
+        [
+            Task(env="e", id="solve", args={"n": 1}, slug="one"),
+            Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two"),
+        ],
+    )
+
+    json_path = taskset.to_file(tmp_path / "tasks.json")
+    jsonl_path = taskset.to_file(tmp_path / "tasks.jsonl")
+
+    assert [entry["slug"] for entry in json.loads(json_path.read_text())] == ["one", "two"]
+    assert [json.loads(line)["slug"] for line in jsonl_path.read_text().splitlines()] == [
+        "one",
+        "two",
+    ]
+    with pytest.raises(ValueError, match=r"use \.json or \.jsonl"):
+        taskset.to_file(tmp_path / "tasks.txt")
+
+
+def test_taskset_from_module_collects_public_tasks(tmp_path) -> None:
+    module = tmp_path / "local_tasks.py"
+    module.write_text(
+        """
+from hud import Task
+
+local = Task(env="module-env", id="solve", args={"n": 1}, slug="local")
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert Taskset.from_module(module)["local"].args == {"n": 1}
+
+
+def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, object]:
+        assert method == "GET"
+        if url.endswith("/tasksets/by-name/demo"):
+            return {"taskset_id": "ts_123", "name": "Demo"}
+        if url.endswith("/tasksets/ts_123/export"):
+            return {
+                "name": "Demo",
+                "tasks": [
+                    {
+                        # CP export shape: the legacy env qualifier is stripped
+                        # server-side, so env + bare scenario arrive already split.
+                        "env": "e",
+                        "scenario": "solve",
+                        "args": {"n": 1},
+                        "name": "one",
+                    }
+                ],
+            }
+        raise AssertionError(url)
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+
+    taskset = Taskset.from_api("demo")
+
+    assert taskset.name == "Demo"
+    assert taskset["one"].id == "solve"
+    assert taskset["one"].env == "e"
+    assert taskset["one"].args == {"n": 1}

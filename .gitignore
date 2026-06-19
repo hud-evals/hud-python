@@ -34,7 +34,6 @@ TODO.md
 /dev/
 
 .claude
-CLAUDE.md
 
 *.csv
 .rl_config_*.json
@@ -55,3 +54,12 @@ hud/rl/checkpoints_test/
 
 .hud_eval_config
 .hud_eval.toml
+
+docs/internal
+
+environments/
+
+experiments/
+.memories/
+
+.codex/

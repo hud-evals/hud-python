@@ -1,8 +1,9 @@
 """HUD Telemetry - Lightweight telemetry for HUD SDK.
 
 This module provides:
-- @instrument decorator for recording function calls
-- High-performance span export to HUD API
+- The OTel-shaped ``Span`` wire format (:mod:`hud.telemetry.span`)
+- ``@instrument`` debug spans for any function
+- High-performance batched span export to the HUD platform
 
 Usage:
     import hud
@@ -10,18 +11,15 @@ Usage:
     @hud.instrument
     async def my_function():
         ...
-
-    # Within an eval context, calls are recorded
-    async with hud.eval(task) as ctx:
-        result = await my_function()
 """
 
-from hud.telemetry.exporter import flush, queue_span, shutdown
+from __future__ import annotations
+
+from hud.telemetry.exporter import flush, queue_span
 from hud.telemetry.instrument import instrument
 
 __all__ = [
     "flush",
     "instrument",
     "queue_span",
-    "shutdown",
 ]

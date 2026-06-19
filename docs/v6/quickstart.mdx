@@ -1,0 +1,82 @@
+---
+title: "Quickstart"
+description: "Install, write a task, run it against a model, and read the reward."
+icon: "bolt"
+---
+
+From install to your first graded trace: you'll write a task, run it against a model through the HUD gateway, and read the reward.
+
+**Fastest path — hand the docs to your coding agent first.** The HUD docs skill scaffolds correct v6 environments and flags weak task designs as you build:
+
+```bash
+npx skills add https://docs.hud.ai
+```
+
+The rest of this page walks the same path by hand.
+
+## 1. Install
+
+<CodeGroup>
+```bash uv
+uv tool install hud-python --python 3.12
+```
+```bash pip
+pip install hud-python
+```
+</CodeGroup>
+
+## 2. Set your API key
+
+Get a key from [hud.ai/project/api-keys](https://hud.ai/project/api-keys) — one key both routes models through the HUD gateway and traces every rollout.
+
+```bash
+hud set HUD_API_KEY=your-key-here
+```
+
+## 3. Write a task
+
+Scaffold a complete, runnable example to start from:
+
+```bash
+hud init my-env
+```
+
+Or write `tasks.py` directly. A task is defined by a **template** — an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable **Task**:
+
+```python tasks.py
+from hud import Environment
+
+env = Environment(name="letter-count")
+
+@env.template()
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s are in '{word}'? Reply with just the number."
+    yield 1.0 if answer and str(word.count(letter)) in answer else 0.0
+
+tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
+```
+
+## 4. Run it
+
+```bash
+hud eval tasks.py claude --group 3
+```
+
+`hud eval` collects the tasks, spawns the environment on a local substrate, runs the `claude` agent, and grades it. `--group 3` runs the task three times so you can see the reward variance across rollouts. It prints each reward and a trace link on [hud.ai](https://hud.ai), where you can replay every step. Add `--full` to run every task in the dataset.
+
+## Next
+
+<CardGroup cols={2}>
+<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
+  Build a portable image and run it anywhere.
+</Card>
+<Card title="Add capabilities" icon="cube" href="/v6/reference/environment">
+  Give the agent a shell, browser, GUI, or robot to act on.
+</Card>
+<Card title="Design tasks for signal" icon="signal" href="/v6/run/signal">
+  Make tasks that actually train, not just test.
+</Card>
+<Card title="Run on any model" icon="robot" href="/v6/run/models">
+  Claude, OpenAI, Gemini, or your own endpoint.
+</Card>
+</CardGroup>

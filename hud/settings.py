@@ -27,20 +27,18 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """
-        Customize settings source precedence to include a user-level env file.
+        Customize settings source precedence.
 
         Precedence (highest to lowest):
         - init_settings (explicit kwargs)
         - env_settings (process environment)
-        - dotenv_settings (project .env)
-        - user_dotenv_settings (~/.hud/.env)  ← added
+        - dotenv_settings (.env in CWD)
+        - user_dotenv_settings (~/.hud/.env, written by `hud set`)
         - file_secret_settings
         """
-
-        user_env_path = Path.home() / ".hud" / ".env"
         user_dotenv_settings = DotEnvSettingsSource(
             settings_cls,
-            env_file=user_env_path,
+            env_file=Path.home() / ".hud" / ".env",
             env_file_encoding="utf-8",
         )
 
@@ -53,39 +51,39 @@ class Settings(BaseSettings):
         )
 
     hud_telemetry_url: str = Field(
-        default="https://telemetry.hud.ai/v3/api",
+        default="https://telemetry.beta.hud.ai/v3/api",
         description="Base URL for the HUD API",
         validation_alias="HUD_TELEMETRY_URL",
     )
 
-    hud_mcp_url: str = Field(
-        default="https://mcp.hud.ai/v3/mcp",
-        description="Base URL for the MCP Server",
-        validation_alias="HUD_MCP_URL",
-    )
-
-    hud_rl_url: str = Field(
-        default="https://rl.hud.ai/v1",
-        description="Base URL for the HUD RL API server",
-        validation_alias="HUD_RL_URL",
-    )
-
     hud_api_url: str = Field(
-        default="https://api.hud.ai",
-        description="Base URL for the HUD API server",
+        default="https://api.beta.hud.ai",
+        description="Base URL (origin) for the HUD API server",
         validation_alias="HUD_API_URL",
     )
 
     hud_web_url: str = Field(
-        default="https://hud.ai",
+        default="https://beta.hud.ai",
         description="Base URL of the HUD web app (used as a fallback for CLI login)",
         validation_alias="HUD_WEB_URL",
     )
 
     hud_gateway_url: str = Field(
-        default="https://inference.hud.ai",
+        default="https://inference.beta.hud.ai",
         description="Base URL for the HUD inference gateway",
         validation_alias="HUD_GATEWAY_URL",
+    )
+
+    hud_runtime_url: str = Field(
+        default="https://mcp.hud.ai",
+        description="Base URL for the HUD runtime tunnel gateway",
+        validation_alias="HUD_RUNTIME_URL",
+    )
+
+    hud_rl_url: str = Field(
+        default="https://rl.beta.hud.ai",
+        description="Base URL for the HUD training (RL) service",
+        validation_alias="HUD_RL_URL",
     )
 
     api_key: str | None = Field(
@@ -152,6 +150,28 @@ class Settings(BaseSettings):
         default=True,
         description="Enable telemetry for the HUD SDK",
         validation_alias="HUD_TELEMETRY_ENABLED",
+    )
+
+    telemetry_local_dir: str | None = Field(
+        default=None,
+        description="If set, also write each telemetry span to <dir>/<trace_id>.jsonl "
+        "locally. Independent of the backend exporter — works with no API key.",
+        validation_alias="HUD_TELEMETRY_LOCAL_DIR",
+    )
+
+    file_tracking_enabled: bool = Field(
+        default=False,
+        description="Publish a workspace's filetracking/1 capability and stream file-change "
+        "diffs to telemetry during a rollout. Opt-in; off by default.",
+        validation_alias="HUD_FILE_TRACKING_ENABLED",
+    )
+
+    file_tracking_interval: float = Field(
+        default=2.0,
+        gt=0,
+        description="Seconds between rollout-level file-tracking snapshots. Each snapshot "
+        "diffs the workspace against the previous one and emits a hud.filetracking.v1 span.",
+        validation_alias="HUD_FILE_TRACKING_INTERVAL",
     )
 
     hud_logging: bool = Field(

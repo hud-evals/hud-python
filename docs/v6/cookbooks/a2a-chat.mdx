@@ -1,0 +1,58 @@
+---
+title: "A2A chat"
+description: "Serve a chat task over the A2A protocol and talk to it from any client."
+icon: "plug"
+---
+
+A complete, runnable example of putting a wire protocol in front of `Chat`: serve a `messages`-style task as an [A2A](https://github.com/google/a2a) endpoint, so any A2A client — including another LLM using it as a tool — can hold a conversation with your environment.
+
+`Chat` is protocol-agnostic (see [Chat](/v6/advanced/chat)); the A2A layer is a reference server kept outside the SDK on purpose. Copy and adapt it from [`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
+
+## The pieces
+
+| File | What it does |
+|------|--------------|
+| `server.py` | A2A server: one `Chat` (conversation) per A2A context, agent card, citations artifact |
+| `client.py` | Minimal A2A client: send messages, print replies |
+| `llm_client.py` | LLM-fronted client: an OpenAI model decides when to call the A2A agent as a tool |
+| `chat_env.py` | Sample chat environment with `messages`-style tasks to serve |
+
+## The environment
+
+A chat-style task takes the running conversation as a `messages` parameter and yields it as the prompt:
+
+```python chat_env.py
+from mcp.types import PromptMessage
+from hud.environment import Environment
+
+env = Environment(name="chat")
+
+@env.template()
+async def chat_simple(messages: list[PromptMessage]):
+    yield messages   # the conversation so far is the prompt
+    yield 1.0
+```
+
+## Run it
+
+From `cookbooks/a2a-chat` (uv resolves the dependencies on first run):
+
+```bash
+# Terminal 1: serve the bundled chat task (spawns chat_env.py per turn)
+uv run server.py
+
+# Terminal 2: talk to it
+uv run client.py            # plain client
+uv run llm_client.py        # LLM-fronted client
+```
+
+The server publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint. Each A2A context gets its own `Chat`, so concurrent conversations stay independent.
+
+Configuration is via env vars: `HUD_MODEL` picks the agent's model (gateway, needs `HUD_API_KEY`), `HUD_TASK`/`HUD_ENV` pick the task row, `HUD_SOURCE` spawns a different env source, and `HUD_ENV_URL` attaches each turn to an already-served control channel (e.g. `hud serve chat_env.py` → `HUD_ENV_URL=tcp://127.0.0.1:8765`) instead of spawning.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Chat" icon="comments" href="/v6/advanced/chat" />
+<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
+</CardGroup>

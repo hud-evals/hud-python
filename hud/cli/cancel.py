@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
-import questionary
 import typer
 
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 
 
@@ -43,10 +42,10 @@ def cancel_command(
     if (
         all_jobs
         and not yes
-        and not questionary.confirm(
+        and not hud_console.confirm(
             "⚠️  This will cancel ALL your active jobs. Continue?",
             default=False,
-        ).ask()
+        )
     ):
         hud_console.info("Cancelled.")
         raise typer.Exit(0)
@@ -55,16 +54,13 @@ def cancel_command(
         job_id
         and not trace_id
         and not yes
-        and not questionary.confirm(
-            f"Cancel all tasks in job {job_id}?",
-            default=True,
-        ).ask()
+        and not hud_console.confirm(f"Cancel all tasks in job {job_id}?")
     ):
         hud_console.info("Cancelled.")
         raise typer.Exit(0)
 
     async def _cancel() -> None:
-        from hud.datasets.utils import cancel_all_jobs, cancel_job, cancel_task
+        from hud.cli.utils.jobs import cancel_all_jobs, cancel_job, cancel_task
 
         if all_jobs:
             hud_console.info("Cancelling all active jobs...")
@@ -86,34 +82,27 @@ def cancel_command(
             hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
             result = await cancel_task(job_id, trace_id)  # type: ignore[arg-type]
 
-            status = result.get("status", "unknown")
-            if status in ("revoked", "terminated"):
-                hud_console.success(f"Task cancelled: {result.get('message', '')}")
-            elif status == "not_found":
-                hud_console.warning(f"Task not found: {result.get('message', '')}")
+            # Two-phase cancel: "accepted" = marked cancelling; "noop" = nothing
+            # to do (already terminal, or not found).
+            if result.get("status") == "accepted":
+                hud_console.success("Task cancellation requested.")
             else:
-                hud_console.info(f"Status: {status} - {result.get('message', '')}")
+                hud_console.warning("Task not found or already finished.")
 
         else:
             hud_console.info(f"Cancelling job {job_id}...")
             result = await cancel_job(job_id)  # type: ignore[arg-type]
 
-            total = result.get("total_found", 0)
             cancelled = result.get("cancelled", 0)
-
-            if total == 0:
-                hud_console.warning(f"No tasks found for job {job_id}")
+            if cancelled == 0:
+                hud_console.warning(f"No active tasks found for job {job_id}")
             else:
-                hud_console.success(
-                    f"Cancelled {cancelled}/{total} tasks "
-                    f"({result.get('running_terminated', 0)} running, "
-                    f"{result.get('queued_revoked', 0)} queued)"
-                )
+                hud_console.success(f"Cancellation requested for {cancelled} task(s).")
 
     try:
         asyncio.run(_cancel())
-    except httpx.HTTPStatusError as e:
-        hud_console.error(f"API error: {e.response.status_code} - {e.response.text}")
+    except HudRequestError as e:
+        hud_console.error(f"API error: {e}")
         raise typer.Exit(1) from e
     except Exception as e:
         hud_console.error(f"Failed to cancel: {e}")

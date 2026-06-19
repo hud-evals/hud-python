@@ -1,4 +1,4 @@
-"""``hud sync`` command group — sync tasks and environments to the platform."""
+"""``hud sync`` command group: sync tasks and environments to the platform."""
 
 from __future__ import annotations
 
@@ -7,21 +7,22 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from urllib import parse
 
-import httpx
 import typer
 
-from hud.cli.utils.api import hud_headers, require_api_key
-from hud.cli.utils.collect import collect_tasks
-from hud.cli.utils.project_config import (
-    get_taskset_id,
-    load_project_config,
-    save_project_config,
+from hud.cli.utils.api import require_api_key
+from hud.cli.utils.registry import (
+    RegistryEnvironment,
+    get_registry_environment,
+    list_registry_environments,
+    resolve_registry_environments,
 )
-from hud.cli.utils.taskset import fetch_remote_tasks, resolve_taskset_id
-from hud.settings import settings
+from hud.cli.utils.source import EnvironmentSource
+from hud.eval import Taskset
+from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
+from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,410 +34,199 @@ sync_app = typer.Typer(
 )
 
 
-def _short_scenario_name(name: str) -> str:
-    """Strip env prefix from scenario name: 'my-env:echo' → 'echo'."""
-    return name.rsplit(":", 1)[-1] if ":" in name else name
-
-
-def _compute_remote_signature(remote_task: dict[str, Any]) -> str:
-    """Compute signature from a remote task dict (from platform API)."""
-    scenario: str = remote_task.get("scenario") or ""
-    raw_args = remote_task.get("args")
-    args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
-    validation: list[dict[str, Any]] | None = remote_task.get("validation")
-    agent_config: dict[str, Any] | None = remote_task.get("agent_config") or None
-    columns: dict[str, Any] | None = remote_task.get("column_values") or None
-    return _compute_signature(scenario, args, validation, agent_config, columns)
-
-
-def _compute_signature(
-    scenario_name: str,
-    args: dict[str, Any],
-    validation: list[dict[str, Any]] | None,
-    agent_config: dict[str, Any] | None,
-    columns: dict[str, Any] | None = None,
+def _taskset_target(
+    taskset: str | None,
+    taskset_id: str | None,
+    console: HUDConsole,
 ) -> str:
-    """Compute a deterministic signature for diff comparison.
-
-    Uses the short scenario name (after colon) so that env-prefix
-    renames don't cause unnecessary updates. The prefix is an MCP
-    namespacing artifact — the actual scenario identity within a
-    registry is the short name.
-    """
-    short = _short_scenario_name(scenario_name)
-    sig_data: dict[str, Any] = {"args": args}
-    if validation is not None:
-        sig_data["validation"] = validation
-    if agent_config:
-        sig_data["agent_config"] = agent_config
-    if columns:
-        sig_data["columns"] = columns
-    return f"{short}|" + json.dumps(
-        sig_data,
-        sort_keys=True,
-        default=str,
-        separators=(",", ":"),
-    )
+    stored_taskset_id = EnvironmentSource.open().taskset_id
+    target_ref = taskset_id or taskset or stored_taskset_id
+    if not target_ref:
+        console.error(
+            "No taskset specified. Pass a taskset name/ID or run "
+            "'hud sync tasks <name>' first to store it."
+        )
+        raise typer.Exit(1)
+    if target_ref == stored_taskset_id and not taskset and not taskset_id:
+        console.info("Using taskset ID from .hud/config.json")
+    return target_ref
 
 
-def _build_local_specs(
-    tasks: list[Any],
-    hud_console: HUDConsole,
-) -> list[dict[str, Any]]:
-    """Convert Task objects into local spec dicts for sync comparison."""
-    from hud.eval.task import Task
+def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
+    """Spreadsheet view of task rows: one ``arg:`` column per key."""
+    arg_keys = sorted({key for entry in entries for key in (entry.get("args") or {})})
+    fieldnames = [
+        "slug",
+        "id",
+        "env",
+        *[f"arg:{key}" for key in arg_keys],
+    ]
 
-    specs: list[dict[str, Any]] = []
-    missing_slugs: list[str] = []
-    missing_scenarios: list[str] = []
+    def cell(value: Any) -> Any:
+        return json.dumps(value, default=str) if isinstance(value, (dict, list)) else value
 
-    for i, task in enumerate(tasks):
-        if not isinstance(task, Task):
-            hud_console.warning(f"Item {i} is not a Task object, skipping")
-            continue
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for entry in entries:
+            args = entry.get("args") or {}
+            writer.writerow(
+                {
+                    "slug": entry.get("slug") or "",
+                    "id": entry.get("id") or "",
+                    "env": entry.get("env") or "",
+                    **{f"arg:{key}": cell(args.get(key)) for key in arg_keys},
+                }
+            )
 
-        scenario_name = task.scenario
-        if not scenario_name:
-            missing_scenarios.append(f"task[{i}]")
-            continue
 
-        task_env = task.env
-        env_name = getattr(task_env, "name", None) if task_env else None
-        if env_name and ":" not in scenario_name:
-            scenario_name = f"{env_name}:{scenario_name}"
+def _export_taskset(
+    target_ref: str,
+    output_path: str,
+    console: HUDConsole,
+) -> None:
+    console.progress_message("Fetching remote taskset...")
+    try:
+        remote_taskset = Taskset.from_api(target_ref)
+        if not remote_taskset:
+            console.warning("No tasks found in taskset")
+            return
+        out = Path(output_path)
+        if out.suffix.lower() == ".csv":
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _write_csv(out, [task.model_dump(exclude_none=True) for task in remote_taskset])
+        else:
+            out = remote_taskset.to_file(out)
+    except (HudException, ValueError) as e:
+        console.error(str(e))
+        raise typer.Exit(1) from e
+    console.success(f"Exported {len(remote_taskset)} tasks to {out}")
 
-        slug = task.slug
-        if not slug or not slug.strip():
-            label = scenario_name or f"task[{i}]"
-            missing_slugs.append(label)
-            continue
-        slug = slug.strip()
 
-        args_dict = task.args or {}
-        if not isinstance(args_dict, dict):
-            hud_console.warning(f"Task '{slug}' has non-dict args, skipping")
-            continue
+def _load_local_taskset(
+    source: str,
+    *,
+    task_filter: str | None,
+    exclude: list[str] | None,
+    console: HUDConsole,
+) -> Taskset:
+    console.progress_message(f"Collecting tasks from {source}...")
+    try:
+        taskset = Taskset.from_file(source)
+    except (ImportError, FileNotFoundError, ValueError) as e:
+        console.error(str(e))
+        raise typer.Exit(1) from e
 
-        validation_list: list[dict[str, Any]] | None = None
-        if task.validation:
-            validation_list = [
-                {"name": v.name, "arguments": v.arguments or {}} for v in task.validation
-            ]
+    if not taskset:
+        console.error(f"No Task objects found in: {source}")
+        raise typer.Exit(1)
+    console.success(f"Found {len(taskset)} task(s)")
 
-        agent_config_dict: dict[str, Any] | None = None
-        if task.agent_config is not None:
-            if isinstance(task.agent_config, dict):
-                agent_config_dict = task.agent_config
-            elif hasattr(task.agent_config, "model_dump"):
-                agent_config_dict = task.agent_config.model_dump(exclude_none=True)
+    if task_filter:
+        taskset = taskset.filter([task_filter])
+        if not taskset:
+            console.error(f"No task found with slug '{task_filter}'")
+            raise typer.Exit(1)
+    if exclude:
+        taskset = taskset.exclude(exclude)
+        if not taskset:
+            console.error("No tasks left after exclusions")
+            raise typer.Exit(1)
+    return taskset
 
-        env_config: dict[str, Any] = {}
-        if env_name:
-            env_config["name"] = env_name
 
-        columns_dict: dict[str, Any] | None = None
-        if hasattr(task, "columns") and task.columns:
-            columns_dict = dict(task.columns)
+def _warn_on_linked_environment_mismatch(
+    taskset: Taskset,
+    platform: PlatformClient,
+    console: HUDConsole,
+) -> None:
+    env_source = EnvironmentSource.open()
+    config = env_source.load_config()
+    stored_registry_id = config.get("registryId")
+    if not isinstance(stored_registry_id, str) or not stored_registry_id:
+        return
 
-        specs.append(
-            {
-                "slug": slug,
-                "scenario_name": str(scenario_name),
-                "args": args_dict,
-                "validation": validation_list,
-                "agent_config": agent_config_dict,
-                "env": env_config,
-                "columns": columns_dict,
-                "signature": _compute_signature(
-                    scenario_name,
-                    args_dict,
-                    validation_list,
-                    agent_config_dict,
-                    columns_dict,
-                ),
-            }
+    try:
+        registry_env = get_registry_environment(platform, stored_registry_id)
+    except HudException as e:
+        console.warning(f"Could not verify linked environment: {e}")
+        return
+
+    if registry_env is None:
+        console.warning(
+            f"Linked environment (registryId: {stored_registry_id[:8]}...) "
+            "no longer exists on platform"
+        )
+        console.hint("Run 'hud sync env' to re-link or 'hud deploy' to create a new one")
+        return
+
+    platform_env_name = registry_env.name
+    if platform_env_name != config.get("registryName"):
+        env_source.save_config({"registryName": platform_env_name})
+
+    mismatched_names = taskset.environment_names() - {platform_env_name}
+    if mismatched_names:
+        console.warning(
+            "Local task env names do not match the linked platform environment "
+            f"'{platform_env_name}': {', '.join(sorted(mismatched_names))}"
         )
 
-    if missing_scenarios:
-        hud_console.error(f"Tasks missing scenario: {', '.join(missing_scenarios)}")
-        raise typer.Exit(1)
 
-    if missing_slugs:
-        hud_console.error(f"Tasks missing slug (required for sync): {', '.join(missing_slugs)}")
-        hud_console.hint("Set task.slug = 'my-slug' on each task")
-        raise typer.Exit(1)
-
-    slug_counts: dict[str, int] = {}
-    for spec in specs:
-        s = spec["slug"]
-        slug_counts[s] = slug_counts.get(s, 0) + 1
-    duplicates = sorted(s for s, c in slug_counts.items() if c > 1)
-    if duplicates:
-        hud_console.error(f"Duplicate slugs: {', '.join(duplicates)}")
-        raise typer.Exit(1)
-
-    return specs
-
-
-def _diff_and_display(
-    local_specs: list[dict[str, Any]],
-    remote_tasks: list[dict[str, Any]],
-    taskset_display: str,
-    taskset_id: str,
-    taskset_exists: bool,
-    hud_console: HUDConsole,
+def _fetch_remote_taskset(
+    platform: PlatformClient,
+    target_ref: str,
     *,
-    collection_failures: list[tuple[str, str]] | None = None,
-    switching_from: str | None = None,
-) -> list[dict[str, Any]]:
-    """Diff local vs remote, display plan, return tasks to upload."""
-    remote_by_slug: dict[str, dict[str, Any]] = {}
-    for rt in remote_tasks:
-        remote_slug = rt.get("slug") or rt.get("external_id")
-        if isinstance(remote_slug, str) and remote_slug:
-            remote_by_slug[remote_slug] = rt
+    force: bool,
+    allow_create: bool,
+    console: HUDConsole,
+) -> Taskset:
+    """The remote taskset to diff against.
 
-    to_create: list[dict[str, Any]] = []
-    to_update: list[dict[str, Any]] = []
-    unchanged = 0
-
-    for spec in local_specs:
-        slug = spec["slug"]
-        existing = remote_by_slug.pop(slug, None)
-        if existing is None:
-            to_create.append(spec)
-            continue
-
-        remote_sig = _compute_remote_signature(existing)
-
-        if remote_sig == spec["signature"]:
-            unchanged += 1
-        else:
-            to_update.append(spec)
-
-    remote_only = len(remote_by_slug)
-
-    hud_console.info("")
-    hud_console.section_title(f"Sync plan for '{taskset_display}'")
-
-    if not taskset_exists:
-        hud_console.info("  Taskset will be created")
-    if switching_from:
-        hud_console.warning(f"  Switching from previously stored taskset ({switching_from[:8]}...)")
-
-    if collection_failures:
-        hud_console.info(f"\n  Skipped ({len(collection_failures)}):")
-        for rel_path, error in collection_failures:
-            hud_console.info(f"    ! {rel_path}: {error}")
-
-    if to_create:
-        hud_console.info(f"\n  Create ({len(to_create)}):")
-        for spec in sorted(to_create, key=lambda s: s["slug"]):
-            hud_console.info(f"    + {spec['slug']}")
-        _detect_slug_renames(remote_by_slug, to_create, hud_console)
-    if to_update:
-        hud_console.info(f"\n  Update ({len(to_update)}):")
-        for spec in sorted(to_update, key=lambda s: s["slug"]):
-            hud_console.info(f"    ~ {spec['slug']}")
-    if unchanged:
-        hud_console.info(f"\n  Unchanged: {unchanged}")
-    if remote_only:
-        hud_console.info(f"\n  Remote-only (not in local source): {remote_only}")
-
-    return sorted(
-        [*to_create, *to_update],
-        key=lambda s: s["slug"],
-    )
-
-
-def _detect_slug_renames(
-    remote_by_slug: dict[str, dict[str, Any]],
-    to_create: list[dict[str, Any]],
-    hud_console: HUDConsole,
-) -> None:
-    """Detect possible slug renames: new local slug with same signature as orphaned remote."""
-    if not to_create or not remote_by_slug:
-        return
-
-    for spec in to_create:
-        for remote_slug, remote_task in remote_by_slug.items():
-            remote_sig = _compute_remote_signature(remote_task)
-            if remote_sig == spec["signature"]:
-                hud_console.info(
-                    f"    (looks like '{remote_slug}' was renamed to '{spec['slug']}')"
-                )
-                break
-
-
-def _infer_column_type(values: list[Any]) -> str:
-    """Infer a column type from observed values across tasks.
-
-    Returns one of: "text", "number", "single-select", "multi-select".
-    Heuristic: if all non-None values are numeric -> "number";
-    if any value is a list -> "multi-select";
-    otherwise -> "text".
+    ``--force`` diffs against an empty taskset so every task uploads. A missing
+    remote diffs as all-create when *allow_create* is set, and is an error
+    otherwise.
     """
-    non_none = [v for v in values if v is not None]
-    if not non_none:
-        return "text"
-    if any(isinstance(v, list) for v in non_none):
-        return "multi-select"
-    if all(isinstance(v, (int, float)) for v in non_none):
-        return "number"
-    return "text"
+    if force:
+        return Taskset(target_ref, [])
+
+    taskset_uuid, display = resolve_taskset_id(platform, target_ref)
+    if taskset_uuid:
+        return Taskset.from_api(taskset_uuid)
+    if allow_create:
+        console.info(f"Taskset '{display}' not found; it will be created")
+        return Taskset(display, [])
+
+    console.error(f"Taskset not found: {target_ref}")
+    raise typer.Exit(1)
 
 
-def _build_column_definitions(
-    all_specs: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]] | None:
-    """Auto-infer evalset column definitions from all local task column values.
-
-    Scans column values across every spec (not just to_upload) so that
-    definitions reflect the full taskset even on partial uploads.
-    """
-    values_by_col: dict[str, list[Any]] = {}
-    for spec in all_specs:
-        cols = spec.get("columns")
-        if not cols:
-            continue
-        for col_name, col_val in cols.items():
-            values_by_col.setdefault(col_name, []).append(col_val)
-
-    if not values_by_col:
-        return None
-
-    definitions: dict[str, dict[str, Any]] = {}
-    for col_name, vals in values_by_col.items():
-        col_type = _infer_column_type(vals)
-        col_def: dict[str, Any] = {"type": col_type}
-        if col_type == "single-select":
-            col_def["options"] = sorted({str(v) for v in vals if v is not None})
-        elif col_type == "multi-select":
-            all_opts: set[str] = set()
-            for v in vals:
-                if isinstance(v, list):
-                    all_opts.update(v)
-                elif v is not None:
-                    all_opts.add(str(v))
-            col_def["options"] = sorted(all_opts)
-        definitions[col_name] = col_def
-    return definitions
-
-
-def _upload_tasks(
-    to_upload: list[dict[str, Any]],
-    taskset_name: str,
-    api_url: str,
-    headers: dict[str, str],
-    column_definitions: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """POST tasks to /tasks/upload and return the response."""
-    payload: dict[str, Any] = {
-        "name": taskset_name,
-        "tasks": [
-            {
-                "slug": spec["slug"],
-                "env": spec["env"],
-                "scenario": spec["scenario_name"],
-                "args": spec["args"],
-                **(
-                    {"validation": spec["validation"]} if spec.get("validation") is not None else {}
-                ),
-                **({"agent_config": spec["agent_config"]} if spec.get("agent_config") else {}),
-                **({"column_values": spec["columns"]} if spec.get("columns") else {}),
-            }
-            for spec in to_upload
-        ],
-    }
-    if column_definitions:
-        payload["columns"] = column_definitions
-
-    response = httpx.post(
-        f"{api_url}/tasks/upload",
-        json=payload,
-        headers=headers,
-        timeout=60.0,
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def _export_remote_tasks(
-    taskset_id: str,
-    taskset_display: str,
-    output_path: str,
-    api_url: str,
-    headers: dict[str, str],
-    hud_console: HUDConsole,
-) -> None:
-    """Fetch remote tasks and export to JSON or CSV."""
-    hud_console.progress_message("Fetching remote tasks...")
-    remote_tasks = fetch_remote_tasks(taskset_id, api_url, headers)
-
-    if not remote_tasks:
-        hud_console.warning("No tasks found in taskset")
+def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
+    detail = (error.response_json or {}).get("detail", "")
+    if error.status_code == 400 and isinstance(detail, str) and detail:
+        console.error("Upload rejected by platform:")
+        for detail_line in detail.split("\n"):
+            stripped = detail_line.strip()
+            if stripped:
+                console.error(f"  {stripped}")
+        if "not found" in detail.lower():
+            console.hint(
+                "Check that the environment is deployed and the task id matches "
+                "the environment manifest."
+            )
         return
+    console.error(f"Upload failed ({error.status_code}): {detail or error}")
 
-    out = Path(output_path)
-    suffix = out.suffix.lower()
 
-    if suffix == ".json":
-        with open(out, "w", encoding="utf-8") as f:
-            json.dump(remote_tasks, f, indent=2, default=str)
+def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
+    returned_id = result.get("taskset_id")
+    if not isinstance(returned_id, str) or not returned_id:
+        return
+    changed = EnvironmentSource.open().save_config({"tasksetId": returned_id})
+    if changed:
+        console.dim_info("Taskset ID saved to:", ".hud/config.json")
+    from hud.settings import settings
 
-    elif suffix == ".csv":
-        all_arg_keys: set[str] = set()
-        all_col_keys: set[str] = set()
-        for t in remote_tasks:
-            args = t.get("args")
-            if isinstance(args, dict):
-                all_arg_keys.update(args.keys())
-            cols = t.get("column_values")
-            if isinstance(cols, dict):
-                all_col_keys.update(cols.keys())
-
-        sorted_arg_keys = sorted(all_arg_keys)
-        sorted_col_keys = sorted(all_col_keys)
-
-        fieldnames = [
-            "slug",
-            "scenario",
-            "env",
-            *[f"arg:{k}" for k in sorted_arg_keys],
-            *[f"col:{k}" for k in sorted_col_keys],
-        ]
-
-        with open(out, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for t in remote_tasks:
-                row: dict[str, Any] = {
-                    "slug": t.get("slug") or t.get("external_id") or "",
-                    "scenario": t.get("scenario") or "",
-                    "env": "",
-                }
-                env_data = t.get("env")
-                if isinstance(env_data, dict):
-                    row["env"] = env_data.get("name") or ""
-
-                args = t.get("args")
-                if isinstance(args, dict):
-                    for k in sorted_arg_keys:
-                        val = args.get(k)
-                        row[f"arg:{k}"] = json.dumps(val) if isinstance(val, (dict, list)) else val
-
-                cols = t.get("column_values")
-                if isinstance(cols, dict):
-                    for k in sorted_col_keys:
-                        val = cols.get(k)
-                        row[f"col:{k}"] = json.dumps(val) if isinstance(val, list) else val
-
-                writer.writerow(row)
-    else:
-        hud_console.error(f"Unsupported export format: {suffix}. Use .json or .csv")
-        raise typer.Exit(1)
-
-    hud_console.success(f"Exported {len(remote_tasks)} tasks to {out}")
+    console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
 
 
 @sync_app.command("tasks")
@@ -483,7 +273,7 @@ def sync_tasks_command(
     export: str | None = typer.Option(
         None,
         "--export",
-        help="Export remote tasks to a file instead of syncing. Supports .json and .csv",
+        help="Export remote tasks to a file instead of syncing. Supports .json, .jsonl, and .csv",
     ),
 ) -> None:
     """Sync local task definitions to a platform taskset.
@@ -506,183 +296,48 @@ def sync_tasks_command(
 
     require_api_key("sync tasks")
 
-    api_url = settings.hud_api_url
-    headers = hud_headers()
+    platform = PlatformClient.from_settings()
 
-    # Resolve taskset identity
-    resolved_taskset_id = taskset_id or ""
-    taskset_display = taskset or ""
-    previously_stored_id = get_taskset_id() or ""
+    target_ref = _taskset_target(taskset, taskset_id, hud_console)
 
-    if not resolved_taskset_id and not taskset:
-        if previously_stored_id:
-            resolved_taskset_id = previously_stored_id
-            hud_console.info("Using taskset ID from .hud/config.json")
-        else:
-            hud_console.error(
-                "No taskset specified. Pass a taskset name/ID or run "
-                "'hud sync tasks <name>' first to store it."
-            )
-            raise typer.Exit(1)
-
-    if taskset and not resolved_taskset_id:
-        hud_console.progress_message("Resolving taskset...")
-        resolved_taskset_id, taskset_display, _ = resolve_taskset_id(
-            taskset,
-            api_url,
-            headers,
-            create=False,
-        )
-        if resolved_taskset_id:
-            hud_console.success(f"Found taskset '{taskset_display}'")
-        else:
-            taskset_display = taskset
-
-    # Resolve the taskset name from platform (for display + upload)
-    if resolved_taskset_id and not taskset_display:
-        try:
-            resp = httpx.get(
-                f"{api_url}/tasks/evalsets/{resolved_taskset_id}/tasks-by-id",
-                headers=headers,
-                timeout=10.0,
-            )
-            if resp.status_code == 200:
-                taskset_display = resp.json().get("evalset_name") or resolved_taskset_id[:8]
-            else:
-                taskset_display = resolved_taskset_id[:8]
-        except Exception:
-            taskset_display = resolved_taskset_id[:8]
-
-    # Export mode: fetch remote tasks and write to file, then exit
     if export:
-        _export_remote_tasks(
-            resolved_taskset_id, taskset_display, export, api_url, headers, hud_console
-        )
+        _export_taskset(target_ref, export, hud_console)
         return
 
-    # Phase 2: Check stored registryId is still valid (if present)
-    config = load_project_config()
-    stored_registry_id = config.get("registryId")
-    if stored_registry_id:
-        try:
-            reg_check = httpx.get(
-                f"{api_url}/registry/envs/{stored_registry_id}",
-                headers=headers,
-                timeout=10.0,
-            )
-            if reg_check.status_code == 404:
-                hud_console.warning(
-                    f"Linked environment (registryId: {stored_registry_id[:8]}...) "
-                    "no longer exists on platform"
-                )
-                hud_console.hint(
-                    "Run 'hud sync env' to re-link or 'hud deploy' to create a new one"
-                )
-        except Exception:  # noqa: S110
-            pass
+    local_taskset = _load_local_taskset(
+        source,
+        task_filter=task_filter,
+        exclude=exclude,
+        console=hud_console,
+    )
+    _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console)
 
-    # Collect local tasks
-    collection_failures: list[tuple[str, str]] = []
-    hud_console.progress_message(f"Collecting tasks from {source}...")
+    # Creating a new taskset is only allowed when targeting an explicit name
+    # (not an --id or a stored id, which must already exist).
+    allow_create = taskset is not None and taskset_id is None
+
     try:
-        raw_tasks = collect_tasks(source, failures=collection_failures)
-    except (ImportError, FileNotFoundError, ValueError) as e:
+        remote_taskset = _fetch_remote_taskset(
+            platform,
+            target_ref,
+            force=force,
+            allow_create=allow_create,
+            console=hud_console,
+        )
+        plan = diff(local_taskset, remote_taskset)
+    except ValueError as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from e
+    except HudException as e:
+        hud_console.error(f"Failed to fetch taskset: {e}")
+        raise typer.Exit(1) from e
 
-    if not raw_tasks:
-        hud_console.error(f"No Task objects found in: {source}")
-        raise typer.Exit(1)
-
-    hud_console.success(f"Found {len(raw_tasks)} task(s)")
-
-    # Build local specs (validates slugs, scenarios, etc.)
-    local_specs = _build_local_specs(raw_tasks, hud_console)
-
-    # Cross-check: resolve current env name from platform, check local refs match
-    stored_registry_id = config.get("registryId")
-    if stored_registry_id and local_specs:
-        from hud.cli.utils.name_check import check_and_fix_env_name, resolve_registry_name
-
-        platform_env_name = resolve_registry_name(stored_registry_id, api_url, headers)
-        if platform_env_name:
-            if platform_env_name != config.get("registryName"):
-                save_project_config({"registryName": platform_env_name})
-
-            task_env_names = {
-                s["env"].get("name") for s in local_specs if s.get("env") and s["env"].get("name")
-            }
-            mismatched_names = {n for n in task_env_names if n != platform_env_name}
-            if mismatched_names:
-                source_dir = Path(source).resolve()
-                if source_dir.is_file():
-                    source_dir = source_dir.parent
-                fixed = check_and_fix_env_name(source_dir, platform_env_name, hud_console)
-                if fixed:
-                    hud_console.progress_message("Re-collecting tasks after name fix...")
-                    collection_failures = []
-                    raw_tasks = collect_tasks(source, failures=collection_failures)
-                    local_specs = _build_local_specs(raw_tasks, hud_console)
-
-    # Apply filters
-    if task_filter:
-        local_specs = [s for s in local_specs if s["slug"] == task_filter]
-        if not local_specs:
-            hud_console.error(f"No task found with slug '{task_filter}'")
-            raise typer.Exit(1)
-    if exclude:
-        exclude_set = set(exclude)
-        local_specs = [s for s in local_specs if s["slug"] not in exclude_set]
-        if not local_specs:
-            hud_console.error("No tasks left after exclusions")
-            raise typer.Exit(1)
-
-    # Fetch remote state (skip if taskset doesn't exist yet)
-    taskset_exists = bool(resolved_taskset_id)
-    taskset_name = taskset_display
-    remote_tasks: list[dict[str, Any]] = []
-
-    if resolved_taskset_id:
-        hud_console.progress_message("Fetching remote taskset...")
-        try:
-            remote_tasks = fetch_remote_tasks(
-                resolved_taskset_id,
-                api_url,
-                headers,
-            )
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                taskset_exists = False
-            else:
-                hud_console.error(f"Failed to fetch taskset: {e}")
-                raise typer.Exit(1) from e
-
-    if not taskset_name and taskset:
-        taskset_name = taskset
-
-    switching_from = (
-        previously_stored_id
-        if previously_stored_id and previously_stored_id != resolved_taskset_id
-        else None
-    )
-
-    # Force mode: skip diff, upload everything
     if force:
-        to_upload = local_specs
-        hud_console.info(f"\n  --force: uploading all {len(to_upload)} task(s)")
+        hud_console.info(f"\n  --force: uploading all {len(plan.to_apply)} task(s)")
     else:
-        to_upload = _diff_and_display(
-            local_specs,
-            remote_tasks,
-            taskset_display,
-            resolved_taskset_id,
-            taskset_exists,
-            hud_console,
-            collection_failures=collection_failures,
-            switching_from=switching_from,
-        )
+        hud_console.info("\n" + plan.summary())
 
-    if not to_upload:
+    if not plan.to_apply:
         hud_console.success("All tasks up to date")
         return
 
@@ -690,58 +345,24 @@ def sync_tasks_command(
         hud_console.info("\n  --dry-run: no changes made")
         return
 
-    # Confirm
-    if not yes:
-        hud_console.info("")
-        try:
-            answer = input("  Proceed? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            hud_console.info("\n  Aborted.")
-            raise typer.Exit(1) from None
-        if answer not in ("y", "yes"):
-            hud_console.info("  Aborted.")
-            return
+    if not yes and not hud_console.confirm("Proceed?", default=False):
+        hud_console.info("Aborted.")
+        return
 
-    # Infer column definitions from ALL local specs (not just to_upload)
-    column_definitions = _build_column_definitions(local_specs)
-
-    # Upload (platform validates envs + scenarios inline)
+    # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = _upload_tasks(to_upload, taskset_name, api_url, headers, column_definitions)
-    except httpx.HTTPStatusError as e:
-        detail = ""
-        import contextlib
-
-        with contextlib.suppress(Exception):
-            detail = e.response.json().get("detail", "")
-        if e.response.status_code == 400 and detail:
-            hud_console.error("Upload rejected by platform:")
-            for detail_line in detail.split("\n"):
-                stripped = detail_line.strip()
-                if stripped:
-                    hud_console.error(f"  {stripped}")
-            if "not found" in detail.lower():
-                hud_console.hint(
-                    "Check that the environment is deployed and scenario names "
-                    "match what's registered (env_name:scenario_name)"
-                )
-        else:
-            hud_console.error(f"Upload failed ({e.response.status_code}): {detail or e}")
+        result = upload_taskset(platform, plan.taskset_name, plan.to_apply)
+    except HudRequestError as e:
+        _show_upload_error(e, hud_console)
         return
 
     created = int(result.get("tasks_created", 0))
     updated = int(result.get("tasks_updated", 0))
-    returned_id = result.get("evalset_id", resolved_taskset_id)
 
     hud_console.success("Sync complete")
     hud_console.info(f"  + {created} created, ~ {updated} updated")
-
-    if returned_id:
-        changed = save_project_config({"tasksetId": returned_id})
-        if changed:
-            hud_console.dim_info("Taskset ID saved to:", ".hud/config.json")
-        hud_console.info(f"  https://hud.ai/evalsets/{returned_id}")
+    _save_taskset_id(result, hud_console)
 
 
 @sync_app.command("env")
@@ -766,8 +387,6 @@ def sync_env_command(
     [not dim]Resolves an environment by name, verifies it exists, and stores
     the registry ID in .hud/config.json for future deploys and syncs.
 
-    Replaces 'hud link'.
-
     Examples:
         hud sync env coding-env           # link cwd to 'coding-env'
         hud sync env coding-env ./my-env  # link specific directory
@@ -778,27 +397,21 @@ def sync_env_command(
 
     require_api_key("sync environments")
 
-    api_url = settings.hud_api_url
-    headers = hud_headers()
+    platform = PlatformClient.from_settings()
     env_dir = Path(directory).resolve()
+    env_source = EnvironmentSource.open(env_dir)
 
-    existing_config = load_project_config(env_dir)
+    existing_config = env_source.load_config()
     existing_registry_id = existing_config.get("registryId")
+    selected_env: RegistryEnvironment | None = None
 
     if not name:
         # Interactive: list environments and let user pick
         hud_console.info("Fetching your environments...")
         try:
-            response = httpx.get(
-                f"{api_url}/registry/envs",
-                headers=headers,
-                params={"limit": 20, "sort_by": "updated_at"},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            envs = response.json()
-        except httpx.HTTPStatusError as e:
-            hud_console.error(f"Failed to fetch environments: {e.response.status_code}")
+            envs = list_registry_environments(platform)
+        except HudRequestError as e:
+            hud_console.error(f"Failed to fetch environments: {e.status_code or e}")
             raise typer.Exit(1) from e
 
         if not envs:
@@ -808,12 +421,8 @@ def sync_env_command(
 
         hud_console.info("\nYour environments:")
         for i, env in enumerate(envs[:10], 1):
-            env_id = env.get("id", "")[:8]
-            env_name = env.get("name_display") or env.get("name", "unnamed")
-            version = env.get("latest_version", "")
-            version_str = f" v{version}" if version else ""
-            marker = " (currently linked)" if env.get("id") == existing_registry_id else ""
-            hud_console.info(f"  {i}. {env_name}{version_str} ({env_id}...){marker}")
+            marker = " (currently linked)" if env.id == existing_registry_id else ""
+            hud_console.info(f"  {i}. {env.name}{env.version_label} ({env.short_id}...){marker}")
 
         hud_console.info("")
         try:
@@ -826,118 +435,51 @@ def sync_env_command(
         try:
             idx = int(selection) - 1
             if 0 <= idx < len(displayed):
-                registry_id = displayed[idx]["id"]
-                selected = displayed[idx]
-                env_display = selected.get("name_display") or selected.get("name", "unnamed")
+                selected_env = displayed[idx]
             else:
                 hud_console.error("Invalid selection")
                 raise typer.Exit(1)
         except ValueError:
             name = selection
 
-    if name:
+    if selected_env is None:
+        if not name:
+            hud_console.error("No environment selected")
+            raise typer.Exit(1)
         # Resolve name to registry ID
         hud_console.progress_message(f"Looking up '{name}'...")
 
-        # Check if it's already a UUID
         try:
-            import uuid as _uuid
+            matching = resolve_registry_environments(platform, name)
+        except HudRequestError as e:
+            hud_console.error(f"Failed to search environments: {e.status_code or e}")
+            raise typer.Exit(1) from e
 
-            _uuid.UUID(name)
-            registry_id = name
-            env_display = name[:8] + "..."
-        except ValueError:
-            try:
-                response = httpx.get(
-                    f"{api_url}/registry/envs",
-                    headers=headers,
-                    params={"search": name, "limit": 5},
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                envs = response.json()
-            except httpx.HTTPStatusError as e:
-                hud_console.error(f"Failed to search environments: {e.response.status_code}")
-                raise typer.Exit(1) from e
+        if not matching:
+            hud_console.error(f"No environment found matching '{name}'")
+            raise typer.Exit(1) from None
 
-            matching = [e for e in envs if (e.get("name_display") or e.get("name", "")) == name]
-            if not matching:
-                matching = [
-                    e
-                    for e in envs
-                    if name.lower() in (e.get("name_display") or e.get("name", "")).lower()
-                ]
+        if len(matching) > 1:
+            hud_console.warning(f"Multiple environments match '{name}':")
+            for env_item in matching:
+                hud_console.info(f"  {env_item.name} ({env_item.short_id}...)")
+            hud_console.info("Pass the full ID with --id to disambiguate")
+            raise typer.Exit(1) from None
 
-            if not matching:
-                hud_console.error(f"No environment found matching '{name}'")
-                hud_console.info("Available environments:")
-                for env_item in envs[:5]:
-                    display = env_item.get("name_display") or env_item.get("name", "unnamed")
-                    eid = env_item.get("id", "")[:8]
-                    hud_console.info(f"  {display} ({eid}...)")
-                raise typer.Exit(1) from None
+        selected_env = matching[0]
 
-            if len(matching) > 1:
-                hud_console.warning(f"Multiple environments match '{name}':")
-                for env_item in matching:
-                    display = env_item.get("name_display") or env_item.get("name", "unnamed")
-                    eid = env_item.get("id", "")[:8]
-                    hud_console.info(f"  {display} ({eid}...)")
-                hud_console.info("Pass the full ID with --id to disambiguate")
-                raise typer.Exit(1) from None
-
-            registry_id = matching[0]["id"]
-            env_display = matching[0].get("name_display") or matching[0].get("name", "unnamed")
-
-    if existing_registry_id and existing_registry_id != registry_id:
+    if existing_registry_id and existing_registry_id != selected_env.id:
         hud_console.warning(f"Currently linked to: {existing_registry_id[:8]}...")
-        if not yes:
-            try:
-                answer = input("Switch to new environment? [y/N] ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                hud_console.info("\nAborted.")
-                raise typer.Exit(0) from None
-            if answer not in ("y", "yes"):
-                hud_console.info("Aborted.")
-                return
+        if not yes and not hud_console.confirm("Switch to new environment?", default=False):
+            hud_console.info("Aborted.")
+            return
 
-    changed = save_project_config(
-        {"registryId": registry_id, "registryName": env_display},
-        env_dir,
+    changed = env_source.save_config(
+        {"registryId": selected_env.id, "registryName": selected_env.name},
     )
-    hud_console.success(f"Linked to: {env_display} ({registry_id[:8]}...)")
+    hud_console.success(f"Linked to: {selected_env.name} ({selected_env.short_id}...)")
     if changed:
         hud_console.dim_info("Config saved to:", ".hud/config.json")
-
-    # Post-check: fetch scenarios and display
-    env_name_for_lookup = name or env_display
-    try:
-        scenarios_resp = httpx.get(
-            f"{api_url}/tasks/environments/{parse.quote(env_name_for_lookup, safe='')}/scenarios",
-            headers=headers,
-            timeout=15.0,
-        )
-        if scenarios_resp.status_code == 200:
-            scenarios_data = scenarios_resp.json()
-            scenarios = scenarios_data.get("scenarios", [])
-            if scenarios:
-                hud_console.info(f"\n  Registered scenarios ({len(scenarios)}):")
-                for s in scenarios[:15]:
-                    hud_console.info(f"    {s['name']}")
-                if len(scenarios) > 15:
-                    hud_console.info(f"    ... and {len(scenarios) - 15} more")
-            else:
-                hud_console.warning("  No scenarios registered (deploy environment first)")
-    except Exception:  # noqa: S110
-        pass
-
-    # Post-check: if local Environment("...") doesn't match, offer to fix
-    try:
-        from hud.cli.utils.name_check import check_and_fix_env_name
-
-        check_and_fix_env_name(env_dir, env_name_for_lookup, hud_console)
-    except Exception:  # noqa: S110
-        pass
 
 
 @sync_app.callback(invoke_without_command=True)
@@ -954,13 +496,4 @@ def sync_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
-    hud_console = HUDConsole()
-    config = load_project_config()
-    stored_taskset_id = config.get("tasksetId")
-
-    if not stored_taskset_id:
-        hud_console.error("No taskset configured. Run 'hud sync tasks <name>' first to set up.")
-        raise typer.Exit(1)
-
-    # Delegate to sync_tasks with stored config and explicit defaults
     ctx.invoke(sync_tasks_command, taskset=None, source=".")

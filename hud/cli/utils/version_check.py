@@ -232,7 +232,7 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
         console: HUDConsole instance for output. If None, creates a new one.
     """
     if console is None:
-        console = HUDConsole(logger=logger)
+        console = HUDConsole()
 
     try:
         info = check_for_updates()

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from .hud_console import HUDConsole, hud_console
-from .types import with_signature
+from .platform import PlatformClient
+from .requests import make_request, make_request_sync
 
 __all__ = [
     "HUDConsole",
+    "PlatformClient",
     "hud_console",
-    "with_signature",
+    "make_request",
+    "make_request_sync",
 ]

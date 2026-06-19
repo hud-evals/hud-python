@@ -1,4 +1,4 @@
-"""HUD CLI - Build, test, and deploy RL environments."""
+"""HUD CLI - build, test, and deploy environments; run evaluations."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-# Create the main Typer app
+from hud.utils.exceptions import HudException
+
 app = typer.Typer(
     name="hud",
     help="HUD CLI - build, test, and deploy evaluation environments",
@@ -26,40 +27,28 @@ SUPPORT_HINT = (
 
 # ---------------------------------------------------------------------------
 # Register commands (each module owns its Typer args, docstring, and logic)
+# NOTE: `sync` is registered below once migrated to the Taskset flow.
 # ---------------------------------------------------------------------------
 
-from .analyze import analyze_command  # noqa: E402
-from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
-from .convert import convert_command  # noqa: E402
-from .debug import debug_command  # noqa: E402
+from .client import client_app  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
-from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
 from .init import init_command  # noqa: E402
-from .link import link_command  # noqa: E402
 from .login import login_command  # noqa: E402
-from .models import models_command  # noqa: E402
-from .push import push_command  # noqa: E402
-from .rl import rl_run_command, rl_status_command  # noqa: E402
-from .scenario import scenario_app  # noqa: E402
+from .models import models_app  # noqa: E402
+from .serve import serve_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
+from .task import task_app  # noqa: E402
 
-_EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
-
-app.command(name="analyze", context_settings=_EXTRA_ARGS)(analyze_command)
-app.command(name="debug", context_settings=_EXTRA_ARGS)(debug_command)
-app.command(name="dev", context_settings=_EXTRA_ARGS)(dev_command)
-app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
+app.command(name="serve")(serve_command)
+app.command(name="dev", deprecated=True, hidden=True)(serve_command)  # alias for now
 app.command(name="deploy")(deploy_command)
-app.command(name="link", hidden=True)(link_command)
 app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)
-app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)
-app.command(name="convert")(convert_command)
 app.command(name="cancel")(cancel_command)
-app.command(name="models")(models_command)
+app.add_typer(models_app, name="models")
 
 
 @app.command(name="set")
@@ -78,21 +67,17 @@ def set_command(
     """
     from hud.utils.hud_console import HUDConsole
 
-    from .utils.config import set_env_values
+    from .utils.config import parse_key_value, set_env_values
 
     hud_console = HUDConsole()
 
     updates: dict[str, str] = {}
     for item in assignments:
-        if "=" not in item:
+        parsed = parse_key_value(item)
+        if parsed is None:
             hud_console.error(f"Invalid assignment (expected KEY=VALUE): {item}")
             raise typer.Exit(1)
-        key, value = item.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            hud_console.error(f"Invalid key in assignment: {item}")
-            raise typer.Exit(1)
+        key, value = parsed
         updates[key] = value
 
     path = set_env_values(updates)
@@ -111,17 +96,14 @@ def version() -> None:
         console.print("HUD CLI version: [cyan]unknown[/cyan]")
 
 
-# Scenario subcommand group
-app.add_typer(scenario_app, name="scenario")
+# Client subcommand group (drive a running env control channel from the shell)
+app.add_typer(client_app, name="client")
 
-# Sync subcommand group
+# Task subcommand group (start a task / grade an answer, direct from source or via --url)
+app.add_typer(task_app, name="task")
+
+# Sync subcommand group (migrated to the Taskset flow)
 app.add_typer(sync_app, name="sync")
-
-# RL subcommand group
-rl_app = typer.Typer(help="🚀 RL training commands\n\nExample: hud rl run my-taskset -m <model-id>")
-rl_app.command("run")(rl_run_command)
-rl_app.command("status")(rl_status_command)
-app.add_typer(rl_app, name="rl")
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +113,19 @@ app.add_typer(rl_app, name="rl")
 
 def main() -> None:
     """Main entry point for the CLI."""
+    global console
+    # Windows cmd.exe uses the system code page (e.g. cp1252) which can't
+    # encode the emoji that Rich uses. Rewrap stdout/stderr as UTF-8 so
+    # Rich's legacy Windows renderer never hits a charmap error.
+    if sys.platform == "win32":
+        import io
+
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "buffer"):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+        console = Console()  # recreate against the new stdout
+
     if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
         from .utils.version_check import display_update_prompt
 
@@ -154,13 +149,7 @@ def main() -> None:
                 )
             )
             console.print("\n[yellow]Quick Start:[/yellow]")
-            console.print(
-                "  1. Create a new environment: [cyan]hud init my-env && cd my-env[/cyan]"
-            )
-            console.print("  2. Start dev server:        [cyan]hud dev[/cyan]")
-            console.print("  3. Deploy to HUD platform:  [cyan]hud deploy[/cyan]")
-            console.print("  4. Sync tasks:              [cyan]hud sync tasks my-taskset[/cyan]")
-            console.print("  5. Run evaluations:         [cyan]hud eval tasks.py claude[/cyan]\n")
+            console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]\n")
 
         app()
     except typer.Exit as e:
@@ -173,8 +162,11 @@ def main() -> None:
 
             hud_console.info(SUPPORT_HINT)
         raise
-    except Exception:
-        raise
+    except HudException as e:
+        from hud.utils.hud_console import hud_console
+
+        hud_console.render_exception(e)
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":

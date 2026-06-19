@@ -41,9 +41,24 @@ class TestHudInit:
         import hud
 
         expected_exports = [
+            "Chat",
+            "DockerRuntime",
             "Environment",
-            "EvalContext",
-            "eval",
+            "Grade",
+            "Job",
+            "HUDRuntime",
+            "HostedRuntime",
+            "Run",
+            "Runtime",
+            "RuntimeConfig",
+            "RuntimeGPU",
+            "RuntimeLimits",
+            "RuntimeResources",
+            "LocalRuntime",
+            "SyncPlan",
+            "Task",
+            "Taskset",
+            "connect",
             "instrument",
         ]
 

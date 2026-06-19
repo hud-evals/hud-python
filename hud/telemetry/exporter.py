@@ -1,47 +1,203 @@
-"""High-performance span exporter for HUD telemetry backend.
+"""Batching span exporter for the HUD telemetry backend.
 
-This module provides a lightweight span exporter that sends spans to the HUD
-telemetry API immediately, using a thread pool to avoid blocking async code.
-
-No OpenTelemetry dependency required.
+``queue_span`` hands each span to one background intake worker that batches by
+count *and* serialized byte-size, then dispatches each per-trace batch to a small
+pool of upload workers over a pooled HTTP connection — so the large image frames
+a robot rollout emits every tick upload in parallel instead of serially behind
+one connection. ``flush`` drains the queue and waits for the in-flight uploads to
+*finish* (not a fixed sleep); it also runs at interpreter exit.
 """
 
 from __future__ import annotations
 
 import atexit
-import concurrent.futures as cf
-import contextlib
+import json
 import logging
+import queue
+import threading
+import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from pathlib import Path
 from typing import Any
 
-from hud.shared import make_request_sync
+import httpx
+
+from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
+from hud.utils import make_request_sync
 
 logger = logging.getLogger(__name__)
 
-# Global singleton thread pool for span exports
-_export_executor: ThreadPoolExecutor | None = None
+# 8 parallel uploads with 4 MiB / 100-span batches drains a rollout's image
+# frames fastest without oversized POSTs.
+_UPLOAD_WORKERS = 8
+_MAX_BATCH_SPANS = 100
+_MAX_BATCH_BYTES = 4 * 1024 * 1024
+_FLUSH_INTERVAL = 1.0
+_UPLOAD_RETRIES = 2
+_UPLOAD_RETRY_DELAY = 0.5
+_HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
 
-# Pending futures for shutdown coordination
-_pending_futures: list[cf.Future[bool]] = []
 
-# Spans waiting to be flushed at context exit (per task_run_id)
-_pending_spans: dict[str, list[dict[str, Any]]] = defaultdict(list)
+class _Marker(threading.Event):
+    """An in-band flush (or stop) marker the intake worker honors in queue order."""
+
+    def __init__(self, *, stop: bool = False) -> None:
+        super().__init__()
+        self.stop = stop
 
 
-def _get_export_executor() -> ThreadPoolExecutor:
-    """Get or create the global thread pool for span exports."""
-    global _export_executor
-    if _export_executor is None:
-        _export_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="span-export")
+# The worker owns all batching state; it is a daemon and runs for the process's
+# life. ``_lock`` guards the worker/pool/client handles and the in-flight set.
+_queue: queue.Queue[dict[str, Any] | _Marker] = queue.Queue()
+_inflight: set[Future[None]] = set()
+_worker: threading.Thread | None = None
+_pool: ThreadPoolExecutor | None = None
+_client: httpx.Client | None = None
+_lock = threading.Lock()
 
-        def cleanup() -> None:
-            if _export_executor is not None:
-                _export_executor.shutdown(wait=True)
+# Local file exporter — the second export target, independent of the backend.
+_local_lock = threading.Lock()
 
-        atexit.register(cleanup)
-    return _export_executor
+
+def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
+    """Append one span as a JSON line to ``<local_dir>/<trace_id>.jsonl``.
+
+    Runs regardless of ``telemetry_enabled`` / ``api_key``: set
+    ``HUD_TELEMETRY_LOCAL_DIR`` to dump every span (the agent's steps — reasoning,
+    tool calls, results) to disk with no backend. Best-effort.
+    """
+    if not local_dir:
+        return
+    try:
+        path = Path(local_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        trace_id = span.get("trace_id") or "unknown"
+        line = json.dumps(span, ensure_ascii=False)
+        with _local_lock, (path / f"{trace_id}.jsonl").open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        logger.debug("local span export failed", exc_info=True)
+
+
+def queue_span(span: dict[str, Any]) -> None:
+    """Export a span: to the local file exporter (if set) and the HUD backend."""
+    from hud.settings import settings
+
+    if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
+        return
+    _export_local(span, settings.telemetry_local_dir)
+    if not settings.telemetry_enabled or not settings.api_key:
+        return
+    _ensure_worker()
+    _queue.put(span)
+
+
+def flush(timeout: float = 10.0) -> bool:
+    """Drain queued spans and wait for their uploads to finish.
+
+    Puts a marker behind everything queued so far, waits for the worker to reach
+    it, then waits for the dispatched uploads to complete. Returns ``False`` if it
+    did not fully drain within ``timeout``.
+    """
+    with _lock:
+        worker = _worker
+    if worker is None or not worker.is_alive():
+        return True
+
+    deadline = time.monotonic() + timeout
+    marker = _Marker()
+    _queue.put(marker)
+    if not marker.wait(max(0.0, deadline - time.monotonic())):
+        return False
+    with _lock:
+        pending = set(_inflight)
+    if not pending:
+        return True
+    _done, not_done = wait(pending, timeout=max(0.0, deadline - time.monotonic()))
+    return not not_done
+
+
+def reset(timeout: float = 30.0) -> None:
+    """Flush, stop the worker, and tear down the pool/client (tests/benchmarks)."""
+    global _worker, _pool, _client
+    with _lock:
+        worker, pool, client = _worker, _pool, _client
+    if worker is not None and worker.is_alive():
+        flush(timeout)
+        stop = _Marker(stop=True)
+        _queue.put(stop)
+        stop.wait(timeout)
+        worker.join(timeout)
+    if pool is not None:
+        pool.shutdown(wait=True)
+    if client is not None:
+        client.close()
+    with _lock:
+        _worker = _pool = _client = None
+        _inflight.clear()
+
+
+def _ensure_worker() -> None:
+    global _worker, _pool, _client
+    with _lock:
+        if _worker is not None and _worker.is_alive():
+            return
+        _client = httpx.Client(
+            timeout=_HTTP_TIMEOUT,
+            limits=httpx.Limits(
+                max_connections=_UPLOAD_WORKERS * 2,
+                max_keepalive_connections=_UPLOAD_WORKERS * 2,
+                keepalive_expiry=30.0,
+            ),
+        )
+        _pool = ThreadPoolExecutor(_UPLOAD_WORKERS, thread_name_prefix="hud-telemetry-upload")
+        _worker = threading.Thread(target=_run, name="hud-telemetry-export", daemon=True)
+        _worker.start()
+
+
+def _run() -> None:
+    batch: list[dict[str, Any]] = []
+    nbytes = 0
+    while True:
+        try:
+            item = _queue.get(timeout=_FLUSH_INTERVAL)
+        except queue.Empty:
+            batch, nbytes = _dispatch(batch)
+            continue
+        if isinstance(item, _Marker):
+            batch, nbytes = _dispatch(batch)
+            item.set()
+            if item.stop:
+                return
+            continue
+        batch.append(item)
+        nbytes += _span_bytes(item)
+        if len(batch) >= _MAX_BATCH_SPANS or nbytes >= _MAX_BATCH_BYTES:
+            batch, nbytes = _dispatch(batch)
+
+
+def _dispatch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Submit one upload per trace in the batch to the pool; return an empty batch."""
+    from hud.settings import settings
+
+    pool, api_key = _pool, settings.api_key
+    if not batch or pool is None or not api_key:
+        return [], 0
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for span in batch:
+        grouped[span["attributes"][TASK_RUN_ID_ATTRIBUTE]].append(span)
+    for task_run_id, spans in grouped.items():
+        future = pool.submit(_do_upload, task_run_id, spans, settings.hud_telemetry_url, api_key)
+        with _lock:
+            _inflight.add(future)
+        future.add_done_callback(_retire)
+    return [], 0
+
+
+def _retire(future: Future[None]) -> None:
+    with _lock:
+        _inflight.discard(future)
 
 
 def _do_upload(
@@ -49,148 +205,32 @@ def _do_upload(
     spans: list[dict[str, Any]],
     telemetry_url: str,
     api_key: str,
-) -> bool:
-    """Upload spans to HUD API (sync, runs in thread pool)."""
+) -> None:
+    url = f"{telemetry_url}/trace/{task_run_id}/telemetry-upload"
     try:
-        url = f"{telemetry_url}/trace/{task_run_id}/telemetry-upload"
-        payload: dict[str, Any] = {"telemetry": spans}
-
-        logger.debug("Uploading %d spans to %s", len(spans), url)
         make_request_sync(
             method="POST",
             url=url,
-            json=payload,
+            json={"telemetry": spans},
             api_key=api_key,
+            max_retries=_UPLOAD_RETRIES,
+            retry_delay=_UPLOAD_RETRY_DELAY,
+            client=_client,
         )
-        return True
-    except Exception as e:
-        logger.debug("Failed to upload spans for task %s: %s", task_run_id, e)
-        return False
+    except Exception as exc:
+        logger.warning(
+            "telemetry upload failed for trace %s (%d spans): %s", task_run_id, len(spans), exc
+        )
 
 
-def _get_api_key() -> str | None:
-    """Get the API key - prefer context override, fallback to settings."""
-    from hud.eval.context import get_current_api_key
-    from hud.settings import settings
-
-    return get_current_api_key() or settings.api_key
-
-
-def queue_span(span: dict[str, Any]) -> None:
-    """Queue a span and immediately upload it (non-blocking).
-
-    Uses thread pool to upload without blocking the event loop.
-    """
-    from hud.settings import settings
-
-    api_key = _get_api_key()
-    if not api_key or not settings.telemetry_enabled:
-        return
-
-    task_run_id = span.get("attributes", {}).get("task_run_id")
-    if not task_run_id:
-        return
-
-    # Store for potential re-flush at context exit
-    _pending_spans[task_run_id].append(span)
-
-    # Capture api_key for upload closure (context may change)
-    upload_api_key = api_key
-
-    # Upload immediately via thread pool
-    executor = _get_export_executor()
-
-    def _upload() -> bool:
-        return _do_upload(task_run_id, [span], settings.hud_telemetry_url, upload_api_key)
-
-    future = executor.submit(_upload)
-    _pending_futures.append(future)
-
-    def _cleanup_done(f: cf.Future[bool]) -> None:
-        with contextlib.suppress(Exception):
-            _ = f.exception()
-        with contextlib.suppress(ValueError):
-            _pending_futures.remove(f)
-        if not f.exception():
-            with contextlib.suppress(Exception):
-                if task_run_id in _pending_spans and span in _pending_spans[task_run_id]:
-                    _pending_spans[task_run_id].remove(span)
-
-    future.add_done_callback(_cleanup_done)
+def _span_bytes(span: dict[str, Any]) -> int:
+    try:
+        return len(json.dumps(span, default=str))
+    except (TypeError, ValueError):
+        return 0
 
 
-def flush(task_run_id: str | None = None) -> None:
-    """Flush any pending spans (called at context exit).
-
-    This ensures any spans that failed to upload are retried.
-
-    Args:
-        task_run_id: Optional task run ID to flush. If None, flushes all.
-    """
-    from hud.settings import settings
-
-    api_key = _get_api_key()
-    if not api_key or not settings.telemetry_enabled:
-        _pending_spans.clear()
-        return
-
-    if _pending_futures:
-        done, _ = cf.wait(list(_pending_futures), timeout=5.0)
-        for f in done:
-            with contextlib.suppress(Exception):
-                _ = f.exception()
-            with contextlib.suppress(ValueError):
-                _pending_futures.remove(f)
-
-    if task_run_id:
-        # Flush specific task
-        spans = _pending_spans.pop(task_run_id, [])
-        if spans:
-            _do_upload(task_run_id, spans, settings.hud_telemetry_url, api_key)
-    else:
-        # Flush all
-        for tid, spans in list(_pending_spans.items()):
-            if spans:
-                _do_upload(tid, spans, settings.hud_telemetry_url, api_key)
-        _pending_spans.clear()
+atexit.register(lambda: flush(timeout=30.0))
 
 
-def shutdown(timeout: float = 10.0) -> bool:
-    """Shutdown and wait for pending exports.
-
-    Args:
-        timeout: Maximum time to wait in seconds
-
-    Returns:
-        True if all exports completed, False if timed out
-    """
-    # Wait for pending async exports
-    if _pending_futures:
-        try:
-            done, not_done = cf.wait(_pending_futures, timeout=timeout)
-            for f in done:
-                with contextlib.suppress(Exception):
-                    _ = f.exception()
-            _pending_futures.clear()
-
-            # Flush any remaining spans synchronously
-            flush()
-
-            return len(not_done) == 0
-        except Exception:
-            return False
-
-    # Flush any remaining spans
-    flush()
-    return True
-
-
-# Register shutdown handler
-atexit.register(lambda: shutdown(timeout=5.0))
-
-
-__all__ = [
-    "flush",
-    "queue_span",
-    "shutdown",
-]
+__all__ = ["flush", "queue_span", "reset"]

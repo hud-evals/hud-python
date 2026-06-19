@@ -1,67 +1,76 @@
-"""HUD Eval - Evaluation context and management.
+"""HUD eval: the v6 execution surface.
 
-This module provides:
-- Task: A runnable evaluation unit (from env())
-- EvalContext: Environment with evaluation tracking (trace_id, reward, etc.)
-- eval(): Standalone context manager for task-based evaluation
+Define a :class:`Task` (a row pointing at its env), group many into a
+:class:`Taskset`, and run agents against live :class:`~hud.eval.Run`s.
+:func:`rollout` is the execution atom (one agent, one task, fully recorded);
+``Task.run`` and ``Taskset.run`` are the scheduler over it, both returning a
+:class:`Job` — the platform receipt. There are no standalone traces: every
+run reports under a job.
 
-Usage:
-    # Using env() to create Task
-    env = Environment("my-env").connect_hub("browser")
+This is the top layer: eval composes :mod:`hud.environment` and
+:mod:`hud.agents`, which never import each other and never import eval back —
+agents see eval only through the ``Run`` handle they are driven with. (Sole
+exception: calling an ``@env.template`` declaration constructs the eval ``Task``
+row.)
 
-    async with env() as ctx:
-        await ctx.call_tool("navigate", url="...")
+Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a
+local source, ``DockerRuntime`` an image, ``Runtime(url)`` an env served
+elsewhere, ``HUDRuntime`` a HUD runtime tunnel, or ``HostedRuntime`` to run the
+whole rollout remotely on the platform::
 
-    async with env("checkout", user_id="alice") as ctx:
-        await agent.run(ctx.prompt)
+    from hud.eval import LocalRuntime, Taskset
 
-    # Standalone with task slugs
-    async with hud.eval("my-org/task:1") as ctx:
-        await agent.run(ctx)
-
-    # Orchestrated with Task objects
-    tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
-    async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
-        await agent.run(ctx.prompt)
-
-    # Blank eval for manual reward
-    async with hud.eval() as ctx:
-        ctx.reward = compute_reward()
+    job = await my_task(a=1).run(agent, runtime=LocalRuntime("env.py"))
+    job = await Taskset("demo", [my_task(d) for d in range(5)]).run(
+        agent, runtime=LocalRuntime("env.py"), group=8
+    )
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from hud.types import Trace
 
-# Auto-instrument httpx on import
-import hud.eval.instrument  # noqa: F401
-
-# run_eval is safe to import (uses lazy imports internally)
-from hud.eval.manager import run_eval
-
-# Task is safe to import
-from hud.eval.task import Task
-
-# Utils for v4 format handling
-from hud.eval.utils import build_env_from_v4, is_v4_format, validate_v4_task
-
-if TYPE_CHECKING:
-    from hud.eval.context import EvalContext
+from .chat import Chat
+from .job import Job
+from .run import Grade, Run, rollout
+from .runtime import (
+    DaytonaRuntime,
+    DockerRuntime,
+    HostedRuntime,
+    HUDRuntime,
+    LocalRuntime,
+    ModalRuntime,
+    Provider,
+    Runtime,
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
+)
+from .sync import SyncPlan
+from .task import Task
+from .taskset import Taskset
 
 __all__ = [
-    "EvalContext",
+    "Chat",
+    "DaytonaRuntime",
+    "DockerRuntime",
+    "Grade",
+    "HUDRuntime",
+    "HostedRuntime",
+    "Job",
+    "LocalRuntime",
+    "ModalRuntime",
+    "Provider",
+    "Run",
+    "Runtime",
+    "RuntimeConfig",
+    "RuntimeGPU",
+    "RuntimeLimits",
+    "RuntimeResources",
+    "SyncPlan",
     "Task",
-    "build_env_from_v4",
-    "is_v4_format",
-    "run_eval",
-    "validate_v4_task",
+    "Taskset",
+    "Trace",
+    "rollout",
 ]
-
-
-def __getattr__(name: str) -> object:
-    """Lazy import EvalContext to avoid circular imports."""
-    if name == "EvalContext":
-        from hud.eval.context import EvalContext
-
-        return EvalContext
-    raise AttributeError(f"module 'hud.eval' has no attribute {name!r}")

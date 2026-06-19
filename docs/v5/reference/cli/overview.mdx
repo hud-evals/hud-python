@@ -1,0 +1,296 @@
+---
+title: "CLI Overview"
+description: "Complete reference for HUD command-line tools"
+icon: "terminal"
+---
+
+The HUD CLI provides a complete toolkit for creating, developing, and running MCP environments. Commands are organized into two main workflows:
+
+<CardGroup cols={2}>
+<Card title="Create & Deploy" icon="rocket" color="#6b21a8">
+  **Directory-based commands** for creating environments:
+  - `hud init` — Create new environment
+  - `hud deploy` — Build remotely & deploy to platform
+  - `hud dev` — Local development (hot-reload via `--watch`)
+  - `hud build` — Local build for validation
+</Card>
+
+<Card title="Sync & Evaluate" icon="play" color="#0891b2">
+  **Task management and agent execution:**
+  - `hud sync tasks` — Sync local tasks to platform
+  - `hud sync env` — Link to a platform environment
+  - `hud eval` — Run agents on tasks/datasets
+  - `hud scenario` — Test scenarios on a running server
+</Card>
+</CardGroup>
+
+## Installation
+
+<CodeGroup>
+```bash uv (Recommended)
+uv tool install hud-python@latest --python 3.12
+hud login
+```
+
+```bash pip
+pip install hud-python
+hud login
+```
+
+```bash pipx
+pipx install hud-python
+hud login
+```
+</CodeGroup>
+
+`hud login` opens your browser to authenticate with [hud.ai](https://hud.ai) and saves your API key automatically. Use `hud login --quiet` to print the URL instead of opening a browser.
+
+## Commands
+
+### Create & Deploy
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud init` | Directory | Create new environment | `hud init my-env` |
+| `hud deploy` | Directory | Build remotely & deploy to platform | `hud deploy .` |
+| `hud sync env` | Name | Link to existing environment | `hud sync env my-env` |
+
+### Sync & Manage Tasks
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud sync tasks` | Taskset + source | Sync local tasks to platform | `hud sync tasks my-taskset` |
+| `hud sync` | (stored config) | Sync using .hud/config.json | `hud sync` |
+
+### Local Development
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud dev` | Directory | Development server (`--watch` for hot-reload) | `hud dev . -w controller` |
+| `hud build` | Directory | Build image locally (for validation) | `hud build . --tag v1.0` |
+| `hud scenario` | Server URL | Test scenarios on running server | `hud scenario list` |
+
+### Run & Evaluate
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.py claude` |
+| `hud analyze` | Image or config | Inspect tools & capabilities | `hud analyze org/env` |
+| `hud debug` | Image/dir/config | 5‑phase compliance test | `hud debug my-env:latest` |
+| `hud rl` | Tasks/taskset | Submit RL training jobs | `hud rl run my-taskset -m <model-id>` |
+
+### Other
+| Command | Description | Example |
+|---------|-------------|---------|
+| `hud push` | Push built image to registry | `hud push .` |
+| `hud cancel` | Cancel remote eval jobs | `hud cancel <job_id>` |
+
+### Utilities
+| Command | Description | Example |
+|---------|-------------|---------|
+| `hud login` | Authenticate via browser (saves API key) | `hud login` |
+| `hud set` | Persist config values to ~/.hud/.env | `hud set HUD_API_KEY=...` |
+| `hud models` | List available inference models | `hud models --json` |
+| `hud convert` | Convert external task formats to HUD | `hud convert ./tasks --from harbor` |
+| `hud version` | Show CLI version | `hud version` |
+
+## Complete Workflows
+
+### Creating & Deploying an Environment
+
+<Steps>
+<Step title="Initialize">
+Create a new HUD environment with minimal boilerplate:
+```bash
+hud init my-env && cd my-env
+```
+Creates `Dockerfile`, `pyproject.toml`, `controller/` (MCP server), optional `environment/` backend, `tasks.json`.
+</Step>
+
+<Step title="Deploy">
+Deploy directly to the HUD platform:
+```bash
+hud deploy
+```
+This builds your environment remotely on HUD's infrastructure and deploys it. Or push to GitHub and connect on [hud.ai](https://hud.ai) for automatic rebuilds.
+</Step>
+</Steps>
+
+### Local Development (Optional)
+
+Use these commands when iterating on your environment locally before deploying:
+
+```bash
+# Development server (no auto-reload by default)
+hud dev
+
+# Enable hot-reload explicitly
+hud dev -w controller -w environment
+
+# Build locally to validate before deploying
+hud build
+```
+
+`hud dev` runs your local development server; add `--watch` (`-w`) to enable automatic reloads. `hud build` creates a local Docker image and generates `hud.lock.yaml` for validation.
+
+### Running an Environment
+
+<Steps>
+<Step title="Analyze">
+Quick inspection without running:
+```bash
+hud analyze hudpython/text_init    # Fast (from metadata)
+hud analyze hudpython/text_init --live  # Full (runs container)
+```
+</Step>
+
+<Step title="Debug">
+Test MCP protocol compliance:
+```bash
+hud debug hudpython/text_init:latest
+```
+Validates through 5 phases of initialization.
+</Step>
+
+</Steps>
+
+## Common Usage
+
+### Docker Images
+```bash
+# Basic
+hud debug my-image:latest
+
+# With options
+hud debug my-image:latest -e DEBUG=true -p 8080:8080
+
+# From registry
+hud analyze ghcr.io/org/image:v1.0.0
+```
+
+## Output Formats
+
+### Interactive (Default)
+```bash
+hud analyze my-env
+
+🔍 Analyzing MCP environment: my-env
+✓ Connected successfully
+✓ Found 12 tools
+
+Available Tools:
+  • click - Click at coordinates
+  • type - Type text
+  ...
+```
+
+### JSON
+```bash
+hud analyze my-env --format json
+
+{
+  "tools": [{
+    "name": "click",
+    "description": "Click at coordinates",
+    "parameters": {...}
+  }]
+}
+```
+
+### Markdown
+```bash
+hud analyze my-env --format markdown > docs/tools.md
+```
+
+## CI/CD Example
+
+```bash
+#!/bin/bash
+set -e
+
+# Test environment
+hud debug "$IMAGE_NAME"
+
+# Verify tools
+TOOLS=$(hud analyze "$IMAGE_NAME" --format json | jq '.tools | length')
+if [ "$TOOLS" -lt 3 ]; then
+  echo "Not enough tools!"
+  exit 1
+fi
+```
+
+## Python Scripting
+
+```python
+import subprocess
+import json
+
+def get_tools(image):
+    result = subprocess.run(
+        ["hud", "analyze", image, "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    return json.loads(result.stdout)["tools"]
+
+# Use
+tools = get_tools("my-env:latest")
+for tool in tools:
+    print(f"- {tool['name']}: {tool['description']}")
+```
+
+## Exit Codes
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 0 | Success | Command completed |
+| 1 | General Error | Command failed |
+| 2 | Usage Error | Invalid arguments |
+| 3 | Connection Error | Failed to connect |
+| 4 | Timeout | Operation timed out |
+| 5 | Protocol Error | MCP violation |
+
+## Environment Variables
+
+```bash
+# Debug output
+export HUD_CLI_DEBUG=true
+
+# Custom timeout
+export HUD_CLI_TIMEOUT=120
+
+# Provider keys
+export ANCHOR_API_KEY=...
+```
+
+## Next Steps
+
+### Create & Deploy
+<CardGroup cols={2}>
+<Card title="Init Command" icon="sparkles" href="/v5/reference/cli/init">
+  Create new environments from scratch
+</Card>
+
+<Card title="Deploy Command" icon="rocket" href="/v5/reference/cli/deploy">
+  Build remotely and deploy to HUD platform
+</Card>
+</CardGroup>
+
+### Local Development
+<CardGroup cols={2}>
+<Card title="Dev Command" icon="code" href="/v5/reference/cli/dev">
+  Develop locally with optional hot-reload and interactive testing
+</Card>
+
+<Card title="Build Command" icon="hammer" href="/v5/reference/cli/build">
+  Build images locally for validation
+</Card>
+</CardGroup>
+
+### Running Commands
+<CardGroup cols={2}>
+<Card title="Analyze Command" icon="magnifying-glass" href="/v5/reference/cli/analyze">
+  Inspect tools and capabilities
+</Card>
+
+<Card title="Debug Command" icon="bug" href="/v5/reference/cli/debug">
+  Test MCP protocol compliance
+</Card>
+</CardGroup>

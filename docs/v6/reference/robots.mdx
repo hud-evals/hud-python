@@ -1,0 +1,174 @@
+---
+title: "Robots"
+description: "The robot capability: contracts, bridges, and the agent harness."
+icon: "robot"
+tag: "Beta"
+---
+
+<Note>
+The `robot` capability is in **beta**. The wire protocol is versioned `openpi/0`; the contract schema is v0. Expect additive changes while the design settles.
+</Note>
+
+HUD runs robot environments the same way it runs everything else — an environment declares tasks and capabilities, an agent drives a live `Run` — but a policy at 10 Hz can't ride discrete tool calls. The `robot` capability is a **schema-driven observation/action loop over WebSocket**. It is **openpi-like** — it reuses openpi's wire format (msgpack with transparent, recursive numpy serialization) and flat observation/action naming (`observation/...` keys, `actions`) — but flips the roles: the **environment is the server** (owns the simulator, serves frames) and the **agent is the client** (runs the policy, streams actions back). On connect the env sends a metadata frame, then pushes observations; failures surface as a string traceback frame rather than a silent close.
+
+Everything below ships behind the `robot` extra (`pip install hud-python[robot]` — numpy + openpi-client).
+
+## Overview
+
+Integrating a policy against a robot environment means answering three questions: who owns the simulator, who runs the policy, and how do their spaces line up. The capability splits each answer into a small, named abstraction — implement the ones on your side, and the framework owns everything in between (the serve loop, the wire protocol, telemetry).
+
+**Environment side** — owns the simulator and serves frames:
+
+- **`RobotBridge`** — the one class you implement around your sim: `reset` / `step` / `get_observation`. The framework owns the WebSocket serve loop and the single-agent connection.
+- **`RobotEndpoint`** — wraps the bridge for task definitions: episode bookkeeping and results.
+
+**Agent side** — runs the policy and streams actions:
+
+- **`RobotAgent`** — the episode-loop harness: connect to the env, read its schema, then `observe → infer → act` until the env terminates.
+- **`Model`** — the policy seam: `infer(batch) -> action`. `LeRobotModel` wraps a stock LeRobot checkpoint.
+- **`Adapter`** — the space-translation seam between what the env emits and what the policy consumes. `LeRobotAdapter` covers the common wiring.
+
+**The contract** — the one artifact both sides share: a self-describing JSON schema of the embodiment's observation and action spaces, carried in the capability's manifest params. The agent wires observations to policy inputs purely from the manifest; there is no shared config.
+
+Each side has a **realtime** variant (`RealtimeRobotBridge` / `RealtimeRobotAgent`) for when the sim clock must not wait on inference — the env advances on its own wall clock while the agent streams action chunks asynchronously. These live in the experimental scaffolding (`demos/experimental`, outside the published SDK) so they can iterate independently.
+
+The shape of the work follows from the split: a bridge is written **once per environment**, a model + adapter **once per policy**, and the contract tells you — before you run anything — whether a given pairing wires up. That's the path from "new checkpoint" to "scored episodes on a benchmark" in an afternoon.
+
+## Environment side
+
+You implement one class — the **bridge** owns the simulator; the framework owns the WebSocket serve loop and the single-agent connection:
+
+```python
+from hud.environment.robot import RobotBridge
+
+class MySimBridge(RobotBridge):
+    async def reset(self, task_id: str, seed: int = 0) -> str:
+        ...                              # build the episode
+        await self._send_observation()   # push the first frame
+        return self.task_description     # becomes the task prompt
+
+    def step(self, action) -> None:
+        ...  # advance one tick; set success / terminated
+
+    def get_observation(self):
+        return {"agentview_image": frame, "state": vec}, self.terminated
+```
+
+Observation dict keys must equal the contract's feature leaf-names. The bridge binds an **ephemeral loopback port** by default — its concrete address is published at serve time, and clients reach it through the control channel's [capability tunnel](/v6/reference/capabilities#bindings-are-always-reachable), so a robot container still publishes only one port.
+
+The **endpoint** wraps the bridge for episode control; each **template** is exactly two yields:
+
+```python
+from hud import Environment
+from hud.environment.robot import RobotEndpoint
+
+env = Environment(name="my-sim")
+endpoint = RobotEndpoint(MySimBridge())  # the env drives the bridge only through the endpoint
+
+@env.initialize
+async def _up():
+    await endpoint.start()
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
+
+@env.shutdown
+async def _down():
+    await endpoint.stop()
+
+@env.template()
+async def pick_and_place(task_id: str, seed: int = 0):
+    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
+    yield await endpoint.result()  # {"score", "success", "total_reward"}
+```
+
+This module is declare-only — serve it like any other environment (`hud serve env.py`, a container CMD, or `LocalRuntime("env.py")`).
+
+<Note>
+A simulator that must **own the process main thread** (Isaac Sim / Omniverse) can't run under `hud serve`. Run the SDK server on a worker thread instead — `asyncio.run(hud.environment.server.serve(env, host, port))` in a thread, with a custom `SimRunner` that pumps sim work back to the main thread.
+</Note>
+
+## Agent side
+
+The harness lives in `hud.agents.robot`. `RobotAgent` owns the episode loop — connect to the `robot` binding, read the contract, then `observe → infer → act` until the env terminates. You supply two seams:
+
+- **`Model`** — runs the policy (`infer(batch) -> action`). `LeRobotModel(policy, preprocess, postprocess)` ships the standard LeRobot inference sandwich.
+- **`Adapter`** — translates env ↔ policy spaces. `LeRobotAdapter(model_image_keys=...)` maps the env's cameras onto the policy's image slots in contract order, converts HWC uint8 → CHW float, and passes state + prompt through.
+
+A stock LeRobot checkpoint is a complete agent in a few lines:
+
+```python
+import torch
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+
+from hud.agents.robot.adapter import LeRobotAdapter
+from hud.agents.robot.agent import RobotAgent
+from hud.agents.robot.model import LeRobotModel
+
+class PI05Agent(RobotAgent):
+    def __init__(self):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        policy = PI05Policy.from_pretrained("lerobot/pi05_libero_finetuned").to(device).eval()
+        pre, post = make_pre_post_processors(policy.config, "lerobot/pi05_libero_finetuned",
+                                             preprocessor_overrides={"device_processor": {"device": device}})
+        self.model = LeRobotModel(policy, pre, post)
+        self.adapter = LeRobotAdapter(model_image_keys=list(policy.config.image_features))
+```
+
+Run it with the normal engine — `Taskset(...).run(agent, runtime=...)` — against any substrate serving the env.
+
+## The contract
+
+Robot observation and action spaces differ immensely. Embodiments disagree on camera count, resolution, and naming; on state representation (joint angles vs. EEF pose, quaternions vs. axis-angle, world frame vs. base frame); on action semantics (absolute vs. delta, position vs. velocity); on control rate. Policies are just as opinionated about what they consume and emit. Pairing *a specific model* with *a specific env* therefore always involves a wiring step — and getting it silently wrong (a transposed image, a reordered state vector) produces a policy that runs fine and scores zero.
+
+The **HUD robot spec** exists to make that wiring explicit and checkable. Each environment carries a contract — a JSON document describing the embodiment: `robot_type`, `control_rate`, and a `features` map where each feature declares its `role` (`observation` / `action`), `dtype`, `shape`, and ordering:
+
+```json
+{
+  "robot_type": "franka_panda_libero",
+  "control_rate": 10,
+  "features": {
+    "observation.images.agentview_image": {"role": "observation", "type": "rgb", "dtype": "uint8", "shape": [256, 256, 3]},
+    "observation.state.robot0_eef_pos":  {"role": "observation", "dtype": "float32", "shape": [3], "order": "0-2"},
+    "action.delta_eef_pos":              {"role": "action", "dtype": "float32", "shape": [3], "order": "0-2"}
+  }
+}
+```
+
+The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role` — this is what the `Adapter` wires against. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives outside the SDK, alongside the contract corpus and the advisory matching/visualization tooling (`match`, `integration_review`, `render_match`).
+
+## Realtime control
+
+The default loop is lockstep — the sim waits for each action. The realtime path lives in the experimental scaffolding (`demos/experimental`, outside the published SDK), built on top of the SDK's `RobotBridge` / `RobotAgent`. `RealtimeRobotBridge` (`experimental.env`) decouples the sim clock from inference: it advances at `control_hz` on its own wall clock, popping actions from an injected **`ActionProvider`** while the agent streams whole action chunks asynchronously. Providers implement the merge strategy — `sync` (blocking baseline), `naive_async` (drop-and-replace), `weighted_async` (blended overlap), and `rtc` (real-time chunking with an execution horizon) — via `make_action_provider(mode, ...)`. On underrun the sim HOLDs (`no_op_action`) rather than freezing, because the real world doesn't pause for inference.
+
+On the agent side, **`RealtimeRobotAgent`** (`experimental.agent`) is the chunk-streaming counterpart: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
+
+**`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default) or `ThreadSimRunner` (dedicated worker — render-heavy sims). Subclass it for exotic topologies (e.g. a sim that owns main with the server on a worker).
+
+## Telemetry
+
+Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per step — every camera frame the policy saw plus the executed action — and stamps **keyframes** where a fresh action chunk was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with markers at each chunk-prediction decision point.
+
+## API summary
+
+| Symbol | Where | Role |
+|--------|-------|------|
+| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
+| `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
+| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
+| `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
+| `RealtimeRobotBridge` | `experimental.env` (`demos/experimental`) | Free-running realtime env-side bridge |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results |
+| `ActionProvider`, `make_action_provider` | `experimental.env` (`demos/experimental`) | Realtime chunk-merge strategies |
+| `SimRunner` (`Inline`/`Thread`) | `hud.environment.robot` | Which thread runs the sim |
+| `RobotAgent` | `hud.agents.robot` | The episode-loop harness |
+| `RealtimeRobotAgent` | `experimental.agent` (`demos/experimental`) | Chunk-streaming realtime agent harness |
+| `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Robot benchmark cookbook" icon="flask" href="/v6/cookbooks/robot-benchmark">
+  LIBERO in Docker, driven by pi0.5, end to end.
+</Card>
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+</CardGroup>

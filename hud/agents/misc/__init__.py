@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .integration_test_agent import IntegrationTestRunner
-from .response_agent import ResponseAgent
+from .response_automation import auto_respond
 
-__all__ = ["IntegrationTestRunner", "ResponseAgent"]
+__all__ = ["auto_respond"]
