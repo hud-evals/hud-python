@@ -215,13 +215,13 @@ async def _down():
 
 `Capability.rfb` listens on `5900 + display` and takes an optional `password=`. Host multiple screens by publishing one `rfb` capability per `display`.
 
-### `Capability.robot`
+### `robot` — an observation/action loop
 
 ```text
 Capability.robot(*, name="robot", url, contract)
 ```
 
-The `openpi/0` control loop *(beta)*. This is an **openpi-like** protocol: it reuses openpi's wire format (msgpack with transparent, recursive numpy serialization) and its flat observation/action naming schema (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. It differs fundamentally in **role assignment** — in openpi a policy *server* answers inference requests; here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts in the world, replying with actions). `contract` is the environment's full self-describing schema — `robot_type`, `control_rate`, and every observation/action feature — carried in the manifest params so the agent wires itself with no shared config. The serving bridge binds an ephemeral loopback port, so publish this from an `@env.initialize` hook after `await bridge.start()`:
+The robot control loop *(beta)*, carried over the `openpi/0` wire protocol. This is an **openpi-like** protocol: it reuses openpi's wire format (msgpack with transparent, recursive numpy serialization) and its flat observation/action naming schema (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. It differs fundamentally in **role assignment** — in openpi a policy *server* answers inference requests; here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts in the world, replying with actions). `contract` is the environment's full self-describing schema — `robot_type`, `control_rate`, and every observation/action feature — carried in the manifest params so the agent wires itself with no shared config. The serving bridge binds an ephemeral loopback port, so publish this from an `@env.initialize` hook after `await bridge.start()`:
 
 ```python
 @env.initialize
