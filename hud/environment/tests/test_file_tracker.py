@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from hud.environment.file_tracker import FileTracker
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 def test_modified_file_produces_a_unified_diff(tmp_path: Path) -> None:
