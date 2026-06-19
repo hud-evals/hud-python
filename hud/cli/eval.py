@@ -151,6 +151,8 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # very_verbose = true
 # auto_respond = true
 # gateway = false  # Route LLM API calls through HUD Gateway
+# runtime = "local"  # local, hud, or tcp://host:port
+# remote = false  # Run the whole rollout remotely on HUD
 
 [claude]
 # model = "claude-sonnet-4-6"
@@ -247,6 +249,7 @@ class EvalConfig(BaseModel):
         "auto_respond",
         "gateway",
         "runtime",
+        "remote",
     }
     source: str | None = None
     agent_type: AgentType | None = None
@@ -261,8 +264,10 @@ class EvalConfig(BaseModel):
     group_size: int = 1
     gateway: bool = False
     #: Placement: "local" (spawn each row's env from the source), "hud"
-    #: (platform-hosted execution), or a tcp:// url of an already-served env.
+    #: (HUD runtime tunnel), or a tcp:// url of an already-served env.
     runtime: str = "local"
+    #: Run the whole rollout remotely on the HUD platform.
+    remote: bool = False
 
     agent_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -291,15 +296,18 @@ class EvalConfig(BaseModel):
         # always route through the HUD gateway — no local provider key is
         # involved, and a local gateway model_client could not travel with
         # the submission anyway. Only HUD_API_KEY matters.
-        if self.runtime == "hud":
-            require_api_key("run platform-hosted evals")
+        if self.remote:
+            require_api_key("run remote hosted evals")
             if self.gateway:
                 self.gateway = False
                 hud_console.info(
-                    "--gateway is implied by --runtime hud (the hosted runner always "
+                    "--gateway is implied by --remote (the hosted runner always "
                     "routes through the HUD gateway); ignoring the flag locally."
                 )
             return
+
+        if self.runtime == "hud":
+            require_api_key("run HUD runtime tunnel evals")
 
         # Gateway by default: when the provider key is missing but HUD_API_KEY is
         # set, route via the HUD gateway instead of erroring — the out-of-the-box
@@ -444,6 +452,7 @@ class EvalConfig(BaseModel):
         config: list[str] | None = None,
         task_ids: str | None = None,
         runtime: str | None = None,
+        remote: bool = False,
     ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
         overrides: dict[str, Any] = {
@@ -482,6 +491,7 @@ class EvalConfig(BaseModel):
             "very_verbose": very_verbose,
             "auto_respond": auto_respond,
             "gateway": gateway,
+            "remote": remote,
         }.items():
             if value:
                 overrides[key] = True
@@ -556,6 +566,8 @@ class EvalConfig(BaseModel):
             table.add_row("verbose", "[bold green]True[/bold green]")
         if self.gateway:
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
+        if self.remote:
+            table.add_row("remote", "[bold green]True[/bold green]")
 
         if self.agent_type:
             table.add_row("", "")
@@ -630,20 +642,25 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
     "local" spawns each row's env from the source next to the tasks file;
-    "hud" submits every rollout for platform-hosted execution (agent
-    co-located with the env on a leased instance); a ``tcp://`` url attaches
-    to an env served elsewhere.
+    "hud" opens the HUD runtime tunnel while keeping the agent loop local;
+    ``--remote`` submits every rollout for platform-hosted execution; a
+    ``tcp://`` url attaches to an env served elsewhere.
     """
-    from hud.eval import HUDRuntime, LocalRuntime, Runtime
+    from hud.eval import HostedRuntime, HUDRuntime, LocalRuntime, Runtime
 
+    if cfg.remote:
+        require_api_key("run remote hosted evals")
+        return HostedRuntime()
     if cfg.runtime == "local":
         return LocalRuntime(_spawn_target(source_path))
     if cfg.runtime == "hud":
-        require_api_key("run platform-hosted evals")
+        require_api_key("run HUD runtime tunnel evals")
         return HUDRuntime()
     if cfg.runtime.startswith("tcp://"):
         return Runtime(cfg.runtime)
-    hud_console.error(f"Unknown runtime {cfg.runtime!r}. Use 'local', 'hud', or a tcp:// url.")
+    hud_console.error(
+        f"Unknown runtime {cfg.runtime!r}. Use 'local', 'hud', a tcp:// url, or --remote."
+    )
     raise typer.Exit(1)
 
 
@@ -777,7 +794,12 @@ def eval_command(
     runtime: str | None = typer.Option(
         None,
         "--runtime",
-        help="Placement: local (default), hud (platform-hosted), or a tcp:// url",
+        help="Placement: local (default), hud (runtime tunnel), or a tcp:// url",
+    ),
+    remote: bool = typer.Option(
+        False,
+        "--remote",
+        help="Run the whole rollout remotely on the HUD platform",
     ),
 ) -> None:
     """Run evaluation on datasets or individual tasks with agents.
@@ -788,7 +810,8 @@ def eval_command(
         hud eval "My Tasks" claude-sonnet-4-6 --full   # Load from platform taskset
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
-        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Execute rollouts on the platform
+        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use HUD runtime tunnel
+        hud eval tasks.json claude-sonnet-4-6 --remote       # Execute rollout remotely
     """
     hud_console.info("Initializing evaluation...")
 
@@ -817,6 +840,7 @@ def eval_command(
         config=config,
         gateway=gateway,
         runtime=runtime,
+        remote=remote,
     )
 
     if cfg.source is None:

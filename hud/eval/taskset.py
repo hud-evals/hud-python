@@ -23,7 +23,7 @@ from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HUDRuntime, LocalRuntime
+from .runtime import HostedRuntime, HUDRuntime, LocalRuntime
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -201,7 +201,7 @@ class Taskset:
         self,
         agent: Agent,
         *,
-        runtime: Provider | HUDRuntime | None = None,
+        runtime: Provider | HostedRuntime | None = None,
         group: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
@@ -211,8 +211,8 @@ class Taskset:
         One shared (stateless) ``agent`` drives every run. ``runtime`` is the
         placement: a :class:`~hud.eval.runtime.Provider` (the env served
         somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
-        or :class:`~hud.eval.runtime.HUDRuntime` to run each rollout on a leased box
-        (left unset: hosted by env name). One provider serves a mixed-env
+        or :class:`~hud.eval.runtime.HostedRuntime` to run each rollout remotely
+        on the platform (left unset: HUD tunnel by env name). One provider serves a mixed-env
         taskset and can size each substrate per row. Registers one HUD job as
         the platform receipt and reports each run's trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
@@ -239,11 +239,12 @@ class Taskset:
             await job_enter(job.id, name=job.name, group=group)
         job_id = job.id
 
-        # Placement is chosen once for the batch: a HUDRuntime runs each rollout on
-        # a leased box, anything else is a Provider driven locally by rollout().
+        # Placement is chosen once for the batch: HostedRuntime delegates the
+        # whole rollout to the platform, anything else is a Provider driven
+        # locally by rollout().
         # No runtime: serve the tasks' shared source locally if they were minted
         # in-process from one file (the common authoring case); otherwise (mixed
-        # or wire-loaded rows with no source) default to HUD-hosted.
+        # or wire-loaded rows with no source) default to the HUD runtime tunnel.
         if runtime is None:
             sources = {t._source for t in task_list if t._source is not None}
             runtime = LocalRuntime(next(iter(sources))) if len(sources) == 1 else None
@@ -251,7 +252,7 @@ class Taskset:
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> Run:
-            if isinstance(placement, HUDRuntime):
+            if isinstance(placement, HostedRuntime):
                 return await placement.run(task, agent, job_id=job_id, group_id=group_id)
             return await rollout(task, agent, runtime=placement, job_id=job_id, group_id=group_id)
 

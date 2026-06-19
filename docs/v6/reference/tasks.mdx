@@ -42,7 +42,7 @@ task = count_letter(word="raspberry")  # -> hud.eval.Task
 | `slug` | `str \| None` | Stable id for sync/filtering/registry. |
 | `columns` | `dict \| None` | Metadata for filtering and leaderboards. |
 | `validation` | `list[dict] \| None` | Sync/platform metadata. |
-| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). Applied during platform-hosted execution. |
+| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). Applied during hosted execution. |
 
 The env on a task is a *name*, never a live object: it is the join key between
 the row and whatever placement can bring that environment up. Running a task
@@ -67,16 +67,17 @@ The contract is structural — a class holding real state (a platform session, a
 | `LocalRuntime(path)` | Serve the row's env from a local `.py` source in a child process (the same serving path a container CMD runs). `env=` pins one explicitly. |
 | `DockerRuntime(image)` | `docker run` a fresh container per rollout from an image whose CMD serves the control channel (the scaffolded `Dockerfile.hud`). `port=` (default 8765) is the in-container port; `run_args=` passes extra `docker run` flags. The control port is the only one published. |
 | `Runtime(url)` | Attach to an already-served control channel (provisioned elsewhere; no lifecycle). |
-| `HUDRuntime()` | Run each rollout on a HUD-hosted substrate by the row's env name — the agent co-located with the env on the instance (the default when `runtime=` is omitted). |
-| `HUDRuntime(mode="cloud")` | Lease the environment on HUD infra but keep the agent loop local; the SDK opens a tunnel and drives the remote control channel through a local `Runtime`. |
+| `HUDRuntime()` | Lease the environment on HUD infra but keep the agent loop local; the SDK opens a tunnel and drives the remote control channel through a local `Runtime` (the default when `runtime=` is omitted). |
+| `HostedRuntime()` | Submit the whole rollout to the HUD platform so the agent runs remotely next to the env. |
 
 ```python
-from hud import DockerRuntime, HUDRuntime, LocalRuntime, Runtime
+from hud import DockerRuntime, HUDRuntime, HostedRuntime, LocalRuntime, Runtime
 
 job = await task.run(agent, runtime=LocalRuntime("env.py"))          # local subprocess
 job = await task.run(agent, runtime=DockerRuntime("my-env:latest"))  # fresh container
 job = await task.run(agent, runtime=Runtime("tcp://host:8765"))  # already served
-job = await task.run(agent, runtime=HUDRuntime(mode="cloud"))  # local agent, cloud env
+job = await task.run(agent, runtime=HUDRuntime())  # local agent, cloud env
+job = await task.run(agent, runtime=HostedRuntime())  # remote agent + cloud env
 ```
 
 Because the provider sees the row, placement can vary per task — heavier

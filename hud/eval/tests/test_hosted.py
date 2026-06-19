@@ -1,8 +1,8 @@
 """HUD-hosted placement: agent spec, submission/polling, and scheduler dispatch.
 
-The hosted path never opens a local connection — :class:`HUDRuntime` submits the
+The hosted path never opens a local connection — :class:`HostedRuntime` submits the
 rollout to the platform, polls the trace until terminal, and folds the result
-into a ``Run``. The scheduler (:meth:`Taskset.run`) chooses between ``HUDRuntime``
+into a ``Run``. The scheduler (:meth:`Taskset.run`) chooses between ``HostedRuntime``
 and a local provider. These tests fake the platform client at the
 ``PlatformClient`` seam, so they cover everything local: spec serialization,
 payload shape, id canonicalization, terminal detection, timeout cancel, the
@@ -12,17 +12,16 @@ Run the caller gets back, and the dispatch.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval.run import Run
-from hud.eval.runtime import HUDRuntime, Runtime
+from hud.eval.runtime import HostedRuntime, HUDRuntime, Runtime
 from hud.eval.task import Task
 from hud.settings import settings
-from hud.telemetry.context import set_trace_context
 
 
 class _FakePlatform:
@@ -92,7 +91,7 @@ def test_hosted_spec_rejects_custom_model_client() -> None:
 @pytest.mark.asyncio
 async def test_run_rejects_non_gateway_agent() -> None:
     """An agent that can't serialize its identity yields a failed Run, not a crash."""
-    run = await HUDRuntime(poll_interval=0.0).run(
+    run = await HostedRuntime(poll_interval=0.0).run(
         Task(env="e", id="x"),
         object(),  # type: ignore[arg-type]
         job_id="j",  # type: ignore[arg-type]
@@ -114,7 +113,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HUDRuntime(poll_interval=0.0)
+    hosted = HostedRuntime(poll_interval=0.0)
     trace_id = uuid.uuid4().hex
     job_id = uuid.uuid4().hex
     task = Task(env="sums", id="add", args={"a": 1, "b": 2})
@@ -147,7 +146,7 @@ async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPa
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HUDRuntime(poll_interval=0.0, run_timeout=0.0)
+    hosted = HostedRuntime(poll_interval=0.0, run_timeout=0.0)
     task = Task(env="sums", id="add", args={})
 
     with pytest.raises(TimeoutError, match="hosted rollout"):
@@ -165,7 +164,7 @@ async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
     task = Task(env="sums", id="add", args={"a": 2, "b": 3})
-    run = await HUDRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
+    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
 
     assert run.reward == 1.0
     assert run.trace.status == "completed"
@@ -184,7 +183,7 @@ async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     task = Task(env="sums", id="add", args={})
-    run = await HUDRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
+    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
 
     assert run.reward == 0.0
     assert run.trace.is_error
@@ -193,7 +192,7 @@ async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_scheduler_drives_provider_locally(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Provider placement goes through the local rollout atom, not HUDRuntime."""
+    """A Provider placement goes through the local rollout atom, not HostedRuntime."""
     import hud.eval.taskset as taskset_mod
     from hud.eval.taskset import Taskset
 
@@ -218,26 +217,28 @@ async def test_scheduler_drives_provider_locally(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_scheduler_delegates_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A HUDRuntime placement is delegated to via HUDRuntime.run, not the local atom."""
+    """A HostedRuntime placement is delegated to via HostedRuntime.run, not the local atom."""
     from hud.eval.taskset import Taskset
 
     seen: dict[str, Any] = {}
 
-    class _RecordingHUDRuntime(HUDRuntime):
+    class _RecordingHostedRuntime(HostedRuntime):
         async def run(self, task: Task, agent: Any, **kwargs: Any) -> Run:  # type: ignore[override]
             seen.update(kwargs)
             run = Run(None, task.id, {})
             run.trace.status = "completed"
             return run
 
-    job = await Taskset("t", [Task(env="e", id="x")]).run(_agent(), runtime=_RecordingHUDRuntime())
+    job = await Taskset("t", [Task(env="e", id="x")]).run(
+        _agent(), runtime=_RecordingHostedRuntime()
+    )
 
     assert len(job.runs) == 1
     assert "job_id" in seen and "group_id" in seen
 
 
 @pytest.mark.asyncio
-async def test_cloud_mode_drives_local_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
 
     async def fake_rollout(task: Task, agent: Any, **kwargs: Any) -> Run:
@@ -248,10 +249,10 @@ async def test_cloud_mode_drives_local_rollout(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr("hud.eval.runtime.rollout", fake_rollout)
 
-    cloud = HUDRuntime(mode="cloud")
+    runtime = HUDRuntime()
     job_id = uuid.uuid4().hex
     trace_id = uuid.uuid4().hex
-    run = await cloud.run(
+    run = await runtime.run(
         Task(env="e", id="x"),
         _agent(),
         job_id=job_id,
@@ -260,14 +261,16 @@ async def test_cloud_mode_drives_local_rollout(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert run.trace.status == "completed"
-    assert seen["runtime"] is cloud
+    assert seen["runtime"] is runtime
     assert seen["job_id"] == job_id
     assert seen["group_id"] == "g1"
     assert seen["trace_id"] == trace_id
 
 
 @pytest.mark.asyncio
-async def test_cloud_session_includes_active_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_runtime_session_create_payload_omits_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     posts: list[dict[str, Any]] = []
     session_id = str(uuid.uuid4())
 
@@ -293,26 +296,24 @@ async def test_cloud_session_includes_active_trace_id(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("hud.eval.runtime.httpx.AsyncClient", _RecordingAsyncClient)
 
-    trace_id = uuid.uuid4().hex
-    with set_trace_context(trace_id):
-        created = await HUDRuntime(mode="cloud")._create_cloud_session(
-            "https://mcp.hud.ai",
-            "sk-hud-test",
-            Task(env="e", id="x"),
-        )
+    created = await HUDRuntime()._create_runtime_session(
+        "https://mcp.hud.ai",
+        "sk-hud-test",
+        Task(env="e", id="x"),
+    )
 
     assert created == session_id
     assert posts == [
         {
             "path": "https://mcp.hud.ai/runtime/sessions",
             "headers": {"Authorization": "Bearer sk-hud-test"},
-            "json": {"environment": "e", "trace_id": str(uuid.UUID(trace_id))},
+            "json": {"environment": "e"},
         }
     ]
 
 
 @pytest.mark.asyncio
-async def test_cloud_session_sets_runtime_connection_params(
+async def test_runtime_session_sets_runtime_connection_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session_id = str(uuid.uuid4())
@@ -323,7 +324,7 @@ async def test_cloud_session_sets_runtime_connection_params(
             return ("127.0.0.1", 4321)
 
     class _Server:
-        sockets = [_Socket()]
+        sockets: ClassVar[list[_Socket]] = [_Socket()]
 
         def __init__(self) -> None:
             self.closed = False
@@ -340,7 +341,7 @@ async def test_cloud_session_sets_runtime_connection_params(
     async def fake_start_server(*args: Any, **kwargs: Any) -> _Server:
         return server
 
-    async def fake_create_cloud_session(
+    async def fake_create_runtime_session(
         self: HUDRuntime,
         runtime_url: str,
         api_key: str,
@@ -351,7 +352,7 @@ async def test_cloud_session_sets_runtime_connection_params(
         assert task.env == "e"
         return session_id
 
-    async def fake_delete_cloud_session(
+    async def fake_delete_runtime_session(
         self: HUDRuntime,
         runtime_url: str,
         api_key: str,
@@ -361,11 +362,11 @@ async def test_cloud_session_sets_runtime_connection_params(
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
     monkeypatch.setattr("hud.eval.runtime.asyncio.start_server", fake_start_server)
-    monkeypatch.setattr(HUDRuntime, "_create_cloud_session", fake_create_cloud_session)
-    monkeypatch.setattr(HUDRuntime, "_delete_cloud_session", fake_delete_cloud_session)
+    monkeypatch.setattr(HUDRuntime, "_create_runtime_session", fake_create_runtime_session)
+    monkeypatch.setattr(HUDRuntime, "_delete_runtime_session", fake_delete_runtime_session)
 
-    cloud = HUDRuntime(mode="cloud", runtime_url="https://mcp.hud.ai/", run_timeout=600.0)
-    async with cloud._cloud_session(Task(env="e", id="x")) as runtime:
+    cloud = HUDRuntime(runtime_url="https://mcp.hud.ai/", run_timeout=600.0)
+    async with cloud._runtime_session(Task(env="e", id="x")) as runtime:
         assert runtime.url == "tcp://127.0.0.1:4321"
         assert runtime.params == {
             "session_id": session_id,

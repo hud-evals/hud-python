@@ -11,7 +11,7 @@ The model *is* the row: field names are the wire keys, so plain pydantic
 (``Task.model_validate(entry)`` / ``task.model_dump()``) is the whole codec —
 there is no bespoke serialization layer.
 
-Placement is ``runtime: Provider | HUDRuntime | None`` (see :mod:`.runtime`).
+Placement is ``runtime: Provider | HostedRuntime | None`` (see :mod:`.runtime`).
 Execution lives entirely in :mod:`.rollout` and scheduling in
 :mod:`.taskset` — :meth:`Task.run` is the single-task form of
 ``Taskset.run``, so the row is always an argument to the engine, never a
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
 
     from .job import Job
-    from .runtime import HUDRuntime, Provider
+    from .runtime import HostedRuntime, Provider
 
 
 class Task(BaseModel):
@@ -41,7 +41,7 @@ class Task(BaseModel):
     Pure data — holds no execution state, so one ``Task`` can drive many
     concurrent rollouts. ``run`` it for a graded :class:`~hud.eval.job.Job`;
     placement comes from ``runtime=`` (a provider), else the source the task was
-    minted from (local), else HUD-hosted provisioning by ``env`` name.
+    minted from (local), else the HUD runtime tunnel by ``env`` name.
     """
 
     env: str = Field(min_length=1)
@@ -60,7 +60,7 @@ class Task(BaseModel):
     #: In-process only: the source file the template was defined in, captured
     #: when a template factory mints the task. Lets ``run`` default to serving
     #: that source locally. Excluded from the wire (a row loaded from JSON has
-    #: none, and falls back to HUD-hosted placement).
+    #: none, and falls back to HUD runtime tunnel placement).
     _source: str | None = PrivateAttr(default=None)
 
     def default_slug(self) -> str:
@@ -78,7 +78,7 @@ class Task(BaseModel):
         self,
         agent: Agent,
         *,
-        runtime: Provider | HUDRuntime | None = None,
+        runtime: Provider | HostedRuntime | None = None,
         group: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
@@ -90,7 +90,7 @@ class Task(BaseModel):
         repeats sharing a group_id, ``max_concurrent`` capping parallelism —
         over a taskset of one. ``runtime`` is the placement; left unset it
         serves the task's source locally when minted in-process, else falls
-        back to HUD-hosted provisioning by ``env`` name.
+        back to the HUD runtime tunnel by ``env`` name.
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 

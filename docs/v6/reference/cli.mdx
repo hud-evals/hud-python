@@ -92,7 +92,8 @@ For a platform taskset, export first: `hud sync tasks <name> --export tasks.json
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
-| `--runtime` | Placement: `local` (default), `hud` (platform-hosted), or `tcp://host:port`. |
+| `--runtime` | Placement: `local` (default), `hud` (HUD runtime tunnel), or `tcp://host:port`. |
+| `--remote` | Run the whole rollout remotely on the HUD platform. |
 | `--yes`, `-y` | Skip confirmation prompt. |
 
 ## Run a packaged image

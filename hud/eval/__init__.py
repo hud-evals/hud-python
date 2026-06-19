@@ -15,8 +15,8 @@ row.)
 
 Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a
 local source, ``DockerRuntime`` an image, ``Runtime(url)`` an env served
-elsewhere (all :class:`Provider`s driven here), or ``HUDRuntime`` to run the
-rollout on a HUD-leased box with the agent co-located with the env::
+elsewhere, ``HUDRuntime`` a HUD runtime tunnel, or ``HostedRuntime`` to run the
+whole rollout remotely on the platform::
 
     from hud.eval import LocalRuntime, Taskset
 
@@ -36,6 +36,7 @@ from .run import Grade, Run, rollout
 from .runtime import (
     DaytonaRuntime,
     DockerRuntime,
+    HostedRuntime,
     HUDRuntime,
     LocalRuntime,
     ModalRuntime,
@@ -57,6 +58,7 @@ __all__ = [
     "DockerRuntime",
     "Grade",
     "HUDRuntime",
+    "HostedRuntime",
     "HudTrainingClient",
     "Job",
     "LocalRuntime",
