@@ -34,6 +34,7 @@ from hud.telemetry.context import set_trace_context
 from hud.types import Step, TaskCall, Trace
 from hud.utils.time import now_iso
 
+from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
@@ -304,7 +305,11 @@ async def rollout(
                 async with live:  # start on enter; grade on exit
                     run = live  # bound only once live: an earlier failure synthesizes
                     _phase = "agent loop"
-                    await agent(run)
+                    # File tracking (when enabled) streams workspace diffs to
+                    # telemetry for the duration of the agent loop; setup churn is
+                    # skipped because the run is already started here.
+                    async with file_tracking_observer(client):
+                        await agent(run)
                     _phase = "grading"
         except TimeoutError:
             raise

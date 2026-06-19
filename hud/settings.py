@@ -147,6 +147,21 @@ class Settings(BaseSettings):
         validation_alias="HUD_TELEMETRY_LOCAL_DIR",
     )
 
+    file_tracking_enabled: bool = Field(
+        default=False,
+        description="Publish a workspace's filetracking/1 capability and stream file-change "
+        "diffs to telemetry during a rollout. Opt-in; off by default.",
+        validation_alias="HUD_FILE_TRACKING_ENABLED",
+    )
+
+    file_tracking_interval: float = Field(
+        default=2.0,
+        gt=0,
+        description="Seconds between rollout-level file-tracking snapshots. Each snapshot "
+        "diffs the workspace against the previous one and emits a hud.filetracking.v1 span.",
+        validation_alias="HUD_FILE_TRACKING_INTERVAL",
+    )
+
     hud_logging: bool = Field(
         default=True,
         description="Enable fancy logging for the HUD SDK",

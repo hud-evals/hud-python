@@ -21,6 +21,7 @@ from hud.capabilities import (
     Capability,
     CapabilityClient,
     CDPClient,
+    FileTrackingClient,
     MCPClient,
     RFBClient,
     SSHClient,
@@ -36,7 +37,7 @@ LOGGER = logging.getLogger("hud.clients")
 
 #: protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
-    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
+    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient, FileTrackingClient)
 }
 
 

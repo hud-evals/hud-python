@@ -279,6 +279,7 @@ class Environment(LegacyEnvMixin):
         root: Path | str,
         *,
         name: str = "shell",
+        track_files: bool | None = None,
         **kwargs: Any,
     ) -> Workspace:
         """Attach a :class:`Workspace` serving ``name`` over ``ssh/2``.
@@ -286,13 +287,23 @@ class Environment(LegacyEnvMixin):
         Registers the start → publish → stop lifecycle on this env's hooks;
         nothing touches the filesystem until the env actually serves. Extra
         kwargs go to :class:`Workspace` (``network=``, ``env=``, ...).
+
+        When ``track_files`` is set (defaulting to ``HUD_FILE_TRACKING_ENABLED``)
+        the workspace also publishes an observation-only ``filetracking/1``
+        capability the rollout streams diffs from.
         """
-        ws = Workspace(root, **kwargs)
+        if track_files is None:
+            from hud.settings import settings
+
+            track_files = settings.file_tracking_enabled
+        ws = Workspace(root, track_files=track_files, **kwargs)
 
         @self.initialize
         async def _up() -> None:
             await ws.start()
             self.add_capability(ws.capability(name))
+            if ws.tracks_files:
+                self.add_capability(ws.file_tracking_capability())
 
         @self.shutdown
         async def _down() -> None:
