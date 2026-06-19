@@ -75,10 +75,14 @@ agent = OpenAIChatAgent(OpenAIChatConfig(
 The [`Chat`](/v6/advanced/chat) runner is protocol-agnostic — an A2A endpoint is a thin adapter that translates requests into `chat.send()` calls:
 
 ```python
-from hud import Chat
+from hud import Chat, LocalRuntime
 from hud.agents import create_agent
 
-chat = Chat(my_task(messages=[]), create_agent("claude-sonnet-4-5"))
+chat = Chat(
+    my_task(messages=[]),
+    create_agent("claude-sonnet-4-5"),
+    runtime=LocalRuntime("env.py"),   # Chat runs the loop locally; a runtime is required
+)
 reply = await chat.send("hello")   # any protocol frontend calls this
 ```
 

@@ -145,11 +145,11 @@ Then run at scale across models with `group=` for reward spread:
 
 ```python
 from hud import Taskset
-from hud.agents import load_agent
+from hud.agents import create_agent
 
 taskset = Taskset.from_api("my-env")
-for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-4o"]:
-    job = await taskset.run(load_agent(model), group=8)
+for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
+    job = await taskset.run(create_agent(model), group=8)
     print(f"{model}: {job.reward:.2f}")
 ```
 

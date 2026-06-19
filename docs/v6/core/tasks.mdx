@@ -67,7 +67,9 @@ The contract is structural — a class holding real state (a platform session, a
 | `LocalRuntime(path)` | Serve the row's env from a local `.py` source in a child process (the same serving path a container CMD runs). `env=` pins one explicitly. |
 | `DockerRuntime(image)` | `docker run` a fresh container per rollout from an image whose CMD serves the control channel (the scaffolded `Dockerfile.hud`). `port=` (default 8765) is the in-container port; `run_args=` passes extra `docker run` flags. The control port is the only one published. |
 | `Runtime(url)` | Attach to an already-served control channel (provisioned elsewhere; no lifecycle). |
-| `HUDRuntime()` | Run each rollout on a HUD-hosted substrate by the row's env name — the agent co-located with the env on the instance (the default when `runtime=` is omitted). |
+| `HUDRuntime()` | Run each rollout on a HUD-hosted substrate by the row's env name — the agent co-located with the env on the instance. |
+
+**Omit `runtime=`** and placement is inferred from where the tasks came from: a taskset minted in-process from a single `.py` source serves that source locally (`LocalRuntime` — the common authoring case), while rows loaded from a file or the platform (no local source to serve) fall back to `HUDRuntime()`.
 
 ```python
 from hud import DockerRuntime, LocalRuntime, Runtime
