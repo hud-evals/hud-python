@@ -132,4 +132,8 @@ def materialize_preset(preset: EnvironmentPreset, target: Path) -> None:
                 source = tar.extractfile(member)
                 if source is not None:
                     dest.write_bytes(source.read())
+                    # Preserve the archive's executable bits so entrypoints and
+                    # scripts stay runnable (no-op on Windows).
+                    if member.mode & 0o111:
+                        dest.chmod(dest.stat().st_mode | (member.mode & 0o111))
             # Symlinks and other special members are intentionally skipped.
