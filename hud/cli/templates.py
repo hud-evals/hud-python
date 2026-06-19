@@ -13,7 +13,7 @@ COPY . .
 
 # Serve the Environment's control channel (tcp JSON-RPC) on 8765.
 EXPOSE 8765
-CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["uv", "run", "python", "-m", "hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
 """
 
 # fmt: off
