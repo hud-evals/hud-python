@@ -5,31 +5,33 @@ The training loop is agnostic to where rollouts come from — it only consumes
 local quickstart differ only in *which taskset* and *which runtime* you hand to
 ``Taskset.run``; the training code never changes.
 
-``load_taskset_and_runtime()`` picks between them from the environment:
+``load_taskset_and_runtime()`` picks between them from the ``TASKSET`` constant:
 
-- ``HUD_TASKSET`` set — the real flow: load a taskset you already built and
+- ``TASKSET`` set — the real flow: load a taskset you already built and
   pushed (``hud deploy`` + ``hud sync``) from the platform with
   ``Taskset.from_api``, and run every rollout on a leased HUD box with
   ``HUDRuntime`` (the agent runs remotely, next to the env). Nothing local.
-- unset — a self-contained quickstart: a tiny arithmetic taskset driven against
+- empty — a self-contained quickstart: a tiny arithmetic taskset driven against
   the bundled ``env.py`` locally.
 """
 
 from __future__ import annotations
 
-import os
 import random
 
 from hud.eval import HUDRuntime, LocalRuntime, Provider, Taskset
 
 from env import multiply
 
+# Deployed taskset to train on (its name or id, from `hud deploy` + `hud sync`).
+# Leave empty for the self-contained local quickstart against env.py.
+TASKSET = ""
+
 
 def load_taskset_and_runtime() -> tuple[Taskset, Provider | HUDRuntime]:
-    """Resolve the rollout source from ``HUD_TASKSET`` (see module docstring)."""
-    taskset_name = os.environ.get("HUD_TASKSET")
-    if taskset_name:
-        return Taskset.from_api(taskset_name), HUDRuntime()
+    """Resolve the rollout source from the ``TASKSET`` constant (see module docstring)."""
+    if TASKSET:
+        return Taskset.from_api(TASKSET), HUDRuntime()
 
     # Three-digit x two-digit multiplication *with* reasoning: hard enough that a
     # 4B reasoner is right only sometimes (a sub-1.0 baseline with within-group

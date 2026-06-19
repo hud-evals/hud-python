@@ -10,14 +10,13 @@ Runs are passed directly: ``TrainingClient`` reads each ``Run``'s trajectory and
 reward. (Pass ``run.trace_id`` strings instead to train on trajectories the
 platform already holds.)
 
-    HUD_MODEL=<trainable-gateway-model> uv run simple_train.py --steps 10
+    uv run simple_train.py --steps 10   # set MODEL below (pick one with `hud models`)
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import time
 
 from dotenv import load_dotenv
@@ -27,6 +26,10 @@ from hud import TrainingClient
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
 from hud.eval import Job
+
+# The trainable gateway model to sample from and train, in place.
+# Pick one with `hud models` and paste its id here.
+MODEL = "Qwen3 4B Instruct 2507 (Tinker)"
 
 
 def _output_tokens(runs: list) -> int:
@@ -41,7 +44,7 @@ def _output_tokens(runs: list) -> int:
 
 
 async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: int) -> None:
-    model = os.environ["HUD_MODEL"]  # a trainable gateway model string
+    model = MODEL  # the trainable gateway model (set at the top of this file)
 
     # return_token_ids tells the gateway/agent this is a training rollout: the
     # response carries token ids + per-token logprobs, which the agent records on
