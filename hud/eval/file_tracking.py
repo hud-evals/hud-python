@@ -33,13 +33,17 @@ _DRAIN_TIMEOUT = 10.0
 async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
     """Stream workspace diffs to telemetry for the duration of the ``with`` block.
 
-    A no-op unless file tracking + telemetry are enabled and the manifest has a
-    ``filetracking`` binding. The opened client is owned by ``client`` and
-    closed on its teardown, so this never closes it directly.
+    A no-op unless telemetry is enabled and the manifest has a ``filetracking``
+    binding. The binding's presence is the authoritative opt-in: it is published
+    iff the workspace was served with ``track_files=True`` (which itself defaults
+    to ``HUD_FILE_TRACKING_ENABLED``), so honoring it here means an explicit
+    ``track_files=True`` streams even when the global setting is off. The opened
+    client is owned by ``client`` and closed on its teardown, so this never
+    closes it directly.
     """
     from hud.settings import settings
 
-    if not (settings.file_tracking_enabled and settings.telemetry_enabled):
+    if not settings.telemetry_enabled:
         yield
         return
     try:
@@ -70,8 +74,12 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        else:
-            await _emit_once(ft)  # trailing diff: edits since the last sample
+        # Trailing diff: edits since the last successful sample. Attempt it in
+        # both paths (clean drain or forced cancel); bound it so a connection
+        # desynced by the cancel above can't wedge teardown. ``_emit_once`` logs
+        # and swallows its own failures.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(_emit_once(ft), _DRAIN_TIMEOUT)
 
 
 async def _poll(ft: FileTrackingClient, interval: float, stop: asyncio.Event) -> None:

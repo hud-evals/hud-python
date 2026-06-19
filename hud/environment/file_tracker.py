@@ -188,7 +188,6 @@ class FileTracker:
 
         self._previous_snapshot: Snapshot | None = None
         self._baseline_snapshot: Snapshot | None = None
-        self._all_diffs: list[dict[str, Any]] = []
 
         self._gitignore_patterns: list[str] = []
         self._gitignore_loaded = False
@@ -247,7 +246,6 @@ class FileTracker:
         self._previous_snapshot = current
 
         if diff.files_changed > 0:
-            self._all_diffs.append(diff.to_dict())
             LOGGER.info(
                 "Snapshot diff: %d files changed (%d scanned) in %.1fms",
                 diff.files_changed,
@@ -267,10 +265,6 @@ class FileTracker:
                 files_changed=0,
             )
         return self._diff(self._baseline_snapshot, self._scan())
-
-    def get_all_diffs(self) -> list[dict[str, Any]]:
-        """All recorded per-snapshot diffs (each in ``DiffResult.to_dict()`` shape)."""
-        return list(self._all_diffs)
 
     def current_manifest(self) -> list[dict[str, Any]]:
         """The latest file manifest: ``[{path, size, content_hash}, ...]``.
