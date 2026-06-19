@@ -9,7 +9,7 @@
   },
   "favicon": "/favicon.ico",
   "colors": {
-    "primary": "#c0960c",
+    "primary": "#ca8a04",
     "light": "#ffd180",
     "dark": "#1c1408"
   },
@@ -21,7 +21,7 @@
     }
   },
   "appearance": {
-    "default": "light"
+    "default": "system"
   },
   "background": {
     "color": {
@@ -66,9 +66,9 @@
             "version": "v6",
             "default": true,
             "groups": [
-              { "group": "Start here", "pages": ["v6/index", "v6/quickstart", "v6/protocol", "migrate-v6"] },
+              { "group": "Start here", "pages": ["v6/index", "v6/quickstart", "migrate-v6"] },
+              { "group": "The Core", "pages": ["v6/reference/environment", "v6/reference/tasks", "v6/reference/capabilities", "v6/reference/agents", "v6/reference/runtime", "v6/reference/robots", "v6/reference/graders", "v6/protocol", "v6/reference/types", "v6/reference/cli"] },
               { "group": "Run & scale", "pages": ["v6/run/deploy", "v6/run/models", "v6/run/signal", "v6/run/training"] },
-              { "group": "Reference", "pages": ["v6/reference/environment", "v6/reference/tasks", "v6/reference/capabilities", "v6/reference/agents", "v6/reference/robots", "v6/reference/graders", "v6/reference/types", "v6/reference/cli"] },
               { "group": "Advanced", "pages": ["v6/advanced/integrations", "v6/advanced/subagents", "v6/advanced/chat", "v6/advanced/patterns", "v6/advanced/harbor-convert"] },
               { "group": "Cookbooks", "pages": ["v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] },
               { "group": "More", "pages": ["v6/faq", "contributing"] }

@@ -6,7 +6,7 @@ icon: "bolt"
 
 From install to your first graded trace: you'll write a task, run it against a model through the HUD gateway, and read the reward.
 
-**Fastest path — hand the docs to your coding agent first.** The HUD docs skill scaffolds correct v6 environments and flags weak task designs as you build:
+**Fastest path – hand the docs to your coding agent first.** The HUD docs skill scaffolds correct v6 environments and flags weak task designs as you build:
 
 ```bash
 npx skills add https://docs.hud.ai
@@ -27,7 +27,7 @@ pip install hud-python
 
 ## 2. Set your API key
 
-Get a key from [hud.ai/project/api-keys](https://hud.ai/project/api-keys) — one key both routes models through the HUD gateway and traces every rollout.
+Get a key from [hud.ai/project/api-keys](https://hud.ai/project/api-keys) – one key both routes models through the HUD gateway and traces every rollout.
 
 ```bash
 hud set HUD_API_KEY=your-key-here
@@ -41,7 +41,7 @@ Scaffold a complete, runnable example to start from:
 hud init my-env
 ```
 
-Or write `tasks.py` directly. A task is defined by a **template** — an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable **Task**:
+Or write `env.py` directly. A task is defined by a **template** – an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable [**Task**](/v6/reference/tasks):
 
 ```python tasks.py
 from hud import Environment

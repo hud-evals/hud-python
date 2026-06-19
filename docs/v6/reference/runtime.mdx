@@ -1,0 +1,114 @@
+---
+title: "Runtime"
+description: "Where an environment's container comes from for a rollout — chosen at run time, never baked into the task."
+icon: "server"
+---
+
+A **runtime** decides *where* the environment runs for a rollout. The task definition never changes — you pass a runtime at execution time and the same taskset runs locally, in a container, on a cloud sandbox, or on HUD's hosted infra.
+
+```python
+from hud.eval import LocalRuntime, DockerRuntime, ModalRuntime, DaytonaRuntime, HUDRuntime, Runtime
+
+await TASKS.run(agent, runtime=LocalRuntime("env.py"))
+```
+
+A runtime is just a function: given a task, bring up the env's control channel somewhere and hand back its URL. The built-ins below cover the common cases; anything callable as `(task) -> async context manager of Runtime` plugs in the same way.
+
+## Built-in runtimes
+
+| Runtime | What it does | When to use it |
+|---------|--------------|----------------|
+| `LocalRuntime` | Serves the env from a `.py` source in a child process on an ephemeral loopback port. | Fastest iteration; local development. |
+| `DockerRuntime` | `docker run`s a fresh container per rollout from an image. | Reproducible local runs; parity with production. |
+| `ModalRuntime` | Boots a fresh [Modal](https://modal.com/) cloud sandbox per rollout from a published image. | Cloud scale without managing infra. |
+| `DaytonaRuntime` | Creates a fresh [Daytona](https://www.daytona.io/) sandbox per rollout from a snapshot. | Cloud scale on Daytona. |
+| `HUDRuntime` | Runs the whole rollout off-box on a HUD-leased instance. | Hosted infra after `hud deploy`. |
+| `Runtime(url)` | Attaches to a substrate already serving elsewhere. | A long-lived container or sandbox you provisioned yourself. |
+
+## Arguments
+
+### `LocalRuntime`
+
+```python
+LocalRuntime(path, *, env=None, ready_timeout=120.0)
+```
+
+- **`path`** — `.py` file (or directory) that declares the env. The child's working directory is the source's directory, so sibling imports and relative data paths resolve.
+- **`env`** — pin a specific env name when the source declares more than one. Defaults to the placed task's env.
+- **`ready_timeout`** — seconds to wait for the child to start serving.
+
+### `DockerRuntime`
+
+```python
+DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None)
+```
+
+- **`image`** — image name to run; shorthand for `runtime_config.image`.
+- **`port`** — port the image's CMD serves inside the container (the scaffolded `Dockerfile.hud` serves `8765`).
+- **`run_args`** — extra `docker run` flags, e.g. `["--gpus", "all"]` or `["-e", "KEY=VAL"]`.
+- **`runtime_config`** — a `RuntimeConfig` (image, resources) for finer control.
+
+### `ModalRuntime`
+
+```python
+ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", port=8765, runtime_config=None)
+```
+
+- **`image_name`** — published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
+- **`image`** — an `Image` to build lazily on first use, as an escape hatch.
+- **`command`** — override the serving command (defaults to the scaffolded `hud serve` entrypoint).
+- **`app_name`** / **`port`** — Modal app name and the in-sandbox serving port.
+
+Requires the `modal` extra and a configured token.
+
+### `DaytonaRuntime`
+
+```python
+DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", port=8765, ssh_host="ssh.app.daytona.io", ssh_expires_minutes=1440, runtime_config=None)
+```
+
+- **`snapshot_name`** — Daytona snapshot to boot from (the durable handle).
+- **`image`** — Dockerfile/registry ref to build the snapshot once if it's missing. Resources (cpu/memory/gpu) live on the snapshot.
+- **`workdir`** / **`port`** — guest working directory and in-sandbox serving port.
+- **`ssh_host`** / **`ssh_expires_minutes`** — SSH tunnel settings (Daytona exposes services over an SSH local-forward).
+
+### `HUDRuntime`
+
+```python
+HUDRuntime(*, poll_interval=5.0, run_timeout=3600.0)
+```
+
+- **`poll_interval`** — seconds between trace polls while the remote rollout runs.
+- **`run_timeout`** — bound on one rollout end to end, including instance startup.
+
+### `Runtime`
+
+```python
+Runtime(url, params=..., config=...)
+```
+
+- **`url`** — control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
+- **`params`** — connection-time data a transport may need (auth token, sandbox id).
+
+Constructed directly, `Runtime` is also a provider — the borrowed, shared case: it yields itself with a no-op lifecycle, since whoever provisioned the substrate owns teardown. This is how custom providers (your own Kubernetes, a reused sandbox) plug in.
+
+## Custom runtimes
+
+Any sandbox provider is one small function — start a container, yield its URL, tear it down:
+
+```python
+from contextlib import asynccontextmanager
+from hud import Runtime
+
+@asynccontextmanager
+async def my_runtime(task):
+    sandbox = await start_my_sandbox(image="my-env")   # your infra brings it up
+    try:
+        yield Runtime(f"tcp://{sandbox.host}:{sandbox.port}")
+    finally:
+        await sandbox.terminate()                       # …and tears it down
+
+await TASKS.run(agent, runtime=my_runtime)
+```
+
+`DockerRuntime`, `ModalRuntime`, and the rest are just the built-in versions of this. See [Package & deploy](/v6/run/deploy) for the full packaging path.
