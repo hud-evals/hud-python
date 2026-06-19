@@ -137,8 +137,8 @@ resources (ports, file handles) are not released otherwise.
 Once `hud eval env.py model` passes locally, two commands push it to the platform:
 
 ```bash
-hud deploy .            # package and deploy the environment (gives it a platform id)
-hud sync tasks env.py   # upload the tasks list, linked to the deployed environment
+hud deploy .                     # package and deploy the environment (gives it a platform id)
+hud sync tasks my-taskset env.py # upload tasks from env.py to the "my-taskset" taskset (name first, source second)
 ```
 
 Then run at scale across models with `group=` for reward spread:

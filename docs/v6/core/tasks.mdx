@@ -43,6 +43,7 @@ task = count_letter(word="raspberry")  # -> hud.eval.Task
 | `columns` | `dict \| None` | Metadata for filtering and leaderboards. |
 | `validation` | `list[dict] \| None` | Sync/platform metadata. |
 | `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). Applied during platform-hosted execution. |
+| `runtime_config` | `RuntimeConfig \| None` | Per-row runtime launch hints (`image`, `resources`, `limits`). The chosen runtime applies the subset it supports or rejects it. `RuntimeConfig` imports from `hud`. |
 
 The env on a task is a *name*, never a live object: it is the join key between
 the row and whatever placement can bring that environment up. Running a task
@@ -66,6 +67,8 @@ The contract is structural — a class holding real state (a platform session, a
 |----------|-------------|
 | `LocalRuntime(path)` | Serve the row's env from a local `.py` source in a child process (the same serving path a container CMD runs). `env=` pins one explicitly. |
 | `DockerRuntime(image)` | `docker run` a fresh container per rollout from an image whose CMD serves the control channel (the scaffolded `Dockerfile.hud`). `port=` (default 8765) is the in-container port; `run_args=` passes extra `docker run` flags. The control port is the only one published. |
+| `ModalRuntime(image_name)` | `docker run` in the cloud: a fresh [Modal](https://modal.com/) sandbox per rollout from a published image. Needs the `modal` extra + a configured token. Imports from `hud.eval`. |
+| `DaytonaRuntime(snapshot_name)` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout from a snapshot. Needs the `daytona` extra + `DAYTONA_API_KEY`. Imports from `hud.eval`. |
 | `Runtime(url)` | Attach to an already-served control channel (provisioned elsewhere; no lifecycle). |
 | `HUDRuntime()` | Run each rollout on a HUD-hosted substrate by the row's env name — the agent co-located with the env on the instance. |
 
@@ -201,6 +204,7 @@ every run (including a single `task.run`) reports under a job.
 | `runs` | `list[Run]` | Runs in expansion order. |
 | `group` | `int` | Runs per task. |
 | `reward` | `float` | Mean reward across runs. |
+| `results` | `dict[str, list[Run]]` | Runs grouped by task slug — the alignment-safe alternative to `zip(tasks, job.runs)` (list-valued since `group > 1` yields several runs per task). |
 | `await Job.start(name, group=1)` | `Job` | Open a job spanning multiple scheduler calls (a training session); pass it as `job=` to accumulate. |
 
 ## Sync
