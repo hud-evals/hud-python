@@ -8,7 +8,7 @@ Most tasks yield a single text prompt. A **chat-style task** yields a *list of m
 
 ## Prerequisites
 
-- An environment and a task (see [Tasks](/v6/reference/tasks)).
+- An environment and a task (see [Tasks](/v6/core/tasks)).
 - An agent to drive the turns (see [Run on any model](/v6/run/models)).
 
 ## A chat-style task
@@ -77,14 +77,14 @@ For an A2A endpoint (sessions per context, agent card, citations transport), see
 
 ## When to use chat vs. a single-turn task
 
-- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/reference/tasks)).
+- **Single-turn task** — the default. One prompt, one graded answer. Use it for evals and training (see [Tasks](/v6/core/tasks)).
 - **Chat task** — when the *interaction itself* is the thing: assistants, tool-use dialogues, or anything where the agent needs prior turns. The grading model is the same — you still yield a reward.
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
 <Card title="Run on any model" icon="robot" href="/v6/run/models" />
 <Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
-<Card title="Types: Trace" icon="code" href="/v6/reference/types" />
+<Card title="Types: Trace" icon="code" href="/v6/core/types" />
 </CardGroup>

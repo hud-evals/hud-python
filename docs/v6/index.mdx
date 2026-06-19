@@ -7,7 +7,22 @@ mode: "wide"
 [HUD](https://hud.ai) is a platform for building RL environments. You define an environment, write tasks for that environment, and run them for evals and training with any model, at any scale. 
 Our SDK is an [open-source](https://github.com/hud-evals/hud-python) Python framework for all of this. 
 
-The full workflow flows in five steps: **declare your environment** → **choose your taskset** → **choose your substrate** → **run your agent** → **churn the RL loop**.
+The full workflow flows in five steps:
+
+```mermaid
+flowchart LR
+    A(["1#160;·#160;Declare#160;your#160;environment"]) --> B(["2 · Choose your taskset"]) --> C(["3 · Choose your substrate"]) --> D(["4 · Run your agent"]) --> E(["5 · Churn the RL loop"])
+    classDef s1 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    classDef s2 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    classDef s3 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    classDef s4 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    classDef s5 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    class A s1;
+    class B s2;
+    class C s3;
+    class D s4;
+    class E s5;
+```
  
 ## Define any environment
 
@@ -15,9 +30,9 @@ An environment is some closed container for your agent to act in. Fundamentally 
 
 <div className="tight-list">
 
-- the **contents** of the container ([Environment](/v6/reference/environment))
-- the **tasks** (and their rewards) to be performed inside it ([Tasks & Tasksets](/v6/reference/tasks))
-- the **capabilities** the agent can use to perform these tasks ([Capabilities](/v6/reference/capabilities))
+- the **contents** of the container ([Environment](/v6/core/environment))
+- the **tasks** (and their rewards) to be performed inside it ([Tasks & Tasksets](/v6/core/tasks))
+- the **capabilities** the agent can use to perform these tasks ([Capabilities](/v6/core/capabilities))
 
 </div>
 
@@ -26,7 +41,7 @@ The v6 SDK leverages modular abstractions for all of these, letting you build on
 
 <Accordion title="Part 1: Declare your environment">
 
-The first and **key** part of any HUD workflow is **declaring your [environment](/v6/reference/environment)** in a declaration file `env.py` - here is a 
+The first and **key** part of any HUD workflow is **declaring your [environment](/v6/core/environment)** in a declaration file `env.py` - here is a 
 standard scaffold:
 
 ```python env.py
@@ -58,7 +73,7 @@ async def some_task_1(...):
 ```
 
 This scaffold is general on purpose - it describes _any_ environment. A one-line shell task, a full GUI desktop, a robot 
-simulator - they're all just environments with some bespoke content, tasks, and associated capabilities. 
+simulator - they're all just environments with some bespoke **content**, **tasks**, and associated **capabilities**. 
 The complexity hidden under this file is hidden in the [HUD protocol](/v6/protocol)
 Its thin envelope lets any model or harness plug into any environment. 
 
@@ -67,7 +82,7 @@ Its thin envelope lets any model or harness plug into any environment.
 
 <Accordion title="Part 2: Choose your taskset">
 
-Then just form a [taskset](/v6/reference/tasks) (one or more tasks with parameters) **in code** or load one **from a file**.
+Then just form a [taskset](/v6/core/tasks) (one or more tasks with parameters) **in code** or load one **from a file**.
 
 ```python tasks.py
 from hud.eval import Taskset
@@ -99,7 +114,7 @@ hud deploy                 # build + register your env image on HUD
 hud sync tasks my-taskset  # publish a taskset to run from the platform
 ```
 
-**2. Run programmatically.** Drive rollouts programmatically from Python by picking a [runtime](/v6/reference/runtime) - the same 
+**2. Run programmatically.** Drive rollouts programmatically from Python by picking a [runtime](/v6/core/runtime) - the same 
 taskset runs against any of them:
 
 ```python
@@ -116,14 +131,14 @@ HUDRuntime()               # HUD's hosted infra (after `hud deploy`)
 ## Evaluate and train any AI agent inside it
 
 Since an environment only exposes capabilities, any agent plugs in. For standard models the 
-[HUD inference gateway](/v6/run/models) lets you switch between models like
+[HUD inference gateway](/v6/run/models) and our **prebuilt harnesses** let you switch between models like
 Claude, GPT, or Gemini just by choosing the model name.
 
-<Accordion title="Part 4: Run your agent">
-
 Run rollouts in parallel with full isolation out of the box.
-Every rollout in the job is traced on the [Platform](https://hud.ai), so you can see exactly 
-what the agent did realtime and how it was graded. You can run this programmatically:
+Every rollout in the job is traced on the [platform](https://hud.ai), so you can see exactly 
+what the agent did realtime and how it was graded.
+<Accordion title="Part 4: Run your agent">
+You can run this programmatically:
 
 ```python
 from hud.agents import create_agent
@@ -140,7 +155,7 @@ print(job.reward)
 
 
 
-or run it from the [CLI](/v6/reference/cli):
+or run it from the [CLI](/v6/core/cli):
 ```bash
 hud eval env.py claude --group 3
 ```
@@ -183,14 +198,19 @@ A few beliefs shape everything in the SDK:
 
 ## Where to go next
 
+Next, read the [**Protocol**](/v6/protocol) — the one idea under everything above. Together, the Introduction and the protocol are the whole core of how HUD works.
+
 <CardGroup cols={2}>
+<Card title="Protocol" icon="route" href="/v6/protocol">
+  The thin envelope between agent and environment — the core idea.
+</Card>
 <Card title="Quickstart" icon="bolt" href="/v6/quickstart">
   From install to your first graded trace in a few minutes.
 </Card>
-<Card title="Environments & capabilities" icon="cube" href="/v6/reference/environment">
+<Card title="Environments & capabilities" icon="cube" href="/v6/core/environment">
   Give the agent shell, browser, GUI, tools, or a robot to act on.
 </Card>
-<Card title="Tasks, tasksets & grading" icon="list-check" href="/v6/reference/tasks">
+<Card title="Tasks, tasksets & grading" icon="list-check" href="/v6/core/tasks">
   Turn one task definition into a whole dataset.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">
@@ -199,7 +219,7 @@ A few beliefs shape everything in the SDK:
 <Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
   Build a portable image and run it anywhere.
 </Card>
-<Card title="Robots (beta)" icon="robot" href="/v6/reference/robots">
+<Card title="Robots (beta)" icon="robot" href="/v6/core/robots">
   Contract-driven control loops for simulators and VLA policies.
 </Card>
 <Card title="Migrate from v5" icon="arrows-rotate" href="/migrate-v6">

@@ -30,8 +30,6 @@ Integrating a policy against a robot environment means answering three questions
 
 **The contract** — the one artifact both sides share: a self-describing JSON schema of the embodiment's observation and action spaces, carried in the capability's manifest params. The agent wires observations to policy inputs purely from the manifest; there is no shared config.
 
-Each side has a **realtime** variant (`RealtimeRobotBridge` / `RealtimeRobotAgent`) for when the sim clock must not wait on inference — the env advances on its own wall clock while the agent streams action chunks asynchronously. These live in the experimental scaffolding (`demos/experimental`, outside the published SDK) so they can iterate independently.
-
 The shape of the work follows from the split: a bridge is written **once per environment**, a model + adapter **once per policy**, and the contract tells you — before you run anything — whether a given pairing wires up. That's the path from "new checkpoint" to "scored episodes on a benchmark" in an afternoon.
 
 ## Environment side
@@ -54,7 +52,7 @@ class MySimBridge(RobotBridge):
         return {"agentview_image": frame, "state": vec}, self.terminated
 ```
 
-Observation dict keys must equal the contract's feature leaf-names. The bridge binds an **ephemeral loopback port** by default — its concrete address is published at serve time, and clients reach it through the control channel's [capability tunnel](/v6/reference/capabilities#bindings-are-always-reachable), so a robot container still publishes only one port.
+Observation dict keys must equal the contract's feature leaf-names. The bridge binds an **ephemeral loopback port** by default — its concrete address is published at serve time, and clients reach it through the control channel's [capability tunnel](/v6/core/capabilities#bindings-are-always-reachable), so a robot container still publishes only one port.
 
 The **endpoint** wraps the bridge for episode control; each **template** is exactly two yields:
 
@@ -83,7 +81,7 @@ async def pick_and_place(task_id: str, seed: int = 0):
 This module is declare-only — serve it like any other environment (`hud serve env.py`, a container CMD, or `LocalRuntime("env.py")`).
 
 <Note>
-A simulator that must **own the process main thread** (Isaac Sim / Omniverse) can't run under `hud serve`. Run the SDK server on a worker thread instead — `asyncio.run(hud.environment.server.serve(env, host, port))` in a thread, with a custom `SimRunner` that pumps sim work back to the main thread.
+A simulator that must **own the process main thread** (Isaac Sim / Omniverse) can't run under `hud serve`. Split the control plane out: the env publishes `RobotEndpoint.remote(host, port)`, and the sim-owning process runs `RobotEndpoint(bridge).serve(host, port)` with a `MainThreadSimRunner` so every sim touch runs on the main thread, outside any task.
 </Note>
 
 ## Agent side
@@ -134,15 +132,17 @@ The **HUD robot spec** exists to make that wiring explicit and checkable. Each e
 }
 ```
 
-The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role` — this is what the `Adapter` wires against. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives outside the SDK, alongside the contract corpus and the advisory matching/visualization tooling (`match`, `integration_review`, `render_match`).
+The agent reads it back via `RobotClient.spaces()`, which splits features into action/observation spaces by `role` — this is what the `Adapter` wires against. The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per contract, every feature rank ≥ 1** (scalars are `[1]`). The full authoring spec — closed symbol sets for `state_type` / `state_representation` / `frame`, conventions, and the known traps — lives outside the SDK alongside the contract corpus.
 
-## Realtime control
+## Sim threading
 
-The default loop is lockstep — the sim waits for each action. The realtime path lives in the experimental scaffolding (`demos/experimental`, outside the published SDK), built on top of the SDK's `RobotBridge` / `RobotAgent`. `RealtimeRobotBridge` (`experimental.env`) decouples the sim clock from inference: it advances at `control_hz` on its own wall clock, popping actions from an injected **`ActionProvider`** while the agent streams whole action chunks asynchronously. Providers implement the merge strategy — `sync` (blocking baseline), `naive_async` (drop-and-replace), `weighted_async` (blended overlap), and `rtc` (real-time chunking with an execution horizon) — via `make_action_provider(mode, ...)`. On underrun the sim HOLDs (`no_op_action`) rather than freezing, because the real world doesn't pause for inference.
+The loop is lockstep — the bridge steps the sim once per received action. A simulator is usually **thread-affine** (every touch must run on the thread that created its GL/device context), but the bridge's asyncio loop can't be stalled by a blocking step. **`SimRunner`** is the one-line injection that decides *which thread* runs the sim; the bridge routes every sim touch through it:
 
-On the agent side, **`RealtimeRobotAgent`** (`experimental.agent`) is the chunk-streaming counterpart: it reads the inference mode/threshold from the contract and replies with whole chunks via `RobotClient.send_chunk`.
+- **`InlineSimRunner`** — runs on the event-loop thread. The default; for cheap/CPU sims and tests.
+- **`ThreadSimRunner`** — sim on a dedicated worker thread, leaving the loop free during a blocking step. For render-heavy or thread-bound sims.
+- **`MainThreadSimRunner`** — sim on the main thread, for runtimes that own *both* the main thread and the loop (Isaac/Omniverse); the owner's pump loop drains queued sim touches between ticks.
 
-**`SimRunner`** selects which thread runs the (usually thread-affine) simulator: `InlineSimRunner` (event loop thread, the default) or `ThreadSimRunner` (dedicated worker — render-heavy sims). Subclass it for exotic topologies (e.g. a sim that owns main with the server on a worker).
+Pass one to the bridge (`RobotBridge(sim_runner=ThreadSimRunner())`), or subclass `SimRunner` for an exotic topology.
 
 ## Telemetry
 
@@ -156,12 +156,9 @@ Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per st
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
 | `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
-| `RealtimeRobotBridge` | `experimental.env` (`demos/experimental`) | Free-running realtime env-side bridge |
-| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results |
-| `ActionProvider`, `make_action_provider` | `experimental.env` (`demos/experimental`) | Realtime chunk-merge strategies |
-| `SimRunner` (`Inline`/`Thread`) | `hud.environment.robot` | Which thread runs the sim |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (local or `.remote()`) |
+| `SimRunner` (`Inline`/`Thread`/`MainThread`) | `hud.environment.robot` | Which thread runs the sim |
 | `RobotAgent` | `hud.agents.robot` | The episode-loop harness |
-| `RealtimeRobotAgent` | `experimental.agent` (`demos/experimental`) | Chunk-streaming realtime agent harness |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 
 ## See also
@@ -170,5 +167,5 @@ Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per st
 <Card title="Robot benchmark cookbook" icon="flask" href="/v6/cookbooks/robot-benchmark">
   LIBERO in Docker, driven by pi0.5, end to end.
 </Card>
-<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
 </CardGroup>

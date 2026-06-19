@@ -67,7 +67,7 @@
             "default": true,
             "groups": [
               { "group": "Start here", "pages": ["v6/index", "v6/quickstart"] },
-              { "group": "The Core", "pages": ["v6/reference/environment", "v6/reference/tasks", "v6/reference/capabilities", "v6/reference/agents", "v6/reference/runtime", "v6/reference/robots", "v6/reference/graders", "v6/protocol", "v6/reference/types", "v6/reference/cli"] },
+              { "group": "The Core", "pages": ["v6/protocol", "v6/core/environment", "v6/core/tasks", "v6/core/capabilities", "v6/core/agents", "v6/core/runtime", "v6/core/robots", "v6/core/graders", "v6/core/types", "v6/core/cli"] },
               { "group": "Run & scale", "pages": ["v6/run/deploy", "v6/run/models", "v6/run/signal", "v6/run/training"] },
               { "group": "Advanced", "pages": ["v6/advanced/integrations", "v6/advanced/subagents", "v6/advanced/chat", "v6/advanced/patterns", "v6/advanced/harbor-convert"] },
               { "group": "Cookbooks", "pages": ["v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] },
@@ -158,56 +158,6 @@
         ]
       },
       {
-        "tab": "Platform",
-        "icon": "building",
-        "groups": [
-          {
-            "group": "Get Started",
-            "pages": [
-              "platform/index",
-              "platform/mcp"
-            ]
-          },
-          {
-            "group": "Concepts",
-            "pages": [
-              "platform/models",
-              "platform/environments",
-              "platform/tasksets"
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              "platform/publishing-leaderboards",
-              "platform/subagent",
-              "platform/file-tracking"
-            ]
-          },
-          {
-            "group": "Agents",
-            "pages": [
-              "platform/agents/automations",
-              "platform/agents/qa",
-              "platform/agents/chats"
-            ]
-          },
-          {
-            "group": "Integrations",
-            "pages": [
-              "platform/rest-api",
-              "platform/slack"
-            ]
-          },
-          {
-            "group": "How We Use HUD on HUD",
-            "pages": [
-              "platform/internal/trace-analysis"
-            ]
-          }
-        ]
-      },
-      {
         "tab": "Changelog",
         "icon": "clock-rotate-left",
         "groups": [
@@ -229,6 +179,7 @@
     { "source": "/tools/:slug*", "destination": "/v5/tools/:slug*" },
     { "source": "/advanced/:slug*", "destination": "/v5/advanced/:slug*" },
     { "source": "/llm-quickstart", "destination": "/v5/llm-quickstart" },
+    { "source": "/v6/reference/:slug*", "destination": "/v6/core/:slug*" },
     { "source": "/cookbooks/ops-diagnostics", "destination": "/v6/cookbooks/ops-diagnostics" },
     { "source": "/cookbooks/codex-coding", "destination": "/v6/cookbooks/coding-agent" },
     { "source": "/cookbooks/:slug*", "destination": "/v6/quickstart" }

@@ -18,7 +18,7 @@ from hud.environment import Answer
 The live handle for one task — the lifecycle plus the agent's `Trace`. You get
 them in `job.runs` from `task.run(agent)` / `taskset.run(agent)`, or construct
 one over a connected client for manual driving (see
-[Running a Task](/v6/reference/tasks#running-a-task)).
+[Running a Task](/v6/core/tasks#running-a-task)).
 
 | Member | Type | Description |
 |--------|------|-------------|
@@ -107,7 +107,7 @@ A normalized citation across providers (`hud.agents.types.Citation`): `type`, `t
 
 ### Grading shapes
 
-`SubScore` and `EvaluationResult` live with the graders — see [Graders](/v6/reference/graders#subscore-and-evaluationresult).
+`SubScore` and `EvaluationResult` live with the graders — see [Graders](/v6/core/graders#subscore-and-evaluationresult).
 
 ## Training types
 
@@ -125,6 +125,6 @@ Declare `input=` / `returns=` on `@env.template` to surface JSON schemas in the 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
-<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
+<Card title="Graders" icon="scale-balanced" href="/v6/core/graders" />
 </CardGroup>

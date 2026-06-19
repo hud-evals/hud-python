@@ -289,6 +289,14 @@ body::after {
   border-radius: 12px !important;
 }
 
+/* Protocol loop diagram: tint only the Capabilities participant box a light
+   blue (mermaid has no per-participant color; it tags each actor box with a
+   `name` attribute, so target that one). */
+#content .mermaid rect.actor[name="Caps"] {
+  fill: #eaf3ff !important;
+  stroke: #7aa9e0 !important;
+}
+
 /* ── "Core Principles" boxes ──────────────────────────────────────────────
    Custom JSX divs sit outside Mintlify's prose scope, so the bold lead-in
    doesn't inherit prose colors (it went near-black on dark). Theme the

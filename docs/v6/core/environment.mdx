@@ -1,0 +1,158 @@
+---
+title: "Environment"
+description: "The Environment class: tasks, capabilities, initializers, and serving."
+icon: "cube"
+mode: "wide"
+---
+
+There are two things called "environment" in HUD, and it helps to keep them apart:
+
+- the **`Environment` object** - a small control object you register capabilities and tasks onto.
+- the **`env.py` declaration file** - the whole environment: the object plus the capabilities, hooks, and tasks declared on it. This is what you author, serve, and ship.
+
+The object is the handle; the file is the environment. This page starts with the object, then shows how a declaration file ties it together.
+
+## The `Environment` object
+
+`hud.environment.Environment` is a lightweight control object. It doesn't hold the world itself - it's where you **register** what the environment exposes: its **capabilities** and its **tasks**.
+
+```python
+from hud import Environment
+# or: from hud.environment import Environment
+```
+
+When served, the object acts as the *server* the agent harness - the *client* - connects to over the [protocol](/v6/protocol): it answers `hello` with the capabilities registered on it and runs the registered tasks on request.
+
+
+
+## Constructor
+
+```python
+Environment(name="environment", *, version="0.0.1", capabilities=None)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
+| `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
+| `capabilities` | `list[Capability] \| None` | `None` | Wire data for services that already exist; see [Capabilities](#capabilities). |
+
+<Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
+
+## Registering task templates
+
+Every task originates from a **template** registered on the object: an async generator that `yield`s a prompt and a reward. Calling the decorated function mints a public [`Task`](/v6/core/tasks).
+
+```python
+@env.template(*, id=None, description="", input=None, returns=None)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | `str \| None` | Task id (defaults to the function name). |
+| `description` | `str` | Human-readable description, surfaced in the manifest. |
+| `input` | `Any` | Optional type for the agent's input (JSON schema in the manifest). |
+| `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `Answer[T]`. See [Types](/v6/core/types). |
+
+```python
+@env.template(id="count", description="Count a letter", returns=int)
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s in '{word}'?"
+    yield 1.0 if str(word.count(letter)) in str(answer.content) else 0.0
+```
+
+## Capabilities
+
+```python
+env.workspace("/workspace")    # attach a Workspace; publishes "shell" (ssh/2) at serve
+env.add_capability(cap)        # publish concrete wire data (replaces a same-named entry)
+```
+
+A **`Capability`** is always concrete wire data — the URL of something serving the protocol. Pass capabilities for services that already exist to the constructor; for a daemon the env runs itself, start it in an `@env.initialize` hook and publish its address with `env.add_capability(...)`. `env.workspace(root)` wires the common shell case: nothing touches the filesystem until the env serves. See [Capabilities](/v6/core/capabilities).
+
+## Lifecycle hooks
+
+```python
+@env.initialize
+async def _seed():
+    (ROOT / "fixture.txt").write_text("...")
+
+@env.shutdown
+async def _stop():
+    ...
+```
+
+Hooks run once around serving — seed state, or stand up a daemon and publish its capability with `env.add_capability(...)`. By the time a client says `hello`, every published capability is concrete.
+
+## Declaring your environment
+
+Everything above happens in one place: a declaration file, conventionally `env.py`. It's an ordinary Python module that **constructs the `Environment` object** and registers its capabilities, hooks, and task templates against it:
+
+```python env.py
+from hud import Environment
+from hud.capabilities import Capability
+from hud.graders import LLMJudgeGrader
+
+env = Environment(name="my-env", capabilities=[              # the object
+    Capability.ssh(name="shell", url="<url>", host_pubkey="<key>"),
+])
+
+@env.initialize                                             # optional setup/teardown
+async def _up():
+    ...
+
+@env.template()                                            # one or more tasks
+async def my_task(...):
+    answer = yield "<prompt>"
+    result = await LLMJudgeGrader.grade(answer=answer, criteria=[...])
+    yield result.value
+```
+
+When you serve, `load_environment` imports the module and picks out the `Environment` object defined in it (select by variable or `name=` when a file declares several), then runs everything registered on it. The only contract is "this module defines an `Environment`" — which is what makes the declaration portable: the same `env.py` runs locally, in a container, or on HUD with nothing changed but the [runtime](/v6/core/runtime).
+
+## Serving
+
+Serving belongs to `hud.environment.server` — the same entry point a container
+CMD runs (`python -m hud.environment.server <source>`):
+
+| Function | Description |
+|----------|-------------|
+| `await serve(env, host="127.0.0.1", port=0)` | Start daemons and accept control-channel connections (blocks). |
+| `await bind(env, host="127.0.0.1", port=0)` | Bind the socket and return an `asyncio.Server` without serving. |
+| `await env.start()` / `await env.stop()` | Run `@env.initialize` / `@env.shutdown` hooks directly. |
+
+In practice you serve with `hud serve` and run through `hud eval`, `task.run()`,
+or `Taskset.run()` — placement (`runtime=LocalRuntime(...)`) brings substrates up for you.
+
+<Note>
+A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under `hud serve`, which runs the asyncio loop on main. Run `serve(env, host, port)` on a worker thread instead and keep the main thread for the dependency — see [Robotics](/v6/core/robots#environment-side).
+</Note>
+
+## More examples
+
+The best way to learn the declaration patterns is to read real ones. The cookbooks each walk a complete `env.py` end to end:
+
+<CardGroup cols={2}>
+<Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent">
+  A shell + files env that grades a test suite.
+</Card>
+<Card title="Ops diagnostics" icon="terminal" href="/v6/cookbooks/ops-diagnostics">
+  Seed state in `@env.initialize`, grade by inspection.
+</Card>
+<Card title="Robot benchmark" icon="robot" href="/v6/cookbooks/robot-benchmark">
+  A simulator env over the `robot` capability.
+</Card>
+<Card title="More on GitHub" icon="github" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks">
+  Full, runnable environments in the SDK repo.
+</Card>
+</CardGroup>
+
+For building more advanced environments — custom daemons, your own capabilities — see [Capabilities](/v6/core/capabilities) and [Patterns](/v6/advanced/patterns).
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Protocol" icon="route" href="/v6/protocol" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
+</CardGroup>

@@ -6,7 +6,7 @@ icon: "diagram-project"
 
 An MCP tool is just a function. A **subagent** is just a function that runs an agent over a task and returns its answer. Put the two together and an orchestrating agent can call a specialist sub-agent as a single tool call — no special class, nothing HUD-specific beyond the rollout you already write.
 
-This is the pattern: write the function, register it as a tool on a plain [FastMCP](https://github.com/jlowin/fastmcp) server, and expose that server as an [`mcp` capability](/v6/reference/capabilities).
+This is the pattern: write the function, register it as a tool on a plain [FastMCP](https://github.com/jlowin/fastmcp) server, and expose that server as an [`mcp` capability](/v6/core/capabilities).
 
 ## 1. Write the subagent as a function
 
@@ -54,7 +54,7 @@ env = Environment(
 )
 ```
 
-Run the FastMCP server alongside the environment so the URL is live — for local iteration, `tools.run(transport="http", host="127.0.0.1", port=8080)`; in a built image, start it from your container entrypoint or an [`@env.initialize`](/v6/build/environments#lifecycle-hooks) hook. See [Capabilities](/v6/reference/capabilities) for the `mcp` capability details.
+Run the FastMCP server alongside the environment so the URL is live — for local iteration, `tools.run(transport="http", host="127.0.0.1", port=8080)`; in a built image, start it from your container entrypoint or an [`@env.initialize`](/v6/build/environments#lifecycle-hooks) hook. See [Capabilities](/v6/core/capabilities) for the `mcp` capability details.
 
 ## How it looks to the orchestrator
 
@@ -65,7 +65,7 @@ Because the tool is an ordinary function, everything composes normally: add retr
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
 <Card title="Run on any model" icon="robot" href="/v6/run/models" />
 <Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
 <Card title="Patterns" icon="shapes" href="/v6/advanced/patterns" />

@@ -86,13 +86,13 @@ class MyAgent(Agent):
 
 `BrowserUseAgent` (in `hud.agents.browser_use`, config `BrowserUseConfig`) is this pattern wrapping `browser-use` on the `cdp` capability.
 
-`RobotAgent` (in `hud.agents.robot`, beta — the `robot` extra) is the non-LLM version of the same pattern: it opens the `openpi/0` capability and runs an observe → infer → act loop, with your policy plugged in through `Model`/`Adapter` seams. See [Robots](/v6/reference/robots).
+`RobotAgent` (in `hud.agents.robot`, beta — the `robot` extra) is the non-LLM version of the same pattern: it opens the `openpi/0` capability and runs an observe → infer → act loop, with your policy plugged in through `Model`/`Adapter` seams. See [Robots](/v6/core/robots).
 
 ## See also
 
 <CardGroup cols={2}>
 <Card title="Run on any model" icon="robot" href="/v6/run/models" />
-<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
-<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
+<Card title="Types: Run & Trace" icon="code" href="/v6/core/types" />
 <Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
 </CardGroup>

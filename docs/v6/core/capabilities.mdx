@@ -230,7 +230,7 @@ async def _up():
     env.add_capability(Capability.robot(name="robot", url=bridge.url, contract=CONTRACT))
 ```
 
-See [Robots](/v6/reference/robots) for the bridge, the harness, and the contract spec.
+See [Robots](/v6/core/robots) for the bridge, the harness, and the contract spec.
 
 ### Workspace
 
@@ -276,13 +276,13 @@ A harness opens a capability to get a live client. The capability clients live i
 | `RFBClient` | `rfb/3.8` |
 | `RobotClient` | `openpi/0` — joins the registry on first open (the `robot` extra: numpy/openpi-client) |
 
-The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
+The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/core/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 
 ## See also
 
 <CardGroup cols={2}>
 <Card title="Environments" icon="cube" href="/v6/build/environments" />
-<Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
-<Card title="Agents" icon="robot" href="/v6/reference/agents" />
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Environment reference" icon="cube" href="/v6/core/environment" />
+<Card title="Agents" icon="robot" href="/v6/core/agents" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
 </CardGroup>

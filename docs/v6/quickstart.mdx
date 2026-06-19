@@ -41,7 +41,7 @@ Scaffold a complete, runnable example to start from:
 hud init my-env
 ```
 
-Or write `env.py` directly. A task is defined by a **template** – an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable [**Task**](/v6/reference/tasks):
+Or write `env.py` directly. A task is defined by a **template** – an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable [**Task**](/v6/core/tasks):
 
 ```python tasks.py
 from hud import Environment
@@ -70,7 +70,7 @@ hud eval tasks.py claude --group 3
 <Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">
   Build a portable image and run it anywhere.
 </Card>
-<Card title="Add capabilities" icon="cube" href="/v6/reference/environment">
+<Card title="Add capabilities" icon="cube" href="/v6/core/environment">
   Give the agent a shell, browser, GUI, or robot to act on.
 </Card>
 <Card title="Design tasks for signal" icon="signal" href="/v6/run/signal">

@@ -8,7 +8,7 @@ The rewards are the signal: the tasks you evaluate are already training data —
 
 ## Prerequisites
 
-- A task and an agent (see [Tasks](/v6/reference/tasks) and [Models](/v6/run/models)).
+- A task and an agent (see [Tasks](/v6/core/tasks) and [Models](/v6/run/models)).
 - A task with **spread** in its rewards — a group that all scores `0.0` (or all `1.0`) produces zero advantage and teaches nothing. See [Designing tasks for signal](/v6/run/signal).
 
 ## Plug into your own trainer
@@ -49,7 +49,7 @@ GRPO advantages are *relative within a group*: `reward - mean`, optionally divid
 <Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
   Build tasks that produce within-group spread and resist reward hacking.
 </Card>
-<Card title="Reference: types" icon="brackets-curly" href="/v6/reference/types">
+<Card title="Reference: types" icon="brackets-curly" href="/v6/core/types">
   `Run`, `Rewarded`, `group_relative`, and the result shapes.
 </Card>
 <Card title="Run on any model" icon="robot" href="/v6/run/models">

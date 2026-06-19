@@ -91,7 +91,7 @@ job = await taskset.run(agent, runtime=placer)
 ### Running a Task
 
 `task.run(agent, runtime=...)` executes the task end to end — provision, agent,
-grade — and returns a `Job` holding the graded [`Run`](/v6/reference/types#run)s.
+grade — and returns a `Job` holding the graded [`Run`](/v6/core/types#run)s.
 It is the single-task form of `Taskset.run()` with identical scheduling
 semantics (`group=`, `max_concurrent=`) and failure isolation (a crashed
 rollout comes back as a failed `Run` inside the job rather than raising).
@@ -228,8 +228,8 @@ Use `hud sync tasks` to upload a taskset to the platform.
 ## See Also
 
 <CardGroup cols={2}>
-<Card title="Environment" icon="cube" href="/v6/reference/environment" />
-<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
-<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Environment" icon="cube" href="/v6/core/environment" />
+<Card title="Types: Run & Trace" icon="code" href="/v6/core/types" />
+<Card title="Graders" icon="scale-balanced" href="/v6/core/graders" />
 <Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
 </CardGroup>
