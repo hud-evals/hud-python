@@ -53,12 +53,20 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         return
 
     ft = cast("FileTrackingClient", await client.open("filetracking"))
-    # Re-baseline past scenario setup so the first emitted diff is the agent's,
-    # then emit the post-setup manifest as the reconstruction anchor (paths +
-    # hashes, no content).
-    with contextlib.suppress(Exception):
+    # Re-baseline past scenario setup (so the first emitted diff is the agent's,
+    # not setup churn) and emit the post-setup manifest as the reconstruction
+    # anchor (paths + hashes, no content). Both are preconditions for correct
+    # telemetry: a failed re-baseline misattributes scenario-setup edits to the
+    # agent, and a missing anchor leaves the streamed diffs with no baseline to
+    # reconstruct against. If either fails, skip tracking this rollout rather
+    # than stream misleading data.
+    try:
         await ft.advance()
         emit_file_snapshot(await ft.snapshot(), started_at=now_iso())
+    except Exception as exc:
+        logger.warning("file tracking setup failed; not tracking this rollout: %s", exc)
+        yield
+        return
 
     stop = asyncio.Event()
     task = asyncio.create_task(_poll(ft, settings.file_tracking_interval, stop))
