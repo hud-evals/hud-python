@@ -82,6 +82,7 @@ class Task(BaseModel):
         group: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
+        rollout_timeout: float | None = None,
     ) -> Job:
         """Run this task with ``agent``: the single-task form of ``Taskset.run``.
 
@@ -96,7 +97,12 @@ class Task(BaseModel):
 
         taskset = Taskset(self.default_slug(), [self])
         return await taskset.run(
-            agent, runtime=runtime, group=group, max_concurrent=max_concurrent, job=job
+            agent,
+            runtime=runtime,
+            group=group,
+            max_concurrent=max_concurrent,
+            job=job,
+            rollout_timeout=rollout_timeout,
         )
 
 

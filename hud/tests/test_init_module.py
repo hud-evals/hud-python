@@ -39,6 +39,7 @@ class TestInitModule:
             "Task",
             "Taskset",
             "Trace",
+            "TrainingClient",
             "connect",
             "instrument",
         ]

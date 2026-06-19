@@ -7,6 +7,10 @@ __pycache__
 .pytest_cache
 dist/
 build/
+# The broad build/ rule above also matches docs/v6/build/, which is real docs
+# content (linked from docs.json). Keep tracking it so docs.hud.ai/v6/build/*
+# does not 404.
+!docs/v6/build/
 *.egg-info/
 uv.lock
 

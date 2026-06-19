@@ -1,0 +1,20 @@
+[project]
+name = "rl-training"
+version = "0.1.0"
+description = "On-policy RL training with the HUD SDK (cookbook)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud-python",
+    "python-dotenv",
+    # ppo_custom_loss.py computes its loss client-side with torch autograd.
+    # simple_train.py (built-in loss) does not need it.
+    "torch>=2",
+]
+
+[tool.uv]
+package = false
+
+# Track the SDK from this repo. If you copied this folder out, delete this
+# block to use the released hud-python from PyPI.
+[tool.uv.sources]
+hud-python = { path = "../..", editable = true }

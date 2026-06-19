@@ -71,3 +71,6 @@ def init_command(
     hud_console.info("")
     hud_console.info("5. Deploy for scale")
     hud_console.info("   hud deploy, then run many evals in parallel.")
+    hud_console.info("")
+    hud_console.info("Tip: Install the HUD skill so your coding agent can help you build:")
+    hud_console.command_example("npx skills add docs.hud.ai", "Install HUD skill")

@@ -198,6 +198,32 @@ def test_resolve_agent_interactive_uses_selected_preset(monkeypatch: pytest.Monk
     assert resolved.agent_type == preset.agent_type
 
 
+def test_resolve_runtime_local_file_defaults_to_local(tmp_path: Path) -> None:
+    tasks = tmp_path / "tasks.json"
+    tasks.write_text("[]", encoding="utf-8")
+    cfg = EvalConfig(source=str(tasks)).resolve_runtime()
+    assert cfg.runtime == "local"
+
+
+def test_resolve_runtime_slug_defaults_to_remote() -> None:
+    cfg = EvalConfig(source="My Tasks").resolve_runtime()
+    assert cfg.runtime is None
+    assert cfg.remote is True
+
+
+def test_resolve_runtime_explicit_runtime_is_honored() -> None:
+    cfg = EvalConfig(source="My Tasks", runtime="hud").resolve_runtime()
+    assert cfg.runtime == "hud"
+    cfg = EvalConfig(source="My Tasks", runtime="tcp://127.0.0.1:7000").resolve_runtime()
+    assert cfg.runtime == "tcp://127.0.0.1:7000"
+
+
+def test_resolve_runtime_local_against_slug_errors() -> None:
+    cfg = EvalConfig(source="My Tasks", runtime="local")
+    with pytest.raises(typer.Exit):
+        cfg.resolve_runtime()
+
+
 def test_display_renders() -> None:
     EvalConfig(agent_type="openai", model="gpt").display()
 

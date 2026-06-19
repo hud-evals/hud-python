@@ -95,6 +95,7 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
             "*claude-opus-4-6*",
             "*claude-sonnet-4-6*",
             "*claude-opus-4-7*",
+            "*claude-opus-4-8*",
         ),
     ),
     ClaudeToolSpec(

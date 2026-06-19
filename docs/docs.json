@@ -67,7 +67,7 @@
             "default": true,
             "groups": [
               { "group": "Start here", "pages": ["v6/index", "v6/quickstart"] },
-              { "group": "The Core", "pages": ["v6/protocol", "v6/core/environment", "v6/core/tasks", "v6/core/capabilities", "v6/core/agents", "v6/core/runtime", "v6/core/robots", "v6/core/graders", "v6/core/types", "v6/core/cli"] },
+              { "group": "The Core", "pages": ["v6/protocol", "v6/core/environment", "v6/core/tasks", "v6/core/capabilities", "v6/core/agents", "v6/core/runtime", "v6/core/robots", "v6/core/graders", "v6/core/training", "v6/core/types", "v6/core/cli"] },
               { "group": "Run & scale", "pages": ["v6/run/deploy", "v6/run/models", "v6/run/signal", "v6/run/training"] },
               { "group": "Advanced", "pages": ["v6/advanced/integrations", "v6/advanced/subagents", "v6/advanced/chat", "v6/advanced/patterns", "v6/advanced/harbor-convert"] },
               { "group": "Cookbooks", "pages": ["v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] },

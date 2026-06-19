@@ -97,7 +97,7 @@ async def trace_enter(trace_id: str, *, job_id: str | None, group_id: str | None
 
 
 async def trace_exit(run: Run) -> None:
-    """Report one finished rollout (status / reward / error) from its ``Run``."""
+    """Report one finished rollout (status / reward / error / metadata) from its ``Run``."""
     if not _reporting_enabled() or run.trace.trace_id is None:
         return
     await _report(
@@ -109,6 +109,9 @@ async def trace_exit(run: Run) -> None:
             # reports a trace-level error.
             "error": run.trace.error if run.trace.is_error else None,
             "evaluation_result": run.evaluation or None,
+            # Trajectory metadata (e.g. ``stop_reason``: max_steps vs done) the
+            # platform stores on the trace for display; never load-bearing.
+            "metadata": run.trace.extra or None,
         },
     )
 
