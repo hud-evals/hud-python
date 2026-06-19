@@ -215,10 +215,13 @@ body::after {
   overflow: hidden;
 }
 /* separate borders drop the default row/header rules — add them back so the
-   table reads as a grid, not floating text. */
+   table reads as a grid, not floating text. `separate` also zeroes the cell
+   padding, so restore horizontal/vertical breathing room (incl. the first
+   column, which was sitting flush against the left border). */
 #content th,
 #content td {
   border-bottom: 1px solid #f0f0f0;
+  padding: 0.625rem 1rem;
 }
 #content tbody tr:last-child td {
   border-bottom: none;

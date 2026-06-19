@@ -24,9 +24,9 @@ An environment is some closed container for your agent to act in. Fundamentally 
 The v6 SDK leverages modular abstractions for all of these, letting you build on or reuse existing parts. 
 
 
-<div className="part-label">Part 1: Declare your environment</div>
+<Accordion title="Part 1: Declare your environment">
 
-The first and **key** part of any HUD workflow is **declaring your environment** in a declaration file `env.py` - here is a 
+The first and **key** part of any HUD workflow is **declaring your [environment](/v6/reference/environment)** in a declaration file `env.py` - here is a 
 standard scaffold:
 
 ```python env.py
@@ -63,7 +63,9 @@ The complexity hidden under this file is hidden in the [HUD protocol](/v6/protoc
 Its thin envelope lets any model or harness plug into any environment. 
 
 
-<div className="part-label">Part 2: Choose your taskset</div>
+</Accordion>
+
+<Accordion title="Part 2: Choose your taskset">
 
 Then just form a [taskset](/v6/reference/tasks) (one or more tasks with parameters) **in code** or load one **from a file**.
 
@@ -76,6 +78,8 @@ TASKS = Taskset("my-taskset", [some_task_1(<args1>), some_task_1(<args2>), some_
 ```
 
 
+</Accordion>
+
 ## Spin it up anywhere
 
 Once defined, an environment shouldn't care where it runs - it should just work. 
@@ -83,7 +87,7 @@ The SDK lets you effortlessly switch between running your environment locally fo
 [Modal](https://modal.com/), or [E2B](https://e2b.dev/) for scale, or [deploy to the HUD platform](/v6/run/deploy).
 The environment definition never changes - just the [Runtime](/v6/run/deploy#pick-where-it-runs-the-runtime) you pass:
 
-<div className="part-label">Part 3: Choose your substrate</div>
+<Accordion title="Part 3: Choose your substrate">
 
 There are **two main ways** to run your declared environments.
 
@@ -107,13 +111,15 @@ ModalRuntime("my-env")     # a Modal cloud sandbox per rollout
 HUDRuntime()               # HUD's hosted infra (after `hud deploy`)
 ```
  
+</Accordion>
+
 ## Evaluate and train any AI agent inside it
 
 Since an environment only exposes capabilities, any agent plugs in. For standard models the 
 [HUD inference gateway](/v6/run/models) lets you switch between models like
 Claude, GPT, or Gemini just by choosing the model name.
 
-<div className="part-label">Part 4: Run your agent</div>
+<Accordion title="Part 4: Run your agent">
 
 Run rollouts in parallel with full isolation out of the box.
 Every rollout in the job is traced on the [Platform](https://hud.ai), so you can see exactly 
@@ -140,11 +146,15 @@ hud eval env.py claude --group 3
 ```
 
 
-<div className="part-label">Part 5: Churn the RL loop</div>
+</Accordion>
+
+<Accordion title="Part 5: Churn the RL loop">
 
 The rewards can then be used for your [training](/v6/run/training): run a group per task 
 and feed the spread straight into your own GRPO/PPO loop - or a stack like 
 [Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or [Fireworks](https://fireworks.ai/).
+
+</Accordion>
 
 ## Core Principles of SDK 
 

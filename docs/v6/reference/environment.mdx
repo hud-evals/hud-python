@@ -2,18 +2,21 @@
 title: "Environment"
 description: "The Environment class: tasks, capabilities, initializers, and serving."
 icon: "cube"
+mode: "wide"
 ---
 
-`hud.environment.Environment` is the control channel that exposes **capabilities** and **tasks**. Import it from the top level or the subpackage:
-
+`hud.environment.Environment` is the core of HUD. It encapsulates all **content** of the environment and exposes **capabilities** and **tasks**.
 ```python
 from hud import Environment
 # or: from hud.environment import Environment
 ```
+Under the hood the `Environment` acts like a *server*. It is what the agent harness - the *client* - connects to. 
+
+
 
 ## Constructor
 
-```text
+```python
 Environment(name="environment", *, version="0.0.1", capabilities=None)
 ```
 
@@ -21,17 +24,22 @@ Environment(name="environment", *, version="0.0.1", capabilities=None)
 |-----------|------|---------|-------------|
 | `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
 | `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
-| `capabilities` | `list[Capability] \| None` | `None` | Capabilities to publish — concrete wire data for services that already exist (`Capability.cdp(url=...)`). Daemons the env runs itself publish theirs at serve time: `env.workspace(root)` for the shell case, `env.add_capability(...)` from an `@env.initialize` hook in general. |
+| `capabilities` | `list[Capability] \| None` | `None` | Wire data for services that already exist; see [Capabilities](#capabilities). |
 
 <Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
 
-## Registering tasks
+## Registering task templates
 
-```text
+In HUD tasks are 
+
+Any task originates from a **task template**. 
+
+ are registered with a **template** decorator: an async generator that `yield`s a prompt and a reward. Calling the decorated object mints a public [`Task`](/v6/reference/tasks).
+
+
+```python
 @env.template(*, id=None, description="", input=None, returns=None)
 ```
-
-Registers a **template**: an async generator that `yield`s a prompt and a reward. Calling the decorated object mints a public [`Task`](/v6/reference/tasks).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
