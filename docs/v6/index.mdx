@@ -7,28 +7,55 @@ mode: "wide"
 
 ## Motivation
 
-AI agents are now doing real knowledge work -
-writing code, browsing the web, controlling robots.
-To measure an agent, you need a controlled world it can act in - one you can reset and reproduce exactly.
+Increasingly, work in the real world is done by AI **agents**. An agent is a machine learning **model** (input in, output out)
+together with a system that enabes the model to act continuously in a loop - a **harness**. 
 
-That world is what's called the **environment**: a specific, reproducible setup
-(a codebase in a known state, a configured browser, a robot simulator)
-together with a set of **tasks** - specific challenges the agent could tackle inside it.
+To reliably use agents in the real world requires learning.
 
-The agent attempts those tasks. But what is an agent? An *agent* is a model with a "loop" built around it: read the world, decide, act, read again.
-To act inside the environment, the model needs **tools** - ways to interact with that environment.
-The **harness** is the code that builds that loop -
-it takes what the agent observes, formats it for the model, and routes the model's output back as actions.
+A *human* needs to learn and measure
+whether an agent can reliably perform work and which agents are better at 
+certain kinds of work (**evaluation** and **benchmarking**). An *agent* needs to learn to improve itself (**training**).
 
-When the agent finishes, the environment scores the result.
-That number is the **reward**.
+To do this safely, reliably, and efficiently we need to construct controlled worlds for an agent to act in - worlds
+you can reset and reproduce exactly.
+These worlds are called **environments**. The work that can be done by an agent in these worlds
+is composed of **tasks**. And to perform certain kinds of tasks in an environment,
+an agent needs **capabilties** - ways to interact with that world.
 
-Reward is how you **learn** -
-whether that means a human comparing models to understand what works and what doesn't,
-or a model being trained to do better next time.
-Everything in HUD is in service of that: run, measure, learn.
+```mermaid
+flowchart LR
+    subgraph AG["<b>agent</b>"]
+        direction LR
+        M["<b>model</b>"]
+        H["<b>harness</b><br/>drives model"]
+        M <--> H
+    end
 
-[HUD](https://hud.ai) is a platform for building RL environments. You define an environment, write tasks for that environment, and run them for evals and training with any model, at any scale. 
+    subgraph EN["<b>environment</b>"]
+        direction TB
+        SP[" "]
+        T["<b>tasks</b>"]
+        SP ~~~ T
+    end
+
+    AG <-->|capabilities| EN
+    EN -->|humans measure| EV["<b>evaluation</b> and <b>benchmarking</b>"]
+    EN -->|agent improves| TR["<b>training</b>"]
+
+    classDef node fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    classDef task fill:#f3e6c8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    classDef spacer fill:transparent,stroke:transparent,color:transparent;
+    class M,H,EV,TR node;
+    class T task;
+    class SP spacer;
+    style AG fill:transparent,stroke:#8a8580,stroke-width:1px;
+    style EN fill:transparent,stroke:#8a8580,stroke-width:1px;
+```
+
+## HUD
+
+[HUD](https://hud.ai) is a platform for building environments. You define an environment, write tasks for that environment, 
+and run any agent to perform those tasks, at any scale. 
 Our SDK is an [open-source](https://github.com/hud-evals/hud-python) Python framework for all of this. 
 
 The full workflow flows in five steps:

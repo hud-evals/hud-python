@@ -309,6 +309,39 @@ body::after {
   fill: #2b2b30 !important;
 }
 
+/* Flowchart edge labels (capabilities / humans measure / agent improves):
+   mermaid's default label box is white, which shows as a box on the #fafafa
+   page. Match it to the page background instead — no visible box, but the box
+   still masks the connector line so it never strikes through the text. Page bg
+   per docs.json: #fafafa light, #17151b dark. */
+#content .mermaid .edgeLabel,
+#content .mermaid .edgeLabel p,
+#content .mermaid .edgeLabel span,
+#content .mermaid .edgeLabel foreignObject div {
+  background: #fafafa !important;
+  background-color: #fafafa !important;
+}
+#content .mermaid .edgeLabel rect {
+  fill: #fafafa !important;
+}
+.dark #content .mermaid .edgeLabel,
+.dark #content .mermaid .edgeLabel p,
+.dark #content .mermaid .edgeLabel span,
+.dark #content .mermaid .edgeLabel foreignObject div {
+  background: #17151b !important;
+  background-color: #17151b !important;
+}
+.dark #content .mermaid .edgeLabel rect {
+  fill: #17151b !important;
+}
+/* Center subgraph (cluster) titles. */
+#content .mermaid .cluster-label,
+#content .mermaid .cluster-label p,
+#content .mermaid .cluster-label div {
+  text-align: center !important;
+  width: 100% !important;
+}
+
 /* ── "Core Principles" boxes ──────────────────────────────────────────────
    Custom JSX divs sit outside Mintlify's prose scope, so the bold lead-in
    doesn't inherit prose colors (it went near-black on dark). Theme the
