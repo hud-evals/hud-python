@@ -89,7 +89,12 @@ From the CLI, the equivalent is `hud eval tasks.py openai_compatible --model my-
 
 ## Bring your own harness
 
-A harness is just *attach to a capability + define a tool spec*, so wrapping another agent framework is a thin adapter — no protocol work. Subclass `Agent` and implement `__call__`:
+Wrapping another agent framework is a thin adapter, not protocol work: you get the `Run`, drive the environment off it, and fill `run.trace`. There are two base classes, depending on how much of HUD's loop you want to reuse:
+
+- `Agent` (`hud.agents.base`) - the bare seam: one `__call__(run)`. Best for wrapping an external framework or a fully custom loop.
+- `ToolAgent` (`hud.agents.tool_agent`) - HUD's catalog-driven tool-call loop, the base every provider agent subclasses. Implement the provider hooks (`get_response`, message/result formatting) and it handles capability wiring, the step loop, and recording.
+
+The minimal case is a bare `Agent`:
 
 ```python harness.py
 from hud.agents.base import Agent
@@ -97,11 +102,13 @@ from hud import Run
 
 class EchoAgent(Agent):
     async def __call__(self, run: Run) -> None:
-        # Read run.prompt_text, do work, then write the answer:
-        run.trace.content = "my answer"
+        answer = await do_work(run.prompt_text)   # your loop, any framework
+        run.trace.content = answer                 # the answer graded on exit
 ```
 
-`run.trace.content` is the answer that gets graded on exit. The bundled `BrowserUseAgent` (in `hud.agents.browser_use`) is exactly this pattern — `browser-use` driving the `cdp` capability.
+`run.record(step)` appends a step to the trace and streams it to the platform live, so the rollout is traced as it runs. Record the family that matches what happened - `AgentStep` (a model turn), `ToolStep` (a tool round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/core/types). `ToolAgent` does all of this for you.
+
+Two bundled agents are exactly this pattern over one capability: `BrowserUseAgent` (`hud.agents.browser_use`) drives `browser-use` over `cdp`, and `RobotAgent` (`hud.agents.robot`, beta) runs a non-LLM observe-infer-act loop over `robot` with your policy in `Model`/`Adapter` seams.
 
 ## Next steps
 
@@ -113,7 +120,7 @@ class EchoAgent(Agent):
   Turn a group of rewards into GRPO advantages.
 </Card>
 <Card title="Agents reference" icon="robot" href="/v6/core/agents">
-  Every agent class, config, and the `Run` contract.
+  Every agent class, config, and the `Run` they drive.
 </Card>
 <Card title="Capabilities" icon="plug" href="/v6/core/capabilities">
   What a harness can attach to.

@@ -1,38 +1,46 @@
 ---
 title: "Agents"
-description: "Built-in agents, their configs, create_agent, and the Run contract."
+description: "Built-in agents and the HUD gateway, running them, and the Run an agent drives."
 icon: "robot"
+mode: "wide"
 ---
 
-An **agent** drives one `Run` to completion. The whole contract is a single method:
+An **agent** is what acts inside an [environment](/v6/core/environment): it works a [task](/v6/core/tasks) through the environment's [capabilities](/v6/core/capabilities) and produces the answer that gets graded. In the HUD framework an agent is anything you call as `await agent(run)`, built on two HUD types:
 
-```text
-async def __call__(self, run: Run) -> None
-```
+<div className="tight-list">
 
-It fills `run.trace` in place; the answer it produces is `run.trace.content`, graded when the run exits. Agents are **stateless per run**, so one instance can drive many concurrent rollouts.
+- a **[`Run`](#the-run)** - the live handle for one task: its prompt, the connection to the environment, and the trace being filled.
+- a **[`Trace`](/v6/core/types#trace)** - the trajectory the agent records: its steps plus the final answer (`run.trace.content`), which gets graded.
 
-```python
-from hud.agents import create_agent, ClaudeAgent, OpenAIAgent, GeminiAgent, OpenAIChatAgent
-```
+</div>
 
-## `create_agent`
+Use a [built-in agent](#built-in-agents) for a standard model, or [bring your own](#bring-your-own-harness) to plug in a custom loop.
 
-```text
-create_agent(model: str, **kwargs) -> Agent
-```
+## Built-in agents
 
-Builds an agent routed through the HUD gateway for any model id the gateway knows (`claude-...`, `gpt-...`, `gemini-...`, `grok-...`). Extra `kwargs` pass through to the provider config.
+The SDK ships one agent per major provider, reached two ways:
+
+- **`create_agent(model)`** - the preferred path. It selects the matching provider agent for a model id and routes every call through the **HUD gateway**.
+- **a provider agent directly** (e.g. `ClaudeAgent(ClaudeConfig(...))`) - the same class constructed yourself, for full config control or to call the provider with your own key instead of the gateway.
 
 ```python
-agent = create_agent("claude-sonnet-4-5")
+from hud.agents import create_agent
+
+agent = create_agent("claude-sonnet-4-5")   # routed through the gateway
 ```
 
-For direct provider access with your own API key, construct a provider agent instead.
+The HUD gateway is an OpenAI-compatible endpoint (`inference.hud.ai`) that fronts every provider behind your single `HUD_API_KEY`, so you switch between Claude, GPT, Gemini, or Grok by name alone, with unified tracing. `create_agent` accepts any id the gateway knows (`claude-...`, `gpt-...`, `gemini-...`, `grok-...`); extra kwargs pass through to the agent's config.
 
-## Provider agents
+### Provider agents
 
-Each provider agent takes an optional config from `hud.agents.types`:
+Each model maps to a provider agent - the class that speaks that provider's API. Construct one directly to set its full config or use your own provider key:
+
+```python
+from hud.agents import ClaudeAgent
+from hud.agents.types import ClaudeConfig
+
+agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
+```
 
 | Agent | Config | Default model |
 |-------|--------|---------------|
@@ -42,37 +50,49 @@ Each provider agent takes an optional config from `hud.agents.types`:
 | `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5-mini` |
 | `ClaudeSDKAgent` | `ClaudeSDKConfig` | `claude-sonnet-4-5` |
 
-```python
-from hud.agents import ClaudeAgent
-from hud.agents.types import ClaudeConfig
+Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so it points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeSDKAgent` runs the `claude` CLI over an `ssh` capability, against the env's filesystem.
 
-agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_tokens=16384))
-```
+`__call__(run)` takes only the run - every knob (`model`, `max_steps`, `system_prompt`, `citations_enabled`) lives on the config. These agents are catalog-driven: each run they read the environment's manifest, open the capabilities they support, build the matching provider tools, and loop against `run.prompt_messages`. Declaring a capability on the environment is enough; you never wire tools.
 
-- **`OpenAIChatAgent`** speaks OpenAI Chat Completions — point `base_url` at any compatible server (vLLM, local models).
-- **`ClaudeSDKAgent`** runs the `claude` CLI (Claude Code) over an `ssh` capability.
+## Running an agent
 
-## How an agent uses capabilities
+Run a task with an agent two ways.
 
-The bundled agents are catalog-driven: on each run they read the environment's manifest, open the capabilities they support (`run.client.open(protocol)`), build their provider tools into fresh per-run state, then loop against `run.prompt_messages`. You don't wire tools — declaring the capability on the environment is enough.
-
-`__call__(run)` takes only the run; tuning like `max_steps`, `system_prompt`, and `citations_enabled` is read from the agent's **config**:
+**Programmatically** - pass the agent to `task.run` / `taskset.run` with a [runtime](/v6/core/runtime):
 
 ```python
-agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
+from hud.agents import create_agent
+from hud.eval import LocalRuntime
+from tasks import TASKS
+
+agent = create_agent("claude-sonnet-4-5")
+job = await TASKS.run(agent, runtime=LocalRuntime("env.py"))
+print(job.reward)
 ```
 
-## Settings precedence
+**From the [CLI](/v6/core/cli#hud-eval)** - `hud eval` takes a task source (`.py`, a directory, or `.json`/`.jsonl`) and an agent name (`claude`, `openai`, `gemini`, `openai_compatible`), runs each rollout in a fresh env subprocess, grades it, and prints the reward:
 
-When the same knob (e.g. `model`, `max_steps`) is set in more than one place, the order is: **explicit kwarg/config field > CLI flag > defaults**. Concretely:
+```bash
+hud eval tasks.py claude                       # first task, one rollout
+hud eval tasks.py openai -m gpt-5 --group 3    # a pinned model, 3 rollouts each
+hud eval tasks.py claude --all                 # every task in the source
+```
 
-- `create_agent("…", max_steps=30)` and `ClaudeConfig(max_steps=30)` set the config field directly.
-- `hud eval … --max-steps 30 --model …` overrides the config defaults for that run.
-- Unset everywhere → the config's built-in default (`max_steps=10`).
+Flags override the agent's config for that run:
+
+| Flag | Effect |
+|------|--------|
+| `--model`, `-m` | Pin a specific model id. |
+| `--group N` | Run each task N times, to see the reward spread. |
+| `--max-steps N` | Cap agent steps per task. |
+| `--all` / `--full` | Run the whole source (`--full` also auto-responds, 100 steps). |
+| `--gateway` | Force calls through the gateway even when a provider key is set. |
+
+With only a `HUD_API_KEY` set, calls route through the gateway; with a provider key present they go straight to the provider. See the [CLI reference](/v6/core/cli#hud-eval) and [Run on any model](/v6/run/models) for the full flag set and key resolution.
 
 ## Bring your own harness
 
-Subclass `Agent` and implement `__call__`. Write the answer to `run.trace.content`:
+To plug in a custom loop or another framework, subclass `Agent` and implement `__call__`. Drive the environment off the `run`, then write the answer to `run.trace.content`:
 
 ```python
 from hud.agents.base import Agent
@@ -80,13 +100,39 @@ from hud import Run
 
 class MyAgent(Agent):
     async def __call__(self, run: Run) -> None:
-        # open a capability, do work, then:
-        run.trace.content = "the answer"
+        answer = await do_work(run.prompt_text)   # your loop, any framework
+        run.record(...)                            # stream steps to the platform live
+        run.trace.content = answer                 # graded when the run ends
 ```
 
-`BrowserUseAgent` (in `hud.agents.browser_use`, config `BrowserUseConfig`) is this pattern wrapping `browser-use` on the `cdp` capability.
+That is the whole seam. For the base classes (`Agent`, `ToolAgent`), the step types `run.record` takes, and worked examples, see [Bring your own harness](/v6/run/models#bring-your-own-harness).
 
-`RobotAgent` (in `hud.agents.robot`, beta — the `robot` extra) is the non-LLM version of the same pattern: it opens the `openpi/0` capability and runs an observe → infer → act loop, with your policy plugged in through `Model`/`Adapter` seams. See [Robots](/v6/core/robots).
+## The `Run`
+
+When you [write a harness](#bring-your-own-harness), your `__call__` receives a `Run` - the one object you work with for the whole task. The runner builds it; you read the prompt off it, drive the environment through it, and record onto it. Three things you do with it:
+
+**Read the prompt** - what the task is asking.
+
+| Member | Description |
+|--------|-------------|
+| `run.prompt_messages` | The prompt as normalized user/assistant turns - what most agents consume. |
+| `run.prompt_text` | The same flattened to plain text, for string-only backends. |
+
+**Drive the environment** - `run.client` is the live connection to the served environment.
+
+| Call | Description |
+|------|-------------|
+| `run.client.open(protocol)` | Open a managed [capability](/v6/core/capabilities) client (shell, browser, ...) to act through. |
+| `run.client.binding(protocol)` | Get a capability's raw wire address, to hand to an external SDK. |
+
+**Record the result** - `run.trace` is the [`Trace`](/v6/core/types#trace) you fill.
+
+| Call | Description |
+|------|-------------|
+| `run.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/core/types)). |
+| `run.trace.content = ...` | Set the final answer, graded when the run ends. |
+
+An agent keeps no per-run state - everything comes from the `run` - so one instance drives many concurrent rollouts. See [Types](/v6/core/types#run) for the full field list.
 
 ## See also
 
@@ -94,5 +140,5 @@ class MyAgent(Agent):
 <Card title="Run on any model" icon="robot" href="/v6/run/models" />
 <Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
 <Card title="Types: Run & Trace" icon="code" href="/v6/core/types" />
-<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
+<Card title="Robots (beta)" icon="robot" href="/v6/core/robots" />
 </CardGroup>
