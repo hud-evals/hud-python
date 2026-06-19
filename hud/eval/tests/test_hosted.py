@@ -20,7 +20,16 @@ import pytest
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval.run import Run
-from hud.eval.runtime import HostedRuntime, HUDRuntime, Runtime, _splice_websocket
+from hud.eval.runtime import (
+    HostedRuntime,
+    HUDRuntime,
+    Runtime,
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
+    _splice_websocket,
+)
 from hud.eval.task import Task
 from hud.settings import settings
 
@@ -117,7 +126,16 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     hosted = HostedRuntime(poll_interval=0.0)
     trace_id = uuid.uuid4().hex
     job_id = uuid.uuid4().hex
-    task = Task(env="sums", id="add", args={"a": 1, "b": 2})
+    task = Task(
+        env="sums",
+        id="add",
+        args={"a": 1, "b": 2},
+        runtime_config=RuntimeConfig(
+            image="registry.example/sums:latest",
+            resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4", count=1)),
+            limits=RuntimeLimits(startup_timeout_s=120, run_timeout_s=900),
+        ),
+    )
 
     run = await hosted.run(task, _agent(), job_id=job_id, group_id="g1", trace_id=trace_id)
 
@@ -135,6 +153,11 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["env"] == "sums"
     assert payload["task"] == "add"
     assert payload["args"] == {"a": 1, "b": 2}
+    assert payload["runtime_config"] == {
+        "image": "registry.example/sums:latest",
+        "resources": {"cpu": 2.0, "gpu": {"type": "L4", "count": 1}},
+        "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
+    }
     assert payload["group_id"] == "g1"
     assert payload["agent"]["type"] == "openai_compatible"
     assert payload["agent"]["config"]["model"] == "test-model"

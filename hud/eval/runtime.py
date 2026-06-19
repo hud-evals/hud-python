@@ -48,7 +48,7 @@ from hud.utils.platform import PlatformClient
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator, Mapping, Sequence
 
     from hud.agents.base import Agent
     from hud.environment.env import Environment
@@ -140,6 +140,13 @@ class Runtime:
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
+
+
+def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
+    modal_uri_prefix = "modal://"
+    if image_uri.startswith(modal_uri_prefix):
+        return modal.Image.from_id(image_uri.removeprefix(modal_uri_prefix))
+    return modal.Image.from_registry(image_uri)
 
 
 class LocalRuntime:
@@ -299,13 +306,17 @@ class ModalRuntime:
         image: Any = None,
         command: Sequence[str] | None = None,
         app_name: str = "hud-envs",
+        workdir: str | None = None,
         port: int = 8765,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+        env_vars: Mapping[str, str] | None = None,
     ) -> None:
         self.image_name = image_name
         self.port = port
-        # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint; the image's
-        # WORKDIR selects which env.py is served. Override for a non-default layout.
+        self.env_vars = dict(env_vars or {})
+        self.workdir = workdir
+        # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
+        # workdir unset by default so Modal preserves the image WORKDIR.
         self.command = (
             tuple(command)
             if command is not None
@@ -337,7 +348,7 @@ class ModalRuntime:
 
         app = None
         if config.image is not None:
-            image = modal.Image.from_registry(config.image)
+            image = _modal_image_from_uri(modal, config.image)
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
         elif self._image is None:
@@ -353,11 +364,13 @@ class ModalRuntime:
                         await self._image.build.aio(app=app)
                         self._resolved = self._image
             image = self._resolved
+        if self.env_vars:
+            image = image.env(self.env_vars)
 
         if app is None:
             app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
 
-        sandbox_kwargs: dict[str, float | int | str] = {}
+        sandbox_kwargs: dict[str, Any] = {}
         resources = config.resources
         if resources is not None and resources.cpu is not None:
             sandbox_kwargs["cpu"] = resources.cpu
@@ -378,6 +391,7 @@ class ModalRuntime:
             *self.command,
             app=app,
             image=image,
+            workdir=self.workdir,
             unencrypted_ports=[self.port],
             readiness_probe=modal.Probe.with_tcp(self.port),
             # Modal types both timeouts as int seconds; floats raise at proto encode.
@@ -846,8 +860,6 @@ class HostedRuntime:
         group_id: str | None,
         trace_id: str,
     ) -> dict[str, Any]:
-        if task.runtime_config is not None:
-            raise ValueError("HostedRuntime does not support task runtime_config yet")
         spec_of = getattr(agent, "hosted_spec", None)
         if not callable(spec_of):
             raise ValueError(
@@ -869,6 +881,10 @@ class HostedRuntime:
         }
         if group_id is not None:
             payload["group_id"] = group_id
+        if task.runtime_config is not None:
+            runtime_config = task.runtime_config.model_dump(mode="json", exclude_none=True)
+            if runtime_config:
+                payload["runtime_config"] = runtime_config
         await platform.apost("/rollouts/submit", json=payload)
         try:
             return await self._await_terminal(platform, payload["trace_id"])
