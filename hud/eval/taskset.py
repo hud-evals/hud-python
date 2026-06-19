@@ -38,11 +38,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.taskset")
 
 
-def _job_name(tasks: list[Task], group: int) -> str:
+def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
     suffix = f" ({group} times)" if group > 1 else ""
     if len(tasks) == 1:
-        return f"Task Run: {tasks[0].id}{suffix}"
-    return f"Batch Run: {len(tasks)} tasks{suffix}"
+        return f"{tasks[0].id}{suffix}"
+    return f"{taskset_name} ({len(tasks)} tasks){suffix}"
 
 
 class Taskset:
@@ -242,7 +242,7 @@ class Taskset:
             expanded.extend((task, group_id) for _ in range(group))
 
         if job is None:
-            job = Job(id=uuid.uuid4().hex, name=_job_name(task_list, group), group=group)
+            job = Job(id=uuid.uuid4().hex, name=_job_name(self.name, task_list, group), group=group)
             await job_enter(job.id, name=job.name, group=group)
         job_id = job.id
 
