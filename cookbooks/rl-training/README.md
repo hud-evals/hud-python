@@ -18,22 +18,29 @@ each `optim_step` closes the on-policy loop.
 
 ## Run
 
-Needs `HUD_API_KEY` and `HUD_MODEL` (a trainable gateway model).
-
-**Train on a deployed taskset (the real flow).** You've built a taskset and
-pushed it (`hud deploy` + `hud sync`); now train on it. Point `HUD_TASKSET` at it
-and rollouts run on **remote HUD boxes** — nothing local:
+Needs `HUD_API_KEY` (from your environment or `.env`). List the trainable
+gateway models on your account, pick one, and set it as the `MODEL` constant at
+the top of `simple_train.py` / `ppo_custom_loss.py`:
 
 ```bash
-HUD_MODEL=<trainable-model> HUD_TASKSET=<taskset-name-or-id> uv run simple_train.py --steps 10
-HUD_MODEL=<trainable-model> HUD_TASKSET=<taskset-name-or-id> uv run ppo_custom_loss.py --steps 10
+hud models
 ```
 
-**Quickstart (self-contained).** Leave `HUD_TASKSET` unset and a tiny local
+**Train on a deployed taskset (the real flow).** You've built a taskset and
+pushed it (`hud deploy` + `hud sync`); now train on it. Set the `TASKSET`
+constant in `common.py` to its name/id and rollouts run on **remote HUD
+boxes** — nothing local:
+
+```bash
+uv run simple_train.py --steps 10
+uv run ppo_custom_loss.py --steps 10
+```
+
+**Quickstart (self-contained).** Leave `TASKSET` empty and a tiny local
 arithmetic taskset runs against the bundled `env.py`:
 
 ```bash
-HUD_MODEL=<trainable-model> uv run simple_train.py --steps 10
+uv run simple_train.py --steps 10
 ```
 
 The swap is `common.py`'s `load_taskset_and_runtime()` — `Taskset.from_api(name)`

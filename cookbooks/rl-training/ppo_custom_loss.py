@@ -13,7 +13,7 @@ reuse the rollout logprobs as the behavior proxy, form the token ratio
 trust region (zero gradient, not clipped), and normalize at the token level so
 long and short trajectories contribute evenly.
 
-    HUD_MODEL=<trainable-gateway-model> uv run ppo_custom_loss.py --steps 10
+    uv run ppo_custom_loss.py --steps 10   # set MODEL below (pick one with `hud models`)
 
 Requires torch (declared in this cookbook's pyproject; in the SDK it is the
 ``hud-python[train]`` extra).
@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 
 import torch
 from dotenv import load_dotenv
@@ -33,6 +32,10 @@ from hud import TrainingClient
 from hud.agents import create_agent
 from hud.eval import Job
 from hud.train import DatumTensors
+
+# The trainable gateway model to sample from and train, in place.
+# Pick one with `hud models` and paste its id here.
+MODEL = "<trainable-model>"
 
 
 def glm_double_sided_is(
@@ -92,7 +95,7 @@ def glm_double_sided_is(
 
 
 async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: int) -> None:
-    model = os.environ["HUD_MODEL"]  # a trainable gateway model string
+    model = MODEL  # the trainable gateway model (set at the top of this file)
 
     # Training rollout: capture token ids + logprobs onto each turn's Sample;
     # room for chain-of-thought (the task needs scratch work).
