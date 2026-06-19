@@ -132,7 +132,7 @@ Use `input=` and `returns=` to surface JSON schemas in the environment's manifes
 
 ## Sync metadata: `slug` and `columns`
 
-When you publish a [taskset](/v6/run/deploy#publish-your-tasks-as-a-taskset) to the platform (`hud sync tasks`), each task carries optional metadata. `slug` is its stable id (defaults to the template id plus an args hash); `columns` are arbitrary fields surfaced as filterable columns and leaderboard facets on the platform:
+When you publish a [taskset](/v6/run/deploy) to the platform (`hud sync tasks`), each task carries optional metadata. `slug` is its stable id (defaults to the template id plus an args hash); `columns` are arbitrary fields surfaced as filterable columns and leaderboard facets on the platform:
 
 ```python tasks.py
 easy = count_letter(word="strawberry")
