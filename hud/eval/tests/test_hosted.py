@@ -11,15 +11,16 @@ Run the caller gets back, and the dispatch.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval.run import Run
-from hud.eval.runtime import HostedRuntime, HUDRuntime, Runtime
+from hud.eval.runtime import HostedRuntime, HUDRuntime, Runtime, _splice_websocket
 from hud.eval.task import Task
 from hud.settings import settings
 
@@ -377,3 +378,38 @@ async def test_runtime_session_sets_runtime_connection_params(
     assert deleted == [("https://mcp.hud.ai", "sk-hud-test", session_id)]
     assert server.closed
     assert server.waited
+
+
+@pytest.mark.asyncio
+async def test_splice_websocket_propagates_relay_errors() -> None:
+    class _Reader:
+        def __init__(self) -> None:
+            self.reads = [b"payload", b""]
+
+        async def read(self, _limit: int) -> bytes:
+            return self.reads.pop(0)
+
+    class _Writer:
+        def write(self, _data: bytes) -> None:
+            pass
+
+        async def drain(self) -> None:
+            pass
+
+    class _WebSocket:
+        async def send(self, _data: bytes) -> None:
+            raise RuntimeError("relay failed")
+
+        def __aiter__(self) -> _WebSocket:
+            return self
+
+        async def __anext__(self) -> bytes:
+            await asyncio.sleep(60.0)
+            raise StopAsyncIteration
+
+    with pytest.raises(RuntimeError, match="relay failed"):
+        await _splice_websocket(
+            cast("asyncio.StreamReader", _Reader()),
+            cast("asyncio.StreamWriter", _Writer()),
+            _WebSocket(),
+        )

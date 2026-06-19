@@ -946,11 +946,21 @@ async def _splice_websocket(
         asyncio.create_task(tcp_to_ws()),
         asyncio.create_task(ws_to_tcp()),
     ]
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    await asyncio.gather(*done, return_exceptions=True)
-    await asyncio.gather(*pending, return_exceptions=True)
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        done_results = await asyncio.gather(*done, return_exceptions=True)
+        await asyncio.gather(*pending, return_exceptions=True)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    for result in done_results:
+        if isinstance(result, BaseException):
+            raise result
 
 
 __all__ = [

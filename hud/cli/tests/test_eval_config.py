@@ -135,6 +135,13 @@ def test_resolve_placement_remote_uses_hosted_runtime(
     assert isinstance(placement, HostedRuntime)
 
 
+def test_runtime_cli_override_clears_config_remote() -> None:
+    cfg = EvalConfig(remote=True).merge_cli(runtime="hud")
+
+    assert cfg.runtime == "hud"
+    assert cfg.remote is False
+
+
 def test_load_missing_writes_template(tmp_path: Path) -> None:
     path = tmp_path / ".hud_eval.toml"
     cfg = EvalConfig.load(str(path))
