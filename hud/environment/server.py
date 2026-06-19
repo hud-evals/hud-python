@@ -24,6 +24,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from hud.graders.results import EvaluationResult
+
 from .env import Answer
 from .utils import error, read_frame, reply, send_frame, splice
 
@@ -160,6 +162,12 @@ class TaskRunner:
                     f"'score' (keys: {sorted(evaluation)})"
                 )
             return cast("dict[str, Any]", _jsonable(evaluation))
+        if isinstance(evaluation, EvaluationResult):
+            # Forward the full grade frame so metadata (info/content/done/isError/
+            # subscores) survives; the wire names the score "score", the model "reward".
+            frame = evaluation.model_dump(mode="json")
+            frame["score"] = frame.pop("reward")
+            return frame
         return {"score": _score_value(evaluation)}
 
     async def cancel(self) -> None:

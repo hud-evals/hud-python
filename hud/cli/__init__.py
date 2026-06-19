@@ -36,7 +36,7 @@ from .deploy import deploy_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
 from .init import init_command  # noqa: E402
 from .login import login_command  # noqa: E402
-from .models import models_command  # noqa: E402
+from .models import models_app  # noqa: E402
 from .serve import serve_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
 from .task import task_app  # noqa: E402
@@ -48,7 +48,7 @@ app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)
 app.command(name="init")(init_command)
 app.command(name="cancel")(cancel_command)
-app.command(name="models")(models_command)
+app.add_typer(models_app, name="models")
 
 
 @app.command(name="set")

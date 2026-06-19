@@ -266,7 +266,9 @@ class EvalConfig(BaseModel):
     gateway: bool = False
     #: Placement: "local" (spawn each row's env from the source), "hud"
     #: (HUD runtime tunnel), or a tcp:// url of an already-served env.
-    runtime: str = "local"
+    #: ``None`` means "infer from the source": a local file runs locally, a
+    #: platform taskset (slug/id, no env source on disk) runs remotely.
+    runtime: str | None = None
     #: Run the whole rollout remotely on the HUD platform.
     remote: bool = False
 
@@ -288,6 +290,34 @@ class EvalConfig(BaseModel):
                     f"Invalid agent: {v}. Must be one of: {', '.join(valid)}"
                 ) from None
         return v
+
+    def source_is_local_file(self) -> bool:
+        """Whether ``source`` points at an on-disk taskset (vs. a platform slug/id)."""
+        return self.source is not None and Path(self.source).exists()
+
+    def resolve_runtime(self) -> EvalConfig:
+        """Pin the effective placement from the source type.
+
+        A local file/dir has its env source on disk, so it defaults to spawning
+        envs locally; a platform taskset (slug or id) has no env source on disk,
+        so it defaults to whole-rollout remote execution. An explicit
+        ``--runtime`` is always honored, except ``local`` against a platform
+        taskset, which has no env to spawn.
+        """
+        if self.runtime is None:
+            if self.source_is_local_file():
+                return self.model_copy(update={"runtime": "local"})
+            return self.model_copy(update={"remote": True})
+        if self.runtime == "local" and not self.source_is_local_file():
+            hud_console.error(
+                f"--runtime local needs a local env source, but {self.source!r} is a "
+                "platform taskset with no env source on disk. Run it on the platform "
+                "by omitting --runtime or passing --remote, export it first "
+                "(hud sync tasks <name> --export tasks.json) and run that file, "
+                "or attach to a served env with --runtime tcp://host:port."
+            )
+            raise typer.Exit(1)
+        return self
 
     def validate_api_keys(self) -> None:
         if self.agent_type is None:
@@ -554,6 +584,7 @@ class EvalConfig(BaseModel):
         table.add_column("Value", style="green")
 
         table.add_row("source", str(self.source or "-"))
+        table.add_row("runtime", str(self.runtime or "-"))
         table.add_row("agent", self.agent_type.value if self.agent_type else "-")
         if self.task_ids:
             table.add_row(
@@ -644,7 +675,7 @@ def _spawn_target(source: Path) -> Path:
     return resolved.parent
 
 
-def _resolve_placement(cfg: EvalConfig, source_path: Path) -> Any:
+def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
     "local" spawns each row's env from the source next to the tasks file;
@@ -658,11 +689,13 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path) -> Any:
         require_api_key("run remote hosted evals")
         return HostedRuntime()
     if cfg.runtime == "local":
+        if source_path is None:
+            raise ValueError("local placement requires a local source path")
         return LocalRuntime(_spawn_target(source_path))
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
         return HUDRuntime()
-    if cfg.runtime.startswith("tcp://"):
+    if cfg.runtime is not None and cfg.runtime.startswith("tcp://"):
         return Runtime(cfg.runtime)
     hud_console.error(
         f"Unknown runtime {cfg.runtime!r}. Use 'local', 'hud', a tcp:// url, or --remote."
@@ -684,20 +717,25 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     from hud.eval import Taskset
 
     source_path = Path(cfg.source)
-    if not source_path.exists():
-        hud_console.error(
-            f"Task source not found locally: {cfg.source}. Export the taskset "
-            "(hud sync tasks <name> --export tasks.json) and run it from the env's "
-            "source directory."
-        )
-        raise typer.Exit(1)
-
-    hud_console.info(f"Loading tasks from: {cfg.source}")
-    try:
-        taskset = Taskset.from_file(source_path)
-    except Exception as e:
-        hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
-        raise typer.Exit(1) from e
+    is_local = source_path.exists()
+    if is_local:
+        hud_console.info(f"Loading tasks from: {cfg.source}")
+        try:
+            taskset = Taskset.from_file(source_path)
+        except Exception as e:
+            hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
+            raise typer.Exit(1) from e
+    else:
+        hud_console.info(f"Loading platform taskset: {cfg.source}")
+        try:
+            taskset = Taskset.from_api(cfg.source)
+        except ValueError as e:
+            hud_console.error(
+                f"Task source not found: {cfg.source}. It is neither a local file nor a "
+                "platform taskset (by name or id). Pass a tasks file (.py/.json/.jsonl) "
+                "or an existing taskset name."
+            )
+            raise typer.Exit(1) from e
 
     if not taskset:
         hud_console.error(
@@ -741,7 +779,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         )
 
     agent = _build_agent(cfg)
-    placement = _resolve_placement(cfg, source_path)
+    placement = _resolve_placement(cfg, source_path if is_local else None)
 
     job = await taskset.run(
         agent,
@@ -800,7 +838,8 @@ def eval_command(
     runtime: str | None = typer.Option(
         None,
         "--runtime",
-        help="Placement: local (default), hud (runtime tunnel), or a tcp:// url",
+        help="Placement: local, hud (runtime tunnel), or a tcp:// url. "
+        "Default: local for a tasks file; remote for a platform taskset.",
     ),
     remote: bool = typer.Option(
         False,
@@ -813,7 +852,7 @@ def eval_command(
     Examples:
         hud eval tasks.json claude-sonnet-4-6
         hud eval tasks.json claude
-        hud eval "My Tasks" claude-sonnet-4-6 --full   # Load from platform taskset
+        hud eval "My Tasks" claude-sonnet-4-6 --full   # Platform taskset, run on the platform
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
         hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use HUD runtime tunnel
@@ -866,6 +905,7 @@ def eval_command(
             raise typer.Exit(1) from None
 
     cfg = cfg.resolve_agent_interactive()
+    cfg = cfg.resolve_runtime()
 
     if cfg.very_verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")

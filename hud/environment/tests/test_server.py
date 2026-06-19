@@ -12,6 +12,7 @@ import pytest
 from hud.clients import HudProtocolError
 from hud.environment import Answer, Environment
 from hud.eval import Run
+from hud.graders import EvaluationResult
 
 from .conftest import served
 
@@ -57,6 +58,21 @@ async def test_score_dict_passes_through_with_extra_keys() -> None:
             run.trace.content = "x"
         assert run.reward == 0.5
         assert run.grade.info == {"detail": "partial credit"}
+
+
+async def test_evaluation_result_forwards_reward_and_metadata() -> None:
+    env = Environment("modelgrade")
+
+    @env.template()
+    async def graded():
+        yield "go"
+        yield EvaluationResult(reward=0.75, content="nice", info={"max_tile": 256})
+
+    async with served(env) as client:
+        async with Run(client, "graded", {}) as run:
+            run.trace.content = "x"
+        assert run.reward == 0.75
+        assert run.grade.info == {"max_tile": 256}
 
 
 def test_answer_holds_parsed_content_and_raw_string() -> None:

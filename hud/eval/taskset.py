@@ -205,6 +205,7 @@ class Taskset:
         group: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
+        rollout_timeout: float | None = None,
     ) -> Job:
         """Run every task x ``group`` with an optional concurrency cap.
 
@@ -219,6 +220,12 @@ class Taskset:
         instead, so a longer arc (a training session) spans many calls under
         one id. Returned ``job.runs`` preserves expansion order (task-major,
         then group).
+
+        ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
+        local (Provider) path: a rollout that exceeds it is cancelled and recorded
+        as a failed/errored run so one wedged rollout (e.g. a stuck sampling
+        stream) cannot stall the whole batch. ``HUDRuntime`` carries its own
+        ``run_timeout`` instead.
         """
         group = group or (job.group if job else 1)
         if group < 1:
@@ -254,7 +261,14 @@ class Taskset:
         async def _run(task: Task, group_id: str) -> Run:
             if isinstance(placement, HostedRuntime):
                 return await placement.run(task, agent, job_id=job_id, group_id=group_id)
-            return await rollout(task, agent, runtime=placement, job_id=job_id, group_id=group_id)
+            return await rollout(
+                task,
+                agent,
+                runtime=placement,
+                job_id=job_id,
+                group_id=group_id,
+                rollout_timeout=rollout_timeout,
+            )
 
         async def _one(task: Task, group_id: str) -> Run:
             if sem is None:

@@ -175,8 +175,14 @@ CMD ["hud", "serve", "env.py", "--host", "0.0.0.0"]
 Dockerfile explicitly — don't assume it's there:
 
 ```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git curl ca-certificates bubblewrap \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install uv   # if your initialize hook calls uv
 ```
+
+`bubblewrap` (`bwrap`) is required for SSH session isolation — without it,
+`env.workspace()` runs unconfined and logs a warning on every task start.
 
 **Don't traverse parents for local paths.** `Path(__file__).parents[2]` crashes
 when env.py runs at `/app/env.py` (only one parent). Anchor from `_HERE` and

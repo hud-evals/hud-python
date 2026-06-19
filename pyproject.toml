@@ -153,6 +153,13 @@ daytona = [
     "daytona>=0.100",
 ]
 
+# Client-side custom training losses (TrainingClient.forward_backward_custom).
+# Only the custom-loss path needs torch autograd; the built-in loss_fn path and
+# the rest of the client are torch-free.
+train = [
+    "torch>=2",
+]
+
 
 [tool.ruff]
 target-version = "py311"
