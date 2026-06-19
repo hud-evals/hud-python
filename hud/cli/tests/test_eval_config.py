@@ -142,6 +142,13 @@ def test_runtime_cli_override_clears_config_remote() -> None:
     assert cfg.remote is False
 
 
+def test_runtime_cli_override_wins_over_remote_flag() -> None:
+    cfg = EvalConfig().merge_cli(runtime="hud", remote=True)
+
+    assert cfg.runtime == "hud"
+    assert cfg.remote is False
+
+
 def test_load_missing_writes_template(tmp_path: Path) -> None:
     path = tmp_path / ".hud_eval.toml"
     cfg = EvalConfig.load(str(path))

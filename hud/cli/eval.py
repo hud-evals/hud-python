@@ -467,9 +467,6 @@ class EvalConfig(BaseModel):
             }.items()
             if value is not None
         }
-        if runtime is not None:
-            overrides["remote"] = False
-
         if agent is not None:
             try:
                 AgentType(agent)
@@ -497,6 +494,9 @@ class EvalConfig(BaseModel):
         }.items():
             if value:
                 overrides[key] = True
+
+        if runtime is not None:
+            overrides["remote"] = False
 
         if full:
             overrides["all"] = True
