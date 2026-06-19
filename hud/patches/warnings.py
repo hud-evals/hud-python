@@ -10,14 +10,29 @@ import warnings
 
 
 def suppress_known_import_warnings() -> None:
-    """Filter third-party import-time noise the user can never act on.
+    """Silence the one import-time warning the user can never act on.
 
     Called before anything imports fastmcp: its jwt provider imports
-    ``authlib.jose``, which emits an ``AuthlibDeprecationWarning`` (a
-    ``DeprecationWarning`` subclass) on every CLI launch.
+    ``authlib.jose``, which emits a single ``AuthlibDeprecationWarning`` on every
+    CLI launch.
+
+    ``authlib.deprecate`` runs ``warnings.simplefilter("always", ...)`` at import
+    time, prepending an "always" filter that would otherwise sit ahead of ours and
+    win (the warnings machinery applies the first matching filter). Import it first
+    so our filter is prepended last and takes precedence; the offending
+    ``authlib.jose`` import comes later via fastmcp.
+
+    The filter is scoped to both the ``AuthlibDeprecationWarning`` class and the
+    ``authlib.jose`` message, so it never hides any other warning -- not even other
+    authlib deprecations.
     """
+    try:
+        from authlib.deprecate import AuthlibDeprecationWarning
+    except ImportError:
+        return  # no authlib installed -> no warning to suppress
+
     warnings.filterwarnings(
         "ignore",
         message=r"authlib\.jose module is deprecated",
-        category=DeprecationWarning,
+        category=AuthlibDeprecationWarning,
     )
