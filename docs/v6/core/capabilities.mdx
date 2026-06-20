@@ -13,6 +13,7 @@ A **capability** is a connection the environment exposes; a harness attaches its
 | `cdp`  | `cdp/1.3` | Browser control over the Chrome DevTools Protocol | Chromium (`playwright`) |
 | `rfb`  | `rfb/3.8` | Full computer-use over VNC: screen + keyboard/mouse | `Xvfb` + `x11vnc` |
 | `robot` | `openpi/0` | Schema-driven robot observation/action loop over WebSocket *(beta)* | robot bridge |
+| `filetracking` | `filetracking/1` | Workspace file changes (diffs + snapshots), for telemetry | `Workspace` (`track_files=True`) |
 
 ```python
 from hud.capabilities import Capability
@@ -219,7 +220,7 @@ Capability.robot(*, name="robot", url, contract)
 
 The robot control loop *(beta)*, carried over the `openpi/0` wire protocol. It's an **openpi-like** protocol: it reuses openpi's wire format (msgpack with recursive numpy serialization) and its flat observation/action naming (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. The one fundamental difference is **role assignment** - in openpi a policy *server* answers inference requests, but here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts, replying with actions).
 
-The `contract` is the environment's full self-describing schema - `robot_type`, `control_rate`, and every observation/action feature - carried in the manifest so the agent wires itself with no shared config. The environment drives its simulator through a [`RobotEndpoint`](/v6/core/robots) (not the bridge directly, although possible), and the endpoint builds the capability for you once started:
+The `contract` is the environment's full self-describing schema - `robot_type`, `control_rate`, and every observation/action feature - carried in the manifest so the agent wires itself with no shared config. The environment drives its simulator through a [`RobotEndpoint`](/v6/advanced/robots) (not the bridge directly, although possible), and the endpoint builds the capability for you once started:
 
 ```python
 endpoint = RobotEndpoint(MySimBridge())   # drive the sim only through the endpoint
@@ -230,7 +231,20 @@ async def _up():
     env.add_capability(await endpoint.capability(contract=CONTRACT))
 ```
 
-See [Robots](/v6/core/robots) for the bridge, the endpoint, the harness, and the contract spec.
+See [Robots](/v6/advanced/robots) for the bridge, the endpoint, the harness, and the contract spec.
+
+### `filetracking` - workspace file changes
+
+`filetracking` is observation-only: it reports what changed in a [`Workspace`](#workspace) over a run,
+so HUD can show file diffs in the trace. It's not a tool an agent calls - the rollout opens it for
+telemetry. A `Workspace` serves it when you opt in:
+
+```python env.py
+env.workspace("workspace", track_files=True)   # also publishes the filetracking/1 capability
+```
+
+The client is `FileTrackingClient` (`hud.capabilities`): `diff()` returns the changes since the last
+call, `snapshot()` the full file manifest, and `advance()` re-baselines without producing a diff.
 
 ## Harness clients
 
@@ -243,6 +257,7 @@ Spinning up a capability is the environment side. The harness side is the mirror
 | `CDPClient` | `cdp/1.3` |
 | `RFBClient` | `rfb/3.8` |
 | `RobotClient` | `openpi/0` - joins the registry on first open (the `robot` extra: numpy/openpi-client) |
+| `FileTrackingClient` | `filetracking/1` - observation-only; opened for telemetry, not as a tool |
 
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/core/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 
