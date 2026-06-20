@@ -35,13 +35,15 @@ from hud.telemetry.context import get_current_trace_id
 from .video import VideoStreamer
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from hud.capabilities.robot import RobotClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
 
 
-def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict], dict[str, str]]:
+def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     """Map a robot contract to LeRobot ``features`` + a wire-key -> LeRobot-key map.
 
     Image obs -> ``observation.images.<leaf>`` (video); the lone vector obs ->
@@ -56,7 +58,7 @@ def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict], dict[s
     ]
     single_state = len(vectors) == 1
 
-    features: dict[str, dict] = {}
+    features: dict[str, dict[str, Any]] = {}
     key_map: dict[str, str] = {}
     for name, f in feats.items():
         role, dtype, shape = f.get("role"), f.get("dtype"), tuple(f.get("shape") or ())
@@ -107,7 +109,10 @@ class Recorder:
             )
             save = False
         self._save = save
-        self._features, self._key_map = _lerobot_features(self._contract) if save else ({}, {})
+        self._features: dict[str, dict[str, Any]] = {}
+        self._key_map: dict[str, str] = {}
+        if save:
+            self._features, self._key_map = _lerobot_features(self._contract)
 
         self._video: VideoStreamer | None = None  # per-episode
         self._run: Run | None = None
@@ -135,12 +140,12 @@ class Recorder:
         self._video.record(obs)
         self._pending = obs.get("data")  # paired with the action in record_action()
 
-    def record_inference(self, chunk: np.ndarray, *, tick: int) -> None:
+    def record_inference(self, chunk: NDArray[Any], *, tick: int) -> None:
         """One re-inference: the freshly inferred ``[T, A]`` action chunk, onto the run."""
         assert self._run is not None  # set in begin()
         self._run.record(InferenceStep(tick=tick, chunk=chunk.tolist(), chunk_length=len(chunk)))
 
-    def record_action(self, action: np.ndarray) -> None:
+    def record_action(self, action: NDArray[Any]) -> None:
         """The executed (env-space) action: completes the pending LeRobot frame."""
         if self._save and self._pending is not None:
             self._add_frame(self._pending, action)
@@ -175,8 +180,8 @@ class Recorder:
             print(f"[agent] WARNING: HF push failed: {exc!r} (dataset still on disk)", flush=True)
 
     # ── LeRobot writing ───────────────────────────────────────────────────────
-    def _add_frame(self, data: dict[str, Any], action: np.ndarray) -> None:
-        self._ensure_dataset()
+    def _add_frame(self, data: dict[str, Any], action: NDArray[Any]) -> None:
+        ds = self._ensure_dataset()
         row: dict[str, Any] = {}
         for wire, key in self._key_map.items():
             value = data.get(wire)
@@ -192,12 +197,12 @@ class Recorder:
         act_ft = self._features["action"]
         row["action"] = np.asarray(action, dtype=act_ft["dtype"]).reshape(act_ft["shape"])
         row["task"] = self._task
-        self._ds.add_frame(row)
+        ds.add_frame(row)
 
-    def _ensure_dataset(self) -> None:
+    def _ensure_dataset(self) -> Any:
         if self._ds is not None:
-            return
-        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+            return self._ds
+        lerobot_dataset: Any = importlib.import_module("lerobot.datasets.lerobot_dataset")
 
         name = self._contract.get("robot_type") or "robot"
         stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -210,7 +215,7 @@ class Recorder:
         self._root = record_dir / f"{name}_{stamp}_{tag}"
         self._repo_id = f"{os.environ.get('HF_REPO') or 'hud'}/{name}_{stamp}_{tag}"
         # LeRobotDataset.create requires a fresh root; images encode to per-episode video.
-        self._ds = LeRobotDataset.create(
+        self._ds = lerobot_dataset.LeRobotDataset.create(
             repo_id=self._repo_id,
             fps=self._fps,
             features=self._features,
@@ -219,6 +224,7 @@ class Recorder:
             use_videos=True,
         )
         print(f"[agent] recording LeRobot dataset -> {self._root}", flush=True)
+        return self._ds
 
 
 __all__ = ["Recorder"]

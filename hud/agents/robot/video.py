@@ -18,7 +18,7 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -210,7 +210,7 @@ class VideoStreamer:
         channel-last guard that would be mis-encoded as a tiny garbage video.
         """
         for name, arr in obs.get("data", {}).items():
-            shape = getattr(arr, "shape", ())
+            shape = cast("tuple[int, ...]", getattr(arr, "shape", ()))
             if getattr(arr, "ndim", 0) != 3 or shape[-1] not in (1, 3, 4):
                 continue
             if name not in self._encoders:

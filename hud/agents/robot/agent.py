@@ -119,6 +119,7 @@ class RobotAgent(Agent):
             )
             chunk = np.atleast_2d(await self.model.ainfer(batch))  # [T, A]
             self._active_chunk = deque(chunk)
+            assert self._recorder is not None  # set in on_episode_start
             self._recorder.record_inference(chunk, tick=self._tick)
         self._tick += 1
         raw = self._active_chunk.popleft()
