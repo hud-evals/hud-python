@@ -13,14 +13,16 @@ Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate on
 Scaffold a new environment package in a fresh `<name>` directory. With no preset it writes a minimal local scaffold - `env.py` (environment, templates, capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` - no network, no API key. With `--preset` (or the interactive picker in a TTY) it downloads a starter environment from GitHub instead.
 
 ```bash
-hud init my-env                   # minimal local scaffold (interactive picker in a TTY)
-hud init my-env --preset browser  # download the "browser" starter from GitHub
+hud init                          # pick a template → ./<template>
+hud init my-env                   # pick a template (or minimal scaffold) → ./my-env
+hud init my-env --preset browser  # download the "browser" starter into ./my-env
+hud init --preset cua             # download the "cua" starter into ./cua-template
 hud init my-env --dir envs        # create ./envs/my-env
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--preset`, `-p` | Starter to download: `blank`, `browser`, `deepresearch`, `cua`, `autonomous-businesses`, `verilog`. Omit for the interactive picker (TTY) or the minimal local scaffold. |
+| `--preset`, `-p` | Starter to download: `blank`, `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench`. Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the minimal local scaffold. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 

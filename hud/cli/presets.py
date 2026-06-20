@@ -26,6 +26,7 @@ class EnvironmentPreset:
     """A starter environment sourced from a public GitHub repo."""
 
     id: str
+    emoji: str
     name: str
     description: str
     owner: str
@@ -35,45 +36,99 @@ class EnvironmentPreset:
 ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     EnvironmentPreset(
         "blank",
+        "🧱",
         "Blank",
-        "Minimal starting point for a custom environment.",
+        "Minimal starting point for building your own environment.",
         "hud-evals",
         "hud-blank",
     ),
     EnvironmentPreset(
         "browser",
+        "🌐",
         "Browser",
-        "Local browser automation environment.",
+        "Browser agents: a 2048 game and a todo app in real Chromium (cdp + rfb).",
         "hud-evals",
         "hud-browser",
     ),
     EnvironmentPreset(
-        "deepresearch",
-        "Deep Research",
-        "Deep research environment with Exa search integration.",
-        "hud-evals",
-        "hud-deepresearch",
-    ),
-    EnvironmentPreset(
         "cua",
+        "🖥️",
         "Computer Use",
-        "Computer-use agent (CUA) desktop environment.",
+        "Computer-use agents: a virtual Linux desktop (XFCE + Chromium) over rfb/VNC.",
         "hud-evals",
         "cua-template",
     ),
     EnvironmentPreset(
+        "deepresearch",
+        "🔬",
+        "Deep Research",
+        "Live deep research: web search (Exa) and People/Company search (SixtyFour).",
+        "hud-evals",
+        "hud-deepresearch",
+    ),
+    EnvironmentPreset(
+        "coding",
+        "🐛",
+        "Coding",
+        "Fix a bug in a Python web app, graded by a hidden pytest suite.",
+        "hud-evals",
+        "coding-template",
+    ),
+    EnvironmentPreset(
+        "ml",
+        "🧠",
+        "ML Research/Training",
+        "ML research and training tasks (GPU).",
+        "hud-evals",
+        "ml-template",
+    ),
+    EnvironmentPreset(
+        "ml-triage",
+        "🩺",
+        "ML Triage/Productivity",
+        "ML triage and productivity tasks.",
+        "hud-evals",
+        "ml-triage-tasks",
+    ),
+    EnvironmentPreset(
+        "verilog",
+        "🔌",
+        "Verilog",
+        "Chip design: one Verilog/SystemVerilog task over ssh, graded by hidden EDA flows.",
+        "hud-evals",
+        "verilog-template",
+    ),
+    EnvironmentPreset(
         "autonomous-businesses",
+        "💼",
         "Autonomous Businesses",
-        "Autonomous business simulation environment.",
+        "Autonomous business loop: support-ticket triage for a small clinic.",
         "hud-evals",
         "autonomous-businesses-template",
     ),
     EnvironmentPreset(
-        "verilog",
-        "Verilog",
-        "Verilog hardware-design environment.",
+        "gdpval",
+        "📈",
+        "GDPVal",
+        "GDPVal benchmark tasks.",
         "hud-evals",
-        "verilog-template",
+        "gdpval-template",
+    ),
+    EnvironmentPreset(
+        "worldsim",
+        "🦾",
+        "Worldsim",
+        "Robotics: a Newton physics scene driven by an LLM agent or VLA policy (AntimLabs).",
+        "hud-evals",
+        "worldsim-template",
+    ),
+    EnvironmentPreset(
+        "videogamebench",
+        "🎮",
+        "VideoGameBench",
+        "Evaluate agents on classic Game Boy games (AntimLabs).",
+        "hud-evals",
+        "videogamebench-template",
     ),
 )
 

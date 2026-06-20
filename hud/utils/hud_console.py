@@ -322,6 +322,7 @@ class HUDConsole:
         message: str,
         choices: list[str | dict[str, Any]] | list[str],
         default: int | None = None,
+        spaced: bool = False,
     ) -> str:
         """Interactive selection with arrow key navigation.
 
@@ -329,17 +330,23 @@ class HUDConsole:
             message: The prompt message to display
             choices: List of choices. Can be strings or dicts with 'name' and 'value' keys
             default: Default selection (matches against choice name/string)
+            spaced: Insert a blank line between choices for a roomier list
 
         Returns:
             The selected choice value
         """
         import questionary
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.keys import Keys
         from questionary import Style
 
-        # Convert choices to questionary format
-        q_choices = []
+        # Convert choices to questionary format, optionally interleaving blank
+        # (non-selectable) separators so the list breathes.
+        q_choices: list[Any] = []
 
         for choice in choices:
+            if spaced and q_choices:
+                q_choices.append(questionary.Separator(" "))
             if isinstance(choice, dict):
                 name = choice.get("name", str(choice.get("value", "")))
                 value = choice.get("value", name)
@@ -357,14 +364,25 @@ class HUDConsole:
             ]
         )
 
-        result = questionary.select(
+        question = questionary.select(
             message,
             choices=q_choices,
-            instruction="(Use ↑/↓ arrows, Enter to select)",
+            instruction="(Use ↑/↓ arrows, Enter to select, Esc to cancel)",
             style=custom_style,
-        ).ask()
+        )
 
-        # If no selection made (Ctrl+C or ESC), exit
+        # questionary only aborts on Ctrl+C out of the box. Bind Esc to cancel
+        # too. Non-eager so it doesn't swallow the Esc-prefixed arrow sequences.
+        key_bindings = question.application.key_bindings
+        assert isinstance(key_bindings, KeyBindings)
+
+        @key_bindings.add(Keys.Escape)
+        def _cancel(event: Any) -> None:
+            event.app.exit(result=None)
+
+        result = question.ask()
+
+        # No selection (Ctrl+C or Esc) → cancel the command.
         if result is None:
             import typer
 
