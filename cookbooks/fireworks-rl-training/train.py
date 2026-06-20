@@ -78,7 +78,9 @@ def load_env() -> None:
     load_dotenv()
 
 
-def make_tasks(*, groups: int, seed: int, min_a: int, max_a: int, min_b: int, max_b: int) -> list[ArithmeticTask]:
+def make_tasks(
+    *, groups: int, seed: int, min_a: int, max_a: int, min_b: int, max_b: int
+) -> list[ArithmeticTask]:
     rng = random.Random(seed)
     return [
         ArithmeticTask(
@@ -134,7 +136,7 @@ async def sample_one(
         rollout_logprobs = rollout_logprobs[:model_input_len]
     weights = torch.zeros(model_input_len, dtype=torch.float32)
     if output_len:
-        weights[max(0, prompt_len - 1):] = 1.0
+        weights[max(0, prompt_len - 1) :] = 1.0
     return RolloutRecord(
         task=task,
         text=text,
@@ -285,7 +287,9 @@ def make_grpo_loss(records: list[RolloutRecord], advantages: list[float]):
     ]
     advantage_tensors = [torch.tensor(value, dtype=torch.float32) for value in advantages]
 
-    def loss_fn(data: list[tinker.Datum], logprobs_list: list[torch.Tensor]) -> tuple[torch.Tensor, dict[str, float]]:
+    def loss_fn(
+        data: list[tinker.Datum], logprobs_list: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, dict[str, float]]:
         total_loss = torch.tensor(0.0)
         total_tokens = 0.0
         ratios: list[float] = []
@@ -310,7 +314,11 @@ def make_grpo_loss(records: list[RolloutRecord], advantages: list[float]):
                 ratios.append(float((ratio * mask).sum().item() / mask.sum().item()))
 
         mean_ratio = sum(ratios) / len(ratios) if ratios else 0.0
-        return total_loss, {"policy_loss_sum": float(total_loss.item()), "tokens": total_tokens, "mean_ratio": mean_ratio}
+        return total_loss, {
+            "policy_loss_sum": float(total_loss.item()),
+            "tokens": total_tokens,
+            "mean_ratio": mean_ratio,
+        }
 
     return loss_fn
 
@@ -326,7 +334,9 @@ def maybe_plot(metrics_path: Path, output_path: Path) -> None:
         import matplotlib.pyplot as plt
     except Exception:
         return
-    rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line]
+    rows = [
+        json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line
+    ]
     if not rows:
         return
     plottable = [row for row in rows if row.get("phase") in {"calibrate", "train"}]
@@ -490,7 +500,9 @@ async def run(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=os.environ.get("FIREWORKS_BASE_URL", "https://api.fireworks.ai"))
+    parser.add_argument(
+        "--base-url", default=os.environ.get("FIREWORKS_BASE_URL", "https://api.fireworks.ai")
+    )
     parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
     parser.add_argument("--inference-model", default=DEFAULT_INFERENCE_MODEL)
     parser.add_argument("--tokenizer-model", default=DEFAULT_TOKENIZER_MODEL)

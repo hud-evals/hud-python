@@ -25,7 +25,7 @@ from hud.environment import Environment
 from hud.graders import EvaluationResult
 
 _INNER_MODEL: str = "ttt-selfplay-389d2c"
-_OUTER_MARK: str = "X"   # set per game; "X" goes first, "O" goes second
+_OUTER_MARK: str = "X"  # set per game; "X" goes first, "O" goes second
 
 # Per-game inner model samples (reset at game start, read at game end).
 _inner_samples: list[dict[str, Any]] = []
@@ -33,9 +33,14 @@ _inner_samples: list[dict[str, Any]] = []
 # ── game logic ─────────────────────────────────────────────────────────────────
 
 _WINS = [
-    (0, 1, 2), (3, 4, 5), (6, 7, 8),  # rows
-    (0, 3, 6), (1, 4, 7), (2, 5, 8),  # cols
-    (0, 4, 8), (2, 4, 6),              # diagonals
+    (0, 1, 2),
+    (3, 4, 5),
+    (6, 7, 8),  # rows
+    (0, 3, 6),
+    (1, 4, 7),
+    (2, 5, 8),  # cols
+    (0, 4, 8),
+    (2, 4, 6),  # diagonals
 ]
 
 
@@ -142,11 +147,13 @@ async def _inner_move(inner_mark: str) -> int:
         token_ids = getattr(choice, "token_ids", None)
         if prompt_ids is not None and token_ids is not None:
             content_lp = choice.logprobs.content if choice.logprobs else None
-            _inner_samples.append({
-                "prompt_token_ids": list(prompt_ids),
-                "output_token_ids": list(token_ids),
-                "output_logprobs": [tok.logprob for tok in content_lp] if content_lp else [],
-            })
+            _inner_samples.append(
+                {
+                    "prompt_token_ids": list(prompt_ids),
+                    "output_token_ids": list(token_ids),
+                    "output_logprobs": [tok.logprob for tok in content_lp] if content_lp else [],
+                }
+            )
         text = choice.message.content or ""
         nums = re.findall(r"\d+", text)
         if nums:

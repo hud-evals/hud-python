@@ -72,10 +72,12 @@ async def main(model: str, steps: int, group: int, lr: float) -> None:
             if inner_turns:
                 inner_count += 1
                 # Symmetric reward: inner model wins what outer loses
-                combined.append(TrajectoryPayload(
-                    samples=inner_turns,
-                    reward=1.0 - run.reward,
-                ))
+                combined.append(
+                    TrajectoryPayload(
+                        samples=inner_turns,
+                        reward=1.0 - run.reward,
+                    )
+                )
 
         # group_size=2 pairs each outer with its inner (symmetric GRPO advantage:
         # advantage = reward - mean([r_outer, r_inner]) = r_outer - 0.5 per game).

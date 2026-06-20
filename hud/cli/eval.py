@@ -5,8 +5,8 @@ Config Override Order: CLI arguments > .hud_eval.toml > defaults
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
 import logging
 import os
 import re
