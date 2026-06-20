@@ -8,6 +8,7 @@ client-side losses use :class:`ForwardResult` / :class:`BackwardRequest`.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,7 +38,12 @@ class TrajectorySample(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    prompt_token_ids: list[int]
+    # Flat prompt token ids (text-only). ``None`` for multimodal prompts, where
+    # ``prompt_chunks`` carries the modality-complete prompt instead.
+    prompt_token_ids: list[int] | None = None
+    # Serialized prompt ``ModelInput`` chunks (text + image); authoritative prompt
+    # when present (mirrors the agent ``Sample``).
+    prompt_chunks: list[dict[str, Any]] | None = None
     output_token_ids: list[int]
     output_logprobs: list[float] = Field(default_factory=list[float])
 

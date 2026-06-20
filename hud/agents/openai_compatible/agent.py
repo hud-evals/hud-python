@@ -193,16 +193,23 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         sample: Sample | None = None
         if return_token_ids:
             prompt_token_ids = getattr(choice, "prompt_token_ids", None)
+            # Multimodal prompt (text + image chunks): the only prompt representation
+            # that survives image inputs; flat prompt_token_ids is null in that case.
+            prompt_chunks = getattr(choice, "prompt_chunks", None)
             token_ids = getattr(choice, "token_ids", None)
-            if prompt_token_ids is not None and token_ids is not None:
-                chat_state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
-                chat_state.continuation_message_count = len(messages)
+            has_prompt = prompt_token_ids is not None or prompt_chunks is not None
+            if token_ids is not None and has_prompt:
                 content_lp = choice.logprobs.content if choice.logprobs else None
                 sample = Sample(
-                    prompt_token_ids=list(prompt_token_ids),
+                    prompt_token_ids=list(prompt_token_ids) if prompt_token_ids is not None else [],
+                    prompt_chunks=list(prompt_chunks) if prompt_chunks is not None else None,
                     output_token_ids=list(token_ids),
                     output_logprobs=[tok.logprob for tok in content_lp] if content_lp else [],
                 )
+                # KV-cache continuation only applies to flat text prompts.
+                if prompt_token_ids is not None:
+                    chat_state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
+                    chat_state.continuation_message_count = len(messages)
 
         tool_calls: list[MCPToolCall] = []
         for tc in function_calls:

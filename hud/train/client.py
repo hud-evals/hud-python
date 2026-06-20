@@ -51,7 +51,8 @@ def _run_to_input(run: Run) -> TrainInput:
     samples = run.trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
     turns = [
         TrajectorySample(
-            prompt_token_ids=sample.prompt_token_ids,
+            prompt_token_ids=sample.prompt_token_ids or None,
+            prompt_chunks=sample.prompt_chunks,
             output_token_ids=sample.output_token_ids,
             output_logprobs=sample.output_logprobs,
         )
