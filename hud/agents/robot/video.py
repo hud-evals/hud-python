@@ -202,9 +202,16 @@ class VideoStreamer:
         self._encoders: dict[str, SegmentEncoder] = {}
 
     def record(self, obs: dict[str, Any]) -> None:
-        """Submit each camera frame in ``obs['data']`` to its (lazy) encoder. Non-blocking."""
+        """Submit each camera frame in ``obs['data']`` to its (lazy) encoder. Non-blocking.
+
+        Only ``HxWxC`` arrays (``ndim == 3``, channel last in ``{1,3,4}``) are treated as
+        camera frames; proprio/state vectors are skipped. This matters for batched robots
+        whose state rides the wire as ``[num_envs, dim]`` (``ndim == 2``) \u2014 without the
+        channel-last guard that would be mis-encoded as a tiny garbage video.
+        """
         for name, arr in obs.get("data", {}).items():
-            if getattr(arr, "ndim", 0) < 2:
+            shape = getattr(arr, "shape", ())
+            if getattr(arr, "ndim", 0) != 3 or shape[-1] not in (1, 3, 4):
                 continue
             if name not in self._encoders:
                 self._encoders[name] = self._make_encoder(name)

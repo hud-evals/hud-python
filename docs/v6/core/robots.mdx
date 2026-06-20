@@ -3,7 +3,7 @@ title: "Robots"
 description: "The robot capability: contracts, bridges, and the agent harness."
 icon: "robot"
 tag: "Beta"
-mode: "wide"
+# mode: "wide"
 ---
 
 <Note>
@@ -89,7 +89,7 @@ drives model until env terminates.
 embodiment's control rate, observation and action spaces, carried in the capability's manifest params. 
 The agent wires observations to policy inputs purely from the manifest; there is no shared config.
 
-## Environment side
+### Environment side
 
 You implement one class - the **bridge**. 
 
@@ -185,7 +185,7 @@ async def pick_and_place(task_id: str, seed: int = 0):
     yield await endpoint.result()  # {"score", "success", "total_reward"}
 ```
 
-## Agent side
+### Agent side
 
 The harness lives in `hud.agents.robot`. 
 
@@ -199,7 +199,7 @@ until the environment terminates. You supply two objects.
 Run it with the normal engine - `Taskset(...).run(agent, runtime=...)` - against any substrate
 serving an env with the robot capability and an adaptable embodiment.
 
-## LeRobot integration
+## LeRobot
 
 HUD integrates with [LeRobot](https://github.com/huggingface/lerobot) natively, so a stock checkpoint
 is a complete agent in a few lines. The two bundled seams *are* the LeRobot convention:
@@ -232,40 +232,8 @@ Anything past the stock image/state convention is just a subclass of `Model` or 
 LeRobot classes are the batteries-included default. See the
 [robot benchmark cookbook](/v6/cookbooks/robot-benchmark) for a full LIBERO + pi0.5 run.
 
-## The Model
 
-`Model` owns *how to run* a policy. To wrap a non-LeRobot checkpoint, subclass it and implement one
-method - `infer`; the episode loop, threading, and the wire are handled for you.
-
-```python
-import numpy as np
-from hud.agents.robot import Model
-
-class MyModel(Model):
-    def __init__(self, policy):
-        self.policy = policy
-
-    def reset(self) -> None:
-        ...                                    # clear per-episode state (optional)
-
-    def infer(self, batch) -> np.ndarray:
-        chunk = self.policy(batch)             # run your policy
-        return np.asarray(chunk, np.float32)   # [T, A] chunk, in the env's action space
-```
-
-- **Input** (`batch`) - the policy-ready inputs your [`Adapter`](#agent-side) produced for this step
-  (images, a state vector, the task prompt - whatever your policy consumes). `Model` and `Adapter`
-  are a matched pair, so the batch is exactly what your adapter emits.
-- **Output** - a `[T, A]` `float32` numpy array: an action chunk of `T` timesteps × `A` action dims,
-  already in the env's action space. Single-action policies return `T = 1`.
-- **`reset()`** - optional; clear per-episode state (an action queue, a chunk buffer) at the start of
-  each episode.
-
-The harness awaits `ainfer`, which runs your (blocking) `infer` in a worker thread by default -
-override `ainfer` only if your policy is natively async. For chunked policies, reduce each `[T, A]`
-chunk to one action per step with an `Ensembler`.
-
-## The contract
+## Contract
 
 Embodiments and policies disagree on cameras, state layout, action semantics, and control rate, so
 pairing a model with an env always needs a wiring step. The **contract** makes it explicit: a JSON
@@ -319,6 +287,41 @@ spec - the closed symbol sets and known traps - lives outside the SDK alongside 
 
 </Accordion>
 
+
+## Model
+
+`Model` owns *how to run* a policy. To wrap a non-LeRobot checkpoint, subclass it and implement one
+method - `infer`; the episode loop, threading, and the wire are handled for you.
+
+```python
+import numpy as np
+from hud.agents.robot import Model
+
+class MyModel(Model):
+    def __init__(self, policy):
+        self.policy = policy
+
+    def reset(self) -> None:
+        ...                                    # clear per-episode state (optional)
+
+    def infer(self, batch) -> np.ndarray:
+        chunk = self.policy(batch)             # run your policy
+        return np.asarray(chunk, np.float32)   # [T, A] chunk, in the env's action space
+```
+
+- **Input** (`batch`) - the policy-ready inputs your [`Adapter`](#agent-side) produced for this step
+  (images, a state vector, the task prompt - whatever your policy consumes). `Model` and `Adapter`
+  are a matched pair, so the batch is exactly what your adapter emits.
+- **Output** - a `[T, A]` `float32` numpy array: an action chunk of `T` timesteps × `A` action dims,
+  already in the env's action space. Single-action policies return `T = 1`.
+- **`reset()`** - optional; clear per-episode state (an action queue, a chunk buffer) at the start of
+  each episode.
+
+The harness awaits `ainfer`, which runs your (blocking) `infer` in a worker thread by default -
+override `ainfer` only if your policy is natively async. For chunked policies, reduce each `[T, A]`
+chunk to one action per step with an `Ensembler`.
+
+
 ## Sim threading
 
 The loop is lockstep - the bridge steps the sim once per received action. A simulator is usually
@@ -341,6 +344,31 @@ Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per st
 frame the policy saw plus the executed action - and stamps **keyframes** where a fresh action chunk
 was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with
 markers at each chunk-prediction decision point.
+
+## Recording datasets
+
+Set `agent.save = True` (wire it to a `--save` flag on your runner) to also record every
+`(observation, executed action)` tick into a **LeRobot v3 dataset** - the rollouts you just ran,
+ready to finetune a policy on. Telemetry streams either way; saving is the opt-in extra.
+
+Recording is **agent-side**: it consumes the observations the agent already receives and the actions
+it already produces, so it runs in *your* process - not the environment container. That sidesteps
+sims (e.g. Isaac/RoboLab) whose dependency stack conflicts with `lerobot`; only your machine needs
+`pip install 'lerobot[dataset]'`.
+
+One dataset spans the whole run - every episode the shared agent drives appends to it - and is
+finalized at process exit. Destination and Hub push come from the environment:
+
+| Env var | Effect |
+|---------|--------|
+| `RECORD_DIR` | Dataset root (default `./data`, relative to where the rollout launched) |
+| `HF_REPO` | Also push the finalized dataset to this HF namespace (needs `HF_TOKEN`) |
+| `HF_PRIVATE` | Push the dataset private |
+
+The [contract](#contract) drives the schema with no extra wiring: image features become
+`observation.images.<camera>` (encoded to per-episode video), the lone state vector becomes
+`observation.state`, the action becomes `action`, and the task prompt rides along as each frame's
+`task`.
 
 
 ## Running a sim in another process
