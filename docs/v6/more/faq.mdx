@@ -16,7 +16,7 @@ Rolling your own usually means three recurring chores: re-wiring tools for each 
 - **One task definition is a whole dataset.** A generative task mints as many concrete tasks as you want from a single definition; you don't author and store one artifact per task.
 - **Nothing downstream is locked in.** A graded rollout is just a `trace_id` and a `reward`, so the same runs you eval today feed any trainer tomorrow — your own loop or a stack like Tinker, slime, or Fireworks — with no environment-side glue, on any rollout infra.
 
-You write the environment once; the model, harness, trainer, and infra all stay swappable. See [Introduction](/v6/index).
+You write the environment once; the model, harness, trainer, and infra all stay swappable. See [Introduction](/v6/start/index).
 </Accordion>
 </AccordionGroup>
 
@@ -104,14 +104,14 @@ Yes, in **beta**: the `openpi/0` capability is a schema-driven observation/actio
 </Accordion>
 
 <Accordion title="I'm upgrading from v5 — what changed?">
-Scenarios became tasks, registered tools became capabilities, and the env serves a control channel instead of an MCP server. Old environments keep running; convert at your own pace. See [Migrate to v6](/migrate-v6).
+Scenarios became tasks, registered tools became capabilities, and the env serves a control channel instead of an MCP server. Old environments keep running; convert at your own pace. See [Migrate to v6](/v6/more/migrate-v6).
 </Accordion>
 </AccordionGroup>
 
 ## Still stuck?
 
 <CardGroup cols={2}>
-<Card title="Quickstart" icon="bolt" href="/v6/quickstart">
+<Card title="Quickstart" icon="bolt" href="/v6/start/quickstart">
   Zero to a first graded trace.
 </Card>
 <Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">

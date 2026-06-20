@@ -10,7 +10,7 @@ This page covers the object and its parts (capabilities, tasks, lifecycle hooks)
 
 ## The `Environment` object
 
-`hud.environment.Environment` is a lightweight control object - it doesn't hold the world itself, it's where you **register** the **capabilities** and **tasks** the environment exposes. When served, it acts as the *server* an agent harness connects to over the [protocol](/v6/protocol): it answers `hello` with its capabilities and runs its tasks on request.
+`hud.environment.Environment` is a lightweight control object - it doesn't hold the world itself, it's where you **register** the **capabilities** and **tasks** the environment exposes. When served, it acts as the *server* an agent harness connects to over the [protocol](/v6/core/protocol): it answers `hello` with its capabilities and runs its tasks on request.
 
 ```python
 from hud import Environment
@@ -24,7 +24,7 @@ env = Environment(name="environment", version="0.0.1", capabilities=None)
 | `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
 | `capabilities` | `list[Capability] \| None` | `None` | Wire data for services that already exist; see [Capabilities](/v6/core/capabilities). |
 
-<Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/migrate-v6).</Note>
+<Note>Passing v5-only keywords emits a `DeprecationWarning` and ignores them. See [Migrate to v6](/v6/more/migrate-v6).</Note>
 
 Register **capabilities** via the constructor (for services that already exist), with `env.workspace(root)` for the common shell case, or with `env.add_capability(...)` from an `@env.initialize` hook for a daemon the env runs itself. Each is concrete wire data - the URL of something serving the protocol. See [Capabilities](/v6/core/capabilities) for the full set and how to spin them up.
 
@@ -132,7 +132,7 @@ For building more advanced environments - custom daemons, your own capabilities 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Protocol" icon="route" href="/v6/protocol" />
+<Card title="Protocol" icon="route" href="/v6/core/protocol" />
 <Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
 <Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
 </CardGroup>

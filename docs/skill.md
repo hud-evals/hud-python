@@ -49,7 +49,7 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
 
-Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/quickstart)
+Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/start/quickstart)
 and [Tasks](/v6/core/tasks).
 
 **Capabilities** give the agent something to act on (declare on the env; the
@@ -212,7 +212,7 @@ If you catch yourself writing any of these, stop and convert:
 | `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` |
 | `from hud.tools import ...` | tools are gone; result types live in `hud.agents.types` |
 
-For an existing v5 env, follow [Migrate to v6](/migrate-v6).
+For an existing v5 env, follow [Migrate to v6](/v6/more/migrate-v6).
 
 ---
 
