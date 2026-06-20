@@ -1,0 +1,433 @@
+---
+title: "Robots"
+description: "The robot capability: contracts, bridges, and the agent harness."
+icon: "robot"
+tag: "Beta"
+mode: "wide"
+---
+
+<Note>
+The `robot` capability is in **beta**. The wire protocol is versioned `openpi/0`; the contract
+schema is v0. Expect additive changes while the design settles.
+</Note>
+
+HUD runs robot environments the same way it runs everything else - an environment declares tasks
+and capabilities, an agent drives a live `Run`, but a 50 Hz policy can't stream actions over tool calls.
+
+So the `robot` capability is instead a continuous **observation/action loop over WebSocket**: the
+environment streams observations (camera frames, robot state) and the agent streams back actions, as
+fast as the policy can run. The wire format is **openpi**-inspired (msgpack with numpy serialization), 
+so existing openpi policy servers only need a thin adapter. 
+
+Everything below ships behind the `robot` extra (pulls in numpy + openpi-client):
+
+<CodeGroup>
+```bash uv
+uv add 'hud-python[robot]'
+```
+```bash pip
+pip install 'hud-python[robot]'
+```
+</CodeGroup>
+
+## Overview
+Like with other HUD workflows there's the environment side
+(server - containerized, served on the runtime) and the agent side (cleint - swappable, model with harness)
+For robotics the **environment side** 
+translates incoming actions into changes in the digital or physical environment and serves observations. 
+The **agent side** owns the policy: it reads those observations, runs
+inference, and sends actions back. 
+
+Both sides need building, and this is where robotics differs from
+the rest of HUD. For LLM agents you can lean on a standard inference provider and a
+stock harness, so often the environment is the only thing you write. For robot policies there is no
+equivalent - no hosted inference provider, no standard harness.
+
+HUD ships tooling for **both** sides: a handful of small, named abstractions you implement, 
+with the framework owning everything in between (the serve loop, the wire protocol, telemetry to platform).
+
+```mermaid
+flowchart LR
+    subgraph ENVS["environment side"]
+        subgraph EP["<b>RobotEndpoint</b>"]
+            BR["<b>RobotBridge</b>"]
+        end
+    end
+
+    subgraph AGS["agent side"]
+        subgraph HA["<b>RobotAgent</b>"]
+            direction LR
+            AD["<b>Adapter</b>"] <--> MO["<b>Model</b>"]
+        end
+    end
+
+    EP <-->|talks to| HA
+
+    classDef node fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    class BR,AD,MO node;
+    style EP fill:transparent,stroke:#8a8580,stroke-width:1px;
+    style HA fill:transparent,stroke:#8a8580,stroke-width:1px;
+    style ENVS fill:transparent,stroke:#2b2722,stroke-width:1.5px;
+    style AGS fill:transparent,stroke:#2b2722,stroke-width:1.5px;
+```
+
+**Environment side** - owns the simulator and serves frames:
+
+- **`RobotBridge`** - the one class you implement around your sim: `reset` / `step` /
+  `get_observation`. The framework owns the WebSocket serve loop and the single-agent connection.
+- **`RobotEndpoint`** - wraps the bridge - the environment server's handle for the 
+sim (even if the sim is running in another process)
+
+**Agent side** - runs the policy and streams actions:
+
+- **`RobotAgent`** - the harness: connects to the env and bridge, owns adapter and model, 
+drives model until env terminates.
+- **`Model`** - the actual stateless checkpoint of the model (includes pre-/post-processing)
+- **`Adapter`** - translates the env's observation space to the model's, and the model's action space to the env's
+
+**The contract** (of the environment) - the one artifact both sides share: a self-describing JSON schema of the
+embodiment's control rate, observation and action spaces, carried in the capability's manifest params. 
+The agent wires observations to policy inputs purely from the manifest; there is no shared config.
+
+## Environment side
+
+You implement one class - the **bridge**. 
+
+```python
+from hud.environment.robot import RobotBridge
+
+class MySimBridge(RobotBridge):
+    async def reset(self, task_id: str, seed: int = 0) -> str:
+        ...                              # build the episode
+        await self._send_observation()   # push the first frame
+        return self.task_description     # becomes the task prompt
+
+    def step(self, action) -> None:
+        ...  # advance one tick; set success / terminated
+
+    def get_observation(self):
+        return {"agentview_image": frame, "state": vec}, self.terminated
+```
+
+
+Those three methods are all you write. Under the hood the framework takes care of communication 
+with the agent and  starting/stopping as well as stepping of the simulator at the *control rate*.
+
+- **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
+- **`step`** applies one action and advances the sim a tick, setting `success` / `terminated` as the
+  episode plays out.
+- **`get_observation`** returns a strctured dict of the current observation 
+plus whether the episode is done.
+
+<Note>
+The `get_observation` function has a strict output convention, see below to follow it.
+</Note>
+
+<Accordion title="The openpi observation convention">
+
+**The `data` dict is the strict part.** It is what the agent indexes by name and feeds straight to
+the policy, so a few things have to be exactly right:
+
+- **Values are numpy arrays** - nothing else survives the trip into the adapter and the trace viewer.
+- **Each key is an observation feature's name, verbatim from the contract.** The agent does
+  `data[name]` directly off the contract
+- **Images are `HWC` arrays** (`[H, W, 3]`, `uint8` RGB).
+- **State is a single 1-D array**, passed to the policy as `float32`; everything rank-1 is treated
+  as state.
+- **`terminated` is a sibling, not part of `data`** - return it as the second item of your
+  `(data, terminated)` tuple and the framework attaches it to the frame.
+
+```python
+def get_observation(self):
+    data = {
+        "observation/image":       rgb,          # [256, 256, 3] uint8, RGB, HWC
+        "observation/wrist_image": wrist_rgb,    # [256, 256, 3] uint8, RGB, HWC
+        "observation/state": np.concatenate([    # [8] float32, in contract order
+            eef_pos,         # xyz                 (3,)
+            eef_axis_angle,  # orientation         (3,)
+            gripper_qpos,    # gripper             (2,)
+        ]).astype(np.float32),
+    }
+    return data, self.terminated   # terminated is a sibling key the framework adds
+```
+
+Actions come back the same way: the agent sends them under openpi's `actions` key, and your
+`step(action)` receives an already-decoded numpy array - you never touch the codec.
+
+</Accordion>
+
+`RobotEndpoint` is the env's control handle on the bridge - the one surface it drives an episode
+through. `start` / `stop` bring the bridge's socket up and down; `capability` publishes the `robot`
+binding once that URL exists (call it after `start`); `reset` begins an episode and returns its
+prompt; `result` returns the episode's score. It's control-plane only - the agent's observe/act loop
+tunnels straight to the bridge's WebSocket - and the same calls work whether the bridge is local
+(shown here) or [in another process](#running-a-sim-in-another-process).
+
+```python
+from hud import Environment
+from hud.environment.robot import RobotEndpoint
+
+env = Environment(name="my-sim")
+endpoint = RobotEndpoint(MySimBridge())  # the env drives the bridge only through the endpoint
+
+@env.initialize
+async def _up():
+    await endpoint.start()
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
+
+@env.shutdown
+async def _down():
+    await endpoint.stop()
+
+@env.template()
+async def pick_and_place(task_id: str, seed: int = 0):
+    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
+    yield await endpoint.result()  # {"score", "success", "total_reward"}
+```
+
+## Agent side
+
+The harness lives in `hud.agents.robot`. 
+
+We provide a base class called `RobotAgent`. It connects to the `robot`
+binding, reads the contract, then runs the rollout loop including model inference
+until the environment terminates. You supply two objects.
+
+- **`Model`** - something with an `infer()` function that returns action chunks (pre-/post-processing included)
+- **`Adapter`** - translates env ↔ model spaces.
+
+Run it with the normal engine - `Taskset(...).run(agent, runtime=...)` - against any substrate
+serving an env with the robot capability and an adaptable embodiment.
+
+## LeRobot integration
+
+HUD integrates with [LeRobot](https://github.com/huggingface/lerobot) natively, so a stock checkpoint
+is a complete agent in a few lines. The two bundled seams *are* the LeRobot convention:
+
+- **`LeRobotModel(policy, preprocess, postprocess)`** runs the policy through its own LeRobot
+  pre/post-processors, so the checkpoint behaves exactly as it does upstream. Pass an `Ensembler` to
+  reduce overlapping action chunks to one action per step.
+- **`LeRobotAdapter(model_image_keys=...)`** maps the env's cameras and state onto the policy's
+  inputs from the [contract](#the-contract) - HWC `uint8` → CHW float, state and prompt passed
+  through.
+
+```python
+import torch
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+
+from hud.agents.robot import RobotAgent, LeRobotModel, LeRobotAdapter
+
+class PI05Agent(RobotAgent):
+    def __init__(self):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        policy = PI05Policy.from_pretrained("lerobot/pi05_libero_finetuned").to(device).eval()
+        pre, post = make_pre_post_processors(policy.config, "lerobot/pi05_libero_finetuned",
+                                             preprocessor_overrides={"device_processor": {"device": device}})
+        self.model = LeRobotModel(policy, pre, post)
+        self.adapter = LeRobotAdapter(model_image_keys=list(policy.config.image_features))
+```
+
+Anything past the stock image/state convention is just a subclass of `Model` or `Adapter`; the
+LeRobot classes are the batteries-included default. See the
+[robot benchmark cookbook](/v6/cookbooks/robot-benchmark) for a full LIBERO + pi0.5 run.
+
+## The Model
+
+`Model` owns *how to run* a policy. To wrap a non-LeRobot checkpoint, subclass it and implement one
+method - `infer`; the episode loop, threading, and the wire are handled for you.
+
+```python
+import numpy as np
+from hud.agents.robot import Model
+
+class MyModel(Model):
+    def __init__(self, policy):
+        self.policy = policy
+
+    def reset(self) -> None:
+        ...                                    # clear per-episode state (optional)
+
+    def infer(self, batch) -> np.ndarray:
+        chunk = self.policy(batch)             # run your policy
+        return np.asarray(chunk, np.float32)   # [T, A] chunk, in the env's action space
+```
+
+- **Input** (`batch`) - the policy-ready inputs your [`Adapter`](#agent-side) produced for this step
+  (images, a state vector, the task prompt - whatever your policy consumes). `Model` and `Adapter`
+  are a matched pair, so the batch is exactly what your adapter emits.
+- **Output** - a `[T, A]` `float32` numpy array: an action chunk of `T` timesteps × `A` action dims,
+  already in the env's action space. Single-action policies return `T = 1`.
+- **`reset()`** - optional; clear per-episode state (an action queue, a chunk buffer) at the start of
+  each episode.
+
+The harness awaits `ainfer`, which runs your (blocking) `infer` in a worker thread by default -
+override `ainfer` only if your policy is natively async. For chunked policies, reduce each `[T, A]`
+chunk to one action per step with an `Ensembler`.
+
+## The contract
+
+Embodiments and policies disagree on cameras, state layout, action semantics, and control rate, so
+pairing a model with an env always needs a wiring step. The **contract** makes it explicit: a JSON
+document in the capability manifest that the agent reads back with `RobotClient.spaces()`, which
+splits `features` into an observation and an action space by each feature's `role` - so a policy
+wires itself with no shared config.
+
+Here's the smallest contract the bundled adapter accepts - one camera, a state vector, and an action:
+
+```json
+{
+  "features": {
+    "observation/image": { "role": "observation", "type": "rgb" },
+    "observation/state": { "role": "observation" },
+    "action":            { "role": "action" }
+  }
+}
+```
+
+Only two fields are load-bearing:
+
+- **`role`** (`observation` / `action`) - `spaces()` splits the contract by it and the `Adapter` wires
+  against that split. Required on every feature.
+- **`type`** on image observations - `rgb`/`bgr`/`gray`/`depth` is how the bundled adapter spots a
+  camera; the first observation *without* an image type becomes the state. Omit it and your image is
+  mistaken for the state. (On the state and action, `type` is descriptive.)
+
+Feature keys are openpi flat slash-paths and must match *verbatim* the keys your bridge returns from
+`get_observation` (`action` is the single action feature). Everything else - `robot_type`,
+`control_rate`, `dtype`, `shape`, `names`, `stats` - is descriptive and never enforced; add `names` if
+you want labeled state/action slices in the trace viewer. Full list in the reference below.
+
+<Accordion title="Full field reference">
+
+| Field | Where | Meaning |
+|-------|-------|---------|
+| `robot_type` | top level | Embodiment id, shown in the trace viewer. Descriptive. |
+| `control_rate` | top level | Control-loop frequency in Hz. Descriptive. |
+| `features` | top level | Map of feature name → feature spec (rows below). |
+| `role` | feature | `observation` or `action` - **the only field that splits the spaces**. Load-bearing. |
+| `type` | feature | Representation tag. Observations: `rgb`/`bgr`/`gray`/`depth` mark an image (load-bearing for the bundled adapter); others (`ee_abs`, `ee_del`, `joint_pos`, …) are descriptive control/state modes. |
+| `dtype` | feature | `image` for frames, else a numpy dtype (`float32`). Descriptive - not checked against your arrays. |
+| `shape` | feature | Declared dims (`[H, W, 3]`, `[8]`). Descriptive; every feature is rank ≥ 1 (scalars are `[1]`). |
+| `names` | feature | Per-element labels; what the trace viewer uses to label state/action slices. |
+| `stats` | feature | Per-element `mean` / `std` / `min` / `max` for a custom adapter. The stock LeRobot path uses the checkpoint's own normalization, so you can omit it. |
+| `state_type` / `state_representation` / `frame` | feature | Closed-symbol embodiment metadata (EEF vs joint, quaternion vs axis-angle, world vs base frame). Descriptive. |
+
+The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per
+contract**. The framework never validates your arrays against `shape` / `dtype`; the full authoring
+spec - the closed symbol sets and known traps - lives outside the SDK alongside the contract corpus.
+
+</Accordion>
+
+## Sim threading
+
+The loop is lockstep - the bridge steps the sim once per received action. A simulator is usually
+**thread-affine** (every touch must run on the thread that created its GL/device context), but the
+bridge's asyncio loop can't be stalled by a blocking step. **`SimRunner`** is the one-line injection
+that decides *which thread* runs the sim; the bridge routes every sim touch through it:
+
+- **`InlineSimRunner`** - runs on the event-loop thread. The default; for cheap/CPU sims and tests.
+- **`ThreadSimRunner`** - sim on a dedicated worker thread, leaving the loop free during a blocking
+  step. For render-heavy or thread-bound sims.
+- **`MainThreadSimRunner`** - sim on the main thread, for runtimes that own *both* the main thread
+  and the loop (Isaac/Omniverse); the owner's pump loop drains queued sim touches between ticks.
+
+Pass one to the bridge (`RobotBridge(sim_runner=ThreadSimRunner())`), or subclass `SimRunner` for an
+exotic topology.
+
+## Telemetry
+
+Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per step - every camera
+frame the policy saw plus the executed action - and stamps **keyframes** where a fresh action chunk
+was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with
+markers at each chunk-prediction decision point.
+
+
+## Running a sim in another process
+
+Some simulators must **own the process main thread** - most notably **Isaac Sim / Omniverse**, where
+Kit drives its own main-thread event loop and `env.reset()` loads USD through a nested
+`run_until_complete`. That can't run inside `hud serve`, which already owns the asyncio loop. The fix
+is to move the sim into its own process and keep the env code essentially unchanged.
+
+`RobotEndpoint` is built for exactly this: the same control surface (`start` / `reset` / `result` /
+`stop`) works whether the bridge is local or remote.
+
+- **Env process** - publish a *remote* handle with `RobotEndpoint.remote(host, port)`. It dials the
+  sim process and forwards every control call over JSON-RPC.
+- **Sim process** - wrap the real bridge and expose it with `RobotEndpoint(bridge).serve(host, port)`,
+  using a [`MainThreadSimRunner`](#sim-threading) so every sim touch runs on the main thread.
+
+The two planes split cleanly, which is why the agent never knows the sim is remote:
+
+- **Control plane** (`start` / `reset` / `result`) - JSON-RPC between the remote endpoint and the
+  serving process.
+- **Data plane** (the agent's `observe → act` loop) - tunnels straight to the bridge's `robot`
+  WebSocket; the contract stays env-side.
+
+**Env side** - identical to the local example, but the endpoint is remote and you `connect()` to it
+first:
+
+```python env.py
+from hud import Environment
+from hud.environment.robot import RobotEndpoint
+
+env = Environment(name="isaac-sim")
+endpoint = RobotEndpoint.remote("127.0.0.1", 9100)   # a handle on the bridge in the sim process
+
+@env.initialize
+async def _up():
+    await endpoint.connect()    # retries until the sim process is serving
+    await endpoint.start()
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
+
+@env.shutdown
+async def _down():
+    await endpoint.close()      # drops the link; does not stop the sim
+
+@env.template()
+async def pick_and_place(task_id: str, seed: int = 0):
+    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
+    yield await endpoint.result()
+```
+
+**Sim process** - your Isaac program builds the bridge and serves its control surface, then runs for
+the process's lifetime:
+
+```python sim_main.py
+import asyncio
+from hud.environment.robot import RobotEndpoint, MainThreadSimRunner
+
+async def main():
+    bridge = MySimBridge(sim_runner=MainThreadSimRunner())   # sim touches run on main
+    server = await RobotEndpoint(bridge).serve("127.0.0.1", 9100)
+    await server.wait_closed()
+
+asyncio.run(main())   # launched on the main thread the sim owns
+```
+
+Bring the two up together - the env's `connect()` retries until the sim is listening. Everything
+downstream (`hud eval`, tasksets, the agent) is unchanged; only *where the bridge runs* moved.
+
+
+## API summary
+
+| Symbol | Where | Role |
+|--------|-------|------|
+| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
+| `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
+| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
+| `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (local or `.remote()`) |
+| `SimRunner` (`Inline`/`Thread`/`MainThread`) | `hud.environment.robot` | Which thread runs the sim |
+| `RobotAgent` | `hud.agents.robot` | The episode-loop harness |
+| `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Robot benchmark cookbook" icon="flask" href="/v6/cookbooks/robot-benchmark">
+  LIBERO in Docker, driven by pi0.5, end to end.
+</Card>
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
+</CardGroup>

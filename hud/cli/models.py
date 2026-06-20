@@ -71,6 +71,8 @@ def list_models(
         )
     console.print(table)
     console.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
+    web = settings.hud_web_url.rstrip("/")
+    console.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
 
 
 @models_app.command("fork")
@@ -116,6 +118,7 @@ def fork_model(
         )
     )
     console.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
+    console.print(f"[dim]View: {_model_url(model['id'])}[/dim]")
 
 
 @models_app.command("checkpoints")
@@ -127,13 +130,15 @@ def list_checkpoints(
     from hud.cli.utils.api import require_api_key
 
     require_api_key("list checkpoints")
-    checkpoints = _get_checkpoints(model)
+    model_id = _resolve_model_id(model)
+    checkpoints = _get_checkpoints(model_id)
 
     if json_output:
         console.print_json(json.dumps(checkpoints, indent=2))
         return
     if not checkpoints:
         console.print("[yellow]No checkpoints yet — this model serves its base weights[/yellow]")
+        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
         return
 
     checkpoints = sorted(checkpoints, key=lambda c: c.get("created_at") or "")
@@ -155,6 +160,7 @@ def list_checkpoints(
             (ckpt.get("created_at") or "")[:19],
         )
     console.print(table)
+    console.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
 
 
 @models_app.command("head")
@@ -170,19 +176,22 @@ def show_head(
     from hud.cli.utils.api import require_api_key
 
     require_api_key("manage head")
+    model_id = _resolve_model_id(model)
 
     if set_to is not None:
-        _set_head(model, set_to)
+        _set_head(model_id, set_to)
         console.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
+        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
         return
 
-    head = next((c for c in _get_checkpoints(model) if c.get("is_active")), None)
+    head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
 
     if json_output:
         console.print_json(json.dumps(head, indent=2))
         return
     if head is None:
         console.print("[yellow]No active checkpoint — this model serves its base weights[/yellow]")
+        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
         return
 
     reward = head.get("mean_reward")
@@ -196,6 +205,15 @@ def show_head(
             border_style="green",
         )
     )
+    console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+
+
+def _model_url(model_id: str, *, tab: str | None = None) -> str:
+    """Web app URL for a model (optionally a specific tab, e.g. ``checkpoints``)."""
+    from hud.settings import settings
+
+    url = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}"
+    return f"{url}?tab={tab}" if tab else url
 
 
 def _resolve_model_id(model: str) -> str:

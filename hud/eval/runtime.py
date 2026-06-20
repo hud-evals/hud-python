@@ -33,6 +33,7 @@ import os
 import signal
 import sys
 import uuid
+from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
 from hud.utils.platform import PlatformClient
 
@@ -189,13 +191,25 @@ class LocalRuntime:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
+            # Capture stderr (don't inherit it): under concurrent rollouts an
+            # inherited fd interleaves every child's output unattributably, so a
+            # crash-before-serving leaves no traceable diagnostic. We keep a
+            # bounded tail and attach it to the failure below.
+            stderr=asyncio.subprocess.PIPE,
             cwd=self.source if self.source.is_dir() else self.source.parent,
             # Start child in its own session for clean signal handling.
             start_new_session=True,
         )
+        assert proc.stderr is not None
+        # Drain stderr into a bounded tail from the start: it never blocks on a
+        # full pipe, and the last lines survive if the child dies early.
+        stderr_tail: deque[str] = deque(maxlen=50)
+        capture = asyncio.create_task(_capture(proc.stderr, stderr_tail))
         try:
-            port = await asyncio.wait_for(_read_port(proc, self.source), self.ready_timeout)
             assert proc.stdout is not None
+            port = await asyncio.wait_for(_read_port(proc.stdout), self.ready_timeout)
+            if port is None:
+                raise RuntimeError(await _exit_detail(proc, self.source, capture, stderr_tail))
             drain = asyncio.create_task(_drain(proc.stdout))
             try:
                 yield Runtime(f"tcp://127.0.0.1:{port}")
@@ -204,6 +218,9 @@ class LocalRuntime:
                 with contextlib.suppress(asyncio.CancelledError):
                     await drain
         finally:
+            capture.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await capture
             await _terminate(proc)
 
 
@@ -612,23 +629,45 @@ async def _local(env: Environment) -> AsyncIterator[Runtime]:
         await env.stop()
 
 
-async def _read_port(proc: asyncio.subprocess.Process, source: Path) -> int:
+async def _read_port(stdout: asyncio.StreamReader) -> int | None:
+    """Read the child's stdout until it announces its port; ``None`` if stdout
+    hits EOF first (the child exited before serving — caller builds the error)."""
     # Imported lazily: a module-level import would pre-load hud.environment.server
     # in every `python -m hud.environment.server` child, tripping runpy's
     # found-in-sys.modules RuntimeWarning on each spawned rollout.
     from hud.environment.server import PORT_ANNOUNCEMENT
 
-    assert proc.stdout is not None
     while True:
-        line = await proc.stdout.readline()
+        line = await stdout.readline()
         if not line:
-            raise RuntimeError(
-                f"spawned env exited with code {await proc.wait()} before serving "
-                f"(source: {source}); see its stderr above",
-            )
+            return None
         text = line.decode("utf-8", "replace").strip()
         if text.startswith(PORT_ANNOUNCEMENT):
             return int(text.removeprefix(PORT_ANNOUNCEMENT))
+
+
+async def _exit_detail(
+    proc: asyncio.subprocess.Process,
+    source: Path,
+    capture: asyncio.Task[None],
+    stderr_tail: deque[str],
+) -> str:
+    """Message for a child that exited before serving, with its captured stderr
+    tail. The child is gone, so its stderr is at EOF — let the capture finish so
+    the traceback it wrote on the way out is included, not raced past."""
+    code = await proc.wait()
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(asyncio.shield(capture), 2.0)
+    tail = "\n".join(stderr_tail).strip()
+    detail = f":\n{tail}" if tail else " (no stderr captured)"
+    return f"spawned env exited with code {code} before serving (source: {source}){detail}"
+
+
+async def _capture(stream: asyncio.StreamReader, sink: deque[str]) -> None:
+    """Drain a child stream into a bounded tail so it never blocks on a full pipe
+    and its last lines survive for diagnostics."""
+    while line := await stream.readline():
+        sink.append(line.decode("utf-8", "replace").rstrip())
 
 
 async def _drain(stream: asyncio.StreamReader) -> None:
@@ -741,6 +780,10 @@ class HUDRuntime:
 
     async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
         payload: dict[str, Any] = {"environment": task.env}
+        trace_id = get_current_trace_id()
+        if trace_id is not None:
+            with contextlib.suppress(ValueError):
+                payload["trace_id"] = str(uuid.UUID(trace_id))
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{runtime_url}/runtime/sessions",

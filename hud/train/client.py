@@ -51,7 +51,8 @@ def _run_to_input(run: Run) -> TrainInput:
     samples = run.trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
     turns = [
         TrajectorySample(
-            prompt_token_ids=sample.prompt_token_ids,
+            prompt_token_ids=sample.prompt_token_ids or None,
+            prompt_chunks=sample.prompt_chunks,
             output_token_ids=sample.output_token_ids,
             output_logprobs=sample.output_logprobs,
         )
@@ -68,9 +69,24 @@ def _run_to_input(run: Run) -> TrainInput:
     )
 
 
-def _to_inputs(trajectories: Sequence[str | Run]) -> list[TrainInput]:
-    """Normalize a mix of ``trace_id`` strings and ``Run``s to wire inputs."""
-    return [item if isinstance(item, str) else _run_to_input(item) for item in trajectories]
+def _to_inputs(trajectories: Sequence[str | Run | TrajectoryPayload]) -> list[TrainInput]:
+    """Normalize a mix of ``trace_id`` strings, inline ``TrajectoryPayload``s, and
+    ``Run``s to wire inputs. The first two pass through; a ``Run`` is converted."""
+    return [
+        item if isinstance(item, str | TrajectoryPayload) else _run_to_input(item)
+        for item in trajectories
+    ]
+
+
+def _check_groups(n: int, group_size: int | None) -> None:
+    """Fail before a forward pass if the batch can't form full GRPO groups: an
+    incomplete final group gets a skewed advantage baseline. Cheap, client-side,
+    no round-trip — unlike per-group reward spread, which only the service sees."""
+    if group_size is not None and n % group_size != 0:
+        raise ValueError(
+            f"{n} trajectories do not divide evenly into groups of {group_size}; "
+            "GRPO normalizes advantages within each group, so every group must be full"
+        )
 
 
 class TrainingClient(BaseTrainingClient):
@@ -85,7 +101,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def forward_backward(
         self,
-        trajectories: Sequence[str | Run],
+        trajectories: Sequence[str | Run | TrajectoryPayload],
         *,
         loss_fn: LossFn = "importance_sampling",
         loss_fn_config: dict[str, float] | None = None,
@@ -95,26 +111,32 @@ class TrainingClient(BaseTrainingClient):
     ) -> ForwardBackwardResult:
         """Accumulate gradients for a batch of trajectories with a built-in loss.
 
-        Each trajectory is a ``trace_id`` (resolved server-side) or a ``Run``
-        (sent inline). Advantages are normalized within contiguous groups of
-        ``group_size`` (all trajectories as one group when ``None``).
-        ``loss_fn_config`` tunes the loss itself (e.g. ``{"epsilon": 0.2}`` for the
-        ``ppo`` clip); ``None`` uses provider defaults.
+        Each trajectory is a ``trace_id`` (resolved server-side), a ``Run`` (its
+        tokens + reward sent inline), or an inline :class:`TrajectoryPayload`
+        (hand-built tokens + reward — e.g. the opponent side of a self-play game).
+        Advantages are normalized within contiguous groups of ``group_size`` (all
+        trajectories as one group when ``None``). ``loss_fn_config`` forwards
+        provider-specific hyperparameters to the loss; ``None`` uses provider
+        defaults (the supported keys are provider-defined, so prefer defaults).
         """
+        inputs = _to_inputs(trajectories)
+        _check_groups(len(inputs), group_size)
         request = ForwardBackwardRequest(
-            inputs=_to_inputs(trajectories),
+            inputs=inputs,
             loss_fn=loss_fn,
             loss_fn_config=loss_fn_config,
             group_size=group_size,
             reward_scale=reward_scale,
             num_substeps=num_substeps,
         )
-        data = await self._post("forward-backward", request.model_dump())
+        # exclude_none so optional fields a (possibly older) server doesn't know
+        # yet — e.g. a null prompt_chunks/trace_id — aren't sent and rejected.
+        data = await self._post("forward-backward", request.model_dump(exclude_none=True))
         return ForwardBackwardResult.model_validate(data)
 
     async def forward(
         self,
-        trajectories: Sequence[str | Run],
+        trajectories: Sequence[str | Run | TrajectoryPayload],
         *,
         group_size: int | None = None,
         reward_scale: float = 1.0,
@@ -126,12 +148,14 @@ class TrainingClient(BaseTrainingClient):
         then send the gradients through :meth:`backward`. For the common case use
         :meth:`forward_backward_custom`, which wires both halves together.
         """
+        inputs = _to_inputs(trajectories)
+        _check_groups(len(inputs), group_size)
         request = ForwardRequest(
-            inputs=_to_inputs(trajectories),
+            inputs=inputs,
             group_size=group_size,
             reward_scale=reward_scale,
         )
-        data = await self._post("forward", request.model_dump())
+        data = await self._post("forward", request.model_dump(exclude_none=True))
         return ForwardResult.model_validate(data)
 
     async def backward(
@@ -153,7 +177,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def forward_backward_custom(
         self,
-        trajectories: Sequence[str | Run],
+        trajectories: Sequence[str | Run | TrajectoryPayload],
         loss_fn: CustomLossFn,
         *,
         group_size: int | None = None,
@@ -191,7 +215,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def step(
         self,
-        trajectories: Sequence[str | Run],
+        trajectories: Sequence[str | Run | TrajectoryPayload],
         *,
         learning_rate: float,
         loss_fn: LossFn = "importance_sampling",

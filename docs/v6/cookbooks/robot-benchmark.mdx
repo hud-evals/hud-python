@@ -6,19 +6,22 @@ tag: "Beta"
 ---
 
 <Note>
-The `robot` capability is in **beta** — see the [Robots reference](/v6/reference/robots).
+The `robot` capability is in **beta** - see the [Robots reference](/v6/core/robots).
 </Note>
 
 This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation benchmark) packaged as a Docker image: three episodes, each in a fresh container, graded by the sim's own success check. The policy runs in *your* process on your GPU; the container is CPU-only and publishes exactly one port.
 
 ## The environment
 
-The env module is declare-only — a sim **bridge**, an **endpoint**, and two-yield templates (this is `demos/benchmarks/envs/libero/env.py`, abbreviated):
+The env module is declare-only - a sim **bridge**, an **endpoint**, and two-yield templates (this is `demos/inventory/envs/libero/env.py`, abbreviated):
 
 ```python env.py
 from hud import Environment
 from hud.environment.robot import RobotEndpoint
+from config import build_contract            # the env's own contract helper
 from libero_sim_bridge import LiberoSimBridge
+
+CONTRACT = build_contract({"use_delta": True})  # the env's self-describing obs/action schema
 
 env = Environment(name="libero")
 endpoint = RobotEndpoint(LiberoSimBridge(use_delta=True))  # drive the bridge through the endpoint
@@ -40,10 +43,10 @@ async def libero_spatial(libero_task_id: int, init_state_id: int = 0):
     yield await endpoint.result()
 ```
 
-The image's CMD serves it with the standard entry point (`hud serve env.py --host 0.0.0.0 --port 8765`); build once from the repo root:
+The image's CMD serves it with the standard entry point (`hud serve env.py --host 0.0.0.0 --port 8765`). This env lives in HUD's `demos/` examples tree, a sibling of the `hud-python` SDK; build it from the parent directory that holds **both** `demos/` and `hud-python/` so the image can install the SDK from local source:
 
 ```bash
-docker build -f demos/benchmarks/envs/libero/Dockerfile -t hud-libero-env .
+docker build -f demos/inventory/envs/libero/Dockerfile -t hud-libero-env .
 ```
 
 ## The agent
@@ -97,7 +100,7 @@ asyncio.run(main())
 python run_libero.py
 ```
 
-`DockerRuntime` is the placement: each rollout `docker run`s a fresh container, publishes the control port, connects, and removes the container afterward. The agent reads the env's **contract** from the manifest at connect time and wires cameras/state/actions itself — there is no shared config between this script and the image. The robot WebSocket binds container-loopback and rides the control port via capability tunneling.
+`DockerRuntime` is the placement: each rollout `docker run`s a fresh container, publishes the control port, connects, and removes the container afterward. The agent reads the env's **contract** from the manifest at connect time and wires cameras/state/actions itself - there is no shared config between this script and the image. The robot WebSocket binds container-loopback and rides the control port via capability tunneling.
 
 For heavy sims (or sweeps), skip the per-episode boot with one long-lived container:
 
@@ -112,13 +115,13 @@ job = await Taskset("libero-demo", TASKS).run(agent, runtime=Runtime("tcp://127.
 
 ## Read the trace
 
-With `HUD_API_KEY` set, every episode streams to the platform automatically: the trace viewer plays the camera frames back under a scrubber, with **diamond markers at each step where the policy predicted a fresh action chunk** — scrub between markers to watch a chunk execute, click one to jump to the decision point.
+With `HUD_API_KEY` set, every episode streams to the platform automatically: the trace viewer plays the camera frames back under a scrubber, with **diamond markers at each step where the policy predicted a fresh action chunk** - scrub between markers to watch a chunk execute, click one to jump to the decision point.
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Robots reference" icon="robot" href="/v6/reference/robots">
-  Contracts, bridges, realtime control, and the harness API.
+<Card title="Robots reference" icon="robot" href="/v6/core/robots">
+  Contracts, bridges, sim threading, and the harness API.
 </Card>
-<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy" />
+<Card title="Package & deploy" icon="rocket" href="/v6/core/runtime" />
 </CardGroup>

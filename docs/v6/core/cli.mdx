@@ -1,0 +1,182 @@
+---
+title: "CLI"
+description: "The hud command reference across the environment lifecycle."
+icon: "terminal"
+---
+
+Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate once with `hud set HUD_API_KEY=...`.
+
+## Build & iterate
+
+### `hud init`
+
+Scaffold a new environment package in a fresh `<name>` directory. With no preset it writes a minimal local scaffold - `env.py` (environment, templates, capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` - no network, no API key. With `--preset` (or the interactive picker in a TTY) it downloads a starter environment from GitHub instead.
+
+```bash
+hud init                          # pick a template → ./<template>
+hud init my-env                   # pick a template (or minimal scaffold) → ./my-env
+hud init my-env --preset browser  # download the "browser" starter into ./my-env
+hud init --preset cua             # download the "cua" starter into ./cua-template
+hud init my-env --dir envs        # create ./envs/my-env
+```
+
+| Option | Description |
+|--------|-------------|
+| `--preset`, `-p` | Starter to download: `blank`, `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench`. Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the minimal local scaffold. |
+| `--dir`, `-d` | Parent directory (default `.`). |
+| `--force`, `-f` | Overwrite existing files. |
+
+### `hud serve`
+
+Serve an environment's control channel locally (tcp JSON-RPC). `hud dev` is a
+deprecated alias.
+
+```bash
+hud serve               # auto-detect env.py
+hud serve env:env       # explicit module:attribute
+hud serve env.py -p 9000
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--port`, `-p` | `8765` | Port to serve on. |
+| `--host` | `127.0.0.1` | Interface to bind (use `0.0.0.0` inside containers). |
+| `--verbose`, `-v` | - | Detailed logs. |
+
+### `hud deploy`
+
+Build **and** publish to HUD infra in one step. The environment's name comes
+from the `Environment(...)` declaration in code; deploying the same name again
+rebuilds that environment.
+
+```bash
+hud deploy
+```
+
+| Option | Description |
+|--------|-------------|
+| `--all`, `-a` | Deploy all environments in the directory. |
+| `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
+| `--env-file` | Path to a `.env` file. |
+
+## Evaluate
+
+### `hud eval`
+
+The primary local iteration loop: run an agent over a task source (`.py`, directory, or JSON/JSONL), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env - no shared state between tasks.
+
+```bash
+# Split layout (hud init): templates in env.py, task rows in tasks.py
+hud eval tasks.py claude
+hud eval tasks.py claude --full --group 3
+
+# Single-file layout: env + tasks list in one file
+hud eval env.py claude
+hud eval env.py claude --model claude-haiku-4-5   # cheaper model for fast iteration
+hud eval env.py claude --max-steps 30
+hud eval env.py claude --all                      # every task, not just the first
+hud eval env.py claude --full                     # every task, auto-respond, 100 steps
+```
+
+<Note>
+`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). It spawns `env.py` for the control channel automatically - you don't pass both files.
+</Note>
+
+**What you don't need for a local run:**
+- A HUD API key - local evals don't hit the platform
+- `hud serve` running - `hud eval` spawns the env subprocess for you
+- Docker - unless your env explicitly uses `DockerRuntime`
+- An SSH connection - the gateway timeout only applies when `env.workspace()` is declared
+
+For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claude`. The tasks are fetched from the platform and the rollouts run remotely by default, since the env source is not on disk.
+
+**Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
+
+| Option | Description |
+|--------|-------------|
+| `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |
+| `--all` | Run every task instead of just the first. |
+| `--model`, `-m` | Model id. |
+| `--gateway`, `-g` | Force LLM calls through the HUD gateway. Implied when only `HUD_API_KEY` is set (no provider key); pass it to force the gateway when a provider key is also present. |
+| `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
+| `--max-concurrent` | Cap parallel rollouts. |
+| `--max-steps` | Cap steps per task (default 10). |
+| `--task-ids` | Comma-separated slugs or 0-based indices. |
+| `--config`, `-c` | Agent config `key=value` (repeatable). |
+| `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
+| `--very-verbose`, `-vv` | Debug-level logs. |
+| `--runtime` | Placement: `local`, `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
+| `--remote` | Run the whole rollout remotely on the HUD platform. |
+| `--yes`, `-y` | Skip confirmation prompt. |
+
+## Run a packaged image
+
+`hud task start` / `hud task grade` attach to an env already serving locally (e.g. inside a built image, or alongside `hud serve`), or load one from source with `--source`. `hud task list` always reads from source (default `.`) - it doesn't attach.
+
+```bash
+hud task list                          # what tasks are exposed
+hud task start fix_bug                 # -> the prompt (stdout)
+hud task grade fix_bug --answer "..."  # -> the reward (stdout)
+```
+
+| Command | Key options |
+|---------|-------------|
+| `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o` |
+| `hud task grade <task>` | `--answer`, `--answer-file`, `--source`, `--args`, `--url`, `--out` |
+| `hud task list` | `--source`/`-s` |
+
+## Platform
+
+```bash
+hud sync tasks my-taskset      # publish tasks as a named taskset
+hud sync env                   # sync environment metadata
+```
+
+External benchmark formats (currently Harbor) load directly into the runtime
+as `Taskset`s - no conversion step. See [Harbor interop](/v6/advanced/harbor-convert).
+
+## Inspect
+
+### `hud jobs [<id>]`
+
+Without an id, lists your most recent jobs. With an id, lists every trace in that job.
+
+```bash
+hud jobs               # recent jobs — id, name, taskset, status, created
+hud jobs <job-id>      # traces for one job — trace id, status, reward, error
+hud jobs --json        # raw JSON
+hud jobs -n 50         # show up to 50 rows (default 20)
+```
+
+### `hud trace <trace_id>`
+
+Inspect a single rollout. Reads from the local telemetry JSONL file first
+(`HUD_TELEMETRY_LOCAL_DIR/<trace_id>.jsonl`) and falls back to the platform API.
+
+```bash
+hud trace <trace-id>          # rendered view: agent turns, tool calls, tool results
+hud trace <trace-id> --json   # raw event list
+```
+
+Set `HUD_TELEMETRY_LOCAL_DIR` in your environment to write spans to disk during a
+rollout so `hud trace` can read them offline without an API call.
+
+## Other commands
+
+| Command | Description |
+|---------|-------------|
+| `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
+| `hud login` | Authenticate with HUD. |
+| `hud models list` | List gateway models. |
+| `hud models fork <model> --name <slug>` | Fork a trainable model from an existing one. |
+| `hud models checkpoints <model>` | List a model's checkpoint tree. |
+| `hud models head <model> [--set <checkpoint-id>]` | Show - or set (rollback/select) - a model's active checkpoint. |
+| `hud cancel` | Cancel a running job. |
+| `hud version` | Show the CLI version. |
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Quickstart" icon="bolt" href="/v6/start/quickstart" />
+<Card title="Run & deploy" icon="rocket" href="/v6/core/runtime" />
+</CardGroup>
