@@ -18,6 +18,7 @@ Setup:
 
 Run:
     python train.py --model c4-selfplay-<id>
+    python train.py --model c4-selfplay --steps 20 --lr 3e-6 --validate-every 5
 """
 
 from __future__ import annotations
@@ -46,7 +47,13 @@ async def _optim_step_with_retry(trainer: TrainingClient, *, lr: float, retries:
             if attempt == retries:
                 raise
             wait = 2**attempt
-            logger.warning("optim_step failed (attempt %d/%d): %s — retrying in %ds", attempt, retries, exc, wait)
+            logger.warning(
+                "optim_step failed (attempt %d/%d): %s — retrying in %ds",
+                attempt,
+                retries,
+                exc,
+                wait,
+            )
             await asyncio.sleep(wait)
 
 
@@ -55,15 +62,44 @@ def make_tasks(model: str) -> Taskset:
     return Taskset("c4-self-play", [play_self(model=model, seed=i) for i in range(8)])
 
 
-async def main(model: str, steps: int, group: int, lr: float) -> None:
+async def _run_validation(trained: str, opponent: str, games: int, step: int) -> float:
+    """Run a quick validation match and return mean reward (win rate proxy)."""
+    val_agent = create_agent(trained, max_steps=30)
+    val_tasks = Taskset("c4-validate", [play_self(model=opponent, seed=s) for s in range(games)])
+    job = await val_tasks.run(val_agent)
+    wins = sum(1 for r in job.runs if r.reward == 1.0)
+    draws = sum(1 for r in job.runs if r.reward == 0.5)
+    losses = sum(1 for r in job.runs if r.reward == 0.0)
+    mean = job.reward
+    x_wins = sum(1 for i, r in enumerate(job.runs) if r.reward == 1.0 and i % 2 == 0)
+    o_wins = sum(1 for i, r in enumerate(job.runs) if r.reward == 1.0 and i % 2 != 0)
+    print(
+        f"  [val@{step}] vs {opponent}: {wins}W/{draws}D/{losses}L  "
+        f"mean={mean:.3f}  X-wins={x_wins}/{games // 2}  O-wins={o_wins}/{games - games // 2}"
+    )
+    return mean
+
+
+async def main(
+    model: str,
+    steps: int,
+    group: int,
+    lr: float,
+    validate_every: int,
+    val_opponent: str,
+    val_games: int,
+) -> None:
     # return_token_ids: gateway returns token ids + per-token logprobs for training
     agent = create_agent(
         model,
+        max_steps=30,
         completion_kwargs={"extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
     tasks = make_tasks(model)
     session = await Job.start(model, group=group)
+
+    val_curve: list[tuple[int, float]] = []
 
     for step in range(steps):
         batch_start = len(session.runs)
@@ -99,27 +135,43 @@ async def main(model: str, steps: int, group: int, lr: float) -> None:
         effective_group = 2 if inner_count == len(batch) else None
 
         if effective_group is None:
-            print(f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples — group_size=None")
+            print(
+                f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples — group_size=None"
+            )
         await trainer.forward_backward(combined, loss_fn="ppo", group_size=effective_group)
         result = await _optim_step_with_retry(trainer, lr=lr)
 
         rewards = [r.reward for r in batch]
         mean_r = sum(rewards) / len(rewards) if rewards else float("nan")
+        reward_std = (
+            (sum((r - mean_r) ** 2 for r in rewards) / len(rewards)) ** 0.5 if rewards else 0.0
+        )
         wins = sum(1 for r in rewards if r == 1.0)
         draws = sum(1 for r in rewards if r == 0.5)
         losses = sum(1 for r in rewards if r == 0.0)
         print(
             f"step {step + 1}/{steps}  "
-            f"mean={mean_r:.3f}  outer-wins={wins}  draws={draws}  outer-losses={losses}  "
+            f"mean={mean_r:.3f}  std={reward_std:.3f}  "
+            f"outer-wins={wins}  draws={draws}  outer-losses={losses}  "
             f"inner-trajectories={inner_count}/{len(batch)}"
         )
         print(f"  -> checkpoint {result.step}  sampler={result.sampler_path}")
+
+        if validate_every > 0 and (step + 1) % validate_every == 0:
+            mean_val = await _run_validation(model, val_opponent, val_games, step + 1)
+            val_curve.append((step + 1, mean_val))
 
     # Server-side view of the run (reward spread etc.), via the checkpoints API.
     print("\nlast checkpoints (server metrics):")
     for c in (await trainer.checkpoints())[-min(steps, 5) :]:
         std = c.metrics.get("reward_std")
         print(f"  {c.name}  reward={c.mean_reward}  std={std}  loss={c.loss_fn}")
+
+    if val_curve:
+        print("\nvalidation curve (step → mean reward vs opponent):")
+        for s, r in val_curve:
+            bar = "#" * int(r * 20)
+            print(f"  step {s:3d}: {r:.3f}  {bar}")
 
 
 if __name__ == "__main__":
@@ -128,5 +180,28 @@ if __name__ == "__main__":
     parser.add_argument("--steps", type=int, default=20, help="optimizer steps")
     parser.add_argument("--group", type=int, default=4, help="GRPO group size (rollouts per task)")
     parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument(
+        "--validate-every",
+        type=int,
+        default=5,
+        metavar="N",
+        help="run validation vs opponent every N steps (0 = off)",
+    )
+    parser.add_argument(
+        "--val-opponent", default="Qwen/Qwen3.5-4B", help="fixed opponent for validation"
+    )
+    parser.add_argument(
+        "--val-games", type=int, default=10, help="games per validation run (even = balanced X/O)"
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.model, args.steps, args.group, args.lr))
+    asyncio.run(
+        main(
+            args.model,
+            args.steps,
+            args.group,
+            args.lr,
+            args.validate_every,
+            args.val_opponent,
+            args.val_games,
+        )
+    )

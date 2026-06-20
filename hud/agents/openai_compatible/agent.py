@@ -206,10 +206,14 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
                     output_token_ids=list(token_ids),
                     output_logprobs=[tok.logprob for tok in content_lp] if content_lp else [],
                 )
-                # KV-cache continuation only applies to flat text prompts.
+                # KV-cache continuation only applies to flat text prompts; clear any
+                # stale state when the gateway returns chunks-only (multimodal turn).
                 if prompt_token_ids is not None:
                     chat_state.continuation_token_ids = list(prompt_token_ids) + list(token_ids)
                     chat_state.continuation_message_count = len(messages)
+                else:
+                    chat_state.continuation_token_ids = None
+                    chat_state.continuation_message_count = None
 
         tool_calls: list[MCPToolCall] = []
         for tc in function_calls:

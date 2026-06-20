@@ -33,7 +33,7 @@ async def run_validation(trained: str, opponent: str, games: int) -> None:
     # Alternate who goes first: even seeds → trained is X (first), odd → trained is O.
     tasks = [play_self(model=opponent, seed=s) for s in range(games)]
     taskset = Taskset("c4-validate", tasks)
-    agent = create_agent(trained)
+    agent = create_agent(trained, max_steps=30)
 
     print(f"Validation: {trained} (outer) vs {opponent} (inner fixed)")
     print(f"Games: {games}  ({games // 2} as X, {games - games // 2} as O)\n")
