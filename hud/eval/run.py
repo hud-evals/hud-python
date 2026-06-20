@@ -218,14 +218,46 @@ class Run:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
-        if exc_type is not None:
-            cancelled = issubclass(exc_type, asyncio.CancelledError | KeyboardInterrupt)
-            self.trace.status = "cancelled" if cancelled else "error"
+        # Ctrl-C isn't a gradable outcome: tear down without grading.
+        if exc_type is not None and issubclass(
+            exc_type, asyncio.CancelledError | KeyboardInterrupt
+        ):
+            self.trace.status = "cancelled"
             await self.client.cancel()
             return False
+
+        # A mid-run error still grades best-effort (the env is usually alive);
+        # the failure is kept (status=error) and the exception still propagates.
+        if exc_type is not None:
+            self.trace.status = "error"
+
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
-        evaluation = await self.client.grade(answer)
+        # grade() blocks on a JSON-RPC read with no timeout and isn't bounded by
+        # rollout_timeout — a wedged env can hang here until the connection drops
+        # (same as the cancel() this replaced). Bound by the deadline if needed.
+        try:
+            evaluation = await self.client.grade(answer)
+        except Exception as grade_exc:
+            # env unreachable: record the grade failure, don't mask the original.
+            logger.warning("grade failed during teardown: %s", grade_exc)
+            self.record(
+                Step(
+                    source="task",
+                    task_call=TaskCall(
+                        phase="evaluate",
+                        name=self._task_id,
+                        arguments=answer,
+                        result={},
+                    ),
+                    started_at=started_at,
+                    error=f"grade failed: {grade_exc}",
+                ),
+            )
+            if self.trace.status is None:
+                self.trace.status = "error"
+            return False
+
         self.grade = Grade.from_dict(evaluation)
         self.record(
             Step(
@@ -287,7 +319,8 @@ async def rollout(
     erasing evidence: a failure *before* the run is live (provision, connect,
     start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
     the real run — prompt, placement record, and the partial trace the agent
-    built — marked as errored. Either way the logged warning names the lifecycle
+    built — marked as errored, and still graded best-effort so a salvageable
+    reward is captured. Either way the logged warning names the lifecycle
     phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``) so
     callers can tell where the failure landed without reading the trace.
     """
