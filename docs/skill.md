@@ -159,6 +159,55 @@ Cite [Deploy](/v6/run/deploy), [Models](/v6/run/models), [Training](/v6/run/trai
 
 ---
 
+## Training scenarios
+
+Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug>`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training](/v6/run/training) and [reference: Training](/v6/reference/training).
+
+**Standard managed loop.** Roll out a batch with `group=` for within-group spread, hand the `Run`s to `step` (one `forward_backward` + one `optim_step`), repeat.
+
+```python
+agent = create_agent(slug, completion_kwargs={"extra_body": {"return_token_ids": True}})
+trainer = TrainingClient(slug)
+session = await Job.start(slug, group=8)
+for _ in range(steps):
+    start = len(session.runs)
+    await taskset.run(agent, job=session)
+    result = await trainer.step(session.runs[start:], learning_rate=1e-5, group_size=8)
+```
+
+**Watch progress from the loop.** Read the checkpoint tree — don't tail logs or count processes. Each node carries `mean_reward`, `loss_fn`, counts, and a `metrics` blob (reward spread, KL, clip fraction).
+
+```python
+for c in await trainer.checkpoints():
+    print(c.name, c.mean_reward, c.metrics.get("reward_std"))
+head = await trainer.head()           # the active checkpoint
+```
+
+**Pick the loss.** `step`/`forward_backward` take `loss_fn` (default `importance_sampling`; also `ppo`, `cispo`, `dro`, `cross_entropy`). Prefer `ppo` when a single lucky rollout could otherwise blow up the update — it clips the IS ratio. Discover the supported set with `await trainer.available_losses()`; leave `loss_fn_config` at `None` unless a provider documents a key.
+
+**Two-sided / self-play.** When one episode yields trajectories for *both* sides (the agent's `Run` plus an opponent move sampled inside the env), train both at once: build a `TrajectoryPayload` for the opponent with the flipped reward and pass it alongside the `Run`. `forward_backward` accepts `str | Run | TrajectoryPayload` mixed; use `group_size` to pair each episode so the GRPO advantage is computed within the pair.
+
+```python
+combined: list[Run | TrajectoryPayload] = []
+for run in batch:
+    combined.append(run)                                              # agent side
+    combined.append(TrajectoryPayload(samples=opp, reward=1.0 - run.reward))  # opponent
+await trainer.forward_backward(combined, loss_fn="ppo", group_size=2)
+await trainer.optim_step(learning_rate=1e-5)
+```
+
+Get the opponent's tokens from the gateway call with `extra_body={"return_token_ids": True}` + `logprobs=True`, then read `choice.prompt_token_ids` / `choice.token_ids`.
+
+**Reset when the objective changes.** If you edit the reward or the environment mid-run, the current head encodes the *old* objective — continuing from it trains a contaminated policy, and the next steps mostly undo the old shaping. Roll the head back to a checkpoint from before the change (or fork a fresh model):
+
+```python
+await trainer.set_head(checkpoint_id)   # or: hud models head <slug> --set <id>
+```
+
+**Custom loss / primitives.** Author the loss yourself (e.g. double-sided IS) with `forward_backward_custom` — the service returns per-token tensors, your torch function makes the gradients (needs `pip install 'hud-python[train]'`). Drop to `forward_backward` + `optim_step` directly when you want the `forward_backward` metrics or gradient accumulation (`num_substeps`) in between; `step` is just the two chained.
+
+---
+
 ## Containerization checklist
 
 env.py runs inside a container during `hud deploy` introspection and on every
@@ -361,6 +410,18 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 - A group of rollouts shows reward spread.
 - The task is multi-step and free of answer leakage.
 - No v5 idioms anywhere.
+
+**Inspect runs after the fact** with `hud jobs` and `hud trace`:
+
+```bash
+hud jobs                    # list recent jobs
+hud jobs <job-id>           # list traces in a job (reward, status, error per rollout)
+hud trace <trace-id>        # render one rollout — agent turns, tool calls, results
+hud trace <trace-id> --json # raw event list (pipe to jq for filtering)
+```
+
+Set `HUD_TELEMETRY_LOCAL_DIR` to write spans locally; `hud trace` reads from disk
+first and falls back to the platform API. Cite [CLI](/v6/reference/cli).
 
 When unsure about an API, read the page rather than guess:
 [Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·

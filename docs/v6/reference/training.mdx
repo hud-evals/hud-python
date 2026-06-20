@@ -38,8 +38,13 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 | `forward(trajectories, *, group_size=None, reward_scale=1.0)` | `ForwardResult` | Current-policy forward pass returning per-token tensors. |
 | `backward(forward_id, weights, *, metrics=None)` | `ForwardBackwardResult` | Apply caller-computed per-token gradients to a forward pass. |
 | `available_losses()` | `list[str]` | Built-in `loss_fn` names this model's provider supports. |
+| `checkpoints()` | `list[CheckpointResponse]` | The checkpoint tree, each node with rewards, loss, counts, and a `metrics` blob. |
+| `head()` | `CheckpointResponse \| None` | The active checkpoint (the weights the gateway serves), or `None` for base weights. |
+| `set_head(checkpoint_id)` | `None` | Promote a checkpoint to head — roll back to, or branch from, it. |
 
-Advantages are normalized within contiguous **groups** of `group_size` (GRPO); `None` treats the whole batch as one group. `num_substeps` splits the batch for gradient accumulation.
+`forward_backward` and `optim_step` are the real primitives; `step` just chains one of each for the common case. Call them separately when you want the `forward_backward` metrics, gradient accumulation (`num_substeps`), or a batch that isn't a single uniform list — e.g. self-play, where each game contributes both the agent's `Run` and a hand-built `TrajectoryPayload` for the opponent side with the flipped reward.
+
+Advantages are normalized within contiguous **groups** of `group_size` (GRPO); `None` treats the whole batch as one group. The batch must divide evenly into groups — `forward_backward` rejects a partial final group before spending a forward pass. `num_substeps` splits the batch for gradient accumulation.
 
 ```python
 for _ in range(steps):
@@ -56,7 +61,22 @@ A training input is a recorded trajectory by id, or an inline one:
 TrainInput = str | TrajectoryPayload          # trace_id, or inline tokens + reward
 ```
 
-Passing a `Run` builds the right form automatically — inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id` (remote rollout).
+The training methods accept `str | Run | TrajectoryPayload`, mixed freely. A `Run` is converted automatically — inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id` (remote rollout). Build a `TrajectoryPayload` yourself when the tokens didn't come from a `Run` at all — e.g. an opponent move sampled inside the environment, trained with its own reward.
+
+To get the token data for a hand-built payload, ask the gateway for it on the completion call: pass `extra_body={"return_token_ids": True}` with `logprobs=True`, then read the ids off the choice.
+
+```python
+resp = await client.chat.completions.create(
+    model="arith-rl", messages=msgs, logprobs=True,
+    extra_body={"return_token_ids": True},
+)
+choice = resp.choices[0]
+sample = TrajectorySample(
+    prompt_token_ids=choice.prompt_token_ids,   # gateway-added fields
+    output_token_ids=choice.token_ids,
+    output_logprobs=[t.logprob for t in choice.logprobs.content],
+)
+```
 
 | Type | Fields |
 |------|--------|
@@ -75,7 +95,7 @@ Passing a `Run` builds the right form automatically — inline `TrajectoryPayloa
 | `CISPO` | `cispo` | Clipped IS policy optimization. |
 | `DRO` | `dro` | Direct reward optimization. |
 
-`loss_fn_config` forwards hyperparameters to the loss (e.g. `{"epsilon": 0.2}` for the `ppo` clip).
+`loss_fn_config` forwards provider-specific hyperparameters to the loss. The supported keys are provider-defined and not every loss accepts config, so prefer the defaults (`None`) unless a provider documents a key.
 
 ## Custom losses
 
@@ -112,6 +132,7 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 |------|--------|
 | `ForwardBackwardResult` | `metrics: dict[str, float]`, `num_datums` |
 | `OptimStepResult` | `step`, `checkpoint_id`, `sampler_path`, `state_path`, `model` |
+| `CheckpointResponse` | `id`, `name`, `is_active`, `prev_model_checkpoint_id`, `mean_reward`, `loss_fn`, `num_datums`, `num_tokens`, `metrics`, `created_at` |
 
 ## `hud models` CLI
 

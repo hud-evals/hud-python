@@ -222,6 +222,10 @@ class Sample(BaseModel):
     """
 
     prompt_token_ids: list[int] = Field(default_factory=list[int])
+    # Multimodal prompt as serialized ``ModelInput`` chunks (text + image), set by
+    # vision rollouts where the prompt is not a flat token list. When present it is
+    # the authoritative prompt for training; ``prompt_token_ids`` stays empty.
+    prompt_chunks: list[dict[str, Any]] | None = None
     output_token_ids: list[int] = Field(default_factory=list[int])
     output_logprobs: list[float] = Field(default_factory=list[float])
 
