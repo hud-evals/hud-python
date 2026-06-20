@@ -45,6 +45,29 @@ class GatewayModelsResponse(BaseModel):
     items: list[GatewayModelInfo]
 
 
+_MODEL_ALIASES: dict[str, str] = {
+    "deepseek-v4": "deepseek/deepseek-v4-pro",
+    "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
+    "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
+    "glm-5.2": "z-ai/glm-5.2",
+    "kimi-2.6": "moonshotai/kimi-k2.6",
+    "kimi-k2.6": "moonshotai/kimi-k2.6",
+    "minimax-m3": "MiniMax-M3",
+    "minimax-m2.7": "MiniMax-M2.7",
+    "minimax-m2.5": "MiniMax-M2.5",
+}
+
+
+def normalize_gateway_model_id(model: str) -> str:
+    """Return the canonical HUD gateway model slug for known short aliases."""
+    return _MODEL_ALIASES.get(model.lower(), model)
+
+
+def gateway_model_aliases() -> tuple[str, ...]:
+    """Return accepted short aliases for HUD gateway model slugs."""
+    return tuple(_MODEL_ALIASES)
+
+
 def build_gateway_client(provider: str) -> GatewayClient:
     """Build a client configured for HUD gateway routing.
 
