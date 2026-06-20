@@ -18,12 +18,13 @@ each `optim_step` closes the on-policy loop.
 
 ## Run
 
-Needs `HUD_API_KEY` (from your environment or `.env`). List the trainable
-gateway models on your account, pick one, and set it as the `MODEL` constant at
-the top of `simple_train.py` / `ppo_custom_loss.py`:
+Needs `HUD_API_KEY` (from your environment or `.env`). List the gateway models
+on your account, pick a trainable one (the **Trainable** column marks them), and
+set it as the `MODEL` constant at the top of `simple_train.py` /
+`ppo_custom_loss.py`:
 
 ```bash
-hud models
+hud models list          # Name | Model (API) | ID | Provider | Agent | Trainable
 ```
 
 **Train on a deployed taskset (the real flow).** You've built a taskset and
