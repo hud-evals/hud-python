@@ -95,7 +95,7 @@ def _load_runtime_config(path: str | None, console: HUDConsole) -> dict[str, Any
     except ValidationError as exc:
         console.error(f"Invalid runtime config in {config_path}: {exc}")
         raise typer.Exit(1) from exc
-    payload = config.model_dump(mode="json", exclude_none=True)
+    payload = config.request_payload()
     return payload or None
 
 

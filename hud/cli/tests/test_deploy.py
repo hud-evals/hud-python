@@ -200,6 +200,15 @@ class TestRuntimeConfigFile:
             "limits": {"startup_timeout_s": 300},
         }
 
+    def test_load_runtime_config_preserves_null_override(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import _load_runtime_config
+        from hud.utils.hud_console import HUDConsole
+
+        config_path = tmp_path / "runtime.json"
+        config_path.write_text(json.dumps({"resources": None}), encoding="utf-8")
+
+        assert _load_runtime_config(str(config_path), HUDConsole()) == {"resources": None}
+
     def test_load_runtime_config_rejects_unknown_fields(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _load_runtime_config
         from hud.utils.hud_console import HUDConsole

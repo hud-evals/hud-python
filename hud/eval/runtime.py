@@ -107,6 +107,9 @@ class RuntimeConfig(BaseModel):
             self.model_dump() | override.model_dump(exclude_unset=True)
         )
 
+    def request_payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude_unset=True)
+
 
 class Provider(Protocol):
     """Server placement: called with the task row being placed, acquire one
@@ -887,7 +890,7 @@ class HostedRuntime:
         if group_id is not None:
             payload["group_id"] = group_id
         if task.runtime_config is not None:
-            runtime_config = task.runtime_config.model_dump(mode="json", exclude_none=True)
+            runtime_config = task.runtime_config.request_payload()
             if runtime_config:
                 payload["runtime_config"] = runtime_config
         await platform.apost("/rollouts/submit", json=payload)
