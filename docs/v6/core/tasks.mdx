@@ -1,0 +1,284 @@
+---
+title: "Tasks & Tasksets"
+description: "What a task is, how you define one, and how a single definition becomes a whole dataset you can run, group into jobs, and sync."
+icon: "list-check"
+---
+
+An [environment](/v6/core/environment) is *where* the agent acts. A **task** is the *work* you measure
+there. A task only ever does two things: it **prompts** the agent, and it **grades** what happened into
+a single number, the **reward**. That one number is the whole point - it's what an evaluation reports
+and what [training](/v6/core/training) learns from.
+
+Four words do all the work, and they're worth keeping apart:
+
+- a **template** is the generator you author with `@env.template()`. It's callable, and calling it
+  doesn't run anything - it *mints* a task.
+- a **task** is a filled-in template: one set of arguments bound into a single runnable row (the
+  environment name, the template id, the args). You `run` a task.
+- a **taskset** is a named, ordered collection of tasks - a table of those rows.
+- a **job** is the receipt a run produces: the graded runs and their mean reward.
+
+## Defining a task
+
+A task is an async generator with exactly **two yields**. The first yield is the prompt; the generator
+pauses while the agent works; the agent's answer comes back into the generator; the second yield is the
+reward (`0.0`-`1.0`).
+
+```python tasks.py
+from hud import Environment
+
+env = Environment(name="letter-count")
+
+@env.template()
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s are in '{word}'?"   # 1st yield: the prompt
+    yield 1.0 if answer == str(word.count(letter)) else 0.0   # 2nd yield: the reward
+```
+
+This shape is deliberate. Everything the agent does - every step, tool call, and observation - happens
+in the gap between the two yields, so you describe a task as plain Python: ask on one line, score on the
+next. The agent loop in the middle is HUD's job, not yours.
+
+`@env.template()` registers the generator as a template; calling it mints a concrete `Task`:
+
+```python
+task = count_letter(word="raspberry")   # a Task row, not yet run
+```
+
+Declare `returns=T` on the template and the answer arrives as a parsed
+[`Answer[T]`](/v6/core/types) (`.content` parsed, `.raw` the original string); without it, `answer` is
+the raw string the agent submitted.
+
+## One definition, many tasks
+
+The core move: one template spans a *space* of tasks. Call it with different arguments and a single
+function becomes a whole dataset, with no separate artifact per task:
+
+```python tasks.py
+tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
+```
+
+Parameterize across difficulties, inputs, or seeds and one definition becomes an entire benchmark.
+
+## The Task row
+
+A `Task` is a Pydantic model - one portable, validated row of data. It holds no live environment: `env`
+is a *name*, the join key between the row and whatever brings that environment up at run time. So a task
+runs anywhere without an env object in-process - the prompt and reward arrive over the wire from the
+substrate that placement brings up.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `env` | `str` | Name of the environment the row belongs to. |
+| `id` | `str` | Task id registered on the environment. |
+| `args` | `dict` | Bound arguments (what the template was called with). |
+| `slug` | `str \| None` | Stable id for sync, filtering, and lookup. |
+| `columns` | `dict \| None` | Metadata surfaced as filter/leaderboard facets. |
+| `validation` | `list[dict] \| None` | Platform/sync metadata. |
+| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). |
+| `runtime_config` | `RuntimeConfig \| None` | Per-row launch hints (`image`, `resources`); the [runtime](/v6/core/runtime) applies what it supports. |
+
+When you don't have the template in hand (data pipelines, generated rows), build the model directly -
+the model *is* the row, so `task.model_dump()` and `Task.model_validate(data)` are the whole codec:
+
+```python
+from hud import Task
+
+task = Task(env="letter-count", id="count_letter", args={"word": "strawberry"}, slug="count-straw")
+```
+
+## Grading: what the reward measures
+
+The second yield is the reward. The first decision is *what* you score:
+
+- **Grade the answer** - compute a float from what the agent said.
+- **Grade the world** - score the **state the agent left behind**: tests passing, a file written, a
+  service responding. Because the agent acts on a real system through its
+  [capabilities](/v6/core/capabilities), this is often the most reliable signal. It's **outcome
+  verification**: the rigor of a test suite, with no fixed protocol the agent has to follow.
+
+You reach for one of three approaches, in increasing power:
+
+<AccordionGroup>
+
+<Accordion title="1. Plain Python - compute a float yourself">
+For simple checks, just return a number. HUD ships normalized comparison helpers in `hud.graders`:
+
+```python tasks.py
+from hud.graders import numeric_match
+
+@env.template()
+async def count_letter(word: str = "strawberry", letter: str = "r"):
+    answer = yield f"How many '{letter}'s are in '{word}'?"
+    yield numeric_match(answer, word.count(letter))
+```
+
+Helpers include `exact_match`, `contains`, `numeric_match`, `f1_score`, and `normalize` - each returns a `float`.
+</Accordion>
+
+<Accordion title="2. Async graders - score a command or an LLM judgment">
+`BashGrader` runs a shell command and scores by exit code; `LLMJudgeGrader` scores an answer against
+rubric criteria. This is also how you **grade the world** - point a command at the state the agent left:
+
+```python tasks.py
+from hud.graders import BashGrader
+
+@env.template()
+async def add_endpoint():
+    yield "Add a /health endpoint to the app in your workspace and make it return 200."
+    result = await BashGrader.grade(command="pytest tests/test_health.py -q")
+    yield result.value   # score what the agent did, not how it described it
+```
+</Accordion>
+
+<Accordion title="3. Composed graders - combine several into one reward">
+`combine` runs several graders in parallel and weights them into one reward, with each subscore visible
+in the trace so a partial reward is legible:
+
+```python tasks.py
+from hud.graders import BashGrader, LLMJudgeGrader, combine
+
+@env.template()
+async def implement_feature(spec: str = "add a /health endpoint"):
+    answer = yield f"Implement this and summarize what you changed: {spec}"
+    yield await combine(
+        BashGrader.grade(weight=0.5, command="pytest -q"),
+        LLMJudgeGrader.grade(weight=0.5, answer=answer, criteria=["Matches the spec"]),
+    )
+```
+</Accordion>
+
+</AccordionGroup>
+
+The full catalog lives in the [Graders reference](/v6/core/graders).
+
+<Warning>
+A grader that returns a constant, or just echoes the answer back as a pass, teaches a model nothing and
+invites reward hacking. A good reward separates good work from bad - see [Advice](/v6/core/advice).
+</Warning>
+
+## Tasksets
+
+A `Taskset` is a named collection of task rows. Build one in code, or load it from a source:
+
+```python
+from hud import Taskset
+
+# in code - the authoring case
+ts = Taskset("letters", [count_letter(word="strawberry"), count_letter(word="raspberry")])
+
+# from a Python source (.py file or directory) - scans it for Task / Taskset objects
+ts = Taskset.from_file("tasks.py")
+
+# from a data file (.json / .jsonl) - portable rows, no source needed
+ts = Taskset.from_file("tasks.jsonl")
+
+# from the platform - by taskset name or id (uses HUD_API_KEY)
+ts = Taskset.from_api("SheetBench-50")
+```
+
+Write rows back out with `ts.to_file("tasks.json")` (or `.jsonl`). Tasksets are also ordered
+collections:
+
+| Operation | Description |
+|-----------|-------------|
+| `len(ts)` / `iter(ts)` | Count / iterate tasks in order. |
+| `ts["slug"]` | Look up one task by slug. |
+| `ts.filter(slugs)` / `ts.exclude(slugs)` | Keep / drop matching slugs (returns a new taskset). |
+
+## Running
+
+`taskset.run(agent, ...)` executes every task and returns a [`Job`](#jobs). `task.run(...)` is the same
+call over a taskset of one, with identical semantics:
+
+```python
+from hud import LocalRuntime
+
+# one task
+job = await count_letter(word="strawberry").run(agent, runtime=LocalRuntime("env.py"))
+
+# a whole taskset: 8 rollouts per task, capped concurrency
+job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurrent=10)
+print(job.reward)
+```
+
+- **`runtime=`** chooses *where* each rollout runs (local subprocess, container, cloud sandbox, HUD).
+  Swap it freely without touching the tasks; omit it and placement is inferred (a locally-authored
+  source serves itself, platform/file rows go HUD-hosted). See [Runtime](/v6/core/runtime).
+- **`group=`** repeats each task N times so you can see the reward spread (the grouping GRPO trains on).
+- **`max_concurrent=`** caps how many rollouts run in parallel.
+
+A crashed rollout comes back as a failed `Run` inside the job rather than raising, so one bad rollout
+never collapses a batch.
+
+## Jobs
+
+A `Job` is the receipt for one execution. Every run reports under a job - there are no standalone
+traces, so even a single `task.run` returns a job of one.
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `id` | `str` | HUD job id. |
+| `name` | `str` | Display name. |
+| `runs` | `list[Run]` | The graded [`Run`](/v6/core/types#run)s, in expansion order. |
+| `group` | `int` | Rollouts per task. |
+| `reward` | `float` | Mean reward across all runs. |
+| `results` | `dict[str, list[Run]]` | Runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)` (list-valued since `group > 1` gives several runs per task). |
+
+```python
+job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
+job.reward                          # mean across every run
+job.runs[0].trace.content           # what the agent answered on the first run
+for slug, runs in job.results.items():   # per-task: its runs, keyed by slug
+    print(slug, sum(r.reward for r in runs) / len(runs))
+```
+
+By default each `run` call mints its own job. To gather many calls under one id - a training session, a
+multi-turn chat - open one with `Job.start` and pass it as `job=`:
+
+```python
+from hud import Job
+
+job = await Job.start("grpo-session", group=8)
+for step in range(epochs):
+    await ts.run(agent, runtime=LocalRuntime("env.py"), job=job)   # all runs accumulate here
+```
+
+## Syncing to the platform
+
+Sync is only for the platform: it publishes a locally-authored taskset to [hud.ai](https://hud.ai) so
+you can run it there, compare models on it, and browse its traces. Local runs never need it.
+
+`hud sync tasks <name>` uploads a taskset and only what changed. In code, `diff()` shows that
+comparison as a `SyncPlan`:
+
+```python
+from hud.eval.sync import diff
+
+plan = diff(Taskset.from_file("tasks.py"), Taskset.from_api("SheetBench-50"))
+print(plan.summary())
+```
+
+| Field | Description |
+|-------|-------------|
+| `to_create` | Local tasks not present remotely. |
+| `to_update` | Local tasks whose content differs from remote. |
+| `unchanged` | Local tasks that match remote. |
+| `remote_only` | Remote tasks with no local counterpart. |
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Environments" icon="cube" href="/v6/core/environment">
+  Where the agent acts, and the capabilities a task grades against.
+</Card>
+<Card title="Graders" icon="check-double" href="/v6/core/graders">
+  Every grader, comparison helper, and the `combine` combiner.
+</Card>
+<Card title="Runtime" icon="server" href="/v6/core/runtime">
+  Where each task runs, chosen at execution time.
+</Card>
+<Card title="Advice" icon="lightbulb" href="/v6/core/advice">
+  Design tasks that actually teach: difficulty, spread, and resisting reward hacking.
+</Card>
+</CardGroup>

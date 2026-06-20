@@ -4,23 +4,23 @@ description: "Load Harbor tasks into the HUD runtime, or export HUD tasks as Har
 icon: "ship"
 ---
 
-Everything that authors tasks — HUD's own `env.py`, platform rows, **Harbor**
-task dirs — is a *frontend* that loads into the same primitives (`Environment`,
+Everything that authors tasks - HUD's own `env.py`, platform rows, **Harbor**
+task dirs - is a *frontend* that loads into the same primitives (`Environment`,
 `Task`, `Taskset`). Integrations are **loaders, not converters**: no codegen
 roundtrip to run foreign tasks. The Harbor integration lives in the SDK repo at
 [`integrations/harbor.py`](https://github.com/hud-evals/hud-python/blob/main/integrations/harbor.py)
-— a recipe built only on the public SDK surface; copy it into your project or
+- a recipe built only on the public SDK surface; copy it into your project or
 run it from a checkout.
 
 ## Prerequisites
 
-- A Harbor task directory — each task has `task.toml` + `instruction.md`, and
+- A Harbor task directory - each task has `task.toml` + `instruction.md`, and
   usually an `environment/` (with a `Dockerfile`) and `tests/`.
 
 ## Load Harbor tasks
 
 `load(path)` parses a Harbor task dir (or a dataset of them) into a `Taskset`
-directly — one row per task dir (`id` = the dir name), sharing one declarative
+directly - one row per task dir (`id` = the dir name), sharing one declarative
 `Environment` per distinct `environment/` build context:
 
 ```python
@@ -33,7 +33,7 @@ for task in taskset:
     print(task.env, task.id)
 ```
 
-Like every task row, the result carries no placement. Run it by supplying one —
+Like every task row, the result carries no placement. Run it by supplying one -
 today that means a substrate already serving the control channel
 (`runtime=Runtime(url)`); a docker provider that builds and runs each task's
 `environment/` image is the planned follow-up:
@@ -77,20 +77,20 @@ How the lifecycle maps:
 
 Only environments whose capabilities are `ssh`/`mcp` are exportable (Harbor is
 shell-centric; `rfb`/`cdp` don't map). The exported task grades over the HUD
-control channel, so it needs Harbor's default same-container verifier — don't
+control channel, so it needs Harbor's default same-container verifier - don't
 set `[verifier.environment]` in `task.toml`.
 
 ## Review, then rely
 
-The mapping is mechanical, so **review the result** — confirm the prompt reads
+The mapping is mechanical, so **review the result** - confirm the prompt reads
 naturally, the grader scores what the prompt asks for, and there's no leftover
-answer leakage (see [Designing tasks for signal](/v6/run/signal)).
+answer leakage (see [Designing tasks for signal](/v6/core/advice)).
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Package & deploy" icon="rocket" href="/v6/run/deploy" />
-<Card title="Tasks & placement" icon="list-check" href="/v6/reference/tasks" />
-<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
-<Card title="CLI reference" icon="terminal" href="/v6/reference/cli" />
+<Card title="Package & deploy" icon="rocket" href="/v6/core/runtime" />
+<Card title="Tasks & placement" icon="list-check" href="/v6/core/tasks" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/core/advice" />
+<Card title="CLI reference" icon="terminal" href="/v6/core/cli" />
 </CardGroup>

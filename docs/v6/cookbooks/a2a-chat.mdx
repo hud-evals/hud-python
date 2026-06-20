@@ -4,9 +4,9 @@ description: "Serve a chat task over the A2A protocol and talk to it from any cl
 icon: "plug"
 ---
 
-A complete, runnable example of putting a wire protocol in front of `Chat`: serve a `messages`-style task as an [A2A](https://github.com/google/a2a) endpoint, so any A2A client — including another LLM using it as a tool — can hold a conversation with your environment.
+A complete, runnable example of putting a wire protocol in front of `Chat`: serve a `messages`-style task as an [A2A](https://github.com/google/a2a) endpoint, so any A2A client - including another LLM using it as a tool - can hold a conversation with your environment.
 
-`Chat` is protocol-agnostic (see [Chat](/v6/advanced/chat)); the A2A layer is a reference server kept outside the SDK on purpose. Copy and adapt it from [`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
+`Chat` is protocol-agnostic (see [Chat](/v6/advanced/extending#chat-and-multi-turn)); the A2A layer is a reference server kept outside the SDK on purpose. Copy and adapt it from [`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
 
 ## The pieces
 
@@ -53,6 +53,6 @@ Configuration is via env vars: `HUD_MODEL` picks the agent's model (gateway, nee
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Chat" icon="comments" href="/v6/advanced/chat" />
-<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/integrations" />
+<Card title="Chat" icon="comments" href="/v6/advanced/extending#chat-and-multi-turn" />
+<Card title="Integrations" icon="puzzle-piece" href="/v6/advanced/extending" />
 </CardGroup>
