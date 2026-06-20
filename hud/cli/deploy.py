@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -12,6 +13,7 @@ from typing import Any
 
 import httpx
 import typer
+from pydantic import ValidationError
 
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
@@ -19,6 +21,7 @@ from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
+from hud.eval.runtime import RuntimeConfig
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -32,6 +35,7 @@ class _DeployPlan:
     name: str
     registry_id: str | None
     runtime: str | None
+    runtime_config: dict[str, Any] | None
     env_vars: dict[str, str]
     build_args: dict[str, str]
     build_secrets: dict[str, str]
@@ -73,6 +77,26 @@ def _normalize_runtime(runtime: str | None, console: HUDConsole) -> str | None:
         f"Invalid runtime {runtime!r}; expected one of: {', '.join(sorted(_VALID_RUNTIMES))}"
     )
     raise typer.Exit(1)
+
+
+def _load_runtime_config(path: str | None, console: HUDConsole) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    config_path = Path(path).expanduser()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        config = RuntimeConfig.model_validate(raw)
+    except FileNotFoundError:
+        console.error(f"Runtime config file not found: {config_path}")
+        raise typer.Exit(1) from None
+    except json.JSONDecodeError as exc:
+        console.error(f"Invalid runtime config JSON in {config_path}: {exc.msg}")
+        raise typer.Exit(1) from exc
+    except ValidationError as exc:
+        console.error(f"Invalid runtime config in {config_path}: {exc}")
+        raise typer.Exit(1) from exc
+    payload = config.request_payload()
+    return payload or None
 
 
 def _load_env_vars(path: Path, console: HUDConsole, *, warn_missing: bool) -> dict[str, str]:
@@ -322,6 +346,7 @@ def _prepare_deploy_plan(
     build_args: list[str] | None,
     build_secrets: list[str] | None,
     runtime: str | None,
+    runtime_config: str | None,
     verbose: bool,
     platform: PlatformClient,
     console: HUDConsole,
@@ -357,11 +382,13 @@ def _prepare_deploy_plan(
     build_args_dict = _parse_key_value_flags(build_args, option="--build-arg", console=console)
     if build_args_dict and verbose:
         console.info(f"Build arguments: {', '.join(build_args_dict.keys())}")
+    normalized_runtime = _normalize_runtime(runtime, console)
 
     return _DeployPlan(
         name=resolved_name,
         registry_id=registry_id,
-        runtime=_normalize_runtime(runtime, console),
+        runtime=normalized_runtime,
+        runtime_config=_load_runtime_config(runtime_config, console),
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
@@ -379,6 +406,7 @@ def deploy_environment(
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
+    runtime_config: str | None = None,
 ) -> None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
@@ -411,6 +439,7 @@ def deploy_environment(
         build_args=build_args,
         build_secrets=build_secrets,
         runtime=runtime,
+        runtime_config=runtime_config,
         verbose=verbose,
         platform=platform,
         console=hud_console,
@@ -485,6 +514,8 @@ async def _trigger_build(
         payload["registry_id"] = plan.registry_id
     if plan.runtime:
         payload["runtime_provider"] = plan.runtime
+    if plan.runtime_config:
+        payload["runtime_config"] = plan.runtime_config
     if plan.env_vars:
         payload["environment_variables"] = plan.env_vars
     if plan.build_args:
@@ -644,6 +675,7 @@ def deploy_all(
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
+    runtime_config: str | None = None,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -683,6 +715,7 @@ def deploy_all(
                 build_args=build_args,
                 build_secrets=build_secrets,
                 runtime=runtime,
+                runtime_config=runtime_config,
             )
             succeeded.append(env_dir.name)
         except (typer.Exit, SystemExit):
@@ -762,6 +795,11 @@ def deploy_command(
         "--runtime",
         help="Persist Modal as the hosted runtime for this registry",
     ),
+    runtime_config: str | None = typer.Option(
+        None,
+        "--runtime-config",
+        help="Path to a JSON RuntimeConfig for hosted runs",
+    ),
 ) -> None:
     """Deploy HUD environment to the platform.
 
@@ -781,6 +819,7 @@ def deploy_command(
             build_args=build_args,
             build_secrets=secrets,
             runtime=runtime,
+            runtime_config=runtime_config,
         )
         return
 
@@ -795,4 +834,5 @@ def deploy_command(
         build_args=build_args,
         build_secrets=secrets,
         runtime=runtime,
+        runtime_config=runtime_config,
     )

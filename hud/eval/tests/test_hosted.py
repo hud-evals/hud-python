@@ -165,6 +165,25 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
+async def test_run_preserves_runtime_config_null_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    await HostedRuntime(poll_interval=0.0).run(
+        Task(env="sums", id="add", runtime_config=RuntimeConfig(resources=None)),
+        _agent(),
+        job_id=uuid.uuid4().hex,
+        trace_id=uuid.uuid4().hex,
+    )
+
+    assert platform.posts[0][1]["runtime_config"] == {"resources": None}
+
+
+@pytest.mark.asyncio
 async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform([{"status": "running"}])
     monkeypatch.setattr(

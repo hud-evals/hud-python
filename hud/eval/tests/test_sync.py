@@ -148,3 +148,15 @@ def test_task_upload_payload_includes_runtime_config() -> None:
     payload = task_upload_payload(task)
 
     assert payload["runtime_config"] == {"image": "img:tag"}
+
+
+def test_task_upload_payload_preserves_runtime_config_null_override() -> None:
+    task = Task(
+        env="e",
+        id="solve",
+        runtime_config=RuntimeConfig(resources=None),
+    )
+
+    payload = task_upload_payload(task)
+
+    assert payload["runtime_config"] == {"resources": None}

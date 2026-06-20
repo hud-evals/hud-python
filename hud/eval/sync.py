@@ -163,7 +163,7 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
     if task.columns:
         payload["columns"] = task.columns
     if task.runtime_config is not None:
-        payload["runtime_config"] = task.runtime_config.model_dump(exclude_none=True)
+        payload["runtime_config"] = task.runtime_config.request_payload()
     return payload
 
 
@@ -176,7 +176,7 @@ def _task_signature(task: Task) -> str:
     if task.columns:
         sig_data["columns"] = task.columns
     if task.runtime_config is not None:
-        sig_data["runtime_config"] = task.runtime_config.model_dump(exclude_none=True)
+        sig_data["runtime_config"] = task.runtime_config.request_payload()
     return f"{task.id}|" + json.dumps(
         sig_data,
         sort_keys=True,
