@@ -82,9 +82,7 @@ def _reporting_enabled() -> bool:
     return bool(settings.telemetry_enabled and settings.api_key)
 
 
-async def job_enter(
-    job_id: str, *, name: str, group: int, taskset_id: str | None = None
-) -> None:
+async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | None = None) -> None:
     """Register a batch job with the platform.
 
     ``taskset_id`` links the job to a synced taskset (set when running
