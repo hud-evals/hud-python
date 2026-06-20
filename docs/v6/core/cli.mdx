@@ -133,6 +133,32 @@ hud sync env                   # sync environment metadata
 External benchmark formats (currently Harbor) load directly into the runtime
 as `Taskset`s - no conversion step. See [Harbor interop](/v6/advanced/harbor-convert).
 
+## Inspect
+
+### `hud jobs [<id>]`
+
+Without an id, lists your most recent jobs. With an id, lists every trace in that job.
+
+```bash
+hud jobs               # recent jobs — id, name, taskset, status, created
+hud jobs <job-id>      # traces for one job — trace id, status, reward, error
+hud jobs --json        # raw JSON
+hud jobs -n 50         # show up to 50 rows (default 20)
+```
+
+### `hud trace <trace_id>`
+
+Inspect a single rollout. Reads from the local telemetry JSONL file first
+(`HUD_TELEMETRY_LOCAL_DIR/<trace_id>.jsonl`) and falls back to the platform API.
+
+```bash
+hud trace <trace-id>          # rendered view: agent turns, tool calls, tool results
+hud trace <trace-id> --json   # raw event list
+```
+
+Set `HUD_TELEMETRY_LOCAL_DIR` in your environment to write spans to disk during a
+rollout so `hud trace` can read them offline without an API call.
+
 ## Other commands
 
 | Command | Description |

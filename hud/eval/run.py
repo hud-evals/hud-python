@@ -218,14 +218,31 @@ class Run:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
-        if exc_type is not None:
-            cancelled = issubclass(exc_type, asyncio.CancelledError | KeyboardInterrupt)
-            self.trace.status = "cancelled" if cancelled else "error"
+        # Ctrl-C isn't a gradable outcome: tear down without grading.
+        if exc_type is not None and issubclass(
+            exc_type, asyncio.CancelledError | KeyboardInterrupt
+        ):
+            self.trace.status = "cancelled"
             await self.client.cancel()
             return False
+
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
-        evaluation = await self.client.grade(answer)
+
+        # A mid-run error grades best-effort (capture a salvageable reward, keep
+        # status=error), but a grade failure must not mask the original error. A
+        # clean run grades normally — a grader fault propagates. grade() also
+        # blocks on an unbounded JSON-RPC read (not bound by rollout_timeout).
+        if exc_type is not None:
+            self.trace.status = "error"
+            try:
+                evaluation = await self.client.grade(answer)
+            except Exception as grade_exc:
+                logger.warning("grade failed after mid-run error: %s", grade_exc)
+                return False
+        else:
+            evaluation = await self.client.grade(answer)
+
         self.grade = Grade.from_dict(evaluation)
         self.record(
             Step(
@@ -287,7 +304,8 @@ async def rollout(
     erasing evidence: a failure *before* the run is live (provision, connect,
     start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
     the real run — prompt, placement record, and the partial trace the agent
-    built — marked as errored. Either way the logged warning names the lifecycle
+    built — marked as errored, and still graded best-effort so a salvageable
+    reward is captured. Either way the logged warning names the lifecycle
     phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``) so
     callers can tell where the failure landed without reading the trace.
     """

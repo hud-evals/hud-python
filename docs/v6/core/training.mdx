@@ -92,13 +92,31 @@ your tasks, not just your loop - the whole point of [Advice](/v6/core/advice).
 
 ## Watch it improve
 
-Each step adds a checkpoint and points the gateway's "head" at it - the weights now being served.
-Inspect the history or roll back to any earlier checkpoint:
+Each step adds a node to the model's **checkpoint tree** and promotes it to the **head** - the weights
+the gateway now serves. A node carries everything you need to watch a run: `mean_reward`, `loss_fn`,
+token/datum counts, and a `metrics` blob (reward spread, sampling logprob, provider training stats like
+PPO KL and clip fraction). Read it from the shell or from the loop:
 
 ```bash
 hud models checkpoints arith-rl          # the checkpoint tree (active head marked)
 hud models head arith-rl --set <id>      # roll back or branch from an earlier point
 ```
+
+```python
+for c in await trainer.checkpoints():    # same data, in the training loop
+    print(c.name, c.mean_reward, c.metrics.get("reward_std"))
+```
+
+Setting the head points the gateway at a different checkpoint and the next `optim_step` extends the tree
+from there - so a checkpoint is also a **rollback point**.
+
+<Warning>
+Roll back when the objective changes. If you edit the reward function or the environment partway through
+a run, the current head encodes the *old* objective - continuing from it fine-tunes a contaminated
+policy, and the early steps after the change mostly undo the old shaping. Roll the head back to a
+checkpoint from before the change (`set_head` / `--set`), or fork a fresh model, so the run measures the
+new objective from a clean start.
+</Warning>
 
 ## TrainingClient
 
@@ -128,9 +146,13 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 | `forward(trajectories, *, group_size=None, reward_scale=1.0)` | `ForwardResult` | Current-policy forward pass returning per-token tensors. |
 | `backward(forward_id, weights, *, metrics=None)` | `ForwardBackwardResult` | Apply caller-computed per-token gradients to a forward pass. |
 | `available_losses()` | `list[str]` | Built-in `loss_fn` names this model's provider supports. |
+| `checkpoints()` | `list[CheckpointResponse]` | The checkpoint tree, each node with rewards, loss, counts, and a `metrics` blob. |
+| `head()` | `CheckpointResponse \| None` | The active checkpoint (the weights the gateway serves), or `None` for base weights. |
+| `set_head(checkpoint_id)` | `None` | Promote a checkpoint to head - roll back to, or branch from, it. |
 
 Advantages are normalized within contiguous **groups** of `group_size` (GRPO); `None` treats the whole
-batch as one group. `num_substeps` splits the batch for gradient accumulation.
+batch as one group. The batch must divide evenly into groups - `forward_backward` rejects a partial
+final group before spending a forward pass. `num_substeps` splits the batch for gradient accumulation.
 
 ## Inputs
 
@@ -140,13 +162,31 @@ A training input is a recorded trajectory by id, or an inline one:
 TrainInput = str | TrajectoryPayload          # trace_id, or inline tokens + reward
 ```
 
-Passing a `Run` builds the right form automatically - inline `TrajectoryPayload` when it carries
-token-level samples (local rollout), else its `trace_id` (remote rollout).
+The methods accept `str | Run | TrajectoryPayload`, mixed freely. A `Run` is converted automatically -
+inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id`
+(remote rollout). Build a `TrajectoryPayload` yourself when the tokens didn't come from a `Run` at all -
+e.g. an opponent move sampled inside the environment during self-play, trained with its own reward.
 
 | Type | Fields |
 |------|--------|
 | `TrajectorySample` | `prompt_token_ids`, `output_token_ids`, `output_logprobs` |
 | `TrajectoryPayload` | `samples: list[TrajectorySample]`, `reward`, `trace_id=None` |
+
+To get the token data for a hand-built payload, ask the gateway for it on the completion call: pass
+`extra_body={"return_token_ids": True}` with `logprobs=True`, then read the ids off the choice.
+
+```python
+resp = await client.chat.completions.create(
+    model="arith-rl", messages=msgs, logprobs=True,
+    extra_body={"return_token_ids": True},
+)
+choice = resp.choices[0]
+sample = TrajectorySample(
+    prompt_token_ids=choice.prompt_token_ids,   # gateway-added fields
+    output_token_ids=choice.token_ids,
+    output_logprobs=[t.logprob for t in choice.logprobs.content],
+)
+```
 
 ## Built-in losses
 
@@ -161,7 +201,9 @@ token-level samples (local rollout), else its `trace_id` (remote rollout).
 | `CISPO` | `cispo` | Clipped IS policy optimization. |
 | `DRO` | `dro` | Direct reward optimization. |
 
-`loss_fn_config` forwards hyperparameters to the loss (e.g. `{"epsilon": 0.2}` for the `ppo` clip).
+`loss_fn_config` forwards provider-specific hyperparameters to the loss (e.g. `{"epsilon": 0.2}` for
+the `ppo` clip). The supported keys are provider-defined and not every loss accepts config, so prefer
+the defaults (`None`) unless a provider documents a key.
 
 ## Custom losses
 
@@ -202,6 +244,7 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 |------|--------|
 | `ForwardBackwardResult` | `metrics: dict[str, float]`, `num_datums` |
 | `OptimStepResult` | `step`, `checkpoint_id`, `sampler_path`, `state_path`, `model` |
+| `CheckpointResponse` | `id`, `name`, `is_active`, `prev_model_checkpoint_id`, `mean_reward`, `loss_fn`, `num_datums`, `num_tokens`, `metrics`, `created_at` |
 
 ## `hud models` CLI
 
