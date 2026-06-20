@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     )
 
     hud_runtime_url: str = Field(
-        default="https://mcp.hud.ai",
+        default="https://mcp.beta.hud.ai",
         description="Base URL for the HUD runtime tunnel gateway",
         validation_alias="HUD_RUNTIME_URL",
     )
