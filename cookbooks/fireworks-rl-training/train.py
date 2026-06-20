@@ -92,7 +92,9 @@ def make_tasks(
     ]
 
 
-def format_prompt_tokens(tokenizer: Any, prompt: str, *, enable_thinking: bool = False) -> list[int]:
+def format_prompt_tokens(
+    tokenizer: Any, prompt: str, *, enable_thinking: bool = False
+) -> list[int]:
     messages = [{"role": "user", "content": prompt}]
     # Hybrid reasoning models (e.g. Qwen3) default to a <think> block. For a
     # direct-answer task with a tight token budget that reasoning never reaches

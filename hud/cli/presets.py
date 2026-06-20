@@ -138,6 +138,14 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "hud-evals",
         "videogamebench-template",
     ),
+    EnvironmentPreset(
+        "arc-agi-3",
+        "🧩",
+        "ARC-AGI-3",
+        "Interactive reasoning benchmark: agents play ARC-AGI-3 games.",
+        "hud-evals",
+        "ARC-AGI-3",
+    ),
 )
 
 PRESETS_BY_ID: dict[str, EnvironmentPreset] = {p.id: p for p in ENVIRONMENT_PRESETS}
