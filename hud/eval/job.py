@@ -89,11 +89,24 @@ async def job_enter(job_id: str, *, name: str, group: int) -> None:
     logger.info("job: %s/jobs/%s", settings.hud_web_url, job_id)
 
 
-async def trace_enter(trace_id: str, *, job_id: str | None, group_id: str | None) -> None:
-    """Report that one rollout started."""
+async def trace_enter(
+    trace_id: str,
+    *,
+    job_id: str | None,
+    group_id: str | None,
+    model: str | None = None,
+) -> None:
+    """Report that one rollout started.
+
+    ``model`` is the model string the agent will sample (when known); the
+    platform resolves it and attributes the trace immediately on enter.
+    """
     if not _reporting_enabled():
         return
-    await _report(f"/trace/{trace_id}/enter", {"job_id": job_id, "group_id": group_id})
+    await _report(
+        f"/trace/{trace_id}/enter",
+        {"job_id": job_id, "group_id": group_id, "model": model},
+    )
 
 
 async def trace_exit(run: Run) -> None:

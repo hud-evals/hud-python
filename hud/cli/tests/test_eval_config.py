@@ -237,3 +237,32 @@ def test_eval_max_steps_lands_in_agent_config() -> None:
     )
     agent = eval_mod._build_agent(cfg)
     assert agent.config.max_steps == 17
+
+
+def test_spawn_target_serves_single_file_env(tmp_path: Path) -> None:
+    env_py = tmp_path / "tasks.py"
+    env_py.write_text(
+        'from hud import Environment\nenv = Environment(name="demo")\n',
+        encoding="utf-8",
+    )
+    assert eval_mod._spawn_target(env_py) == env_py.resolve()
+
+
+def test_spawn_target_resolves_split_tasks_layout(tmp_path: Path) -> None:
+    (tmp_path / "env.py").write_text(
+        'from hud.environment import Environment\nenv = Environment(name="demo")\n',
+        encoding="utf-8",
+    )
+    tasks_py = tmp_path / "tasks.py"
+    tasks_py.write_text("from env import env\n\ntasks = []\n", encoding="utf-8")
+    assert eval_mod._spawn_target(tasks_py) == (tmp_path / "env.py").resolve()
+
+
+def test_spawn_target_json_uses_parent_directory(tmp_path: Path) -> None:
+    tasks_json = tmp_path / "tasks.json"
+    tasks_json.write_text("[]", encoding="utf-8")
+    assert eval_mod._spawn_target(tasks_json) == tmp_path.resolve()
+
+
+def test_spawn_target_directory_is_served_as_is(tmp_path: Path) -> None:
+    assert eval_mod._spawn_target(tmp_path) == tmp_path.resolve()

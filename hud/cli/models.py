@@ -56,14 +56,18 @@ def list_models(
     table = Table()
     table.add_column("Name", style="cyan")
     table.add_column("Model (API)", style="green")
+    table.add_column("ID", style="blue", no_wrap=True)
     table.add_column("Provider", style="yellow")
     table.add_column("Agent", style="magenta")
+    table.add_column("Trainable", style="green", justify="center")
     for model in models_list:
         table.add_row(
             model.name or model.id or "-",
             model.model_name or model.id or "-",
+            model.id or "-",
             model.provider.name or "-",
             model.sdk_agent_type or "-",
+            "✓" if model.is_trainable else "",
         )
     console.print(table)
     console.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")

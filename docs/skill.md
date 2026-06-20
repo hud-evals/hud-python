@@ -122,9 +122,11 @@ needed in the template. Cite [Capabilities](/v6/reference/capabilities).
 
 ## Local iteration and process model
 
-`hud eval env.py model` is the canonical test loop — no cloud account, docker,
-or SSH required for a local MCP env. Use a cheap model while building; switch
-to the target model to validate. Override the default 10-step budget with
+`hud eval tasks.py claude` is the canonical test loop for the split
+`env.py` + `tasks.py` layout (`hud init`); use `hud eval env.py claude` when
+tasks live in the same file. No cloud account, Docker, or SSH required for a
+local run. Use a cheap model while building (`claude --model claude-haiku-4-5`);
+switch to the target model to validate. Override the default step budget with
 `--max-steps`.
 
 Each rollout runs in a **fresh subprocess**: module-level state resets between
@@ -134,22 +136,22 @@ resources (ports, file handles) are not released otherwise.
 
 ## Local → platform
 
-Once `hud eval env.py model` passes locally, two commands push it to the platform:
+Once local eval passes, two commands push it to the platform:
 
 ```bash
-hud deploy .            # package and deploy the environment (gives it a platform id)
-hud sync tasks env.py   # upload the tasks list, linked to the deployed environment
+hud deploy .                      # build and register the environment
+hud sync tasks my-taskset .       # upload tasks from the project directory
 ```
 
 Then run at scale across models with `group=` for reward spread:
 
 ```python
 from hud import Taskset
-from hud.agents import load_agent
+from hud.agents import create_agent
 
-taskset = Taskset.from_api("my-env")
+taskset = Taskset.from_api("my-taskset")
 for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-4o"]:
-    job = await taskset.run(load_agent(model), group=8)
+    job = await taskset.run(create_agent(model), group=8)
     print(f"{model}: {job.reward:.2f}")
 ```
 
@@ -353,7 +355,7 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 
 ## Verify before you call it done
 
-- `hud eval env.py haiku` runs without error and returns a non-zero reward.
+- `hud eval env.py claude --model claude-haiku-4-5` runs without error and returns a non-zero reward.
 - Imports resolve against the installed `hud` package (don't invent symbols).
 - The grader's cheapest path scores at or below the floor.
 - A group of rollouts shows reward spread.
