@@ -179,6 +179,38 @@ class TestCollectEnvironmentVariables:
         assert "INVALID_FORMAT" not in result
 
 
+class TestRuntimeConfigFile:
+    def test_load_runtime_config_uses_sdk_shape(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import _load_runtime_config
+        from hud.utils.hud_console import HUDConsole
+
+        config_path = tmp_path / "runtime.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "resources": {"gpu": {"type": "A10G", "count": 2}},
+                    "limits": {"startup_timeout_s": 300},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert _load_runtime_config(str(config_path), HUDConsole()) == {
+            "resources": {"gpu": {"type": "A10G", "count": 2}},
+            "limits": {"startup_timeout_s": 300},
+        }
+
+    def test_load_runtime_config_rejects_unknown_fields(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import _load_runtime_config
+        from hud.utils.hud_console import HUDConsole
+
+        config_path = tmp_path / "runtime.json"
+        config_path.write_text(json.dumps({"provider_config": {}}), encoding="utf-8")
+
+        with pytest.raises(typer.Exit):
+            _load_runtime_config(str(config_path), HUDConsole())
+
+
 class TestDeployEnvironment:
     """Tests for deploy_environment function."""
 

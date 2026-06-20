@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -12,6 +13,7 @@ from typing import Any
 
 import httpx
 import typer
+from pydantic import ValidationError
 
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
@@ -19,6 +21,7 @@ from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
+from hud.eval.runtime import RuntimeConfig
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -76,30 +79,24 @@ def _normalize_runtime(runtime: str | None, console: HUDConsole) -> str | None:
     raise typer.Exit(1)
 
 
-def _runtime_config_from_flags(
-    *,
-    runtime: str | None,
-    gpu: str | None,
-    gpu_count: int | None,
-    console: HUDConsole,
-) -> dict[str, Any] | None:
-    if gpu is None and gpu_count is None:
+def _load_runtime_config(path: str | None, console: HUDConsole) -> dict[str, Any] | None:
+    if path is None:
         return None
-    if runtime != "modal":
-        console.error("--gpu and --gpu-count require --runtime modal")
-        raise typer.Exit(1)
-    count = gpu_count or 1
-    if count < 1:
-        console.error("--gpu-count must be at least 1")
-        raise typer.Exit(1)
-    gpu_config: dict[str, Any] = {"count": count}
-    if gpu is not None:
-        gpu_type = gpu.strip()
-        if not gpu_type:
-            console.error("--gpu must be a non-empty Modal GPU type")
-            raise typer.Exit(1)
-        gpu_config["type"] = gpu_type
-    return {"resources": {"gpu": gpu_config}}
+    config_path = Path(path).expanduser()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        config = RuntimeConfig.model_validate(raw)
+    except FileNotFoundError:
+        console.error(f"Runtime config file not found: {config_path}")
+        raise typer.Exit(1) from None
+    except json.JSONDecodeError as exc:
+        console.error(f"Invalid runtime config JSON in {config_path}: {exc.msg}")
+        raise typer.Exit(1) from exc
+    except ValidationError as exc:
+        console.error(f"Invalid runtime config in {config_path}: {exc}")
+        raise typer.Exit(1) from exc
+    payload = config.model_dump(mode="json", exclude_none=True)
+    return payload or None
 
 
 def _load_env_vars(path: Path, console: HUDConsole, *, warn_missing: bool) -> dict[str, str]:
@@ -349,8 +346,7 @@ def _prepare_deploy_plan(
     build_args: list[str] | None,
     build_secrets: list[str] | None,
     runtime: str | None,
-    gpu: str | None,
-    gpu_count: int | None,
+    runtime_config: str | None,
     verbose: bool,
     platform: PlatformClient,
     console: HUDConsole,
@@ -392,12 +388,7 @@ def _prepare_deploy_plan(
         name=resolved_name,
         registry_id=registry_id,
         runtime=normalized_runtime,
-        runtime_config=_runtime_config_from_flags(
-            runtime=normalized_runtime,
-            gpu=gpu,
-            gpu_count=gpu_count,
-            console=console,
-        ),
+        runtime_config=_load_runtime_config(runtime_config, console),
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
@@ -415,8 +406,7 @@ def deploy_environment(
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
-    gpu: str | None = None,
-    gpu_count: int | None = None,
+    runtime_config: str | None = None,
 ) -> None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
@@ -449,8 +439,7 @@ def deploy_environment(
         build_args=build_args,
         build_secrets=build_secrets,
         runtime=runtime,
-        gpu=gpu,
-        gpu_count=gpu_count,
+        runtime_config=runtime_config,
         verbose=verbose,
         platform=platform,
         console=hud_console,
@@ -686,8 +675,7 @@ def deploy_all(
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
-    gpu: str | None = None,
-    gpu_count: int | None = None,
+    runtime_config: str | None = None,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -727,8 +715,7 @@ def deploy_all(
                 build_args=build_args,
                 build_secrets=build_secrets,
                 runtime=runtime,
-                gpu=gpu,
-                gpu_count=gpu_count,
+                runtime_config=runtime_config,
             )
             succeeded.append(env_dir.name)
         except (typer.Exit, SystemExit):
@@ -808,15 +795,10 @@ def deploy_command(
         "--runtime",
         help="Persist Modal as the hosted runtime for this registry",
     ),
-    gpu: str | None = typer.Option(
+    runtime_config: str | None = typer.Option(
         None,
-        "--gpu",
-        help="Modal GPU type to use for hosted runs, e.g. A10G or H100",
-    ),
-    gpu_count: int | None = typer.Option(
-        None,
-        "--gpu-count",
-        help="Number of Modal GPUs for hosted runs",
+        "--runtime-config",
+        help="Path to a JSON RuntimeConfig for hosted runs",
     ),
 ) -> None:
     """Deploy HUD environment to the platform.
@@ -837,8 +819,7 @@ def deploy_command(
             build_args=build_args,
             build_secrets=secrets,
             runtime=runtime,
-            gpu=gpu,
-            gpu_count=gpu_count,
+            runtime_config=runtime_config,
         )
         return
 
@@ -853,6 +834,5 @@ def deploy_command(
         build_args=build_args,
         build_secrets=secrets,
         runtime=runtime,
-        gpu=gpu,
-        gpu_count=gpu_count,
+        runtime_config=runtime_config,
     )
