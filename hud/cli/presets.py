@@ -123,6 +123,14 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "worldsim-template",
     ),
     EnvironmentPreset(
+        "robot",
+        "🤖",
+        "Robot",
+        "Robotics: run a VLA policy against a containerized robot sim, graded by task success.",
+        "hud-evals",
+        "robot-template",
+    ),
+    EnvironmentPreset(
         "videogamebench",
         "🎮",
         "VideoGameBench",
