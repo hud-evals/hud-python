@@ -226,37 +226,22 @@ class Run:
             await self.client.cancel()
             return False
 
-        # A mid-run error still grades best-effort (the env is usually alive);
-        # the failure is kept (status=error) and the exception still propagates.
-        if exc_type is not None:
-            self.trace.status = "error"
-
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
-        # grade() blocks on a JSON-RPC read with no timeout and isn't bounded by
-        # rollout_timeout — a wedged env can hang here until the connection drops
-        # (same as the cancel() this replaced). Bound by the deadline if needed.
-        try:
+
+        # A mid-run error grades best-effort (capture a salvageable reward, keep
+        # status=error), but a grade failure must not mask the original error. A
+        # clean run grades normally — a grader fault propagates. grade() also
+        # blocks on an unbounded JSON-RPC read (not bound by rollout_timeout).
+        if exc_type is not None:
+            self.trace.status = "error"
+            try:
+                evaluation = await self.client.grade(answer)
+            except Exception as grade_exc:
+                logger.warning("grade failed after mid-run error: %s", grade_exc)
+                return False
+        else:
             evaluation = await self.client.grade(answer)
-        except Exception as grade_exc:
-            # env unreachable: record the grade failure, don't mask the original.
-            logger.warning("grade failed during teardown: %s", grade_exc)
-            self.record(
-                Step(
-                    source="task",
-                    task_call=TaskCall(
-                        phase="evaluate",
-                        name=self._task_id,
-                        arguments=answer,
-                        result={},
-                    ),
-                    started_at=started_at,
-                    error=f"grade failed: {grade_exc}",
-                ),
-            )
-            if self.trace.status is None:
-                self.trace.status = "error"
-            return False
 
         self.grade = Grade.from_dict(evaluation)
         self.record(
