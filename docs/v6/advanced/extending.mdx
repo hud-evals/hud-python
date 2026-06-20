@@ -1,0 +1,385 @@
+---
+title: "Extending HUD"
+description: "Beyond the standard workflow: bring your own harness, compose richer environments, scale tasksets, run subagents as tools, and build multi-turn chats."
+icon: "puzzle-piece"
+mode: "wide"
+---
+
+The standard workflow - declare an environment, write tasks, run a built-in agent - covers most of
+what you need. This page collects the patterns for going further: plugging in your own agent,
+composing richer environments, scaling tasksets, delegating to subagents, and driving multi-turn
+chats. Each is independent; jump to what you need.
+
+# Bring your own harness
+
+Because an [environment](/v6/core/environment) only exposes [capabilities](/v6/core/capabilities) and
+never a fixed agent, any loop or framework plugs in as a harness. Wrapping one is a thin adapter, not
+protocol work: you get a [`Run`](/v6/core/types#run), drive the environment off it, and fill
+`run.trace.content`.
+
+## The Agent seam
+
+Subclass `Agent` and implement `__call__`. Open the capabilities you need off `run.client`, do your
+work, and write the answer to `run.trace.content` (graded on exit):
+
+```python harness.py
+from hud.agents.base import Agent
+from hud import Run
+
+class MyHarness(Agent):
+    async def __call__(self, run: Run) -> None:
+        prompt = run.prompt_text          # or run.prompt_messages for structured turns
+        # ... drive your framework against a capability ...
+        run.record(...)                   # stream steps to the platform live (optional)
+        run.trace.content = "the final answer"
+```
+
+That is the whole seam. An agent keeps no per-run state - everything comes from the `run` - so one
+instance drives many concurrent rollouts.
+
+## The Run you drive
+
+The `run` is the one object you work with for the whole task. Three things you do with it:
+
+**Read the prompt** - what the task is asking.
+
+| Member | Description |
+|--------|-------------|
+| `run.prompt_messages` | The prompt as normalized user/assistant turns - what most agents consume. |
+| `run.prompt_text` | The same flattened to plain text, for string-only backends. |
+
+**Drive the environment** - `run.client` is the live connection to the served environment.
+
+| Call | Description |
+|------|-------------|
+| `run.client.open(protocol)` | Open a managed [capability](/v6/core/capabilities) client (shell, browser, ...) to act through. |
+| `run.client.binding(protocol)` | Get a capability's raw wire address, to hand to an external SDK. |
+
+**Record the result** - `run.trace` is the [`Trace`](/v6/core/types#trace) you fill.
+
+| Call | Description |
+|------|-------------|
+| `run.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/core/types)). |
+| `run.trace.content = ...` | Set the final answer, graded when the run ends. |
+
+## Reusing HUD's loop: `ToolAgent`
+
+There are two base classes, depending on how much of HUD's loop you want:
+
+- **`Agent`** (`hud.agents.base`) - the bare seam above. Best for wrapping an external framework or a
+  fully custom loop.
+- **`ToolAgent`** (`hud.agents.tool_agent`, also exported as `MCPAgent`) - HUD's catalog-driven
+  tool-call loop, the base every provider agent subclasses. Implement the provider hooks
+  (`get_response`, message/result formatting) and it handles capability wiring, the step loop, and
+  recording.
+
+Record the step family that matches what happened - `AgentStep` (a model turn), `ToolStep` (a tool
+round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/core/types). `ToolAgent` does all of
+this for you.
+
+## Wrap an existing framework: browser-use on `cdp`
+
+The bundled `BrowserUseAgent` is exactly this adapter - `browser-use` driving the `cdp` (browser)
+capability:
+
+```python run.py
+from hud.agents.browser_use import BrowserUseAgent
+from hud.agents.types import BrowserUseConfig
+
+agent = BrowserUseAgent(BrowserUseConfig(model="claude-sonnet-4-5", max_steps=25))
+job = await my_browser_task().run(agent)
+```
+
+Use it as a template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`,
+`rfb`, `robot`).
+
+## Any OpenAI-compatible endpoint
+
+`OpenAIChatAgent` speaks the OpenAI Chat Completions API, so vLLM servers, local models, and hosted
+checkpoints all work - point `base_url` at the server:
+
+```python run.py
+from hud.agents import OpenAIChatAgent
+from hud.agents.types import OpenAIChatConfig
+
+agent = OpenAIChatAgent(OpenAIChatConfig(
+    model="my-model",
+    base_url="http://localhost:8000/v1",
+    api_key="local",
+))
+```
+
+# Composing richer environments
+
+These patterns build on [Environments](/v6/core/environment) once the basics are in place.
+
+## Multiple capabilities at once
+
+An environment can expose several capabilities; the harness opens whichever it needs. A task that spans
+a shell **and** a browser declares both:
+
+```python env.py
+from hud.capabilities import Capability
+from hud.environment import Environment
+
+env = Environment(
+    name="full-stack",
+    capabilities=[
+        Capability.cdp(url="ws://127.0.0.1:9222"),    # cdp: a browser you run
+    ],
+)
+env.workspace("/workspace")                           # ssh: shell + files, served by the env
+```
+
+The same environment serves a shell-only coding task and a browser-driving task - the difference is
+which capabilities the harness opens, not the environment.
+
+## Stateful environments and backing daemons
+
+Use `@env.initialize` / `@env.shutdown` to manage anything the tasks need running - a database, a
+seeded service, a fixture. The hooks run once around serving:
+
+```python env.py
+import asyncpg
+
+db: asyncpg.Connection | None = None
+
+@env.initialize
+async def _start():
+    global db
+    db = await asyncpg.connect("postgresql://localhost/app")
+
+@env.shutdown
+async def _stop():
+    if db is not None:
+        await db.close()
+```
+
+Keep environment state **frozen across rollouts**: every run of a task should see the same starting
+state, so reward differences reflect the agent, not a drifting environment.
+
+# Scaling a taskset
+
+## Parameterize for a difficulty spread
+
+One task definition should span a range. Parameterize the generator and create a concrete task per
+point:
+
+```python tasks.py
+@env.template()
+async def fix_bug(difficulty: int = 1):
+    answer = yield f"Fix the level-{difficulty} bug in your workspace."
+    result = await BashGrader.grade(weight=1.0, command="pytest -q")
+    yield result.value
+
+tasks = [fix_bug(difficulty=d) for d in range(1, 6)]
+```
+
+A controlled difficulty distribution is what makes a taskset trainable - see
+[Designing tasks](/v6/core/advice).
+
+## Structure a large taskset across files
+
+Keep tasks in modules and collect them into a `Taskset` at the top:
+
+```python tasks.py
+from hud.eval import Taskset
+from coding_tasks import fix_bug, add_feature
+from review_tasks import review_pr
+
+taskset = Taskset("engineering-work", [
+    *(fix_bug(difficulty=d) for d in range(1, 6)),
+    add_feature(spec="health endpoint"),
+    review_pr(pr_id=1421),
+])
+```
+
+`hud eval tasks.py claude --full` runs the whole set; `hud sync tasks my-taskset` publishes it. Give
+each task a stable `slug` so it's identifiable on the platform:
+
+```python tasks.py
+v = fix_bug(difficulty=3)
+v.slug = "fix-bug-3"
+```
+
+## Group rollouts for variance
+
+To measure variance (or feed training), run each task several times. `group` repeats share a GRPO
+group:
+
+```python run.py
+taskset = Taskset("bugs", [fix_bug(difficulty=d) for d in range(1, 6)])
+job = await taskset.run(agent, group=8, max_concurrent=10)
+rewards = [run.reward for run in job.runs]
+```
+
+## Route tasks to different substrates
+
+A [runtime](/v6/core/runtime) is called once per rollout with the task row, so a callable can place
+heavier rows on heavier substrates:
+
+```python run.py
+def placer(task):
+    gpus = 4 if task.args.get("big_model") else 1
+    return DockerRuntime(f"hud/{task.env}", run_args=["--gpus", str(gpus)])(task)
+
+await taskset.run(agent, runtime=placer)
+```
+
+# Subagents as tools
+
+An MCP tool is just a function. A **subagent** is just a function that runs an agent over a task and
+returns its answer. Put the two together and an orchestrating agent can call a specialist sub-agent as
+a single tool call - no special class, nothing HUD-specific beyond the rollout you already write.
+
+## Write the subagent as a function
+
+Calling an `@env.template` mints a task; running it drives a fresh rollout whose `Job` carries the
+result. Wrap that in a function and return the agent's answer:
+
+```python subagents.py
+from hud.agents import create_agent
+from tasks import investigate   # an @env.template you defined
+
+_specialist = create_agent("claude-haiku-4-5")   # one stateless instance drives every call
+
+async def investigate_issue(issue_id: str) -> str:
+    """Investigate an issue and return the root-cause findings."""
+    job = await investigate(issue_id=issue_id).run(_specialist)
+    return job.runs[0].trace.content or ""
+```
+
+The function's signature and docstring are all an MCP server needs to build the tool schema:
+`issue_id: str` becomes the one parameter, the docstring becomes the description.
+
+## Register it as an MCP tool
+
+Use a baseline [FastMCP](https://github.com/jlowin/fastmcp) server - type hints + docstring become the
+schema, no subclass required:
+
+```python subagents.py
+from fastmcp import FastMCP
+
+tools = FastMCP(name="specialists")
+tools.tool(investigate_issue)        # or write @tools.tool above the function
+```
+
+## Expose it as an `mcp` capability
+
+An orchestrating environment declares an `mcp` capability pointing at that server, so any harness that
+opens it sees `investigate_issue` as a callable tool:
+
+```python env.py
+from hud.environment import Environment
+from hud.capabilities import Capability
+
+env = Environment(
+    name="orchestrator",
+    capabilities=[Capability.mcp(name="specialists", url="http://127.0.0.1:8080/mcp")],
+)
+```
+
+Run the FastMCP server alongside the environment so the URL is live - for local iteration,
+`tools.run(transport="http", host="127.0.0.1", port=8080)`; in a built image, start it from your
+container entrypoint or an
+[`@env.initialize`](/v6/core/environment#lifecycle-hooks-set-up-and-tear-down) hook.
+
+## How it looks to the orchestrator
+
+The orchestrating agent opens the `mcp` capability, sees one tool - `investigate_issue(issue_id)` -
+calls it, and gets the specialist's findings back as the tool result. From its side it's a single tool
+call; underneath, a whole sub-rollout ran. Each subagent rollout streams under its own trace, so you
+can inspect the specialist's work separately from the orchestrator's. Because the tool is an ordinary
+function, everything composes normally: add retries, fan out to several specialists, or swap the model
+- all in plain Python.
+
+# Chat and multi-turn
+
+Most tasks yield a single text prompt. A **chat-style task** yields a *list of messages* instead, so
+the agent works against a multi-turn conversation. The `Chat` runner drives that conversation turn by
+turn and keeps the history for you.
+
+Reach for chat when the *interaction itself* is the thing - assistants, tool-use dialogues, anything
+where the agent needs prior turns. For evals and training, the default single-turn [task](/v6/core/tasks)
+is what you want. Either way the grading model is the same: you still yield a reward.
+
+## A chat-style task
+
+A task's prompt can be plain text **or** a list of `PromptMessage`s. To accept a running conversation,
+take a `messages` parameter and yield it as the prompt:
+
+```python tasks.py
+from hud import Environment
+from mcp.types import PromptMessage
+
+env = Environment(name="assistant")
+
+@env.template()
+async def assistant(messages: list[PromptMessage]):
+    answer = yield messages          # the conversation so far is the prompt
+    yield 1.0 if answer else 0.0     # grade the final turn however you like
+```
+
+`run.prompt` becomes the message list, and agents consume it as normalized turns through
+`run.prompt_messages`.
+
+## Driving it with `Chat`
+
+`Chat` wraps a concrete **Task** plus an **Agent**. Each `send()` appends the user message, runs the
+agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
+
+```python chat.py
+import asyncio
+from hud import Chat
+from hud.agents import create_agent
+from tasks import assistant
+
+async def main():
+    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
+    r1 = await chat.send("Book me a flight")
+    r2 = await chat.send("SFO to JFK")
+    print(r2.content)            # the assistant's latest reply
+
+asyncio.run(main())
+```
+
+`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is
+replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout
+(omit it and the task's source serves locally when minted in-process, else HUD-hosted by env name).
+
+## Managing history
+
+The conversation history **is** the public `chat.messages` list - persist it, restore it, or reset it
+directly:
+
+| Operation | Description |
+|-----------|-------------|
+| `await chat.send(message)` | Send a user turn; returns the reply `Trace`. |
+| `chat.messages` | The history (`{"role", "content"}` dicts) - `json.dumps` to persist, assign to restore, clear to reset. |
+
+## Serving a chat
+
+`Chat` is protocol-agnostic: any frontend - a web handler, a notebook, a wire protocol - just calls
+`await chat.send(...)`. For example, behind FastAPI:
+
+```python
+app = FastAPI()
+chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
+
+@app.post("/api/chat")
+async def chat_endpoint(message: str):
+    result = await chat.send(message)
+    return {"response": result.content}
+```
+
+For a complete A2A endpoint (sessions per context, agent card, citations transport), see the runnable
+[A2A chat cookbook](/v6/cookbooks/a2a-chat) - the protocol adapter is deliberately not part of the SDK.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Agents" icon="robot" href="/v6/core/agents" />
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
+<Card title="Run & deploy" icon="rocket" href="/v6/core/runtime" />
+<Card title="Harbor interop" icon="anchor" href="/v6/advanced/harbor-convert" />
+</CardGroup>

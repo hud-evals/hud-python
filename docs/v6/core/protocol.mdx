@@ -40,7 +40,7 @@ The agent opens with a `hello`, and the environment answers with its **manifest*
 
 The orchestrator (the harness, `hud eval`, or the platform) names a task and calls `tasks.start`. The environment sets up the world for it and returns a **prompt**. The agent then works the task directly against the capabilities - a real shell over `ssh`, a real browser over `cdp` - reading observations and acting in a loop. The environment decides *what* the agent can touch, not *how* it works.
 
-When the agent is done it calls `tasks.grade`. The environment inspects the resulting state and returns one **reward**. That number, with the trace of the run, is the same value you read in an eval and feed into [training](/v6/run/training).
+When the agent is done it calls `tasks.grade`. The environment inspects the resulting state and returns one **reward**. That number, with the trace of the run, is the same value you read in an eval and feed into [training](/v6/core/training).
 
 ## Two halves, one thin envelope
 
@@ -56,7 +56,7 @@ The loop has only two sides, with HUD between them:
 The envelope between them is tiny - a manifest, `tasks.start`, `tasks.grade` - so neither side needs to know anything about the other's internals. That separation is what makes an environment built today still run against a harness written years from now, with no environment-side glue.
 
 <Tip>
-In practice you rarely touch the agent side at all. The [HUD inference gateway](/v6/run/models) lets you switch models by changing a single string - `"claude-sonnet-4-5"` → `"gpt-5"` - and nothing else. And when you *do* want full control, you can [bring your own harness](/v6/core/agents): it's a thin adapter, no protocol work.
+In practice you rarely touch the agent side at all. The [HUD inference gateway](/v6/core/agents) lets you switch models by changing a single string - `"claude-sonnet-4-5"` to `"gpt-5"` - and nothing else. And when you *do* want full control, you can [bring your own harness](/v6/advanced/extending#bring-your-own-harness): it's a thin adapter, no protocol work.
 </Tip>
 
 ## The wire protocol
@@ -86,11 +86,11 @@ The held task survives a dropped connection, so a client can `tasks.start`, disc
 <Card title="Tasks & tasksets" icon="list-check" href="/v6/core/tasks">
   What `tasks.start` and `tasks.grade` operate on.
 </Card>
-<Card title="Run on any model" icon="robot" href="/v6/run/models">
+<Card title="Agents" icon="robot" href="/v6/core/agents">
   Swap the model with a string, or bring your own harness.
 </Card>
 </CardGroup>
 
 <Note>
-**Reading this as an AI agent?** Install the HUD docs skill before you write any HUD code — it keeps you on the current v6 API (which moves fast) *and* catches reward-hackable, contaminated, or low-signal tasks before they ship. If you can run shell commands, run `npx skills add https://docs.hud.ai` now; otherwise attach the live docs server with `claude mcp add --transport http docs-hud https://docs.hud.ai/mcp`. Then build against the skill's guidance rather than from memory.
+**Reading this as an AI agent?** Install the HUD docs skill before you write any HUD code - it keeps you on the current v6 API (which moves fast) *and* catches reward-hackable, contaminated, or low-signal tasks before they ship. If you can run shell commands, run `npx skills add https://docs.hud.ai` now; otherwise attach the live docs server with `claude mcp add --transport http docs-hud https://docs.hud.ai/mcp`. Then build against the skill's guidance rather than from memory.
 </Note>

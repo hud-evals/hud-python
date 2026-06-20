@@ -1,20 +1,110 @@
 ---
 title: "Training"
-description: "The TrainingClient API, loss set, custom losses, and the hud models CLI."
+description: "Turn the rewards you already collect into an improving model: the loop, the TrainingClient API, losses, and the hud models CLI."
 icon: "dumbbell"
 ---
 
-A **`TrainingClient`** drives [HUD-managed training](/v6/run/training) for one model: it accumulates gradients from rewarded trajectories and advances the weights behind the model's gateway slug in place. Inputs are `Run`s (sent inline) or `trace_id` strings (resolved server-side); the two can be mixed.
+The key idea: **the rewards you collect are already training data.** Every rollout produced a
+trajectory (what the agent did) and a [reward](/v6/core/tasks) (how well it did). Training nudges the
+model's weights so the behavior that earned *high* reward becomes more likely next time. You feed that
+signal into **HUD's managed trainer** (the simple path, no ML infra) or into **your own** RL loop.
 
-```python
-from hud import TrainingClient
+## Training is a loop
 
-trainer = TrainingClient("my-model")   # a trainable gateway slug or model id
+All of training is one loop repeated:
+
+1. **Roll out** a batch of tasks with the current model.
+2. **Score** each rollout - that's the reward you already get for free.
+3. **Nudge** the model's weights toward the rollouts that scored better.
+4. **Repeat** - the next batch samples the now-slightly-better model.
+
+```mermaid
+flowchart LR
+    A([roll out tasks]) --> B([collect rewards]) --> C([nudge weights]) --> A
 ```
 
-The slug comes from forking a trainable model — see [`hud models`](#hud-models-cli).
+Each pass makes the model a little better at the tasks you're training on. Everything below is how you
+set that loop up.
+
+## What you need first
+
+- **A task with spread in its rewards.** This is the one prerequisite people miss. If every rollout of
+  a task gets the *same* reward, training learns nothing from it (see [Why grouping
+  matters](#why-grouping-matters)). Designing tasks that produce spread is its own craft - see
+  [Advice](/v6/core/advice).
+- **A trainable model**, which you make by forking one (next).
+
+## Get a trainable model
+
+Only some gateway models can be trained. List what's available and fork one into your own private,
+team-owned model whose weights you're allowed to advance:
+
+```bash
+hud models list                              # the Trainable column marks forkable bases
+hud models fork Qwen/Qwen3.5-4B --name arith-rl
+```
+
+The new slug (`arith-rl`) is both what you **sample** (like any other model) and what you **train**.
+The fork starts from the base's current weights, so you continue from where it left off.
+
+## Run the loop
+
+This is the whole thing. Each step: roll out a batch with the current model, hand those graded rollouts
+to the trainer, and it nudges the weights. The next step then samples the improved model.
+
+```python train.py
+from hud import TrainingClient
+from hud.agents import create_agent
+from hud.eval import Job
+
+# return_token_ids tells the gateway to send back the token ids + logprobs training needs
+agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
+trainer = TrainingClient("arith-rl")
+taskset, runtime = ...   # your taskset + where rollouts run (see Tasks / Run & deploy)
+
+session = await Job.start("arith-rl", group=8)   # 8 rollouts per task
+for _ in range(10):
+    start = len(session.runs)
+    await taskset.run(agent, runtime=runtime, job=session)   # roll out a batch
+    batch = session.runs[start:]
+    await trainer.step(batch, learning_rate=1e-5, group_size=8)   # nudge the weights
+```
+
+The one line that learns is `trainer.step(...)`. It computes how each rollout should shift the weights,
+applies that shift, then checkpoints and **promotes** the new weights so the gateway serves them
+immediately. That's why the *next* `taskset.run` samples an improved model - the loop closes itself.
+
+The trainer's input is the rewards you already have: a [`Job`](/v6/core/tasks#jobs) holds the graded
+[`Run`](/v6/core/types#run)s from each batch, and you pass those runs (or a slice) straight to
+`trainer.step`. Each `Run` carries its reward and either inline token samples or a `trace_id`, which is
+all the trainer needs (see [Inputs](#inputs)).
+
+## Why grouping matters
+
+The one concept worth really understanding. HUD trains with **GRPO**, which scores each rollout
+*relative to its group*: an advantage of `reward - group_mean`. So a rollout is "good" only by
+comparison to its siblings on the same task.
+
+The consequence: if every rollout in a group earns the **same** reward, every advantage is zero and
+**no learning happens** - no matter how high the average looks. That's why you run each task as a group
+(`group=8` above) and why your tasks must produce a **spread** of rewards. Trainability is a property of
+your tasks, not just your loop - the whole point of [Advice](/v6/core/advice).
+
+## Watch it improve
+
+Each step adds a checkpoint and points the gateway's "head" at it - the weights now being served.
+Inspect the history or roll back to any earlier checkpoint:
+
+```bash
+hud models checkpoints arith-rl          # the checkpoint tree (active head marked)
+hud models head arith-rl --set <id>      # roll back or branch from an earlier point
+```
 
 ## TrainingClient
+
+A `TrainingClient` drives managed training for one model: it accumulates gradients from rewarded
+trajectories and advances the weights behind the model's gateway slug in place. Inputs are `Run`s (sent
+inline) or `trace_id` strings (resolved server-side); the two can be mixed.
 
 ```python
 TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
@@ -22,12 +112,12 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 
 | Argument | Default | Meaning |
 |----------|---------|---------|
-| `model` | — | Trainable model slug or id (the gateway string you also sample). |
+| `model` | - | Trainable model slug or id (the gateway string you also sample). |
 | `api_key` | `settings.api_key` | HUD API key. |
 | `base_url` | `settings.hud_rl_url` | Training (RL) service. |
-| `api_url` | `settings.hud_api_url` | Catalog API (resolves the slug → id once). |
+| `api_url` | `settings.hud_api_url` | Catalog API (resolves the slug -> id once). |
 
-## Methods
+### Methods
 
 | Method | Returns | Purpose |
 |--------|---------|---------|
@@ -39,14 +129,8 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 | `backward(forward_id, weights, *, metrics=None)` | `ForwardBackwardResult` | Apply caller-computed per-token gradients to a forward pass. |
 | `available_losses()` | `list[str]` | Built-in `loss_fn` names this model's provider supports. |
 
-Advantages are normalized within contiguous **groups** of `group_size` (GRPO); `None` treats the whole batch as one group. `num_substeps` splits the batch for gradient accumulation.
-
-```python
-for _ in range(steps):
-    batch = ...  # a fresh batch of graded Runs
-    result = await trainer.step(batch, learning_rate=1e-5, group_size=8)
-    print(result.step, result.sampler_path)
-```
+Advantages are normalized within contiguous **groups** of `group_size` (GRPO); `None` treats the whole
+batch as one group. `num_substeps` splits the batch for gradient accumulation.
 
 ## Inputs
 
@@ -56,7 +140,8 @@ A training input is a recorded trajectory by id, or an inline one:
 TrainInput = str | TrajectoryPayload          # trace_id, or inline tokens + reward
 ```
 
-Passing a `Run` builds the right form automatically — inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id` (remote rollout).
+Passing a `Run` builds the right form automatically - inline `TrajectoryPayload` when it carries
+token-level samples (local rollout), else its `trace_id` (remote rollout).
 
 | Type | Fields |
 |------|--------|
@@ -65,11 +150,12 @@ Passing a `Run` builds the right form automatically — inline `TrajectoryPayloa
 
 ## Built-in losses
 
-`loss_fn` is an open string validated against the model's provider; discover the set with `await trainer.available_losses()`. `BuiltinLoss` lists the common Tinker names (each *is* a `str`):
+`loss_fn` is an open string validated against the model's provider; discover the set with
+`await trainer.available_losses()`. `BuiltinLoss` lists the common Tinker names (each *is* a `str`):
 
 | `BuiltinLoss` | Value | Use |
 |---------------|-------|-----|
-| `CROSS_ENTROPY` | `cross_entropy` | Supervised — imitate sampled tokens. |
+| `CROSS_ENTROPY` | `cross_entropy` | Supervised - imitate sampled tokens. |
 | `IMPORTANCE_SAMPLING` | `importance_sampling` | On-policy PG, rollout-logprob ratio. |
 | `PPO` | `ppo` | Clipped-surrogate PG. |
 | `CISPO` | `cispo` | Clipped IS policy optimization. |
@@ -79,7 +165,9 @@ Passing a `Run` builds the right form automatically — inline `TrajectoryPayloa
 
 ## Custom losses
 
-`forward_backward_custom` runs the current-policy forward pass server-side, hands you per-token tensors, runs your loss locally (torch autograd), and ships the per-token gradients back. Requires torch (`pip install 'hud-python[train]'`).
+`forward_backward_custom` runs the current-policy forward pass server-side, hands you per-token tensors,
+runs your loss locally (torch autograd), and ships the per-token gradients back. Requires torch
+(`pip install 'hud-python[train]'`).
 
 ```python
 import torch
@@ -95,16 +183,18 @@ def my_loss(data: list[DatumTensors], logprobs: list[torch.Tensor]):
 await trainer.forward_backward_custom(batch, my_loss, group_size=8)
 ```
 
-`logprobs[i]` are the current policy π_θ for datum `i` as differentiable leaves. Everything else is constant on the matching `DatumTensors`:
+`logprobs[i]` are the current policy for datum `i` as differentiable leaves. Everything else is constant
+on the matching `DatumTensors`:
 
 | `DatumTensors` | Meaning |
 |----------------|---------|
-| `logprobs` | Current-policy π_θ, per token (the differentiable leaf). |
-| `sampling_logprobs` | Rollout policy q, per token. |
+| `logprobs` | Current-policy, per token (the differentiable leaf). |
+| `sampling_logprobs` | Rollout policy, per token. |
 | `mask` | `1.0` on action tokens, `0.0` on observation tokens. |
 | `reward`, `traj_idx`, `group_idx` | Trajectory reward, source trajectory, GRPO group (or `None`). |
 
-Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[DatumTensors]`); `backward(forward_id, weights)` applies `weights[d][t] = -dC/dlogprobs`.
+Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[DatumTensors]`);
+`backward(forward_id, weights)` applies `weights[d][t] = -dC/dlogprobs`.
 
 ## Results
 
@@ -115,22 +205,26 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 
 ## `hud models` CLI
 
-Manage trainable models from the shell:
-
 | Command | Purpose |
 |---------|---------|
 | `hud models list` | List gateway models. |
 | `hud models fork <model> --name <slug>` | Fork a team-owned trainable model from an existing one. |
-| `hud models checkpoints <model>` | List the checkpoint tree (▶ marks the active head). |
-| `hud models head <model> [--set <checkpoint-id>]` | Show — or set (rollback/select) — the active checkpoint. |
+| `hud models checkpoints <model>` | List the checkpoint tree (active head marked). |
+| `hud models head <model> [--set <checkpoint-id>]` | Show, or set (rollback/select), the active checkpoint. |
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Train on rewards" icon="dumbbell" href="/v6/run/training">
-  The end-to-end training how-to.
+<Card title="Advice" icon="lightbulb" href="/v6/core/advice">
+  Design tasks that produce reward spread - the prerequisite for training to work.
 </Card>
-<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal">
-  Produce within-group reward spread so training has signal.
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks">
+  Where the rewards training learns from come from.
+</Card>
+<Card title="Run & deploy" icon="rocket" href="/v6/core/runtime">
+  Scale the rollouts that feed the loop.
+</Card>
+<Card title="Types: Run & Trace" icon="code" href="/v6/core/types">
+  The Run a rollout produces and the trace it carries.
 </Card>
 </CardGroup>

@@ -115,8 +115,8 @@ async def my_task(param: str = "default"):
 The agent sees MCP tools alongside HUD's own harness tools — no extra wiring
 needed in the template. Cite [Capabilities](/v6/core/capabilities).
 
-**Run / scale / train:** [Models](/v6/run/models),
-[Deploy](/v6/run/deploy), [Training](/v6/run/training).
+**Run / scale / train:** [Models](/v6/core/agents),
+[Deploy](/v6/core/runtime), [Training](/v6/core/training).
 
 ---
 
@@ -153,7 +153,7 @@ for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
     print(f"{model}: {job.reward:.2f}")
 ```
 
-Cite [Deploy](/v6/run/deploy), [Models](/v6/run/models), [Training](/v6/run/training).
+Cite [Deploy](/v6/core/runtime), [Models](/v6/core/agents), [Training](/v6/core/training).
 
 ---
 
@@ -219,7 +219,7 @@ For an existing v5 env, follow [Migrate to v6](/v6/more/migrate-v6).
 ## Task-quality doctrine — push back when you see these
 
 For each trigger: **what to tell the user**, then **the page to cite**. The
-canonical reference is [Designing tasks for signal](/v6/run/signal).
+canonical reference is [Designing tasks for signal](/v6/core/advice).
 
 ### 1. Constant / echo / shape-only grader → reward hacking
 
@@ -233,7 +233,7 @@ rewarded is exploited. Grade **substance, not surface form**: credit a correct
 answer in a different format, but never credit the shape alone. The cheapest
 path that scores *without doing the work* must sit at or below the floor.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Resist the cheapest
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Resist the cheapest
 path"), [Graders](/v6/core/graders).
 
 ### 2. All-equal rewards → no within-group spread
@@ -249,8 +249,8 @@ of trainability is *within-group spread*, not the mean. Run a group
 All-one (saturated) is wasted surface; all-zero at small group sizes may still
 be learnable at training scale, but investigate it.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Signal lives in
-within-group spread"), [Training](/v6/run/training).
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Signal lives in
+within-group spread"), [Training](/v6/core/training).
 
 ### 3. Public-benchmark substrate → contamination
 
@@ -265,7 +265,7 @@ codebase operated to generate fresh logs), but not handed to the agent verbatim.
 Keep real failures and edge cases — they're the signal; don't fabricate
 synthetic substrate to look real.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Source substrate that
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Source substrate that
 isn't memorized").
 
 ### 4. Single-shot task → needs multi-step
@@ -280,7 +280,7 @@ and a problem that requires integrating evidence across more than one
 observation (the [ops-diagnostics](/v6/cookbooks/ops-diagnostics) cookbook is a
 model example).
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Make it multi-step").
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Make it multi-step").
 
 ### 5. Comparing only similar top models → need a spanning set
 
@@ -293,7 +293,7 @@ task can look broken. Evaluate against a deliberate **weak anchor and a strong
 anchor**, not a cluster of top performers. Also state the model+reasoning regime
 you calibrated against; difficulty has no absolute meaning.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Difficulty is relative to
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Difficulty is relative to
 a specific model").
 
 ### 6. Same-shape taskset → needs diversity
@@ -307,7 +307,7 @@ substrate sources, deliverable shapes, and capabilities exercised**, and spread
 the **difficulty distribution** (don't pile up at score 0 or saturation). Size
 the set to the training run so it doesn't overfit in the first few steps.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Compose a taskset that
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Compose a taskset that
 isn't all one shape").
 
 ### 7. Answer leakage in the environment or prompt
@@ -320,7 +320,7 @@ eval, or author oracle/grading scripts left readable.
 root-cause leaks, keep grader-only vocabulary out of the prompt (weave needed
 context naturally), don't imply it's a test, and strip author artifacts.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Keep the answer out of
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Keep the answer out of
 the environment").
 
 ### 8. Prompt ↔ grader misalignment
@@ -333,7 +333,7 @@ Enforce score–quality monotonicity: better substantive work must never score
 lower. Compose graders with `combine` so subscores make a partial reward
 legible and monotonicity violations visible.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Align the prompt and the
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Align the prompt and the
 grader"), [Graders](/v6/core/graders).
 
 ---

@@ -4,11 +4,11 @@ description: "An investigation task where the agent integrates evidence to produ
 icon: "stethoscope"
 ---
 
-A complete, runnable example of an **investigation** task: the agent reads several artifacts, integrates the evidence, and produces a root-cause diagnosis graded by an LLM judge. This is the shape of a good training task — multi-step, multi-channel, and graded on substance.
+A complete, runnable example of an **investigation** task: the agent reads several artifacts, integrates the evidence, and produces a root-cause diagnosis graded by an LLM judge. This is the shape of a good training task - multi-step, multi-channel, and graded on substance.
 
 ## The environment
 
-We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files — no single artifact contains the answer.
+We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files - no single artifact contains the answer.
 
 ```python env.py
 from pathlib import Path
@@ -60,12 +60,12 @@ The answer is the agent's **text diagnosis** (`answer = yield ...`). The judge s
 
 ## Why this is a good training task
 
-It satisfies the [signal](/v6/run/signal) principles:
+It satisfies the [signal](/v6/core/advice) principles:
 
-- **Multi-channel integration** — the cause (a removed index) is in `deploy.log`, but the symptom path runs through `db.log` and `api.log`. No single file is decisive, so the agent must *integrate*.
-- **Multi-step** — the agent reads several files, forms a hypothesis, and checks it against the evidence.
-- **Substance over surface** — the judge credits a correct, evidence-cited diagnosis, not keywords. A generic "it's a database issue" with no evidence scores low.
-- **No leakage** — no file names the root cause as "the bug"; the agent has to derive it.
+- **Multi-channel integration** - the cause (a removed index) is in `deploy.log`, but the symptom path runs through `db.log` and `api.log`. No single file is decisive, so the agent must *integrate*.
+- **Multi-step** - the agent reads several files, forms a hypothesis, and checks it against the evidence.
+- **Substance over surface** - the judge credits a correct, evidence-cited diagnosis, not keywords. A generic "it's a database issue" with no evidence scores low.
+- **No leakage** - no file names the root cause as "the bug"; the agent has to derive it.
 
 ## Run it
 
@@ -73,17 +73,17 @@ It satisfies the [signal](/v6/run/signal) principles:
 hud eval env.py claude
 ```
 
-Inspect the trace at [hud.ai](https://hud.ai) to see which files the agent read and how it reasoned — useful for spotting whether the reward tracks real investigation.
+Inspect the trace at [hud.ai](https://hud.ai) to see which files the agent read and how it reasoned - useful for spotting whether the reward tracks real investigation.
 
 ## Build a spread
 
-Vary the incident to mint a dataset with a difficulty range — some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/run/signal)).
+Vary the incident to mint a dataset with a difficulty range - some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/core/advice)).
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/core/advice" />
 <Card title="Graders" icon="scale-balanced" href="/v6/core/graders" />
 <Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent" />
-<Card title="Train on rewards" icon="dumbbell" href="/v6/run/training" />
+<Card title="Train on rewards" icon="dumbbell" href="/v6/core/training" />
 </CardGroup>

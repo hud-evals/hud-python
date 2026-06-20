@@ -384,3 +384,37 @@ body::after {
     margin-inline: auto;
   }
 }
+
+/* ── Agent-only note ───────────────────────────────────────────────────────
+   Guidance aimed at AI agents reading the page, not humans. Fully invisible
+   and collapsed in layout, but the text stays in the DOM for an agent that
+   ingests the page. `.agent-signal` is the same pattern for the steering line. */
+.agent-note,
+.agent-note * {
+  color: transparent !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+  text-decoration: none !important;
+}
+.agent-note {
+  height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  font-size: 0;
+  line-height: 0;
+}
+.agent-signal {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
