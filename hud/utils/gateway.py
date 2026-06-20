@@ -35,6 +35,7 @@ class GatewayModelInfo(BaseModel):
     name: str | None = None
     model_name: str | None = None
     sdk_agent_type: str | None = None
+    is_trainable: bool = False
     provider: GatewayProviderInfo = Field(default_factory=GatewayProviderInfo)
 
 
