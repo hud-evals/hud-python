@@ -58,7 +58,7 @@ def _list_jobs(*, json_output: bool, limit: int) -> None:
         console.print(f"[red]Failed to fetch jobs: {e}[/red]")
         raise typer.Exit(1) from e
 
-    items = data.get("items") or data if isinstance(data, list) else []
+    items = data if isinstance(data, list) else (data.get("items") or [])
 
     if json_output:
         console.print_json(json.dumps(items, indent=2, default=str))
@@ -108,7 +108,7 @@ def _show_job_traces(job_id: str, *, json_output: bool, limit: int) -> None:
         console.print(f"[red]Failed to fetch traces: {e}[/red]")
         raise typer.Exit(1) from e
 
-    items = data.get("items") or data if isinstance(data, list) else []
+    items = data if isinstance(data, list) else (data.get("items") or [])
 
     if json_output:
         console.print_json(json.dumps(items, indent=2, default=str))
