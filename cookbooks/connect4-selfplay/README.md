@@ -1,11 +1,8 @@
 # Connect Four self-play
 
-Symmetric self-play RL on a 6×7 Connect Four board — a step up from
-[tic-tac-toe](../tictactoe-selfplay) that keeps a real reward spread as the
-policy improves. Tic-tac-toe draws under near-optimal play, so its reward
-collapses to ~0.5 everywhere and the GRPO advantage goes to zero. Connect Four
-draws are rare (you need a full 42-cell board with no line), so the win/loss
-signal persists.
+Symmetric self-play RL on a 6×7 Connect Four board. Draws are rare (you need a
+full 42-cell board with no four-in-a-row), so the win/loss reward signal
+persists as the policy improves and the GRPO advantage stays non-zero.
 
 ## How it works
 
@@ -49,9 +46,8 @@ python train.py --model c4-selfplay-<id> --steps 20 --group 4 --lr 1e-5
 
 - **Memory scales with `tasks × group`.** Each task×rollout is a fresh `env.py`
   subprocess. With 8 tasks and `--group 4` that's 32 concurrent games. Connect
-  Four games run longer than tic-tac-toe (up to 42 plies), so they cost more
-  tokens and time per game — start at `--group 4` and raise only if you have RAM
-  headroom.
+  Four games can run up to 42 plies, so they cost more tokens and time per game —
+  start at `--group 4` and raise only if you have RAM headroom.
 - **Watch the server-side metrics.** The loop prints local win/draw/loss counts
   each step and the last few checkpoints' `mean_reward` / `reward_std` via
   `trainer.checkpoints()` at the end. A healthy run keeps non-trivial
