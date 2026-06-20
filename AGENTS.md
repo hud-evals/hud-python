@@ -126,6 +126,17 @@ Python `>=3.11, <3.13`.
 - Run the narrowest relevant tests first, then broader checks when the blast
   radius is shared or user-facing.
 
+## CLI Inspection Commands
+
+`hud trace <trace_id>` — inspect a rollout. Reads local JSONL first
+(`HUD_TELEMETRY_LOCAL_DIR/<trace_id>.jsonl`), falls back to
+`GET /v2/trace/{id}/events`. Code: `hud/cli/trace.py`.
+
+`hud jobs` — list recent jobs (`GET /v2/jobs`). `hud jobs <id>` — list traces
+for a job (`GET /v2/jobs/{id}/traces`). Both responses return `{items: [...]}`;
+the list is extracted with `data if isinstance(data, list) else (data.get("items") or [])`.
+Code: `hud/cli/jobs.py`.
+
 ## Operational Debugging
 
 - Follow the execution path instead of guessing from abstractions.

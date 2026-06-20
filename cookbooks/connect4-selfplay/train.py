@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import time
 
 from hud import Run, TrainingClient
 from hud.agents import create_agent
@@ -102,8 +103,12 @@ async def main(
     val_curve: list[tuple[int, float]] = []
 
     for step in range(steps):
+        t_step = time.perf_counter()
+
         batch_start = len(session.runs)
+        t0 = time.perf_counter()
         await tasks.run(agent, job=session)
+        t_rollout = time.perf_counter() - t0
         batch = session.runs[batch_start:]
 
         # One outer + one inner trajectory per game. forward_backward takes the
@@ -138,8 +143,15 @@ async def main(
             print(
                 f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples — group_size=None"
             )
+        print(f"  rollout done: {t_rollout:.1f}s for {len(batch)} games ({len(combined)} trajectories)")
+
+        t0 = time.perf_counter()
         await trainer.forward_backward(combined, loss_fn="ppo", group_size=effective_group)
+        t_fwdbwd = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
         result = await _optim_step_with_retry(trainer, lr=lr)
+        t_optim = time.perf_counter() - t0
 
         rewards = [r.reward for r in batch]
         mean_r = sum(rewards) / len(rewards) if rewards else float("nan")
@@ -155,7 +167,11 @@ async def main(
             f"outer-wins={wins}  draws={draws}  outer-losses={losses}  "
             f"inner-trajectories={inner_count}/{len(batch)}"
         )
+        t_total = time.perf_counter() - t_step
         print(f"  -> checkpoint {result.step}  sampler={result.sampler_path}")
+        print(
+            f"  timing: rollout={t_rollout:.1f}s  fwd_bwd={t_fwdbwd:.1f}s  optim={t_optim:.1f}s  total={t_total:.1f}s"
+        )
 
         if validate_every > 0 and (step + 1) % validate_every == 0:
             mean_val = await _run_validation(model, val_opponent, val_games, step + 1)
