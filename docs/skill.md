@@ -411,6 +411,18 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 - The task is multi-step and free of answer leakage.
 - No v5 idioms anywhere.
 
+**Inspect runs after the fact** with `hud jobs` and `hud trace`:
+
+```bash
+hud jobs                    # list recent jobs
+hud jobs <job-id>           # list traces in a job (reward, status, error per rollout)
+hud trace <trace-id>        # render one rollout — agent turns, tool calls, results
+hud trace <trace-id> --json # raw event list (pipe to jq for filtering)
+```
+
+Set `HUD_TELEMETRY_LOCAL_DIR` to write spans locally; `hud trace` reads from disk
+first and falls back to the platform API. Cite [CLI](/v6/reference/cli).
+
 When unsure about an API, read the page rather than guess:
 [Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·
 [Capabilities](/v6/reference/capabilities) · [Agents](/v6/reference/agents) ·
