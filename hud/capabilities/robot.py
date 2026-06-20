@@ -50,6 +50,10 @@ class RobotClient(CapabilityClient):
         """The env's full contract from the manifest (robot_type, control_rate, features, ...)."""
         return dict(self.capability.params.get("contract") or {})
 
+    def get_control_rate(self, default: int = 10) -> int:
+        """The env's control rate in Hz (frames/actions per second), rounded to at least 1."""
+        return max(1, round(self.contract.get("control_rate") or default))
+
     def spaces(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Split the contract's ``features`` into ``(action_space, observation_space)`` by role.
 

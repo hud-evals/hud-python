@@ -5,8 +5,8 @@ Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter`` in
 
 The base calls the adapter and model at the right moments::
 
-    setup_robot      -> adapter.bind(spaces)                          # once after connect
-    on_episode_start -> model.reset(); adapter.reset()                # once per episode
+    setup_robot      -> adapter.bind(spaces)       # once after connect
+    on_episode_start -> adapter.reset()            # per episode; model is stateless
     select_action    -> adapt_observation -> model.ainfer -> pop chunk -> adapt_action
 
 ``model.ainfer`` always returns a ``[T, A]`` chunk; :meth:`RobotAgent.select_action`
@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 
 from hud.agents.base import Agent
-from hud.agents.types import InferenceStep, ObservationStep
 from hud.capabilities.robot import RobotClient
+
+from .record import Recorder
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
@@ -57,6 +58,9 @@ class RobotAgent(Agent):
     robot_protocol: ClassVar[str] = ROBOT_PROTOCOL
     #: How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
+    #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair to disk
+    #: (the ``--save`` flag). Telemetry streams regardless; see :mod:`.record`.
+    save: bool = False
 
     #: Runs the policy (preprocess → forward → postprocess). Subclasses set this.
     model: Model | None = None
@@ -70,9 +74,11 @@ class RobotAgent(Agent):
     _env_obs_space: dict[str, Any]
     #: Unexecuted tail of the current policy chunk; popped one action per step.
     _active_chunk: deque[ActionArray]
-    #: The live run + control-tick index, so ``select_action`` can record its own InferenceStep.
-    _run: Run
+    #: Control-tick index, incremented per executed action.
     _tick: int
+    #: Records all telemetry (observation/inference steps + video) and, when ``save``, a
+    #: LeRobot dataset. Agent-lifetime (the dataset spans every episode); created lazily.
+    _recorder: Recorder | None = None
 
     def setup_robot(self, client: RobotClient) -> None:
         """Discover the env's action/observation layout and bind the adapter to it."""
@@ -81,16 +87,19 @@ class RobotAgent(Agent):
             self.adapter.bind(self._env_action_space, self._env_obs_space)
 
     def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
-        """Store the prompt and reset the model and adapter before the act loop.
+        """Store the prompt and reset per-episode state before the act loop.
 
-        Override (calling ``super()`` first) only for extra per-episode setup.
+        The model is stateless (per-episode state lives here, not on the shared model), so
+        only the adapter is reset. Override (calling ``super()`` first) for extra setup.
         """
         self._prompt = prompt
         self._active_chunk = deque()
-        self._run = run
         self._tick = 0
-        if self.model is not None:
-            self.model.reset()
+        # One recorder for the agent's life so its LeRobot dataset spans every episode;
+        # begin() opens this episode (fresh video stream, prompt) and takes the run it records onto.
+        if self._recorder is None:
+            self._recorder = Recorder(client, save=self.save)
+        self._recorder.begin(run, prompt)
         if self.adapter is not None:
             self.adapter.reset()
 
@@ -110,9 +119,8 @@ class RobotAgent(Agent):
             )
             chunk = np.atleast_2d(await self.model.ainfer(batch))  # [T, A]
             self._active_chunk = deque(chunk)
-            self._run.record(
-                InferenceStep(tick=self._tick, chunk=chunk.tolist(), chunk_length=len(chunk))
-            )
+            assert self._recorder is not None  # set in on_episode_start
+            self._recorder.record_inference(chunk, tick=self._tick)
         self._tick += 1
         raw = self._active_chunk.popleft()
         return raw if self.adapter is None else self.adapter.adapt_action(raw, obs)
@@ -131,15 +139,17 @@ class RobotAgent(Agent):
             self.on_episode_start(run, client, prompt=prompt)
             print(f"[agent] episode started: {prompt!r} (max_steps={step_limit})", flush=True)
 
+            assert self._recorder is not None  # set in on_episode_start above
             for step in range(step_limit):
                 obs = await client.get_observation()
-                run.record(ObservationStep.from_obs(obs, tick=step, obs_space=self._env_obs_space))
+                self._recorder.record_observation(obs, tick=step)
 
                 if self.should_stop(obs, step=step, max_steps=step_limit):
                     print(f"[agent] env reported terminated at step {step}", flush=True)
                     break
 
                 action = await self.select_action(obs)
+                self._recorder.record_action(action)
                 await client.send_action(action)
 
                 if self.log_every and step % self.log_every == 0:
@@ -151,6 +161,8 @@ class RobotAgent(Agent):
             run.trace.status = "completed"
             run.trace.content = "done"
         finally:
+            if self._recorder is not None:
+                self._recorder.end()  # flush video tails + commit the LeRobot episode
             await client.close()
 
 

@@ -342,6 +342,31 @@ frame the policy saw plus the executed action - and stamps **keyframes** where a
 was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with
 markers at each chunk-prediction decision point.
 
+## Recording datasets
+
+Set `agent.save = True` (wire it to a `--save` flag on your runner) to also record every
+`(observation, executed action)` tick into a **LeRobot v3 dataset** - the rollouts you just ran,
+ready to finetune a policy on. Telemetry streams either way; saving is the opt-in extra.
+
+Recording is **agent-side**: it consumes the observations the agent already receives and the actions
+it already produces, so it runs in *your* process - not the environment container. That sidesteps
+sims (e.g. Isaac/RoboLab) whose dependency stack conflicts with `lerobot`; only your machine needs
+`pip install 'lerobot[dataset]'`.
+
+One dataset spans the whole run - every episode the shared agent drives appends to it - and is
+finalized at process exit. Destination and Hub push come from the environment:
+
+| Env var | Effect |
+|---------|--------|
+| `RECORD_DIR` | Dataset root (default `./data`, relative to where the rollout launched) |
+| `HF_REPO` | Also push the finalized dataset to this HF namespace (needs `HF_TOKEN`) |
+| `HF_PRIVATE` | Push the dataset private |
+
+The [contract](#the-contract) drives the schema with no extra wiring: image features become
+`observation.images.<camera>` (encoded to per-episode video), the lone state vector becomes
+`observation.state`, the action becomes `action`, and the task prompt rides along as each frame's
+`task`.
+
 
 ## Running a sim in another process
 

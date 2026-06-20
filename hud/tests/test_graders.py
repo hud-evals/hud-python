@@ -305,7 +305,7 @@ class TestGradeCompatShim:
     """v5 environments call ``Grade.gather`` / ``Grade.from_subscores`` via ``hud.native``."""
 
     async def test_gather_combines_like_combine(self) -> None:
-        from hud.native import Grade
+        from hud.native import Grade  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await Grade.gather(
             SubScore(name="alpha", value=1.0, weight=1.0),
