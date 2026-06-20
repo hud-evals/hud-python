@@ -99,7 +99,7 @@ class OpenAIConfig(AgentConfig):
     """Configuration for OpenAIAgent."""
 
     model_name: str = "OpenAI"
-    model: str = Field(default="gpt-5.4", validation_alias=_model_alias)
+    model: str = Field(default="gpt-5.5", validation_alias=_model_alias)
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Any = None  # openai Reasoning
@@ -113,7 +113,7 @@ class OpenAIChatConfig(AgentConfig):
     """Configuration for OpenAIChatAgent."""
 
     model_name: str = "OpenAI Chat"
-    model: str = Field(default="gpt-5-mini", validation_alias=_model_alias)
+    model: str = Field(default="gpt-5.4-mini", validation_alias=_model_alias)
     checkpoint: str | None = Field(
         default=None,
         description="Specific checkpoint name for inference routing. "
@@ -139,7 +139,7 @@ class ClaudeSDKConfig(AgentConfig):
     """
 
     model_name: str = "Claude Code"
-    model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
+    model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     allowed_tools: list[str] = Field(

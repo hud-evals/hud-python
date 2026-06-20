@@ -43,8 +43,9 @@ def _resolve_model_from_catalog(model_id: str) -> tuple[AgentType, str] | None:
     Returns None if the model isn't found or the catalog is unreachable.
     """
     try:
-        from hud.utils.gateway import list_gateway_models
+        from hud.utils.gateway import list_gateway_models, normalize_gateway_model_id
 
+        model_id = normalize_gateway_model_id(model_id)
         models = list_gateway_models()
     except Exception:
         return None
@@ -117,8 +118,9 @@ class AgentPreset:
 
 _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
-    AgentPreset("GPT-5.4", AgentType.OPENAI, "gpt-5.4"),
-    AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3-1-pro"),
+    AgentPreset("Claude Opus 4.8", AgentType.CLAUDE, "claude-opus-4-8"),
+    AgentPreset("GPT-5.5", AgentType.OPENAI, "gpt-5.5"),
+    AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3.1-pro-preview"),
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
@@ -131,10 +133,22 @@ _AGENT_PRESETS: list[AgentPreset] = [
         },
     ),
     AgentPreset(
-        "GLM-4.6V (Z-AI)",
+        "GLM 5.2 (Z.ai)",
         AgentType.OPENAI_COMPATIBLE,
-        "z-ai/glm-4.6v",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM-4.6V"}},
+        "z-ai/glm-5.2",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM 5.2"}},
+    ),
+    AgentPreset(
+        "Kimi K2.6 (Moonshot)",
+        AgentType.OPENAI_COMPATIBLE,
+        "moonshotai/kimi-k2.6",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Kimi K2.6"}},
+    ),
+    AgentPreset(
+        "MiniMax M3",
+        AgentType.OPENAI_COMPATIBLE,
+        "MiniMax-M3",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "MiniMax M3"}},
     ),
 ]
 
@@ -162,7 +176,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # use_computer_beta = true
 
 [openai]
-# model = "gpt-4o"
+# model = "gpt-5.5"
 # temperature = 0.7
 # max_output_tokens = 4096
 
@@ -401,6 +415,11 @@ class EvalConfig(BaseModel):
 
         if self.model:
             kwargs["model"] = self.model
+
+        if isinstance(kwargs.get("model"), str):
+            from hud.utils.gateway import normalize_gateway_model_id
+
+            kwargs["model"] = normalize_gateway_model_id(kwargs["model"])
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE and "api_key" not in kwargs:
             base_url = kwargs.get("base_url", "")
