@@ -57,12 +57,13 @@ def _resolve_preset(
         return None
 
     choices: list[str | dict[str, Any]] = [
-        {"name": f"{p.name} — {p.description}", "value": p.id} for p in ENVIRONMENT_PRESETS
+        {"name": f"{p.emoji}  {p.name} — {p.description}", "value": p.id}
+        for p in ENVIRONMENT_PRESETS
     ]
     if allow_local:
-        local = {"name": "Minimal (local scaffold, no download)", "value": _LOCAL_SCAFFOLD}
+        local = {"name": "💾  Minimal (local scaffold, no download)", "value": _LOCAL_SCAFFOLD}
         choices.insert(0, local)
-    selected = hud_console.select("Choose a template", choices, default=0)
+    selected = hud_console.select("Choose a template", choices, default=0, spaced=True)
     return None if selected == _LOCAL_SCAFFOLD else PRESETS_BY_ID[selected]
 
 

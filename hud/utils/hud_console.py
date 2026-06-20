@@ -322,6 +322,7 @@ class HUDConsole:
         message: str,
         choices: list[str | dict[str, Any]] | list[str],
         default: int | None = None,
+        spaced: bool = False,
     ) -> str:
         """Interactive selection with arrow key navigation.
 
@@ -329,6 +330,7 @@ class HUDConsole:
             message: The prompt message to display
             choices: List of choices. Can be strings or dicts with 'name' and 'value' keys
             default: Default selection (matches against choice name/string)
+            spaced: Insert a blank line between choices for a roomier list
 
         Returns:
             The selected choice value
@@ -336,10 +338,13 @@ class HUDConsole:
         import questionary
         from questionary import Style
 
-        # Convert choices to questionary format
-        q_choices = []
+        # Convert choices to questionary format, optionally interleaving blank
+        # (non-selectable) separators so the list breathes.
+        q_choices: list[Any] = []
 
         for choice in choices:
+            if spaced and q_choices:
+                q_choices.append(questionary.Separator(" "))
             if isinstance(choice, dict):
                 name = choice.get("name", str(choice.get("value", "")))
                 value = choice.get("value", name)

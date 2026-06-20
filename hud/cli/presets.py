@@ -26,6 +26,7 @@ class EnvironmentPreset:
     """A starter environment sourced from a public GitHub repo."""
 
     id: str
+    emoji: str
     name: str
     description: str
     owner: str
@@ -35,6 +36,7 @@ class EnvironmentPreset:
 ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     EnvironmentPreset(
         "blank",
+        "🧱",
         "Blank",
         "Minimal starting point for building your own environment.",
         "hud-evals",
@@ -42,6 +44,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "browser",
+        "🌐",
         "Browser",
         "Browser agents: a 2048 game and a todo app in real Chromium (cdp + rfb).",
         "hud-evals",
@@ -49,6 +52,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "cua",
+        "🖥️",
         "Computer Use",
         "Computer-use agents: a virtual Linux desktop (XFCE + Chromium) over rfb/VNC.",
         "hud-evals",
@@ -56,6 +60,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "deepresearch",
+        "🔬",
         "Deep Research",
         "Live deep research: web search (Exa) and People/Company search (SixtyFour).",
         "hud-evals",
@@ -63,6 +68,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "coding",
+        "🐛",
         "Coding",
         "Fix a bug in a Python web app, graded by a hidden pytest suite.",
         "hud-evals",
@@ -70,6 +76,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "ml",
+        "🧠",
         "ML Research/Training",
         "ML research and training tasks (GPU).",
         "hud-evals",
@@ -77,6 +84,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "ml-triage",
+        "🩺",
         "ML Triage/Productivity",
         "ML triage and productivity tasks.",
         "hud-evals",
@@ -84,6 +92,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "verilog",
+        "🔌",
         "Verilog",
         "Chip design: one Verilog/SystemVerilog task over ssh, graded by hidden EDA flows.",
         "hud-evals",
@@ -91,6 +100,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "autonomous-businesses",
+        "💼",
         "Autonomous Businesses",
         "Autonomous business loop: support-ticket triage for a small clinic.",
         "hud-evals",
@@ -98,6 +108,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "gdpval",
+        "📈",
         "GDPVal",
         "GDPVal benchmark tasks.",
         "hud-evals",
@@ -105,6 +116,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "worldsim",
+        "🦾",
         "Worldsim",
         "Robotics: a Newton physics scene driven by an LLM agent or VLA policy (AntimLabs).",
         "hud-evals",
@@ -112,6 +124,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
     ),
     EnvironmentPreset(
         "videogamebench",
+        "🎮",
         "VideoGameBench",
         "Evaluate agents on classic Game Boy games (AntimLabs).",
         "hud-evals",

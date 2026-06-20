@@ -8,8 +8,12 @@ we can assert directly.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 from hud.utils.hud_console import HUDConsole
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_output_methods_do_not_raise() -> None:
@@ -60,3 +64,62 @@ def test_render_exception_request_error_details() -> None:
 
     c = HUDConsole()
     c.render_exception(HudRequestError("nope", status_code=403, response_text="forbidden"))
+
+
+def _capture_select_choices(monkeypatch: pytest.MonkeyPatch, returns: str) -> dict[str, Any]:
+    """Patch the ``questionary`` boundary so ``HUDConsole.select`` runs without a
+    TTY, recording the choice list it builds."""
+    import questionary
+
+    captured: dict[str, Any] = {}
+
+    class _Stub:
+        def ask(self) -> str:
+            return returns
+
+    def _fake_select(message: str, **kwargs: Any) -> _Stub:
+        captured["choices"] = kwargs["choices"]
+        return _Stub()
+
+    monkeypatch.setattr(questionary, "select", _fake_select)
+    return captured
+
+
+def test_select_spaced_interleaves_blank_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+    from questionary import Choice, Separator
+
+    captured = _capture_select_choices(monkeypatch, returns="b")
+
+    result = HUDConsole().select(
+        "pick",
+        [
+            {"name": "A", "value": "a"},
+            {"name": "B", "value": "b"},
+            {"name": "C", "value": "c"},
+        ],
+        spaced=True,
+    )
+
+    assert result == "b"
+    choices = captured["choices"]
+    # A blank separator sits between consecutive choices, but never leads or trails.
+    # (questionary's Separator subclasses Choice, so compare exact types here.)
+    assert [type(x).__name__ for x in choices] == [
+        "Choice",
+        "Separator",
+        "Choice",
+        "Separator",
+        "Choice",
+    ]
+    assert sum(type(x) is Choice for x in choices) == 3
+    assert sum(isinstance(x, Separator) for x in choices) == 2
+
+
+def test_select_without_spaced_has_no_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+    from questionary import Separator
+
+    captured = _capture_select_choices(monkeypatch, returns="a")
+
+    HUDConsole().select("pick", [{"name": "A", "value": "a"}, {"name": "B", "value": "b"}])
+
+    assert not any(isinstance(x, Separator) for x in captured["choices"])
