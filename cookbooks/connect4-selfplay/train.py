@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 
 from hud import Run, TrainingClient
 from hud.agents import create_agent
@@ -31,6 +32,22 @@ from hud.eval import Job, Taskset
 from hud.train import TrajectoryPayload, TrajectorySample
 
 from env import play_self
+
+
+logger = logging.getLogger(__name__)
+
+
+async def _optim_step_with_retry(trainer: TrainingClient, *, lr: float, retries: int = 3) -> any:
+    """Retry optim_step on transient 5xx errors (backend occasionally returns 500)."""
+    for attempt in range(1, retries + 1):
+        try:
+            return await trainer.optim_step(learning_rate=lr)
+        except Exception as exc:
+            if attempt == retries:
+                raise
+            wait = 2**attempt
+            logger.warning("optim_step failed (attempt %d/%d): %s — retrying in %ds", attempt, retries, exc, wait)
+            await asyncio.sleep(wait)
 
 
 def make_tasks(model: str) -> Taskset:
@@ -81,8 +98,10 @@ async def main(model: str, steps: int, group: int, lr: float) -> None:
         # fall back to a single group rather than a misaligned one.
         effective_group = 2 if inner_count == len(batch) else None
 
+        if effective_group is None:
+            print(f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples — group_size=None")
         await trainer.forward_backward(combined, loss_fn="ppo", group_size=effective_group)
-        result = await trainer.optim_step(learning_rate=lr)
+        result = await _optim_step_with_retry(trainer, lr=lr)
 
         rewards = [r.reward for r in batch]
         mean_r = sum(rewards) / len(rewards) if rewards else float("nan")
