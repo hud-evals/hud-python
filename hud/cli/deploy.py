@@ -32,6 +32,7 @@ class _DeployPlan:
     name: str
     registry_id: str | None
     runtime: str | None
+    runtime_config: dict[str, Any] | None
     env_vars: dict[str, str]
     build_args: dict[str, str]
     build_secrets: dict[str, str]
@@ -73,6 +74,32 @@ def _normalize_runtime(runtime: str | None, console: HUDConsole) -> str | None:
         f"Invalid runtime {runtime!r}; expected one of: {', '.join(sorted(_VALID_RUNTIMES))}"
     )
     raise typer.Exit(1)
+
+
+def _runtime_config_from_flags(
+    *,
+    runtime: str | None,
+    gpu: str | None,
+    gpu_count: int | None,
+    console: HUDConsole,
+) -> dict[str, Any] | None:
+    if gpu is None and gpu_count is None:
+        return None
+    if runtime != "modal":
+        console.error("--gpu and --gpu-count require --runtime modal")
+        raise typer.Exit(1)
+    count = gpu_count or 1
+    if count < 1:
+        console.error("--gpu-count must be at least 1")
+        raise typer.Exit(1)
+    gpu_config: dict[str, Any] = {"count": count}
+    if gpu is not None:
+        gpu_type = gpu.strip()
+        if not gpu_type:
+            console.error("--gpu must be a non-empty Modal GPU type")
+            raise typer.Exit(1)
+        gpu_config["type"] = gpu_type
+    return {"resources": {"gpu": gpu_config}}
 
 
 def _load_env_vars(path: Path, console: HUDConsole, *, warn_missing: bool) -> dict[str, str]:
@@ -322,6 +349,8 @@ def _prepare_deploy_plan(
     build_args: list[str] | None,
     build_secrets: list[str] | None,
     runtime: str | None,
+    gpu: str | None,
+    gpu_count: int | None,
     verbose: bool,
     platform: PlatformClient,
     console: HUDConsole,
@@ -357,11 +386,18 @@ def _prepare_deploy_plan(
     build_args_dict = _parse_key_value_flags(build_args, option="--build-arg", console=console)
     if build_args_dict and verbose:
         console.info(f"Build arguments: {', '.join(build_args_dict.keys())}")
+    normalized_runtime = _normalize_runtime(runtime, console)
 
     return _DeployPlan(
         name=resolved_name,
         registry_id=registry_id,
-        runtime=_normalize_runtime(runtime, console),
+        runtime=normalized_runtime,
+        runtime_config=_runtime_config_from_flags(
+            runtime=normalized_runtime,
+            gpu=gpu,
+            gpu_count=gpu_count,
+            console=console,
+        ),
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
@@ -379,6 +415,8 @@ def deploy_environment(
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
+    gpu: str | None = None,
+    gpu_count: int | None = None,
 ) -> None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
@@ -411,6 +449,8 @@ def deploy_environment(
         build_args=build_args,
         build_secrets=build_secrets,
         runtime=runtime,
+        gpu=gpu,
+        gpu_count=gpu_count,
         verbose=verbose,
         platform=platform,
         console=hud_console,
@@ -485,6 +525,8 @@ async def _trigger_build(
         payload["registry_id"] = plan.registry_id
     if plan.runtime:
         payload["runtime_provider"] = plan.runtime
+    if plan.runtime_config:
+        payload["runtime_config"] = plan.runtime_config
     if plan.env_vars:
         payload["environment_variables"] = plan.env_vars
     if plan.build_args:
@@ -644,6 +686,8 @@ def deploy_all(
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
+    gpu: str | None = None,
+    gpu_count: int | None = None,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -683,6 +727,8 @@ def deploy_all(
                 build_args=build_args,
                 build_secrets=build_secrets,
                 runtime=runtime,
+                gpu=gpu,
+                gpu_count=gpu_count,
             )
             succeeded.append(env_dir.name)
         except (typer.Exit, SystemExit):
@@ -762,6 +808,16 @@ def deploy_command(
         "--runtime",
         help="Persist Modal as the hosted runtime for this registry",
     ),
+    gpu: str | None = typer.Option(
+        None,
+        "--gpu",
+        help="Modal GPU type to use for hosted runs, e.g. A10G or H100",
+    ),
+    gpu_count: int | None = typer.Option(
+        None,
+        "--gpu-count",
+        help="Number of Modal GPUs for hosted runs",
+    ),
 ) -> None:
     """Deploy HUD environment to the platform.
 
@@ -781,6 +837,8 @@ def deploy_command(
             build_args=build_args,
             build_secrets=secrets,
             runtime=runtime,
+            gpu=gpu,
+            gpu_count=gpu_count,
         )
         return
 
@@ -795,4 +853,6 @@ def deploy_command(
         build_args=build_args,
         build_secrets=secrets,
         runtime=runtime,
+        gpu=gpu,
+        gpu_count=gpu_count,
     )

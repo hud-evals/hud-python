@@ -262,6 +262,7 @@ class TestDeployAsync:
                     name="test-env",
                     registry_id=None,
                     runtime=None,
+                    runtime_config=None,
                     env_vars={},
                     build_args={},
                     build_secrets={},
@@ -292,6 +293,7 @@ class TestDeployAsync:
                     name="test-env",
                     registry_id=None,
                     runtime=None,
+                    runtime_config=None,
                     env_vars={},
                     build_args={},
                     build_secrets={},
@@ -331,6 +333,7 @@ class TestDeployAsync:
                 name="test-env",
                 registry_id=None,
                 runtime="modal",
+                runtime_config=None,
                 env_vars={},
                 build_args={},
                 build_secrets={},
@@ -342,6 +345,48 @@ class TestDeployAsync:
         assert result == {"id": "build-1", "registry_id": "registry-1"}
         assert platform.payload is not None
         assert platform.payload["runtime_provider"] == "modal"
+
+    @pytest.mark.asyncio
+    async def test_trigger_build_sends_runtime_config(self) -> None:
+        from hud.cli.deploy import _DeployPlan, _trigger_build
+        from hud.utils.hud_console import HUDConsole
+        from hud.utils.platform import PlatformClient
+
+        class FakePlatform(PlatformClient):
+            payload: dict[str, object] | None = None
+
+            async def apost(
+                self,
+                path: str,
+                *,
+                json: object | None = None,
+            ) -> dict[str, object]:
+                assert path == "/builds/trigger"
+                assert isinstance(json, dict)
+                object.__setattr__(self, "payload", json)
+                return {"id": "build-1", "registry_id": "registry-1"}
+
+        runtime_config = {"resources": {"gpu": {"type": "A10G", "count": 1}}}
+        platform = FakePlatform("https://api.example", "key")
+        result = await _trigger_build(
+            platform,
+            build_id="build-1",
+            plan=_DeployPlan(
+                name="test-env",
+                registry_id=None,
+                runtime="modal",
+                runtime_config=runtime_config,
+                env_vars={},
+                build_args={},
+                build_secrets={},
+            ),
+            no_cache=False,
+            console=HUDConsole(),
+        )
+
+        assert result == {"id": "build-1", "registry_id": "registry-1"}
+        assert platform.payload is not None
+        assert platform.payload["runtime_config"] == runtime_config
 
 
 class TestSaveDeployLink:
