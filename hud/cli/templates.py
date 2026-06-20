@@ -13,7 +13,7 @@ COPY . .
 
 # Serve the Environment's control channel (tcp JSON-RPC) on 8765.
 EXPOSE 8765
-CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["uv", "run", "hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
 """
 
 # fmt: off
@@ -78,7 +78,7 @@ async def count(sentence: str, letter: str):
 
 
 # =============================================================================
-# TEST - run with: python env.py
+# TEST - run with: uv run python env.py
 # =============================================================================
 
 async def test():
@@ -136,7 +136,6 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = ["hud-python"]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv]
+package = false
 """

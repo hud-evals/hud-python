@@ -79,6 +79,18 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 - **Taskset** — a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/core/tasks).
 </Accordion>
 
+<Accordion title="hud eval env.py or tasks.py?">
+`hud eval` takes the file (or directory) that **lists runnable `Task` rows** — a `tasks = [...]` variable, a JSON/JSONL export, or a platform taskset name.
+
+| Layout | Where tasks live | Command |
+|--------|------------------|---------|
+| **Split** (`hud init`) | `tasks.py` imports templates from `env.py` | `hud eval tasks.py claude` |
+| **Single-file** (quickstart, cookbooks) | `tasks = [...]` in the same file as `Environment` | `hud eval env.py claude` (or `tasks.py` if that's the filename) |
+| **Directory** | Any `.py` files under a folder | `hud eval . claude` |
+
+The CLI spawns the environment from `env.py` (or the file that defines `Environment`) automatically — you don't pass both paths. See [CLI reference](/v6/reference/cli#hud-eval).
+</Accordion>
+
 <Accordion title="hud eval vs hud serve vs hud deploy — which when?">
 - **`hud eval tasks.py claude`** — run an agent over your tasks and grade them. Your main loop.
 - **`hud serve env.py`** — serve the environment locally so you can drive one task by hand (`hud task start` / `hud task grade`).

@@ -5,6 +5,7 @@ Config Override Order: CLI arguments > .hud_eval.toml > defaults
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import logging
 import os
@@ -665,13 +666,46 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
+def _python_defines_environment(path: Path) -> bool:
+    """Return True when ``path`` constructs a v6 :class:`~hud.environment.Environment`."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        callee_name = (
+            callee.id
+            if isinstance(callee, ast.Name)
+            else callee.attr
+            if isinstance(callee, ast.Attribute)
+            else None
+        )
+        if callee_name == "Environment":
+            return True
+    return False
+
+
 def _spawn_target(source: Path) -> Path:
-    """The path the ``LocalRuntime`` provider serves: the source itself for ``.py``
-    files and directories, the surrounding directory for JSON/JSONL data files
-    (the env's ``.py`` source lives next to the tasks file)."""
+    """The path the ``LocalRuntime`` provider serves.
+
+    Directories and env-defining ``.py`` files are served as-is. Task-only
+    sources (``tasks.py`` importing from ``env.py``) resolve to a sibling
+    ``env.py`` or the containing directory. JSON/JSONL data files use the
+    surrounding directory (the env source lives next to the tasks file).
+    """
     resolved = source.resolve()
-    if resolved.is_dir() or resolved.suffix == ".py":
+    if resolved.is_dir():
         return resolved
+    if resolved.suffix != ".py":
+        return resolved.parent
+    if _python_defines_environment(resolved):
+        return resolved
+    env_py = resolved.parent / "env.py"
+    if env_py.is_file():
+        return env_py
     return resolved.parent
 
 

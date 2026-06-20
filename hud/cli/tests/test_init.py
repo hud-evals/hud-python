@@ -29,6 +29,14 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
     assert (target / "tasks.py").read_text().startswith('"""')
     assert 'name = "my-cool-env"' in (target / "pyproject.toml").read_text()
 
+    pyproject = (target / "pyproject.toml").read_text()
+    assert "package = false" in pyproject
+    assert "[build-system]" not in pyproject
+
+    dockerfile = (target / "Dockerfile.hud").read_text()
+    assert 'CMD ["uv", "run", "hud", "serve"' in dockerfile
+    assert '"dev"' not in dockerfile
+
 
 def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
     target = tmp_path / "taken"

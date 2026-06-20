@@ -39,9 +39,12 @@ Scaffold a complete, runnable example to start from:
 
 ```bash
 hud init my-env
+cd my-env
 ```
 
-Or write `env.py` directly. A task is defined by a **template** – an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable [**Task**](/v6/core/tasks):
+`hud init` creates a **split layout**: `@env.template` definitions in `env.py`, concrete task rows in `tasks.py`. Skip to step 4 and run `hud eval tasks.py claude`.
+
+Or write a **single file** (`tasks.py`) with everything inline. A task is defined by a **template** – an async generator registered with `@env.template`: `yield` a prompt, receive the answer, `yield` a reward (`0.0`–`1.0`). Calling the template mints a runnable [**Task**](/v6/core/tasks):
 
 ```python tasks.py
 from hud import Environment

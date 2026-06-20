@@ -10,16 +10,13 @@ Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate on
 
 ### `hud init`
 
-Scaffold a new environment package in a fresh `<name>` directory (created under `--dir`, default the current directory). With no preset it writes a minimal local scaffold — `env.py` (tasks + capabilities), `tasks.py`, `Dockerfile.hud`, and `pyproject.toml` — no network, no API key. With `--preset` (or the interactive picker shown in a TTY) it instead downloads a starter environment from GitHub — the same set the platform's *environments/new* flow offers.
+Scaffold a new environment package in a fresh `<name>` directory (created under `--dir`, default the current directory). With no preset it writes a minimal local scaffold — `env.py` (environment, templates, and capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` — no network, no API key. With `--preset` (or the interactive picker shown in a TTY) it instead downloads a starter environment from GitHub — the same set the platform's *environments/new* flow offers.
 
 ```bash
 hud init my-env                   # minimal local scaffold (interactive picker in a TTY)
 hud init my-env --preset browser  # download the "browser" starter from GitHub
 hud init my-env --dir envs        # create ./envs/my-env
 ```
-
-`hud init` always creates the new `<name>` directory and refuses to write into an existing non-empty one unless `--force` is passed.
-
 | Option | Description |
 |--------|-------------|
 | `--preset`, `-p` | Starter to download: `blank`, `browser`, `deepresearch`, `cua`, `autonomous-businesses`, `verilog`. Omit for the interactive picker (TTY) or the minimal local scaffold. |
@@ -65,13 +62,24 @@ hud deploy
 
 The primary local iteration loop: run an agent over a task source (`.py`, directory, or JSON/JSONL), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env — no shared state between tasks.
 
+Pass the file that **defines the runnable `Task` rows** — not necessarily the file that defines the `Environment`:
+
 ```bash
-hud eval env.py claude              # one task, one rollout
-hud eval env.py haiku               # cheaper model for fast iteration
+# Split layout (hud init): templates in env.py, task rows in tasks.py
+hud eval tasks.py claude
+hud eval tasks.py claude --full --group 3
+
+# Single-file layout: env + tasks list in one file
+hud eval env.py claude
+hud eval env.py claude --model claude-haiku-4-5   # cheaper model for fast iteration
 hud eval env.py claude --max-steps 30
-hud eval env.py claude --all        # every task, not just the first
-hud eval env.py claude --full       # every task, auto-respond, 100 steps
+hud eval env.py claude --all                      # every task, not just the first
+hud eval env.py claude --full                     # every task, auto-respond, 100 steps
 ```
+
+<Note>
+`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). It spawns `env.py` for the control channel automatically — you don't pass both files.
+</Note>
 
 **What you don't need for a local run:**
 - A HUD API key — local evals don't hit the platform

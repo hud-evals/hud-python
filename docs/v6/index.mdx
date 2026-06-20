@@ -211,6 +211,9 @@ or run it from the [CLI](/v6/core/cli):
 hud eval env.py claude --group 3
 ```
 
+This example keeps `Environment` and `tasks = [...]` in one file. After `hud init`, use `hud eval tasks.py claude` instead — templates live in `env.py`, task rows in `tasks.py`.
+
+`--group 3` runs three rollouts so you can see the reward spread; each is traced on [hud.ai](https://hud.ai).
 
 </Accordion>
 
@@ -245,7 +248,6 @@ A few beliefs shape everything in the SDK:
     HUD just hands the agent a direct connection to the environment (`ssh` for a shell, `cdp` for a browser, `rfb` for a screen, `robot` for a simulator) and returns a reward.
   </div>
 </div>
-
 
 ## Where to go next
 
