@@ -38,17 +38,20 @@ class Job:
     name: str
     runs: list[Run] = field(default_factory=list)
     group: int = 1
+    #: Platform taskset id this job runs, when it's a synced taskset
+    #: (``Taskset.from_api``). Links the job to that taskset on the platform.
+    taskset_id: str | None = None
 
     @classmethod
-    async def start(cls, name: str, *, group: int = 1) -> Job:
+    async def start(cls, name: str, *, group: int = 1, taskset_id: str | None = None) -> Job:
         """Open a job spanning multiple scheduler calls.
 
         A scheduler call mints its own job by default; pass a started job as
         ``job=`` to ``Task.run`` / ``Taskset.run`` to accumulate every run of a
         longer arc — a training session, a chat conversation — under one id.
         """
-        job = cls(id=uuid.uuid4().hex, name=name, group=group)
-        await job_enter(job.id, name=name, group=group)
+        job = cls(id=uuid.uuid4().hex, name=name, group=group, taskset_id=taskset_id)
+        await job_enter(job.id, name=name, group=group, taskset_id=taskset_id)
         return job
 
     @property
@@ -79,11 +82,21 @@ def _reporting_enabled() -> bool:
     return bool(settings.telemetry_enabled and settings.api_key)
 
 
-async def job_enter(job_id: str, *, name: str, group: int) -> None:
-    """Register a batch job with the platform."""
+async def job_enter(
+    job_id: str, *, name: str, group: int, taskset_id: str | None = None
+) -> None:
+    """Register a batch job with the platform.
+
+    ``taskset_id`` links the job to a synced taskset (set when running
+    ``Taskset.from_api``); ``None`` for ad-hoc/local tasksets. The platform
+    creates no taskset on its own — remote rollouts carry the scenario inline.
+    """
     if not _reporting_enabled():
         return
-    await _report(f"/trace/job/{job_id}/enter", {"name": name, "group": group})
+    await _report(
+        f"/trace/job/{job_id}/enter",
+        {"name": name, "group": group, "taskset_id": taskset_id},
+    )
     from hud.settings import settings
 
     logger.info("job: %s/jobs/%s", settings.hud_web_url, job_id)
