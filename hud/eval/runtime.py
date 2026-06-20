@@ -42,6 +42,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
 from hud.utils.platform import PlatformClient
 
@@ -741,6 +742,10 @@ class HUDRuntime:
 
     async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
         payload: dict[str, Any] = {"environment": task.env}
+        trace_id = get_current_trace_id()
+        if trace_id is not None:
+            with contextlib.suppress(ValueError):
+                payload["trace_id"] = str(uuid.UUID(trace_id))
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{runtime_url}/runtime/sessions",
