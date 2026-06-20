@@ -414,9 +414,12 @@ class EvalConfig(BaseModel):
             kwargs.update(agent_cfg)
 
         if self.model:
+            kwargs["model"] = self.model
+
+        if isinstance(kwargs.get("model"), str):
             from hud.utils.gateway import normalize_gateway_model_id
 
-            kwargs["model"] = normalize_gateway_model_id(self.model)
+            kwargs["model"] = normalize_gateway_model_id(kwargs["model"])
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE and "api_key" not in kwargs:
             base_url = kwargs.get("base_url", "")

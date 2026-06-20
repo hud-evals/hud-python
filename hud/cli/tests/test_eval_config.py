@@ -56,6 +56,15 @@ def test_get_agent_kwargs_normalizes_gateway_model_alias() -> None:
     assert cfg.get_agent_kwargs()["model"] == "z-ai/glm-5.2"
 
 
+def test_get_agent_kwargs_normalizes_config_model_alias() -> None:
+    cfg = EvalConfig(
+        agent_type="openai_compatible",
+        agent_config={"openai_compatible": {"model": "glm-5.2"}},
+    )
+
+    assert cfg.get_agent_kwargs()["model"] == "z-ai/glm-5.2"
+
+
 def test_get_agent_kwargs_requires_agent_type() -> None:
     with pytest.raises(ValueError, match="agent_type must be set"):
         EvalConfig().get_agent_kwargs()
@@ -207,6 +216,14 @@ def test_merge_cli_resolves_gateway_model_alias(monkeypatch: pytest.MonkeyPatch)
 
     assert merged.agent_type is not None and merged.agent_type.value == "openai_compatible"
     assert merged.model == "z-ai/glm-5.2"
+
+
+def test_merge_cli_config_model_alias_is_normalized() -> None:
+    merged = EvalConfig(agent_type="openai_compatible").merge_cli(
+        config=["openai_compatible.model=glm-5.2"]
+    )
+
+    assert merged.get_agent_kwargs()["model"] == "z-ai/glm-5.2"
 
 
 def test_merge_cli_namespaced_config() -> None:
