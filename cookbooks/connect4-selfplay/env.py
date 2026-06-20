@@ -1,8 +1,7 @@
 """Connect Four self-play environment.
 
-A step up from tic-tac-toe: a 6x7 board, drop-a-disc moves, and decisive
-outcomes (draws are rare on a full 42-cell board), so the reward keeps a real
-spread as the policy improves instead of collapsing to all-draws.
+6x7 board, drop-a-disc moves, decisive outcomes (draws are rare on a full
+42-cell board), so the reward keeps real spread as the policy improves.
 
 Starting order is randomized per task (seed % 2 decides who drops first). The
 outer agent plays one side for a full game; the inner model (same slug) plays
