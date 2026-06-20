@@ -10,16 +10,18 @@ Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate on
 
 ### `hud init`
 
-Scaffold a new environment package in a fresh `<name>` directory (created under `--dir`, default the current directory). With no preset it writes a minimal local scaffold — `env.py` (environment, templates, and capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` — no network, no API key. With `--preset` (or the interactive picker shown in a TTY) it instead downloads a starter environment from GitHub — the same set the platform's *environments/new* flow offers.
+Scaffold a new environment package. With no `NAME`, an interactive picker lists the starter environments — the same set the platform's *environments/new* flow offers — and clones the one you choose from GitHub into `./<template>` (like `git clone`). With a `NAME` it scaffolds into a fresh `<name>` directory (created under `--dir`, default the current directory); the picker also offers a minimal local scaffold — `env.py` (environment, templates, and capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` — with no network and no API key, which is the default in a non-interactive shell. `--preset` skips the picker and downloads that starter directly.
 
 ```bash
-hud init my-env                   # minimal local scaffold (interactive picker in a TTY)
-hud init my-env --preset browser  # download the "browser" starter from GitHub
+hud init                          # pick a template → ./<template>
+hud init my-env                   # pick a template (or minimal scaffold) → ./my-env
+hud init my-env --preset browser  # download the "browser" starter into ./my-env
+hud init --preset cua             # download the "cua" starter into ./cua-template
 hud init my-env --dir envs        # create ./envs/my-env
 ```
 | Option | Description |
 |--------|-------------|
-| `--preset`, `-p` | Starter to download: `blank`, `browser`, `deepresearch`, `cua`, `autonomous-businesses`, `verilog`. Omit for the interactive picker (TTY) or the minimal local scaffold. |
+| `--preset`, `-p` | Starter to download: `blank`, `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench`. Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the minimal local scaffold. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 

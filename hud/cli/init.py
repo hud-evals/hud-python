@@ -1,9 +1,11 @@
 """``hud init``: scaffold a new HUD environment package.
 
-By default (or in a non-interactive shell) it writes a minimal local scaffold —
-no network, no API key. With ``--preset`` (or via the interactive picker) it
-downloads one of the starter environments from GitHub instead — the same set the
-platform's *environments/new* flow offers. See :mod:`hud.cli.presets`.
+With no ``NAME`` it shows an interactive picker of the starter environments and
+clones the chosen one from GitHub into ``./<repo>`` — the same set the platform's
+*environments/new* flow offers (see :mod:`hud.cli.presets`). With a ``NAME`` it
+scaffolds into ``./NAME``: the picker also offers a minimal local scaffold (no
+network, no API key), which is the default in a non-interactive shell. ``--preset``
+skips the picker and downloads that starter directly.
 """
 
 from __future__ import annotations
@@ -31,9 +33,17 @@ def _python_name(name: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "_" for c in name)
 
 
-def _resolve_preset(preset: str | None, hud_console: HUDConsole) -> EnvironmentPreset | None:
+def _resolve_preset(
+    preset: str | None, hud_console: HUDConsole, *, allow_local: bool
+) -> EnvironmentPreset | None:
     """Pick the starter: an explicit ``--preset`` id, an interactive choice, or
-    ``None`` for the minimal local scaffold."""
+    ``None`` for the minimal local scaffold.
+
+    ``allow_local`` offers the bundled local scaffold in the interactive picker.
+    It needs a target name, so it's only offered when the caller has one (i.e. a
+    ``NAME`` was passed). With no name the picker lists only the GitHub starters,
+    whose repo name becomes the target directory.
+    """
     if preset is not None:
         chosen = PRESETS_BY_ID.get(preset)
         if chosen is None:
@@ -47,11 +57,20 @@ def _resolve_preset(preset: str | None, hud_console: HUDConsole) -> EnvironmentP
         return None
 
     choices: list[str | dict[str, Any]] = [
-        {"name": "Minimal (local scaffold, no download)", "value": _LOCAL_SCAFFOLD},
-        *({"name": f"{p.name} — {p.description}", "value": p.id} for p in ENVIRONMENT_PRESETS),
+        {"name": f"{p.name} — {p.description}", "value": p.id} for p in ENVIRONMENT_PRESETS
     ]
-    selected = hud_console.select("Choose a starter", choices, default=0)
+    if allow_local:
+        local = {"name": "Minimal (local scaffold, no download)", "value": _LOCAL_SCAFFOLD}
+        choices.insert(0, local)
+    selected = hud_console.select("Choose a template", choices, default=0)
     return None if selected == _LOCAL_SCAFFOLD else PRESETS_BY_ID[selected]
+
+
+def _ensure_writable(target: Path, force: bool, hud_console: HUDConsole) -> None:
+    """Refuse to scaffold into a non-empty directory unless ``--force``."""
+    if target.exists() and any(target.iterdir()) and not force:
+        hud_console.error(f"{target} already exists and is not empty (use --force)")
+        raise typer.Exit(1)
 
 
 def _write_local_scaffold(target: Path, env_name: str, hud_console: HUDConsole) -> None:
@@ -69,39 +88,58 @@ def _write_local_scaffold(target: Path, env_name: str, hud_console: HUDConsole) 
 
 
 def init_command(
-    name: str = typer.Argument(..., help="Environment name (directory to create)"),
+    name: str | None = typer.Argument(
+        None,
+        help="Environment name (directory to create). Omit to pick a template "
+        "and clone it into the current directory.",
+    ),
     directory: str = typer.Option(".", "--dir", "-d", help="Parent directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
     preset: str | None = typer.Option(
         None,
         "--preset",
         "-p",
-        help="Starter preset to download from GitHub (e.g. blank, browser, "
-        "deepresearch, cua, autonomous-businesses, verilog). Omit for an interactive picker; in a "
-        "non-interactive shell, omitting it writes the minimal local scaffold.",
+        help="Template to download from GitHub (e.g. blank, browser, cua, "
+        "deepresearch, coding, ml, verilog). Omit for the interactive picker; with "
+        "a NAME in a non-interactive shell, omitting it writes the minimal local scaffold.",
     ),
 ) -> None:
     """🚀 Create a new HUD environment package.
 
-    [not dim]With no --preset, writes a minimal local scaffold (env.py, tasks.py,
-    Dockerfile.hud, pyproject.toml) — or, in a TTY, lets you pick a starter. With
-    --preset, downloads that starter from GitHub.
+    [not dim]With no NAME, pick a template and clone it into the current directory
+    (as ./<template>). With a NAME, scaffold into ./NAME — pick a template, or
+    write the minimal local scaffold (env.py, tasks.py, Dockerfile.hud,
+    pyproject.toml). Pass --preset to skip the picker.
 
     Examples:
-        hud init my-env                  # interactive picker (or local scaffold)
-        hud init my-env --preset browser  # download the browser starter
-        hud init my-env --dir envs       # create ./envs/my-env[/not dim]
+        hud init                          # pick a template → ./<template>
+        hud init my-env                   # pick a template (or minimal) → ./my-env
+        hud init my-env --preset browser  # clone the browser template → ./my-env
+        hud init --preset cua             # clone the cua template → ./cua-template[/not dim]
     """
     hud_console = HUDConsole()
 
-    target = Path(directory) / name
-    if target.exists() and any(target.iterdir()) and not force:
-        hud_console.error(f"{target} already exists and is not empty (use --force)")
+    # Fail fast if an explicitly named target is occupied, before any prompt/download.
+    explicit_target = Path(directory) / name if name is not None else None
+    if explicit_target is not None:
+        _ensure_writable(explicit_target, force, hud_console)
+
+    chosen = _resolve_preset(preset, hud_console, allow_local=name is not None)
+
+    if explicit_target is not None:
+        target = explicit_target
+    elif chosen is not None:
+        # No name: clone the template into ./<repo>, like `git clone` would.
+        target = Path(directory) / chosen.repo
+        _ensure_writable(target, force, hud_console)
+    else:
+        hud_console.error(
+            "Nothing to create. Pass a name (hud init my-env), a --preset, "
+            "or run in an interactive terminal to pick a template."
+        )
         raise typer.Exit(1)
 
-    chosen = _resolve_preset(preset, hud_console)
-
-    hud_console.header(f"HUD Init: {name}")
+    hud_console.header(f"HUD Init: {target.name}")
     if chosen is not None:
         hud_console.info(f"Downloading {chosen.owner}/{chosen.repo} …")
         created = not target.exists()
@@ -117,7 +155,7 @@ def init_command(
             raise typer.Exit(1) from exc
         hud_console.status_item(f"{chosen.owner}/{chosen.repo}", "✓")
     else:
-        _write_local_scaffold(target, _python_name(name), hud_console)
+        _write_local_scaffold(target, _python_name(target.name), hud_console)
 
     hud_console.section_title("Next Steps")
     hud_console.info("")
