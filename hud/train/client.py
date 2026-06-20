@@ -129,7 +129,9 @@ class TrainingClient(BaseTrainingClient):
             reward_scale=reward_scale,
             num_substeps=num_substeps,
         )
-        data = await self._post("forward-backward", request.model_dump())
+        # exclude_none so optional fields a (possibly older) server doesn't know
+        # yet — e.g. a null prompt_chunks/trace_id — aren't sent and rejected.
+        data = await self._post("forward-backward", request.model_dump(exclude_none=True))
         return ForwardBackwardResult.model_validate(data)
 
     async def forward(
@@ -153,7 +155,7 @@ class TrainingClient(BaseTrainingClient):
             group_size=group_size,
             reward_scale=reward_scale,
         )
-        data = await self._post("forward", request.model_dump())
+        data = await self._post("forward", request.model_dump(exclude_none=True))
         return ForwardResult.model_validate(data)
 
     async def backward(

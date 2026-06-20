@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     )
 
     hud_web_url: str = Field(
-        default="https://beta.hud.ai",
+        default="https://hud.ai",
         description="Base URL of the HUD web app (used as a fallback for CLI login)",
         validation_alias="HUD_WEB_URL",
     )
