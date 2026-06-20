@@ -56,7 +56,7 @@ async def run_validation(trained: str, opponent: str, games: int) -> None:
     for i, run in enumerate(job.runs):
         side = "X" if i % 2 == 0 else "O"
         outcome = {1.0: "WIN ", 0.5: "DRAW", 0.0: "LOSS"}.get(run.reward, f"{run.reward:.2f}")
-        print(f"  game {i+1:2d} (outer={side}): {outcome}")
+        print(f"  game {i + 1:2d} (outer={side}): {outcome}")
 
 
 def main() -> None:

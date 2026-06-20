@@ -122,9 +122,7 @@ def _show_job_traces(job_id: str, *, json_output: bool, limit: int) -> None:
         return
 
     console.print(
-        Panel.fit(
-            f"[bold cyan]Job Traces[/bold cyan] [dim]{job_id}[/dim]", border_style="cyan"
-        )
+        Panel.fit(f"[bold cyan]Job Traces[/bold cyan] [dim]{job_id}[/dim]", border_style="cyan")
     )
     table = Table()
     table.add_column("Trace ID", style="blue", no_wrap=True)
