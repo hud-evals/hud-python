@@ -32,6 +32,7 @@ from hud import Run, TrainingClient
 from hud.agents import create_agent
 from hud.eval import Job, Taskset
 from hud.train import TrajectoryPayload, TrajectorySample
+from hud.utils.exceptions import HudNetworkError, HudTimeoutError
 
 from env import play_self
 
@@ -40,16 +41,22 @@ logger = logging.getLogger(__name__)
 
 
 async def _optim_step_with_retry(trainer: TrainingClient, *, lr: float, retries: int = 3) -> any:
-    """Retry optim_step on transient 5xx errors (backend occasionally returns 500)."""
+    """Retry optim_step only on network/timeout errors.
+
+    optim_step is state-mutating (saves a checkpoint). Retrying on server-side
+    errors (5xx) can cause duplicate checkpoint saves, which poisons the Tinker
+    training run. Only network-level failures (connection drop, timeout) are safe
+    to retry.
+    """
     for attempt in range(1, retries + 1):
         try:
             return await trainer.optim_step(learning_rate=lr)
-        except Exception as exc:
+        except (HudNetworkError, HudTimeoutError) as exc:
             if attempt == retries:
                 raise
             wait = 2**attempt
             logger.warning(
-                "optim_step failed (attempt %d/%d): %s — retrying in %ds",
+                "optim_step network error (attempt %d/%d): %s — retrying in %ds",
                 attempt,
                 retries,
                 exc,
@@ -143,7 +150,9 @@ async def main(
             print(
                 f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples — group_size=None"
             )
-        print(f"  rollout done: {t_rollout:.1f}s for {len(batch)} games ({len(combined)} trajectories)")
+        print(
+            f"  rollout done: {t_rollout:.1f}s for {len(batch)} games ({len(combined)} trajectories)"
+        )
 
         t0 = time.perf_counter()
         await trainer.forward_backward(combined, loss_fn="ppo", group_size=effective_group)
