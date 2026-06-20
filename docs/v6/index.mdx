@@ -64,6 +64,8 @@ Run it against any model — your `HUD_API_KEY` is the only key you need:
 hud eval env.py claude --group 3
 ```
 
+This example keeps `Environment` and `tasks = [...]` in one file. After `hud init`, use `hud eval tasks.py claude` instead — templates live in `env.py`, task rows in `tasks.py`.
+
 `--group 3` runs three rollouts so you can see the reward spread; each is traced on [hud.ai](https://hud.ai).
 
 ## Where to go next

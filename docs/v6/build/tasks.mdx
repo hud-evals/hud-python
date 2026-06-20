@@ -8,6 +8,10 @@ A **task template** is the measurement instrument: one async generator that prom
 
 The template ships **inside the environment image** — one image mints every task in your dataset on demand, with no separate artifact per task.
 
+<Note>
+**Two file layouts.** Tutorials often use a **single file** (`env.py` or `tasks.py`) with both the `Environment` and a `tasks = [...]` list — run `hud eval` on that file. `hud init` scaffolds a **split layout**: templates live in `env.py`, concrete rows in `tasks.py` — run `hud eval tasks.py`. Either works; the CLI resolves the environment source from the task file automatically.
+</Note>
+
 ## The two-yield generator
 
 Register a template with `@env.template()`. The first `yield` is the prompt; the value it returns is the agent's answer; the second `yield` is the reward (a float, usually `0.0`–`1.0`).

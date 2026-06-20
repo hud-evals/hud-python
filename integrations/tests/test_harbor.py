@@ -95,7 +95,7 @@ _DOCKERFILE = """\
 FROM python:3.11-slim
 RUN pip install hud-python
 COPY env.py ./
-CMD ["hud", "dev"]
+CMD ["hud", "serve", "env:env"]
 """
 
 

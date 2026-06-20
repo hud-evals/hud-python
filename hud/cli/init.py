@@ -76,8 +76,8 @@ def init_command(
         None,
         "--preset",
         "-p",
-        help="Starter preset to download from GitHub (e.g. blank, coding, browser, "
-        "deepresearch, rubrics, remote-browser). Omit for an interactive picker; in a "
+        help="Starter preset to download from GitHub (e.g. blank, browser, "
+        "deepresearch, cua, autonomous-businesses, verilog). Omit for an interactive picker; in a "
         "non-interactive shell, omitting it writes the minimal local scaffold.",
     ),
 ) -> None:
@@ -89,7 +89,7 @@ def init_command(
 
     Examples:
         hud init my-env                  # interactive picker (or local scaffold)
-        hud init my-env --preset coding  # download the coding starter
+        hud init my-env --preset browser  # download the browser starter
         hud init my-env --dir envs       # create ./envs/my-env[/not dim]
     """
     hud_console = HUDConsole()
