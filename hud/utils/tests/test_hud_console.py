@@ -8,12 +8,27 @@ we can assert directly.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
+import typer
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.output import DummyOutput
 
 from hud.utils.hud_console import HUDConsole
 
-if TYPE_CHECKING:
-    import pytest
+
+def _select_with_keystrokes(
+    keys: str, choices: list[str | dict[str, Any]], *, spaced: bool = False
+) -> str:
+    """Drive ``HUDConsole.select`` with scripted keystrokes through a prompt_toolkit
+    pipe input (no real TTY), returning the selected value."""
+    with create_pipe_input() as inp:
+        inp.send_text(keys)
+        with create_app_session(input=inp, output=DummyOutput()):
+            return HUDConsole().select("pick", choices, spaced=spaced)
 
 
 def test_output_methods_do_not_raise() -> None:
@@ -73,7 +88,14 @@ def _capture_select_choices(monkeypatch: pytest.MonkeyPatch, returns: str) -> di
 
     captured: dict[str, Any] = {}
 
+    class _App:
+        def __init__(self) -> None:
+            self.key_bindings = KeyBindings()
+
     class _Stub:
+        def __init__(self) -> None:
+            self.application = _App()
+
         def ask(self) -> str:
             return returns
 
@@ -123,3 +145,21 @@ def test_select_without_spaced_has_no_separators(monkeypatch: pytest.MonkeyPatch
     HUDConsole().select("pick", [{"name": "A", "value": "a"}, {"name": "B", "value": "b"}])
 
     assert not any(isinstance(x, Separator) for x in captured["choices"])
+
+
+def test_select_escape_cancels() -> None:
+    # questionary cancels on Ctrl+C only; we additionally bind Esc to cancel,
+    # which surfaces as a typer.Exit through select's None handling.
+    with pytest.raises(typer.Exit):
+        _select_with_keystrokes("\x1b", [{"name": "A", "value": "a"}, {"name": "B", "value": "b"}])
+
+
+def test_select_arrow_then_enter_selects_skipping_separators() -> None:
+    # Down + Enter lands on the second real choice; the blank separator between
+    # spaced choices is skipped, and the Esc binding doesn't break arrow keys.
+    result = _select_with_keystrokes(
+        "\x1b[B\r",
+        [{"name": "A", "value": "a"}, {"name": "B", "value": "b"}, {"name": "C", "value": "c"}],
+        spaced=True,
+    )
+    assert result == "b"

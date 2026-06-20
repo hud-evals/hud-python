@@ -336,6 +336,8 @@ class HUDConsole:
             The selected choice value
         """
         import questionary
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.keys import Keys
         from questionary import Style
 
         # Convert choices to questionary format, optionally interleaving blank
@@ -362,14 +364,25 @@ class HUDConsole:
             ]
         )
 
-        result = questionary.select(
+        question = questionary.select(
             message,
             choices=q_choices,
-            instruction="(Use ↑/↓ arrows, Enter to select)",
+            instruction="(Use ↑/↓ arrows, Enter to select, Esc to cancel)",
             style=custom_style,
-        ).ask()
+        )
 
-        # If no selection made (Ctrl+C or ESC), exit
+        # questionary only aborts on Ctrl+C out of the box. Bind Esc to cancel
+        # too. Non-eager so it doesn't swallow the Esc-prefixed arrow sequences.
+        key_bindings = question.application.key_bindings
+        assert isinstance(key_bindings, KeyBindings)
+
+        @key_bindings.add(Keys.Escape)
+        def _cancel(event: Any) -> None:
+            event.app.exit(result=None)
+
+        result = question.ask()
+
+        # No selection (Ctrl+C or Esc) → cancel the command.
         if result is None:
             import typer
 
