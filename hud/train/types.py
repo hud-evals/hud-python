@@ -67,9 +67,9 @@ class ForwardBackwardRequest(BaseModel):
 
     inputs: list[TrainInput] = Field(min_length=1)
     loss_fn: LossFn = "importance_sampling"
-    # Loss-function hyperparameters forwarded verbatim to the provider's loss
-    # (Tinker ``loss_fn_config``): e.g. ``{"epsilon": 0.2}`` for the ``ppo`` clip,
-    # KL coefficients, etc. ``None`` uses the provider defaults.
+    # Provider-specific loss hyperparameters forwarded verbatim to the provider's
+    # loss (Tinker ``loss_fn_config``). The supported keys are provider-defined
+    # and not all losses accept config; ``None`` uses the provider defaults.
     loss_fn_config: dict[str, float] | None = None
     # Trajectories are normalized for advantages within contiguous groups of this
     # size (GRPO). ``None`` treats all trajectories as a single group.
@@ -117,6 +117,34 @@ class OptimStepResult(BaseModel):
     # Gateway model string now serving the promoted weights (typically unchanged
     # across steps; the active checkpoint behind it advances).
     model: str
+
+
+class CheckpointResponse(BaseModel):
+    """One node in a model's checkpoint tree (the programmatic form of a
+    ``hud models checkpoints`` row).
+
+    Each ``optim_step`` appends one. ``is_active`` marks the head the gateway
+    serves; ``prev_model_checkpoint_id`` links to its parent. ``metrics`` is the
+    provider's per-step blob (e.g. ``reward_std``/``reward_min``/``reward_max``,
+    ``sampling_logprob_mean``, and ``tinker.*`` training stats). Extra fields the
+    service returns (jobs, tasksets, reward groups) are ignored, not rejected.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str | None = None
+    checkpoint_name: str | None = None
+    prev_model_checkpoint_id: str | None = None
+    is_active: bool = False
+    created_at: str | None = None
+    num_traces: int | None = None
+    num_datums: int | None = None
+    num_tokens: int | None = None
+    mean_reward: float | None = None
+    learning_rate: float | None = None
+    loss_fn: str | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
 
 
 # ── Custom-loss path ─────────────────────────────────────────────────────────

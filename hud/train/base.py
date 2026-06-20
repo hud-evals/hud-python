@@ -10,7 +10,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 from hud.settings import settings
-from hud.train.types import OptimStepRequest, OptimStepResult
+from hud.train.types import CheckpointResponse, OptimStepRequest, OptimStepResult
 from hud.utils.requests import make_request
 
 
@@ -100,3 +100,32 @@ class BaseTrainingClient:
         )
         data = await self._post("optim-step", request.model_dump(), max_retries=3)
         return OptimStepResult.model_validate(data)
+
+    async def checkpoints(self) -> list[CheckpointResponse]:
+        """The model's checkpoint tree (oldest first), each node carrying its
+        rewards, loss, token/datum counts, and a ``metrics`` blob. The
+        programmatic twin of ``hud models checkpoints`` — poll it inside a
+        training loop to watch ``mean_reward``, KL, and clip fraction live."""
+        model_id = await self._resolve_model_id()
+        # The checkpoints endpoint lives on the catalog API and returns a JSON
+        # array (make_request is typed for the common object response).
+        url = f"{self._api_url}/v2/models/{model_id}/checkpoints"
+        data: Any = await make_request("GET", url, api_key=self._api_key)
+        return [CheckpointResponse.model_validate(c) for c in data]
+
+    async def head(self) -> CheckpointResponse | None:
+        """The active checkpoint (the weights the gateway serves now), or
+        ``None`` when the model still serves its base weights."""
+        return next((c for c in await self.checkpoints() if c.is_active), None)
+
+    async def set_head(self, checkpoint_id: str) -> None:
+        """Promote a checkpoint to head — a rollback to, or branch from, that
+        node; the next :meth:`optim_step` extends the tree from there.
+
+        Use this when the reward function or environment changes underneath a
+        run: continuing from a stale head fine-tunes a policy shaped by the old
+        objective. Roll back to a clean checkpoint (or fork a fresh model) so the
+        run measures the new objective, not a contaminated starting point."""
+        model_id = await self._resolve_model_id()
+        url = f"{self._api_url}/v2/models/{model_id}/head"
+        await make_request("PUT", url, json={"checkpoint_id": checkpoint_id}, api_key=self._api_key)

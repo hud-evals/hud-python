@@ -92,7 +92,7 @@ Requires torch (`pip install 'hud-python[train]'`); the built-in path does not. 
 
 ## Inspect progress
 
-Each `optim_step` adds a node to the model's checkpoint tree and promotes it to the head — the weights the gateway now serves:
+Each `optim_step` adds a node to the model's **checkpoint tree** and promotes it to the **head** — the weights the gateway now serves. A node carries everything you need to watch a run: `mean_reward`, `loss_fn`, token/datum counts, and a `metrics` blob (reward spread, sampling logprob, provider training stats like PPO KL and clip fraction). Read it from the shell or from the loop:
 
 ```bash
 hud models checkpoints arith-rl              # the tree, oldest first (▶ = active head)
@@ -100,7 +100,16 @@ hud models head arith-rl                     # the active checkpoint + its stats
 hud models head arith-rl --set <checkpoint>  # roll back / select a different head
 ```
 
-Setting the head points the gateway at a different checkpoint (a rollback or a branch point); the next `optim_step` extends the tree from there.
+```python
+for c in await trainer.checkpoints():        # same data, in the training loop
+    print(c.name, c.mean_reward, c.metrics.get("reward_std"))
+```
+
+Setting the head points the gateway at a different checkpoint and the next `optim_step` extends the tree from there — so a checkpoint is also a **rollback point**.
+
+<Warning>
+Roll back when the objective changes. If you edit the reward function or the environment partway through a run, the current head encodes the *old* objective — continuing from it fine-tunes a contaminated policy, and the early steps after the change mostly undo the old shaping. Roll the head back to a checkpoint from before the change (`set_head`/`--set`), or fork a fresh model, so the run measures the new objective from a clean start.
+</Warning>
 
 ## Why grouping matters
 

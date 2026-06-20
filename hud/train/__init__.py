@@ -13,6 +13,7 @@ from hud.train.client import TrainingClient
 from hud.train.types import (
     BackwardRequest,
     BuiltinLoss,
+    CheckpointResponse,
     DatumTensors,
     ForwardBackwardRequest,
     ForwardBackwardResult,
@@ -31,6 +32,7 @@ __all__ = [
     "BackwardRequest",
     "BaseTrainingClient",
     "BuiltinLoss",
+    "CheckpointResponse",
     "DatumTensors",
     "ForwardBackwardRequest",
     "ForwardBackwardResult",
