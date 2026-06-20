@@ -49,7 +49,7 @@ uv run hud eval tasks.py claude
 </Accordion>
 
 <Accordion title="What platforms are supported (macOS / Windows / Linux)?">
-The CLI and SDK run on macOS, Windows, and Linux. Two caveats: `ssh` sandbox isolation is **Linux-only** (the shell still runs without it elsewhere), and `BashGrader` needs bash, so on native Windows it scores `0.0`. Both are fine for local iteration and resolved inside a built Linux image. See [Capabilities](/v6/reference/capabilities).
+The CLI and SDK run on macOS, Windows, and Linux. Two caveats: `ssh` sandbox isolation is **Linux-only** (the shell still runs without it elsewhere), and `BashGrader` needs bash, so on native Windows it scores `0.0`. Both are fine for local iteration and resolved inside a built Linux image. See [Capabilities](/v6/core/capabilities).
 </Accordion>
 </AccordionGroup>
 
@@ -73,10 +73,10 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 
 <AccordionGroup>
 <Accordion title="Environment vs task vs taskset?">
-- **Environment** — where the agent acts; exposes [capabilities](/v6/reference/capabilities) (`ssh`, `cdp`, …).
+- **Environment** — where the agent acts; exposes [capabilities](/v6/core/capabilities) (`ssh`, `cdp`, …).
 - **Task definition** — a `@env.template` async generator that prompts and grades.
 - **Task** — calling a definition (`count_letter(word="…")`) mints one runnable, parameterized data row.
-- **Taskset** — a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/reference/tasks).
+- **Taskset** — a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/core/tasks).
 </Accordion>
 
 <Accordion title="hud eval vs hud serve vs hud deploy — which when?">
@@ -84,7 +84,7 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 - **`hud serve env.py`** — serve the environment locally so you can drive one task by hand (`hud task start` / `hud task grade`).
 - **`hud deploy`** — build a portable Docker image **and** publish to HUD infra in one step.
 
-Full surface in the [CLI reference](/v6/reference/cli).
+Full surface in the [CLI reference](/v6/core/cli).
 </Accordion>
 
 <Accordion title="Can I use my own model or a local endpoint?">
@@ -100,7 +100,7 @@ Yes. The Harbor integration loads Harbor-format tasks straight into a `Taskset` 
 </Accordion>
 
 <Accordion title="Does HUD support robotics / VLA policies?">
-Yes, in **beta**: the `openpi/0` capability is a schema-driven observation/action loop over WebSocket for simulator and robot environments, with a LeRobot-ready agent harness and trace playback with action-chunk markers. See the [Robots reference](/v6/reference/robots) and the [robot benchmark cookbook](/v6/cookbooks/robot-benchmark).
+Yes, in **beta**: the `openpi/0` capability is a schema-driven observation/action loop over WebSocket for simulator and robot environments, with a LeRobot-ready agent harness and trace playback with action-chunk markers. See the [Robots reference](/v6/core/robots) and the [robot benchmark cookbook](/v6/cookbooks/robot-benchmark).
 </Accordion>
 
 <Accordion title="I'm upgrading from v5 — what changed?">

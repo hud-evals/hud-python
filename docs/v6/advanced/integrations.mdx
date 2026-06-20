@@ -21,7 +21,7 @@ class MyHarness(Agent):
         run.trace.content = "the final answer"
 ```
 
-The result is graded on exit like any other run. See the [agent contract](/v6/reference/agents).
+The result is graded on exit like any other run. See the [agent contract](/v6/core/agents).
 
 ## Wrap an existing framework: browser-use on `cdp`
 
@@ -52,7 +52,7 @@ def placer(task):
 job = await taskset.run(agent, runtime=placer)
 ```
 
-See [placement](/v6/reference/tasks#placement-where-a-task-runs) for the
+See [placement](/v6/core/tasks#placement-where-a-task-runs) for the
 built-in providers (`LocalRuntime`, `Runtime(url)`, `HUDRuntime`).
 
 ## Any OpenAI-compatible endpoint
@@ -75,10 +75,14 @@ agent = OpenAIChatAgent(OpenAIChatConfig(
 The [`Chat`](/v6/advanced/chat) runner is protocol-agnostic — an A2A endpoint is a thin adapter that translates requests into `chat.send()` calls:
 
 ```python
-from hud import Chat
+from hud import Chat, LocalRuntime
 from hud.agents import create_agent
 
-chat = Chat(my_task(messages=[]), create_agent("claude-sonnet-4-5"))
+chat = Chat(
+    my_task(messages=[]),
+    create_agent("claude-sonnet-4-5"),
+    runtime=LocalRuntime("env.py"),   # Chat runs the loop locally; a runtime is required
+)
 reply = await chat.send("hello")   # any protocol frontend calls this
 ```
 
@@ -87,8 +91,8 @@ See [`cookbooks/a2a-chat/server.py`](https://github.com/hud-evals/hud-python/blo
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Agents" icon="robot" href="/v6/reference/agents" />
-<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Agents" icon="robot" href="/v6/core/agents" />
+<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
 <Card title="Chat" icon="comments" href="/v6/advanced/chat" />
 <Card title="Patterns" icon="shapes" href="/v6/advanced/patterns" />
 </CardGroup>

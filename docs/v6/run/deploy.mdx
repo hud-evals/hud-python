@@ -83,7 +83,7 @@ docker rm -f run1
 `hud task start` returns the prompt; the agent works; `hud task grade` returns the reward — no source, no open port (`hud task list` shows what an image exposes).
 
 <Note>
-**Reproducible by construction.** Each rollout gets its **own fresh container**, so results reproduce across runs and machines and one rollout never leaks state into the next. Keep per-task setup in [`@env.initialize`](/v6/reference/environment#lifecycle-hooks) so every run starts from the same state.
+**Reproducible by construction.** Each rollout gets its **own fresh container**, so results reproduce across runs and machines and one rollout never leaks state into the next. Keep per-task setup in [`@env.initialize`](/v6/core/environment#lifecycle-hooks) so every run starts from the same state.
 </Note>
 
 <Note>

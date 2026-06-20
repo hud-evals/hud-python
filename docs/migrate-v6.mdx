@@ -119,7 +119,7 @@ v5 served an MCP server via `env.run(transport=...)`. v6 serves its control chan
 
 ## Converting with an agent
 
-The conversion is mechanical, so the fastest path is to let your coding agent do it. Add the HUD docs to your agent — they're available as an MCP server at `docs.hud.ai/mcp`, or use the **Copy / Claude / ChatGPT** buttons at the top of any docs page — then point it at this guide and the [Environment reference](/v6/reference/environment) and ask it to adapt your `env.py`. A prompt like:
+The conversion is mechanical, so the fastest path is to let your coding agent do it. Add the HUD docs to your agent — they're available as an MCP server at `docs.hud.ai/mcp`, or use the **Copy / Claude / ChatGPT** buttons at the top of any docs page — then point it at this guide and the [Environment reference](/v6/core/environment) and ask it to adapt your `env.py`. A prompt like:
 
 > Convert this v5 HUD environment to v6 using the migration guide at docs.hud.ai. Rename scenarios to tasks, replace registered tools with the capability they imply (shell/files → `ssh`, browser → `cdp`, computer-use → `rfb`, custom tools → `mcp`), switch `env("name", ...)` to calling the task, and fix the `hud.tools` imports below.
 
@@ -149,10 +149,10 @@ The rule of thumb: **grading types move to `hud.graders`, tools become capabilit
 ## Next steps
 
 <CardGroup cols={2}>
-<Card title="Environment reference" icon="cube" href="/v6/reference/environment">
+<Card title="Environment reference" icon="cube" href="/v6/core/environment">
   Define capabilities, lifecycle hooks, and tasks.
 </Card>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks">
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks">
   Define tasks, collect tasksets, and grade runs.
 </Card>
 <Card title="Package & deploy" icon="rocket" href="/v6/run/deploy">

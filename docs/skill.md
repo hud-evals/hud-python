@@ -50,7 +50,7 @@ tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
 
 Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/quickstart)
-and [Tasks](/v6/reference/tasks).
+and [Tasks](/v6/core/tasks).
 
 **Capabilities** give the agent something to act on (declare on the env; the
 harness brings its own tools):
@@ -64,8 +64,8 @@ env.workspace("/workspace")
 
 `ssh` (shell+files; `env.workspace(root)` runs the sandbox for you),
 `mcp`, `cdp` (browser), `rfb` (computer-use), `robot` (robot policies). Cite
-[Environments](/v6/reference/environment) and
-[Capabilities](/v6/reference/capabilities).
+[Environments](/v6/core/environment) and
+[Capabilities](/v6/core/capabilities).
 
 ### MCP capability — in-process tool server
 
@@ -113,7 +113,7 @@ async def my_task(param: str = "default"):
 ```
 
 The agent sees MCP tools alongside HUD's own harness tools — no extra wiring
-needed in the template. Cite [Capabilities](/v6/reference/capabilities).
+needed in the template. Cite [Capabilities](/v6/core/capabilities).
 
 **Run / scale / train:** [Models](/v6/run/models),
 [Deploy](/v6/run/deploy), [Training](/v6/run/training).
@@ -137,19 +137,19 @@ resources (ports, file handles) are not released otherwise.
 Once `hud eval env.py model` passes locally, two commands push it to the platform:
 
 ```bash
-hud deploy .            # package and deploy the environment (gives it a platform id)
-hud sync tasks env.py   # upload the tasks list, linked to the deployed environment
+hud deploy .                     # package and deploy the environment (gives it a platform id)
+hud sync tasks my-taskset env.py # upload tasks from env.py to the "my-taskset" taskset (name first, source second)
 ```
 
 Then run at scale across models with `group=` for reward spread:
 
 ```python
 from hud import Taskset
-from hud.agents import load_agent
+from hud.agents import create_agent
 
 taskset = Taskset.from_api("my-env")
-for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-4o"]:
-    job = await taskset.run(load_agent(model), group=8)
+for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
+    job = await taskset.run(create_agent(model), group=8)
     print(f"{model}: {job.reward:.2f}")
 ```
 
@@ -234,7 +234,7 @@ answer in a different format, but never credit the shape alone. The cheapest
 path that scores *without doing the work* must sit at or below the floor.
 
 **Cite:** [/v6/run/signal](/v6/run/signal) ("Resist the cheapest
-path"), [Graders](/v6/reference/graders).
+path"), [Graders](/v6/core/graders).
 
 ### 2. All-equal rewards → no within-group spread
 
@@ -334,7 +334,7 @@ lower. Compose graders with `combine` so subscores make a partial reward
 legible and monotonicity violations visible.
 
 **Cite:** [/v6/run/signal](/v6/run/signal) ("Align the prompt and the
-grader"), [Graders](/v6/reference/graders).
+grader"), [Graders](/v6/core/graders).
 
 ---
 
@@ -347,7 +347,7 @@ grader"), [Graders](/v6/reference/graders).
 - Compose: `await combine(...)` (positive weights normalize to 1.0).
 - Structured answers: `@env.template(returns=MyModel)` → answer is `Answer[T]`.
 
-Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
+Cite [Graders](/v6/core/graders) and [Types](/v6/core/types).
 
 ---
 
@@ -361,7 +361,7 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 - No v5 idioms anywhere.
 
 When unsure about an API, read the page rather than guess:
-[Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·
-[Capabilities](/v6/reference/capabilities) · [Agents](/v6/reference/agents) ·
-[Graders](/v6/reference/graders) · [Types](/v6/reference/types) ·
-[CLI](/v6/reference/cli).
+[Environment](/v6/core/environment) · [Tasks & Tasksets](/v6/core/tasks) ·
+[Capabilities](/v6/core/capabilities) · [Agents](/v6/core/agents) ·
+[Graders](/v6/core/graders) · [Types](/v6/core/types) ·
+[CLI](/v6/core/cli).

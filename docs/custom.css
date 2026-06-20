@@ -74,6 +74,36 @@ body {
   letter-spacing: -0.01em;
 }
 
+/* "Part N" step labels: look like an H3 (same font/size/weight, italic) but are
+   plain divs — no heading anchor, much less space above, indented from the side. */
+#content .part-label {
+  font-family: "Apfel Grotezk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: -0.01em;
+  color: var(--tw-prose-headings);
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+/* "See also" reference notes under code blocks: snug against the block above,
+   smaller and paler than body text. Light + dark variants. */
+#content .docs-ref {
+  margin-top: -1.25rem !important;   /* pull up tight under the previous block */
+  font-size: 0.82em;
+  color: #8a8a8a;
+}
+#content .docs-ref a {
+  color: #8a8a8a;
+}
+.dark #content .docs-ref {
+  color: #8a8a8a;
+}
+.dark #content .docs-ref a {
+  color: #8a8a8a;
+}
+
 /* Warm gold text selection (site accent --accent #ffc98c). */
 ::selection {
   background-color: rgba(255, 201, 140, 0.45);
@@ -143,6 +173,30 @@ body::after {
   border-color: oklch(1 0 0 / 0.1);
 }
 
+/* Tight list: collapse the inter-item spacing for a compact, inline-feeling
+   bulleted list (used on the intro's "what's in an environment" breakdown). */
+#content .tight-list ul,
+#content .tight-list ol {
+  margin-top: -1.1rem !important;
+  margin-bottom: -1.1rem !important;
+}
+#content .tight-list li {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+  line-height: 1.4 !important;
+}
+/* loose markdown lists wrap each item's text in a <p>; kill its margins too */
+#content .tight-list li > p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+/* inside a quotation, keep the list within the quote padding (no negative pull) */
+#content blockquote.tight-list ol,
+#content blockquote.tight-list ul {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
 /* Blockquotes: gold left rule, like a pull-quote. */
 #content blockquote {
   border-left: 2px solid #c0960c;
@@ -160,15 +214,33 @@ body::after {
   border-spacing: 0;
   overflow: hidden;
 }
+/* separate borders drop the default row/header rules — add them back so the
+   table reads as a grid, not floating text. `separate` also zeroes the cell
+   padding, so restore horizontal/vertical breathing room (incl. the first
+   column, which was sitting flush against the left border). */
+#content th,
+#content td {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 0.625rem 1rem;
+}
+#content tbody tr:last-child td {
+  border-bottom: none;
+}
 #content th {
-  background-color: rgba(0, 0, 0, 0.02);
+  background-color: rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid #e5e5e5;
   font-weight: 600;
 }
 .dark #content table {
   border-color: rgba(255, 255, 255, 0.1);
 }
+.dark #content th,
+.dark #content td {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
 .dark #content th {
   background-color: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(255, 255, 255, 0.12);
 }
 
 /* ── Cards ────────────────────────────────────────────────────────────────
@@ -177,10 +249,10 @@ body::after {
    rounding (clean, not brutalist). The hover edge is the theme's amber primary.
    Values are the platform's exact oklch tokens. */
 .card {
-  background: oklch(1 0 0) !important;
-  border: 1px solid oklch(0.922 0.005 325.62) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #ffffff 30%, #fafafa 72%, #f9f9f9 100%) !important;
+  border: 1px solid #e5e5e5 !important;
   border-radius: 12px !important;
-  box-shadow: none !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.03) !important;
   transition: border-color 150ms ease;
 }
 .dark .card {
@@ -215,4 +287,100 @@ body::after {
 /* Callouts (Note/Warning/Tip): match the card radius + hairline language. */
 .callout {
   border-radius: 12px !important;
+}
+
+/* Protocol loop diagram: tint only the Capabilities participant box a light
+   blue (mermaid has no per-participant color; it tags each actor box with a
+   `name` attribute, so target that one). */
+#content .mermaid rect.actor[name="Caps"] {
+  fill: #eaf3ff !important;
+  stroke: #7aa9e0 !important;
+}
+/* Dark mode only: the Capabilities box (light blue) and the "agent works"
+   highlight band (light gray) keep their light fills in dark mode, leaving
+   mermaid's light text unreadable on them. Darken just those two so the text
+   reads — light-mode visuals are untouched. */
+.dark #content .mermaid rect.actor[name="Caps"] {
+  fill: #15314f !important;
+  stroke: #5a8fd0 !important;
+}
+.dark #content .mermaid rect.rect,
+.dark #content .mermaid rect[fill="rgb(238,238,238)"] {
+  fill: #2b2b30 !important;
+}
+
+/* Flowchart edge labels (capabilities / humans measure / agent improves):
+   mermaid's default label box is white, which shows as a box on the #fafafa
+   page. Match it to the page background instead — no visible box, but the box
+   still masks the connector line so it never strikes through the text. Page bg
+   per docs.json: #fafafa light, #17151b dark. */
+#content .mermaid .edgeLabel,
+#content .mermaid .edgeLabel p,
+#content .mermaid .edgeLabel span,
+#content .mermaid .edgeLabel foreignObject div {
+  background: #fafafa !important;
+  background-color: #fafafa !important;
+}
+#content .mermaid .edgeLabel rect {
+  fill: #fafafa !important;
+}
+.dark #content .mermaid .edgeLabel,
+.dark #content .mermaid .edgeLabel p,
+.dark #content .mermaid .edgeLabel span,
+.dark #content .mermaid .edgeLabel foreignObject div {
+  background: #17151b !important;
+  background-color: #17151b !important;
+}
+.dark #content .mermaid .edgeLabel rect {
+  fill: #17151b !important;
+}
+/* Center subgraph (cluster) titles. */
+#content .mermaid .cluster-label,
+#content .mermaid .cluster-label p,
+#content .mermaid .cluster-label div {
+  text-align: center !important;
+  width: 100% !important;
+}
+
+/* ── "Core Principles" boxes ──────────────────────────────────────────────
+   Custom JSX divs sit outside Mintlify's prose scope, so the bold lead-in
+   doesn't inherit prose colors (it went near-black on dark). Theme the
+   surface + text explicitly for both modes. */
+.principles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.principle {
+  background: #f7f7f8;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 16px 20px;
+  color: #262626;
+}
+.principle strong {
+  color: #0a0a0a;
+}
+.dark .principle {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #d4d4d8;
+}
+.dark .principle strong {
+  color: #fafafa;
+}
+
+/* ── Wider reading column on landscape/large screens ──────────────────────
+   Mintlify caps the prose measure fairly narrow; give it a bit more room once
+   there's space (≥1024px). Kept to ~76rem so long-form text stays readable
+   rather than going full-bleed. Per-page `mode: "wide"` still works on top. */
+@media (min-width: 1024px) {
+  #content-area,
+  #content-container {
+    max-width: 100% !important;
+  }
+  #content {
+    max-width: 76rem !important;
+    margin-inline: auto;
+  }
 }

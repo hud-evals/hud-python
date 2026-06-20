@@ -20,7 +20,7 @@ from hud.capabilities import Capability
 
 ## The `Capability` dataclass
 
-A capability is `(name, protocol, url, params)` — concrete wire data carrying the real address of something serving the protocol.
+A capability is `(name, protocol, url, params)` - concrete wire data carrying the real address of something serving the protocol.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -29,36 +29,32 @@ A capability is `(name, protocol, url, params)` — concrete wire data carrying 
 | `url` | `str` | Connection URL. |
 | `params` | `dict` | Protocol-specific connection params. |
 
-Each protocol has a factory (`Capability.ssh`, `.mcp`, `.cdp`, `.rfb`, `.robot`) that normalizes the URL and fills defaults; `cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it.
+Each protocol has a **factory** (`Capability.ssh`, `.mcp`, `.cdp`, `.rfb`, `.robot`) - a classmethod that builds a valid `Capability` for that protocol, so you don't need to fill in the `name`, `protocol`, `url`, and `params` fields by hand. It normalizes the URL (fills in the default scheme and port), sets the right `protocol` id, and packs the protocol-specific params (e.g. `host_pubkey` for `ssh`, `display` for `rfb`). `cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it on the wire.
 
 ## Spinning up a capability
 
-Every capability points at a daemon. For one that already exists, pass the factory to the constructor. For a daemon the **environment** runs itself, the pattern is always the same: start it in `@env.initialize`, **block until it's listening**, publish its address with `env.add_capability(...)`, and tear it down in `@env.shutdown`. The env doesn't accept a client connection until every initialize hook returns, so waiting for the port closes the startup race.
+Every capability points at a daemon. If the daemon already exists (a managed service, a remote box), just describe it with its factory and you're done. The case worth a closer look is **a daemon the environment runs itself** - an MCP server, a browser, a VNC display. The flow is the same four steps every time:
 
-A small readiness helper the snippets below reuse:
+```python env.py
+@env.initialize
+async def _up():
+    start_daemon(host="127.0.0.1", port=PORT)            # 1. launch it (subprocess / task)
+    await wait_until_listening("127.0.0.1", PORT)         # 2. block until it accepts connections
+    env.add_capability(Capability.mcp(name="tools",      # 3. publish its address
+                                      url=f"http://127.0.0.1:{PORT}/mcp"))
 
-```python
-import asyncio
-import socket
-
-async def _listening(host: str, port: int, timeout: float = 15.0) -> None:
-    """Block until host:port accepts a connection — call before publishing."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        try:
-            socket.create_connection((host, port), timeout=0.5).close()
-            return
-        except OSError:
-            await asyncio.sleep(0.1)
-    raise RuntimeError(f"nothing listening on {host}:{port}")
+@env.shutdown
+async def _down():
+    stop_daemon()                                        # 4. tear it down with the env
 ```
 
-Bind every daemon to `127.0.0.1`: a loopback capability is forwarded through the env's one control port (see [Bindings are always reachable](#bindings-are-always-reachable)), so nothing else needs publishing.
+**Wait until it's actually listening (step 2).** Launching a subprocess or background task returns *before* the daemon has bound its port - publish the capability now and an agent can connect before anything is there to answer. The environment runs *every* `@env.initialize` hook to completion before it accepts a single client, so blocking here is what guarantees the capability is live the moment any agent connects. The robust way is to poll the port in a loop until it answers (as the example envs do); a brief `asyncio.sleep` is fine for a daemon you know starts fast.
 
-### `ssh` — a sandboxed shell
+**Bind to `127.0.0.1` (step 1 and 3).** Bind every daemon to `127.0.0.1` so it's only reachable from inside the environment - that's exactly what you want, because <u>the environment exposes a single control port and nothing else</u>. The HUD client transparently forwards a `127.0.0.1` capability through that one control port to the daemon inside; a capability that's already on a public address is used as-is. So you bind, publish, and never think about networking - <u>one port in, every capability reachable</u>.
 
-The shell case is built in. A [`Workspace`](#workspace) is a sandboxed directory the agent gets over `ssh`; `env.workspace(root)` starts it, publishes its `ssh` capability, and stops it with the env — one line, no hook:
+### `ssh` - a sandboxed shell
+
+The shell case is built in via [`Workspace`](#workspace) - a built-in daemon that manages a `bwrap`-isolated directory and serves it over `ssh`. `env.workspace(root)` starts it, publishes its `ssh` capability, and stops it with the env - one line, no hook:
 
 ```python env.py
 from hud.environment import Environment
@@ -68,7 +64,7 @@ env.workspace("workspace")   # publishes "shell" (ssh/2) when the env serves
 ```
 
 <Note>
-Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation (`bwrap`) is Linux-only — unisolated elsewhere, isolated in a built image.
+Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation (`bwrap`) is Linux-only - unisolated elsewhere, isolated in a built image.
 </Note>
 
 To run a workspace yourself, drive its lifecycle and publish `ws.capability()` by hand:
@@ -89,7 +85,7 @@ async def _down():
     await ws.stop()
 ```
 
-### `mcp` — your own tools
+### `mcp` - your own tools
 
 Serve bespoke tools on a [FastMCP](https://gofastmcp.com) server. The streamable-HTTP transport serves under `/mcp`, so that path is part of the published URL:
 
@@ -118,7 +114,7 @@ async def _up():
         _task = asyncio.create_task(
             server.run_async(transport="http", host="127.0.0.1", port=8040)
         )
-        await _listening("127.0.0.1", 8040)
+        await asyncio.sleep(1.0)               # wait until the server is ready
     env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8040/mcp"))
 
 @env.shutdown
@@ -131,7 +127,7 @@ async def _down():
 
 `Capability.mcp` accepts `ws`/`wss`/`http`/`https` URLs (no stdio) and an optional `auth_token=`.
 
-### `cdp` — a browser
+### `cdp` - a browser
 
 Launch Chromium with a DevTools port. Playwright ships the binary (`playwright install chromium`); run it as a subprocess so the CDP endpoint is reachable at `http://127.0.0.1:9222`:
 
@@ -160,7 +156,7 @@ async def _up():
             "--no-first-run",
             "--user-data-dir=" + tempfile.mkdtemp(prefix="cdp_"),
         )
-        await _listening("127.0.0.1", 9222)
+        await asyncio.sleep(1.0)               # wait until Chromium is ready
     env.add_capability(Capability.cdp(name="browser", url="http://127.0.0.1:9222"))
 
 @env.shutdown
@@ -174,7 +170,7 @@ async def _down():
 
 `Capability.cdp` defaults to port `9222` and takes an optional `target_id=`. (Add `--no-sandbox` only when running as root in a container.)
 
-### `rfb` — a virtual screen
+### `rfb` - a virtual screen
 
 Full computer-use is a VNC server over a virtual display. On Linux, `Xvfb` paints the framebuffer and `x11vnc` serves it (`apt install xvfb x11vnc`):
 
@@ -199,7 +195,7 @@ async def _up():
             "x11vnc", "-display", ":0", "-rfbport", "5900",
             "-localhost", "-forever", "-nopw",
         )
-        await _listening("127.0.0.1", 5900)
+        await asyncio.sleep(1.0)               # wait until VNC is ready
         _procs = (xvfb, vnc)
     env.add_capability(Capability.rfb(name="screen", url="rfb://127.0.0.1", display=0))
 
@@ -215,26 +211,46 @@ async def _down():
 
 `Capability.rfb` listens on `5900 + display` and takes an optional `password=`. Host multiple screens by publishing one `rfb` capability per `display`.
 
-### `Capability.robot`
+### `robot` - an observation/action loop
 
 ```text
 Capability.robot(*, name="robot", url, contract)
 ```
 
-The `openpi/0` control loop *(beta)*. This is an **openpi-like** protocol: it reuses openpi's wire format (msgpack with transparent, recursive numpy serialization) and its flat observation/action naming schema (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. It differs fundamentally in **role assignment** — in openpi a policy *server* answers inference requests; here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts in the world, replying with actions). `contract` is the environment's full self-describing schema — `robot_type`, `control_rate`, and every observation/action feature — carried in the manifest params so the agent wires itself with no shared config. The serving bridge binds an ephemeral loopback port, so publish this from an `@env.initialize` hook after `await bridge.start()`:
+The robot control loop *(beta)*, carried over the `openpi/0` wire protocol. It's an **openpi-like** protocol: it reuses openpi's wire format (msgpack with recursive numpy serialization) and its flat observation/action naming (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. The one fundamental difference is **role assignment** - in openpi a policy *server* answers inference requests, but here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts, replying with actions).
+
+The `contract` is the environment's full self-describing schema - `robot_type`, `control_rate`, and every observation/action feature - carried in the manifest so the agent wires itself with no shared config. The environment drives its simulator through a [`RobotEndpoint`](/v6/core/robots) (not the bridge directly, although possible), and the endpoint builds the capability for you once started:
 
 ```python
+endpoint = RobotEndpoint(MySimBridge())   # drive the sim only through the endpoint
+
 @env.initialize
 async def _up():
-    await bridge.start()
-    env.add_capability(Capability.robot(name="robot", url=bridge.url, contract=CONTRACT))
+    await endpoint.start()
+    env.add_capability(await endpoint.capability(contract=CONTRACT))
 ```
 
-See [Robots](/v6/reference/robots) for the bridge, the harness, and the contract spec.
+See [Robots](/v6/core/robots) for the bridge, the endpoint, the harness, and the contract spec.
 
-### Workspace
+## Harness clients
 
-`Workspace` is the standard shell daemon: a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). Attach one with `env.workspace(root, ...)` and the environment brings it up (keys, socket, accept loop) when it serves, tearing it down on `env.stop()`. Extra kwargs configure the workspace — mounts, network, env vars, guest path, fixed ports, your own keys:
+Spinning up a capability is the environment side. The harness side is the mirror: it **opens** a capability to get a live client it can drive. The capability clients live in `hud.capabilities`:
+
+| Client | Protocol |
+|--------|----------|
+| `SSHClient` | `ssh/2` (raw `asyncssh` connection via `.conn`) |
+| `MCPClient` | `mcp/2025-11-25` |
+| `CDPClient` | `cdp/1.3` |
+| `RFBClient` | `rfb/3.8` |
+| `RobotClient` | `openpi/0` - joins the registry on first open (the `robot` extra: numpy/openpi-client) |
+
+The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/core/agents)). To write your own harness, attach to the capability you need and define your tool spec.
+
+## Workspace
+
+A `Workspace` is not a capability - it's the built-in daemon that *serves* the `ssh` capability. It's the one capability HUD ships an implementation for; for `mcp`, `cdp`, and `rfb` you stand up the daemon yourself (above), but for a shell you just attach a workspace.
+
+Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). `env.workspace(root, ...)` wires its whole lifecycle: the environment brings it up (keys, socket, accept loop) when it serves and tears it down on `env.stop()`. Extra kwargs configure the sandbox - mounts, network, env vars, guest path, fixed ports, your own keys:
 
 ```python
 from hud.environment import Environment, Mount
@@ -247,7 +263,7 @@ env.workspace(
 )
 ```
 
-To run one yourself (outside an env), drive the lifecycle directly and publish `ws.capability()` as a concrete `ssh` capability:
+To run one outside an env, drive its lifecycle directly and publish `ws.capability()` as a concrete `ssh` capability:
 
 | Member | Description |
 |--------|-------------|
@@ -258,31 +274,10 @@ To run one yourself (outside an env), drive the lifecycle directly and publish `
 | `ws.ssh_url` / `ws.ssh_host_pubkey` | Connection address and host key. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
 
-Pass `mounts=[Mount("ro", src=..., dst=...)]` and `network=True` (both from `hud.environment`) to configure the sandbox.
-
-## Bindings are always reachable
-
-Every address in the manifest is dialable from where the client runs. A loopback daemon (a workspace, a browser in the same container) is transparently forwarded through the env's control port, so a container only ever publishes **one** port — bind your daemons to `127.0.0.1` and don't worry about the rest.
-
-## Harness clients
-
-A harness opens a capability to get a live client. The capability clients live in `hud.capabilities`:
-
-| Client | Protocol |
-|--------|----------|
-| `SSHClient` | `ssh/2` (raw `asyncssh` connection via `.conn`) |
-| `MCPClient` | `mcp/2025-11-25` |
-| `CDPClient` | `cdp/1.3` |
-| `RFBClient` | `rfb/3.8` |
-| `RobotClient` | `openpi/0` — joins the registry on first open (the `robot` extra: numpy/openpi-client) |
-
-The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
-
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Environments" icon="cube" href="/v6/build/environments" />
-<Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
-<Card title="Agents" icon="robot" href="/v6/reference/agents" />
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Environment" icon="cube" href="/v6/core/environment" />
+<Card title="Agents" icon="robot" href="/v6/core/agents" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
 </CardGroup>

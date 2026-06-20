@@ -49,7 +49,7 @@ tasks = [fix_add()]
 This task has no `answer = yield` — the deliverable is the **state of the workspace**, not a text answer.
 
 <Note>
-To start from an existing repo instead of seeding files inline, write it into the workspace root in `@env.initialize`, or pass `mounts=` (see [Capabilities](/v6/reference/capabilities)).
+To start from an existing repo instead of seeding files inline, write it into the workspace root in `@env.initialize`, or pass `mounts=` (see [Capabilities](/v6/core/capabilities)).
 </Note>
 
 ## Run it
@@ -97,8 +97,8 @@ tasks = [fix_add(target=t) for t in ("test_calc.py", "test_utils.py", "test_io.p
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
-<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Environment reference" icon="cube" href="/v6/core/environment" />
+<Card title="Graders" icon="scale-balanced" href="/v6/core/graders" />
 <Card title="Designing tasks for signal" icon="signal" href="/v6/run/signal" />
 <Card title="Ops diagnostics" icon="stethoscope" href="/v6/cookbooks/ops-diagnostics" />
 </CardGroup>
