@@ -64,8 +64,10 @@ class BaseTrainingClient:
 
                 for gm in list_gateway_models():
                     if self.model in (gm.id, gm.name, gm.model_name):
-                        self._model_id = gm.id
-                        break
+                        resolved = gm.id or gm.model_name
+                        if resolved:
+                            self._model_id = resolved
+                            break
                 else:
                     raise ValueError(
                         f"Model {self.model!r} not found. "
@@ -81,9 +83,10 @@ class BaseTrainingClient:
         self, suffix: str, payload: dict[str, Any], *, max_retries: int = 0
     ) -> dict[str, Any]:
         url = await self._train_url(suffix)
-        # forward_backward/backward accumulate gradients in place and are not
-        # idempotent, so they default to no retry (a retry double-counts a batch).
-        # optim_step is deduped server-side and opts into retries explicitly.
+        # Training POSTs are not safe to auto-retry: forward_backward/backward
+        # accumulate gradients in place (a retry double-counts a batch) and
+        # optim_step saves a checkpoint (a retry can save a step twice and poison
+        # the run). All callers pass max_retries=0; the server owns recovery.
         return await make_request(
             "POST", url, json=payload, api_key=self._api_key, max_retries=max_retries
         )
@@ -111,9 +114,11 @@ class BaseTrainingClient:
         step that saves state + sampler weights and advances the model's active
         checkpoint, so the gateway serves the updated weights.
 
-        Safe to retry: the service dedups against the model's checkpoint counter
-        and the in-flight step, so a network retry returns the already-committed
-        step instead of applying the optimizer twice."""
+        One-shot, never retried: a duplicate submit is what poisons a training
+        run (the same step number saved twice). The server owns recovery — it
+        adopts an already-saved step on a colliding save and rebuilds a poisoned
+        run from head on the next call — so a failed step is safe to simply
+        re-run from the training loop."""
         request = OptimStepRequest(
             learning_rate=learning_rate,
             beta1=beta1,
@@ -121,7 +126,7 @@ class BaseTrainingClient:
             eps=eps,
             weight_decay=weight_decay,
         )
-        data = await self._post("optim-step", request.model_dump(), max_retries=3)
+        data = await self._post("optim-step", request.model_dump(), max_retries=0)
         return OptimStepResult.model_validate(data)
 
     async def checkpoints(self) -> list[CheckpointResponse]:
