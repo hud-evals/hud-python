@@ -99,7 +99,32 @@ async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Pat
     # agent saw and the runtime the rollout executed against.
     assert run.prompt == "add:2:3"
     assert run.runtime is not None
-    assert run.reward == 0.0  # never graded
+    assert run.reward == 0.0  # graded best-effort, but the agent never answered → 0.0
+
+
+class _AnswerThenBoomAgent(Agent):
+    """Records a correct answer, then raises — a mid-run failure after the env
+    already has a gradable answer in hand."""
+
+    def __init__(self, fn: Any) -> None:
+        self._fn = fn
+
+    async def __call__(self, run: Any) -> None:
+        run.trace.content = self._fn(run.prompt)
+        raise RuntimeError("agent exploded after answering")
+
+
+async def test_mid_run_failure_still_grades_best_effort(env_file: Path) -> None:
+    # The agent answers correctly, then fails. The env is still alive, so the
+    # run is graded best-effort: the reward is captured even though it errored.
+    run = await rollout(
+        _add_task(2, 3), _AnswerThenBoomAgent(_solve_add), runtime=LocalRuntime(env_file)
+    )
+
+    assert run.trace.is_error
+    assert "agent exploded after answering" in (run.trace.error or "")
+    assert run.reward == 1.0  # graded despite the failure
+    assert run.trace.status == "error"  # the failure is preserved, not masked
 
 
 class _SlowAgent(Agent):

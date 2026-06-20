@@ -50,6 +50,21 @@ def test_get_agent_kwargs_model_precedence_and_flags() -> None:
     assert kwargs["verbose"] is True
 
 
+def test_get_agent_kwargs_normalizes_gateway_model_alias() -> None:
+    cfg = EvalConfig(agent_type="openai_compatible", model="glm-5.2")
+
+    assert cfg.get_agent_kwargs()["model"] == "z-ai/glm-5.2"
+
+
+def test_get_agent_kwargs_normalizes_config_model_alias() -> None:
+    cfg = EvalConfig(
+        agent_type="openai_compatible",
+        agent_config={"openai_compatible": {"model": "glm-5.2"}},
+    )
+
+    assert cfg.get_agent_kwargs()["model"] == "z-ai/glm-5.2"
+
+
 def test_get_agent_kwargs_requires_agent_type() -> None:
     with pytest.raises(ValueError, match="agent_type must be set"):
         EvalConfig().get_agent_kwargs()
@@ -184,6 +199,31 @@ def test_merge_cli_overrides_fields() -> None:
     assert merged.agent_type is not None and merged.agent_type.value == "openai"
     assert merged.task_ids == ["a", "b"]
     assert merged.max_steps == 7
+
+
+def test_merge_cli_resolves_gateway_model_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo
+
+    model = GatewayModelInfo(
+        id="z-ai/glm-5.2",
+        model_name="z-ai/glm-5.2",
+        sdk_agent_type="openai_compatible",
+        provider=GatewayProviderInfo(name="openai"),
+    )
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
+
+    merged = EvalConfig().merge_cli(agent="glm-5.2")
+
+    assert merged.agent_type is not None and merged.agent_type.value == "openai_compatible"
+    assert merged.model == "z-ai/glm-5.2"
+
+
+def test_merge_cli_config_model_alias_is_normalized() -> None:
+    merged = EvalConfig(agent_type="openai_compatible").merge_cli(
+        config=["openai_compatible.model=glm-5.2"]
+    )
+
+    assert merged.get_agent_kwargs()["model"] == "z-ai/glm-5.2"
 
 
 def test_merge_cli_namespaced_config() -> None:

@@ -66,93 +66,12 @@
             "version": "v6",
             "default": true,
             "groups": [
-              { "group": "Start here", "pages": ["v6/index", "v6/quickstart"] },
-              { "group": "The Core", "pages": ["v6/protocol", "v6/core/environment", "v6/core/tasks", "v6/core/capabilities", "v6/core/agents", "v6/core/runtime", "v6/core/robots", "v6/core/graders", "v6/core/training", "v6/core/types", "v6/core/cli"] },
-              { "group": "Run & scale", "pages": ["v6/run/deploy", "v6/run/models", "v6/run/signal", "v6/run/training"] },
-              { "group": "Advanced", "pages": ["v6/advanced/integrations", "v6/advanced/subagents", "v6/advanced/chat", "v6/advanced/patterns", "v6/advanced/harbor-convert"] },
+              { "group": "Start here", "pages": ["v6/start/index", "v6/start/quickstart"] },
+              { "group": "Overview", "pages": ["v6/build/overview", "v6/core/protocol"] },
+              { "group": "Core", "pages": ["v6/core/environment", "v6/core/tasks", "v6/core/capabilities", "v6/core/agents", "v6/core/runtime", "v6/core/graders", "v6/core/advice", "v6/core/training", "v6/core/types", "v6/core/cli"] },
+              { "group": "Advanced", "pages": ["v6/advanced/extending", "v6/core/robots", "v6/advanced/harbor-convert"] },
               { "group": "Cookbooks", "pages": ["v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] },
-              { "group": "More", "pages": ["v6/faq", "migrate-v6", "contributing"] }
-            ]
-          },
-          {
-            "version": "v5",
-            "tag": "Legacy",
-            "groups": [
-              {
-                "group": "Get Started",
-                "pages": ["v5/index", "v5/llm-quickstart", "migrate-v6"]
-              },
-              {
-                "group": "Building Environments",
-                "pages": [
-                  "v5/building/scaffolding",
-                  "v5/building/tasks-and-evaluation",
-                  "v5/building/running-at-scale",
-                  "v5/building/environments-as-data"
-                ]
-              },
-              {
-                "group": "Running Agents",
-                "pages": [
-                  "v5/quick-links/models",
-                  "v5/quick-links/training",
-                  "v5/guides/integrations",
-                  "v5/guides/chat",
-                  "v5/tools/agents"
-                ]
-              },
-              {
-                "group": "Advanced",
-                "pages": [
-                  "v5/advanced/patterns",
-                  "v5/advanced/harbor-convert",
-                  "platform/publishing-leaderboards"
-                ]
-              },
-              {
-                "group": "SDK Reference",
-                "pages": [
-                  "v5/reference/environments",
-                  "v5/reference/tools",
-                  "v5/reference/native-graders",
-                  "v5/reference/evals",
-                  "v5/reference/agents",
-                  "v5/reference/types"
-                ]
-              },
-              {
-                "group": "Tools Reference",
-                "pages": [
-                  "v5/tools/computer",
-                  "v5/tools/coding",
-                  "v5/tools/filesystem",
-                  "v5/tools/memory",
-                  "v5/tools/web",
-                  "v5/tools/grounding"
-                ]
-              },
-              {
-                "group": "CLI Reference",
-                "pages": [
-                  "v5/reference/cli/overview",
-                  "v5/reference/cli/init",
-                  "v5/reference/cli/dev",
-                  "v5/reference/cli/build",
-                  "v5/reference/cli/deploy",
-                  "v5/reference/cli/link",
-                  "v5/reference/cli/push",
-                  "v5/reference/cli/analyze",
-                  "v5/reference/cli/debug",
-                  "v5/reference/cli/eval",
-                  "v5/reference/cli/rl",
-                  "v5/reference/cli/sync",
-                  "v5/reference/cli/misc"
-                ]
-              },
-              {
-                "group": "Community",
-                "pages": ["contributing"]
-              }
+              { "group": "More", "pages": ["v6/more/faq", "v6/more/migrate-v6", "v6/more/contributing"] }
             ]
           }
         ]
@@ -160,17 +79,34 @@
     ]
   },
   "redirects": [
-    { "source": "/building/:slug*", "destination": "/v5/building/:slug*" },
-    { "source": "/guides/:slug*", "destination": "/v5/guides/:slug*" },
-    { "source": "/quick-links/:slug*", "destination": "/v5/quick-links/:slug*" },
-    { "source": "/reference/:slug*", "destination": "/v5/reference/:slug*" },
-    { "source": "/tools/:slug*", "destination": "/v5/tools/:slug*" },
-    { "source": "/advanced/:slug*", "destination": "/v5/advanced/:slug*" },
-    { "source": "/llm-quickstart", "destination": "/v5/llm-quickstart" },
+    { "source": "/migrate-v6", "destination": "/v6/more/migrate-v6" },
+    { "source": "/contributing", "destination": "/v6/more/contributing" },
+    { "source": "/v6/faq", "destination": "/v6/more/faq" },
+    { "source": "/v6/migrate-v6", "destination": "/v6/more/migrate-v6" },
+    { "source": "/v6/contributing", "destination": "/v6/more/contributing" },
+    { "source": "/v6/index", "destination": "/v6/start/index" },
+    { "source": "/v6/quickstart", "destination": "/v6/start/quickstart" },
+    { "source": "/v6/protocol", "destination": "/v6/core/protocol" },
     { "source": "/v6/reference/:slug*", "destination": "/v6/core/:slug*" },
+    { "source": "/v6/build/protocol", "destination": "/v6/core/protocol" },
+    { "source": "/v6/build/environments", "destination": "/v6/core/environment" },
+    { "source": "/v6/build/tasks", "destination": "/v6/core/tasks" },
+    { "source": "/v6/build/agents", "destination": "/v6/core/agents" },
+    { "source": "/v6/build/run", "destination": "/v6/core/runtime" },
+    { "source": "/v6/build/train", "destination": "/v6/core/training" },
+    { "source": "/v6/build/advice", "destination": "/v6/core/advice" },
+    { "source": "/v6/run/models", "destination": "/v6/core/agents" },
+    { "source": "/v6/run/deploy", "destination": "/v6/core/runtime" },
+    { "source": "/v6/run/training", "destination": "/v6/core/training" },
+    { "source": "/v6/run/signal", "destination": "/v6/core/advice" },
+    { "source": "/v6/advanced/integrations", "destination": "/v6/advanced/extending" },
+    { "source": "/v6/advanced/patterns", "destination": "/v6/advanced/extending" },
+    { "source": "/v6/advanced/chat", "destination": "/v6/advanced/extending" },
+    { "source": "/v6/advanced/subagents", "destination": "/v6/advanced/extending" },
+    { "source": "/v6/start/overview", "destination": "/v6/build/overview" },
     { "source": "/cookbooks/ops-diagnostics", "destination": "/v6/cookbooks/ops-diagnostics" },
     { "source": "/cookbooks/codex-coding", "destination": "/v6/cookbooks/coding-agent" },
-    { "source": "/cookbooks/:slug*", "destination": "/v6/quickstart" }
+    { "source": "/cookbooks/:slug*", "destination": "/v6/start/quickstart" }
   ],
   "contextual": {
     "options": ["copy", "claude", "chatgpt", "perplexity"]
@@ -192,7 +128,7 @@
       "viewport": "width=device-width, initial-scale=1",
       "robots": "index, follow",
       "description": "OSS Evaluations and RL Environments SDK for AI Agent Developers.",
-      "og:title": "HUD Documentation — Evaluations and RL Environments.",
+      "og:title": "HUD Documentation - Evaluations and RL Environments.",
       "og:description": "OSS Evaluations and RL Environments SDK",
       "og:site_name": "hud",
       "twitter:site": "@hud_evals",

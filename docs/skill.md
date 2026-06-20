@@ -49,7 +49,7 @@ async def count_letter(word: str = "strawberry", letter: str = "r"):
 tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
 
-Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/quickstart)
+Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/start/quickstart)
 and [Tasks](/v6/core/tasks).
 
 **Capabilities** give the agent something to act on (declare on the env; the
@@ -115,18 +115,16 @@ async def my_task(param: str = "default"):
 The agent sees MCP tools alongside HUD's own harness tools — no extra wiring
 needed in the template. Cite [Capabilities](/v6/core/capabilities).
 
-**Run / scale / train:** [Models](/v6/run/models),
-[Deploy](/v6/run/deploy), [Training](/v6/run/training).
+**Run / scale / train:** [Models](/v6/core/agents),
+[Deploy](/v6/core/runtime), [Training](/v6/core/training).
 
 ---
 
 ## Local iteration and process model
 
-`hud eval tasks.py claude` is the canonical test loop for the split
-`env.py` + `tasks.py` layout (`hud init`); use `hud eval env.py claude` when
-tasks live in the same file. No cloud account, Docker, or SSH required for a
-local run. Use a cheap model while building (`claude --model claude-haiku-4-5`);
-switch to the target model to validate. Override the default step budget with
+`hud eval env.py model` is the canonical test loop — no cloud account, docker,
+or SSH required for a local MCP env. Use a cheap model while building; switch
+to the target model to validate. Override the default 10-step budget with
 `--max-steps`.
 
 Each rollout runs in a **fresh subprocess**: module-level state resets between
@@ -136,11 +134,11 @@ resources (ports, file handles) are not released otherwise.
 
 ## Local → platform
 
-Once local eval passes, two commands push it to the platform:
+Once `hud eval env.py model` passes locally, two commands push it to the platform:
 
 ```bash
-hud deploy .                      # build and register the environment
-hud sync tasks my-taskset .       # upload tasks from the project directory
+hud deploy .                     # package and deploy the environment (gives it a platform id)
+hud sync tasks my-taskset env.py # upload tasks from env.py to the "my-taskset" taskset (name first, source second)
 ```
 
 Then run at scale across models with `group=` for reward spread:
@@ -155,7 +153,56 @@ for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
     print(f"{model}: {job.reward:.2f}")
 ```
 
-Cite [Deploy](/v6/run/deploy), [Models](/v6/run/models), [Training](/v6/run/training).
+Cite [Deploy](/v6/core/runtime), [Models](/v6/core/agents), [Training](/v6/core/training).
+
+---
+
+## Training scenarios
+
+Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug>`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training](/v6/run/training) and [reference: Training](/v6/reference/training).
+
+**Standard managed loop.** Roll out a batch with `group=` for within-group spread, hand the `Run`s to `step` (one `forward_backward` + one `optim_step`), repeat.
+
+```python
+agent = create_agent(slug, completion_kwargs={"extra_body": {"return_token_ids": True}})
+trainer = TrainingClient(slug)
+session = await Job.start(slug, group=8)
+for _ in range(steps):
+    start = len(session.runs)
+    await taskset.run(agent, job=session)
+    result = await trainer.step(session.runs[start:], learning_rate=1e-5, group_size=8)
+```
+
+**Watch progress from the loop.** Read the checkpoint tree — don't tail logs or count processes. Each node carries `mean_reward`, `loss_fn`, counts, and a `metrics` blob (reward spread, KL, clip fraction).
+
+```python
+for c in await trainer.checkpoints():
+    print(c.name, c.mean_reward, c.metrics.get("reward_std"))
+head = await trainer.head()           # the active checkpoint
+```
+
+**Pick the loss.** `step`/`forward_backward` take `loss_fn` (default `importance_sampling`; also `ppo`, `cispo`, `dro`, `cross_entropy`). Prefer `ppo` when a single lucky rollout could otherwise blow up the update — it clips the IS ratio. Discover the supported set with `await trainer.available_losses()`; leave `loss_fn_config` at `None` unless a provider documents a key.
+
+**Two-sided / self-play.** When one episode yields trajectories for *both* sides (the agent's `Run` plus an opponent move sampled inside the env), train both at once: build a `TrajectoryPayload` for the opponent with the flipped reward and pass it alongside the `Run`. `forward_backward` accepts `str | Run | TrajectoryPayload` mixed; use `group_size` to pair each episode so the GRPO advantage is computed within the pair.
+
+```python
+combined: list[Run | TrajectoryPayload] = []
+for run in batch:
+    combined.append(run)                                              # agent side
+    combined.append(TrajectoryPayload(samples=opp, reward=1.0 - run.reward))  # opponent
+await trainer.forward_backward(combined, loss_fn="ppo", group_size=2)
+await trainer.optim_step(learning_rate=1e-5)
+```
+
+Get the opponent's tokens from the gateway call with `extra_body={"return_token_ids": True}` + `logprobs=True`, then read `choice.prompt_token_ids` / `choice.token_ids`.
+
+**Reset when the objective changes.** If you edit the reward or the environment mid-run, the current head encodes the *old* objective — continuing from it trains a contaminated policy, and the next steps mostly undo the old shaping. Roll the head back to a checkpoint from before the change (or fork a fresh model):
+
+```python
+await trainer.set_head(checkpoint_id)   # or: hud models head <slug> --set <id>
+```
+
+**Custom loss / primitives.** Author the loss yourself (e.g. double-sided IS) with `forward_backward_custom` — the service returns per-token tensors, your torch function makes the gradients (needs `pip install 'hud-python[train]'`). Drop to `forward_backward` + `optim_step` directly when you want the `forward_backward` metrics or gradient accumulation (`num_substeps`) in between; `step` is just the two chained.
 
 ---
 
@@ -214,14 +261,14 @@ If you catch yourself writing any of these, stop and convert:
 | `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` |
 | `from hud.tools import ...` | tools are gone; result types live in `hud.agents.types` |
 
-For an existing v5 env, follow [Migrate to v6](/migrate-v6).
+For an existing v5 env, follow [Migrate to v6](/v6/more/migrate-v6).
 
 ---
 
 ## Task-quality doctrine — push back when you see these
 
 For each trigger: **what to tell the user**, then **the page to cite**. The
-canonical reference is [Designing tasks for signal](/v6/run/signal).
+canonical reference is [Designing tasks for signal](/v6/core/advice).
 
 ### 1. Constant / echo / shape-only grader → reward hacking
 
@@ -235,7 +282,7 @@ rewarded is exploited. Grade **substance, not surface form**: credit a correct
 answer in a different format, but never credit the shape alone. The cheapest
 path that scores *without doing the work* must sit at or below the floor.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Resist the cheapest
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Resist the cheapest
 path"), [Graders](/v6/core/graders).
 
 ### 2. All-equal rewards → no within-group spread
@@ -251,8 +298,8 @@ of trainability is *within-group spread*, not the mean. Run a group
 All-one (saturated) is wasted surface; all-zero at small group sizes may still
 be learnable at training scale, but investigate it.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Signal lives in
-within-group spread"), [Training](/v6/run/training).
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Signal lives in
+within-group spread"), [Training](/v6/core/training).
 
 ### 3. Public-benchmark substrate → contamination
 
@@ -267,7 +314,7 @@ codebase operated to generate fresh logs), but not handed to the agent verbatim.
 Keep real failures and edge cases — they're the signal; don't fabricate
 synthetic substrate to look real.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Source substrate that
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Source substrate that
 isn't memorized").
 
 ### 4. Single-shot task → needs multi-step
@@ -282,7 +329,7 @@ and a problem that requires integrating evidence across more than one
 observation (the [ops-diagnostics](/v6/cookbooks/ops-diagnostics) cookbook is a
 model example).
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Make it multi-step").
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Make it multi-step").
 
 ### 5. Comparing only similar top models → need a spanning set
 
@@ -295,7 +342,7 @@ task can look broken. Evaluate against a deliberate **weak anchor and a strong
 anchor**, not a cluster of top performers. Also state the model+reasoning regime
 you calibrated against; difficulty has no absolute meaning.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Difficulty is relative to
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Difficulty is relative to
 a specific model").
 
 ### 6. Same-shape taskset → needs diversity
@@ -309,7 +356,7 @@ substrate sources, deliverable shapes, and capabilities exercised**, and spread
 the **difficulty distribution** (don't pile up at score 0 or saturation). Size
 the set to the training run so it doesn't overfit in the first few steps.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Compose a taskset that
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Compose a taskset that
 isn't all one shape").
 
 ### 7. Answer leakage in the environment or prompt
@@ -322,7 +369,7 @@ eval, or author oracle/grading scripts left readable.
 root-cause leaks, keep grader-only vocabulary out of the prompt (weave needed
 context naturally), don't imply it's a test, and strip author artifacts.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Keep the answer out of
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Keep the answer out of
 the environment").
 
 ### 8. Prompt ↔ grader misalignment
@@ -335,7 +382,7 @@ Enforce score–quality monotonicity: better substantive work must never score
 lower. Compose graders with `combine` so subscores make a partial reward
 legible and monotonicity violations visible.
 
-**Cite:** [/v6/run/signal](/v6/run/signal) ("Align the prompt and the
+**Cite:** [/v6/core/advice](/v6/core/advice) ("Align the prompt and the
 grader"), [Graders](/v6/core/graders).
 
 ---
@@ -361,6 +408,18 @@ Cite [Graders](/v6/core/graders) and [Types](/v6/core/types).
 - A group of rollouts shows reward spread.
 - The task is multi-step and free of answer leakage.
 - No v5 idioms anywhere.
+
+**Inspect runs after the fact** with `hud jobs` and `hud trace`:
+
+```bash
+hud jobs                    # list recent jobs
+hud jobs <job-id>           # list traces in a job (reward, status, error per rollout)
+hud trace <trace-id>        # render one rollout — agent turns, tool calls, results
+hud trace <trace-id> --json # raw event list (pipe to jq for filtering)
+```
+
+Set `HUD_TELEMETRY_LOCAL_DIR` to write spans locally; `hud trace` reads from disk
+first and falls back to the platform API. Cite [CLI](/v6/reference/cli).
 
 When unsure about an API, read the page rather than guess:
 [Environment](/v6/core/environment) · [Tasks & Tasksets](/v6/core/tasks) ·

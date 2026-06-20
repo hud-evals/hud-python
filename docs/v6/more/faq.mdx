@@ -1,0 +1,124 @@
+---
+title: "FAQ"
+description: "Answers to the questions that come up most when getting started with HUD."
+icon: "circle-question"
+---
+
+Short answers to the questions that come up most. For the full story, each answer links to the page that covers it.
+
+## Why HUD
+
+<AccordionGroup>
+<Accordion title="Why HUD instead of building my own eval or RL harness?">
+Rolling your own usually means three recurring chores: re-wiring tools for each model, re-packaging an artifact per task, and gluing rewards into a trainer. HUD removes all three:
+
+- **The environment never needs rebuilding as models change.** It exposes a *capability* - a real connection like an `ssh` shell or a browser - that any model or harness drives directly, so a harness released years from now still runs it.
+- **One task definition is a whole dataset.** A generative task mints as many concrete tasks as you want from a single definition; you don't author and store one artifact per task.
+- **Nothing downstream is locked in.** A graded rollout is just a `trace_id` and a `reward`, so the same runs you eval today feed any trainer tomorrow - your own loop or a stack like Tinker, slime, or Fireworks - with no environment-side glue, on any rollout infra.
+
+You write the environment once; the model, harness, trainer, and infra all stay swappable. See [Introduction](/v6/start/index).
+</Accordion>
+</AccordionGroup>
+
+## Setup & requirements
+
+<AccordionGroup>
+<Accordion title="Do I need Docker?">
+Not for the quickstart. `hud eval`, `hud serve`, and gateway runs need **no Docker** - you write a `tasks.py` and run it. You only need Docker for the **packaging path**: building a portable image from `Dockerfile.hud` and the build step of `hud deploy`. See [Package & deploy](/v6/core/runtime).
+</Accordion>
+
+<Accordion title="Do I need an API key?">
+You need **one** of:
+- A **`HUD_API_KEY`** ([hud.ai/project/api-keys](https://hud.ai/project/api-keys)) - routes models through the HUD gateway (the default when no provider key is set) and traces every rollout. One key for everything.
+- A **provider key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) - to call that provider directly instead of the gateway.
+
+See [Run on any model](/v6/core/agents).
+</Accordion>
+
+<Accordion title="Do I need a GPU?">
+No - not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. **Training** feeds HUD's rewards into your own GRPO/PPO loop (or a stack like Tinker, slime, or Fireworks), which brings its own compute. See [Train on rewards](/v6/core/training).
+</Accordion>
+
+<Accordion title="My environment imports a package hud can't find - why?">
+A globally installed CLI (`uv tool install hud-python`) runs in its **own** Python environment, so it can't see packages from your project's venv (e.g. `playwright` in your env's dependencies). Inside a project with its own deps, add `hud-python` to the project and run it from the venv:
+
+```bash
+uv add hud-python
+uv run hud eval tasks.py claude
+```
+</Accordion>
+
+<Accordion title="What platforms are supported (macOS / Windows / Linux)?">
+The CLI and SDK run on macOS, Windows, and Linux. Two caveats: `ssh` sandbox isolation is **Linux-only** (the shell still runs without it elsewhere), and `BashGrader` needs bash, so on native Windows it scores `0.0`. Both are fine for local iteration and resolved inside a built Linux image. See [Capabilities](/v6/core/capabilities).
+</Accordion>
+</AccordionGroup>
+
+## Privacy & cost
+
+<AccordionGroup>
+<Accordion title="What does HUD see? Is my data private?">
+Two data paths to know about:
+- **Gateway** (the default with just `HUD_API_KEY`, or forced with `--gateway` / `create_agent`): model calls route through HUD's OpenAI-compatible endpoint at `inference.hud.ai`, which forwards to the provider.
+- **Tracing**: when `HUD_API_KEY` is set, each rollout's trace is recorded on the [hud.ai](https://hud.ai) platform so you can replay it. Run without the key (or with a provider key directly) to skip the gateway.
+
+For data-handling specifics, see [hud.ai](https://hud.ai) or contact the team.
+</Accordion>
+
+<Accordion title="How much does it cost?">
+Running locally with your own provider key (`hud serve`, `hud eval ... claude`) incurs no HUD charge beyond your provider's usage. The **gateway** uses hosted compute. For current pricing, quotas, and any free tier, see [hud.ai](https://hud.ai/project/api-keys).
+</Accordion>
+</AccordionGroup>
+
+## Concepts & commands
+
+<AccordionGroup>
+<Accordion title="Environment vs task vs taskset?">
+- **Environment** - where the agent acts; exposes [capabilities](/v6/core/capabilities) (`ssh`, `cdp`, …).
+- **Task definition** - a `@env.template` async generator that prompts and grades.
+- **Task** - calling a definition (`count_letter(word="…")`) mints one runnable, parameterized data row.
+- **Taskset** - a collection of tasks you evaluate one agent over, with optional GRPO grouping. See [Tasks & tasksets](/v6/core/tasks).
+</Accordion>
+
+<Accordion title="hud eval vs hud serve vs hud deploy - which when?">
+- **`hud eval tasks.py claude`** - run an agent over your tasks and grade them. Your main loop.
+- **`hud serve env.py`** - serve the environment locally so you can drive one task by hand (`hud task start` / `hud task grade`).
+- **`hud deploy`** - build a portable Docker image **and** publish to HUD infra in one step.
+
+Full surface in the [CLI reference](/v6/core/cli).
+</Accordion>
+
+<Accordion title="hud eval env.py or tasks.py?">
+Pass the file that **lists runnable tasks**. In the split layout (`hud init`) that's `tasks.py` (it imports templates from `env.py`); in a single-file setup it's whatever file holds both the `Environment` and the `tasks = [...]` list. The CLI spawns `env.py` for the control channel automatically - you don't pass both. Point it at `.` to scan a directory. See the [CLI reference](/v6/core/cli).
+</Accordion>
+
+<Accordion title="Can I use my own model or a local endpoint?">
+Yes. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - point `base_url` at it. From the CLI use the `openai_compatible` agent. See [Run on any model](/v6/core/agents) and [Integrations](/v6/advanced/extending).
+</Accordion>
+
+<Accordion title="Do I have to train, or can I just run evals?">
+Evals are a complete use on their own - write tasks, run them across models, read rewards and traces. Training is **optional**: because every rollout returns a reward and a trace, the same tasks become training data **if and when** you want them to. See [Train on rewards](/v6/core/training).
+</Accordion>
+
+<Accordion title="Can I bring an existing benchmark or tasks?">
+Yes. The Harbor integration loads Harbor-format tasks straight into a `Taskset` (`integrations.harbor.load`), no conversion round-trip needed. And a whole benchmark can become one generative task definition. See [Harbor interop](/v6/advanced/harbor-convert).
+</Accordion>
+
+<Accordion title="Does HUD support robotics / VLA policies?">
+Yes, in **beta**: the `openpi/0` capability is a schema-driven observation/action loop over WebSocket for simulator and robot environments, with a LeRobot-ready agent harness and trace playback with action-chunk markers. See the [Robots reference](/v6/core/robots) and the [robot benchmark cookbook](/v6/cookbooks/robot-benchmark).
+</Accordion>
+
+<Accordion title="I'm upgrading from v5 - what changed?">
+Scenarios became tasks, registered tools became capabilities, and the env serves a control channel instead of an MCP server. Old environments keep running; convert at your own pace. See [Migrate to v6](/v6/more/migrate-v6).
+</Accordion>
+</AccordionGroup>
+
+## Still stuck?
+
+<CardGroup cols={2}>
+<Card title="Quickstart" icon="bolt" href="/v6/start/quickstart">
+  Zero to a first graded trace.
+</Card>
+<Card title="Designing tasks for signal" icon="signal" href="/v6/core/advice">
+  What makes a task actually worth training on.
+</Card>
+</CardGroup>

@@ -32,6 +32,7 @@ from hud.eval.runtime import (
 )
 from hud.eval.task import Task
 from hud.settings import settings
+from hud.telemetry.context import set_trace_context
 
 
 class _FakePlatform:
@@ -332,6 +333,53 @@ async def test_runtime_session_create_payload_omits_trace_id(
             "path": "https://mcp.hud.ai/runtime/sessions",
             "headers": {"Authorization": "Bearer sk-hud-test"},
             "json": {"environment": "e"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_create_payload_includes_current_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posts: list[dict[str, Any]] = []
+    session_id = str(uuid.uuid4())
+    trace_id = uuid.uuid4().hex
+
+    class _RecordingAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _RecordingAsyncClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(
+            self,
+            path: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any],
+        ) -> _FakeResponse:
+            posts.append({"path": path, "headers": headers, "json": json})
+            return _FakeResponse({"id": session_id})
+
+    monkeypatch.setattr("hud.eval.runtime.httpx.AsyncClient", _RecordingAsyncClient)
+
+    with set_trace_context(trace_id):
+        created = await HUDRuntime()._create_runtime_session(
+            "https://mcp.hud.ai",
+            "sk-hud-test",
+            Task(env="e", id="x"),
+        )
+
+    assert created == session_id
+    assert posts == [
+        {
+            "path": "https://mcp.hud.ai/runtime/sessions",
+            "headers": {"Authorization": "Bearer sk-hud-test"},
+            "json": {"environment": "e", "trace_id": str(uuid.UUID(trace_id))},
         }
     ]
 

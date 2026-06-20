@@ -108,7 +108,7 @@ def test_create_agent_resolves_gateway_model_metadata(
 
     model = GatewayModelInfo(
         id="ft:custom-123",
-        model_name="gpt-5.4",
+        model_name="gpt-5.5",
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
@@ -122,4 +122,40 @@ def test_create_agent_resolves_gateway_model_metadata(
     agent = create_agent("ft:custom-123")
 
     assert isinstance(agent, OpenAIChatAgent)
-    assert agent.config.model == "gpt-5.4"  # resolved to the model's real name
+    assert agent.config.model == "gpt-5.5"  # resolved to the model's real name
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [
+        ("deepseek-v4", "deepseek/deepseek-v4-pro"),
+        ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+        ("glm-5.2", "z-ai/glm-5.2"),
+        ("kimi-k2.6", "moonshotai/kimi-k2.6"),
+        ("minimax-m3", "MiniMax-M3"),
+    ],
+)
+def test_create_agent_accepts_gateway_model_aliases(
+    alias: str,
+    canonical: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo
+
+    model = GatewayModelInfo(
+        id=canonical,
+        model_name=canonical,
+        sdk_agent_type="openai_compatible",
+        provider=GatewayProviderInfo(name="openai"),
+    )
+    monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
+
+    def _build_client(_provider: str) -> object:
+        return object()
+
+    monkeypatch.setattr("hud.agents.build_gateway_client", _build_client)
+
+    agent = create_agent(alias)
+
+    assert isinstance(agent, OpenAIChatAgent)
+    assert agent.config.model == canonical

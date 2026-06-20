@@ -8,7 +8,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.types import AgentType
-from hud.utils.gateway import build_gateway_client, list_gateway_models
+from hud.utils.gateway import (
+    build_gateway_client,
+    gateway_model_aliases,
+    list_gateway_models,
+    normalize_gateway_model_id,
+)
 
 if TYPE_CHECKING:
     from typing import TypeAlias
@@ -27,6 +32,8 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
     For direct API access with provider API keys, instantiate the agent classes directly.
     """
+    requested_model = model
+    model = normalize_gateway_model_id(model)
     agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
     if agent_type is not None:
         model_id = model
@@ -73,7 +80,8 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                 for n in (gm.id, gm.name, gm.model_name)
                 if isinstance(n, str)
             ]
-            near = difflib.get_close_matches(model, known, n=3, cutoff=0.5)
+            known.extend(gateway_model_aliases())
+            near = difflib.get_close_matches(requested_model, known, n=3, cutoff=0.5)
             hint = (
                 f" Did you mean: {', '.join(near)}?"
                 if near
@@ -84,7 +92,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                 if gateway_models
                 else "the HUD gateway registry (empty — is HUD_API_KEY set?)"
             )
-            raise ValueError(f"Model {model!r} not found in {source}.{hint}")
+            raise ValueError(f"Model {requested_model!r} not found in {source}.{hint}")
 
     kwargs.setdefault("model", model_id)
     kwargs.setdefault("model_client", build_gateway_client(provider_name))
