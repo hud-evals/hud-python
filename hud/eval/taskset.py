@@ -59,6 +59,17 @@ class Taskset:
         self.origin = origin
         self.tasks: dict[str, Task] = self._index_by_slug(list(tasks))
 
+    @property
+    def api_id(self) -> str | None:
+        """The platform taskset id when loaded via :meth:`from_api`, else None.
+
+        Threaded into the job so a remote run of a synced taskset links to it;
+        ad-hoc/file/module tasksets have none and create no taskset.
+        """
+        if self.origin and self.origin.startswith("api:"):
+            return self.origin[len("api:") :]
+        return None
+
     @classmethod
     def from_file(cls, path: str | Path) -> Taskset:
         """Load a taskset from ``.py`` source, a directory, or JSON/JSONL data.
@@ -242,8 +253,13 @@ class Taskset:
             expanded.extend((task, group_id) for _ in range(group))
 
         if job is None:
-            job = Job(id=uuid.uuid4().hex, name=_job_name(self.name, task_list, group), group=group)
-            await job_enter(job.id, name=job.name, group=group)
+            job = Job(
+                id=uuid.uuid4().hex,
+                name=_job_name(self.name, task_list, group),
+                group=group,
+                taskset_id=self.api_id,
+            )
+            await job_enter(job.id, name=job.name, group=group, taskset_id=self.api_id)
         job_id = job.id
 
         # Placement is chosen once for the batch: HostedRuntime delegates the

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
-    init_command(name="my-cool-env", directory=str(tmp_path), force=False)
+    init_command(name="my-cool-env", directory=str(tmp_path), force=False, preset=None)
 
     target = tmp_path / "my-cool-env"
     assert {p.name for p in target.iterdir()} == {
@@ -29,6 +29,14 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
     assert (target / "tasks.py").read_text().startswith('"""')
     assert 'name = "my-cool-env"' in (target / "pyproject.toml").read_text()
 
+    pyproject = (target / "pyproject.toml").read_text()
+    assert "package = false" in pyproject
+    assert "[build-system]" not in pyproject
+
+    dockerfile = (target / "Dockerfile.hud").read_text()
+    assert 'CMD ["uv", "run", "hud", "serve"' in dockerfile
+    assert '"dev"' not in dockerfile
+
 
 def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
     target = tmp_path / "taken"
@@ -36,7 +44,7 @@ def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
     (target / "precious.txt").write_text("data")
 
     with pytest.raises(typer.Exit):
-        init_command(name="taken", directory=str(tmp_path), force=False)
+        init_command(name="taken", directory=str(tmp_path), force=False, preset=None)
 
     assert (target / "precious.txt").read_text() == "data"
 
@@ -46,6 +54,6 @@ def test_init_force_overwrites_existing_files(tmp_path: Path) -> None:
     target.mkdir()
     (target / "env.py").write_text("old")
 
-    init_command(name="env", directory=str(tmp_path), force=True)
+    init_command(name="env", directory=str(tmp_path), force=True, preset=None)
 
     assert "Environment" in (target / "env.py").read_text()

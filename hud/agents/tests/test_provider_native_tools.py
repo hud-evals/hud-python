@@ -102,7 +102,7 @@ def _commands(tool: Any) -> list[str]:
 
 
 async def test_openai_shell_wraps_command_with_timeout() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
 
     result = await tool.execute({"commands": ["pwd"], "timeout_ms": 2500})
 
@@ -114,7 +114,7 @@ async def test_openai_shell_wraps_command_with_timeout() -> None:
 
 
 async def test_openai_shell_runs_each_command_without_timeout() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
 
     await tool.execute({"commands": ["echo a", "echo b"]})
 
@@ -122,7 +122,7 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
 
 
 async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
 
     result = await tool.execute({"commands": 123})
 
@@ -131,7 +131,7 @@ async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
 
 
 def test_openai_shell_to_params_is_shell_type() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.4"), client=_ssh())
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
     assert tool.to_params()["type"] == "shell"
 
 

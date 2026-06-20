@@ -5,6 +5,7 @@ Config Override Order: CLI arguments > .hud_eval.toml > defaults
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import logging
 import os
@@ -42,8 +43,9 @@ def _resolve_model_from_catalog(model_id: str) -> tuple[AgentType, str] | None:
     Returns None if the model isn't found or the catalog is unreachable.
     """
     try:
-        from hud.utils.gateway import list_gateway_models
+        from hud.utils.gateway import list_gateway_models, normalize_gateway_model_id
 
+        model_id = normalize_gateway_model_id(model_id)
         models = list_gateway_models()
     except Exception:
         return None
@@ -116,8 +118,9 @@ class AgentPreset:
 
 _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
-    AgentPreset("GPT-5.4", AgentType.OPENAI, "gpt-5.4"),
-    AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3-1-pro"),
+    AgentPreset("Claude Opus 4.8", AgentType.CLAUDE, "claude-opus-4-8"),
+    AgentPreset("GPT-5.5", AgentType.OPENAI, "gpt-5.5"),
+    AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3.1-pro-preview"),
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
@@ -130,10 +133,22 @@ _AGENT_PRESETS: list[AgentPreset] = [
         },
     ),
     AgentPreset(
-        "GLM-4.6V (Z-AI)",
+        "GLM 5.2 (Z.ai)",
         AgentType.OPENAI_COMPATIBLE,
-        "z-ai/glm-4.6v",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM-4.6V"}},
+        "z-ai/glm-5.2",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM 5.2"}},
+    ),
+    AgentPreset(
+        "Kimi K2.6 (Moonshot)",
+        AgentType.OPENAI_COMPATIBLE,
+        "moonshotai/kimi-k2.6",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Kimi K2.6"}},
+    ),
+    AgentPreset(
+        "MiniMax M3",
+        AgentType.OPENAI_COMPATIBLE,
+        "MiniMax-M3",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "MiniMax M3"}},
     ),
 ]
 
@@ -161,7 +176,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # use_computer_beta = true
 
 [openai]
-# model = "gpt-4o"
+# model = "gpt-5.5"
 # temperature = 0.7
 # max_output_tokens = 4096
 
@@ -400,6 +415,11 @@ class EvalConfig(BaseModel):
 
         if self.model:
             kwargs["model"] = self.model
+
+        if isinstance(kwargs.get("model"), str):
+            from hud.utils.gateway import normalize_gateway_model_id
+
+            kwargs["model"] = normalize_gateway_model_id(kwargs["model"])
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE and "api_key" not in kwargs:
             base_url = kwargs.get("base_url", "")
@@ -665,13 +685,46 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
+def _python_defines_environment(path: Path) -> bool:
+    """Return True when ``path`` constructs a v6 :class:`~hud.environment.Environment`."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        callee_name = (
+            callee.id
+            if isinstance(callee, ast.Name)
+            else callee.attr
+            if isinstance(callee, ast.Attribute)
+            else None
+        )
+        if callee_name == "Environment":
+            return True
+    return False
+
+
 def _spawn_target(source: Path) -> Path:
-    """The path the ``LocalRuntime`` provider serves: the source itself for ``.py``
-    files and directories, the surrounding directory for JSON/JSONL data files
-    (the env's ``.py`` source lives next to the tasks file)."""
+    """The path the ``LocalRuntime`` provider serves.
+
+    Directories and env-defining ``.py`` files are served as-is. Task-only
+    sources (``tasks.py`` importing from ``env.py``) resolve to a sibling
+    ``env.py`` or the containing directory. JSON/JSONL data files use the
+    surrounding directory (the env source lives next to the tasks file).
+    """
     resolved = source.resolve()
-    if resolved.is_dir() or resolved.suffix == ".py":
+    if resolved.is_dir():
         return resolved
+    if resolved.suffix != ".py":
+        return resolved.parent
+    if _python_defines_environment(resolved):
+        return resolved
+    env_py = resolved.parent / "env.py"
+    if env_py.is_file():
+        return env_py
     return resolved.parent
 
 

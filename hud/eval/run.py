@@ -295,8 +295,15 @@ async def rollout(
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
+    # Report the model the agent will sample so the platform attributes the
+    # trace to it on enter. Only LLM tool agents carry an inference-model slug
+    # (``config.model``); robot/other agents have none. Local import avoids an
+    # eval<->agents import cycle.
+    from hud.agents.tool_agent import ToolAgent
+
+    agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
     with set_trace_context(trace_id):
-        await trace_enter(trace_id, job_id=job_id, group_id=group_id)
+        await trace_enter(trace_id, job_id=job_id, group_id=group_id, model=agent_model)
         run: Run | None = None
         _phase = "provisioning"
 
