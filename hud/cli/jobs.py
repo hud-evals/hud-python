@@ -83,7 +83,7 @@ def _list_jobs(*, json_output: bool, limit: int) -> None:
     for job in items:
         jid = str(job.get("id") or "")
         table.add_row(
-            jid[:8] + "…" if len(jid) > 8 else jid,
+            jid,
             job.get("name") or "-",
             job.get("taskset_name") or "-",
             job.get("status") or "-",
@@ -135,7 +135,7 @@ def _show_job_traces(job_id: str, *, json_output: bool, limit: int) -> None:
         tid = str(tr.get("id") or "")
         reward = tr.get("reward")
         table.add_row(
-            tid[:8] + "…" if len(tid) > 8 else tid,
+            tid,
             tr.get("status") or "-",
             f"{reward:.3f}" if reward is not None else "-",
             (str(tr.get("start_time") or tr.get("created_at") or ""))[:19],
