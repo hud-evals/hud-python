@@ -3,7 +3,7 @@ title: "Robots"
 description: "The robot capability: contracts, bridges, and the agent harness."
 icon: "robot"
 tag: "Beta"
-mode: "wide"
+
 ---
 
 <Note>
@@ -32,7 +32,7 @@ pip install 'hud-python[robot]'
 
 ## Overview
 Like with other HUD workflows there's the environment side
-(server - containerized, served on the runtime) and the agent side (cleint - swappable, model with harness)
+(server - containerized, served on the runtime) and the agent side (client - swappable, model with harness).
 For robotics the **environment side** 
 translates incoming actions into changes in the digital or physical environment and serves observations. 
 The **agent side** owns the policy: it reads those observations, runs
@@ -116,7 +116,7 @@ with the agent and  starting/stopping as well as stepping of the simulator at th
 - **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
 - **`step`** applies one action and advances the sim a tick, setting `success` / `terminated` as the
   episode plays out.
-- **`get_observation`** returns a strctured dict of the current observation 
+- **`get_observation`** returns a structured dict of the current observation
 plus whether the episode is done.
 
 <Note>
@@ -265,7 +265,33 @@ The harness awaits `ainfer`, which runs your (blocking) `infer` in a worker thre
 override `ainfer` only if your policy is natively async. For chunked policies, reduce each `[T, A]`
 chunk to one action per step with an `Ensembler`.
 
-## The contract
+## Batching
+
+Running many rollouts at once, each calling `infer` once per step, wastes the GPU on
+single-observation forwards. `BatchedAgent` fixes that: it wraps a `RobotAgent`, gives each concurrent
+rollout its own episode state, and shares one batched model that coalesces their per-step `infer` calls
+into a single stacked forward.
+
+```python
+from hud.agents.robot.batching import BatchedAgent
+
+agent = BatchedAgent(MyRobotAgent(), batch_size=8)   # set batch_size to your max_concurrent
+
+job = await taskset.run(agent, runtime=DockerRuntime("hud-libero-env"), max_concurrent=8)
+```
+
+Each tick, up to `batch_size` concurrent observations are stacked into one `[N, ...]` batch, run
+through a single forward, and scattered back to each rollout; a short `max_wait_s` (default 50 ms)
+flushes early when fewer rollouts are live, so the tail of a suite never stalls. Set `batch_size` to
+match `max_concurrent` so a full batch can form.
+
+`BatchedAgent` needs an **in-process, stateless** model whose `infer` runs the whole `[N, ...]` batch
+in one forward - `LeRobotModel` qualifies. A remote OpenPI policy server is not supported (its protocol
+has no batched-request shape); run one agent per rollout against it instead. `BatchedAgent` also takes
+ownership of the agent you pass (it swaps in the batched model in place), so give it a dedicated
+instance rather than one you also use for unbatched runs.
+
+## Contract
 
 Embodiments and policies disagree on cameras, state layout, action semantics, and control rate, so
 pairing a model with an env always needs a wiring step. The **contract** makes it explicit: a JSON
@@ -273,37 +299,53 @@ document in the capability manifest that the agent reads back with `RobotClient.
 splits `features` into an observation and an action space by each feature's `role` - so a policy
 wires itself with no shared config.
 
-Here's the smallest contract the bundled adapter accepts - one camera, a state vector, and an action:
+Here's a proper minimal contract - one camera, a state vector, and an action:
 
 ```json
 {
+  "control_rate": 10,
   "features": {
-    "observation/image": { "role": "observation", "type": "rgb" },
-    "observation/state": { "role": "observation" },
-    "action":            { "role": "action" }
+    "observation/image": {
+      "role": "observation",
+      "type": "rgb",
+      "names": ["height", "width", "channel"]
+    },
+    "observation/state": {
+      "role": "observation",
+      "names": ["eef_x", "eef_y", "eef_z", "axis_x", "axis_y", "axis_z", "grip_l", "grip_r"]
+    },
+    "action": {
+      "role": "action",
+      "names": ["dx", "dy", "dz", "drx", "dry", "drz", "gripper"]
+    }
   }
 }
 ```
 
-Only two fields are load-bearing:
+`role` and `type` wire the spaces; `control_rate` and `names` are what make the run legible on the
+platform, so a real contract should always set them:
 
 - **`role`** (`observation` / `action`) - `spaces()` splits the contract by it and the `Adapter` wires
   against that split. Required on every feature.
 - **`type`** on image observations - `rgb`/`bgr`/`gray`/`depth` is how the bundled adapter spots a
   camera; the first observation *without* an image type becomes the state. Omit it and your image is
   mistaken for the state. (On the state and action, `type` is descriptive.)
+- **`control_rate`** (top level, Hz) - the agent reads it as the playback fps for the recorded episode,
+  so the trace viewer plays back at real speed and any saved dataset has the right frame rate. Set it
+  to your real control rate.
+- **`names`** (per feature) - per-element labels the trace viewer shows on each state/action slice;
+  without them the dimensions display unlabeled.
 
 Feature keys are openpi flat slash-paths and must match *verbatim* the keys your bridge returns from
-`get_observation` (`action` is the single action feature). Everything else - `robot_type`,
-`control_rate`, `dtype`, `shape`, `names`, `stats` - is descriptive and never enforced; add `names` if
-you want labeled state/action slices in the trace viewer. Full list in the reference below.
+`get_observation` (`action` is the single action feature). Everything else - `robot_type`, `dtype`,
+`shape`, `stats` - is descriptive and never enforced. Full list in the reference below.
 
 <Accordion title="Full field reference">
 
 | Field | Where | Meaning |
 |-------|-------|---------|
 | `robot_type` | top level | Embodiment id, shown in the trace viewer. Descriptive. |
-| `control_rate` | top level | Control-loop frequency in Hz. Descriptive. |
+| `control_rate` | top level | Control-loop frequency in Hz; the agent reads it as the playback/record fps. Recommended. |
 | `features` | top level | Map of feature name → feature spec (rows below). |
 | `role` | feature | `observation` or `action` - **the only field that splits the spaces**. Load-bearing. |
 | `type` | feature | Representation tag. Observations: `rgb`/`bgr`/`gray`/`depth` mark an image (load-bearing for the bundled adapter); others (`ee_abs`, `ee_del`, `joint_pos`, …) are descriptive control/state modes. |
@@ -334,13 +376,6 @@ that decides *which thread* runs the sim; the bridge routes every sim touch thro
 
 Pass one to the bridge (`RobotBridge(sim_runner=ThreadSimRunner())`), or subclass `SimRunner` for an
 exotic topology.
-
-## Telemetry
-
-Zero-config: with HUD telemetry configured, `RobotAgent` streams one span per step - every camera
-frame the policy saw plus the executed action - and stamps **keyframes** where a fresh action chunk
-was inferred. The platform's trace viewer plays the episode back: scrub through all frames, with
-markers at each chunk-prediction decision point.
 
 ## Recording datasets
 
@@ -447,6 +482,7 @@ downstream (`hud eval`, tasksets, the agent) is unchanged; only *where the bridg
 | `SimRunner` (`Inline`/`Thread`/`MainThread`) | `hud.environment.robot` | Which thread runs the sim |
 | `RobotAgent` | `hud.agents.robot` | The episode-loop harness |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
+| `BatchedAgent` / `BatchedModel` | `hud.agents.robot.batching` | Many concurrent rollouts against one shared, batched model |
 
 ## See also
 

@@ -31,7 +31,7 @@ set that loop up.
 - **A task with spread in its rewards.** This is the one prerequisite people miss. If every rollout of
   a task gets the *same* reward, training learns nothing from it (see [Why grouping
   matters](#why-grouping-matters)). Designing tasks that produce spread is its own craft - see
-  [Advice](/v6/core/advice).
+  [Designing tasks](/v6/core/advice).
 - **A trainable model**, which you make by forking one (next).
 
 ## Get a trainable model
@@ -88,7 +88,7 @@ comparison to its siblings on the same task.
 The consequence: if every rollout in a group earns the **same** reward, every advantage is zero and
 **no learning happens** - no matter how high the average looks. That's why you run each task as a group
 (`group=8` above) and why your tasks must produce a **spread** of rewards. Trainability is a property of
-your tasks, not just your loop - the whole point of [Advice](/v6/core/advice).
+your tasks, not just your loop - the whole point of [Designing tasks](/v6/core/advice).
 
 ## Watch it improve
 
@@ -258,7 +258,7 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Advice" icon="lightbulb" href="/v6/core/advice">
+<Card title="Designing tasks" icon="lightbulb" href="/v6/core/advice">
   Design tasks that produce reward spread - the prerequisite for training to work.
 </Card>
 <Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks">

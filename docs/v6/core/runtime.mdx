@@ -1,8 +1,14 @@
 ---
 title: "Run & deploy"
-description: "Choose where an environment runs for each rollout - from a local process to the HUD platform - without touching the task."
+description: "Run a task by deploying to the platform or programmatically from your machine."
 icon: "rocket"
 ---
+
+This page covers how you actually run tasks: deploying an environment to the HUD platform, and running
+it programmatically from your own machine. Both go through a **runtime** - the one thing you pass to
+choose where each rollout runs.
+
+## Runtime
 
 A **runtime** decides *where* an environment runs for a rollout. You pass it to `task.run` /
 `taskset.run` at execution time, and the same task and the same `env.py` run anywhere - only the
@@ -65,58 +71,34 @@ image runs unchanged on HUD, on a cloud sandbox, in CI, or on your laptop. After
 `HUDRuntime()` is the natural pair. Pass build config with `--env`, `--build-arg`, and `--secret`. See
 the [CLI reference](/v6/core/cli#hud-deploy) for the full flag set.
 
-## Run on your own infra
+## RuntimeConfig
 
-A **runtime is just a function**: given a task, start a container somewhere and yield its
-control-channel URL. That one function is the whole integration surface for any provider - Modal, E2B,
-Runloop, your own Kubernetes:
+`RuntimeConfig` carries the construction hints a container-based runtime needs: which image, how much
+hardware, and what timeouts. Set it on the runtime (`runtime_config=`) or per row on
+[`Task.runtime_config`](/v6/core/tasks#the-task-row); the runtime merges the two and applies what it
+supports.
 
-```python run.py
-from contextlib import asynccontextmanager
-from hud import Runtime
+```python
+from hud.eval import RuntimeConfig, RuntimeResources, RuntimeGPU, RuntimeLimits
 
-@asynccontextmanager
-async def my_runtime(task):
-    sandbox = await start_my_sandbox(image="my-env")   # your infra brings it up
-    try:
-        yield Runtime(f"tcp://{sandbox.host}:{sandbox.port}")
-    finally:
-        await sandbox.terminate()                       # ...and tears it down
-
-await TASKS.run(agent, runtime=my_runtime)
+RuntimeConfig(
+    image="my-env",
+    resources=RuntimeResources(cpu=4, memory_mb=8192, gpu=RuntimeGPU(type="A100", count=1)),
+    limits=RuntimeLimits(startup_timeout_s=300, run_timeout_s=1800),
+)
 ```
 
-`DockerRuntime` and the rest are just built-in versions of this. Anything that starts your image and
-hands back a URL plugs in with no change to the environment or the task - that's what "run anywhere"
-means concretely. Constructed directly, `Runtime(url)` yields itself with a no-op lifecycle, since
-whoever provisioned the substrate owns teardown.
+| Field | Description |
+|-------|-------------|
+| `image` | Image to run. |
+| `resources` | `RuntimeResources(cpu, memory_mb, gpu=RuntimeGPU(type, count))`. |
+| `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
-Placement can also vary per task: a runtime is called once per rollout with the task row being placed,
-so one callable can route heavier rows to heavier substrates.
+Support differs per runtime: `DockerRuntime`, `ModalRuntime`, and `DaytonaRuntime` accept it (Docker
+ignores `limits`; Daytona ignores `run_timeout_s` and resource overrides when booting from a snapshot).
+`LocalRuntime` and `HUDRuntime` reject a per-task `runtime_config`.
 
-## A self-contained image, no HUD account
-
-For a fully local artifact, build straight from the scaffolded `Dockerfile.hud` and drive a task with
-the packaged CLI. `docker exec` runs the commands *inside* the container, so nothing needs to be
-exposed:
-
-```bash
-docker build -f Dockerfile.hud -t my-env .
-
-docker run -d --name run1 my-env
-docker exec run1 hud task start fix_bug                # -> the prompt
-docker exec run1 hud task grade fix_bug --answer "..." # -> the reward
-docker rm -f run1
-```
-
-<Note>
-**Reproducible by construction.** Each rollout gets its own fresh container, so results reproduce
-across runs and machines and one rollout never leaks state into the next. Keep per-task setup in
-[`@env.initialize`](/v6/core/environment#lifecycle-hooks-set-up-and-tear-down) so every run starts from
-the same state.
-</Note>
-
-## Runtime arguments
+## Runtime directory
 
 The constructor for each built-in runtime:
 
@@ -185,46 +167,31 @@ Runtime(url, params=..., config=...)
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
 
-## RuntimeConfig
+## Run on your own infra
 
-`RuntimeConfig` carries the construction hints a container-based runtime needs: which image, how much
-hardware, and what timeouts. Set it on the runtime (`runtime_config=`) or per row on
-[`Task.runtime_config`](/v6/core/tasks#the-task-row); the runtime merges the two and applies what it
-supports.
+A **runtime is just a function**: given a task, start a container somewhere and yield its
+control-channel URL. That one function is the whole integration surface for any provider - Modal, E2B,
+Runloop, your own Kubernetes:
 
-```python
-from hud.eval import RuntimeConfig, RuntimeResources, RuntimeGPU, RuntimeLimits
+```python run.py
+from contextlib import asynccontextmanager
+from hud import Runtime
 
-RuntimeConfig(
-    image="my-env",
-    resources=RuntimeResources(cpu=4, memory_mb=8192, gpu=RuntimeGPU(type="A100", count=1)),
-    limits=RuntimeLimits(startup_timeout_s=300, run_timeout_s=1800),
-)
+@asynccontextmanager
+async def my_runtime(task):
+    sandbox = await start_my_sandbox(image="my-env")   # your infra brings it up
+    try:
+        yield Runtime(f"tcp://{sandbox.host}:{sandbox.port}")
+    finally:
+        await sandbox.terminate()                       # ...and tears it down
+
+await TASKS.run(agent, runtime=my_runtime)
 ```
 
-| Field | Description |
-|-------|-------------|
-| `image` | Image to run. |
-| `resources` | `RuntimeResources(cpu, memory_mb, gpu=RuntimeGPU(type, count))`. |
-| `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
+`DockerRuntime` and the rest are just built-in versions of this. Anything that starts your image and
+hands back a URL plugs in with no change to the environment or the task - that's what "run anywhere"
+means concretely. Constructed directly, `Runtime(url)` yields itself with a no-op lifecycle, since
+whoever provisioned the substrate owns teardown.
 
-Support differs per runtime: `DockerRuntime`, `ModalRuntime`, and `DaytonaRuntime` accept it (Docker
-ignores `limits`; Daytona ignores `run_timeout_s` and resource overrides when booting from a snapshot).
-`LocalRuntime` and `HUDRuntime` reject a per-task `runtime_config`.
-
-## See also
-
-<CardGroup cols={2}>
-<Card title="Agents" icon="robot" href="/v6/core/agents">
-  The agent that connects to the environment and acts.
-</Card>
-<Card title="Train" icon="dumbbell" href="/v6/core/training">
-  Turn the rewards a run collects into a training signal.
-</Card>
-<Card title="CLI reference" icon="terminal" href="/v6/core/cli">
-  `hud deploy`, `hud eval`, `hud task`, and the full flag set.
-</Card>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks">
-  Per-task placement via `Task.runtime_config`.
-</Card>
-</CardGroup>
+Placement can also vary per task: a runtime is called once per rollout with the task row being placed,
+so one callable can route heavier rows to heavier substrates.

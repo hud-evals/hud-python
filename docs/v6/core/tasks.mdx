@@ -87,7 +87,7 @@ from hud import Task
 task = Task(env="letter-count", id="count_letter", args={"word": "strawberry"}, slug="count-straw")
 ```
 
-## Grading: what the reward measures
+## Grading
 
 The second yield is the reward. The first decision is *what* you score:
 
@@ -150,12 +150,9 @@ async def implement_feature(spec: str = "add a /health endpoint"):
 
 </AccordionGroup>
 
-The full catalog lives in the [Graders reference](/v6/core/graders).
-
-<Warning>
-A grader that returns a constant, or just echoes the answer back as a pass, teaches a model nothing and
-invites reward hacking. A good reward separates good work from bad - see [Advice](/v6/core/advice).
-</Warning>
+The full catalog lives in the [Graders reference](/v6/core/graders). A grader that returns a constant
+or just echoes the answer back teaches a model nothing and invites reward hacking; a good reward
+separates good work from bad - see [Designing tasks](/v6/core/advice).
 
 ## Tasksets
 
@@ -278,7 +275,7 @@ print(plan.summary())
 <Card title="Runtime" icon="server" href="/v6/core/runtime">
   Where each task runs, chosen at execution time.
 </Card>
-<Card title="Advice" icon="lightbulb" href="/v6/core/advice">
+<Card title="Designing tasks" icon="lightbulb" href="/v6/core/advice">
   Design tasks that actually teach: difficulty, spread, and resisting reward hacking.
 </Card>
 </CardGroup>

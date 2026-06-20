@@ -179,7 +179,7 @@ hud serve env.py     # serve locally on tcp://127.0.0.1:8765 while you iterate
 <Note>
 A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under
 `hud serve`, which runs the asyncio loop on main. Run `serve(env, host, port)` on a worker thread
-instead and keep the main thread for the dependency - see [Robots](/v6/core/robots#environment-side).
+instead and keep the main thread for the dependency - see [Robots](/v6/advanced/robots#environment-side).
 </Note>
 
 ## Learn from real environments
