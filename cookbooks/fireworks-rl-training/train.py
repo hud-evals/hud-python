@@ -92,9 +92,18 @@ def make_tasks(
     ]
 
 
-def format_prompt_tokens(tokenizer: Any, prompt: str) -> list[int]:
+def format_prompt_tokens(tokenizer: Any, prompt: str, *, enable_thinking: bool = False) -> list[int]:
     messages = [{"role": "user", "content": prompt}]
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    # Hybrid reasoning models (e.g. Qwen3) default to a <think> block. For a
+    # direct-answer task with a tight token budget that reasoning never reaches
+    # the integer, so rewards collapse to zero. enable_thinking flows into the
+    # chat template (ignored by templates that don't define it).
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=enable_thinking,
+    )
     return list(tokenizer.encode(text))
 
 
@@ -112,14 +121,16 @@ async def sample_one(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    enable_thinking: bool,
 ) -> RolloutRecord:
-    prompt_tokens = format_prompt_tokens(tokenizer, task.prompt)
+    prompt_tokens = format_prompt_tokens(tokenizer, task.prompt, enable_thinking=enable_thinking)
     completions = await sampler.sample_with_prompt_tokens(
         prompt_tokens,
         n=1,
         max_tokens=max_tokens,
         temperature=temperature,
         top_p=top_p,
+        logprobs=True,
     )
     completion = completions[0]
     tokens = list(completion.full_tokens)
@@ -156,6 +167,7 @@ async def sample_rollouts(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    enable_thinking: bool,
 ) -> list[RolloutRecord]:
     jobs = [
         sample_one(
@@ -165,6 +177,7 @@ async def sample_rollouts(
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
+            enable_thinking=enable_thinking,
         )
         for task in tasks
         for _ in range(rollouts_per_prompt)
@@ -448,9 +461,21 @@ async def run(args: argparse.Namespace) -> None:
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
                 top_p=args.top_p,
+                enable_thinking=args.enable_thinking,
             )
             rollout_seconds = time.perf_counter() - t0
             stats = reward_stats(records)
+            for record in records[: args.debug_samples]:
+                prompt_len = len(
+                    format_prompt_tokens(
+                        tokenizer, record.task.prompt, enable_thinking=args.enable_thinking
+                    )
+                )
+                print(
+                    "[sample] reward=%s output_tokens=%d text=%r"
+                    % (record.reward, max(0, len(record.tokens) - prompt_len), record.text),
+                    flush=True,
+                )
             row: dict[str, Any] = {
                 "phase": "calibrate" if args.calibrate_only else "train",
                 "step": step,
@@ -471,8 +496,9 @@ async def run(args: argparse.Namespace) -> None:
             datums = make_datums(records)
             advantages = advantages_by_record(records)
             loss_fn = make_grpo_loss(records, advantages)
-            fb = training_client.forward_backward_custom(datums, loss_fn).result()
-            training_client.optim_step(
+            fb_future = await training_client.forward_backward_custom_async(datums, loss_fn)
+            fb = await fb_future.result_async()
+            optim_future = await training_client.optim_step_async(
                 tinker.AdamParams(
                     learning_rate=args.learning_rate,
                     beta1=0.9,
@@ -481,10 +507,12 @@ async def run(args: argparse.Namespace) -> None:
                     weight_decay=args.weight_decay,
                 ),
                 grad_accumulation_normalization=GradAccNormalization.NUM_LOSS_TOKENS,
-            ).result()
+            )
+            await optim_future.result_async()
             row.update(fb.metrics)
 
-            saved = training_client.save_weights_for_sampler(f"step-{step:05d}").result()
+            saved_future = await training_client.save_weights_for_sampler_async(f"step-{step:05d}")
+            saved = await saved_future.result_async()
             row["checkpoint"] = saved.path
             sampler = service.create_deployment_sampler(
                 model_path=saved.path,
@@ -525,6 +553,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-a", type=int, default=99)
     parser.add_argument("--min-b", type=int, default=2)
     parser.add_argument("--max-b", type=int, default=9)
+    parser.add_argument("--debug-samples", type=int, default=0)
+    parser.add_argument(
+        "--enable-thinking",
+        action="store_true",
+        help="Keep the model's <think> reasoning block. Off by default so direct-answer "
+        "rollouts reach the integer within the token budget (hybrid models like Qwen3 "
+        "otherwise spend the whole budget reasoning and score zero).",
+    )
     parser.add_argument("--calibrate-only", action="store_true")
     parser.add_argument(
         "--calibration-backend",
