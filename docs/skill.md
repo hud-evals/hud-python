@@ -147,7 +147,7 @@ Then run at scale across models with `group=` for reward spread:
 from hud import Taskset
 from hud.agents import create_agent
 
-taskset = Taskset.from_api("my-env")
+taskset = Taskset.from_api("my-taskset")
 for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
     job = await taskset.run(create_agent(model), group=8)
     print(f"{model}: {job.reward:.2f}")
@@ -353,7 +353,7 @@ Cite [Graders](/v6/core/graders) and [Types](/v6/core/types).
 
 ## Verify before you call it done
 
-- `hud eval env.py haiku` runs without error and returns a non-zero reward.
+- `hud eval env.py claude --model claude-haiku-4-5` runs without error and returns a non-zero reward.
 - Imports resolve against the installed `hud` package (don't invent symbols).
 - The grader's cheapest path scores at or below the floor.
 - A group of rollouts shows reward spread.

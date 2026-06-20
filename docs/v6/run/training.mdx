@@ -12,6 +12,17 @@ The rewards are the signal: the tasks you evaluate are already training data —
 - A task with **spread** in its rewards — a group that all scores `0.0` (or all `1.0`) produces zero advantage and teaches nothing. See [Designing tasks for signal](/v6/run/signal).
 - For the managed trainer: a **trainable model** (created below).
 
+## Find a trainable base
+
+`hud models list` is the source of truth for what the gateway serves — name, API slug, **id**, provider, agent type, and a **Trainable** column. Only models marked trainable can be forked and trained:
+
+```bash
+hud models list                 # the Trainable column (✓) marks forkable bases
+hud models list --json          # same data, scriptable
+```
+
+Use the **slug** ("Model (API)") or **id** from that table wherever a model string is expected (`HUD_MODEL`, `create_agent`, `TrainingClient`).
+
 ## Create a trainable model
 
 A trainable model is a private, team-owned model whose weights you advance. Fork one from any trainable base — the fork starts from the base's active checkpoint, so you continue where it left off:
@@ -20,7 +31,7 @@ A trainable model is a private, team-owned model whose weights you advance. Fork
 hud models fork Qwen/Qwen3.5-4B --name arith-rl
 ```
 
-The new model's slug (`arith-rl`) is both what you **sample** (through the gateway, like any other model) and what you **train**. Inspect a model's catalog entry any time with `hud models list`.
+The new model's slug (`arith-rl`) is both what you **sample** (through the gateway, like any other model) and what you **train**.
 
 ## Train it
 

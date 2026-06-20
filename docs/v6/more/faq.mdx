@@ -87,6 +87,10 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 Full surface in the [CLI reference](/v6/core/cli).
 </Accordion>
 
+<Accordion title="hud eval env.py or tasks.py?">
+Pass the file that **lists runnable tasks**. In the split layout (`hud init`) that's `tasks.py` (it imports templates from `env.py`); in a single-file setup it's whatever file holds both the `Environment` and the `tasks = [...]` list. The CLI spawns `env.py` for the control channel automatically — you don't pass both. Point it at `.` to scan a directory. See the [CLI reference](/v6/core/cli).
+</Accordion>
+
 <Accordion title="Can I use my own model or a local endpoint?">
 Yes. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works — point `base_url` at it. From the CLI use the `openai_compatible` agent. See [Run on any model](/v6/run/models) and [Integrations](/v6/advanced/integrations).
 </Accordion>
