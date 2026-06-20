@@ -39,15 +39,38 @@ class BaseTrainingClient:
 
     async def _resolve_model_id(self) -> str:
         """Resolve ``self.model`` to the id the service keys on: a uuid is used
-        directly, a slug is looked up once via the catalog and cached."""
+        directly, a slug/name is looked up once via the catalog and cached.
+
+        Resolution order:
+        1. UUID → used directly.
+        2. Slug (model_name) → GET /v2/models/resolve (fast path).
+        3. Display name or unknown string → fall back to list_gateway_models(),
+           which matches id | name | model_name — same logic as create_agent().
+        """
         if self._model_id is not None:
             return self._model_id
         try:
             self._model_id = str(UUID(self.model))
         except ValueError:
             url = f"{self._api_url}/v2/models/resolve?model={quote(self.model, safe='')}"
-            data = await make_request("GET", url, api_key=self._api_key)
-            self._model_id = str(data["id"])
+            try:
+                data = await make_request("GET", url, api_key=self._api_key)
+                self._model_id = str(data["id"])
+            except Exception as exc:
+                # /v2/models/resolve only matches model_name (slug), not the
+                # display name. Fall back to the full model list, which matches
+                # id | name | model_name — consistent with create_agent().
+                from hud.utils.gateway import list_gateway_models
+
+                for gm in list_gateway_models():
+                    if self.model in (gm.id, gm.name, gm.model_name):
+                        self._model_id = gm.id
+                        break
+                else:
+                    raise ValueError(
+                        f"Model {self.model!r} not found. "
+                        "Run `hud models` to list available models."
+                    ) from exc
         return self._model_id
 
     async def _train_url(self, suffix: str) -> str:

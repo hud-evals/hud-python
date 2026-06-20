@@ -28,6 +28,8 @@ from hud.environment import Environment
 from hud.graders import EvaluationResult
 
 _INNER_MODEL: str = "c4-selfplay"
+_INNER_MODEL_NAME: str = "c4-selfplay"  # resolved model_name (gateway routing key)
+_INNER_PROVIDER: str = "openai"
 _OUTER_MARK: str = "X"  # set per game; "X" drops first, "O" drops second
 
 # Per-game inner model samples (reset at game start, read at game end).
@@ -112,6 +114,26 @@ class ConnectFour:
 
 game = ConnectFour()
 
+
+def _resolve_inner_model(model: str) -> tuple[str, str]:
+    """Return (model_name, provider) by looking up the model in the gateway registry.
+
+    create_agent() does this same lookup (agents/__init__.py:36-65) so that the
+    gateway receives the resolved model_name, not a raw slug/UUID. The token-id
+    extensions (return_token_ids) are gated on the model routing as a known
+    trainable model; passing a raw id or slug can miss that path silently.
+    """
+    from hud.utils.gateway import list_gateway_models
+
+    try:
+        for gm in list_gateway_models():
+            if model in (gm.id, gm.name, gm.model_name):
+                return gm.model_name or model, gm.provider.name or "openai"
+    except Exception:
+        pass
+    return model, "openai"
+
+
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
 
@@ -134,12 +156,12 @@ async def _inner_move(inner_mark: str) -> int:
     """
     from hud.utils.gateway import build_gateway_client
 
-    client = build_gateway_client("openai")
+    client = build_gateway_client(_INNER_PROVIDER)
     available = game.available()
 
     try:
         resp = await client.chat.completions.create(
-            model=_INNER_MODEL,
+            model=_INNER_MODEL_NAME,
             messages=[
                 {
                     "role": "system",
@@ -171,10 +193,16 @@ async def _inner_move(inner_mark: str) -> int:
                     "output_logprobs": [tok.logprob for tok in content_lp] if content_lp else [],
                 }
             )
-        # The model may reason before answering, so take the LAST valid column it
-        # names, not the first integer it mentions.
         text = choice.message.content or ""
-        for tok in reversed(re.findall(r"\d+", text)):
+        # Prefer an explicit "column N" mention; fall back to the last bare digit
+        # in range. Using \b[0-6]\b avoids mis-picking row indices or counts like
+        # "4 in a row" that appear after the stated column.
+        explicit = re.search(r"\bcol(?:umn)?\s*([0-6])\b", text, re.IGNORECASE)
+        if explicit:
+            col = int(explicit.group(1))
+            if col in available:
+                return col
+        for tok in reversed(re.findall(r"\b([0-6])\b", text)):
             col = int(tok)
             if col in available:
                 return col
@@ -259,8 +287,9 @@ async def _down() -> None:
 @env.template()
 async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
     """Self-play game. seed % 2 decides who drops first: even → outer is X, odd → outer is O."""
-    global _INNER_MODEL, _OUTER_MARK, _inner_samples
+    global _INNER_MODEL, _INNER_MODEL_NAME, _INNER_PROVIDER, _OUTER_MARK, _inner_samples
     _INNER_MODEL = model
+    _INNER_MODEL_NAME, _INNER_PROVIDER = _resolve_inner_model(model)
     _OUTER_MARK = "X" if seed % 2 == 0 else "O"
     inner_mark = "O" if _OUTER_MARK == "X" else "X"
 

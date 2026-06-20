@@ -97,15 +97,22 @@ async def main(
     val_opponent: str,
     val_games: int,
 ) -> None:
+    # Keep reasoning short so the agent doesn't burn its step budget on analysis.
+    # Each turn: one sentence of reasoning, then call make_move immediately.
+    system_prompt = (
+        "You are playing Connect Four. Think in ONE sentence, then immediately call make_move. "
+        "Do not write long analysis. Just pick the best column and call the tool."
+    )
     # return_token_ids: gateway returns token ids + per-token logprobs for training
     agent = create_agent(
         model,
         max_steps=30,
+        system_prompt=system_prompt,
         completion_kwargs={"extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
     tasks = make_tasks(model)
-    session = await Job.start(model, group=group)
+    session = await Job.start("c4-selfplay", group=group)
 
     val_curve: list[tuple[int, float]] = []
 
