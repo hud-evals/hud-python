@@ -145,7 +145,7 @@ async def main(
             val_curve.append((step + 1, mean_val))
 
     print("\nlast checkpoints (server metrics):")
-    for c in (await trainer.checkpoints())[-min(steps, 5):]:
+    for c in (await trainer.checkpoints())[-min(steps, 5) :]:
         std = c.metrics.get("reward_std")
         print(f"  {c.name}  reward={c.mean_reward}  std={std}  loss={c.loss_fn}")
 
@@ -161,12 +161,24 @@ if __name__ == "__main__":
     parser.add_argument("--steps", type=int, default=20, help="optimizer steps")
     parser.add_argument("--group", type=int, default=4, help="GRPO group size (rollouts per task)")
     parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
-    parser.add_argument("--validate-every", type=int, default=5, metavar="N",
-                        help="run validation vs opponent every N steps (0 = off)")
+    parser.add_argument(
+        "--validate-every",
+        type=int,
+        default=5,
+        metavar="N",
+        help="run validation vs opponent every N steps (0 = off)",
+    )
     parser.add_argument("--val-opponent", default="Qwen/Qwen3.5-4B", help="fixed opponent")
     parser.add_argument("--val-games", type=int, default=10, help="games per validation run")
     args = parser.parse_args()
-    asyncio.run(main(
-        args.model, args.steps, args.group, args.lr,
-        args.validate_every, args.val_opponent, args.val_games,
-    ))
+    asyncio.run(
+        main(
+            args.model,
+            args.steps,
+            args.group,
+            args.lr,
+            args.validate_every,
+            args.val_opponent,
+            args.val_games,
+        )
+    )
