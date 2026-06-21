@@ -120,6 +120,24 @@ needed in the template. Cite [Capabilities](/v6/core/capabilities).
 
 ---
 
+## Start from a template
+
+`hud init` scaffolds a new environment. Pass `--preset <id>` to start from a
+ready-made template instead of the blank scaffold (omit it for an interactive
+picker):
+
+```bash
+hud init my-env --preset browser
+```
+
+Available presets: `blank`, `browser`, `cua` (computer-use desktop),
+`deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`,
+`gdpval`, `worldsim`, `robot`, `videogamebench`, and `arc-agi-3`. Each downloads
+a complete, runnable starting point you adapt — prefer it over hand-writing an
+environment from scratch. Cite [Quickstart](/v6/start/quickstart).
+
+---
+
 ## Local iteration and process model
 
 `hud eval env.py model` is the canonical test loop — no cloud account, docker,

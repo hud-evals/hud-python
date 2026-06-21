@@ -70,7 +70,7 @@
               { "group": "Overview", "pages": ["v6/build/overview", "v6/core/protocol"] },
               { "group": "Core", "pages": ["v6/core/environment", "v6/core/tasks", "v6/core/capabilities", "v6/core/agents", "v6/core/runtime", "v6/core/graders", "v6/core/advice", "v6/core/training", "v6/core/types", "v6/core/cli"] },
               { "group": "Advanced", "pages": ["v6/advanced/extending", "v6/advanced/robots", "v6/advanced/harbor-convert"] },
-              { "group": "Cookbooks", "pages": ["v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] },
+              { "group": "Cookbooks", "pages": ["v6/cookbooks/index", "v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] },
               { "group": "More", "pages": ["v6/more/faq", "v6/more/migrate-v6", "v6/more/contributing"] }
             ]
           }
