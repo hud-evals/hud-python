@@ -257,6 +257,27 @@ def reward_stats(records: list[RolloutRecord]) -> dict[str, float]:
     }
 
 
+def within_group_reward_std(records: list[RolloutRecord]) -> float:
+    """Mean per-group reward std — the spread GRPO actually trains on.
+
+    Advantages are computed *within* each prompt group, so between-group spread
+    is irrelevant: if every rollout of a prompt earns the same reward, that
+    group's advantage is zero. This averages each group's std to report whether
+    any learning signal exists at all.
+    """
+    grouped: dict[int, list[float]] = {}
+    for record in records:
+        grouped.setdefault(record.task.group_index, []).append(record.reward)
+    stds: list[float] = []
+    for rewards in grouped.values():
+        if len(rewards) < 2:
+            continue
+        mean = sum(rewards) / len(rewards)
+        variance = sum((r - mean) ** 2 for r in rewards) / (len(rewards) - 1)
+        stds.append(math.sqrt(variance))
+    return sum(stds) / len(stds) if stds else 0.0
+
+
 def advantages_by_record(records: list[RolloutRecord]) -> list[float]:
     grouped: dict[int, list[float]] = {}
     for record in records:
@@ -409,6 +430,7 @@ async def run(args: argparse.Namespace) -> None:
             "step": 0,
             "num_rollouts": len(records),
             "rollout_seconds": time.perf_counter() - t0,
+            "within_group_reward_std": within_group_reward_std(records),
             **reward_stats(records),
         }
         append_jsonl(metrics_path, row)
@@ -483,6 +505,7 @@ async def run(args: argparse.Namespace) -> None:
                 "step": step,
                 "num_rollouts": len(records),
                 "rollout_seconds": rollout_seconds,
+                "within_group_reward_std": within_group_reward_std(records),
                 "trainer_job_id": getattr(service, "trainer_job_id", None),
                 "deployment_id": getattr(service, "deployment_id", None),
                 **stats,
@@ -549,12 +572,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
-    parser.add_argument("--max-tokens", type=int, default=32)
+    parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--min-a", type=int, default=10)
-    parser.add_argument("--max-a", type=int, default=99)
-    parser.add_argument("--min-b", type=int, default=2)
-    parser.add_argument("--max-b", type=int, default=9)
+    parser.add_argument("--min-a", type=int, default=100)
+    parser.add_argument("--max-a", type=int, default=999)
+    parser.add_argument("--min-b", type=int, default=100)
+    parser.add_argument("--max-b", type=int, default=999)
     parser.add_argument("--debug-samples", type=int, default=0)
     parser.add_argument(
         "--enable-thinking",

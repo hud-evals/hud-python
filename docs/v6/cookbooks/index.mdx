@@ -1,0 +1,51 @@
+---
+title: "Cookbooks"
+description: "Complete, runnable examples you can copy and adapt."
+icon: "book-open"
+---
+
+Cookbooks are complete, runnable examples — each one is a small project you can
+copy and adapt. They all live in the
+[`cookbooks/`](https://github.com/hud-evals/hud-python/tree/main/cookbooks)
+directory of the SDK repo. The ones below with a walkthrough have a full guide
+here; the rest are best read straight from the source.
+
+## Walkthroughs
+
+<CardGroup cols={2}>
+  <Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent">
+    Run a coding agent against a shell + files environment, graded by tests.
+    Source: [`cookbooks/codex-coding`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/codex-coding).
+  </Card>
+  <Card title="A2A chat" icon="plug" href="/v6/cookbooks/a2a-chat">
+    Serve a chat task over the A2A protocol and talk to it from any client.
+    Source: [`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
+  </Card>
+  <Card title="Ops diagnostics" icon="stethoscope" href="/v6/cookbooks/ops-diagnostics">
+    An investigation task where the agent integrates evidence into a diagnosis.
+  </Card>
+  <Card title="Robot benchmark" icon="robot" href="/v6/cookbooks/robot-benchmark">
+    Run a VLA policy against a containerized robot sim, graded by task success.
+  </Card>
+</CardGroup>
+
+## More runnable examples
+
+These ship in the repo without a separate walkthrough — read the README in each
+directory to run them.
+
+<CardGroup cols={2}>
+  <Card title="RL training" icon="dumbbell" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/rl-training">
+    On-policy RL: roll out a taskset with the current weights, train on the
+    resulting trajectories, and serve the updated weights for the next rollout —
+    all under one trainable model string.
+  </Card>
+  <Card title="Connect Four self-play" icon="table-cells" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/connect4-selfplay">
+    Symmetric self-play GRPO on a 6×7 Connect Four board, training both sides
+    from a single rollout.
+  </Card>
+  <Card title="Fireworks RL training" icon="fire" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/fireworks-rl-training">
+    The RL loop driven through the Fireworks Training API instead of the HUD
+    training service.
+  </Card>
+</CardGroup>
