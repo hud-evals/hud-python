@@ -67,7 +67,7 @@ shape alone.
 A task where one inference call produces the deliverable doesn't give RL enough rollout structure to
 learn from. Real training tasks require **multiple steps** - several observations, tool calls, or turns
 - so the trajectory carries learnable structure. If your task is single-shot, give the agent something
-to *do*: a [capability](/v6/core/environment) to act through and a problem that requires integrating
+to *do*: a [capability](/v6/reference/environment) to act through and a problem that requires integrating
 evidence across more than one observation.
 
 ## Keep the answer out of the environment
@@ -93,7 +93,7 @@ What the prompt sets up, the grader should test - and vice versa. Two related pr
   If a generic memo that did no investigation can outscore a thorough one, the grader is measuring
   shape, not substance.
 
-Compose graders so a partial reward is legible (see [`combine`](/v6/core/graders)) - subscores let you
+Compose graders so a partial reward is legible (see [`combine`](/v6/reference/graders)) - subscores let you
 see which component earned the reward, which is how you catch monotonicity violations.
 
 ## Source substrate that isn't memorized
@@ -134,8 +134,8 @@ costume - same operation, different proper nouns - won't train general capabilit
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
-<Card title="Graders" icon="scale-balanced" href="/v6/core/graders" />
-<Card title="Training" icon="dumbbell" href="/v6/core/training" />
+<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Training" icon="dumbbell" href="/v6/reference/training" />
 <Card title="Composing richer environments" icon="puzzle-piece" href="/v6/advanced/extending" />
 </CardGroup>

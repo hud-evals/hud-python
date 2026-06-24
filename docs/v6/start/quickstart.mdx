@@ -31,7 +31,7 @@ Get a key from [hud.ai/project/api-keys](https://hud.ai/project/api-keys) - one 
 hud set HUD_API_KEY=your-key-here
 ```
 
-## 3. Write a task
+## 3. Create a Test Environment
 
 Scaffold a complete, runnable example to start from:
 
@@ -62,20 +62,3 @@ hud eval tasks.py claude
 ```
 
 `hud eval` spawns the environment locally, runs the `claude` agent, and grades it. Every rollout generates a replayable trace on [hud.ai](https://hud.ai). 
-
-## Next
-
-<CardGroup cols={2}>
-<Card title="Package & deploy" icon="rocket" href="/v6/core/runtime">
-  Build a portable image and run it anywhere.
-</Card>
-<Card title="Add capabilities" icon="cube" href="/v6/core/environment">
-  Give the agent a shell, browser, GUI, or robot to act on.
-</Card>
-<Card title="Design tasks for signal" icon="signal" href="/v6/core/advice">
-  Make tasks that actually train, not just test.
-</Card>
-<Card title="Run on any model" icon="robot" href="/v6/core/agents">
-  Claude, OpenAI, Gemini, or your own endpoint.
-</Card>
-</CardGroup>

@@ -4,10 +4,10 @@ description: "What a task is, how you define one, and how a single definition be
 icon: "list-check"
 ---
 
-An [environment](/v6/core/environment) is *where* the agent acts. A **task** is the *work* you measure
+An [environment](/v6/reference/environment) is *where* the agent acts. A **task** is the *work* you measure
 there. A task only ever does two things: it **prompts** the agent, and it **grades** what happened into
 a single number, the **reward**. That one number is the whole point - it's what an evaluation reports
-and what [training](/v6/core/training) learns from.
+and what [training](/v6/reference/training) learns from.
 
 Four words do all the work, and they're worth keeping apart:
 
@@ -46,7 +46,7 @@ task = count_letter(word="raspberry")   # a Task row, not yet run
 ```
 
 Declare `returns=T` on the template and the answer arrives as a parsed
-[`Answer[T]`](/v6/core/types) (`.content` parsed, `.raw` the original string); without it, `answer` is
+[`Answer[T]`](/v6/reference/types) (`.content` parsed, `.raw` the original string); without it, `answer` is
 the raw string the agent submitted.
 
 ## One definition, many tasks
@@ -76,7 +76,7 @@ substrate that placement brings up.
 | `columns` | `dict \| None` | Metadata surfaced as filter/leaderboard facets. |
 | `validation` | `list[dict] \| None` | Platform/sync metadata. |
 | `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). |
-| `runtime_config` | `RuntimeConfig \| None` | Per-row launch hints (`image`, `resources`); the [runtime](/v6/core/runtime) applies what it supports. |
+| `runtime_config` | `RuntimeConfig \| None` | Per-row launch hints (`image`, `resources`); the [runtime](/v6/reference/runtime) applies what it supports. |
 
 When you don't have the template in hand (data pipelines, generated rows), build the model directly -
 the model *is* the row, so `task.model_dump()` and `Task.model_validate(data)` are the whole codec:
@@ -94,7 +94,7 @@ The second yield is the reward. The first decision is *what* you score:
 - **Grade the answer** - compute a float from what the agent said.
 - **Grade the world** - score the **state the agent left behind**: tests passing, a file written, a
   service responding. Because the agent acts on a real system through its
-  [capabilities](/v6/core/capabilities), this is often the most reliable signal. It's **outcome
+  [capabilities](/v6/reference/capabilities), this is often the most reliable signal. It's **outcome
   verification**: the rigor of a test suite, with no fixed protocol the agent has to follow.
 
 You reach for one of three approaches, in increasing power:
@@ -150,9 +150,9 @@ async def implement_feature(spec: str = "add a /health endpoint"):
 
 </AccordionGroup>
 
-The full catalog lives in the [Graders reference](/v6/core/graders). A grader that returns a constant
+The full catalog lives in the [Graders reference](/v6/reference/graders). A grader that returns a constant
 or just echoes the answer back teaches a model nothing and invites reward hacking; a good reward
-separates good work from bad - see [Designing tasks](/v6/core/advice).
+separates good work from bad - see [Designing tasks](/v6/reference/advice).
 
 ## Tasksets
 
@@ -201,7 +201,7 @@ print(job.reward)
 
 - **`runtime=`** chooses *where* each rollout runs (local subprocess, container, cloud sandbox, HUD).
   Swap it freely without touching the tasks; omit it and placement is inferred (a locally-authored
-  source serves itself, platform/file rows go HUD-hosted). See [Runtime](/v6/core/runtime).
+  source serves itself, platform/file rows go HUD-hosted). See [Runtime](/v6/reference/runtime).
 - **`group=`** repeats each task N times so you can see the reward spread (the grouping GRPO trains on).
 - **`max_concurrent=`** caps how many rollouts run in parallel.
 
@@ -217,7 +217,7 @@ traces, so even a single `task.run` returns a job of one.
 |--------|------|-------------|
 | `id` | `str` | HUD job id. |
 | `name` | `str` | Display name. |
-| `runs` | `list[Run]` | The graded [`Run`](/v6/core/types#run)s, in expansion order. |
+| `runs` | `list[Run]` | The graded [`Run`](/v6/reference/types#run)s, in expansion order. |
 | `group` | `int` | Rollouts per task. |
 | `reward` | `float` | Mean reward across all runs. |
 | `results` | `dict[str, list[Run]]` | Runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)` (list-valued since `group > 1` gives several runs per task). |
@@ -266,16 +266,16 @@ print(plan.summary())
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Environments" icon="cube" href="/v6/core/environment">
+<Card title="Environments" icon="cube" href="/v6/reference/environment">
   Where the agent acts, and the capabilities a task grades against.
 </Card>
-<Card title="Graders" icon="check-double" href="/v6/core/graders">
+<Card title="Graders" icon="check-double" href="/v6/reference/graders">
   Every grader, comparison helper, and the `combine` combiner.
 </Card>
-<Card title="Runtime" icon="server" href="/v6/core/runtime">
+<Card title="Runtime" icon="server" href="/v6/reference/runtime">
   Where each task runs, chosen at execution time.
 </Card>
-<Card title="Designing tasks" icon="lightbulb" href="/v6/core/advice">
+<Card title="Designing tasks" icon="lightbulb" href="/v6/reference/advice">
   Design tasks that actually teach: difficulty, spread, and resisting reward hacking.
 </Card>
 </CardGroup>

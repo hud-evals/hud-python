@@ -11,9 +11,9 @@ chats. Each is independent; jump to what you need.
 
 ## Bring your own harness
 
-Because an [environment](/v6/core/environment) only exposes [capabilities](/v6/core/capabilities) and
+Because an [environment](/v6/reference/environment) only exposes [capabilities](/v6/reference/capabilities) and
 never a fixed agent, any loop or framework plugs in as a harness. Wrapping one is a thin adapter, not
-protocol work: you get a [`Run`](/v6/core/types#run), drive the environment off it, and fill
+protocol work: you get a [`Run`](/v6/reference/types#run), drive the environment off it, and fill
 `run.trace.content`.
 
 ### The Agent seam
@@ -51,14 +51,14 @@ The `run` is the one object you work with for the whole task. Three things you d
 
 | Call | Description |
 |------|-------------|
-| `run.client.open(protocol)` | Open a managed [capability](/v6/core/capabilities) client (shell, browser, ...) to act through. |
+| `run.client.open(protocol)` | Open a managed [capability](/v6/reference/capabilities) client (shell, browser, ...) to act through. |
 | `run.client.binding(protocol)` | Get a capability's raw wire address, to hand to an external SDK. |
 
-**Record the result** - `run.trace` is the [`Trace`](/v6/core/types#trace) you fill.
+**Record the result** - `run.trace` is the [`Trace`](/v6/reference/types#trace) you fill.
 
 | Call | Description |
 |------|-------------|
-| `run.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/core/types)). |
+| `run.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/reference/types)). |
 | `run.trace.content = ...` | Set the final answer, graded when the run ends. |
 
 ### Reusing HUD's loop: `ToolAgent`
@@ -73,7 +73,7 @@ There are two base classes, depending on how much of HUD's loop you want:
   recording.
 
 Record the step family that matches what happened - `AgentStep` (a model turn), `ToolStep` (a tool
-round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/core/types). `ToolAgent` does all of
+round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/reference/types). `ToolAgent` does all of
 this for you.
 
 ### Wrap an existing framework: browser-use on `cdp`
@@ -110,7 +110,7 @@ agent = OpenAIChatAgent(OpenAIChatConfig(
 
 ## Composing richer environments
 
-These patterns build on [Environments](/v6/core/environment) once the basics are in place.
+These patterns build on [Environments](/v6/reference/environment) once the basics are in place.
 
 ### Multiple capabilities at once
 
@@ -175,7 +175,7 @@ tasks = [fix_bug(difficulty=d) for d in range(1, 6)]
 ```
 
 A controlled difficulty distribution is what makes a taskset trainable - see
-[Designing tasks](/v6/core/advice).
+[Designing tasks](/v6/reference/advice).
 
 ### Structure a large taskset across files
 
@@ -214,7 +214,7 @@ rewards = [run.reward for run in job.runs]
 
 ### Route tasks to different substrates
 
-A [runtime](/v6/core/runtime) is called once per rollout with the task row, so a callable can place
+A [runtime](/v6/reference/runtime) is called once per rollout with the task row, so a callable can place
 heavier rows on heavier substrates:
 
 ```python run.py
@@ -281,7 +281,7 @@ env = Environment(
 Run the FastMCP server alongside the environment so the URL is live - for local iteration,
 `tools.run(transport="http", host="127.0.0.1", port=8080)`; in a built image, start it from your
 container entrypoint or an
-[`@env.initialize`](/v6/core/environment#lifecycle-hooks-set-up-and-tear-down) hook.
+[`@env.initialize`](/v6/reference/environment#lifecycle-hooks-set-up-and-tear-down) hook.
 
 ### How it looks to the orchestrator
 
@@ -299,7 +299,7 @@ the agent works against a multi-turn conversation. The `Chat` runner drives that
 turn and keeps the history for you.
 
 Reach for chat when the *interaction itself* is the thing - assistants, tool-use dialogues, anything
-where the agent needs prior turns. For evals and training, the default single-turn [task](/v6/core/tasks)
+where the agent needs prior turns. For evals and training, the default single-turn [task](/v6/reference/tasks)
 is what you want. Either way the grading model is the same: you still yield a reward.
 
 ### A chat-style task
@@ -377,8 +377,8 @@ For a complete A2A endpoint (sessions per context, agent card, citations transpo
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Agents" icon="robot" href="/v6/core/agents" />
-<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
-<Card title="Run & deploy" icon="rocket" href="/v6/core/runtime" />
+<Card title="Agents" icon="robot" href="/v6/reference/agents" />
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Run & deploy" icon="rocket" href="/v6/reference/runtime" />
 <Card title="Harbor interop" icon="anchor" href="/v6/advanced/harbor-convert" />
 </CardGroup>

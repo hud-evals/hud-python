@@ -5,8 +5,8 @@ icon: "robot"
 mode: "wide"
 ---
 
-An **agent** is what acts inside an [environment](/v6/core/environment): it works a
-[task](/v6/core/tasks) through the environment's [capabilities](/v6/core/capabilities) and produces the
+An **agent** is what acts inside an [environment](/v6/reference/environment): it works a
+[task](/v6/reference/tasks) through the environment's [capabilities](/v6/reference/capabilities) and produces the
 answer that gets graded. Concretely it's a **model** wrapped in a **harness** - the loop that feeds the
 model observations and turns its output into actions. In the framework an agent is anything callable as
 `await agent(run)`, where the `run` is the live handle for one task: its prompt, its connection to the
@@ -70,7 +70,7 @@ CLI over an `ssh` capability, against the env's filesystem. Every knob (`model`,
 
 Run a task with an agent two ways.
 
-**Programmatically** - pass the agent to `task.run` / `taskset.run` with a [runtime](/v6/core/runtime):
+**Programmatically** - pass the agent to `task.run` / `taskset.run` with a [runtime](/v6/reference/runtime):
 
 ```python
 from hud.agents import create_agent
@@ -82,7 +82,7 @@ job = await TASKS.run(agent, runtime=LocalRuntime("env.py"))
 print(job.reward)
 ```
 
-**From the [CLI](/v6/core/cli#hud-eval)** - `hud eval` takes a task source (`.py`, a directory, or
+**From the [CLI](/v6/reference/cli#hud-eval)** - `hud eval` takes a task source (`.py`, a directory, or
 `.json`/`.jsonl`) and an agent name (`claude`, `openai`, `gemini`, `openai_compatible`), runs each
 rollout in a fresh env subprocess, grades it, and prints the reward:
 
@@ -103,7 +103,7 @@ Flags override the agent's config for that run:
 | `--gateway` | Force calls through the gateway even when a provider key is set. |
 
 With only a `HUD_API_KEY` set, calls route through the gateway; with a provider key present they go
-straight to the provider. See the [CLI reference](/v6/core/cli#hud-eval) for the full flag set and key
+straight to the provider. See the [CLI reference](/v6/reference/cli#hud-eval) for the full flag set and key
 resolution.
 
 ## Bring your own harness
@@ -117,7 +117,7 @@ the seam, the `Run` object you work with, the step types you record, and worked 
 
 <CardGroup cols={2}>
 <Card title="Bring your own harness" icon="screwdriver-wrench" href="/v6/advanced/extending#bring-your-own-harness" />
-<Card title="Capabilities" icon="plug" href="/v6/core/capabilities" />
-<Card title="Types: Run & Trace" icon="code" href="/v6/core/types" />
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
+<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
 <Card title="Robots (beta)" icon="robot" href="/v6/advanced/robots" />
 </CardGroup>
