@@ -8,7 +8,7 @@
 
 HUD is a platform for building RL environments for AI agents, across coding, browser, computer-use, and robotics. Define an environment, write tasks, and run them as evals and training across any model, at any scale.
 
-To learn more, see the [documentation](https://docs.hud.ai) and [API reference](https://docs.hud.ai/reference/environment).
+To learn more, see the [documentation](https://docs.hud.ai) and [environment reference](https://docs.hud.ai/v6/core/environment).
 
 [![PyPI](https://img.shields.io/pypi/v/hud-python?style=flat-square)](https://pypi.org/project/hud-python/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -41,7 +41,7 @@ Then scaffold your first environment:
 hud init my-env
 ```
 
-![Agent running on SheetBench](https://raw.githubusercontent.com/hud-evals/hud-python/main/docs/src/images/trace_sheet.gif)
+![Agent running on SheetBench](docs/src/images/trace_sheet.gif)
 
 ## The protocol
 
@@ -80,14 +80,14 @@ hud eval my-taskset --remote
 For local iteration, the same protocol works against a container on your laptop:
 
 ```bash
-hud build .
-docker run -d --name run1 my-env
-docker exec run1 hud task start fix_bug
-docker exec run1 hud task grade fix_bug --answer "…"
+docker build -f Dockerfile.hud -t my-env .
+docker run -d --name run1 -p 8765:8765 my-env
+hud task start fix_bug --url tcp://127.0.0.1:8765
+hud task grade fix_bug --url tcp://127.0.0.1:8765 --answer "..."
 docker rm -f run1
 ```
 
-→ [Package & deploy](https://docs.hud.ai/run/deploy)
+→ [Run & deploy](https://docs.hud.ai/v6/core/runtime)
 
 ## Environments & templates
 
@@ -114,7 +114,7 @@ hud eval tasks.py claude --group 3
 
 Each graded evaluation is a **trace** (the SDK's live handle is a `Run`). With `HUD_API_KEY` set, every rollout is recorded on [hud.ai](https://hud.ai). Tasks that need a shell, browser, GUI, or robot declare **capabilities** (below); everything else — variants, grading, batching — stays identical.
 
-→ [Quickstart](https://docs.hud.ai/quickstart) · [Tasks & tasksets](https://docs.hud.ai/reference/tasks)
+→ [Quickstart](https://docs.hud.ai/v6/start/quickstart) · [Tasks & tasksets](https://docs.hud.ai/v6/core/tasks)
 
 ## Capabilities & harnesses
 
@@ -132,39 +132,42 @@ A **capability** is a connection the environment exposes; a **harness** attaches
 
 **Bring your own:** a harness attaches to a capability and defines a tool spec — wrap `browser-use` on `cdp`, a VLA policy on `robot`, or your own agent on `ssh` / `mcp`. No protocol work required.
 
-→ [Capabilities](https://docs.hud.ai/reference/capabilities) · [Models](https://docs.hud.ai/run/models) · [Robots](https://docs.hud.ai/reference/robots)
+→ [Capabilities](https://docs.hud.ai/v6/core/capabilities) · [Models](https://docs.hud.ai/v6/core/agents) · [Robots](https://docs.hud.ai/v6/advanced/robots)
 
 ## Deploy on the platform
 
 From the [platform UI](https://hud.ai) you can run batches, compare models on the same taskset, and inspect every trace.
 
-→ [Deploy](https://docs.hud.ai/run/deploy) · [Leaderboards](https://hud.ai/leaderboards)
+→ [Run & deploy](https://docs.hud.ai/v6/core/runtime)
 
 ## Train on rewards
 
-Every rollout returns a `Run` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and turn the rewards into GRPO advantages with `group_relative()`:
+Every rollout returns a `Run` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and pass the graded runs to `TrainingClient.step()`:
 
 ```python
+from hud import TrainingClient
 from hud.agents import create_agent
-from hud.eval import Taskset, group_relative
+from hud.eval import Job
 
-agent = create_agent("claude-sonnet-4-5")
-job = await Taskset(count_letter(word=w) for w in words).run(agent, group=16)
-for runs in job.results.values():
-    advantages = group_relative([r.reward for r in runs], normalize_std=True)
-    ...  # feed (run.trace_id, adv) into your optimizer
+agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
+trainer = TrainingClient("arith-rl")
+taskset, runtime = ...  # your Taskset and where rollouts run
+
+session = await Job.start("arith-rl", group=8)
+start = len(session.runs)
+await taskset.run(agent, runtime=runtime, group=8, job=session)
+await trainer.step(session.runs[start:], learning_rate=1e-5, group_size=8)
 ```
 
 HUD is the environment-and-reward source for your own GRPO/PPO loop — the same environment trains any model, text or multimodal, unchanged.
 
-→ [Training](https://docs.hud.ai/run/training) · [Designing tasks for signal](https://docs.hud.ai/run/signal)
+→ [Training](https://docs.hud.ai/v6/core/training) · [Designing tasks for signal](https://docs.hud.ai/v6/core/advice)
 
 ## Links
 
 - [Documentation](https://docs.hud.ai)
-- [Quickstart](https://docs.hud.ai/quickstart)
-- [CLI reference](https://docs.hud.ai/reference/cli)
-- [Leaderboards](https://hud.ai/leaderboards)
+- [Quickstart](https://docs.hud.ai/v6/start/quickstart)
+- [CLI reference](https://docs.hud.ai/v6/core/cli)
 - [Environment templates](https://hud.ai/environments)
 - [Supported models](https://hud.ai/models)
 - [Discord](https://discord.gg/wkjtmHYYjm)
@@ -189,8 +192,8 @@ Key areas: [Agents](hud/agents/) · [Environments](hud/environment/) · [Capabil
 
 ```bibtex
 @software{hud2025agentevalplatform,
-  author = {HUD and Jay Ram and Lorenss Martinsons and Parth Patel and Govind Pimpale and Dylan Bowman and Jaideep and Nguyen Nhat Minh},
-  title  = {HUD: An Evaluation and RL Envrionments Platform for Agents},
+  author = {HUD and Jay Ram and Lorenss Martinsons and Parth Patel and Govind Pimpale and Dylan Bowman and Jaideep Chawla and Nguyen Nhat Minh},
+  title  = {HUD: An Evaluation and RL Environments Platform for Agents},
   date   = {2025-04},
   url    = {https://github.com/hud-evals/hud-python},
   langid = {en}
