@@ -13,14 +13,18 @@ the atom and return a :class:`Job`.
 from __future__ import annotations
 
 import asyncio
+import json
 import textwrap
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import mcp.types as mcp_types
 import pytest
 
 from hud.agents.base import Agent
+from hud.agents.openai_compatible import OpenAIChatAgent
+from hud.agents.types import OpenAIChatConfig
 from hud.environment import Environment
 from hud.eval import Job, LocalRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
@@ -63,6 +67,44 @@ class _FnAgent(Agent):
         run.trace.content = self._fn(run.prompt)
 
 
+class _SequencedCompletions:
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = responses
+        self.requests: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.requests.append(kwargs)
+        return self._responses.pop(0)
+
+
+class _FakeOpenAI:
+    def __init__(self, responses: list[Any]) -> None:
+        self.chat = SimpleNamespace(completions=_SequencedCompletions(responses))
+
+
+def _chat_response(content: str, tool_calls: list[Any] | None = None) -> Any:
+    message = SimpleNamespace(
+        content=content,
+        tool_calls=tool_calls or [],
+        refusal=None,
+        model_dump=lambda exclude_none=True: {"role": "assistant", "content": content},
+    )
+    choice = SimpleNamespace(message=message, finish_reason="stop", logprobs=None)
+    return SimpleNamespace(
+        choices=[choice],
+        model="fake-openai-compatible",
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, prompt_tokens_details=None),
+    )
+
+
+def _tool_call(name: str, arguments: str) -> Any:
+    return SimpleNamespace(
+        type="function",
+        id=f"call_{name}",
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
 def _add_task(a: int, b: int) -> Task:
     """A pure data row; the env it names is defined by the spawned file."""
     return Task(env="sums", id="add", args={"a": a, "b": b})
@@ -84,6 +126,54 @@ async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     # The factual placement record: the runtime this run executed against.
     assert run.runtime is not None
     assert run.runtime.startswith("tcp://127.0.0.1:")
+
+
+async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    report = workspace / "REPORT.md"
+    env = Environment("opencode_report")
+    env.workspace(workspace, guest_path=str(workspace))
+
+    @env.initialize
+    async def seed() -> None:
+        workspace.mkdir(parents=True, exist_ok=True)
+        report.unlink(missing_ok=True)
+
+    @env.template()
+    async def write_report():
+        yield "Write PASS to REPORT.md."
+        yield 1.0 if report.exists() and report.read_text().strip() == "PASS" else 0.0
+
+    model_client = _FakeOpenAI(
+        [
+            _chat_response(
+                "",
+                [_tool_call("write", json.dumps({"filePath": str(report), "content": "PASS"}))],
+            ),
+            _chat_response("done"),
+        ]
+    )
+    agent = OpenAIChatAgent(
+        OpenAIChatConfig(model="qwen3.6-plus", model_client=model_client, max_steps=4)
+    )
+
+    run = await rollout(
+        Task(env="opencode_report", id="write_report"),
+        agent,
+        runtime=lambda _task: _local(env),
+    )
+
+    assert run.reward == 1.0
+    assert report.read_text() == "PASS"
+    tools = model_client.chat.completions.requests[0]["extra_body"]["tools"]
+    assert [tool["function"]["name"] for tool in tools] == [
+        "bash",
+        "read",
+        "glob",
+        "grep",
+        "edit",
+        "write",
+    ]
 
 
 async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Path) -> None:
