@@ -17,11 +17,13 @@ from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
 from .tools import (
+    BashTool,
+    EditTool,
     GlobTool,
     GrepTool,
-    ListTool,
     OpenAICompatibleMCPProxyTool,
     ReadTool,
+    WriteTool,
 )
 from .tools.base import format_chat_result
 
@@ -41,10 +43,12 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
     """OpenAI-compatible agent using the chat.completions protocol."""
 
     tool_catalog = (
+        BashTool,
         ReadTool,
-        GrepTool,
         GlobTool,
-        ListTool,
+        GrepTool,
+        EditTool,
+        WriteTool,
         OpenAICompatibleMCPProxyTool,
     )
 
