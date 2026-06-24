@@ -1,0 +1,208 @@
+---
+title: "Creating Environments"
+description: "Scaffold an environment, write its env.py, test it locally, and deploy it to the platform."
+icon: "hammer"
+mode: "wide"
+---
+
+
+This guide outlines how to create an environment in the HUD format - defining the `env.py` file, registering tasks
+and capabiltiies, doing quick local tests, and deploying the environment to our platform.
+
+## Start
+
+Run `hud init` in your terminal. This lets you select a template to start with, the default is a blank template.
+
+```bash
+hud init my-env
+cd my-env
+```
+
+Inside the blank template `my-env` you now have four files, each with one job:
+
+<div className="filetree">
+  <div className="ft-root">my-env/</div>
+  <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">env.py</span></span><span className="ft-note">the environment: object, capabilities, and task definitions</span></div>
+  <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">tasks.py</span></span><span className="ft-note">the concrete tasks to run, filled in with real arguments</span></div>
+  <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">Dockerfile.hud</span></span><span className="ft-note">how the environment is packaged into an image on deploy</span></div>
+  <div className="ft-row"><span><span className="ft-branch">└── </span><span className="ft-name">pyproject.toml</span></span><span className="ft-note">the Python dependencies</span></div>
+</div>
+
+## The `env.py` file
+
+`env.py` is the only file that defines behavior. Here is a complete one: an environment that gives the
+agent a calculator tool, asks it to add two numbers, and scores the answer. We'll take it part by part,
+top to bottom.
+
+<Accordion title="Full env.py">
+
+```python env.py
+import asyncio
+
+from fastmcp import FastMCP
+
+from hud.capabilities import Capability
+from hud.environment import Environment
+
+server = FastMCP(name="calc-tools")
+
+@server.tool
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+env = Environment(name="calc")
+_server_task: asyncio.Task | None = None
+
+@env.initialize
+async def _up():
+    global _server_task
+    if _server_task is None:
+        _server_task = asyncio.create_task(
+            server.run_async(transport="http", host="127.0.0.1", port=8040)
+        )
+        await asyncio.sleep(1.0)   # wait until the server is listening
+    env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8040/mcp"))
+
+@env.shutdown
+async def _down():
+    global _server_task
+    if _server_task is not None:
+        _server_task.cancel()
+        _server_task = None
+
+@env.template(id="sum")
+async def sum_task(a: int, b: int):
+    answer = yield f"Use your tools to compute {a} + {b}. Reply with just the number."
+    yield 1.0 if str(a + b) in (answer or "") else 0.0
+```
+
+</Accordion>
+
+```python
+env = Environment(name="calc")
+```
+
+This creates the **`Environment` object**. It holds nothing on its own; it's the handle you register
+everything else against. Every capability and task that follows attaches to `env`. The `name` is how a
+task row later finds its way back to this definition. When HUD runs the environment, it imports the
+file, finds this object, and serves whatever is registered on it, which is why the same `env.py` runs
+on your laptop, in a container, or on the platform unchanged.
+
+## Capabilities
+
+A **capability** is a connection the agent drives. This environment serves its own: a
+[FastMCP](https://gofastmcp.com) server exposing one tool, `add`. Three things happen, in order, inside
+the lifecycle hooks:
+
+```python
+@env.initialize          # runs once before the env accepts any connection
+async def _up():
+    # 1. start the tool server in the background
+    _server_task = asyncio.create_task(server.run_async(transport="http", host="127.0.0.1", port=8040))
+    await asyncio.sleep(1.0)                                  # 2. wait until it's listening
+    env.add_capability(Capability.mcp(name="tools",          # 3. publish its address
+                                      url="http://127.0.0.1:8040/mcp"))
+
+@env.shutdown            # runs on shutdown
+async def _down():
+    _server_task.cancel()                                    # tear it down with the env
+```
+
+`@env.initialize` runs to completion before any agent connects, so by the time one does, the tool is
+live. Step 2 matters: a background task returns before the server has bound its port, and publishing
+the capability too early lets an agent connect to nothing. `@env.shutdown` releases it.
+
+You attach a capability three ways:
+
+- in the `Environment(...)` constructor, for a service that already exists,
+- with `env.add_capability(...)` from a hook, for a service the environment runs itself (above),
+- with `env.workspace(root)`, the one-line shortcut for the common case: a sandboxed shell over `ssh`.
+
+Other protocols - a browser over `cdp`, a full desktop over `rfb`, a robot loop - attach the same way.
+The [capabilities](/v6/reference/capabilities) page has the spin-up for each.
+
+## Tasks
+
+```python
+@env.template(id="sum")
+async def sum_task(a: int, b: int):
+    answer = yield f"Use your tools to compute {a} + {b}. Reply with just the number."
+    yield 1.0 if str(a + b) in (answer or "") else 0.0
+```
+
+A task is an async generator with two `yield`s. The first yields the prompt; the agent then works,
+calling the `add` tool, and its answer comes back into `answer`; the second yields the reward. Whatever
+the agent does happens between the two yields.
+
+`@env.template()` registers the function as a **template**. Its parameters (`a`, `b`) fill in per run,
+so one definition covers a whole space of tasks. Calling it - `sum_task(a=2, b=3)` - binds one runnable
+[task](/v6/reference/tasks).
+
+## Grading
+
+The second yield is the reward, a number from `0.0` to `1.0`. Here it's plain Python: compare the
+answer to `a + b`. You have three options as tasks grow:
+
+| Approach | What it does |
+| --- | --- |
+| Plain Python | Compute the float inline, like above. Comparison helpers (`exact_match`, `numeric_match`, ...) live in `hud.graders`. |
+| Async graders | `BashGrader` scores a shell command by exit code; `LLMJudgeGrader` scores against rubric criteria. This is how you grade the state the agent left behind - a test passing, a file written. |
+| Composed graders | `combine` runs several at once and weights them into one reward, each subscore visible in the trace. |
+
+Grading the state the agent left behind is usually the most reliable signal. A grader that returns a
+constant invites reward hacking; see [designing tasks](/v6/reference/advice) for what separates good
+work from bad.
+
+## Listing tasks in `tasks.py`
+
+`env.py` defines the shape of a task. `tasks.py` lists the concrete ones to run by calling the template
+with real arguments:
+
+```python tasks.py
+from env import sum_task
+
+tasks = [
+    sum_task(a=2, b=3),
+    sum_task(a=10, b=15),
+]
+```
+
+Each call binds one runnable task. Build them in a loop to turn one definition into a whole dataset.
+
+## Testing the environment locally
+
+Run an agent against the tasks. `hud eval` spawns the environment locally, runs the agent, grades each
+task, and prints the reward:
+
+```bash
+hud eval tasks.py claude
+```
+
+That's the whole local loop - no API key, no Docker, no separate server. Use it while iterating.
+
+## Deploying to the platform
+
+When it works locally, ship it. Deploying talks to the platform, so set your API key first:
+
+```bash
+hud set HUD_API_KEY=your-key   # get one at hud.ai
+```
+
+`hud deploy` builds the image from `Dockerfile.hud` and publishes the environment under its
+`Environment(name=...)`:
+
+```bash
+hud deploy
+```
+
+To run a taskset from the platform, publish it too. `hud sync` uploads a taskset and only what changed:
+
+```bash
+hud sync tasks my-tasks   # publish tasks.py as a named taskset
+hud sync env              # sync environment metadata
+```
+
+Your environment now lives on the platform, ready to run at scale and compare across models. Running
+those evaluations - locally, on a cloud sandbox, or on the platform - is covered in
+[evaluating agents](/v6/guides/running-an-eval).
