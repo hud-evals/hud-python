@@ -1,0 +1,51 @@
+---
+title: "Training Agents"
+description: "Group rollouts per task, read the reward spread, and feed it into your RL loop."
+icon: "dumbbell"
+---
+
+Evaluation and training share the same machinery: a task, an agent, and a reward. To train, you run many
+rollouts of the same task, look at how the rewards spread, and use that signal to update the model.
+
+## 1. Group rollouts per task
+
+Run a group of rollouts for each task instead of a single attempt. The spread of rewards within a group
+is the learning signal - a task every rollout passes (or fails) teaches nothing.
+
+```python
+from hud.eval import LocalRuntime
+from tasks import TASKS
+
+job = await TASKS.run(agent, runtime=LocalRuntime("env.py"), group=8)   # 8 rollouts per task
+```
+
+## 2. Read the reward spread
+
+Each group yields a distribution of rewards. A healthy training task has variance - some rollouts succeed,
+some don't - so the policy has a gradient to climb.
+
+```python
+for task_group in job.groups:
+    print(task_group.rewards)        # e.g. [1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
+```
+
+## 3. Feed it into your RL loop
+
+Hand the grouped rewards straight to your own GRPO/PPO loop, or a stack like
+[Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or
+[Fireworks](https://fireworks.ai/). The environment and reward stay fixed; everything else is yours to
+swap.
+
+## Where to go next
+
+<CardGroup cols={2}>
+<Card title="Training" icon="dumbbell" href="/v6/reference/training">
+  The training reference: groups, rewards, and RL integration.
+</Card>
+<Card title="Evaluating Agents" icon="play" href="/v6/guides/running-an-eval">
+  Form a taskset and run an agent against it.
+</Card>
+<Card title="Designing tasks" icon="signal" href="/v6/reference/advice">
+  Build tasks with the variance that makes training work.
+</Card>
+</CardGroup>
