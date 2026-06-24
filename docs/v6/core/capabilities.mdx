@@ -237,10 +237,12 @@ See [Robots](/v6/advanced/robots) for the bridge, the endpoint, the harness, and
 
 `filetracking` is observation-only: it reports what changed in a [`Workspace`](#workspace) over a run,
 so HUD can show file diffs in the trace. It's not a tool an agent calls - the rollout opens it for
-telemetry. A `Workspace` serves it when you opt in:
+telemetry. `env.workspace(...)` publishes it by default with conservative tracking limits and
+secret redaction; set `HUD_FILE_TRACKING_ENABLED=false` or pass `track_files=False` to opt out:
 
 ```python env.py
-env.workspace("workspace", track_files=True)   # also publishes the filetracking/1 capability
+env.workspace("workspace")                     # also publishes the filetracking/1 capability
+env.workspace("workspace", track_files=False)  # ssh only; no filetracking capability
 ```
 
 The client is `FileTrackingClient` (`hud.capabilities`): `diff()` returns the changes since the last
@@ -265,7 +267,7 @@ The bundled provider agents open these automatically based on which capabilities
 
 A `Workspace` is not a capability - it's the built-in daemon that *serves* the `ssh` capability. It's the one capability HUD ships an implementation for; for `mcp`, `cdp`, and `rfb` you stand up the daemon yourself (above), but for a shell you just attach a workspace.
 
-Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). `env.workspace(root, ...)` wires its whole lifecycle: the environment brings it up (keys, socket, accept loop) when it serves and tears it down on `env.stop()`. Extra kwargs configure the sandbox - mounts, network, env vars, guest path, fixed ports, your own keys:
+Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). `env.workspace(root, ...)` wires its whole lifecycle: the environment brings it up (keys, socket, accept loop, and file tracking by default) when it serves and tears it down on `env.stop()`. Extra kwargs configure the sandbox - mounts, network, env vars, guest path, fixed ports, your own keys:
 
 ```python
 from hud.environment import Environment, Mount

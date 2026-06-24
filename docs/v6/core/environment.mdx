@@ -58,8 +58,8 @@ free: <u>wrapping any system is trivial</u>, and <u>nothing about the agent is b
 same environment keeps working with any model or harness, today's or next year's.
 
 The most common capability is a shell: a **`Workspace`** is a sandboxed directory the agent works in
-over `ssh`, and `env.workspace(root)` brings it up, publishes its `ssh` capability, and tears it down
-with the env - one line, no hook:
+over `ssh`, and `env.workspace(root)` brings it up, publishes its `ssh` capability plus
+observation-only file tracking by default, and tears it down with the env - one line, no hook:
 
 ```python env.py
 from hud import Environment

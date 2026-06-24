@@ -7,16 +7,19 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+import shlex
+from typing import Any, cast
 
 import pytest
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
-
-if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
+from hud.agents.openai_compatible.agent import OpenAIChatAgent
+from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
+from hud.agents.tools.base import result_text
+from hud.agents.types import OpenAIChatConfig
+from hud.capabilities import Capability, SSHClient
 
 
 class _Completed:
@@ -61,6 +64,21 @@ class _FakeSFTP:
     def open(self, path: str, mode: str) -> _FakeOpenFile:
         return _FakeOpenFile(self._store, path, mode)
 
+    async def listdir(self, path: str) -> list[str]:
+        prefix = path.rstrip("/")
+        if not prefix:
+            prefix = "/"
+        if prefix != "/":
+            prefix += "/"
+        names: set[str] = set()
+        for file_path in self._store:
+            if not file_path.startswith(prefix):
+                continue
+            rest = file_path[len(prefix) :]
+            if rest:
+                names.add(rest.split("/", 1)[0])
+        return sorted(names)
+
 
 class _Conn:
     def __init__(self, completed: _Completed, store: dict[str, bytes]) -> None:
@@ -70,13 +88,26 @@ class _Conn:
 
     async def run(self, command: str, check: bool = False) -> _Completed:
         self.commands.append(command)
+        parts = shlex.split(command)
+        if len(parts) == 3 and parts[:2] in (["test", "-d"], ["test", "-e"]):
+            path = parts[2]
+            exists = path in self._store or any(
+                file_path.startswith(path.rstrip("/") + "/") for file_path in self._store
+            )
+            if parts[1] == "-d":
+                exists = any(
+                    file_path.startswith(path.rstrip("/") + "/") for file_path in self._store
+                )
+            return _Completed(exit_status=0 if exists else 1)
+        if len(parts) >= 3 and parts[:2] == ["mkdir", "-p"]:
+            return _Completed(exit_status=0)
         return self._completed
 
     def start_sftp_client(self) -> _FakeSFTP:
         return _FakeSFTP(self._store)
 
 
-class _FakeSSH:
+class _FakeSSH(SSHClient):
     """Duck-typed ``SSHClient``: ``conn.run`` (bash) + ``conn.start_sftp_client`` (files)."""
 
     def __init__(
@@ -87,7 +118,10 @@ class _FakeSSH:
         files: dict[str, bytes] | None = None,
     ) -> None:
         self.files: dict[str, bytes] = files or {}
-        self.conn = _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)
+        super().__init__(
+            Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22"),
+            cast("Any", _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)),
+        )
 
 
 def _ssh(**kwargs: Any) -> SSHClient:
@@ -96,6 +130,11 @@ def _ssh(**kwargs: Any) -> SSHClient:
 
 def _commands(tool: Any) -> list[str]:
     return tool.client.conn.commands
+
+
+class _OpenAIChatAgentForTest(OpenAIChatAgent):
+    async def build_tools_for_test(self, ssh: SSHClient) -> tuple[dict[str, Any], list[Any]]:
+        return await self._build_tools({"ssh": ssh})
 
 
 # ─── OpenAI shell ─────────────────────────────────────────────────────
@@ -133,6 +172,96 @@ async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
 def test_openai_shell_to_params_is_shell_type() -> None:
     tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
     assert tool.to_params()["type"] == "shell"
+
+
+# ─── OpenAI-compatible OpenCode workspace tools ───────────────────────
+
+
+async def test_openai_compatible_catalog_matches_opencode_workspace_tools() -> None:
+    agent = _OpenAIChatAgentForTest(
+        OpenAIChatConfig(model="qwen3.6-plus", model_client=cast("Any", object()))
+    )
+
+    tools, params = await agent.build_tools_for_test(_ssh())
+
+    assert list(tools) == ["bash", "read", "glob", "grep", "edit", "write"]
+    assert [param["function"]["name"] for param in params] == [
+        "bash",
+        "read",
+        "glob",
+        "grep",
+        "edit",
+        "write",
+    ]
+
+
+async def test_openai_compatible_bash_uses_workdir_and_timeout() -> None:
+    tool = BashTool(spec=BashTool.default_spec("qwen"), client=_ssh())
+
+    await tool.execute({"command": "echo hi", "workdir": "/tmp/my dir", "timeout": 2500})
+
+    assert _commands(tool) == ["cd '/tmp/my dir' && timeout 3s bash -lc 'echo hi'"]
+
+
+async def test_openai_compatible_write_stores_file_via_workspace_sftp() -> None:
+    ssh = _FakeSSH()
+    tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    result = await tool.execute({"filePath": "/REPORT.md", "content": "done"})
+
+    assert result.isError is False
+    assert ssh.files["/REPORT.md"] == b"done"
+
+
+async def test_openai_compatible_edit_rewrites_unique_match() -> None:
+    ssh = _FakeSSH(files={"/f.txt": b"hello old world"})
+    tool = EditTool(spec=EditTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    result = await tool.execute(
+        {"filePath": "/f.txt", "oldString": "old", "newString": "new"},
+    )
+
+    assert result.isError is False
+    assert ssh.files["/f.txt"] == b"hello new world"
+
+
+async def test_openai_compatible_edit_rejects_ambiguous_match() -> None:
+    ssh = _FakeSSH(files={"/f.txt": b"a a a"})
+    tool = EditTool(spec=EditTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    result = await tool.execute(
+        {"filePath": "/f.txt", "oldString": "a", "newString": "b"},
+    )
+
+    assert result.isError is True
+    assert ssh.files["/f.txt"] == b"a a a"
+
+
+async def test_openai_compatible_read_lists_directories() -> None:
+    tool = ReadTool(
+        spec=ReadTool.default_spec("qwen"),
+        client=_ssh(files={"/work/a.txt": b"a", "/work/nested/b.txt": b"b"}),
+    )
+
+    result = await tool.execute({"filePath": "/work"})
+
+    text = result_text(result)
+    assert "<type>directory</type>" in text
+    assert "a.txt" in text
+    assert "nested" in text
+
+
+async def test_openai_compatible_read_accepts_zero_offset_for_first_page() -> None:
+    tool = ReadTool(
+        spec=ReadTool.default_spec("qwen"),
+        client=_ssh(files={"/f.txt": b"alpha\nbeta\n"}),
+    )
+
+    result = await tool.execute({"filePath": "/f.txt", "offset": 0, "limit": 1})
+
+    text = result_text(result)
+    assert "1: alpha" in text
+    assert "2: beta" not in text
 
 
 # ─── Gemini shell ─────────────────────────────────────────────────────

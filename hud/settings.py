@@ -160,9 +160,10 @@ class Settings(BaseSettings):
     )
 
     file_tracking_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Publish a workspace's filetracking/1 capability and stream file-change "
-        "diffs to telemetry during a rollout. Opt-in; off by default.",
+        "diffs to telemetry during a rollout. Enabled by default; set "
+        "HUD_FILE_TRACKING_ENABLED=false to opt out.",
         validation_alias="HUD_FILE_TRACKING_ENABLED",
     )
 

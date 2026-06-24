@@ -29,7 +29,12 @@ def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "root").exists()
 
 
-async def test_serving_publishes_the_workspace_capability(tmp_path: Path) -> None:
+async def test_serving_publishes_the_workspace_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "file_tracking_enabled", True)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
@@ -38,8 +43,24 @@ async def test_serving_publishes_the_workspace_capability(tmp_path: Path) -> Non
         assert cap.protocol == "ssh/2"
         assert cap.url.startswith("ssh://")
         assert cap.params["host_pubkey"].startswith("ssh-ed25519")
+        assert client.binding("filetracking").protocol == "filetracking/1"
         ssh_dir = tmp_path / "root" / ".hud" / "ssh"
         assert any(ssh_dir.rglob("host_ed25519"))
+
+
+async def test_workspace_file_tracking_can_be_opted_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "file_tracking_enabled", True)
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+
+    async with served(env) as client:
+        assert client.binding("shell").protocol == "ssh/2"
+        with pytest.raises(KeyError):
+            client.binding("filetracking")
 
 
 async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
@@ -76,15 +97,18 @@ async def test_stop_tears_down_the_workspace(tmp_path: Path) -> None:
 
 
 async def test_restarting_replaces_the_published_address_without_duplicates(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "file_tracking_enabled", True)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
     async with served(env):
         pass
     async with served(env):
-        assert [c.name for c in env.capabilities] == ["shell"]
+        assert [c.name for c in env.capabilities] == ["shell", "filetracking"]
 
 
 async def test_any_initialize_hook_can_publish_a_capability() -> None:
