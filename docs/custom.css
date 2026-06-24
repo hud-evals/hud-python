@@ -418,3 +418,158 @@ body::after {
   white-space: nowrap;
   border: 0;
 }
+
+/* ── Collapsible sidebar sections ("toggle masquerading as a heading") ──────
+   Mintlify makes a section collapsible by nesting a group inside it, but it
+   renders that nested group as a <button> styled like a plain page link.
+   Restyle the toggle so it reads as a section heading (matching the always-open
+   "Start here" / "Guides" / "Reference" / "More" headings), keeping its chevron
+   as the expand/collapse affordance. The redundant outer wrapper heading is
+   hidden. This keys off the nested-group structure (`li[data-group-tag]`), so it
+   applies to exactly whichever sections are authored as nested groups in
+   docs.json — currently Advanced and Cookbooks. */
+li[data-group-tag] > button[aria-expanded] {
+  font-size: 0.75rem !important;   /* text-xs */
+  line-height: 1rem !important;
+  font-weight: 600 !important;     /* font-semibold */
+  color: #111827 !important;       /* gray-900 */
+}
+.dark li[data-group-tag] > button[aria-expanded] {
+  color: #e5e7eb !important;       /* gray-200 */
+}
+/* the section's pages sit one nesting level deeper than other sections — pull
+   them back to the standard page-link indent so they line up identically. */
+li[data-group-tag] ul a {
+  padding-left: 1rem !important;
+}
+/* hide the redundant outer section heading that wraps a collapsible toggle */
+div:has(> ul.sidebar-group > li[data-group-tag]) > .sidebar-group-header {
+  display: none !important;
+}
+
+/* ── Mermaid diagrams: stop labels overflowing their boxes ──────────────────
+   Mermaid measures each node box using its *default* font (trebuchet ms), but
+   the page then inherits the wider HUD brand font (Inter), so the rendered
+   text no longer fits the box it was sized for and the last letters clip. The
+   simple, root-cause fix: render mermaid text in the same font mermaid measures
+   with, so every box fits by construction. (Scoped to diagrams only — the rest
+   of the page keeps the brand font.) */
+#content .mermaid,
+#content .mermaid span,
+#content .mermaid p,
+#content .mermaid div,
+#content .mermaid foreignObject,
+#content .mermaid text,
+#content .mermaid .nodeLabel,
+#content .mermaid .edgeLabel,
+#content .mermaid .cluster-label {
+  font-family: "trebuchet ms", verdana, arial, sans-serif !important;
+}
+/* Overview step pills are meant to stay on a single line (their spaces are
+   non-breaking) — keep them from wrapping. */
+#content .mermaid .node.clickable .nodeLabel,
+#content .mermaid .node.clickable foreignObject,
+#content .mermaid .node.clickable foreignObject > div {
+  white-space: nowrap !important;
+}
+/* Nodes with a mermaid `click` link: a subtle, minimalist hover cue — a slight
+   scale-up from the node's own center, nothing imposing. */
+#content .mermaid .node.clickable {
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+#content .mermaid .node.clickable:hover {
+  transform: scale(1.05);
+}
+
+/* ── Two-column guide layout (textbook margin) ─────────────────────────────
+   A per-step row: the explanation on the left stays the center of attention,
+   with a quiet margin on the right for supporting code, tables, diagrams, and
+   notes. The split engages at ≥1024px (matching the wide reading column) and
+   stacks into a single column below that, so each visual drops under the text it
+   belongs to. The text column is intentionally narrower than the visual column
+   (4:6) so code and diagrams get room to breathe. */
+@media (min-width: 1024px) {
+  #content .guide-row {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+    gap: 2.75rem;
+    align-items: start;
+    margin: 1.5rem 0;
+  }
+  #content .guide-aside {
+    border-left: 1px solid #e5e5e5;
+    padding-left: 1.5rem;
+    font-size: 0.9em;
+  }
+  .dark #content .guide-aside {
+    border-left-color: rgba(255, 255, 255, 0.1);
+  }
+}
+/* Small uppercase caption above a margin visual. */
+#content .aside-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #8a8a8a;
+  margin-bottom: 0.5rem;
+}
+/* Margin tables/code shrink to fit the narrow column without forcing a scrollbar. */
+#content .guide-aside table {
+  width: 100%;
+  font-size: 0.8em;
+}
+#content .guide-aside th,
+#content .guide-aside td {
+  padding: 0.4rem 0.6rem;
+}
+
+/* ── File tree ──────────────────────────────────────────────────────────────
+   A clean directory listing (à la a file explorer): a bordered, rounded box
+   matching the card/code-block hairline language, with monospace entries, quiet
+   connector glyphs, and muted inline notes aligned in their own column. Each
+   row is a 2-column grid (name | note) so every note lines up regardless of
+   filename length. */
+#content .filetree {
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 1rem 1.25rem;
+  margin: 1.25rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace;
+  font-size: 0.85rem;
+  line-height: 1.85;
+}
+.dark #content .filetree {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+#content .filetree .ft-root {
+  font-weight: 600;
+  color: var(--tw-prose-headings);
+  margin-bottom: 0.15rem;
+}
+#content .filetree .ft-row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.5rem;
+  align-items: baseline;
+}
+#content .filetree .ft-branch {
+  color: #c0c0c0;
+}
+.dark #content .filetree .ft-branch {
+  color: #5a5a5a;
+}
+#content .filetree .ft-name {
+  color: var(--tw-prose-headings);
+  font-weight: 500;
+}
+#content .filetree .ft-note {
+  color: #8a8a8a;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.92em;
+}
