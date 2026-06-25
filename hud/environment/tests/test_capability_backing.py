@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import subprocess
 import sys
 from typing import TYPE_CHECKING, cast
 
@@ -86,24 +87,38 @@ async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
             assert client.binding("shell").params["host_pubkey"] == first
 
 
-def _pid_exists(pid: int) -> bool:
+def _pid_status(pid: int) -> str | None:
+    result = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.stdout.strip() or None
+
+
+def _pid_is_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    return True
+    status = _pid_status(pid)
+    if status is None:
+        return False
+    return not status.startswith("Z")
 
 
-async def _wait_for_pid_exit(pid: int, max_wait: float = 2.0) -> bool:
+async def _wait_for_pid_inactive(pid: int, max_wait: float = 2.0) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max_wait
     while loop.time() < deadline:
-        if not _pid_exists(pid):
+        if not _pid_is_running(pid):
             return True
         await asyncio.sleep(0.05)
-    return not _pid_exists(pid)
+    return not _pid_is_running(pid)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
@@ -121,9 +136,9 @@ async def test_workspace_command_teardown_kills_background_children(tmp_path: Pa
                 check=True,
             )
             pid = int(pid_file.read_text())
-            assert await _wait_for_pid_exit(pid)
+            assert await _wait_for_pid_inactive(pid)
     finally:
-        if pid is not None and _pid_exists(pid):
+        if pid is not None and _pid_is_running(pid):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
 

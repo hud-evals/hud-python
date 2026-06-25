@@ -17,6 +17,7 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
 import sys
 import textwrap
 from contextlib import asynccontextmanager
@@ -119,24 +120,38 @@ def _solve_add(prompt: str) -> str:
     return str(int(a) + int(b))
 
 
-def _pid_exists(pid: int) -> bool:
+def _pid_status(pid: int) -> str | None:
+    result = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.stdout.strip() or None
+
+
+def _pid_is_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    return True
+    status = _pid_status(pid)
+    if status is None:
+        return False
+    return not status.startswith("Z")
 
 
-async def _wait_for_pid_exit(pid: int, max_wait: float = 2.0) -> bool:
+async def _wait_for_pid_inactive(pid: int, max_wait: float = 2.0) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max_wait
     while loop.time() < deadline:
-        if not _pid_exists(pid):
+        if not _pid_is_running(pid):
             return True
         await asyncio.sleep(0.05)
-    return not _pid_exists(pid)
+    return not _pid_is_running(pid)
 
 
 async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
@@ -237,9 +252,9 @@ async def test_local_runtime_startup_failure_kills_spawned_children(tmp_path: Pa
             async with LocalRuntime(env_file, ready_timeout=2.0)(Task(env="leaky", id="noop")):
                 pass
         pid = int(pid_file.read_text())
-        assert await _wait_for_pid_exit(pid)
+        assert await _wait_for_pid_inactive(pid)
     finally:
-        if pid is not None and _pid_exists(pid):
+        if pid is not None and _pid_is_running(pid):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
 
