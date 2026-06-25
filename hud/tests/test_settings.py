@@ -23,6 +23,16 @@ def test_settings_defaults():
     assert s.log_stream == "stdout"
 
 
+def test_file_tracking_is_enabled_by_default():
+    assert Settings.model_fields["file_tracking_enabled"].default is True
+
+
+def test_file_tracking_can_be_disabled_by_env(monkeypatch):
+    monkeypatch.setenv("HUD_FILE_TRACKING_ENABLED", "false")
+
+    assert Settings().file_tracking_enabled is False
+
+
 def test_settings_singleton():
     """Test that settings is a singleton."""
     s1 = get_settings()

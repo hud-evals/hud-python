@@ -345,9 +345,13 @@ class Workspace:
         """The concrete ``filetracking/1`` capability (requires ``track_files=True``)."""
         from hud.capabilities import Capability
 
-        if self._ft_port is None:
+        if self._ft_host is None or self._ft_port is None:
             raise RuntimeError("file tracking not started; call start() with track_files=True")
-        return Capability.filetracking(name=name, url=f"tcp://{self._ft_host}:{self._ft_port}")
+        return Capability(
+            name=name,
+            protocol="filetracking/1",
+            url=f"tcp://{self._ft_host}:{self._ft_port}",
+        )
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
 
