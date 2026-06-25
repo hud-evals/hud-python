@@ -484,6 +484,16 @@ div:has(> ul.sidebar-group > li[data-group-tag]) > .sidebar-group-header {
 #content .mermaid text {
   font-family: "trebuchet ms", verdana, arial, sans-serif !important;
 }
+/* Overview step pills stay on one line (non-breaking spaces). Any tiny
+   measure-vs-render slack on the longest pill ("Declare your environment")
+   would clip the last letters — let the label spill into the pill's internal
+   padding instead of being cut at the box edge. */
+#content .mermaid .node.clickable .nodeLabel,
+#content .mermaid .node.clickable foreignObject,
+#content .mermaid .node.clickable foreignObject > div {
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
 /* Nodes with a mermaid `click` link: a subtle, minimalist hover cue — a slight
    scale-up from the node's own center, nothing imposing. */
 #content .mermaid .node.clickable {

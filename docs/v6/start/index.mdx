@@ -39,7 +39,7 @@ flowchart LR
     end
 
     AG <-->|capabilities| EN
-    EN -->|humans measure| EV["<b>evaluation</b>#160;and#160;<b>benchmarking</b>"]
+    EN -->|humans measure| EV["<b>evaluation</b> and<br/><b>benchmarking</b>"]
     EN -->|agent improves| TR["<b>training</b>"]
 
     classDef node fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
@@ -53,13 +53,20 @@ flowchart LR
 ```
 
 
+## HUD
+
+[HUD](https://hud.ai) is a platform for building environments. You define an environment, write tasks for
+that environment, and run any agent to perform those tasks, at any scale. Our SDK is an
+[open-source](https://github.com/hud-evals/hud-python) Python framework for all of this.
+
 ## Reading the docs
 
 - [**Quickstart**](/v6/start/quickstart) - install HUD and run your first graded task in minutes.
 - [**Overview**](/v6/start/overview) - the big picture of what HUD is and how the whole workflow fits together.
-- [**Core**](/v6/reference/environment) - the heart of the docs: environments, tasks, agents, running, training, and more, each with a hands-on guide and its API.
+- [**Guides**](/v6/guides/creating-an-environment) - high-level, dedicated guides for each stage: creating environments, running evals, and training agents.
+- [**Reference**](/v6/reference/environment) - the API for each core object: environments, tasks, agents, graders, and more.
 - [**Advanced**](/v6/advanced/extending) - off the beaten path: bring your own harness, composing environments, subagents, and chat.
-- [**Cookbooks**](/v6/cookbooks/coding-agent) - worked examples and creative ways to use HUD.
+- [**Cookbooks**](/v6/cookbooks/index) - worked examples and creative ways to use HUD.
 - [**More**](/v6/more/faq) - FAQ, migrating to v6, and contributing.
 
 {/* <CardGroup cols={2}>

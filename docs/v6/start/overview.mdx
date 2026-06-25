@@ -12,7 +12,7 @@ specific guides on the main uses see Guides. The workflow can be split into 5 st
 ```mermaid
 %%{init: {'flowchart': {'padding': 22}}}%%
 flowchart LR
-    A(["1#160;·#160;Declare#160;your#160;environment"]) --> B(["2#160;·#160;Choose#160;your#160;taskset"]) --> C(["3#160;·#160;Choose#160;your#160;runtime"]) --> D(["4#160;·#160;Run#160;your#160;agent"]) --> E(["5#160;·#160;Learn"])
+    A(["1#160;·#160;Declare#160;environment"]) --> B(["2#160;·#160;Choose#160;your#160;taskset"]) --> C(["3#160;·#160;Choose#160;your#160;runtime"]) --> D(["4#160;·#160;Run#160;your#160;agent"]) --> E(["5#160;·#160;Learn"])
     classDef s1 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
     classDef s2 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
     classDef s3 fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
@@ -32,7 +32,7 @@ flowchart LR
 
 ## 1 · Declare your environment
 
-In HUD any workflow starts either by creating your own environment or choosing an existing one.
+In HUD any workflow starts with creating an environment.
 
 An environment is some closed container for your agent to act in. Fundamentally it's defined by:
 
@@ -191,7 +191,7 @@ run is traced on the [platform](https://hud.ai), so you can see exactly what the
 | [**Agent**](/v6/reference/agents) | A model paired with a harness that drives it - plugged into an environment's capabilities to attempt tasks and be graded. |
 | [**Run**](/v6/reference/types#run) | A single rollout - one agent attempting one task - that produces a reward. |
 | [**Trace**](/v6/reference/types#trace) | The full, replayable timeline of a run: every action, observation, and grade. |
-| [**Job**](/v6/reference/tasks#jobs) | A collection of runs grouped together - e.g. a whole taskset evaluated by an agent. |
+| [**Job**](/v6/reference/types#job) | A collection of runs grouped together - e.g. a whole taskset evaluated by an agent. |
 
 <Accordion title="Part 4: Run your agent">
 
