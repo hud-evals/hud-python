@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from typing import TYPE_CHECKING, Any
 
-from hud.environment.file_tracker import FileTracker
-from hud.environment.file_tracking import serve_file_tracking
+from hud.environment.file_tracker import FileTracker, serve_file_tracking
 from hud.environment.utils import read_frame, send_frame
 
 if TYPE_CHECKING:
@@ -59,6 +59,15 @@ async def test_diff_snapshot_advance_roundtrip(tmp_path: Path) -> None:
         (tmp_path / "b.txt").write_text("z\n")
         await _call(reader, writer, "advance")
         assert (await _call(reader, writer, "diff"))["files_changed"] == 0
+
+        # flush() returns the trailing diff plus bounded changed deliverables.
+        (tmp_path / "report.xlsx").write_bytes(b"spreadsheet")
+        flush = await _call(reader, writer, "flush")
+        assert flush["diff"]["files_changed"] == 1
+        capture = flush["capture"]
+        assert capture["files_captured"] == 1
+        assert capture["files"][0]["path"] == "report.xlsx"
+        assert base64.b64decode(capture["files"][0]["file"]["data"]) == b"spreadsheet"
     finally:
         writer.close()
         await writer.wait_closed()

@@ -2,9 +2,9 @@
 
 Snapshots a directory tree and produces unified diffs (patches) between
 snapshots, so a rollout can record exactly what changed on disk over time. The
-tracker is pure computation over a local ``root`` — it does no networking and
-holds no credentials; a serving layer (:mod:`hud.environment.file_tracking`)
-exposes it as a capability and the client side decides what to record.
+tracker is pure computation over a local ``root``; ``serve_file_tracking`` wraps
+one tracker in the small ``filetracking/1`` framed-JSON adapter used by
+workspaces.
 
 Ported from the orchestrator sidecar's ``/proc``-scanning tracker, with the
 Kubernetes coupling removed (it scans an injected ``root`` instead of
@@ -15,15 +15,20 @@ never read, hashed-for-fingerprint only, and never emitted as a diff.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import difflib
 import fnmatch
 import hashlib
 import logging
+import mimetypes
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from .utils import error, read_frame, reply, send_frame
 
 LOGGER = logging.getLogger("hud.environment.file_tracker")
 
@@ -67,6 +72,36 @@ SECRET_DENY_PATTERNS: tuple[str, ...] = (
 
 #: Skip files larger than this during scanning (default 10 MB).
 DEFAULT_MAX_FILE_SIZE: int = 10 * 1024 * 1024
+
+#: Artifacts worth preserving as downloads. Common source edits are already
+#: represented by diffs; HTML is included because it is often the rendered result.
+DEFAULT_CAPTURE_EXTENSIONS: tuple[str, ...] = (
+    ".docx",
+    ".htm",
+    ".html",
+    ".jpeg",
+    ".jpg",
+    ".pdf",
+    ".png",
+    ".pptx",
+    ".webp",
+    ".xlsm",
+    ".xlsx",
+)
+
+CAPTURE_CONTENT_TYPES: dict[str, str] = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".htm": "text/html",
+    ".html": "text/html",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".webp": "image/webp",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 @dataclass(frozen=True)
@@ -179,17 +214,26 @@ class FileTracker:
     # instead of a full unified diff, so ``difflib`` never allocates unbounded.
     _MAX_DIFF_FILE_BYTES: int = 1 * 1024 * 1024
 
+    # Artifact capture is stricter than scan/diff limits because it emits base64
+    # into telemetry. Keep the raw total comfortably below the default 25 MB span request limit
+    # (after base64 overhead).
+    _MAX_CAPTURE_FILES: int = 20
+    _MAX_CAPTURE_FILE_BYTES: int = 5 * 1024 * 1024
+    _MAX_CAPTURE_TOTAL_BYTES: int = 15 * 1024 * 1024
+
     def __init__(
         self,
         root: Path | str,
         *,
         exclude_patterns: tuple[str, ...] = DEFAULT_EXCLUDE_PATTERNS,
+        capture_extensions: tuple[str, ...] = DEFAULT_CAPTURE_EXTENSIONS,
         honor_gitignore: bool = True,
         max_file_size: int = DEFAULT_MAX_FILE_SIZE,
         secret_deny_patterns: tuple[str, ...] = SECRET_DENY_PATTERNS,
     ) -> None:
         self._root = Path(root).resolve()
         self._exclude_patterns = exclude_patterns
+        self._capture_extensions = tuple(ext.lower() for ext in capture_extensions)
         self._secret_deny_patterns = secret_deny_patterns
         self._honor_gitignore = honor_gitignore
         self._max_file_size = max_file_size
@@ -222,14 +266,14 @@ class FileTracker:
         return snapshot
 
     def advance_baseline(self) -> None:
-        """Re-scan and update the previous snapshot WITHOUT producing a diff.
+        """Re-scan and update the tracking baseline WITHOUT producing a diff.
 
         Used after scenario setup (which writes many files that are not agent
-        edits) and after a truncated diff (a ``git checkout`` / ``npm install``
-        burst) so the next snapshot starts clean.
+        edits), so subsequent diffs and final artifact capture start clean.
         """
         prev_count = len(self._previous_snapshot.files) if self._previous_snapshot else 0
         snapshot = self._scan()
+        self._baseline_snapshot = snapshot
         self._previous_snapshot = snapshot
         if len(snapshot.files) != prev_count:
             LOGGER.info(
@@ -249,7 +293,32 @@ class FileTracker:
                 files_changed=0,
             )
 
+        return self._diff_current(self._scan())
+
+    def flush_changes(self) -> dict[str, Any]:
+        """Return the final diff plus changed artifact payloads in one scan."""
+        if self._previous_snapshot is None:
+            LOGGER.warning("No baseline snapshot; taking one now")
+            baseline = self.take_baseline()
+            return {
+                "diff": DiffResult(
+                    patches=[],
+                    snapshot_timestamp=baseline.timestamp,
+                    scan_duration_ms=baseline.scan_duration_ms,
+                    files_scanned=len(baseline.files),
+                    files_changed=0,
+                ).to_dict(),
+                "capture": self._capture_artifacts(baseline),
+            }
+
         current = self._scan()
+        capture = self._capture_artifacts(current)
+        return {"diff": self._diff_current(current).to_dict(), "capture": capture}
+
+    def _diff_current(self, current: Snapshot) -> DiffResult:
+        if self._previous_snapshot is None:
+            raise RuntimeError("cannot diff without a baseline")
+
         diff = self._diff(self._previous_snapshot, current)
         # Keep budget-skipped files pending: revert each to its previous state in
         # the new baseline (drop added-but-skipped files) so the next scan still
@@ -271,18 +340,6 @@ class FileTracker:
             )
         return diff
 
-    def get_cumulative_diff(self) -> DiffResult:
-        """Diff from the baseline to the current state (a final summary)."""
-        if self._baseline_snapshot is None:
-            return DiffResult(
-                patches=[],
-                snapshot_timestamp=time.time(),
-                scan_duration_ms=0.0,
-                files_scanned=0,
-                files_changed=0,
-            )
-        return self._diff(self._baseline_snapshot, self._scan())
-
     def current_manifest(self) -> list[dict[str, Any]]:
         """The latest file manifest: ``[{path, size, content_hash}, ...]``.
 
@@ -297,6 +354,106 @@ class FileTracker:
             for e in sorted(snapshot.files.values(), key=lambda e: e.rel_path)
         ]
 
+    def _capture_artifacts(self, current: Snapshot) -> dict[str, Any]:
+        changed: list[tuple[str, FileEntry]] = []
+        if self._baseline_snapshot is not None:
+            for path in sorted(current.files):
+                entry = current.files[path]
+                baseline_entry = self._baseline_snapshot.files.get(path)
+                if baseline_entry is None:
+                    changed.append(("added", entry))
+                elif baseline_entry.content_hash != entry.content_hash:
+                    changed.append(("modified", entry))
+
+        captured: list[dict[str, Any]] = []
+        files_eligible = 0
+        files_skipped = 0
+        total_bytes = 0
+        truncated = False
+
+        for status, entry in changed:
+            suffix = PurePosixPath(entry.rel_path).suffix.lower()
+            if entry.redacted or suffix not in self._capture_extensions:
+                continue
+            files_eligible += 1
+
+            if (
+                len(captured) >= self._MAX_CAPTURE_FILES
+                or entry.size > self._MAX_CAPTURE_FILE_BYTES
+                or total_bytes + entry.size > self._MAX_CAPTURE_TOTAL_BYTES
+            ):
+                files_skipped += 1
+                truncated = True
+                continue
+
+            file = self._capture_file(status, entry)
+            if file is None:
+                files_skipped += 1
+                continue
+
+            total_bytes += int(file["size"])
+            captured.append(file)
+
+        payload = {
+            "snapshot_timestamp": current.timestamp,
+            "scan_duration_ms": round(current.scan_duration_ms, 2),
+            "files_scanned": len(current.files),
+            "files_changed": len(changed),
+            "files_eligible": files_eligible,
+            "files_captured": len(captured),
+            "files_skipped": files_skipped,
+            "files": captured,
+        }
+        if truncated:
+            payload["truncated"] = True
+        return payload
+
+    def _capture_file(self, status: str, entry: FileEntry) -> dict[str, Any] | None:
+        raw_path = self._root / entry.rel_path
+        try:
+            if raw_path.is_symlink():
+                return None
+        except OSError:
+            return None
+
+        path = raw_path.resolve()
+        try:
+            path.relative_to(self._root)
+        except ValueError:
+            return None
+
+        try:
+            if not path.is_file():
+                return None
+            stat = path.stat()
+            if stat.st_size != entry.size or stat.st_size > self._MAX_CAPTURE_FILE_BYTES:
+                return None
+            with path.open("rb") as f:
+                data = f.read()
+        except (PermissionError, OSError):
+            return None
+
+        if len(data) != entry.size:
+            return None
+
+        suffix = PurePosixPath(entry.rel_path).suffix.lower()
+        content_type = CAPTURE_CONTENT_TYPES.get(
+            suffix,
+            mimetypes.guess_type(entry.rel_path)[0] or "application/octet-stream",
+        )
+        return {
+            "path": entry.rel_path,
+            "status": status,
+            "size": entry.size,
+            "content_hash": hashlib.sha256(data).hexdigest(),
+            "content_type": content_type,
+            "file": {
+                "type": "file",
+                "data": base64.b64encode(data).decode("ascii"),
+                "media_type": content_type,
+            },
+        }
+
     # ─── scanning ─────────────────────────────────────────────────────
 
     def _scan(self) -> Snapshot:
@@ -308,8 +465,9 @@ class FileTracker:
             self._gitignore_patterns = self._collect_gitignore_patterns()
             self._gitignore_loaded = True
 
+        exclude_patterns = self._exclude_patterns + tuple(self._gitignore_patterns)
         if self._root.is_dir():
-            self._walk_directory(str(self._root), files, budget)
+            self._walk_directory(str(self._root), files, budget, exclude_patterns)
 
         return Snapshot(
             timestamp=time.time(),
@@ -318,7 +476,11 @@ class FileTracker:
         )
 
     def _walk_directory(
-        self, abs_dir: str, files: dict[str, FileEntry], budget: ScanBudget
+        self,
+        abs_dir: str,
+        files: dict[str, FileEntry],
+        budget: ScanBudget,
+        exclude_patterns: tuple[str, ...],
     ) -> None:
         try:
             scanner = os.scandir(abs_dir)
@@ -334,11 +496,11 @@ class FileTracker:
                     rel = os.path.relpath(entry.path, root_str).replace(os.sep, "/")
                     is_dir = entry.is_dir(follow_symlinks=False)
 
-                    if self._should_exclude(rel, is_dir):
+                    if self._matches(rel, is_dir, exclude_patterns):
                         continue
 
                     if is_dir:
-                        self._walk_directory(entry.path, files, budget)
+                        self._walk_directory(entry.path, files, budget, exclude_patterns)
                         continue
                     if not entry.is_file(follow_symlinks=False):
                         continue
@@ -370,7 +532,7 @@ class FileTracker:
                 redacted=prev.redacted,
             )
 
-        if self._is_secret(rel):
+        if self._matches(rel, False, self._secret_deny_patterns):
             # Credential-shaped: detect change via fingerprint, never read content.
             return FileEntry(
                 rel_path=rel,
@@ -398,12 +560,6 @@ class FileTracker:
             content_hash=content_hash,
             lines=lines,
         )
-
-    def _should_exclude(self, rel: str, is_dir: bool) -> bool:
-        return self._matches(rel, is_dir, self._exclude_patterns + tuple(self._gitignore_patterns))
-
-    def _is_secret(self, rel: str) -> bool:
-        return self._matches(rel, False, self._secret_deny_patterns)
 
     @staticmethod
     def _matches(rel: str, is_dir: bool, patterns: tuple[str, ...]) -> bool:
@@ -433,16 +589,9 @@ class FileTracker:
         root_gitignore = self._root / ".gitignore"
         if not root_gitignore.is_file():
             return []
-        patterns = self._parse_gitignore(root_gitignore)
-        if patterns:
-            LOGGER.info("Loaded %d gitignore patterns", len(patterns))
-        return patterns
-
-    @staticmethod
-    def _parse_gitignore(path: Path) -> list[str]:
         patterns: list[str] = []
         try:
-            with path.open("r", encoding="utf-8", errors="replace") as f:
+            with root_gitignore.open("r", encoding="utf-8", errors="replace") as f:
                 for raw in f:
                     line = raw.strip()
                     # Skip comments, blanks, and negations (unsupported).
@@ -450,7 +599,9 @@ class FileTracker:
                         continue
                     patterns.append(line.lstrip("/"))
         except (PermissionError, OSError) as exc:
-            LOGGER.debug("Cannot read gitignore %s: %s", path, exc)
+            LOGGER.debug("Cannot read gitignore %s: %s", root_gitignore, exc)
+        if patterns:
+            LOGGER.info("Loaded %d gitignore patterns", len(patterns))
         return patterns
 
     @staticmethod
@@ -555,12 +706,6 @@ class FileTracker:
             return f"File too large to diff ({size_before} -> {size_after} bytes): {path}\n"
         old_lines = old_entry.lines if old_entry else ()
         new_lines = new_entry.lines if new_entry else ()
-        return self._unified_diff(path, old_lines, new_lines)
-
-    @staticmethod
-    def _unified_diff(
-        path: str, old_lines: tuple[str, ...] | None, new_lines: tuple[str, ...] | None
-    ) -> str:
         if old_lines is None or new_lines is None:
             return f"Binary file changed: {path}\n"
         return "\n".join(
@@ -574,7 +719,60 @@ class FileTracker:
         )
 
 
+class _FileTrackingHandler:
+    """Per-server dispatcher; one tracker shared across connections under a lock."""
+
+    def __init__(self, tracker: FileTracker) -> None:
+        self._tracker = tracker
+        self._lock = asyncio.Lock()
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            while (msg := await read_frame(reader)) is not None:
+                msg_id = msg.get("id")
+                method = msg.get("method", "")
+                try:
+                    async with self._lock:
+                        if method == "diff":
+                            diff = await loop.run_in_executor(None, self._tracker.take_snapshot)
+                            result = diff.to_dict()
+                        elif method == "snapshot":
+                            manifest = self._tracker.current_manifest()
+                            result = {"files": manifest, "files_scanned": len(manifest)}
+                        elif method == "advance":
+                            await loop.run_in_executor(None, self._tracker.advance_baseline)
+                            result = {"advanced": True}
+                        elif method == "flush":
+                            result = await loop.run_in_executor(None, self._tracker.flush_changes)
+                        else:
+                            raise ValueError(f"unknown filetracking method: {method!r}")
+                except Exception as exc:  # never tear the connection down on one bad call
+                    LOGGER.debug("filetracking %s failed: %s", method, exc)
+                    if isinstance(msg_id, int):
+                        await send_frame(writer, error(msg_id, -32000, str(exc)))
+                    continue
+                if isinstance(msg_id, int):
+                    await send_frame(writer, reply(msg_id, result))
+        except (ConnectionError, OSError):
+            pass
+        finally:
+            writer.close()
+
+
+async def serve_file_tracking(
+    tracker: FileTracker, host: str = "127.0.0.1", port: int = 0
+) -> asyncio.Server:
+    """Bind a ``filetracking/1`` server for ``tracker``. Caller drives the port."""
+    handler = _FileTrackingHandler(tracker)
+    server = await asyncio.start_server(handler.handle, host, port)
+    sock = server.sockets[0].getsockname()
+    LOGGER.info("filetracking bound on %s:%s", sock[0], sock[1])
+    return server
+
+
 __all__ = [
+    "DEFAULT_CAPTURE_EXTENSIONS",
     "DEFAULT_EXCLUDE_PATTERNS",
     "DEFAULT_MAX_FILE_SIZE",
     "SECRET_DENY_PATTERNS",
@@ -583,4 +781,5 @@ __all__ = [
     "FileTracker",
     "PatchEntry",
     "Snapshot",
+    "serve_file_tracking",
 ]
