@@ -8,6 +8,11 @@ and ``env.stop()`` runs the matching shutdown hooks.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
+import signal
+import sys
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -19,6 +24,8 @@ from .conftest import served
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from hud.capabilities.ssh import SSHClient
 
 
 def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
@@ -77,6 +84,48 @@ async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
             first = client.binding("shell").params["host_pubkey"]
         async with connect(runtime) as client:
             assert client.binding("shell").params["host_pubkey"] == first
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+async def _wait_for_pid_exit(pid: int, max_wait: float = 2.0) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max_wait
+    while loop.time() < deadline:
+        if not _pid_exists(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return not _pid_exists(pid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_workspace_command_teardown_kills_background_children(tmp_path: Path) -> None:
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+    pid_file = tmp_path / "root" / "child.pid"
+    pid: int | None = None
+
+    try:
+        async with served(env) as client:
+            ssh = cast("SSHClient", await client.open("shell"))
+            await ssh.conn.run(
+                "sleep 120 >/dev/null 2>&1 < /dev/null & echo $! > child.pid",
+                check=True,
+            )
+            pid = int(pid_file.read_text())
+            assert await _wait_for_pid_exit(pid)
+    finally:
+        if pid is not None and _pid_exists(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
 
 
 async def test_stop_tears_down_the_workspace(tmp_path: Path) -> None:

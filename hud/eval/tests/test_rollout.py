@@ -13,7 +13,11 @@ the atom and return a :class:`Job`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
+import signal
+import sys
 import textwrap
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -115,6 +119,26 @@ def _solve_add(prompt: str) -> str:
     return str(int(a) + int(b))
 
 
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+async def _wait_for_pid_exit(pid: int, max_wait: float = 2.0) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max_wait
+    while loop.time() < deadline:
+        if not _pid_exists(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return not _pid_exists(pid)
+
+
 async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=LocalRuntime(env_file))
 
@@ -174,6 +198,50 @@ async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) 
         "edit",
         "write",
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_local_runtime_startup_failure_kills_spawned_children(tmp_path: Path) -> None:
+    env_file = tmp_path / "env.py"
+    env_file.write_text(
+        textwrap.dedent(
+            """
+            import asyncio
+            from pathlib import Path
+
+            from hud import Environment
+
+            env = Environment("leaky")
+
+
+            @env.initialize
+            async def start_child():
+                proc = await asyncio.create_subprocess_exec(
+                    "sleep",
+                    "120",
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                Path("child.pid").write_text(str(proc.pid), encoding="utf-8")
+                raise RuntimeError("startup boom")
+            """
+        ),
+        encoding="utf-8",
+    )
+    pid_file = tmp_path / "child.pid"
+    pid: int | None = None
+
+    try:
+        with pytest.raises(RuntimeError, match="startup boom"):
+            async with LocalRuntime(env_file, ready_timeout=2.0)(Task(env="leaky", id="noop")):
+                pass
+        pid = int(pid_file.read_text())
+        assert await _wait_for_pid_exit(pid)
+    finally:
+        if pid is not None and _pid_exists(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
 
 
 async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Path) -> None:

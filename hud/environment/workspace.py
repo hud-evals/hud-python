@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Literal
 
 import asyncssh
 
+from hud.utils.process import create_process_group_exec
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -538,7 +540,7 @@ class Workspace:
             return
 
         try:
-            sub = await asyncio.create_subprocess_exec(
+            sub = await create_process_group_exec(
                 *argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -552,20 +554,14 @@ class Workspace:
             return
 
         try:
-            stdout_data, stderr_data = await asyncio.wait_for(
-                sub.communicate(input=None),
-                timeout=3600.0,
+            stdout_data, stderr_data = await sub.communicate(
+                input=None,
+                max_wait=3600.0,
             )
         except TimeoutError:
-            sub.kill()
-            await sub.wait()
             process.stderr.write(b"workspace: command timed out after 3600s\n")
             process.exit(1)
             return
-        except asyncio.CancelledError:
-            sub.kill()
-            await sub.wait()
-            raise
 
         if stdout_data:
             process.stdout.write(stdout_data)
