@@ -9,6 +9,8 @@ mode: "wide"
 This guide outlines how to create an environment in the HUD format - defining the `env.py` file, registering tasks
 and capabilities, doing quick local tests, and deploying the environment to our platform.
 
+On this page: [Start](#start) · [The `env.py` file](#the-envpy-file) · [Capabilities](#capabilities) · [Lifecycle hooks](#lifecycle-hooks) · [Tasks](#tasks) · [Testing locally](#testing-the-environment-locally) · [Deploying](#deploying-to-the-platform)
+
 ## Start
 
 Run `hud init` in your terminal. This lets you select a template to start with, the default is a blank template.
@@ -172,7 +174,7 @@ any connection, so by the time an agent connects, everything it needs is already
 hook runs, so you can write straight into `ROOT`.
 
 Hooks run per environment, not per task, so use them for state every task shares. The [environment
-reference](/v6/reference/environment#lifecycle-hooks-set-up-and-tear-down) covers the full lifecycle.
+reference](/v6/reference/environment#methods) covers the full lifecycle.
 
 <div className="guide-row">
 <div className="guide-main">
@@ -295,4 +297,14 @@ hud sync env              # sync environment metadata
 
 Your environment now lives on the platform, ready to run at scale and compare across models. Running
 those evaluations - locally, on a cloud sandbox, or on the platform - is covered in
-[](/v6/guides/running-an-eval).
+[evaluating agents](/v6/guides/running-an-eval).
+
+## Export to other formats
+
+A HUD environment isn't locked to HUD: its tasks export to other benchmark formats, like self-contained
+[Harbor](/v6/advanced/harbor-convert) task folders.
+
+## See environment examples
+
+For more to build on, pick a different starting point with `hud init`, or read the
+[cookbooks](/v6/cookbooks/index) for worked environments like a coding agent and an ops diagnostics task.
