@@ -197,6 +197,27 @@ body::after {
   margin-bottom: 0 !important;
 }
 
+/* Step list: standard line spacing (no tight pull), with a gentle top margin so
+   it never overlaps a wrapping intro line above it (used in the split guide panes). */
+#content .step-list ul,
+#content .step-list ol {
+  margin-top: 0.4rem !important;
+  margin-bottom: 0.4rem !important;
+}
+#content .step-list li {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  line-height: 1.7 !important;
+}
+#content .step-list li > p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+/* breathing room before a part-label that follows a step list (e.g. "2 · ...") */
+#content .step-list + .part-label {
+  margin-top: 1.6rem !important;
+}
+
 /* Blockquotes: gold left rule, like a pull-quote. */
 #content blockquote {
   border-left: 2px solid #c0960c;
