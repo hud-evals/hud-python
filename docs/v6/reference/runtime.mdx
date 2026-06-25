@@ -9,7 +9,7 @@ A **runtime** chooses where each rollout's environment runs. You pass it to `tas
 runtime changes.
 
 ```python
-from hud.eval import LocalRuntime
+from hud import LocalRuntime
 
 await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
 ```
