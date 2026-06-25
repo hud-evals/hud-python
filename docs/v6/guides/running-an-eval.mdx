@@ -1,105 +1,126 @@
 ---
-title: "Running an Eval"
-description: "Run an agent against your tasks - from the platform or from a local environment - and read the reward."
+title: "Evaluating Agents"
+description: "Point an agent at a set of tasks, choose where each rollout runs, and read the reward."
 icon: "play"
+mode: "wide"
 ---
 
-`hud eval` is the central command for all evaluations. It works whether your environment lives on the HUD platform or in a local `env.py`, and every rollout it produces lands as a traced, replayable entry in your [platform dashboard](https://hud.ai). The mechanics underneath - the control channel, `tasks.start`, `tasks.grade` - are documented in [Protocol](/v6/advanced/protocol).
 
-The two workflows differ only in where your environment lives:
+This guide outlines how to run an evaluation: pointing an agent at a set of tasks, choosing where each
+rollout runs, and reading the reward. One command sits at the center of every eval - `hud eval` - and it
+works the same whether your environment is deployed to the platform or lives in a local `env.py`. Every
+rollout it produces is traced to your [dashboard](https://hud.ai), and the messages an agent and an
+environment exchange underneath are covered in [protocol](/v6/advanced/protocol).
 
-| | When to use | Entry points |
+There are two workflows, and they differ only in where the environment lives:
+
+| Workflow | When to use it | Where you start it |
 | --- | --- | --- |
-| [**Deployed environment**](#deployed-environment) | Env is built and hosted on HUD | Terminal or platform UI |
-| [**Local environment**](#local-environment) | `env.py` is on your disk | Terminal or run script |
+| [Deployed environment](#running-a-deployed-environment) | The env is built and hosted on the platform | Terminal or platform |
+| [Local environment](#running-a-local-environment) | The `env.py` is on your disk | Terminal or run script |
 
----
+## Running a deployed environment
 
-## Deployed environment
+A **deployed environment** has been built and published to the platform with
+[`hud deploy`](/v6/guides/creating-an-environment#deploying-to-the-platform), or is one you picked from
+the [catalog](https://hud.ai/environments/new). It runs entirely on hosted infra, so there's no local
+process to manage - you start a run from the terminal or from the platform, and both trace to the same
+place.
 
-A **deployed environment** is one that has been built and published to HUD with [`hud deploy`](/v6/guides/creating-an-environment#deploy-it), or an existing environment from the [platform catalog](https://hud.ai/environments/new). The environment runs entirely on HUD's hosted infra - there is no local process to manage.
+<div className="guide-row">
+<div className="guide-main">
 
-Two entry points are available, and both trace to the same dashboard.
+**From the terminal**, pass the taskset name or id to `hud eval`. The tasks are fetched from the
+platform and each rollout runs remotely on hosted infra.
 
-**From the terminal.** Pass the taskset name or id to `hud eval`. The tasks are fetched from the platform and each rollout runs remotely on HUD's infra:
+**From the platform**, open [hud.ai](https://hud.ai), pick the environment, choose a taskset and a
+model, and launch - no CLI required.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">terminal</p>
 
 ```bash
 hud eval "My Taskset" claude
 hud eval "My Taskset" claude --all --group 3
 ```
 
-**From the platform.** Open [hud.ai](https://hud.ai), select your environment, choose a taskset and a model, and launch from the dashboard. No CLI required.
+</div>
+</div>
 
 ### Choosing an agent
 
-The agent shorthand (`claude`, `openai`, `gemini`) selects a built-in harness and routes LLM calls through the [HUD gateway](/v6/reference/agents) - a single `HUD_API_KEY` covers every provider, so switching models is one flag:
+The agent name (`claude`, `openai`, `gemini`) selects a built-in harness and routes calls through the
+[HUD gateway](/v6/reference/agents), where one `HUD_API_KEY` covers every provider. Switching models is a
+single flag, and `hud models list` shows every model the gateway knows.
 
 ```bash
-hud eval "My Taskset" claude --model claude-haiku-4-5   # cheaper model for fast iteration
+hud eval "My Taskset" claude --model claude-haiku-4-5   # a cheaper model for fast iteration
 hud eval "My Taskset" openai --model gpt-5
 hud eval "My Taskset" gemini
 ```
 
-To see every model the gateway supports, run `hud models list`. For a custom harness - a fine-tuned model, a framework you already use - see [Bring your own harness](/v6/advanced/extending#bring-your-own-harness).
+For a custom loop - a fine-tuned model, a framework you already use - see
+[bring your own harness](/v6/advanced/extending#bring-your-own-harness).
 
-### Traces and results
+### Reading traces and results
 
-Each rollout is a **trace**: a replayable timeline of every action the agent took and the reward it received. All traces are visible on the [HUD dashboard](https://hud.ai), grouped into a **job**. You can also inspect them from the CLI:
+Each rollout is a **trace**: a replayable timeline of everything the agent did and the reward it earned.
+Traces are grouped into a **job** and shown on the [dashboard](https://hud.ai). You can also read them
+from the terminal:
 
 ```bash
 hud jobs               # recent jobs - id, name, taskset, status
-hud jobs <job-id>      # traces for that job
-hud trace <trace-id>   # one rollout in full
+hud jobs <job-id>      # the traces in one job
+hud trace <trace-id>   # a single rollout in full
 ```
 
----
+## Running a local environment
 
-## Local environment
-
-A local environment is an `env.py` on your disk. This is the typical workflow during environment development. `hud eval` is the preferred entry point; a run script gives you programmatic control when you need it.
-
-Both paths accept a [runtime](/v6/reference/runtime) - the one argument that decides where each rollout runs. The environment definition never changes; only the runtime changes.
+A local environment is an `env.py` on your disk - the usual case while you're still developing it.
+`hud eval` is the way to run it; a run script is the same eval in Python when you want programmatic
+control. Both take a [runtime](/v6/reference/runtime), the one argument that decides where each rollout
+runs. The environment definition never changes - only the runtime does.
 
 <Note>
-With a `HUD_API_KEY` set, local evals also trace to the [platform dashboard](https://hud.ai). Without one, rollouts run and grade locally with no platform calls.
+With a `HUD_API_KEY` set, local runs still trace to the [dashboard](https://hud.ai). Without one, they
+run and grade entirely on your machine with no platform calls.
 </Note>
 
-### Using `hud eval`
+### With `hud eval`
 
-`hud eval` is the preferred local iteration loop. It spawns the env subprocess automatically - you do not need `hud serve` running, a Docker daemon, or a HUD API key for a purely local run.
+`hud eval` spawns the env subprocess for you, so a purely local run needs no `hud serve`, no Docker, and
+no API key. Point it at your task source, pass an agent name, and set `--runtime` when you want a rollout
+to run somewhere other than your machine.
 
 <div className="guide-row">
 <div className="guide-main">
 
-Point `hud eval` at your task source and pass an agent name. By default, each rollout runs in a local child process from your `env.py`:
-
-```bash
-hud eval tasks.py claude                             # first task, one rollout
-hud eval tasks.py claude --all                       # every task
-hud eval tasks.py claude --group 3                   # 3 rollouts per task
-hud eval tasks.py claude --runtime hud               # run on HUD's hosted infra
-hud eval tasks.py claude --runtime tcp://host:8765   # attach to a running substrate
-```
-
-The `--runtime` flag sets where each rollout executes. Omit it for the fastest local loop. For the full flag set, see [`hud eval`](/v6/reference/cli#hud-eval).
+By default each rollout runs in a child process from your `env.py`. The `--runtime` flag moves that
+placement elsewhere without touching the environment. See [`hud eval`](/v6/reference/cli#hud-eval) for the
+full flag set.
 
 </div>
 <div className="guide-aside">
 
-<p className="aside-label">--runtime options</p>
+<p className="aside-label">terminal</p>
 
-| `--runtime` | Where the env runs | Requires |
-| --- | --- | --- |
-| *(omitted)* | Child process on your machine | Nothing |
-| `hud` | HUD's hosted infra | `hud deploy` first |
-| `tcp://host:port` | A substrate you already started | A running server |
+```bash
+hud eval tasks.py claude               # first task, one rollout
+hud eval tasks.py claude --all         # every task
+hud eval tasks.py claude --group 3     # 3 rollouts per task
+hud eval tasks.py claude --runtime hud # on hosted infra
+```
 
 </div>
 </div>
 
-### Using a run script
+### With a run script
 
-When you want programmatic control - looping over agents, integrating into a training pipeline, or routing tasks to different infra - call `taskset.run` directly and pass a [runtime](/v6/reference/runtime) object:
+When you want programmatic control - looping over agents, feeding a training pipeline, routing tasks to
+different infra - call `taskset.run` directly and hand it a [runtime](/v6/reference/runtime) object. This
+is the same eval `hud eval` runs, written out in Python.
 
 ```python run.py
 import asyncio
@@ -116,45 +137,34 @@ async def main():
 asyncio.run(main())
 ```
 
-Swap the runtime to change where the env runs without touching `env.py` or the tasks:
+The runtime is where you set placement. Swap it for another and the env runs somewhere else, with no
+change to `env.py` or the tasks:
 
 | Runtime | Where the env runs |
 | --- | --- |
-| `LocalRuntime("env.py")` | Child process on your machine |
-| `DockerRuntime("my-env")` | Fresh local container per rollout |
-| `ModalRuntime("my-env")` | Fresh [Modal](https://modal.com) sandbox per rollout |
-| `DaytonaRuntime("my-env")` | Fresh [Daytona](https://daytona.io) sandbox per rollout |
-| `HUDRuntime()` | HUD's hosted infra (after `hud deploy`) |
+| `LocalRuntime("env.py")` | A child process on your machine |
+| `DockerRuntime("my-env")` | A fresh local container per rollout |
+| `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com) sandbox per rollout |
+| `DaytonaRuntime("my-env")` | A fresh [Daytona](https://daytona.io) sandbox per rollout |
+| `HUDRuntime()` | Hosted infra, after `hud deploy` |
 | `Runtime("tcp://host:port")` | A substrate you started yourself |
 
-For constructor details and how to bring your own runtime, see [Runtime](/v6/reference/runtime).
+The [runtime reference](/v6/reference/runtime) covers each constructor and how to bring your own.
 
-### `hud serve`
+### Serving an environment directly
 
-`hud eval` starts and stops the env subprocess automatically. `hud serve` exposes the same control channel as a standalone long-lived process - useful when you want to talk to a running env directly from a script, test a packaged image manually, or drive `hud task start` and `hud task grade` by hand:
+`hud eval` starts and stops the env subprocess for you. `hud serve` instead exposes the same control
+channel as a standalone, long-lived process - useful for talking to a running env from a script, testing
+a packaged image by hand, or driving `hud task start` and `hud task grade` yourself.
 
 ```bash
 hud serve            # auto-detect env.py, bind :8765
 hud serve env.py -p 9000
 ```
 
-From a script, attach with `Runtime("tcp://localhost:8765")`; from `hud eval`, pass `--runtime tcp://localhost:8765`. The [Protocol reference](/v6/advanced/protocol) documents every message the control channel speaks.
+Attach to it from a script with `Runtime("tcp://localhost:8765")`, or from `hud eval` with
+`--runtime tcp://localhost:8765`. The [protocol reference](/v6/advanced/protocol) describes every message
+the channel speaks.
 
----
-
-## Where to go next
-
-<CardGroup cols={2}>
-<Card title="Deploying an environment" icon="rocket" href="/v6/guides/creating-an-environment#deploy-it">
-  Build your env into a platform image with `hud deploy`.
-</Card>
-<Card title="Runtimes" icon="server" href="/v6/reference/runtime">
-  Every built-in runtime and how to bring your own.
-</Card>
-<Card title="Agents" icon="robot" href="/v6/reference/agents">
-  Swap the model with a string, or bring your own harness.
-</Card>
-<Card title="Protocol" icon="route" href="/v6/advanced/protocol">
-  How an agent and an environment communicate.
-</Card>
-</CardGroup>
+With runs in hand, turn the reward spread into model updates - covered in
+[training agents](/v6/guides/training-models).

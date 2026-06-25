@@ -447,30 +447,21 @@ div:has(> ul.sidebar-group > li[data-group-tag]) > .sidebar-group-header {
   display: none !important;
 }
 
-/* ── Mermaid diagrams: stop labels overflowing their boxes ──────────────────
-   Mermaid measures each node box using its *default* font (trebuchet ms), but
-   the page then inherits the wider HUD brand font (Inter), so the rendered
-   text no longer fits the box it was sized for and the last letters clip. The
-   simple, root-cause fix: render mermaid text in the same font mermaid measures
-   with, so every box fits by construction. (Scoped to diagrams only — the rest
-   of the page keeps the brand font.) */
+/* ── Mermaid diagrams: fix clipped labels at the source ─────────────────────
+   Mermaid measures each node's width with its own font (trebuchet) but the
+   page otherwise renders the labels in the wider HUD brand font (Inter), so
+   the boxes come out too narrow and the last letters get clipped. Instead of
+   patching the overflow, render the labels in the SAME font mermaid measures
+   with — then every box is sized correctly and nothing overflows. */
 #content .mermaid,
+#content .mermaid .nodeLabel,
+#content .mermaid .edgeLabel,
+#content .mermaid .cluster-label,
 #content .mermaid span,
 #content .mermaid p,
 #content .mermaid div,
-#content .mermaid foreignObject,
-#content .mermaid text,
-#content .mermaid .nodeLabel,
-#content .mermaid .edgeLabel,
-#content .mermaid .cluster-label {
+#content .mermaid text {
   font-family: "trebuchet ms", verdana, arial, sans-serif !important;
-}
-/* Overview step pills are meant to stay on a single line (their spaces are
-   non-breaking) — keep them from wrapping. */
-#content .mermaid .node.clickable .nodeLabel,
-#content .mermaid .node.clickable foreignObject,
-#content .mermaid .node.clickable foreignObject > div {
-  white-space: nowrap !important;
 }
 /* Nodes with a mermaid `click` link: a subtle, minimalist hover cue — a slight
    scale-up from the node's own center, nothing imposing. */

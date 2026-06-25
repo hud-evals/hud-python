@@ -7,7 +7,7 @@ mode: "wide"
 
 
 This guide outlines how to create an environment in the HUD format - defining the `env.py` file, registering tasks
-and capabiltiies, doing quick local tests, and deploying the environment to our platform.
+and capabilities, doing quick local tests, and deploying the environment to our platform.
 
 ## Start
 
@@ -30,129 +30,209 @@ Inside the blank template `my-env` you now have four files, each with one job:
 
 ## The `env.py` file
 
-`env.py` is the only file that defines behavior. Here is a complete one: an environment that gives the
-agent a calculator tool, asks it to add two numbers, and scores the answer. We'll take it part by part,
-top to bottom.
+`env.py` is the only file that defines behavior. In this section we'll go through each part of a full example (see it in full below).
+It's an environment that gives the agent a sandboxed shell and file system, asks it to count a letter in a sentence, and scores the answer.
 
-<Accordion title="Full env.py">
+<Accordion title="Full env.py example">
+
+We'll use the following `env.py` example in this section 
 
 ```python env.py
-import asyncio
-
-from fastmcp import FastMCP
-
-from hud.capabilities import Capability
+from pathlib import Path
 from hud.environment import Environment
 
-server = FastMCP(name="calc-tools")
-
-@server.tool
-def add(a: int, b: int) -> int:
-    """Add two integers."""
-    return a + b
-
-env = Environment(name="calc")
-_server_task: asyncio.Task | None = None
+ROOT = Path("workspace")
+env = Environment(name="counter")
+env.workspace(ROOT)
 
 @env.initialize
-async def _up():
-    global _server_task
-    if _server_task is None:
-        _server_task = asyncio.create_task(
-            server.run_async(transport="http", host="127.0.0.1", port=8040)
-        )
-        await asyncio.sleep(1.0)   # wait until the server is listening
-    env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8040/mcp"))
+async def _setup():
+    (ROOT / "instructions.txt").write_text("Count letters case-insensitively.\n")
 
 @env.shutdown
-async def _down():
-    global _server_task
-    if _server_task is not None:
-        _server_task.cancel()
-        _server_task = None
+async def _teardown():
+    (ROOT / "instructions.txt").unlink(missing_ok=True)
 
-@env.template(id="sum")
-async def sum_task(a: int, b: int):
-    answer = yield f"Use your tools to compute {a} + {b}. Reply with just the number."
-    yield 1.0 if str(a + b) in (answer or "") else 0.0
+@env.template(id="count")
+async def count(sentence: str, letter: str):
+    answer = yield f"How many times does '{letter}' appear in '{sentence}'?"
+    yield 1.0 if str(sentence.lower().count(letter.lower())) in (answer or "") else 0.0
 ```
 
 </Accordion>
 
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">1 · Imports and the environment object</div>
+
+`env = Environment(name="counter")` creates the environment - the central object everything else
+attaches to. Capabilities, lifecycle hooks, and tasks all register against `env`; it holds nothing on
+its own. The `name` identifies it - how a task finds its way back to this definition, and what it's
+published under when you deploy.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">env.py</p>
+
 ```python
-env = Environment(name="calc")
+from pathlib import Path
+from hud.environment import Environment
+
+ROOT = Path("workspace")
+env = Environment(name="counter")
 ```
 
-This creates the **`Environment` object**. It holds nothing on its own; it's the handle you register
-everything else against. Every capability and task that follows attaches to `env`. The `name` is how a
-task row later finds its way back to this definition. When HUD runs the environment, it imports the
-file, finds this object, and serves whatever is registered on it, which is why the same `env.py` runs
-on your laptop, in a container, or on the platform unchanged.
+</div>
+</div>
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">2 · Capabilities</div>
+
+`env.workspace(ROOT)` attaches a **capability**: a sandboxed shell and file system the agent reaches
+over `ssh`, rooted at the `workspace/` directory next to `env.py`. 
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">env.py</p>
+
+```python
+env.workspace(ROOT)
+```
+
+</div>
+</div>
 
 ## Capabilities
 
-A **capability** is a connection the agent drives. This environment serves its own: a
-[FastMCP](https://gofastmcp.com) server exposing one tool, `add`. Three things happen, in order, inside
-the lifecycle hooks:
+A **capability** is a connection the agent drives, and it's what keeps an environment portable: you
+declare the connection, and any agent that speaks the protocol drives it with its own tools.
 
-```python
-@env.initialize          # runs once before the env accepts any connection
-async def _up():
-    # 1. start the tool server in the background
-    _server_task = asyncio.create_task(server.run_async(transport="http", host="127.0.0.1", port=8040))
-    await asyncio.sleep(1.0)                                  # 2. wait until it's listening
-    env.add_capability(Capability.mcp(name="tools",          # 3. publish its address
-                                      url="http://127.0.0.1:8040/mcp"))
-
-@env.shutdown            # runs on shutdown
-async def _down():
-    _server_task.cancel()                                    # tear it down with the env
-```
-
-`@env.initialize` runs to completion before any agent connects, so by the time one does, the tool is
-live. Step 2 matters: a background task returns before the server has bound its port, and publishing
-the capability too early lets an agent connect to nothing. `@env.shutdown` releases it.
-
-You attach a capability three ways:
+Above, `env.workspace(ROOT)` attached a single `ssh` capability - the common case. An environment isn't
+limited to one, though: publish as many as the tasks need, and the agent sees every one. You attach them
+three ways:
 
 - in the `Environment(...)` constructor, for a service that already exists,
-- with `env.add_capability(...)` from a hook, for a service the environment runs itself (above),
-- with `env.workspace(root)`, the one-line shortcut for the common case: a sandboxed shell over `ssh`.
+- with `env.workspace(root)`, the one-line shortcut for the typical shell case above,
+- with `env.add_capability(...)` from a hook, for a service the environment runs itself.
+
+That last form is how you expose a custom tool. A [FastMCP](https://gofastmcp.com) server is a common
+choice: an `@env.initialize` hook starts it, waits for it to bind, then publishes its address.
+
+```python
+@env.initialize
+async def _start():
+    asyncio.create_task(server.run_http_async(host="127.0.0.1", port=8040))   # 1. start the server
+    await asyncio.sleep(0.2)                                                   # 2. let it bind
+    env.add_capability(Capability.mcp(name="tools",                           # 3. publish its address
+                                      url="http://127.0.0.1:8040/mcp"))
+```
 
 Other protocols - a browser over `cdp`, a full desktop over `rfb`, a robot loop - attach the same way.
-The [capabilities](/v6/reference/capabilities) page has the spin-up for each.
+The [capabilities](/v6/reference/capabilities) page has the spin-up for each, and the
+[protocol](/v6/advanced/protocol) covers how an agent discovers them over the wire.
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">3 · Lifecycle hooks</div>
+
+`@env.initialize` runs once before the env serves - the place to seed files or start services - and
+`@env.shutdown` runs on teardown, after the run finishes, to release them. Both are optional; here
+they're dummy hooks for demonstration, writing and removing a file.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">env.py</p>
+
+```python
+@env.initialize
+async def _setup():
+    (ROOT / "instructions.txt").write_text("Count letters case-insensitively.\n")
+
+@env.shutdown
+async def _teardown():
+    (ROOT / "instructions.txt").unlink(missing_ok=True)
+```
+
+</div>
+</div>
+
+## Lifecycle hooks
+
+When a task needs state - seeded files, a running service, a browser - you bring it up in
+`@env.initialize` and release it in `@env.shutdown`. `@env.initialize` runs once before the env accepts
+any connection, so by the time an agent connects, everything it needs is already in place. Because the
+`env.workspace(...)` hook is registered first, the workspace directory already exists when your own
+hook runs, so you can write straight into `ROOT`.
+
+Hooks run per environment, not per task, so use them for state every task shares. The [environment
+reference](/v6/reference/environment#lifecycle-hooks-set-up-and-tear-down) covers the full lifecycle.
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">4 · Tasks</div>
+
+`@env.template(id="count")` defines the task. The first `yield` sends the prompt and pauses; when the
+agent's `answer` arrives the function resumes, and the second `yield` returns the reward - `1.0` if the
+count matches, else `0.0`.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">env.py</p>
+
+```python
+@env.template(id="count")
+async def count(sentence: str, letter: str):
+    answer = yield f"How many times does '{letter}' appear in '{sentence}'?"
+    yield 1.0 if str(sentence.lower().count(letter.lower())) in (answer or "") else 0.0
+```
+
+</div>
+</div>
 
 ## Tasks
 
-```python
-@env.template(id="sum")
-async def sum_task(a: int, b: int):
-    answer = yield f"Use your tools to compute {a} + {b}. Reply with just the number."
-    yield 1.0 if str(a + b) in (answer or "") else 0.0
-```
+A **task** is HUD's unit of evaluation: a prompt the agent attempts and a reward that scores how it did.
+You write one as an async generator with exactly two `yield`s:
 
-A task is an async generator with two `yield`s. The first yields the prompt; the agent then works,
-calling the `add` tool, and its answer comes back into `answer`; the second yields the reward. Whatever
-the agent does happens between the two yields.
+1. **The first `yield` returns the prompt** and pauses the function while the agent works in the
+   environment, driving whatever capabilities it was given. Its answer comes back into `answer`.
+2. **The second `yield` returns the score** - a reward from `0.0` to `1.0`. This is where grading goes:
+   compare `answer` inline, or call a [grader](#grading) to judge what the agent left behind.
 
-`@env.template()` registers the function as a **template**. Its parameters (`a`, `b`) fill in per run,
-so one definition covers a whole space of tasks. Calling it - `sum_task(a=2, b=3)` - binds one runnable
-[task](/v6/reference/tasks).
+`@env.template()` registers it as a **template**, not a single task: its parameters fill in per run, so
+one definition describes a whole space of tasks. Calling it - `count(sentence="strawberry",
+letter="r")` - mints one concrete, runnable [task](/v6/reference/tasks).
 
 ## Grading
 
 The second yield is the reward, a number from `0.0` to `1.0`. Here it's plain Python: compare the
-answer to `a + b`. You have three options as tasks grow:
+agent's answer to the count Python computes. You have three options as tasks grow:
 
 | Approach | What it does |
 | --- | --- |
-| Plain Python | Compute the float inline, like above. Comparison helpers (`exact_match`, `numeric_match`, ...) live in `hud.graders`. |
+| Plain Python | Compute the answer inline, like above. Comparison helpers (`exact_match`, `numeric_match`, ...) live in `hud.graders`. |
 | Async graders | `BashGrader` scores a shell command by exit code; `LLMJudgeGrader` scores against rubric criteria. This is how you grade the state the agent left behind - a test passing, a file written. |
 | Composed graders | `combine` runs several at once and weights them into one reward, each subscore visible in the trace. |
 
-Grading the state the agent left behind is usually the most reliable signal. A grader that returns a
-constant invites reward hacking; see [designing tasks](/v6/reference/advice) for what separates good
-work from bad.
+An async grader is an `await`ed call whose result you yield - `BashGrader`, for instance, runs a command
+in the workspace and scores by exit code:
+
+```python
+result = await BashGrader.grade(weight=1.0, command="pytest -q", cwd=str(ROOT))
+yield result.value
+```
+
+The full set lives in the [graders](/v6/reference/graders) reference; see [designing
+tasks](/v6/reference/advice) for what separates good rewards from hackable ones.
 
 ## Listing tasks in `tasks.py`
 
@@ -160,11 +240,11 @@ work from bad.
 with real arguments:
 
 ```python tasks.py
-from env import sum_task
+from env import count
 
 tasks = [
-    sum_task(a=2, b=3),
-    sum_task(a=10, b=15),
+    count(sentence="strawberry", letter="r"),
+    count(sentence="banana", letter="a"),
 ]
 ```
 
@@ -179,7 +259,17 @@ task, and prints the reward:
 hud eval tasks.py claude
 ```
 
-That's the whole local loop - no API key, no Docker, no separate server. Use it while iterating.
+No Docker or separate server needed - the only thing you need is a provider key for the model
+(`ANTHROPIC_API_KEY`, ...), or a `HUD_API_KEY` to route through the HUD gateway instead.
+
+<Note>
+Runs on macOS, Windows, and Linux, but `ssh` sandbox isolation is **Linux-only** and `BashGrader` needs
+bash (scores `0.0` on native Windows). Off Linux, get full behavior via `--runtime hud`
+(see next guide for running), WSL2, or the built image (`Dockerfile.hud`).
+</Note>
+
+`hud eval` spawns a fresh env per run; to keep one serving locally for repeated runs or manual
+inspection, use `hud serve`.
 
 ## Deploying to the platform
 
@@ -205,4 +295,4 @@ hud sync env              # sync environment metadata
 
 Your environment now lives on the platform, ready to run at scale and compare across models. Running
 those evaluations - locally, on a cloud sandbox, or on the platform - is covered in
-[evaluating agents](/v6/guides/running-an-eval).
+[](/v6/guides/running-an-eval).
