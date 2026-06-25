@@ -38,7 +38,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.file_tracking")
 
 _DRAIN_TIMEOUT = 10.0
-_FRAME_LIMIT_BYTES = 32 * 1024 * 1024
+# flush can carry a 50 MiB diff plus base64 capture and JSON escaping overhead.
+_FRAME_LIMIT_BYTES = 160 * 1024 * 1024
 _FILETRACKING_SCHEMA = "hud.filetracking.v1"
 _FileTrackingSpanName: TypeAlias = Literal[
     "filetracking.capture",
@@ -189,7 +190,12 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
                 _emit_file_tracking("filetracking.diff", diff, started_at=started_at)
 
             capture = flush.get("capture")
-            if isinstance(capture, dict) and capture.get("files_captured"):
+            if isinstance(capture, dict) and (
+                capture.get("files_captured")
+                or capture.get("files_skipped")
+                or capture.get("files_eligible")
+                or capture.get("truncated")
+            ):
                 _emit_file_tracking("filetracking.capture", capture, started_at=started_at)
         with contextlib.suppress(Exception):
             await ft.close()

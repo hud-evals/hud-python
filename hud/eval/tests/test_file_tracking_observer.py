@@ -12,6 +12,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
+from hud.environment.file_tracker import FileTracker
 from hud.eval import file_tracking as observer
 from hud.telemetry.context import set_trace_context
 
@@ -22,8 +23,14 @@ _CAP = Capability(name="filetracking", protocol="filetracking/1", url="tcp://127
 
 
 class _FakeFt:
-    def __init__(self, *, advance_raises: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        advance_raises: bool = False,
+        flush_result: dict[str, Any] | None = None,
+    ) -> None:
         self.advance_raises = advance_raises
+        self.flush_result = flush_result
         self.advance_calls = 0
         self.snapshot_calls = 0
         self.diff_calls = 0
@@ -47,6 +54,8 @@ class _FakeFt:
             return {"files_changed": 1, "patches": [{"path": "a.txt"}]}
         if method == "flush":
             self.flush_calls += 1
+            if self.flush_result is not None:
+                return self.flush_result
             return {
                 "diff": {"files_changed": 1, "patches": [{"path": "final.txt"}]},
                 "capture": {"files_captured": 1, "files": [{"path": "report.xlsx"}]},
@@ -140,6 +149,32 @@ async def test_successful_setup_anchors_and_polls(monkeypatch: pytest.MonkeyPatc
     assert captures == [{"files_captured": 1, "files": [{"path": "report.xlsx"}]}]
 
 
+async def test_flush_emits_skipped_capture_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.settings import settings
+
+    capture = {
+        "files_changed": 1,
+        "files_eligible": 1,
+        "files_captured": 0,
+        "files_skipped": 1,
+        "truncated": True,
+        "files": [],
+    }
+    monkeypatch.setattr(settings, "telemetry_enabled", True)
+    monkeypatch.setattr(settings, "file_tracking_interval", 60.0)
+    diffs, snapshots, captures = _record_emitters(monkeypatch)
+    ft = _FakeFt(flush_result={"diff": {"files_changed": 0, "patches": []}, "capture": capture})
+    _connects_to(monkeypatch, ft)
+
+    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
+        pass
+
+    assert ft.flush_calls == 1
+    assert len(snapshots) == 1
+    assert diffs == []
+    assert captures == [capture]
+
+
 async def test_connect_failure_does_not_break_the_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     from hud.settings import settings
 
@@ -201,6 +236,12 @@ async def test_file_tracking_client_reads_large_snapshot_frame() -> None:
     finally:
         server.close()
         await server.wait_closed()
+
+
+def test_file_tracking_frame_limit_covers_flush_caps() -> None:
+    encoded_capture_cap = 4 * ((FileTracker._MAX_CAPTURE_TOTAL_BYTES + 2) // 3)
+    escaped_diff_cap = 2 * FileTracker._MAX_DIFF_BYTES
+    assert escaped_diff_cap + encoded_capture_cap <= observer._FRAME_LIMIT_BYTES
 
 
 def test_emit_file_tracking_noops_without_a_trace_context(
