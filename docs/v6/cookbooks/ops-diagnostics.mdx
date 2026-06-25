@@ -4,11 +4,11 @@ description: "Walk through an ops diagnostics task where the agent gathers logs,
 icon: "stethoscope"
 ---
 
-A complete, runnable example of an **investigation** task: the agent reads several artifacts, integrates the evidence, and produces a root-cause diagnosis graded by an LLM judge. This is the shape of a good training task - multi-step, multi-channel, and graded on substance.
+An **investigation** task asks the agent to reach a conclusion that no single piece of evidence gives away. Here the agent reads several log files, integrates what they say, and produces a root-cause diagnosis that an LLM judge grades against a rubric. This is the shape of a good training task - multi-step, multi-channel, and graded on substance rather than keywords.
 
 ## The environment
 
-We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files - no single artifact contains the answer.
+We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The cause sits in one file and the symptoms in others, so the agent has to read across them - no single artifact contains the answer.
 
 ```python env.py
 from pathlib import Path

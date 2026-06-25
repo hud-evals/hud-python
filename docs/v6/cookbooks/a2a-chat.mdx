@@ -4,9 +4,9 @@ description: "Build a chat task on the HUD A2A orchestrator, serve it over the a
 icon: "plug"
 ---
 
-A complete, runnable example of putting a wire protocol in front of `Chat`: serve a `messages`-style task as an [A2A](https://github.com/google/a2a) endpoint, so any A2A client - including another LLM using it as a tool - can hold a conversation with your environment.
+Sometimes you want to reach an environment over a standard wire protocol instead of the SDK. This example puts one in front of `Chat`: it serves a `messages`-style task as an [A2A](https://github.com/google/a2a) endpoint, so any A2A client - including another LLM using it as a tool - can hold a conversation with your environment.
 
-`Chat` is protocol-agnostic (see [Chat](/v6/advanced/extending#chat-and-multi-turn)); the A2A layer is a reference server kept outside the SDK on purpose. Copy and adapt it from [`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
+A **`Chat`** is HUD's multi-turn conversation object, and it is protocol-agnostic (see [Chat](/v6/advanced/extending#chat-and-multi-turn)). The A2A layer is a reference server kept outside the SDK on purpose, so you copy and adapt it from [`cookbooks/a2a-chat`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/a2a-chat).
 
 ## The pieces
 
@@ -48,7 +48,14 @@ uv run llm_client.py        # LLM-fronted client
 
 The server publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint. Each A2A context gets its own `Chat`, so concurrent conversations stay independent.
 
-Configuration is via env vars: `HUD_MODEL` picks the agent's model (gateway, needs `HUD_API_KEY`), `HUD_TASK`/`HUD_ENV` pick the task row, `HUD_SOURCE` spawns a different env source, and `HUD_ENV_URL` attaches each turn to an already-served control channel (e.g. `hud serve chat_env.py` → `HUD_ENV_URL=tcp://127.0.0.1:8765`) instead of spawning.
+You configure the server through environment variables:
+
+| Variable | What it controls |
+|----------|------------------|
+| `HUD_MODEL` | The agent's model, routed through the gateway (needs `HUD_API_KEY`). |
+| `HUD_TASK` / `HUD_ENV` | Which task row to serve. |
+| `HUD_SOURCE` | Spawns a different env source. |
+| `HUD_ENV_URL` | Attaches each turn to an already-served control channel instead of spawning. For example, `hud serve chat_env.py` then `HUD_ENV_URL=tcp://127.0.0.1:8765`. |
 
 ## See also
 
