@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING
 
 from hud.environment.file_tracker import FileTracker
@@ -135,6 +136,73 @@ def test_vcs_config_files_are_redacted(tmp_path: Path) -> None:
     assert "redacted" in patch.patch.lower()
     assert "token@example.com" not in patch.patch
     assert "new-token@example.com" not in patch.patch
+
+
+def test_capture_changed_deliverables_since_advanced_baseline(tmp_path: Path) -> None:
+    (tmp_path / "setup.xlsx").write_bytes(b"setup workbook")
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+    tracker.advance_baseline()
+
+    (tmp_path / "analysis.py").write_text("print('tracked by diff')\n")
+    (tmp_path / "notes.txt").write_text("tracked by diff\n")
+    (tmp_path / "deliverable.xlsx").write_bytes(b"workbook bytes")
+    (tmp_path / "report.html").write_text("<html><body>report</body></html>\n")
+
+    payload = tracker.flush_changes()["capture"]
+
+    assert payload["files_changed"] == 4
+    assert payload["files_eligible"] == 2
+    assert payload["files_captured"] == 2
+    assert payload["files_skipped"] == 0
+    files = {file["path"]: file for file in payload["files"]}
+
+    xlsx = files["deliverable.xlsx"]
+    assert xlsx["status"] == "added"
+    assert (
+        xlsx["content_type"]
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert len(xlsx["content_hash"]) == 64
+    assert base64.b64decode(xlsx["file"]["data"]) == b"workbook bytes"
+    assert xlsx["file"]["type"] == "file"
+    assert xlsx["file"]["media_type"] == xlsx["content_type"]
+
+    html = files["report.html"]
+    assert html["status"] == "added"
+    assert html["content_type"] == "text/html"
+    assert base64.b64decode(html["file"]["data"]) == b"<html><body>report</body></html>\n"
+    assert html["file"]["media_type"] == "text/html"
+
+
+def test_capture_skips_secret_shaped_files(tmp_path: Path) -> None:
+    (tmp_path / ".env.xlsx").write_bytes(b"API_KEY=before")
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    (tmp_path / ".env.xlsx").write_bytes(b"API_KEY=after")
+    payload = tracker.flush_changes()["capture"]
+
+    assert payload["files_changed"] == 1
+    assert payload["files_eligible"] == 0
+    assert payload["files_captured"] == 0
+    assert payload["files"] == []
+
+
+def test_capture_marks_cap_skips_as_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(FileTracker, "_MAX_CAPTURE_FILE_BYTES", 4)
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    (tmp_path / "large.pdf").write_bytes(b"12345")
+    payload = tracker.flush_changes()["capture"]
+
+    assert payload["files_eligible"] == 1
+    assert payload["files_captured"] == 0
+    assert payload["files_skipped"] == 1
+    assert payload["truncated"] is True
 
 
 def test_per_file_diff_cap_emits_a_placeholder(

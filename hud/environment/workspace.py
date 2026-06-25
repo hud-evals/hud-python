@@ -249,8 +249,7 @@ class Workspace:
 
     async def _start_file_tracking(self) -> None:
         """Take the baseline snapshot and bind the filetracking/1 server."""
-        from .file_tracker import FileTracker
-        from .file_tracking import serve_file_tracking
+        from .file_tracker import FileTracker, serve_file_tracking
 
         tracker = FileTracker(self.root)
         # The baseline walk is CPU-bound; keep it off the event loop.
