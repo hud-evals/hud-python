@@ -6,11 +6,10 @@ mode: "wide"
 ---
 
 
-This guide outlines how to run an evaluation: pointing an agent at a set of tasks, choosing where each
-rollout runs, and reading the reward. One command sits at the center of every eval - `hud eval` - and it
-works the same whether your environment is deployed to the platform or lives in a local `env.py`. Every
-rollout it produces is traced to your [dashboard](https://hud.ai), and the messages an agent and an
-environment exchange underneath are covered in [protocol](/v6/advanced/protocol).
+This guide outlines how to run an evaluation: pointing an agent at tasks, choosing where each rollout
+runs, and reading the reward. The `hud eval` command is the centra tool for evals: it drives
+every eval and works the same whether your environment is deployed or a local `env.py`. Every rollout
+traces to your [platform](https://hud.ai).
 
 There are two workflows, and they differ only in where the environment lives:
 
@@ -22,32 +21,20 @@ There are two workflows, and they differ only in where the environment lives:
 ## Running a deployed environment
 
 A **deployed environment** has been built and published to the platform with
-[`hud deploy`](/v6/guides/creating-an-environment#deploying-to-the-platform), or is one you picked from
-the [catalog](https://hud.ai/environments/new). It runs entirely on hosted infra, so there's no local
-process to manage - you start a run from the terminal or from the platform, and both trace to the same
-place.
+[`hud deploy`](/v6/guides/creating-an-environment#deploying-to-the-platform). It runs entirely on hosted
+infra, so there's no local process to manage - you start a run from the terminal or from the platform,
+and both trace to the same place.
 
-<div className="guide-row">
-<div className="guide-main">
-
-**From the terminal**, pass the taskset name or id to `hud eval`. The tasks are fetched from the
-platform and each rollout runs remotely on hosted infra.
-
-**From the platform**, open [hud.ai](https://hud.ai), pick the environment, choose a taskset and a
-model, and launch - no CLI required.
-
-</div>
-<div className="guide-aside">
-
-<p className="aside-label">terminal</p>
+**From the terminal**, pass the taskset name or id to `hud eval`. The tasks are fetched from the platform
+and each rollout runs remotely on hosted infra.
 
 ```bash
 hud eval "My Taskset" claude
 hud eval "My Taskset" claude --all --group 3
 ```
 
-</div>
-</div>
+**From the platform**, open [hud.ai](https://hud.ai), pick the environment, choose a taskset and a model,
+and launch - no CLI required.
 
 ### Choosing an agent
 
@@ -67,7 +54,7 @@ For a custom loop - a fine-tuned model, a framework you already use - see
 ### Reading traces and results
 
 Each rollout is a **trace**: a replayable timeline of everything the agent did and the reward it earned.
-Traces are grouped into a **job** and shown on the [dashboard](https://hud.ai). You can also read them
+Traces are grouped into a **job** and shown on the [platform](https://hud.ai). You can also read them
 from the terminal:
 
 ```bash
@@ -79,12 +66,13 @@ hud trace <trace-id>   # a single rollout in full
 ## Running a local environment
 
 A local environment is an `env.py` on your disk - the usual case while you're still developing it.
-`hud eval` is the way to run it; a run script is the same eval in Python when you want programmatic
+`hud eval` is the way to run it; alternatively you can write your own run script 
+that calls `Taskset.run` the same way when you want programmatic
 control. Both take a [runtime](/v6/reference/runtime), the one argument that decides where each rollout
 runs. The environment definition never changes - only the runtime does.
 
 <Note>
-With a `HUD_API_KEY` set, local runs still trace to the [dashboard](https://hud.ai). Without one, they
+With a `HUD_API_KEY` set, local runs still trace to the [platform](https://hud.ai). Without one, they
 run and grade entirely on your machine with no platform calls.
 </Note>
 
@@ -119,7 +107,7 @@ hud eval tasks.py claude --runtime hud # on hosted infra
 ### With a run script
 
 When you want programmatic control - looping over agents, feeding a training pipeline, routing tasks to
-different infra - call `taskset.run` directly and hand it a [runtime](/v6/reference/runtime) object. This
+different infra - call `Taskset.run` directly and hand it a [runtime](/v6/reference/runtime) object. This
 is the same eval `hud eval` runs, written out in Python.
 
 ```python run.py
@@ -167,4 +155,4 @@ Attach to it from a script with `Runtime("tcp://localhost:8765")`, or from `hud 
 the channel speaks.
 
 With runs in hand, turn the reward spread into model updates - covered in
-[training agents](/v6/guides/training-models).
+[training agents](/v6/guides/training-agents).
