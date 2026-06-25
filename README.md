@@ -8,7 +8,7 @@
 
 HUD is a platform for building RL environments for AI agents, across coding, browser, computer-use, and robotics. Define an environment, write tasks, and run them as evals and training across any model, at any scale.
 
-To learn more, see the [documentation](https://docs.hud.ai) and [environment reference](https://docs.hud.ai/v6/core/environment).
+To learn more, see the [documentation](https://docs.hud.ai) and [environment reference](https://docs.hud.ai/v6/reference/environment).
 
 [![PyPI](https://img.shields.io/pypi/v/hud-python?style=flat-square)](https://pypi.org/project/hud-python/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -52,8 +52,9 @@ sequenceDiagram
     participant Agent
     participant Env as Environment
     participant Caps as Capabilities (ssh · mcp · cdp · rfb · robot)
-    Agent->>Env: manifest exchange
-    Env-->>Agent: capabilities + tasks
+    Note over Env,Caps: environment holds & serves these
+    Agent->>Env: hello
+    Env-->>Agent: manifest (capabilities)
     Agent->>Env: tasks.start
     Env-->>Agent: prompt
     rect rgb(238,238,238)
@@ -87,7 +88,7 @@ hud task grade fix_bug --url tcp://127.0.0.1:8765 --answer "..."
 docker rm -f run1
 ```
 
-→ [Run & deploy](https://docs.hud.ai/v6/core/runtime)
+→ [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
 ## Environments & templates
 
@@ -114,7 +115,7 @@ hud eval tasks.py claude --group 3
 
 Each graded evaluation is a **trace** (the SDK's live handle is a `Run`). With `HUD_API_KEY` set, every rollout is recorded on [hud.ai](https://hud.ai). Tasks that need a shell, browser, GUI, or robot declare **capabilities** (below); everything else — variants, grading, batching — stays identical.
 
-→ [Quickstart](https://docs.hud.ai/v6/start/quickstart) · [Tasks & tasksets](https://docs.hud.ai/v6/core/tasks)
+→ [Quickstart](https://docs.hud.ai/v6/start/quickstart) · [Tasks & tasksets](https://docs.hud.ai/v6/reference/tasks)
 
 ## Capabilities & harnesses
 
@@ -132,13 +133,13 @@ A **capability** is a connection the environment exposes; a **harness** attaches
 
 **Bring your own:** a harness attaches to a capability and defines a tool spec — wrap `browser-use` on `cdp`, a VLA policy on `robot`, or your own agent on `ssh` / `mcp`. No protocol work required.
 
-→ [Capabilities](https://docs.hud.ai/v6/core/capabilities) · [Models](https://docs.hud.ai/v6/core/agents) · [Robots](https://docs.hud.ai/v6/advanced/robots)
+→ [Capabilities](https://docs.hud.ai/v6/reference/capabilities) · [Models](https://docs.hud.ai/v6/reference/agents) · [Robots](https://docs.hud.ai/v6/advanced/robots)
 
 ## Deploy on the platform
 
 From the [platform UI](https://hud.ai) you can run batches, compare models on the same taskset, and inspect every trace.
 
-→ [Run & deploy](https://docs.hud.ai/v6/core/runtime)
+→ [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
 ## Train on rewards
 
@@ -161,13 +162,13 @@ await trainer.step(session.runs[start:], learning_rate=1e-5, group_size=8)
 
 HUD is the environment-and-reward source for your own GRPO/PPO loop — the same environment trains any model, text or multimodal, unchanged.
 
-→ [Training](https://docs.hud.ai/v6/core/training) · [Designing tasks for signal](https://docs.hud.ai/v6/core/advice)
+→ [Training](https://docs.hud.ai/v6/reference/training) · [Designing tasks for signal](https://docs.hud.ai/v6/reference/advice)
 
 ## Links
 
 - [Documentation](https://docs.hud.ai)
 - [Quickstart](https://docs.hud.ai/v6/start/quickstart)
-- [CLI reference](https://docs.hud.ai/v6/core/cli)
+- [CLI reference](https://docs.hud.ai/v6/reference/cli)
 - [Environment templates](https://hud.ai/environments)
 - [Supported models](https://hud.ai/models)
 - [Discord](https://discord.gg/wkjtmHYYjm)

@@ -1,0 +1,88 @@
+---
+title: "Environments"
+description: "The Environment control object, its registration methods, and how to serve one over the wire protocol."
+icon: "cube"
+---
+
+An **environment** is the world an agent acts in - a shell, a browser, a desktop, a robot simulator.
+The `Environment` object is the wire-protocol control handle for one: it holds the capabilities and
+tasks registered against it and answers an agent harness over the [protocol](/v6/advanced/protocol).
+Authoring an `env.py` lives in [creating an environment](/v6/guides/creating-an-environment); this
+page is the object and its serving API.
+
+## The `Environment` object
+
+`hud.environment.Environment` is the lightweight control object the whole file hangs off. When
+served, it acts as the *server* an agent harness connects to: it answers `hello` with its
+capabilities and runs its tasks on request.
+
+```python
+from hud import Environment
+
+env = Environment(name="environment", version="0.0.1", capabilities=None)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | `"environment"` | Environment identity (used as the env-ref name). |
+| `version` | `str` | `"0.0.1"` | Version string surfaced in the manifest. |
+| `capabilities` | `list[Capability] \| None` | `None` | Wire data for services that already exist; see [Capabilities](/v6/reference/capabilities). |
+## Methods
+
+You register capabilities, lifecycle hooks, and tasks against the object with these methods. Each
+becomes part of what the environment advertises when it serves.
+
+| Method | Description |
+|--------|-------------|
+| `env.template(*, id=None, description="", input=None, returns=None)` | Register a **task template** (an async generator that yields a prompt, then a reward). Returns a factory that mints a [`Task`](/v6/reference/tasks) when called. |
+| `env.initialize` / `env.shutdown` | Decorators registering hooks run once before serving / on teardown (shutdown runs in reverse order). |
+| `env.add_capability(cap)` | Publish concrete wire data, replacing any same-named entry. Call it from an `@env.initialize` hook once a daemon the env runs is up. |
+| `env.capability(name)` | Look up a published [capability](/v6/reference/capabilities) by name. |
+| `env.workspace(root, *, name="shell", track_files=None, **kwargs)` | Attach a [`Workspace`](/v6/reference/capabilities#workspace) serving `name` over `ssh/2`, wiring its start, publish, and stop lifecycle. File tracking runs by default (`track_files` defaults to `HUD_FILE_TRACKING_ENABLED`). |
+| `env.start()` / `env.stop()` | Run the `@env.initialize` / `@env.shutdown` hooks directly (`start` is idempotent until `stop`). |
+| `env.tasks` / `env.templates` | The registered template factories by id (`templates` is an alias of `tasks`). |
+
+The `@env.template()` decorator takes optional arguments:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | `str \| None` | Task id (defaults to the function name). |
+| `description` | `str` | Human-readable description, surfaced in the manifest. |
+| `input` | `Any` | Optional type for the agent's input (JSON schema in the manifest). |
+| `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `Answer[T]`. See [Types](/v6/reference/types). |
+
+Grading and collecting tasks into tasksets are their own topics: see [graders](/v6/reference/graders)
+and [Tasks & Tasksets](/v6/reference/tasks).
+
+## Serving
+
+You rarely serve by hand - `hud eval`, [`task.run()`](/v6/reference/tasks), and `Taskset.run()` bring
+the environment up for you, and the [runtime](/v6/reference/runtime) you pass decides where. Serving
+itself belongs to `hud.environment.server`, the entry point every substrate runs: a
+[`LocalRuntime`](/v6/reference/runtime#localruntime) child process, a container CMD, or `hud serve`.
+
+| Function | Description |
+|----------|-------------|
+| `await serve(env, host="127.0.0.1", port=0)` | Start daemons and serve the control channel until cancelled (blocks). |
+| `await bind(env, host="127.0.0.1", port=0)` | Bind the control-channel socket and return an `asyncio.Server` without serving. |
+| `load_environment(path, *, name=None)` | Return the one `Environment` defined at `path` (a `.py` file or directory); `name` selects among several. |
+
+The server module is the same entry point a container CMD runs:
+
+```bash
+python -m hud.environment.server <path> [--env NAME] [--host HOST] [--port PORT]
+```
+
+```bash
+hud serve env.py     # serve locally on tcp://127.0.0.1:8765 while you iterate
+```
+
+<Note>
+A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under
+`hud serve`, which runs the asyncio loop on main. Run `serve(env, host, port)` on a worker thread
+instead and keep the main thread for the dependency - see [Robots](/v6/advanced/robots#environment-side).
+</Note>
+
+See [creating an environment](/v6/guides/creating-an-environment) to author one,
+[capabilities](/v6/reference/capabilities) for the access it exposes, and [runtime](/v6/reference/runtime)
+for where it runs.

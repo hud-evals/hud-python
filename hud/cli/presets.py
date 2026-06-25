@@ -23,7 +23,12 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class EnvironmentPreset:
-    """A starter environment sourced from a public GitHub repo."""
+    """A starter environment.
+
+    Most presets are sourced from a public GitHub repo. When ``local`` is set the
+    starter is the bundled minimal scaffold instead (see :mod:`hud.cli.templates`);
+    ``owner``/``repo`` are then only used to name the target directory.
+    """
 
     id: str
     emoji: str
@@ -31,6 +36,7 @@ class EnvironmentPreset:
     description: str
     owner: str
     repo: str
+    local: bool = False
 
 
 ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
@@ -38,9 +44,10 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "blank",
         "🧱",
         "Blank",
-        "Minimal starting point for building your own environment.",
+        "Minimal local scaffold (no download): a single letter-counting task.",
         "hud-evals",
         "hud-blank",
+        local=True,
     ),
     EnvironmentPreset(
         "browser",

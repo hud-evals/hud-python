@@ -53,6 +53,27 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
     assert '"dev"' not in dockerfile
 
 
+def test_init_blank_preset_writes_local_scaffold_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 'blank' is the bundled local scaffold: it must never hit the network.
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("materialize_preset should not be called for blank")
+
+    monkeypatch.setattr(init_module, "materialize_preset", _boom)
+
+    init_command(name="berry", directory=str(tmp_path), force=False, preset="blank")
+
+    target = tmp_path / "berry"
+    assert {p.name for p in target.iterdir()} == {
+        "pyproject.toml",
+        "env.py",
+        "tasks.py",
+        "Dockerfile.hud",
+    }
+    assert 'Environment(name="berry")' in (target / "env.py").read_text()
+
+
 def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
     target = tmp_path / "taken"
     target.mkdir()

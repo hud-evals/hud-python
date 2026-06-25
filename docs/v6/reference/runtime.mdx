@@ -1,28 +1,18 @@
 ---
-title: "Run & deploy"
-description: "Run a HUD task by deploying the environment to the platform or by driving it programmatically from your machine, with the same task definition either way."
+title: "Runtimes"
+description: "Where each rollout's environment runs - the runtime you pass at execution time."
 icon: "rocket"
 ---
 
-This page covers how you actually run tasks: deploying an environment to the HUD platform, and running
-it programmatically from your own machine. Both go through a **runtime** - the one thing you pass to
-choose where each rollout runs.
-
-## Runtime
-
-A **runtime** decides *where* an environment runs for a rollout. You pass it to `task.run` /
+A **runtime** chooses where each rollout's environment runs. You pass it to `task.run` /
 `taskset.run` at execution time, and the same task and the same `env.py` run anywhere - only the
 runtime changes.
 
 ```python
-from hud.eval import LocalRuntime
+from hud import LocalRuntime
 
-await TASKS.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
+await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
 ```
-
-Under the hood a runtime is just a function: given a task, bring the environment up somewhere and hand
-back its control-channel URL. The agent loop always runs on your machine and drives that URL; the
-runtime only decides what's on the other end.
 
 ## Built-in runtimes
 
@@ -33,49 +23,28 @@ runtime only decides what's on the other end.
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
 | `Runtime("tcp://host:8765")` | A substrate you already started | Attaching to a long-lived container or sandbox you own |
-| `HUDRuntime()` | The HUD platform, leased by name | After you deploy (see below); the default when `runtime=` is omitted for platform/file rows |
+| `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
+| `HostedRuntime()` | The whole rollout on a HUD-leased box | Agent and env run together off your machine |
 
 Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
-Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
+HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
 
 <Note>
-**Omit `runtime=` and it's inferred.** A taskset minted in-process from one `.py` source serves that
-source locally; rows loaded from a file or the platform fall back to `HUDRuntime`. Pass a runtime
-explicitly the moment you want something other than that.
+**Omit `runtime=` and it's inferred** from each task's `_source`, the file its template was defined
+in. When every task shares one `_source`, that source is served locally as `LocalRuntime(source)`;
+otherwise (mixed sources, or rows loaded from a file or the platform with no source) it falls back to
+`HUDRuntime()`. Pass a runtime explicitly the moment you want something else.
 </Note>
 
-## The decision: run it yourself or deploy
-
-Every runtime above is one of two choices, and that choice is the only one that really matters: do you
-keep the environment on infra **you** bring up, or **deploy** it to the HUD platform?
-
-- **Run it yourself.** `LocalRuntime` for development, `DockerRuntime` for a reproducible container,
-  `ModalRuntime` / `DaytonaRuntime` for cloud sandboxes, or `Runtime(url)` to attach to something you
-  already started. You own the substrate's lifecycle.
-- **Deploy to the platform.** `hud deploy` builds your environment image and hosts it; then
-  `HUDRuntime()` leases it per rollout while your agent loop stays local. This is the path to running
-  batches and comparing models from the [platform UI](https://hud.ai), with every trace browsable.
-
-## Package & deploy
-
-Deploying builds your environment into an **image** on HUD and registers it by the name in your
-`Environment(...)` declaration - one step, no local Docker:
-
-```bash
-hud deploy                 # build the image on HUD from Dockerfile.hud, register it by name
-hud sync tasks my-taskset  # publish the taskset (uploads only what changed)
-```
-
-`hud init` scaffolds the `Dockerfile.hud`. One build packs every task from the definition, so the same
-image runs unchanged on HUD, on a cloud sandbox, in CI, or on your laptop. After deploying,
-`HUDRuntime()` is the natural pair. Pass build config with `--env`, `--build-arg`, and `--secret`. See
-the [CLI reference](/v6/core/cli#hud-deploy) for the full flag set.
+To deploy an environment to the platform and run against it, see
+[running an eval](/v6/guides/running-an-eval) and
+[deploying to the platform](/v6/guides/creating-an-environment#deploying-to-the-platform).
 
 ## RuntimeConfig
 
 `RuntimeConfig` carries the construction hints a container-based runtime needs: which image, how much
 hardware, and what timeouts. Set it on the runtime (`runtime_config=`) or per row on
-[`Task.runtime_config`](/v6/core/tasks#the-task-row); the runtime merges the two and applies what it
+[`Task.runtime_config`](/v6/reference/tasks#task); the runtime merges the two and applies what it
 supports.
 
 ```python
@@ -126,12 +95,13 @@ DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None)
 ### `ModalRuntime`
 
 ```python
-ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", port=8765, runtime_config=None, env_vars=None)
+ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", workdir=None, port=8765, runtime_config=None, env_vars=None)
 ```
 
 - **`image_name`** - published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
 - **`image`** - an `Image` to build lazily on first use, as an escape hatch.
 - **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint).
+- **`workdir`** - working directory inside the sandbox. Left unset, Modal keeps the image's `WORKDIR`.
 - **`app_name`** / **`port`** / **`env_vars`** - Modal app name, in-sandbox serving port, and extra environment variables.
 
 Requires the `modal` extra and a configured token.
@@ -157,6 +127,20 @@ HUDRuntime(*, run_timeout=3600.0, runtime_url=None)
 - **`runtime_url`** - override the runtime endpoint the tunnel connects to.
 
 The SDK leases your deployed env by name and tunnels to its control channel; the agent loop runs local.
+
+### `HostedRuntime`
+
+```python
+HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
+```
+
+- **`poll_interval`** - seconds between trace-status polls while the rollout runs remotely.
+- **`run_timeout`** - bound on one rollout end to end, including instance provisioning and queueing.
+
+Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
+**whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and
+runs the agent right next to it. This process only submits the rollout and polls its trace to
+completion. It requires a gateway agent that can serialize its identity (Claude/OpenAI/Gemini).
 
 ### `Runtime`
 
@@ -185,7 +169,7 @@ async def my_runtime(task):
     finally:
         await sandbox.terminate()                       # ...and tears it down
 
-await TASKS.run(agent, runtime=my_runtime)
+await taskset.run(agent, runtime=my_runtime)
 ```
 
 `DockerRuntime` and the rest are just built-in versions of this. Anything that starts your image and

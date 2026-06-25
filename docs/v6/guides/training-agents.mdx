@@ -1,0 +1,172 @@
+---
+title: "Training Agents"
+description: "Turn an evaluation into a training loop: fork a model, roll out a taskset in groups, and feed the rewards back to nudge the weights."
+icon: "dumbbell"
+mode: "wide"
+---
+
+
+This guide outlines how to turn an evaluation into a training loop - forking a model you're allowed to
+update, rolling out a taskset in groups, and feeding the rewards back to move the weights. The rewards
+you already collect are the training signal, so training reuses the eval from the
+[previous guide](/v6/guides/running-an-eval) almost unchanged.
+
+## How training works
+
+Evaluation and training share the same three pieces: a **task**, an **agent**, and a **reward**. An
+eval runs that once; training repeats it, nudging the weights toward higher-reward rollouts after each
+batch. The reward is already the signal - nothing new gets graded.
+
+The loop repeats four steps:
+
+<div className="tight-list">
+
+1. **Roll out** a batch of tasks with the current model.
+2. **Score** each rollout - the reward you already get for free.
+3. **Nudge** the weights toward the rollouts that scored higher.
+4. **Repeat** - the next batch samples the now-improved model.
+
+</div>
+
+Two things have to be true before that loop can learn:
+
+| Prerequisite | Why it matters |
+| --- | --- |
+| A **trainable model** you forked | You can only advance weights you own, so you start by forking a base into a private model (below). |
+| A taskset whose rewards **spread** | Training learns from the gap between rollouts; a task every rollout passes or fails teaches nothing (see [Why groups matter](#why-groups-matter)). |
+
+## Fork a trainable model
+
+A **trainable model** is a gateway model whose weights you're allowed to advance. Only some bases can be
+forked. List the models to see which models are trainable, then fork one into a private, team-owned model.
+
+<div className="guide-row">
+<div className="guide-main">
+
+The `hud models list` command marks forkable bases in its Trainable column. Running `hud models fork`
+copies a base into a new slug you own, starting from the base's current weights, 
+so training continues from there.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">terminal</p>
+
+```bash
+hud models list                               # the Trainable column marks forkable bases
+hud models fork Qwen/Qwen3.5-4B --name arith-rl
+```
+
+</div>
+</div>
+
+The new slug (`arith-rl`) is both what you **sample** and what you **train** - one string flows through
+the whole loop.
+
+## Run the loop
+
+This is the whole thing in Python: each step rolls out a batch with the current weights, hands the
+graded rollouts to the trainer, and the trainer nudges the weights and promotes them - so the next step
+samples an improved model.
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">1 · Set up the agent and trainer</div>
+
+Two objects, both keyed to the model you forked:
+
+<div className="step-list">
+
+- **The agent** rolls out like in an eval. The `return_token_ids` flag marks it a training rollout, so
+  each response carries the token ids and logprobs the trainer needs.
+- **The trainer** advances the weights behind the slug in place. It runs on a
+  [Tinker](https://thinkingmachines.ai/tinker/) client under the hood, so you write no ML infra.
+
+</div>
+
+<div className="part-label">2 · Roll out, then nudge</div>
+
+One job spans the session; each step appends a batch and trains on it:
+
+<div className="step-list">
+
+- **Open the job** with `group=8` - 8 rollouts per task, so the rewards are comparable (next).
+- **Roll out** the batch, the same eval as the [previous guide](/v6/guides/running-an-eval). The
+  [runtime](/v6/reference/runtime) sets where it runs; swap `LocalRuntime` for `HUDRuntime()` unchanged.
+- **Nudge** with `trainer.step` - the one line that learns. It scores each rollout against its group,
+  shifts the weights, then **promotes** them so the gateway serves the new ones at once.
+
+</div>
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">train.py</p>
+
+```python
+import asyncio
+from hud import TrainingClient, Taskset, LocalRuntime
+from hud.agents import create_agent
+from hud.eval import Job
+
+MODEL = "arith-rl"   # the model you forked above
+
+# 1 · set up the agent and trainer
+agent = create_agent(MODEL, completion_kwargs={"extra_body": {"return_token_ids": True}})
+trainer = TrainingClient(MODEL)
+taskset = Taskset.from_file("tasks.py")
+
+# 2 · roll out, then nudge
+async def main():
+    session = await Job.start(MODEL, group=8)   # one job spans the session
+    for step in range(10):
+        start = len(session.runs)
+        await taskset.run(agent, runtime=LocalRuntime("env.py"), job=session)
+        batch = session.runs[start:]                          # this step's rollouts
+        await trainer.step(batch, learning_rate=1e-5, group_size=8)   # nudge + promote
+        print(f"step {step}  reward {sum(r.reward for r in batch) / len(batch):.2f}")
+
+asyncio.run(main())
+```
+
+</div>
+</div>
+
+## Why groups matter
+
+By default, HUD trains with **GRPO**, which scores each rollout relative to its group: its advantage is
+`reward - group_mean`. A rollout counts as good only next to its siblings on the same task.
+
+So if every rollout in a group earns the **same** reward, every advantage is zero and nothing moves -
+however high the average looks. That is why each task runs as a group (`group=8`) and why your tasks must
+produce a spread of rewards. Trainability is a property of your tasks, not the loop;
+[designing tasks](/v6/reference/advice) covers how to build that spread in.
+
+## Watch it improve
+
+Each `trainer.step` adds a node to the model's **checkpoint tree** and promotes it to the **head** - the
+weights the gateway now serves. Read the tree from the shell, or the mean reward from the loop's print.
+
+<div className="guide-row">
+<div className="guide-main">
+
+Because every step checkpoints, any node is also a rollback point. Roll the head back when the objective
+changes: if you edit the reward or the environment mid-run, set the head to a checkpoint taken before the
+change so the run measures the new objective from a clean start.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">terminal</p>
+
+```bash
+hud models checkpoints arith-rl       # the checkpoint tree, active head marked
+hud models head arith-rl --set <id>   # roll back or branch from an earlier point
+```
+
+</div>
+</div>
+
+The [training reference](/v6/reference/training) covers the `TrainingClient` API, the built-in and
+custom losses, and the checkpoint tree in full.

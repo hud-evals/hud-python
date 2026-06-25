@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for the hud CLI across the environment lifecycle: init, serve, build, push, sync, eval, deploy, models, and the platform login commands."
+description: "The hud command reference across the environment lifecycle."
 icon: "terminal"
 ---
 
@@ -10,7 +10,7 @@ Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate on
 
 ### `hud init`
 
-Scaffold a new environment package in a fresh `<name>` directory. With no preset it writes a minimal local scaffold - `env.py` (environment, templates, capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` - no network, no API key. With `--preset` (or the interactive picker in a TTY) it downloads a starter environment from GitHub instead.
+Scaffold a new environment package in a fresh `<name>` directory. The `blank` template (the default with no preset, and the first option in the interactive picker) writes a minimal local scaffold - `env.py` (environment, templates, capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` - no network, no API key. Every other preset downloads a starter environment from GitHub instead.
 
 ```bash
 hud init                          # pick a template → ./<template>
@@ -22,7 +22,7 @@ hud init my-env --dir envs        # create ./envs/my-env
 
 | Option | Description |
 |--------|-------------|
-| `--preset`, `-p` | Starter to download: `blank`, `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench`. Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the minimal local scaffold. |
+| `--preset`, `-p` | Starter to use: `blank` (minimal local scaffold), `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench` (all downloaded from GitHub). Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the blank local scaffold. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 
@@ -178,5 +178,5 @@ rollout so `hud trace` can read them offline without an API call.
 
 <CardGroup cols={2}>
 <Card title="Quickstart" icon="bolt" href="/v6/start/quickstart" />
-<Card title="Run & deploy" icon="rocket" href="/v6/core/runtime" />
+<Card title="Run & deploy" icon="rocket" href="/v6/reference/runtime" />
 </CardGroup>

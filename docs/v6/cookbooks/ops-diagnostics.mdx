@@ -4,11 +4,11 @@ description: "Walk through an ops diagnostics task where the agent gathers logs,
 icon: "stethoscope"
 ---
 
-A complete, runnable example of an **investigation** task: the agent reads several artifacts, integrates the evidence, and produces a root-cause diagnosis graded by an LLM judge. This is the shape of a good training task - multi-step, multi-channel, and graded on substance.
+An **investigation** task asks the agent to reach a conclusion that no single piece of evidence gives away. Here the agent reads several log files, integrates what they say, and produces a root-cause diagnosis that an LLM judge grades against a rubric. This is the shape of a good training task - multi-step, multi-channel, and graded on substance rather than keywords.
 
 ## The environment
 
-We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The agent must read across files - no single artifact contains the answer.
+We give the agent shell access to a directory of logs and traces, then ask for a diagnosis. The cause sits in one file and the symptoms in others, so the agent has to read across them - no single artifact contains the answer.
 
 ```python env.py
 from pathlib import Path
@@ -60,7 +60,7 @@ The answer is the agent's **text diagnosis** (`answer = yield ...`). The judge s
 
 ## Why this is a good training task
 
-It satisfies the [signal](/v6/core/advice) principles:
+It satisfies the [signal](/v6/reference/advice) principles:
 
 - **Multi-channel integration** - the cause (a removed index) is in `deploy.log`, but the symptom path runs through `db.log` and `api.log`. No single file is decisive, so the agent must *integrate*.
 - **Multi-step** - the agent reads several files, forms a hypothesis, and checks it against the evidence.
@@ -77,13 +77,13 @@ Inspect the trace at [hud.ai](https://hud.ai) to see which files the agent read 
 
 ## Build a spread
 
-Vary the incident to mint a dataset with a difficulty range - some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/core/advice)).
+Vary the incident to mint a dataset with a difficulty range - some with an obvious deploy cause, some where the evidence is more scattered. A controlled difficulty distribution is what makes the set trainable (see [Designing tasks for signal](/v6/reference/advice)).
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Designing tasks for signal" icon="signal" href="/v6/core/advice" />
-<Card title="Graders" icon="scale-balanced" href="/v6/core/graders" />
+<Card title="Designing tasks for signal" icon="signal" href="/v6/reference/advice" />
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
 <Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent" />
-<Card title="Train on rewards" icon="dumbbell" href="/v6/core/training" />
+<Card title="Train on rewards" icon="dumbbell" href="/v6/reference/training" />
 </CardGroup>

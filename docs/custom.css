@@ -197,6 +197,27 @@ body::after {
   margin-bottom: 0 !important;
 }
 
+/* Step list: standard line spacing (no tight pull), with a gentle top margin so
+   it never overlaps a wrapping intro line above it (used in the split guide panes). */
+#content .step-list ul,
+#content .step-list ol {
+  margin-top: 0.4rem !important;
+  margin-bottom: 0.4rem !important;
+}
+#content .step-list li {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  line-height: 1.7 !important;
+}
+#content .step-list li > p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+/* breathing room before a part-label that follows a step list (e.g. "2 · ...") */
+#content .step-list + .part-label {
+  margin-top: 1.6rem !important;
+}
+
 /* Blockquotes: gold left rule, like a pull-quote. */
 #content blockquote {
   border-left: 2px solid #c0960c;
@@ -417,4 +438,160 @@ body::after {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ── Collapsible sidebar sections ("toggle masquerading as a heading") ──────
+   Mintlify makes a section collapsible by nesting a group inside it, but it
+   renders that nested group as a <button> styled like a plain page link.
+   Restyle the toggle so it reads as a section heading (matching the always-open
+   "Start here" / "Guides" / "Reference" / "More" headings), keeping its chevron
+   as the expand/collapse affordance. The redundant outer wrapper heading is
+   hidden. This keys off the nested-group structure (`li[data-group-tag]`), so it
+   applies to exactly whichever sections are authored as nested groups in
+   docs.json — currently Advanced and Cookbooks. */
+li[data-group-tag] > button[aria-expanded] {
+  font-size: 0.75rem !important;   /* text-xs */
+  line-height: 1rem !important;
+  font-weight: 600 !important;     /* font-semibold */
+  color: #111827 !important;       /* gray-900 */
+}
+.dark li[data-group-tag] > button[aria-expanded] {
+  color: #e5e7eb !important;       /* gray-200 */
+}
+/* the section's pages sit one nesting level deeper than other sections — pull
+   them back to the standard page-link indent so they line up identically. */
+li[data-group-tag] ul a {
+  padding-left: 1rem !important;
+}
+/* hide the redundant outer section heading that wraps a collapsible toggle */
+div:has(> ul.sidebar-group > li[data-group-tag]) > .sidebar-group-header {
+  display: none !important;
+}
+
+/* ── Mermaid diagrams: fix clipped labels at the source ─────────────────────
+   Mermaid measures each node's width with its own font (trebuchet) but the
+   page otherwise renders the labels in the wider HUD brand font (Inter), so
+   the boxes come out too narrow and the last letters get clipped. Instead of
+   patching the overflow, render the labels in the SAME font mermaid measures
+   with — then every box is sized correctly and nothing overflows. */
+#content .mermaid,
+#content .mermaid .nodeLabel,
+#content .mermaid .edgeLabel,
+#content .mermaid .cluster-label,
+#content .mermaid span,
+#content .mermaid p,
+#content .mermaid div,
+#content .mermaid text {
+  font-family: "trebuchet ms", verdana, arial, sans-serif !important;
+}
+/* Overview step pills stay on one line (non-breaking spaces). Any tiny
+   measure-vs-render slack on the longest pill ("Declare your environment")
+   would clip the last letters — let the label spill into the pill's internal
+   padding instead of being cut at the box edge. */
+#content .mermaid .node.clickable .nodeLabel,
+#content .mermaid .node.clickable foreignObject,
+#content .mermaid .node.clickable foreignObject > div {
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+/* Nodes with a mermaid `click` link: a subtle, minimalist hover cue — a slight
+   scale-up from the node's own center, nothing imposing. */
+#content .mermaid .node.clickable {
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+#content .mermaid .node.clickable:hover {
+  transform: scale(1.05);
+}
+
+/* ── Two-column guide layout (textbook margin) ─────────────────────────────
+   A per-step row: the explanation on the left stays the center of attention,
+   with a quiet margin on the right for supporting code, tables, diagrams, and
+   notes. The split engages at ≥1024px (matching the wide reading column) and
+   stacks into a single column below that, so each visual drops under the text it
+   belongs to. The text column is intentionally narrower than the visual column
+   (4:6) so code and diagrams get room to breathe. */
+@media (min-width: 1024px) {
+  #content .guide-row {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+    gap: 2.75rem;
+    align-items: start;
+    margin: 1.5rem 0;
+  }
+  #content .guide-aside {
+    border-left: 1px solid #e5e5e5;
+    padding-left: 1.5rem;
+    font-size: 0.9em;
+  }
+  .dark #content .guide-aside {
+    border-left-color: rgba(255, 255, 255, 0.1);
+  }
+}
+/* Small uppercase caption above a margin visual. */
+#content .aside-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #8a8a8a;
+  margin-bottom: 0.5rem;
+}
+/* Margin tables/code shrink to fit the narrow column without forcing a scrollbar. */
+#content .guide-aside table {
+  width: 100%;
+  font-size: 0.8em;
+}
+#content .guide-aside th,
+#content .guide-aside td {
+  padding: 0.4rem 0.6rem;
+}
+
+/* ── File tree ──────────────────────────────────────────────────────────────
+   A clean directory listing (à la a file explorer): a bordered, rounded box
+   matching the card/code-block hairline language, with monospace entries, quiet
+   connector glyphs, and muted inline notes aligned in their own column. Each
+   row is a 2-column grid (name | note) so every note lines up regardless of
+   filename length. */
+#content .filetree {
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 1rem 1.25rem;
+  margin: 1.25rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace;
+  font-size: 0.85rem;
+  line-height: 1.85;
+}
+.dark #content .filetree {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+#content .filetree .ft-root {
+  font-weight: 600;
+  color: var(--tw-prose-headings);
+  margin-bottom: 0.15rem;
+}
+#content .filetree .ft-row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.5rem;
+  align-items: baseline;
+}
+#content .filetree .ft-branch {
+  color: #c0c0c0;
+}
+.dark #content .filetree .ft-branch {
+  color: #5a5a5a;
+}
+#content .filetree .ft-name {
+  color: var(--tw-prose-headings);
+  font-weight: 500;
+}
+#content .filetree .ft-note {
+  color: #8a8a8a;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.92em;
 }

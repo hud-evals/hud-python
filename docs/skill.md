@@ -50,7 +50,7 @@ tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
 
 Run it: `hud eval tasks.py claude`. Cite [Quickstart](/v6/start/quickstart)
-and [Tasks](/v6/core/tasks).
+and [Tasks](/v6/reference/tasks).
 
 **Capabilities** give the agent something to act on (declare on the env; the
 harness brings its own tools):
@@ -64,8 +64,8 @@ env.workspace("/workspace")
 
 `ssh` (shell+files; `env.workspace(root)` runs the sandbox for you),
 `mcp`, `cdp` (browser), `rfb` (computer-use), `robot` (robot policies). Cite
-[Environments](/v6/core/environment) and
-[Capabilities](/v6/core/capabilities).
+[Environments](/v6/reference/environment) and
+[Capabilities](/v6/reference/capabilities).
 
 ### MCP capability — in-process tool server
 
@@ -113,10 +113,10 @@ async def my_task(param: str = "default"):
 ```
 
 The agent sees MCP tools alongside HUD's own harness tools — no extra wiring
-needed in the template. Cite [Capabilities](/v6/core/capabilities).
+needed in the template. Cite [Capabilities](/v6/reference/capabilities).
 
-**Run / scale / train:** [Models](/v6/core/agents),
-[Deploy](/v6/core/runtime), [Training](/v6/core/training).
+**Run / scale / train:** [Models](/v6/reference/agents),
+[Deploy](/v6/reference/runtime), [Training](/v6/reference/training).
 
 ---
 
@@ -171,7 +171,7 @@ for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
     print(f"{model}: {job.reward:.2f}")
 ```
 
-Cite [Deploy](/v6/core/runtime), [Models](/v6/core/agents), [Training](/v6/core/training).
+Cite [Deploy](/v6/reference/runtime), [Models](/v6/reference/agents), [Training](/v6/reference/training).
 
 ---
 
@@ -286,7 +286,7 @@ For an existing v5 env, follow [Migrate to v6](/v6/more/migrate-v6).
 ## Task-quality doctrine — push back when you see these
 
 For each trigger: **what to tell the user**, then **the page to cite**. The
-canonical reference is [Designing tasks for signal](/v6/core/advice).
+canonical reference is [Designing tasks for signal](/v6/reference/advice).
 
 ### 1. Constant / echo / shape-only grader → reward hacking
 
@@ -300,8 +300,8 @@ rewarded is exploited. Grade **substance, not surface form**: credit a correct
 answer in a different format, but never credit the shape alone. The cheapest
 path that scores *without doing the work* must sit at or below the floor.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Resist the cheapest
-path"), [Graders](/v6/core/graders).
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Resist the cheapest
+path"), [Graders](/v6/reference/graders).
 
 ### 2. All-equal rewards → no within-group spread
 
@@ -316,8 +316,8 @@ of trainability is *within-group spread*, not the mean. Run a group
 All-one (saturated) is wasted surface; all-zero at small group sizes may still
 be learnable at training scale, but investigate it.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Signal lives in
-within-group spread"), [Training](/v6/core/training).
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Signal lives in
+within-group spread"), [Training](/v6/reference/training).
 
 ### 3. Public-benchmark substrate → contamination
 
@@ -332,7 +332,7 @@ codebase operated to generate fresh logs), but not handed to the agent verbatim.
 Keep real failures and edge cases — they're the signal; don't fabricate
 synthetic substrate to look real.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Source substrate that
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Source substrate that
 isn't memorized").
 
 ### 4. Single-shot task → needs multi-step
@@ -347,7 +347,7 @@ and a problem that requires integrating evidence across more than one
 observation (the [ops-diagnostics](/v6/cookbooks/ops-diagnostics) cookbook is a
 model example).
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Make it multi-step").
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Make it multi-step").
 
 ### 5. Comparing only similar top models → need a spanning set
 
@@ -360,7 +360,7 @@ task can look broken. Evaluate against a deliberate **weak anchor and a strong
 anchor**, not a cluster of top performers. Also state the model+reasoning regime
 you calibrated against; difficulty has no absolute meaning.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Difficulty is relative to
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Difficulty is relative to
 a specific model").
 
 ### 6. Same-shape taskset → needs diversity
@@ -374,7 +374,7 @@ substrate sources, deliverable shapes, and capabilities exercised**, and spread
 the **difficulty distribution** (don't pile up at score 0 or saturation). Size
 the set to the training run so it doesn't overfit in the first few steps.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Compose a taskset that
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Compose a taskset that
 isn't all one shape").
 
 ### 7. Answer leakage in the environment or prompt
@@ -387,7 +387,7 @@ eval, or author oracle/grading scripts left readable.
 root-cause leaks, keep grader-only vocabulary out of the prompt (weave needed
 context naturally), don't imply it's a test, and strip author artifacts.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Keep the answer out of
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Keep the answer out of
 the environment").
 
 ### 8. Prompt ↔ grader misalignment
@@ -400,8 +400,8 @@ Enforce score–quality monotonicity: better substantive work must never score
 lower. Compose graders with `combine` so subscores make a partial reward
 legible and monotonicity violations visible.
 
-**Cite:** [/v6/core/advice](/v6/core/advice) ("Align the prompt and the
-grader"), [Graders](/v6/core/graders).
+**Cite:** [/v6/reference/advice](/v6/reference/advice) ("Align the prompt and the
+grader"), [Graders](/v6/reference/graders).
 
 ---
 
@@ -414,7 +414,7 @@ grader"), [Graders](/v6/core/graders).
 - Compose: `await combine(...)` (positive weights normalize to 1.0).
 - Structured answers: `@env.template(returns=MyModel)` → answer is `Answer[T]`.
 
-Cite [Graders](/v6/core/graders) and [Types](/v6/core/types).
+Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 
 ---
 
@@ -440,7 +440,7 @@ Set `HUD_TELEMETRY_LOCAL_DIR` to write spans locally; `hud trace` reads from dis
 first and falls back to the platform API. Cite [CLI](/v6/reference/cli).
 
 When unsure about an API, read the page rather than guess:
-[Environment](/v6/core/environment) · [Tasks & Tasksets](/v6/core/tasks) ·
-[Capabilities](/v6/core/capabilities) · [Agents](/v6/core/agents) ·
-[Graders](/v6/core/graders) · [Types](/v6/core/types) ·
-[CLI](/v6/core/cli).
+[Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·
+[Capabilities](/v6/reference/capabilities) · [Agents](/v6/reference/agents) ·
+[Graders](/v6/reference/graders) · [Types](/v6/reference/types) ·
+[CLI](/v6/reference/cli).

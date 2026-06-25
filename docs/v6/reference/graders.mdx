@@ -16,6 +16,27 @@ from hud.graders import (
 )
 ```
 
+## What grading scores
+
+Grading decides *what* the reward measures. Two framings cover most tasks:
+
+- **Grade the answer** - compute a float from what the agent said.
+- **Grade the world** - score the state the agent left behind: tests passing, a file written, a
+  service responding. Because the agent acts on a real system through its
+  [capabilities](/v6/reference/capabilities), this is **outcome verification**: the rigor of a test
+  suite with no fixed protocol the agent has to follow.
+
+## Approaches
+
+Three approaches cover grading, in increasing power. Each produces the `float` or
+[`EvaluationResult`](#subscore-and-evaluationresult) yielded as the task's second yield.
+
+| Approach | When to reach for it | Example |
+|----------|----------------------|---------|
+| **Plain Python** | A reward you compute from the answer, optionally via a comparison helper | `yield numeric_match(answer, 3)` |
+| **Async grader** | Score a command's exit code or an LLM's judgment of the answer | `yield (await BashGrader.grade(weight=1.0, command="pytest -q")).value` |
+| **Composed** | Weight several graders into one reward, each subscore kept in the trace | `yield await combine(BashGrader.grade(...), LLMJudgeGrader.grade(...))` |
+
 ## Comparison helpers
 
 Each returns a `float` (`0.0`-`1.0`) you can yield directly or wrap in a `SubScore`.
@@ -72,7 +93,8 @@ result = await LLMJudgeGrader.grade(
 )
 ```
 
-`criteria` items are strings, or `(requirement, weight)` tuples.
+`criteria` items are strings, or `(requirement, weight)` tuples. A negative weight marks an error to
+avoid: the criterion scores as a penalty, MET when the answer actually makes the mistake.
 
 ## `combine` - compose multiple graders
 
@@ -129,9 +151,5 @@ An `EvaluationResult` is the combined grade payload you can yield from a task:
 
 `EvaluationResult.from_float(value)` wraps a bare reward.
 
-## See also
-
-<CardGroup cols={2}>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/core/tasks" />
-<Card title="Designing tasks" icon="signal" href="/v6/core/advice" />
-</CardGroup>
+Graders run as the second yield of a [task](/v6/reference/tasks); for choosing a reward that separates
+good work from bad, see [designing tasks](/v6/reference/advice).

@@ -9,11 +9,11 @@ tag: "Beta"
 The `robot` capability is in **beta** - see the [Robots reference](/v6/advanced/robots).
 </Note>
 
-This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation benchmark) packaged as a Docker image: three episodes, each in a fresh container, graded by the sim's own success check. The policy runs in *your* process on your GPU; the container is CPU-only and publishes exactly one port.
+This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation benchmark) packaged as a Docker image: three episodes, each in a fresh container, graded by the sim's own success check. The split of work is the thing to notice - the policy runs in *your* process on your GPU, while the container is CPU-only and publishes exactly one port.
 
 ## The environment
 
-The env module is declare-only - a sim **bridge**, an **endpoint**, and two-yield templates (this is `demos/inventory/envs/libero/env.py`, abbreviated):
+The env module only declares; it runs no policy of its own. It wires three things together: a **bridge** that drives the simulator, a **`RobotEndpoint`** that exposes the bridge as a capability, and two-yield task templates. This is `demos/inventory/envs/libero/env.py`, abbreviated:
 
 ```python env.py
 from hud import Environment
@@ -100,7 +100,11 @@ asyncio.run(main())
 python run_libero.py
 ```
 
-`DockerRuntime` is the placement: each rollout `docker run`s a fresh container, publishes the control port, connects, and removes the container afterward. The agent reads the env's **contract** from the manifest at connect time and wires cameras/state/actions itself - there is no shared config between this script and the image. The robot WebSocket binds container-loopback and rides the control port via capability tunneling.
+Here `DockerRuntime` sets the placement, and each rollout is self-contained:
+
+- **The container** is created fresh with `docker run`, publishes its control port, is connected to, and is removed when the episode ends.
+- **The agent** reads the env's **contract** from the manifest at connect time and wires cameras, state, and actions itself - there is no shared config between this script and the image.
+- **The robot WebSocket** binds to container-loopback and rides that single control port through capability tunneling.
 
 For heavy sims (or sweeps), skip the per-episode boot with one long-lived container:
 
@@ -123,5 +127,5 @@ With `HUD_API_KEY` set, every episode streams to the platform automatically: the
 <Card title="Robots reference" icon="robot" href="/v6/advanced/robots">
   Contracts, bridges, sim threading, and the harness API.
 </Card>
-<Card title="Package & deploy" icon="rocket" href="/v6/core/runtime" />
+<Card title="Package & deploy" icon="rocket" href="/v6/reference/runtime" />
 </CardGroup>
