@@ -35,8 +35,10 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     "*.pyc",
     ".cache/",
     ".npm/",
-    ".git/objects/",
-    ".git/logs/",
+    ".git",
+    ".hg",
+    ".svn",
+    ".jj",
     # The Workspace's own SSH credential dir, materialized under root at serve time.
     ".hud/",
     "*.so",
@@ -49,6 +51,8 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
 SECRET_DENY_PATTERNS: tuple[str, ...] = (
     ".env",
     ".env.*",
+    ".gitconfig",
+    ".gitmodules",
     "*.pem",
     "id_*",
     "*_key",

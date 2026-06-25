@@ -10,10 +10,13 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from hud.capabilities import Capability
 from hud.eval import file_tracking as observer
 
 if TYPE_CHECKING:
     import pytest
+
+_CAP = Capability(name="filetracking", protocol="filetracking/1", url="tcp://127.0.0.1:1")
 
 
 class _FakeFt:
@@ -22,6 +25,7 @@ class _FakeFt:
         self.advance_calls = 0
         self.snapshot_calls = 0
         self.diff_calls = 0
+        self.close_calls = 0
 
     async def advance(self) -> dict[str, Any]:
         self.advance_calls += 1
@@ -37,26 +41,13 @@ class _FakeFt:
         self.diff_calls += 1
         return {"files_changed": 1, "patches": [{"path": "a.txt"}]}
 
+    async def close(self) -> None:
+        self.close_calls += 1
 
-class _FakeClient:
-    def __init__(self, ft: _FakeFt) -> None:
-        self._ft = ft
 
+class _BoundClient:
     def binding(self, name: str) -> object:
-        return object()
-
-    async def open(self, name: str) -> _FakeFt:
-        return self._ft
-
-
-class _OpenFailsClient:
-    """A bound capability whose open() fails (e.g. a refused tunnel)."""
-
-    def binding(self, name: str) -> object:
-        return object()
-
-    async def open(self, name: str) -> object:
-        raise ConnectionError("tunnel refused")
+        return _CAP
 
 
 def _record_emitters(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Any], list[Any]]:
@@ -76,6 +67,16 @@ def _record_emitters(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Any], list[A
     return diffs, snapshots
 
 
+def _connects_to(monkeypatch: pytest.MonkeyPatch, ft: _FakeFt) -> None:
+    class _FakeFileTrackingClient:
+        @classmethod
+        async def connect(cls, cap: Capability) -> _FakeFt:
+            assert cap == _CAP
+            return ft
+
+    monkeypatch.setattr(observer, "FileTrackingClient", _FakeFileTrackingClient)
+
+
 async def test_setup_failure_skips_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     from hud.settings import settings
 
@@ -83,14 +84,16 @@ async def test_setup_failure_skips_polling(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(settings, "file_tracking_interval", 0.01)
     diffs, snapshots = _record_emitters(monkeypatch)
     ft = _FakeFt(advance_raises=True)
+    _connects_to(monkeypatch, ft)
 
-    async with observer.file_tracking_observer(_FakeClient(ft)):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
         await asyncio.sleep(0.05)
 
     assert ft.advance_calls == 1
     # advance() raised, so the anchor snapshot and all diff polling are skipped.
     assert ft.snapshot_calls == 0
     assert ft.diff_calls == 0
+    assert ft.close_calls == 1
     assert diffs == []
     assert snapshots == []
 
@@ -102,25 +105,35 @@ async def test_successful_setup_anchors_and_polls(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings, "file_tracking_interval", 0.01)
     diffs, snapshots = _record_emitters(monkeypatch)
     ft = _FakeFt()
+    _connects_to(monkeypatch, ft)
 
-    async with observer.file_tracking_observer(_FakeClient(ft)):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
         await asyncio.sleep(0.05)
 
     assert ft.advance_calls == 1
     assert len(snapshots) == 1  # manifest anchor emitted once
     assert ft.diff_calls >= 1
+    assert ft.close_calls == 1
     assert diffs  # at least one diff streamed
 
 
-async def test_open_failure_does_not_break_the_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connect_failure_does_not_break_the_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     from hud.settings import settings
 
     monkeypatch.setattr(settings, "telemetry_enabled", True)
     diffs, snapshots = _record_emitters(monkeypatch)
 
-    # A failed open must degrade to a no-op, not raise into the agent loop.
+    class _FailingFileTrackingClient:
+        @classmethod
+        async def connect(cls, cap: Capability) -> object:
+            assert cap == _CAP
+            raise ConnectionError("tunnel refused")
+
+    monkeypatch.setattr(observer, "FileTrackingClient", _FailingFileTrackingClient)
+
+    # A failed connection must degrade to a no-op, not raise into the agent loop.
     ran = False
-    async with observer.file_tracking_observer(_OpenFailsClient()):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
         ran = True
 
     assert ran

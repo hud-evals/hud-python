@@ -1,15 +1,33 @@
-"""filetracking/1 wire roundtrip: serve a FileTracker, drive it via the client."""
+"""filetracking/1 wire roundtrip: serve a FileTracker, drive the wire directly."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+from typing import TYPE_CHECKING, Any
 
-from hud.capabilities import Capability, FileTrackingClient
 from hud.environment.file_tracker import FileTracker
 from hud.environment.file_tracking import serve_file_tracking
+from hud.environment.utils import read_frame, send_frame
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+async def _call(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    method: str,
+) -> dict[str, Any]:
+    await send_frame(
+        writer,
+        {"jsonrpc": "2.0", "id": 1, "method": method, "params": {}},
+    )
+    reply = await read_frame(reader)
+    assert reply is not None
+    assert "error" not in reply
+    result = reply.get("result")
+    assert isinstance(result, dict)
+    return result
 
 
 async def test_diff_snapshot_advance_roundtrip(tmp_path: Path) -> None:
@@ -19,29 +37,30 @@ async def test_diff_snapshot_advance_roundtrip(tmp_path: Path) -> None:
 
     server = await serve_file_tracking(tracker)
     host, port = server.sockets[0].getsockname()[:2]
-    client = await FileTrackingClient.connect(Capability.filetracking(url=f"tcp://{host}:{port}"))
+    reader, writer = await asyncio.open_connection(host, port)
     try:
         # Nothing changed yet.
-        assert (await client.diff())["files_changed"] == 0
+        assert (await _call(reader, writer, "diff"))["files_changed"] == 0
 
         # An edit shows up as a diff on the next pull.
         (tmp_path / "a.txt").write_text("x\ny\n")
-        diff = await client.diff()
+        diff = await _call(reader, writer, "diff")
         assert diff["files_changed"] == 1
         assert diff["patches"][0]["path"] == "a.txt"
 
         # diff() advanced the baseline, so a re-pull is empty.
-        assert (await client.diff())["files_changed"] == 0
+        assert (await _call(reader, writer, "diff"))["files_changed"] == 0
 
         # snapshot() returns the full manifest.
-        snapshot = await client.snapshot()
+        snapshot = await _call(reader, writer, "snapshot")
         assert any(entry["path"] == "a.txt" for entry in snapshot["files"])
 
         # advance() re-baselines without erroring.
         (tmp_path / "b.txt").write_text("z\n")
-        await client.advance()
-        assert (await client.diff())["files_changed"] == 0
+        await _call(reader, writer, "advance")
+        assert (await _call(reader, writer, "diff"))["files_changed"] == 0
     finally:
-        await client.close()
+        writer.close()
+        await writer.wait_closed()
         server.close()
         await server.wait_closed()

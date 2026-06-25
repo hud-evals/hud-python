@@ -8,6 +8,12 @@ and ``env.stop()`` runs the matching shutdown hooks.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
+import signal
+import subprocess
+import sys
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -20,6 +26,8 @@ from .conftest import served
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from hud.capabilities.ssh import SSHClient
+
 
 def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
     env = Environment("pure")
@@ -29,7 +37,12 @@ def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "root").exists()
 
 
-async def test_serving_publishes_the_workspace_capability(tmp_path: Path) -> None:
+async def test_serving_publishes_the_workspace_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "file_tracking_enabled", True)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
@@ -38,8 +51,24 @@ async def test_serving_publishes_the_workspace_capability(tmp_path: Path) -> Non
         assert cap.protocol == "ssh/2"
         assert cap.url.startswith("ssh://")
         assert cap.params["host_pubkey"].startswith("ssh-ed25519")
+        assert client.binding("filetracking").protocol == "filetracking/1"
         ssh_dir = tmp_path / "root" / ".hud" / "ssh"
         assert any(ssh_dir.rglob("host_ed25519"))
+
+
+async def test_workspace_file_tracking_can_be_opted_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "file_tracking_enabled", True)
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+
+    async with served(env) as client:
+        assert client.binding("shell").protocol == "ssh/2"
+        with pytest.raises(KeyError):
+            client.binding("filetracking")
 
 
 async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
@@ -56,6 +85,62 @@ async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
             first = client.binding("shell").params["host_pubkey"]
         async with connect(runtime) as client:
             assert client.binding("shell").params["host_pubkey"] == first
+
+
+def _pid_status(pid: int) -> str | None:
+    result = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.stdout.strip() or None
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    status = _pid_status(pid)
+    if status is None:
+        return False
+    return not status.startswith("Z")
+
+
+async def _wait_for_pid_inactive(pid: int, max_wait: float = 2.0) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max_wait
+    while loop.time() < deadline:
+        if not _pid_is_running(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return not _pid_is_running(pid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_workspace_command_teardown_kills_background_children(tmp_path: Path) -> None:
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+    pid_file = tmp_path / "root" / "child.pid"
+    pid: int | None = None
+
+    try:
+        async with served(env) as client:
+            ssh = cast("SSHClient", await client.open("shell"))
+            await ssh.conn.run(
+                "sleep 120 >/dev/null 2>&1 < /dev/null & echo $! > child.pid",
+                check=True,
+            )
+            pid = int(pid_file.read_text())
+            assert await _wait_for_pid_inactive(pid)
+    finally:
+        if pid is not None and _pid_is_running(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
 
 
 async def test_stop_tears_down_the_workspace(tmp_path: Path) -> None:
@@ -76,15 +161,18 @@ async def test_stop_tears_down_the_workspace(tmp_path: Path) -> None:
 
 
 async def test_restarting_replaces_the_published_address_without_duplicates(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "file_tracking_enabled", True)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
     async with served(env):
         pass
     async with served(env):
-        assert [c.name for c in env.capabilities] == ["shell"]
+        assert [c.name for c in env.capabilities] == ["shell", "filetracking"]
 
 
 async def test_any_initialize_hook_can_publish_a_capability() -> None:

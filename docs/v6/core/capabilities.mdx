@@ -13,7 +13,6 @@ A **capability** is a connection the environment exposes; a harness attaches its
 | `cdp`  | `cdp/1.3` | Browser control over the Chrome DevTools Protocol | Chromium (`playwright`) |
 | `rfb`  | `rfb/3.8` | Full computer-use over VNC: screen + keyboard/mouse | `Xvfb` + `x11vnc` |
 | `robot` | `openpi/0` | Schema-driven robot observation/action loop over WebSocket *(beta)* | robot bridge |
-| `filetracking` | `filetracking/1` | Workspace file changes (diffs + snapshots), for telemetry | `Workspace` (`track_files=True`) |
 
 ```python
 from hud.capabilities import Capability
@@ -233,18 +232,17 @@ async def _up():
 
 See [Robots](/v6/advanced/robots) for the bridge, the endpoint, the harness, and the contract spec.
 
-### `filetracking` - workspace file changes
+### Workspace file tracking
 
-`filetracking` is observation-only: it reports what changed in a [`Workspace`](#workspace) over a run,
-so HUD can show file diffs in the trace. It's not a tool an agent calls - the rollout opens it for
-telemetry. A `Workspace` serves it when you opt in:
+Workspace file tracking records what changed in a [`Workspace`](#workspace) over a run, so HUD can
+show file diffs in the trace. It runs with the workspace lifecycle and is not a tool the agent calls.
+`env.workspace(...)` enables it by default with conservative tracking limits and secret redaction; set
+`HUD_FILE_TRACKING_ENABLED=false` or pass `track_files=False` to opt out:
 
 ```python env.py
-env.workspace("workspace", track_files=True)   # also publishes the filetracking/1 capability
+env.workspace("workspace")                     # ssh plus file tracking
+env.workspace("workspace", track_files=False)  # ssh only
 ```
-
-The client is `FileTrackingClient` (`hud.capabilities`): `diff()` returns the changes since the last
-call, `snapshot()` the full file manifest, and `advance()` re-baselines without producing a diff.
 
 ## Harness clients
 
@@ -257,15 +255,20 @@ Spinning up a capability is the environment side. The harness side is the mirror
 | `CDPClient` | `cdp/1.3` |
 | `RFBClient` | `rfb/3.8` |
 | `RobotClient` | `openpi/0` - joins the registry on first open (the `robot` extra: numpy/openpi-client) |
-| `FileTrackingClient` | `filetracking/1` - observation-only; opened for telemetry, not as a tool |
 
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/core/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 
 ## Workspace
 
-A `Workspace` is not a capability - it's the built-in daemon that *serves* the `ssh` capability. It's the one capability HUD ships an implementation for; for `mcp`, `cdp`, and `rfb` you stand up the daemon yourself (above), but for a shell you just attach a workspace.
+A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for
+agent access and, when enabled, `filetracking` for rollout telemetry. For `mcp`, `cdp`, and `rfb` you
+stand up the daemon yourself (above), but for a shell you just attach a workspace.
 
-Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). `env.workspace(root, ...)` wires its whole lifecycle: the environment brings it up (keys, socket, accept loop) when it serves and tears it down on `env.stop()`. Extra kwargs configure the sandbox - mounts, network, env vars, guest path, fixed ports, your own keys:
+Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP).
+`env.workspace(root, ...)` wires its whole lifecycle: the environment brings it up (keys, socket,
+accept loop, and file tracking by default) when it serves and tears it down on `env.stop()`.
+Extra kwargs configure the sandbox - mounts, network, env vars, guest path, fixed ports, your own
+keys:
 
 ```python
 from hud.environment import Environment, Mount

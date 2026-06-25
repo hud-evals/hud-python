@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import urlsplit
 
 from hud.telemetry.filetracking import emit_file_diff, emit_file_snapshot
 from hud.utils.time import now_iso
@@ -21,12 +23,72 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from hud.capabilities import FileTrackingClient
+    from hud.capabilities import Capability
     from hud.clients.client import HudClient
 
 logger = logging.getLogger("hud.eval.file_tracking")
 
 _DRAIN_TIMEOUT = 10.0
+
+
+class FileTrackingClient:
+    """Live ``filetracking/1`` connection: ``diff`` / ``snapshot`` / ``advance``."""
+
+    def __init__(
+        self,
+        capability: Capability,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        self.capability = capability
+        self._reader = reader
+        self._writer = writer
+        self._id = 0
+        self._lock = asyncio.Lock()
+
+    @classmethod
+    async def connect(cls, cap: Capability) -> Self:
+        parts = urlsplit(cap.url)
+        if parts.hostname is None or parts.port is None:
+            raise ValueError(f"filetracking capability missing host or port: {cap.url!r}")
+        reader, writer = await asyncio.open_connection(parts.hostname, parts.port)
+        return cls(cap, reader, writer)
+
+    async def diff(self) -> dict[str, Any]:
+        return await self._call("diff")
+
+    async def snapshot(self) -> dict[str, Any]:
+        return await self._call("snapshot")
+
+    async def advance(self) -> None:
+        await self._call("advance")
+
+    async def close(self) -> None:
+        self._writer.close()
+        with contextlib.suppress(OSError):
+            await self._writer.wait_closed()
+
+    async def _call(self, method: str) -> dict[str, Any]:
+        async with self._lock:
+            self._id += 1
+            msg_id = self._id
+            payload = json.dumps(
+                {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": {}},
+                separators=(",", ":"),
+            )
+            self._writer.write(payload.encode("utf-8") + b"\n")
+            await self._writer.drain()
+            line = await self._reader.readline()
+            if not line:
+                raise ConnectionError(f"filetracking: connection closed during {method!r}")
+            reply: dict[str, Any] = json.loads(line)
+            if "error" in reply:
+                err = reply["error"]
+                raise RuntimeError(f"filetracking {method!r} error: {err.get('message')}")
+            result = reply.get("result")
+            if not isinstance(result, dict):
+                raise RuntimeError(f"filetracking {method!r}: result was not an object")
+            return result
 
 
 @asynccontextmanager
@@ -37,9 +99,7 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
     binding. The binding's presence is the authoritative opt-in: it is published
     iff the workspace was served with ``track_files=True`` (which itself defaults
     to ``HUD_FILE_TRACKING_ENABLED``), so honoring it here means an explicit
-    ``track_files=True`` streams even when the global setting is off. The opened
-    client is owned by ``client`` and closed on its teardown, so this never
-    closes it directly.
+    ``track_files=True`` streams even when the global setting is off.
     """
     from hud.settings import settings
 
@@ -47,7 +107,7 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         yield
         return
     try:
-        client.binding("filetracking")
+        cap = client.binding("filetracking")
     except (KeyError, RuntimeError):
         yield
         return
@@ -58,11 +118,15 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
     # observation-only, so any setup failure — a refused tunnel, a failed
     # re-baseline (which would misattribute setup edits to the agent), or a
     # missing anchor — skips tracking rather than breaking the agent loop.
+    ft: FileTrackingClient | None = None
     try:
-        ft = cast("FileTrackingClient", await client.open("filetracking"))
+        ft = await FileTrackingClient.connect(cap)
         await ft.advance()
         emit_file_snapshot(await ft.snapshot(), started_at=now_iso())
     except Exception as exc:
+        if ft is not None:
+            with contextlib.suppress(Exception):
+                await ft.close()
         logger.warning("file tracking setup failed; not tracking this rollout: %s", exc)
         yield
         return
@@ -87,6 +151,8 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         # and swallows its own failures.
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(_emit_once(ft), _DRAIN_TIMEOUT)
+        with contextlib.suppress(Exception):
+            await ft.close()
 
 
 async def _poll(ft: FileTrackingClient, interval: float, stop: asyncio.Event) -> None:

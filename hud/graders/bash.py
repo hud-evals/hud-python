@@ -6,6 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
+from hud.utils.process import create_process_group_exec
+
 from .base import Grader
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ class BashGrader(Grader):
             "Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout_seconds
         )
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_process_group_exec(
                 "/bin/bash",
                 "-lc",
                 command,
@@ -42,15 +44,11 @@ class BashGrader(Grader):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_seconds
-            )
+            stdout_bytes, stderr_bytes = await proc.communicate(max_wait=timeout_seconds)
             stdout = stdout_bytes.decode(errors="replace")
             stderr = stderr_bytes.decode(errors="replace")
             returncode = proc.returncode if proc.returncode is not None else 1
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
             return (
                 0.0,
                 {

@@ -29,8 +29,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
-import signal
 import sys
 import uuid
 from collections import deque
@@ -46,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
 from hud.utils.platform import PlatformClient
+from hud.utils.process import ProcessGroup, create_process_group_exec
 
 from .run import Grade, Run, rollout
 
@@ -191,8 +190,9 @@ class LocalRuntime:
             raise FileNotFoundError(f"LocalRuntime: source not found: {self.source}")
         cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
         cmd += ["--env", self.env or task.env]
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_process_group_exec(
             *cmd,
+            term_timeout=10.0,
             stdout=asyncio.subprocess.PIPE,
             # Capture stderr (don't inherit it): under concurrent rollouts an
             # inherited fd interleaves every child's output unattributably, so a
@@ -200,8 +200,6 @@ class LocalRuntime:
             # bounded tail and attach it to the failure below.
             stderr=asyncio.subprocess.PIPE,
             cwd=self.source if self.source.is_dir() else self.source.parent,
-            # Start child in its own session for clean signal handling.
-            start_new_session=True,
         )
         assert proc.stderr is not None
         # Drain stderr into a bounded tail from the start: it never blocks on a
@@ -224,7 +222,7 @@ class LocalRuntime:
             capture.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await capture
-            await _terminate(proc)
+            await proc.terminate()
 
 
 class DockerRuntime:
@@ -650,7 +648,7 @@ async def _read_port(stdout: asyncio.StreamReader) -> int | None:
 
 
 async def _exit_detail(
-    proc: asyncio.subprocess.Process,
+    proc: ProcessGroup,
     source: Path,
     capture: asyncio.Task[None],
     stderr_tail: deque[str],
@@ -677,31 +675,6 @@ async def _drain(stream: asyncio.StreamReader) -> None:
     """Keep consuming the child's stdout so it never blocks on a full pipe."""
     while await stream.read(65536):
         pass
-
-
-async def _terminate(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is not None:
-        return
-    # No process groups on Windows: best-effort on the direct child only.
-    if not hasattr(os, "killpg"):
-        proc.terminate()
-        try:
-            await asyncio.wait_for(proc.wait(), 10.0)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-        return
-    # Child leads its own group (pgid == pid): SIGTERM it for a graceful
-    # env.stop(), give the leader 10s, then SIGKILL the group unconditionally so
-    # a straggler grandchild can't outlive a fast-exiting leader (empty group ->
-    # ProcessLookupError, suppressed).
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGTERM)
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(proc.wait(), 10.0)
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGKILL)
-    await proc.wait()
 
 
 #: Platform trace statuses that end a hosted rollout.

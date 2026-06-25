@@ -77,6 +77,28 @@ def test_gitignore_is_honored(tmp_path: Path) -> None:
     assert "ignored.txt" not in manifest_paths
 
 
+def test_vcs_metadata_dirs_are_excluded(tmp_path: Path) -> None:
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+    (git_dir / "config").write_text('[remote "origin"]\nurl = https://token@example.com/repo.git\n')
+    (tmp_path / "tracked.txt").write_text("x\n")
+
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    manifest_paths = {entry["path"] for entry in tracker.current_manifest()}
+    assert "tracked.txt" in manifest_paths
+    assert not any(path == ".git" or path.startswith(".git/") for path in manifest_paths)
+
+    (git_dir / "config").write_text(
+        '[remote "origin"]\nurl = https://new-token@example.com/repo.git\n'
+    )
+    diff = tracker.take_snapshot()
+
+    assert diff.files_changed == 0
+    assert diff.patches == []
+
+
 def test_secret_files_are_tracked_but_content_is_never_emitted(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("API_KEY=supersecretvalue\n")
     tracker = FileTracker(tmp_path)
@@ -93,6 +115,26 @@ def test_secret_files_are_tracked_but_content_is_never_emitted(tmp_path: Path) -
     assert "redacted" in patch.patch.lower()
     assert "supersecretvalue" not in patch.patch
     assert "hunter2" not in patch.patch
+
+
+def test_vcs_config_files_are_redacted(tmp_path: Path) -> None:
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "private"]\nurl = https://token@example.com/private.git\n'
+    )
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "private"]\nurl = https://new-token@example.com/private.git\n'
+    )
+    diff = tracker.take_snapshot()
+
+    assert diff.files_changed == 1
+    patch = diff.patches[0]
+    assert patch.rel_path == ".gitmodules"
+    assert "redacted" in patch.patch.lower()
+    assert "token@example.com" not in patch.patch
+    assert "new-token@example.com" not in patch.patch
 
 
 def test_per_file_diff_cap_emits_a_placeholder(
