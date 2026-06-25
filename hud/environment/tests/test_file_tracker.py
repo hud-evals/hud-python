@@ -160,8 +160,7 @@ def test_capture_changed_deliverables_since_advanced_baseline(tmp_path: Path) ->
     xlsx = files["deliverable.xlsx"]
     assert xlsx["status"] == "added"
     assert (
-        xlsx["content_type"]
-        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        xlsx["content_type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     assert len(xlsx["content_hash"]) == 64
     assert base64.b64decode(xlsx["file"]["data"]) == b"workbook bytes"
