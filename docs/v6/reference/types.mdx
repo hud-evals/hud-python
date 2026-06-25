@@ -7,7 +7,7 @@ icon: "code"
 The serializable shapes agents, tasks, and graders exchange.
 
 ```python
-from hud import Grade, Run, Trace
+from hud import Grade, Job, Run, Trace
 from hud.types import Step
 from hud.agents.types import AgentStep, Citation, SubagentStep, ToolStep
 from hud.environment import Answer
@@ -29,6 +29,7 @@ The live handle for one task - the lifecycle plus the agent's `Trace`. You get t
 | `run.evaluation` | `dict` | The raw grade payload (`grade.raw`). |
 | `run.runtime` | `str \| None` | Control-channel url the run executed against (the placement record). |
 | `run.trace_id` | `str \| None` | Keys the trajectory for training. |
+| `run.slug` | `str \| None` | The task slug this run came from, set by the runner; how [`Job.results`](#job) keys runs back to their task without positional zip. |
 | `run.job_id` / `run.group_id` | `str \| None` | Batch + GRPO group, set by the runner. |
 
 A rollout that fails before its session is live comes back as a synthesized failed run (no prompt, no
@@ -48,6 +49,31 @@ Structured result from grading one run, parsed from the wire grade frame
 | `info` | `dict` | Extra metadata. |
 | `is_error` | `bool` | Whether grading failed. |
 | `raw` | `dict` | The full original frame. |
+
+## `Job`
+
+The receipt for one execution: the graded [`Run`](#run)s of a batch under one platform job id. Every
+run reports under a job, so even a single `task.run` returns a job of one. You get one back from
+[`task.run` / `taskset.run`](/v6/reference/tasks#running).
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `id` | `str` | Platform job id. |
+| `name` | `str` | Display name. |
+| `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). |
+| `group` | `int` | Rollouts per task. |
+| `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
+| `reward` | `float` | Property: mean reward across runs (`0.0` for an empty job). |
+| `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
+
+```python
+job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
+print(job.reward)   # mean across every run
+```
+
+Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
+multi-turn chat - open one with `Job.start(name, *, group=1, taskset_id=None)` and pass it as `job=`;
+the [training agents](/v6/guides/training-agents) guide uses this session pattern.
 
 ## `Trace`
 
@@ -112,9 +138,5 @@ agent submits them as part of the answer.
 Declare `input=` / `returns=` on `@env.template` to surface JSON schemas in the manifest and parse the
 agent's answer into a typed `Answer[T]`. Any Pydantic model or standard type works.
 
-## See also
-
-<CardGroup cols={2}>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
-<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
-</CardGroup>
+These shapes flow through a [task](/v6/reference/tasks) run; the scores they carry come from the
+[graders](/v6/reference/graders).

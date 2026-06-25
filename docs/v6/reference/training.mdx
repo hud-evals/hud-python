@@ -1,122 +1,42 @@
 ---
 title: "Training"
-description: "Turn the rewards you already collect into an improving model: the loop, the TrainingClient API, losses, and the hud models CLI."
+description: "The TrainingClient API, training paths, losses, results, and the hud models CLI."
 icon: "dumbbell"
+mode: "wide"
 ---
 
-The key idea: **the rewards you collect are already training data.** Every rollout produced a
-trajectory (what the agent did) and a [reward](/v6/reference/tasks) (how well it did). Training nudges the
-model's weights so the behavior that earned *high* reward becomes more likely next time. You feed that
-signal into **HUD's managed trainer** (the simple path, no ML infra) or into **your own** RL loop.
+Training advances a model's weights from the rewards a rollout already produces. A
+[`TrainingClient`](#trainingclient) drives the managed path against one model slug; lower-level methods
+expose the gradient-accumulation and custom-loss steps underneath it. For the end-to-end loop (forking a
+model, rolling out a taskset in groups, feeding rewards back) see [training agents](/v6/guides/training-agents).
 
-## Training is a loop
+## Training paths
 
-All of training is one loop repeated:
+Each path accumulates gradients differently, then applies them with the same `optim_step`. All operate on
+a [`TrainingClient`](#trainingclient) except the last.
 
-1. **Roll out** a batch of tasks with the current model.
-2. **Score** each rollout - that's the reward you already get for free.
-3. **Nudge** the model's weights toward the rollouts that scored better.
-4. **Repeat** - the next batch samples the now-slightly-better model.
+| Path | How gradients accumulate | Promote weights |
+| --- | --- | --- |
+| Managed one-shot | `step(trajectories, learning_rate=...)` | folded into `step` |
+| Split accumulate then update | `forward_backward(...)` once or repeated (or `num_substeps>1`) | `optim_step(...)` |
+| Client-side custom loss | `forward_backward_custom(trajectories, loss_fn)` | `optim_step(...)` |
+| Low-level | `forward(...)` then your loss then `backward(forward_id, weights)` | `optim_step(...)` |
+| Supervised (SFT) | any path with `loss_fn="cross_entropy"` (`BuiltinLoss.CROSS_ENTROPY`) | as above |
+| External RL stack | export each [`Run`](/v6/reference/types#run)'s `reward` and `trace_id`; no `TrainingClient` | owned by your stack |
 
-```mermaid
-flowchart LR
-    A([roll out tasks]) --> B([collect rewards]) --> C([nudge weights]) --> A
-```
+Gradients accumulate across `forward_backward` / `forward_backward_custom` / `backward` calls until an
+`optim_step` (or `step`, which calls both) applies them, checkpoints, and promotes the new weights.
 
-Each pass makes the model a little better at the tasks you're training on. Everything below is how you
-set that loop up.
+## Objects
 
-## What you need first
-
-- **A task with spread in its rewards.** This is the one prerequisite people miss. If every rollout of
-  a task gets the *same* reward, training learns nothing from it (see [Why grouping
-  matters](#why-grouping-matters)). Designing tasks that produce spread is its own craft - see
-  [Designing tasks](/v6/reference/advice).
-- **A trainable model**, which you make by forking one (next).
-
-## Get a trainable model
-
-Only some gateway models can be trained. List what's available and fork one into your own private,
-team-owned model whose weights you're allowed to advance:
-
-```bash
-hud models list                              # the Trainable column marks forkable bases
-hud models fork Qwen/Qwen3.5-4B --name arith-rl
-```
-
-The new slug (`arith-rl`) is both what you **sample** (like any other model) and what you **train**.
-The fork starts from the base's current weights, so you continue from where it left off.
-
-## Run the loop
-
-This is the whole thing. Each step: roll out a batch with the current model, hand those graded rollouts
-to the trainer, and it nudges the weights. The next step then samples the improved model.
-
-```python train.py
-from hud import TrainingClient
-from hud.agents import create_agent
-from hud.eval import Job
-
-# return_token_ids tells the gateway to send back the token ids + logprobs training needs
-agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
-trainer = TrainingClient("arith-rl")
-taskset, runtime = ...   # your taskset + where rollouts run (see Tasks / Run & deploy)
-
-session = await Job.start("arith-rl", group=8)   # 8 rollouts per task
-for _ in range(10):
-    start = len(session.runs)
-    await taskset.run(agent, runtime=runtime, job=session)   # roll out a batch
-    batch = session.runs[start:]
-    await trainer.step(batch, learning_rate=1e-5, group_size=8)   # nudge the weights
-```
-
-The one line that learns is `trainer.step(...)`. It computes how each rollout should shift the weights,
-applies that shift, then checkpoints and **promotes** the new weights so the gateway serves them
-immediately. That's why the *next* `taskset.run` samples an improved model - the loop closes itself.
-
-The trainer's input is the rewards you already have: a [`Job`](/v6/reference/tasks#jobs) holds the graded
-[`Run`](/v6/reference/types#run)s from each batch, and you pass those runs (or a slice) straight to
-`trainer.step`. Each `Run` carries its reward and either inline token samples or a `trace_id`, which is
-all the trainer needs (see [Inputs](#inputs)).
-
-## Why grouping matters
-
-The one concept worth really understanding. HUD trains with **GRPO**, which scores each rollout
-*relative to its group*: an advantage of `reward - group_mean`. So a rollout is "good" only by
-comparison to its siblings on the same task.
-
-The consequence: if every rollout in a group earns the **same** reward, every advantage is zero and
-**no learning happens** - no matter how high the average looks. That's why you run each task as a group
-(`group=8` above) and why your tasks must produce a **spread** of rewards. Trainability is a property of
-your tasks, not just your loop - the whole point of [Designing tasks](/v6/reference/advice).
-
-## Watch it improve
-
-Each step adds a node to the model's **checkpoint tree** and promotes it to the **head** - the weights
-the gateway now serves. A node carries everything you need to watch a run: `mean_reward`, `loss_fn`,
-token/datum counts, and a `metrics` blob (reward spread, sampling logprob, provider training stats like
-PPO KL and clip fraction). Read it from the shell or from the loop:
-
-```bash
-hud models checkpoints arith-rl          # the checkpoint tree (active head marked)
-hud models head arith-rl --set <id>      # roll back or branch from an earlier point
-```
-
-```python
-for c in await trainer.checkpoints():    # same data, in the training loop
-    print(c.name, c.mean_reward, c.metrics.get("reward_std"))
-```
-
-Setting the head points the gateway at a different checkpoint and the next `optim_step` extends the tree
-from there - so a checkpoint is also a **rollback point**.
-
-<Warning>
-Roll back when the objective changes. If you edit the reward function or the environment partway through
-a run, the current head encodes the *old* objective - continuing from it fine-tunes a contaminated
-policy, and the early steps after the change mostly undo the old shaping. Roll the head back to a
-checkpoint from before the change (`set_head` / `--set`), or fork a fresh model, so the run measures the
-new objective from a clean start.
-</Warning>
+| Object | Role |
+| --- | --- |
+| Forked model slug | The gateway string you both sample and train; weights advance behind it in place. |
+| [`create_agent`](/v6/reference/agents#create-agent) `completion_kwargs` | Marks rollouts for token capture (`extra_body={"return_token_ids": True}`); OpenAIChatConfig-only (see [Token capture](#token-capture)). |
+| [`Job`](/v6/reference/types#job) / `group` | The receipt collecting a batch's graded [`Run`](/v6/reference/types#run)s; `group` sets rollouts per task, the GRPO group. |
+| [`Run`](/v6/reference/types#run) | One graded rollout; carries its `reward` and either inline token samples or a `trace_id`. |
+| `TrainingClient` | Drives managed training for one model slug. |
+| `CheckpointResponse` | One node in the model's checkpoint tree. |
 
 ## TrainingClient
 
@@ -141,7 +61,7 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 |--------|---------|---------|
 | `forward_backward(trajectories, *, loss_fn, loss_fn_config=None, group_size=None, reward_scale=1.0, num_substeps=1)` | `ForwardBackwardResult` | Accumulate gradients with a built-in `loss_fn`. |
 | `optim_step(*, learning_rate, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.0)` | `OptimStepResult` | Apply gradients, checkpoint, and promote the new weights. |
-| `step(trajectories, *, learning_rate, ...)` | `OptimStepResult` | One `forward_backward` then one `optim_step`. |
+| `step(trajectories, *, learning_rate, loss_fn="importance_sampling", loss_fn_config=None, group_size=None, reward_scale=1.0, num_substeps=1, weight_decay=0.0)` | `OptimStepResult` | One `forward_backward` then one `optim_step`. |
 | `forward_backward_custom(trajectories, loss_fn, *, group_size=None, reward_scale=1.0)` | `ForwardBackwardResult` | Accumulate gradients with a client-side loss (see [Custom losses](#custom-losses)). |
 | `forward(trajectories, *, group_size=None, reward_scale=1.0)` | `ForwardResult` | Current-policy forward pass returning per-token tensors. |
 | `backward(forward_id, weights, *, metrics=None)` | `ForwardBackwardResult` | Apply caller-computed per-token gradients to a forward pass. |
@@ -150,9 +70,11 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 | `head()` | `CheckpointResponse \| None` | The active checkpoint (the weights the gateway serves), or `None` for base weights. |
 | `set_head(checkpoint_id)` | `None` | Promote a checkpoint to head - roll back to, or branch from, it. |
 
-Advantages are normalized within contiguous **groups** of `group_size` (GRPO); `None` treats the whole
-batch as one group. The batch must divide evenly into groups - `forward_backward` rejects a partial
-final group before spending a forward pass. `num_substeps` splits the batch for gradient accumulation.
+Advantages are group-relative (GRPO-style) when `group_size` is set, normalized within contiguous
+**groups** of that size; `None` treats the whole batch as one group. The `loss_fn` selects the
+policy-gradient objective applied on top, defaulting to `importance_sampling` (not GRPO itself). The
+batch must divide evenly into groups - `forward_backward` rejects a partial final group before spending
+a forward pass. `num_substeps` splits the batch for gradient accumulation.
 
 ## Inputs
 
@@ -169,11 +91,28 @@ e.g. an opponent move sampled inside the environment during self-play, trained w
 
 | Type | Fields |
 |------|--------|
-| `TrajectorySample` | `prompt_token_ids`, `output_token_ids`, `output_logprobs` |
+| `TrajectorySample` | `prompt_token_ids`, `prompt_chunks`, `output_token_ids`, `output_logprobs` |
 | `TrajectoryPayload` | `samples: list[TrajectorySample]`, `reward`, `trace_id=None` |
 
-To get the token data for a hand-built payload, ask the gateway for it on the completion call: pass
-`extra_body={"return_token_ids": True}` with `logprobs=True`, then read the ids off the choice.
+A sample's prompt is `prompt_token_ids` for a flat text prompt, or `prompt_chunks` (serialized text +
+image chunks) for a multimodal one, where `prompt_token_ids` is empty. `output_logprobs` are per output
+token under the sampling policy.
+
+### Token capture
+
+The token ids and logprobs a sample needs come from the gateway. `completion_kwargs` carries the flag,
+and it lives only on `OpenAIChatConfig`, so token capture runs through `OpenAIChatAgent` (the agent
+[`create_agent`](/v6/reference/agents#create-agent) selects for gateway models routed over Chat
+Completions). Setting `extra_body={"return_token_ids": True}` is enough: that agent sets `logprobs=True`
+automatically and writes a `Sample` onto each turn, which a `Run` converts to a `TrajectoryPayload` for
+training.
+
+```python
+agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
+```
+
+Calling the gateway directly with your own OpenAI client (for a hand-built payload) takes both flags,
+since nothing sets `logprobs` for you:
 
 ```python
 resp = await client.chat.completions.create(
@@ -222,8 +161,12 @@ def my_loss(data: list[DatumTensors], logprobs: list[torch.Tensor]):
         loss = loss - (ratio * datum.reward * torch.tensor(datum.mask)).sum()
     return loss, {"trained": float(len(data))}
 
-await trainer.forward_backward_custom(batch, my_loss, group_size=8)
+await trainer.forward_backward_custom(batch, my_loss, group_size=8)   # accumulate gradients
+await trainer.optim_step(learning_rate=1e-5)                          # apply, checkpoint, promote
 ```
+
+Gradients accumulate on the model session until `optim_step` applies them, so a custom-loss step is not
+complete until that call promotes the new weights.
 
 `logprobs[i]` are the current policy for datum `i` as differentiable leaves. Everything else is constant
 on the matching `DatumTensors`:
@@ -244,7 +187,7 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 |------|--------|
 | `ForwardBackwardResult` | `metrics: dict[str, float]`, `num_datums` |
 | `OptimStepResult` | `step`, `checkpoint_id`, `sampler_path`, `state_path`, `model` |
-| `CheckpointResponse` | `id`, `name`, `is_active`, `prev_model_checkpoint_id`, `mean_reward`, `loss_fn`, `num_datums`, `num_tokens`, `metrics`, `created_at` |
+| `CheckpointResponse` | `id`, `name`, `checkpoint_name`, `is_active`, `prev_model_checkpoint_id`, `mean_reward`, `learning_rate`, `loss_fn`, `num_traces`, `num_datums`, `num_tokens`, `metrics`, `created_at` |
 
 ## `hud models` CLI
 
@@ -255,19 +198,6 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 | `hud models checkpoints <model>` | List the checkpoint tree (active head marked). |
 | `hud models head <model> [--set <checkpoint-id>]` | Show, or set (rollback/select), the active checkpoint. |
 
-## See also
-
-<CardGroup cols={2}>
-<Card title="Designing tasks" icon="lightbulb" href="/v6/reference/advice">
-  Design tasks that produce reward spread - the prerequisite for training to work.
-</Card>
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks">
-  Where the rewards training learns from come from.
-</Card>
-<Card title="Run & deploy" icon="rocket" href="/v6/reference/runtime">
-  Scale the rollouts that feed the loop.
-</Card>
-<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types">
-  The Run a rollout produces and the trace it carries.
-</Card>
-</CardGroup>
+For the end-to-end loop see [training agents](/v6/guides/training-agents); for the
+[`Job`](/v6/reference/types#job) and [`Run`](/v6/reference/types#run) the trainer consumes see
+[types](/v6/reference/types), and for where rollouts run see [runtimes](/v6/reference/runtime).

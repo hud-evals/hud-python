@@ -31,15 +31,15 @@ from hud.agents import create_agent
 agent = create_agent("claude-sonnet-4-5")   # routed through the gateway
 ```
 
-The HUD gateway is an OpenAI-compatible endpoint (`inference.hud.ai`) that fronts every provider behind
-your single `HUD_API_KEY`, so you switch between Claude, GPT, Gemini, or Grok <u>by name alone</u>, with
-unified tracing. `create_agent` accepts any id the gateway knows (`claude-...`, `gpt-...`, `gemini-...`,
-`grok-...`); extra kwargs pass through to the agent's config.
+The HUD gateway is an OpenAI-compatible endpoint (`settings.hud_gateway_url`, default
+`https://inference.beta.hud.ai`) that fronts every provider behind your single `HUD_API_KEY`, so you
+switch between Claude, GPT, and Gemini by name alone, with unified tracing. `create_agent` accepts any id
+the gateway knows (`claude-...`, `gpt-...`, `gemini-...`); extra kwargs pass through to the agent's
+config.
 
-The reason this is one line: built-in agents are **catalog-driven**. Each run they read the
-environment's manifest, open the capabilities they support, build the matching provider tools, and loop
-against `run.prompt_messages`. <u>Declaring a capability on the environment is enough; you never wire
-tools.</u>
+Built-in agents are **catalog-driven**: each run they read the environment's manifest, open the
+capabilities they support, build the matching provider tools, and loop against `run.prompt_messages`.
+Declaring a capability on the environment is enough; you never wire tools.
 
 ### Provider agents
 
@@ -66,45 +66,55 @@ points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeSDK
 CLI over an `ssh` capability, against the env's filesystem. Every knob (`model`, `max_steps`,
 `system_prompt`, `citations_enabled`) lives on the config; `__call__(run)` takes only the run.
 
+## create_agent {#create-agent}
+
+```python
+create_agent(model: str, **kwargs) -> GatewayAgent
+```
+
+The `create_agent` function resolves `model` to a gateway agent type and returns that provider agent
+wired to the gateway. Extra `kwargs` forward to the matched provider config (the `*Config` for the
+resolved type), with `model` and a gateway `model_client` filled in. Passing `completion_kwargs` only
+works when `model` resolves to `OpenAIChatAgent`, since `completion_kwargs` lives only on
+`OpenAIChatConfig`.
+
+A model id maps to one of four gateway agent types (`AgentType`), each a provider agent:
+
+| `AgentType` | Agent class |
+|-------------|-------------|
+| `claude` | `ClaudeAgent` |
+| `openai` | `OpenAIAgent` |
+| `gemini` | `GeminiAgent` |
+| `openai_compatible` | `OpenAIChatAgent` |
+
+For a provider key instead of the gateway, or for `ClaudeSDKAgent` (not a gateway type), construct the
+provider agent directly.
+
+## Agent
+
+Every agent implements the `Agent` base class (`hud.agents.base`): one abstract method,
+`__call__(run: Run) -> None`. An agent drives the live [`Run`](/v6/reference/types#run) to completion,
+filling `run.trace` in place; the graded answer is `run.trace.content`. An agent is stateless per run -
+everything comes from `run` - so one instance drives many concurrent rollouts.
+
 ## Running an agent
 
-Run a task with an agent two ways.
-
-**Programmatically** - pass the agent to `task.run` / `taskset.run` with a [runtime](/v6/reference/runtime):
+Run a task with an agent two ways. **Programmatically**, pass the agent to `Task.run` or `Taskset.run`
+with a [runtime](/v6/reference/runtime):
 
 ```python
 from hud.agents import create_agent
-from hud.eval import LocalRuntime
-from tasks import TASKS
+from hud.eval import LocalRuntime, Taskset
 
 agent = create_agent("claude-sonnet-4-5")
-job = await TASKS.run(agent, runtime=LocalRuntime("env.py"))
+taskset = Taskset.from_file("tasks.py")        # scaffolded tasks.py exports a list of tasks
+job = await taskset.run(agent, runtime=LocalRuntime("env.py"))
 print(job.reward)
 ```
 
-**From the [CLI](/v6/reference/cli#hud-eval)** - `hud eval` takes a task source (`.py`, a directory, or
-`.json`/`.jsonl`) and an agent name (`claude`, `openai`, `gemini`, `openai_compatible`), runs each
-rollout in a fresh env subprocess, grades it, and prints the reward:
-
-```bash
-hud eval tasks.py claude                       # first task, one rollout
-hud eval tasks.py openai -m gpt-5 --group 3    # a pinned model, 3 rollouts each
-hud eval tasks.py claude --all                 # every task in the source
-```
-
-Flags override the agent's config for that run:
-
-| Flag | Effect |
-|------|--------|
-| `--model`, `-m` | Pin a specific model id. |
-| `--group N` | Run each task N times, to see the reward spread. |
-| `--max-steps N` | Cap agent steps per task. |
-| `--all` / `--full` | Run the whole source (`--full` also auto-responds, 100 steps). |
-| `--gateway` | Force calls through the gateway even when a provider key is set. |
-
-With only a `HUD_API_KEY` set, calls route through the gateway; with a provider key present they go
-straight to the provider. See the [CLI reference](/v6/reference/cli#hud-eval) for the full flag set and key
-resolution.
+**From the CLI**, `hud eval` takes a task source and an agent name (`claude`, `openai`, `gemini`,
+`openai_compatible`); see [running an eval](/v6/guides/running-an-eval) for the walkthrough and the
+[CLI reference](/v6/reference/cli#hud-eval) for the full flag set.
 
 ## Bring your own harness
 
@@ -113,11 +123,6 @@ the final answer to `run.trace.content` (what gets graded). Since this is outsid
 the seam, the `Run` object you work with, the step types you record, and worked examples live in
 [Extending HUD](/v6/advanced/extending#bring-your-own-harness).
 
-## See also
-
-<CardGroup cols={2}>
-<Card title="Bring your own harness" icon="screwdriver-wrench" href="/v6/advanced/extending#bring-your-own-harness" />
-<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
-<Card title="Types: Run & Trace" icon="code" href="/v6/reference/types" />
-<Card title="Robots (beta)" icon="robot" href="/v6/advanced/robots" />
-</CardGroup>
+To run an agent end to end see [running an eval](/v6/guides/running-an-eval); for where each rollout runs
+see [runtimes](/v6/reference/runtime), and for the [`Run`](/v6/reference/types#run) an agent fills see
+[types](/v6/reference/types).

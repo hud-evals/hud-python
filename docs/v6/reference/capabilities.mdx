@@ -1,6 +1,6 @@
 ---
 title: "Capabilities"
-description: "Capabilities are the connections an environment exposes to agents: how to declare each one, spin it up at runtime, and attach the matching client."
+description: "The wire protocols an environment exposes, each protocol's factory signature, and the clients that attach to them."
 icon: "plug"
 ---
 
@@ -29,66 +29,52 @@ A capability is `(name, protocol, url, params)` - concrete wire data carrying th
 | `url` | `str` | Connection URL. |
 | `params` | `dict` | Protocol-specific connection params. |
 
-Each protocol has a **factory** (`Capability.ssh`, `.mcp`, `.cdp`, `.rfb`, `.robot`) - a classmethod that builds a valid `Capability` for that protocol, so you don't need to fill in the `name`, `protocol`, `url`, and `params` fields by hand. It normalizes the URL (fills in the default scheme and port), sets the right `protocol` id, and packs the protocol-specific params (e.g. `host_pubkey` for `ssh`, `display` for `rfb`). `cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it on the wire.
+Each protocol has a **factory** (`Capability.ssh`, `.mcp`, `.cdp`, `.rfb`, `.robot`) - a classmethod that builds a valid `Capability` for that protocol, so you don't fill in the four fields by hand. It normalizes the URL (fills in the default scheme and port), sets the right `protocol` id, and packs the protocol-specific params. `cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it on the wire.
 
 ## Spinning up a capability
 
-Every capability points at a daemon. If the daemon already exists (a managed service, a remote box), just describe it with its factory and you're done. The case worth a closer look is **a daemon the environment runs itself** - an MCP server, a browser, a VNC display. The flow is the same four steps every time:
+Every capability points at a daemon. A daemon that already exists (a managed service, a remote box) is described with its factory and you're done. A daemon the **environment runs itself** follows the same four steps inside an `@env.initialize` hook:
 
-```python env.py
-@env.initialize
-async def _up():
-    start_daemon(host="127.0.0.1", port=PORT)            # 1. launch it (subprocess / task)
-    await wait_until_listening("127.0.0.1", PORT)         # 2. block until it accepts connections
-    env.add_capability(Capability.mcp(name="tools",      # 3. publish its address
-                                      url=f"http://127.0.0.1:{PORT}/mcp"))
+1. **Launch it** as a subprocess or background task, bound to `127.0.0.1`.
+2. **Block until it is listening** before publishing. A subprocess returns before its port is bound, so poll the port (or `asyncio.sleep` for a daemon you know starts fast). The environment runs every `@env.initialize` hook to completion before accepting a client, so a capability published here is live the moment any agent connects.
+3. **Publish its address** with [`env.add_capability(...)`](/v6/reference/environment#methods).
+4. **Tear it down** in `@env.shutdown`.
 
-@env.shutdown
-async def _down():
-    stop_daemon()                                        # 4. tear it down with the env
-```
+Bind every daemon to `127.0.0.1`: the environment exposes a single control port, and the HUD client transparently forwards a `127.0.0.1` capability through that port to the daemon inside. A capability already on a public address is used as-is.
 
-**Wait until it's actually listening (step 2).** Launching a subprocess or background task returns *before* the daemon has bound its port - publish the capability now and an agent can connect before anything is there to answer. The environment runs *every* `@env.initialize` hook to completion before it accepts a single client, so blocking here is what guarantees the capability is live the moment any agent connects. The robust way is to poll the port in a loop until it answers (as the example envs do); a brief `asyncio.sleep` is fine for a daemon you know starts fast.
-
-**Bind to `127.0.0.1` (step 1 and 3).** Bind every daemon to `127.0.0.1` so it's only reachable from inside the environment - that's exactly what you want, because <u>the environment exposes a single control port and nothing else</u>. The HUD client transparently forwards a `127.0.0.1` capability through that one control port to the daemon inside; a capability that's already on a public address is used as-is. So you bind, publish, and never think about networking - <u>one port in, every capability reachable</u>.
+## Factories
 
 ### `ssh` - a sandboxed shell
 
-The shell case is built in via [`Workspace`](#workspace) - a built-in daemon that manages a `bwrap`-isolated directory and serves it over `ssh`. `env.workspace(root)` starts it, publishes its `ssh` capability, and stops it with the env - one line, no hook:
-
-```python env.py
-from hud.environment import Environment
-
-env = Environment(name="coder")
-env.workspace("workspace")   # publishes "shell" (ssh/2) when the env serves
+```text
+Capability.ssh(*, name="shell", url, user="agent", host_pubkey, client_key=None, client_key_path=None, shell=None)
 ```
 
-<Note>
-Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation (`bwrap`) is Linux-only - unisolated elsewhere, isolated in a built image.
-</Note>
+The shell case is built in via [`Workspace`](#workspace), so you rarely call this factory directly. [`env.workspace(root)`](/v6/reference/environment#methods) starts a workspace, publishes its `ssh` capability, and stops it with the env.
 
-To run a workspace yourself, drive its lifecycle and publish `ws.capability()` by hand:
-
-```python env.py
-from hud.environment import Environment, Workspace
-
-env = Environment(name="coder")
-ws = Workspace("workspace", host="127.0.0.1", port=0)   # port 0 → ephemeral
-
-@env.initialize
-async def _up():
-    await ws.start()                          # binds, generates keys; idempotent
-    env.add_capability(ws.capability("shell"))
-
-@env.shutdown
-async def _down():
-    await ws.stop()
-```
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Capability name. Default `"shell"`. |
+| `url` | `str` | SSH URL (`host[:port]`, default port `22`). |
+| `user` | `str` | SSH username. Default `"agent"`. |
+| `host_pubkey` | `str` | Server host public key (for the harness's `known_hosts`). |
+| `client_key` | `str \| None` | Private key *content*; authenticates across a container boundary. |
+| `client_key_path` | `str \| None` | Path to a key file; only works when client and daemon share a filesystem. |
+| `shell` | `str \| None` | Remote shell type (`bash` / `powershell` / `cmd`); auto-detected from `sys.platform`. |
 
 ### `mcp` - your own tools
 
-Serve bespoke tools on a [FastMCP](https://gofastmcp.com) server. The streamable-HTTP transport serves under `/mcp`, so that path is part of the published URL:
+```text
+Capability.mcp(*, name="tools", url, auth_token=None)
+```
 
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Capability name. Default `"tools"`. |
+| `url` | `str` | `ws` / `wss` / `http` / `https` URL (no stdio). The streamable-HTTP transport serves under `/mcp`. |
+| `auth_token` | `str \| None` | Optional bearer token. |
+
+<Accordion title="Example env.py">
 ```python env.py
 import asyncio
 
@@ -110,11 +96,11 @@ _task: asyncio.Task | None = None
 @env.initialize
 async def _up():
     global _task
-    if _task is None:                          # idempotent
+    if _task is None:
         _task = asyncio.create_task(
             server.run_async(transport="http", host="127.0.0.1", port=8040)
         )
-        await asyncio.sleep(1.0)               # wait until the server is ready
+        await asyncio.sleep(1.0)
     env.add_capability(Capability.mcp(name="tools", url="http://127.0.0.1:8040/mcp"))
 
 @env.shutdown
@@ -124,13 +110,23 @@ async def _down():
         _task.cancel()
         _task = None
 ```
-
-`Capability.mcp` accepts `ws`/`wss`/`http`/`https` URLs (no stdio) and an optional `auth_token=`.
+</Accordion>
 
 ### `cdp` - a browser
 
-Launch Chromium with a DevTools port. Playwright ships the binary (`playwright install chromium`); run it as a subprocess so the CDP endpoint is reachable at `http://127.0.0.1:9222`:
+```text
+Capability.cdp(*, name="browser", url, target_id=None)
+```
 
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Capability name. Default `"browser"`. |
+| `url` | `str` | DevTools URL (default scheme `ws`, default port `9222`). |
+| `target_id` | `str \| None` | Optional CDP target id. |
+
+Playwright ships the Chromium binary (`playwright install chromium`). Add `--no-sandbox` to the launch flags only when running as root in a container.
+
+<Accordion title="Example env.py">
 ```python env.py
 import asyncio
 import tempfile
@@ -156,7 +152,7 @@ async def _up():
             "--no-first-run",
             "--user-data-dir=" + tempfile.mkdtemp(prefix="cdp_"),
         )
-        await asyncio.sleep(1.0)               # wait until Chromium is ready
+        await asyncio.sleep(1.0)
     env.add_capability(Capability.cdp(name="browser", url="http://127.0.0.1:9222"))
 
 @env.shutdown
@@ -167,13 +163,24 @@ async def _down():
         await _proc.wait()
         _proc = None
 ```
-
-`Capability.cdp` defaults to port `9222` and takes an optional `target_id=`. (Add `--no-sandbox` only when running as root in a container.)
+</Accordion>
 
 ### `rfb` - a virtual screen
 
-Full computer-use is a VNC server over a virtual display. On Linux, `Xvfb` paints the framebuffer and `x11vnc` serves it (`apt install xvfb x11vnc`):
+```text
+Capability.rfb(*, name="screen", url, password=None, display=0)
+```
 
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Capability name. Default `"screen"`. |
+| `url` | `str` | VNC URL (default scheme `rfb`). When the URL omits a port it defaults to `5900 + display`. |
+| `password` | `str \| None` | Optional VNC password. |
+| `display` | `int` | VNC display number. Default `0`. Host multiple screens by publishing one `rfb` capability per display. |
+
+On Linux, `Xvfb` paints the framebuffer and `x11vnc` serves it (`apt install xvfb x11vnc`).
+
+<Accordion title="Example env.py">
 ```python env.py
 import asyncio
 
@@ -190,12 +197,12 @@ async def _up():
         xvfb = await asyncio.create_subprocess_exec(
             "Xvfb", ":0", "-screen", "0", "1280x1024x24",
         )
-        await asyncio.sleep(0.5)               # let the X server come up first
+        await asyncio.sleep(0.5)
         vnc = await asyncio.create_subprocess_exec(
             "x11vnc", "-display", ":0", "-rfbport", "5900",
             "-localhost", "-forever", "-nopw",
         )
-        await asyncio.sleep(1.0)               # wait until VNC is ready
+        await asyncio.sleep(1.0)
         _procs = (xvfb, vnc)
     env.add_capability(Capability.rfb(name="screen", url="rfb://127.0.0.1", display=0))
 
@@ -208,8 +215,7 @@ async def _down():
             await p.wait()
         _procs = None
 ```
-
-`Capability.rfb` listens on `5900 + display` and takes an optional `password=`. Host multiple screens by publishing one `rfb` capability per `display`.
+</Accordion>
 
 ### `robot` - an observation/action loop
 
@@ -217,9 +223,13 @@ async def _down():
 Capability.robot(*, name="robot", url, contract)
 ```
 
-The robot control loop *(beta)*, carried over the `openpi/0` wire protocol. It's an **openpi-like** protocol: it reuses openpi's wire format (msgpack with recursive numpy serialization) and its flat observation/action naming (`observation/...` keys, `actions`), so an openpi policy server and a HUD env speak the same bytes. The one fundamental difference is **role assignment** - in openpi a policy *server* answers inference requests, but here the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts, replying with actions).
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Capability name. Default `"robot"`. |
+| `url` | `str` | WebSocket URL (default scheme `ws`, default port `9091`). |
+| `contract` | `dict` | The env's self-describing schema: `robot_type`, `control_rate`, and a `features` map (each feature's `role`, layout, and normalization `stats`). |
 
-The `contract` is the environment's full self-describing schema - `robot_type`, `control_rate`, and every observation/action feature - carried in the manifest so the agent wires itself with no shared config. The environment drives its simulator through a [`RobotEndpoint`](/v6/advanced/robots) (not the bridge directly, although possible), and the endpoint builds the capability for you once started:
+The robot control loop *(beta)* runs over the `openpi/0` protocol. It is **openpi-like**: it reuses openpi's msgpack-numpy wire format and flat observation/action naming, but the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts, replying with actions). The environment drives its simulator through a [`RobotEndpoint`](/v6/advanced/robots), which builds the capability once started:
 
 ```python
 endpoint = RobotEndpoint(MySimBridge())   # drive the sim only through the endpoint
@@ -232,12 +242,9 @@ async def _up():
 
 See [Robots](/v6/advanced/robots) for the bridge, the endpoint, the harness, and the contract spec.
 
-### Workspace file tracking
+## Workspace file tracking
 
-Workspace file tracking records what changed in a [`Workspace`](#workspace) over a run, so HUD can
-show file diffs in the trace. It runs with the workspace lifecycle and is not a tool the agent calls.
-`env.workspace(...)` enables it by default with conservative tracking limits and secret redaction; set
-`HUD_FILE_TRACKING_ENABLED=false` or pass `track_files=False` to opt out:
+Workspace file tracking records what changed in a [`Workspace`](#workspace) over a run, so HUD can show file diffs in the trace. It runs with the workspace lifecycle and is not a tool the agent calls. `env.workspace(...)` enables it by default (the `HUD_FILE_TRACKING_ENABLED` setting); set `HUD_FILE_TRACKING_ENABLED=false` or pass `track_files=False` to opt out:
 
 ```python env.py
 env.workspace("workspace")                     # ssh plus file tracking
@@ -260,42 +267,56 @@ The bundled provider agents open these automatically based on which capabilities
 
 ## Workspace
 
-A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for
-agent access and, when enabled, `filetracking` for rollout telemetry. For `mcp`, `cdp`, and `rfb` you
-stand up the daemon yourself (above), but for a shell you just attach a workspace.
+A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for agent access and, when enabled, file tracking for rollout telemetry. For `mcp`, `cdp`, and `rfb` you stand up the daemon yourself.
 
-Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP).
-`env.workspace(root, ...)` wires its whole lifecycle: the environment brings it up (keys, socket,
-accept loop, and file tracking by default) when it serves and tears it down on `env.stop()`.
-Extra kwargs configure the sandbox - mounts, network, env vars, guest path, fixed ports, your own
-keys:
+Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
 
 ```python
-from hud.environment import Environment, Mount
+from hud.environment import Environment, Workspace
 
 env = Environment(name="coder")
-env.workspace(
-    "/workspace",
-    network=True,
-    mounts=[Mount("ro", src="/data", dst="/data")],
-)
+ws = Workspace("workspace", host="127.0.0.1", port=0)   # port 0 = ephemeral
+
+@env.initialize
+async def _up():
+    await ws.start()                          # binds, generates keys; idempotent
+    env.add_capability(ws.capability("shell"))
+
+@env.shutdown
+async def _down():
+    await ws.stop()
 ```
 
-To run one outside an env, drive its lifecycle directly and publish `ws.capability()` as a concrete `ssh` capability:
+<Note>
+Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation (`bwrap`) is Linux-only - unisolated elsewhere, isolated in a built image.
+</Note>
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `root` | `Path \| str` | Directory served (created at start). |
+| `mounts` | `Sequence[Mount]` | Extra bwrap mounts. Default `()`. |
+| `network` | `bool` | Allow network inside the sandbox. Default `False`. |
+| `env` | `Mapping[str, str] \| None` | Environment variables for the sandbox. |
+| `system_mounts` | `Sequence[Mount] \| None` | Override the default system mounts. |
+| `guest_path` | `str` | Path the root mounts at inside the sandbox. Default `"/workspace"`. |
+| `host` | `str` | SSH bind host. Default `"127.0.0.1"`. |
+| `port` | `int` | SSH bind port (`0` binds an ephemeral port). Default `0`. |
+| `user` | `str` | SSH username. Default `"agent"`. |
+| `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
+| `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
+| `track_files` | `bool` | Serve file-tracking telemetry over the workspace lifecycle. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on). |
 
 | Member | Description |
 |--------|-------------|
-| `Workspace(root, *, host="127.0.0.1", port=0, mounts=(), network=False, env=None, user="agent", ...)` | Construct. `port=0` binds an ephemeral port. |
 | `await ws.start()` | Start the SSH accept loop (idempotent). |
-| `ws.capability(name="shell")` | The resolved `ssh` `Capability` (materializes keys, binds the socket). |
 | `await ws.stop()` | Stop accepting sessions and release the socket. |
-| `ws.ssh_url` / `ws.ssh_host_pubkey` | Connection address and host key. |
+| `ws.capability(name="shell")` | The resolved `ssh` `Capability` (materializes keys, binds the socket). |
+| `ws.file_tracking_capability(name="filetracking")` | The `filetracking/1` `Capability` (requires `track_files=True`). |
+| `ws.tracks_files` | Whether this workspace serves a `filetracking/1` capability. |
+| `ws.ssh_url` / `ws.ssh_host_pubkey` / `ws.ssh_client_key_path` / `ws.ssh_user` | Connection address, host key, client key path, and username. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
+| `ws.bwrap_argv(...)` / `ws.shell_argv(...)` | Build argv for your own subprocess (bwrap'd / per-session shell). |
 
-## See also
+A `Mount` (`hud.environment`) configures a single bwrap mount, `Mount(kind, src, dst, optional)`, where `kind` is one of `ro`, `rw`, `tmpfs`, `symlink`, `proc`, `dev`.
 
-<CardGroup cols={2}>
-<Card title="Environment" icon="cube" href="/v6/reference/environment" />
-<Card title="Agents" icon="robot" href="/v6/reference/agents" />
-<Card title="Tasks & Tasksets" icon="list-check" href="/v6/reference/tasks" />
-</CardGroup>
+For authoring a complete environment around a capability, see [creating an environment](/v6/guides/creating-an-environment); for the object and serving API, see [environment](/v6/reference/environment).
