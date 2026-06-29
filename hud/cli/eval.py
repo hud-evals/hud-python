@@ -728,7 +728,32 @@ def _spawn_target(source: Path) -> Path:
     return resolved.parent
 
 
-def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
+def _is_harbor_source(source_path: Path | None) -> bool:
+    if source_path is None or not source_path.exists():
+        return False
+    if not source_path.is_dir():
+        return False
+    from integrations.harbor import detect
+
+    return detect(source_path)
+
+
+def _load_local_taskset(source_path: Path) -> tuple[Any, str]:
+    from hud.eval import Taskset
+
+    if _is_harbor_source(source_path):
+        from integrations.harbor import load
+
+        return load(source_path), "harbor"
+    return Taskset.from_file(source_path), "hud"
+
+
+def _resolve_placement(
+    cfg: EvalConfig,
+    source_path: Path | None,
+    *,
+    source_kind: str = "hud",
+) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
     "local" spawns each row's env from the source next to the tasks file;
@@ -744,6 +769,10 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
+        if source_kind == "harbor":
+            from integrations.harbor import HarborRuntime
+
+            return HarborRuntime(source_path)
         return LocalRuntime(_spawn_target(source_path))
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
@@ -767,18 +796,19 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    from hud.eval import Taskset
-
     source_path = Path(cfg.source)
     is_local = source_path.exists()
+    source_kind = "api"
     if is_local:
         hud_console.info(f"Loading tasks from: {cfg.source}")
         try:
-            taskset = Taskset.from_file(source_path)
+            taskset, source_kind = _load_local_taskset(source_path)
         except Exception as e:
             hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
             raise typer.Exit(1) from e
     else:
+        from hud.eval import Taskset
+
         hud_console.info(f"Loading platform taskset: {cfg.source}")
         try:
             taskset = Taskset.from_api(cfg.source)
@@ -832,7 +862,11 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         )
 
     agent = _build_agent(cfg)
-    placement = _resolve_placement(cfg, source_path if is_local else None)
+    placement = _resolve_placement(
+        cfg,
+        source_path if is_local else None,
+        source_kind=source_kind,
+    )
 
     job = await taskset.run(
         agent,

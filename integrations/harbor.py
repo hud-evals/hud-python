@@ -11,11 +11,9 @@ Harbor task structure (terminal-bench layout)::
 
 :func:`load` parses a task dir (or a dataset of them) into rows sharing one
 env name per distinct ``environment/`` build context — no codegen, no
-roundtrip. Like every row, the result is runnable
-once a placement is supplied (``runtime=Runtime(url)`` against a served substrate
-today). Providers receive the row being placed, so a docker provider that
-builds and runs each row's ``environment/`` image is the named follow-up —
-expressible without engine changes.
+roundtrip. Like every row, the result is runnable once a placement is supplied.
+Use :class:`HarborRuntime` for local Docker-backed execution of Harbor tasks, or
+``runtime=Runtime(url)`` to attach to a substrate served elsewhere.
 
 :func:`export` is the reverse direction: turn a HUD task source into
 self-contained Harbor task folders (``task.toml`` + ``instruction.md`` +
@@ -40,19 +38,23 @@ channel.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import re
 import shutil
-import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hud.environment import Environment
 from hud.environment.server import TaskRunner
 from hud.eval import Task, Taskset
+from integrations.harbor_common import (
+    _HarborTask,
+    _is_harbor_task,
+    _parse_task,
+    _slugify,
+    _task_dirs,
+)
+from integrations.harbor_runtime import HarborRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -74,18 +76,12 @@ _BUILD_CONTEXT_IGNORE = shutil.ignore_patterns(
     "__pycache__", "*.pyc", ".git", ".venv", "venv", "*.egg-info", ".pytest_cache"
 )
 
-
 # ─── load: Harbor dirs -> Taskset ──────────────────────────────────────
 
 
 def detect(path: str | Path) -> bool:
     """True when *path* is a Harbor task dir or a dataset of them."""
-    root = Path(path)
-    if _is_harbor_task(root):
-        return True
-    if root.is_dir():
-        return any(_is_harbor_task(d) for d in root.iterdir() if d.is_dir())
-    return False
+    return bool(_task_dirs(path))
 
 
 def load(path: str | Path) -> Taskset:
@@ -96,12 +92,8 @@ def load(path: str | Path) -> Taskset:
     context (content-hashed), derived from the dataset name.
     """
     root = Path(path).resolve()
-    if _is_harbor_task(root):
-        task_dirs = [root]
-        dataset_name = root.parent.name
-    else:
-        task_dirs = sorted(d for d in root.iterdir() if d.is_dir() and _is_harbor_task(d))
-        dataset_name = root.name
+    task_dirs = _task_dirs(root)
+    dataset_name = root.parent.name if _is_harbor_task(root) else root.name
     if not task_dirs:
         raise ValueError(f"no Harbor tasks found in {path}")
 
@@ -124,54 +116,6 @@ def load(path: str | Path) -> Taskset:
         env_name = base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}"
         tasks.extend(Task(env=env_name, id=harbor_task.task_id) for harbor_task in group)
     return Taskset(base_name, tasks)
-
-
-def _slugify(name: str) -> str:
-    """A valid env name (lowercase ``[a-z0-9-]``) from a dataset dir name."""
-    normalized = re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", "-").replace("_", "-"))
-    return re.sub(r"-+", "-", normalized).strip("-") or "harbor"
-
-
-def _is_harbor_task(path: Path) -> bool:
-    return path.is_dir() and (path / "task.toml").exists() and (path / "instruction.md").exists()
-
-
-def _hash_directory(path: Path) -> str:
-    """Content-hash a directory for grouping tasks by identical environments."""
-    hasher = hashlib.sha256()
-    if not path.exists():
-        return "empty"
-    for file_path in sorted(path.rglob("*")):
-        if file_path.is_file():
-            hasher.update(str(file_path.relative_to(path)).encode())
-            hasher.update(file_path.read_bytes())
-    return hasher.hexdigest()[:16]
-
-
-@dataclass(frozen=True, slots=True)
-class _HarborTask:
-    """One parsed Harbor task dir."""
-
-    task_id: str
-    config: dict[str, Any]
-    env_hash: str
-
-
-def _parse_task(task_dir: Path) -> _HarborTask | None:
-    if not (task_dir / "instruction.md").is_file():
-        LOGGER.warning("failed to read instruction.md in %s", task_dir)
-        return None
-    try:
-        config: dict[str, Any] = tomllib.loads((task_dir / "task.toml").read_text("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        LOGGER.warning("failed to parse task.toml in %s", task_dir)
-        config = {}
-    env_dir = task_dir / "environment"
-    return _HarborTask(
-        task_id=task_dir.name,
-        config=config,
-        env_hash=_hash_directory(env_dir) if env_dir.exists() else "no-env",
-    )
 
 
 # ─── export: HUD tasks -> Harbor task folders ───────────────────────────
@@ -443,6 +387,7 @@ __all__ = [
     "ALLOWED_PROTOCOLS",
     "CONTROL_PORT",
     "DEFAULT_ANSWER_FILE",
+    "HarborRuntime",
     "detect",
     "export",
     "load",

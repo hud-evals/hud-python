@@ -8,8 +8,9 @@ to run foreign tasks.
 This package lives outside ``hud`` on purpose: each module is a recipe built
 **only on the public SDK surface** (``Environment``, ``Task``,
 ``Taskset``, ``Runtime``) — that constraint is the proof the core is
-flexible. Copy a module into your project or run it from a checkout; nothing
-in the SDK or CLI imports it.
+flexible. Copy a module into your project or run it from a checkout. The CLI may
+call selected integrations explicitly for polished interop paths, but the
+integration contract itself stays independent of private SDK hooks.
 
 The contract: an integration module exposes ``detect(path) -> bool`` and
 ``load(path) -> Taskset``. Placement stays an execution-time concern — loaders

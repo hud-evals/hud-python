@@ -7,7 +7,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from integrations.harbor import detect, export, load
+from integrations.harbor import HarborRuntime, detect, export, load
+from integrations.harbor_runtime import (
+    _compose_file,
+    _compose_overlay,
+    _dockerfile_declared_generated_app_files,
+    _ensure_dockerfile_created_dirs,
+    _ensure_start_script,
+    _host_path_for_app_file,
+    _preserved_image_paths,
+)
 
 from .conftest import make_harbor_task
 
@@ -72,6 +81,170 @@ def test_load_skips_unparseable_toml_but_keeps_the_rest(tmp_path: Path) -> None:
 
     # Unparseable config degrades gracefully; the task itself still loads.
     assert {task.id for task in taskset} == {"good", "broken"}
+
+
+def test_harbor_runtime_accepts_dataset_dirs(single_task: Path) -> None:
+    runtime = HarborRuntime(single_task.parent)
+
+    assert single_task.name in runtime._task_dirs
+
+
+def test_compose_file_detection_prefers_harbor_names(tmp_path: Path) -> None:
+    env = tmp_path / "environment"
+    env.mkdir()
+    compose = env / "docker-compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+
+    assert _compose_file(env) == compose
+
+
+def test_compose_overlay_mounts_main_workspace_tests_and_logs(tmp_path: Path) -> None:
+    overlay = _compose_overlay(
+        workspace=tmp_path / "workspace",
+        tests_dir=tmp_path / "tests",
+        logs=tmp_path / "logs",
+        preserved_paths=[],
+    )
+
+    assert "main:" in overlay
+    assert 'entrypoint: ["sleep"]' in overlay
+    assert f"{tmp_path / 'workspace'}:/app" in overlay
+    assert f"{tmp_path / 'tests'}:/tests:ro" in overlay
+    assert f"{tmp_path / 'logs'}:/logs" in overlay
+
+
+def test_compose_overlay_preserves_image_dependency_subpaths(tmp_path: Path) -> None:
+    overlay = _compose_overlay(
+        workspace=tmp_path / "workspace",
+        tests_dir=tmp_path / "tests",
+        logs=tmp_path / "logs",
+        preserved_paths=["/app/node_modules"],
+    )
+
+    assert '      - "/app/node_modules"' in overlay
+
+
+def test_preserved_image_paths_detects_node_and_php_dependency_dirs(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "composer.json").write_text("{}", encoding="utf-8")
+
+    assert _preserved_image_paths(tmp_path) == ["/app/node_modules", "/app/vendor"]
+
+
+def test_preserved_image_paths_detects_node_build_output(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text(
+        "FROM node:20-slim\nRUN npm ci\nRUN npm run build\n",
+        encoding="utf-8",
+    )
+
+    assert _preserved_image_paths(tmp_path) == ["/app/node_modules", "/app/dist"]
+
+
+def test_ensure_start_script_recreates_build_generated_entrypoint(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "docker-entrypoint.sh").write_text("echo start\n", encoding="utf-8")
+
+    _ensure_start_script(workspace)
+
+    start = workspace / "start_app.sh"
+    assert start.exists()
+    text = start.read_text(encoding="utf-8")
+    assert "exec sh /app/docker-entrypoint.sh" in text
+
+
+def test_ensure_start_script_preserves_dockerfile_generated_command(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "docker-entrypoint.sh").write_text('exec "$@"\n', encoding="utf-8")
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "RUN printf '%s\\n' '#!/usr/bin/env bash' 'set -e' 'cd /app' "
+        "'exec /app/docker-entrypoint.sh gunicorn --bind 0.0.0.0:8000 src.main:app' "
+        "> /app/start_app.sh && chmod +x /app/start_app.sh\n",
+        encoding="utf-8",
+    )
+
+    _ensure_start_script(workspace)
+
+    text = (workspace / "start_app.sh").read_text(encoding="utf-8")
+    assert "exec /app/docker-entrypoint.sh gunicorn --bind 0.0.0.0:8000 src.main:app" in text
+    assert (workspace / "docker-entrypoint.sh").stat().st_mode & 0o111
+
+
+def test_ensure_start_script_restores_generated_entrypoint(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "RUN printf '#!/bin/sh\\npython -m src.seed --init\\n"
+        "exec uvicorn src.main:app --host 0.0.0.0 --port 8000\\n' "
+        "> /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh\n"
+        "RUN printf '%s\\n' '#!/usr/bin/env bash' 'set -e' 'cd /app' "
+        "'exec /app/docker-entrypoint.sh' > /app/start_app.sh && chmod +x /app/start_app.sh\n",
+        encoding="utf-8",
+    )
+
+    _ensure_start_script(workspace)
+
+    entrypoint = workspace / "docker-entrypoint.sh"
+    assert entrypoint.exists()
+    assert entrypoint.stat().st_mode & 0o111
+    assert "python -m src.seed --init" in entrypoint.read_text(encoding="utf-8")
+    assert "exec /app/docker-entrypoint.sh" in (workspace / "start_app.sh").read_text(
+        encoding="utf-8",
+    )
+
+
+def test_ensure_dockerfile_created_dirs_restores_app_dirs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM node:20-slim\n"
+        "RUN mkdir -p static/uploads /app/tmp/cache && mkdir -p /var/lib/ignored\n",
+        encoding="utf-8",
+    )
+
+    _ensure_dockerfile_created_dirs(workspace)
+
+    assert (workspace / "static" / "uploads").is_dir()
+    assert (workspace / "tmp" / "cache").is_dir()
+    assert not (workspace / "var" / "lib" / "ignored").exists()
+
+
+def test_dockerfile_declared_generated_app_files_detects_seeded_sqlite_db(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "ENV DB_PATH=/app/data/salon_workforce.db\n"
+        "RUN python -m src.seed --init\n",
+        encoding="utf-8",
+    )
+
+    assert _dockerfile_declared_generated_app_files(workspace) == [
+        "/app/data/salon_workforce.db",
+    ]
+    assert _host_path_for_app_file(workspace, "/app/data/salon_workforce.db") == (
+        workspace / "data" / "salon_workforce.db"
+    )
+
+
+def test_dockerfile_declared_generated_app_files_ignores_non_app_or_non_db_paths(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "ENV DB_PATH=/var/lib/app.db CACHE_PATH=/app/cache\n"
+        "ENV SOME_DATABASE_PATH=/app/data/app.txt\n",
+        encoding="utf-8",
+    )
+
+    assert _dockerfile_declared_generated_app_files(workspace) == []
+    assert _host_path_for_app_file(workspace, "/tmp/app.db") is None
 
 
 # ─── export: HUD tasks -> Harbor task folders ───────────────────────────
