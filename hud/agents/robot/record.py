@@ -1,10 +1,18 @@
-"""Per-episode recording for robot rollouts — telemetry, plus an optional LeRobot dataset.
+"""Recording for robot/sim rollouts: telemetry streaming, plus an optional LeRobot dataset.
 
-The agent loop hands every tick to one :class:`Recorder`. It always streams the telemetry
-the HUD viewer needs (an :class:`~hud.agents.types.ObservationStep` of numeric state +
-per-camera H.264 video); when ``save`` is on it *also* appends each
-``(observation, executed action)`` pair to a LeRobot v3 dataset for offline
-training/finetuning.
+Three recorders, smallest to largest, all streaming the *same* robot telemetry the HUD
+viewer plays (numeric :class:`~hud.agents.types.ObservationStep` state + per-camera H.264
+video) via the existing exporter:
+
+- :class:`Recorder` — one trace. Emits spans with an *explicit* ``trace_id`` (no rollout
+  contextvar, no ``Run``), so it works from a bare synchronous loop or any thread. The
+  primitive the vectorized recorder is built from.
+- :class:`VecRecorder` — a whole vectorized env as one **Job** of per-episode traces. One
+  :class:`Recorder` per recorded env slot; on each ``done[i]`` (auto-reset) it closes that
+  slot's trace and opens a fresh one, so every episode becomes its own fully-saved trace.
+- :class:`EpisodeRecorder` — the agent-loop recorder: records onto a :class:`Run` (so steps
+  land on ``run.trace`` for grading/training) and, when ``save`` is on, *also* appends each
+  ``(observation, executed action)`` pair to a LeRobot v3 dataset for offline training.
 
 Saving is opt-in (the agent's ``save`` flag — the ``--save`` runner flag), so the heavy
 LeRobot/PyAV imports stay deferred until a dataset is actually built. One dataset spans the
@@ -14,6 +22,10 @@ exit, optionally pushed to the HF Hub. Destination + push come from the environm
 - ``RECORD_DIR``  — dataset root (default ``./data`` from where the rollout launched)
 - ``HF_REPO``     — HF namespace to also push to (needs ``HF_TOKEN``)
 - ``HF_PRIVATE``  — push the dataset private
+
+Everything HUD-specific (job/trace lifecycle, trace-id assignment, span building, video
+encoding, upload) lives here; a benchmark just does ``VecRecorder(...)`` -> ``record`` ->
+``close``. :func:`register_live_stream` is the thin Isaac-side hook for the live WebRTC view.
 """
 
 from __future__ import annotations
@@ -29,18 +41,49 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from hud.agents.types import InferenceStep, ObservationStep
+from hud.agents.types import InferenceStep, ObservationStep, StateFeature
 from hud.telemetry.context import get_current_trace_id
+from hud.utils.platform import PlatformClient
 
 from .video import VideoStreamer
 
 if TYPE_CHECKING:
+    from typing import Self
+
     from numpy.typing import NDArray
 
     from hud.capabilities.robot import RobotClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
+
+
+def _reporting_enabled() -> bool:
+    from hud.settings import settings
+
+    return bool(settings.telemetry_enabled and settings.api_key)
+
+
+def _report_sync(path: str, payload: dict[str, Any]) -> None:
+    """Best-effort sync POST to the platform (job/trace lifecycle). No-op without an API key.
+
+    Mirrors the async ``hud.eval.job`` reporting so a sync vec-env loop never needs an event
+    loop, and never fails the run when the platform is unreachable.
+    """
+    if not _reporting_enabled():
+        return
+    body = {k: v for k, v in payload.items() if v is not None}
+    try:
+        PlatformClient.from_settings().post(path, json=body)
+    except Exception as exc:  # reporting is fire-and-forget
+        logger.warning("platform report %s failed: %s", path, exc)
+
+
+def _to_numpy(x: Any) -> NDArray[Any]:
+    """Coerce a torch tensor / array / scalar to a numpy array (no torch dependency)."""
+    if hasattr(x, "detach"):  # torch.Tensor
+        x = x.detach().cpu().numpy()
+    return np.asarray(x)
 
 
 def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
@@ -86,7 +129,7 @@ def _feature_names(feature: dict[str, Any], base: str) -> list[str]:
     return [f"{base}_{i}" for i in range(int((feature.get("shape") or [1])[0]))]
 
 
-class Recorder:
+class EpisodeRecorder:
     """Records one agent's rollouts: always telemetry, optionally a LeRobot dataset.
 
     The agent owns a single instance for its lifetime and routes *all* recording through
@@ -227,4 +270,268 @@ class Recorder:
         return self._ds
 
 
-__all__ = ["Recorder"]
+# ── lightweight telemetry recorders (vec-env / bare-loop, no Run, no LeRobot) ────────────
+
+
+def _observation_step(obs: dict[str, Any], *, tick: int) -> ObservationStep:
+    """Build an :class:`ObservationStep` (numeric state) from a flat per-slot obs dict.
+
+    Camera frames travel as H.264 video, so array obs with rank >= 2 are skipped; flat
+    numeric vectors become unlabelled :class:`StateFeature`s. Robust to scalars (unlike
+    :meth:`ObservationStep.from_obs`, which expects a robot-contract ``obs['data']``).
+    """
+    state: dict[str, StateFeature] = {}
+    for name, val in obs.items():
+        arr = _to_numpy(val)
+        if arr.ndim >= 2:
+            continue
+        flat = np.atleast_1d(arr).astype(float).ravel()
+        if 0 < flat.size <= 512:
+            state[name] = StateFeature(values=flat.tolist())
+    return ObservationStep(tick=tick, state=state)
+
+
+class Recorder:
+    """Streams one trace's telemetry to the platform: state, per-camera video, actions.
+
+    Standalone: emits spans with an explicit ``trace_id`` rather than relying on the rollout
+    contextvar, so it runs inside a plain (or vectorized) loop. Reuses the robot step schema
+    and :class:`~hud.agents.robot.video.VideoStreamer`, so the existing exporter and trace
+    viewer ingest it unchanged.
+    """
+
+    def __init__(
+        self,
+        *,
+        trace_id: str,
+        job_id: str | None = None,
+        group_id: str | None = None,
+        fps: int = 10,
+        model: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        enter: bool = True,
+    ) -> None:
+        self.trace_id = trace_id
+        self.job_id = job_id
+        self._fps = fps
+        self._tick = 0
+        self._reward = 0.0
+        self._metadata = metadata or {}
+        self._video: VideoStreamer | None = None  # lazy, one per trace
+        self._closed = False
+        if enter:
+            _report_sync(
+                f"/trace/{trace_id}/enter",
+                {"job_id": job_id, "group_id": group_id, "model": model},
+            )
+
+    def add_reward(self, reward: float) -> None:
+        """Accumulate per-step reward into this trace's total (reported on close)."""
+        self._reward += float(reward)
+
+    def record(
+        self,
+        *,
+        obs: dict[str, Any] | None = None,
+        frames: dict[str, Any] | None = None,
+        action: Any | None = None,
+    ) -> None:
+        """Record one tick: numeric-state span, per-camera video, and the executed action.
+
+        ``obs`` is this slot's observation dict (flat numeric vectors); ``frames`` maps a
+        camera name to its ``HxWxC`` frame; ``action`` is the executed action vector.
+        """
+        if obs is not None:
+            _observation_step(obs, tick=self._tick).emit(trace_id=self.trace_id)
+        if frames:
+            if self._video is None:
+                self._video = VideoStreamer(fps=self._fps, trace_id=self.trace_id)
+            self._video.record({"data": frames})
+        if action is not None:
+            chunk = _to_numpy(action).astype(float).ravel().tolist()
+            InferenceStep(tick=self._tick, chunk=[chunk], chunk_length=1).emit(
+                trace_id=self.trace_id
+            )
+        self._tick += 1
+
+    def close(
+        self,
+        *,
+        status: str = "completed",
+        reward: float | None = None,
+        error: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Flush video tails and report the trace exit (status / reward / metadata)."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._video is not None:
+            self._video.finalize()
+        meta = {**self._metadata, **(metadata or {})}
+        _report_sync(
+            f"/trace/{self.trace_id}/exit",
+            {
+                "status": status,
+                "reward": self._reward if reward is None else reward,
+                "error": error,
+                "metadata": meta or None,
+            },
+        )
+
+
+class VecRecorder:
+    """Records a vectorized env as one Job of per-episode traces.
+
+    Construct it once with the batch size, call :meth:`record` after every ``env.step`` with
+    the batched tensors, and :meth:`close` at the end. A configurable subset of slots
+    (``record_indices``) gets rich traces (state + video); each ``done[i]`` closes that slot's
+    current trace and opens a new one, so a slot that plays many episodes produces many
+    traces — all under one Job at :attr:`job_url`.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        num_envs: int,
+        *,
+        record_indices: list[int] | None = None,
+        fps: int = 10,
+        seed: int | None = None,
+        group_id: str | None = None,
+        model: str | None = None,
+        job_id: str | None = None,
+    ) -> None:
+        self.name = name
+        self.num_envs = num_envs
+        self.fps = fps
+        self.seed = seed
+        self.group_id = group_id
+        self.model = model
+        self.job_id = job_id or uuid.uuid4().hex
+        if record_indices is None:
+            record_indices = list(range(min(num_envs, 4)))  # a few representative slots
+        self.record_indices = [i for i in record_indices if 0 <= i < num_envs]
+
+        self._episode = dict.fromkeys(self.record_indices, 0)
+        self._rec: dict[int, Recorder | None] = dict.fromkeys(self.record_indices)
+        _report_sync(f"/trace/job/{self.job_id}/enter", {"name": name, "group": 1})
+        logger.info("hud vec job: %s", self.job_url)
+
+    @property
+    def job_url(self) -> str:
+        from hud.settings import settings
+
+        return f"{settings.hud_web_url}/jobs/{self.job_id}"
+
+    def _new_trace_id(self, i: int) -> str:
+        # Deterministic (reproducible, idempotent re-uploads) when a seed is given.
+        if self.seed is not None:
+            key = f"hud.vec:{self.job_id}:{i}:{self._episode[i]}:{self.seed}"
+            return uuid.uuid5(uuid.NAMESPACE_URL, key).hex
+        return uuid.uuid4().hex
+
+    def _open(self, i: int) -> Recorder:
+        rec = Recorder(
+            trace_id=self._new_trace_id(i),
+            job_id=self.job_id,
+            group_id=self.group_id,
+            fps=self.fps,
+            model=self.model,
+            metadata={"env_index": i, "episode_index": self._episode[i], "seed": self.seed},
+        )
+        self._rec[i] = rec
+        return rec
+
+    def record(
+        self,
+        *,
+        obs: Any | None = None,
+        frames: dict[str, Any] | None = None,
+        action: Any | None = None,
+        reward: Any | None = None,
+        done: Any | None = None,
+        info: dict[str, Any] | None = None,  # reserved for per-env metrics
+    ) -> None:
+        """Record one batched step. Pass the tensors straight from ``env.step``.
+
+        On ``done[i]`` the slot's current episode is closed (final reward attributed to it)
+        and a fresh trace is opened for the next episode; the post-reset observation returned
+        on the same step is skipped so frames never bleed across the episode boundary.
+        """
+        done_np = _to_numpy(done) if done is not None else None
+        reward_np = _to_numpy(reward) if reward is not None else None
+
+        for i in self.record_indices:
+            rec = self._rec[i] or self._open(i)
+            if reward_np is not None:
+                rec.add_reward(float(reward_np[i]))
+            if done_np is not None and bool(done_np[i]):
+                rec.close()  # closing episode keeps its own env/episode metadata
+                self._episode[i] += 1
+                self._rec[i] = None
+                continue  # the returned obs belongs to the next episode
+            rec.record(
+                obs=_slice_obs(obs, i),
+                frames=_slice_frames(frames, i),
+                action=None if action is None else _to_numpy(action)[i],
+            )
+
+    def close(self) -> None:
+        """Close any open traces and flush all telemetry to the platform."""
+        for i in self.record_indices:
+            rec = self._rec[i]
+            if rec is not None:
+                rec.close()
+                self._rec[i] = None
+        from hud.telemetry.exporter import flush
+
+        flush()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def _slice_obs(obs: Any | None, i: int) -> dict[str, Any] | None:
+    """One slot's observation as a name->array dict (accepts a dict or a bare batched array)."""
+    if obs is None:
+        return None
+    if isinstance(obs, dict):
+        return {k: _to_numpy(v)[i] for k, v in obs.items()}
+    return {"obs": _to_numpy(obs)[i]}
+
+
+def _slice_frames(frames: dict[str, Any] | None, i: int) -> dict[str, Any] | None:
+    """One slot's camera frames as a name->``HxWxC`` array dict."""
+    if not frames:
+        return None
+    return {name: _to_numpy(arr)[i] for name, arr in frames.items()}
+
+
+def register_live_stream(
+    job_id: str,
+    host: str,
+    port: int,
+    *,
+    media_port: int | None = None,
+    kind: str = "webrtc",
+    path: str | None = None,
+) -> None:
+    """Register a live (WebRTC) stream endpoint for a Job so the platform job page can view it.
+
+    The thin Isaac-side glue for the interactive viewer: the sim enables its WebRTC livestream
+    and calls this once on startup; the platform's job page resolves the endpoint and connects.
+    ``port`` is the signaling port (49100); ``media_port`` is the WebRTC media (UDP) port.
+    Best-effort — a no-op without an API key, and tolerant of the platform endpoint not yet
+    existing.
+    """
+    _report_sync(
+        f"/jobs/{job_id}/live-stream",
+        {"host": host, "port": port, "media_port": media_port, "kind": kind, "path": path},
+    )
+
+
+__all__ = ["EpisodeRecorder", "Recorder", "VecRecorder", "register_live_stream"]

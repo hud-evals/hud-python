@@ -8,6 +8,7 @@ from __future__ import annotations
 # Apply patches to third-party libraries early, before other imports
 from . import patches as _patches  # noqa: F401
 from ._legacy import install as _install_v5_compat
+from .agents.robot.record import Recorder, VecRecorder, register_live_stream
 from .clients import connect
 from .environment import Environment
 from .eval import (
@@ -43,6 +44,7 @@ __all__ = [
     "HostedRuntime",
     "Job",
     "LocalRuntime",
+    "Recorder",
     "Run",
     "Runtime",
     "RuntimeConfig",
@@ -54,8 +56,10 @@ __all__ = [
     "Taskset",
     "Trace",
     "TrainingClient",
+    "VecRecorder",
     "connect",
     "instrument",
+    "register_live_stream",
 ]
 
 try:
