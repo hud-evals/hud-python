@@ -7,6 +7,8 @@ are the agent's declared I/O types.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from hud.environment import Environment
@@ -15,6 +17,14 @@ from hud.environment import Environment
 class _Point(BaseModel):
     x: int
     y: int
+
+
+class _Payload(BaseModel):
+    text: str
+
+
+_Mode = Literal["easy", "hard"]
+_Retries = int | None
 
 
 def test_args_schema_captures_params_defaults_and_required() -> None:
@@ -86,3 +96,19 @@ def test_input_and_returns_schemas_still_published() -> None:
     assert entry["input"]["properties"]["x"]["type"] == "integer"
     assert entry["returns"]["properties"]["y"]["type"] == "integer"
     assert entry["args"]["properties"] == {}
+
+
+def test_args_schema_resolves_postponed_rich_annotations() -> None:
+    env = Environment("manifests")
+
+    @env.template()
+    async def rich(mode: _Mode, payload: _Payload, retries: _Retries = None):
+        yield "go"
+        yield 1.0
+
+    assert callable(rich)
+    schema = env.tasks["rich"].manifest_entry()["args"]
+    assert schema["properties"]["mode"]["enum"] == ["easy", "hard"]
+    assert schema["properties"]["retries"]["default"] is None
+    assert "$ref" in schema["properties"]["payload"]
+    assert set(schema["required"]) == {"mode", "payload"}
