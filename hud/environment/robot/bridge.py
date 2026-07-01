@@ -1,20 +1,26 @@
-"""Env-side ``robot`` bridge: the base class users subclass to wrap their sim.
+"""Env-side ``robot`` bridges: the base classes users subclass to wrap their sim.
 
 The *server* side of the ``robot`` protocol (agent-side client:
-:class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined
-there. Subclass :class:`RobotBridge` and implement ``step`` / ``get_observation`` to
-serve a sim over WebSocket — it steps the sim once per received action.
+:class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined there.
+Three layers, smallest to largest:
 
-An injected :class:`~.sim_runner.SimRunner` owns *which thread runs the
-(thread-affine) sim*, so subclasses stay thread-naive.
+- :class:`RobotBridge` — single-agent, one sim step per received action.
+- :class:`VecRobotBridge` — the same loop but every frame carries batched ``[N, ...]`` arrays
+  (``terminated`` an ``[N]`` mask, action ``[N, A]``), for a vectorized env served in lockstep.
+- :class:`IsaacBridge` — a :class:`VecRobotBridge` that owns an Isaac Lab env: main-thread sim
+  threading, rebuild-on-instance-change, and a :meth:`~IsaacBridge.serve_forever` pump loop.
+
+An injected :class:`~.sim_runner.SimRunner` owns *which thread runs the (thread-affine) sim*,
+so subclasses stay thread-naive.
 """
 
 from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import numpy as np
 import websockets
 import websockets.exceptions
 
@@ -22,10 +28,11 @@ import websockets.exceptions
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
 from hud.capabilities.robot import _packb, _unpackb
 
-from .sim_runner import InlineSimRunner, SimRunner
+from .sim_runner import InlineSimRunner, MainThreadSimRunner, SimRunner
 
-if TYPE_CHECKING:
-    import numpy as np
+# Task args that vary *within* one built Isaac env (cheap reset), vs. env-defining args that
+# need a full rebuild (Isaac bakes assets at construction, so a new family/size is a new env).
+EPISODIC_KEYS = ("seed", "background_id", "instruction_id")
 
 
 class RobotBridge(ABC):
@@ -123,6 +130,10 @@ class RobotBridge(ABC):
         return f"ws://{self._host}:{self._port}"
 
     async def start(self) -> None:
+        # Idempotent: a long-lived bridge serves sequential agents, so re-``start`` (e.g. a
+        # second run against the same sim) is a no-op rather than an EADDRINUSE rebind.
+        if self._server is not None:
+            return
         self._server = await websockets.serve(
             self._handle_client, self._host, self._port, max_size=None, reuse_address=True
         )
@@ -173,4 +184,125 @@ class RobotBridge(ABC):
             await self._client.send(_packb(msg))
 
 
-__all__ = ["RobotBridge"]
+class VecRobotBridge(RobotBridge):
+    """A :class:`RobotBridge` that serves a whole *vectorized* env in lockstep.
+
+    Same single-agent WebSocket loop, but every frame carries batched ``[N, ...]`` arrays
+    and ``terminated`` is an ``[N]`` per-env mask (not a scalar); the agent sends back one
+    ``[N, A]`` action. Subclasses implement the batched :meth:`step` / :meth:`get_observation`
+    (which returns ``(data{name: [N, ...]}, terminated[N])``). The wire codec already carries
+    arrays of any rank, so the only single-env assumption to drop is the scalar ``terminated``.
+    """
+
+    async def _send_observation(self) -> None:
+        if self._client is None:
+            return
+        out = await self._sim_runner.call(self.get_observation)
+        if out is None:
+            return
+        data, terminated = out
+        msg = {**data, "terminated": np.asarray(terminated, dtype=bool)}  # [N] mask, not a scalar
+        with contextlib.suppress(websockets.exceptions.ConnectionClosed):
+            await self._client.send(_packb(msg))
+
+
+class IsaacBridge(VecRobotBridge):
+    """Serve an Isaac Lab env's whole vectorized batch over ``robot``.
+
+    The reusable base for any Isaac Lab / Omniverse benchmark: one process owns one
+    ``num_envs`` env and serves the whole batch in lockstep (``[N, ...]`` obs in, ``[N, A]``
+    action out). It encodes the Isaac gotchas once — Isaac/Omniverse pins the simulator to the
+    **main thread** and ``env.reset()`` nests a ``run_until_complete`` for USD loading, so every
+    sim touch is routed through a :class:`~.sim_runner.MainThreadSimRunner` and executed by
+    :meth:`serve_forever`'s pump loop *outside* any asyncio task.
+
+    **Subclass contract:** implement :meth:`make_env` and :meth:`observe`. Optionally override
+    :meth:`prompt` (defaults to the env's ``instruction``), :meth:`instance_key` (which task
+    args trigger a rebuild), and :meth:`result` (defaults to the env's ``extras["metrics"]``).
+    """
+
+    def __init__(self, *, sim_runner: SimRunner | None = None, **kwargs: Any) -> None:
+        super().__init__(sim_runner=sim_runner or MainThreadSimRunner(), **kwargs)
+        self.env: Any = None
+        self.base: Any = None  # env.unwrapped
+        self._instance: Any = None  # current env-defining key; a mismatch forces a rebuild
+        self._done: np.ndarray | None = None
+
+    # ── subclass hooks ────────────────────────────────────────────────────────
+    @abstractmethod
+    def make_env(self, **task_args: Any) -> Any:
+        """Build (and return) the gym env for the resolved task. Called on the sim thread."""
+
+    @abstractmethod
+    def observe(self) -> dict[str, np.ndarray]:
+        """The current batched observation as ``{contract_key: [N, ...] ndarray}``."""
+
+    def prompt(self) -> str:
+        return self.base.instruction
+
+    def instance_key(self, task_args: dict[str, Any]) -> Any:
+        """The env-defining subset of the task args; a change here rebuilds the env."""
+        return tuple(sorted((k, v) for k, v in task_args.items() if k not in EPISODIC_KEYS))
+
+    # ── bridge protocol (all sim touches run on the main thread) ───────────────
+    async def reset(self, **task_args: Any) -> str:
+        return await self._sim_runner.call(self._sync_reset, task_args)
+
+    def _sync_reset(self, task_args: dict[str, Any]) -> str:
+        key = self.instance_key(task_args)
+        if self.env is None or key != self._instance:
+            if self.env is not None:
+                self.env.close()
+            self.env = self.make_env(**task_args)
+            self.base = self.env.unwrapped
+            self._instance = key
+        self.env.reset(seed=task_args.get("seed"))
+        self._done = np.zeros(self.base.num_envs, dtype=bool)
+        return self.prompt()
+
+    def step(self, action: np.ndarray) -> None:
+        import torch
+
+        # np.array (copy) not asarray: the wire-decoded buffer is read-only, which torch warns on.
+        act = torch.as_tensor(np.array(action, dtype=np.float32), device=self.base.device)
+        _, _, terminated, truncated, _ = self.env.step(act)
+        self._done = (terminated | truncated).detach().cpu().numpy().astype(bool)
+
+    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+        if self.base is None:
+            return None
+        return self.observe(), self._done
+
+    def result(self, **extra: Any) -> dict[str, Any]:
+        """Episode-batch score from the env's ``extras["metrics"]`` (set pre-reset by the env)."""
+        m = dict(self.base.extras.get("metrics", {})) if self.base is not None else {}
+        return {
+            "score": float(m.get("force_penalized_score", m.get("success_rate", 0.0))),
+            "success": float(m.get("success_rate", 0.0)),
+            **m,
+            **extra,
+        }
+
+    # ── serving: own the Kit main thread, drain sim touches between frames ──────
+    def serve_forever(self, simulation_app: Any, *, host: str = "0.0.0.0", port: int = 9100) -> None:
+        """Serve the control endpoint + robot WebSocket on the Kit main thread, blocking for the
+        process lifetime. Each pass services socket IO once, drains queued sim touches (task-free,
+        on main), then pumps Kit — the one loop Isaac and asyncio can share.
+        """
+        import asyncio
+
+        from .endpoint import RobotEndpoint
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(RobotEndpoint(self).serve(host, port))
+        drain = getattr(self._sim_runner, "drain", None)
+        while simulation_app.is_running():
+            loop.run_until_complete(asyncio.sleep(0))  # advance control + robot WS tasks once
+            if drain is not None:
+                drain()  # execute queued sim touches on main, outside any task
+            simulation_app.update()  # pump Kit (renders cameras, steps physics queue)
+        loop.run_until_complete(self.stop())
+
+
+__all__ = ["EPISODIC_KEYS", "IsaacBridge", "RobotBridge", "VecRobotBridge"]
