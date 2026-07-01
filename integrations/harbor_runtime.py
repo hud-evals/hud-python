@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import shlex
 import shutil
 import tempfile
+import tomllib
 import uuid
+from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves this at runtime.
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +19,7 @@ from hud.environment.workspace import Workspace
 from integrations.harbor_common import _hash_directory, _slugify, _task_dirs
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncIterator
 
     import asyncssh
 
@@ -35,7 +38,8 @@ class HarborRuntime:
     The agent receives normal HUD SSH/SFTP access; shell commands execute inside
     the main container via ``docker exec`` while file transfer edits the mounted
     host workspace. Grading runs the Harbor ``tests/test.sh`` inside the same
-    main container and reads ``/logs/verifier/reward.json`` or ``reward.txt``.
+    main container, bounded by the task's ``[verifier] timeout_sec``, and reads
+    ``/logs/verifier/reward.json`` or ``reward.txt``.
     """
 
     def __init__(
@@ -49,7 +53,6 @@ class HarborRuntime:
         self._task_dirs = {task_dir.name: task_dir for task_dir in _task_dirs(self.root)}
         if not self._task_dirs:
             raise ValueError(f"no Harbor tasks found in {path}")
-        self._image_cache: dict[Path, str] = {}
 
     @contextlib.asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
@@ -77,53 +80,26 @@ class HarborRuntime:
 
             compose_file = _compose_file(env_dir)
             if compose_file is not None:
-                async with self._compose_container(
-                    task,
-                    compose_file,
-                    workspace,
-                    tests_dir,
-                    logs,
-                    preserved_paths,
-                ) as (
-                    container,
-                    provider,
-                ):
-                    env = self._environment_for(task, task_dir, workspace, logs, container)
-                    async with _local(env) as runtime:
-                        yield Runtime(
-                            runtime.url,
-                            params={
-                                **runtime.params,
-                                "provider": provider,
-                                "container": container,
-                                "ready_timeout": self.ready_timeout,
-                            },
-                            config=runtime.config,
-                        )
+                acquire = self._compose_container(
+                    task, compose_file, workspace, tests_dir, logs, preserved_paths
+                )
             else:
-                async with self._single_container(
-                    task,
-                    task_dir,
-                    workspace,
-                    tests_dir,
-                    logs,
-                    preserved_paths,
-                ) as (
-                    container,
-                    provider,
-                ):
-                    env = self._environment_for(task, task_dir, workspace, logs, container)
-                    async with _local(env) as runtime:
-                        yield Runtime(
-                            runtime.url,
-                            params={
-                                **runtime.params,
-                                "provider": provider,
-                                "container": container,
-                                "ready_timeout": self.ready_timeout,
-                            },
-                            config=runtime.config,
-                        )
+                acquire = self._single_container(
+                    task, task_dir, workspace, tests_dir, logs, preserved_paths
+                )
+            async with acquire as (container, provider):
+                env = self._environment_for(task, task_dir, workspace, logs, container)
+                async with _local(env) as runtime:
+                    yield Runtime(
+                        runtime.url,
+                        params={
+                            **runtime.params,
+                            "provider": provider,
+                            "container": container,
+                            "ready_timeout": self.ready_timeout,
+                        },
+                        config=runtime.config,
+                    )
 
     @contextlib.asynccontextmanager
     async def _single_container(
@@ -137,8 +113,8 @@ class HarborRuntime:
     ) -> AsyncIterator[tuple[str, str]]:
         from hud.eval.runtime import _docker
 
-        image = await self._image_for(task_dir)
         env_dir = task_dir / "environment"
+        image = await self._build_image(env_dir)
         await _restore_image_generated_files(image, workspace)
         container_name = f"hud-harbor-{_slugify(task.id)}-{uuid.uuid4().hex[:8]}"
         preserved_volume_args = [arg for path in preserved_paths for arg in ("--volume", path)]
@@ -165,10 +141,10 @@ class HarborRuntime:
         try:
             yield container, "harbor"
         finally:
-            await _release_mount_permissions(container)
+            with contextlib.suppress(Exception):
+                await _release_mount_permissions(container)
             await _docker("rm", "--force", "--volumes", container, check=False)
             await _docker("image", "rm", image, check=False)
-            self._image_cache.pop(env_dir, None)
 
     @contextlib.asynccontextmanager
     async def _compose_container(
@@ -195,15 +171,23 @@ class HarborRuntime:
             newline="\n",
         )
         compose_args = ("compose", "-f", str(compose_file), "-f", str(overlay), "-p", project)
-        await _docker(*compose_args, "up", "--detach", "--build")
-        out, _ = await _docker(*compose_args, "ps", "-q", "main")
-        container = out.strip()
-        if not container:
-            raise RuntimeError(f"docker compose project {project} did not create a main service")
+        container = ""
         try:
+            await _docker(*compose_args, "up", "--detach", "--build")
+            out, _ = await _docker(*compose_args, "ps", "-q", "main")
+            container = out.strip()
+            if not container:
+                raise RuntimeError(
+                    f"docker compose project {project} did not create a main service"
+                )
+            if _dockerfile_declared_generated_app_files(workspace):
+                image_out, _ = await _docker("inspect", "--format", "{{.Image}}", container)
+                await _restore_image_generated_files(image_out.strip(), workspace)
             yield container, "harbor-compose"
         finally:
-            await _release_mount_permissions(container)
+            if container:
+                with contextlib.suppress(Exception):
+                    await _release_mount_permissions(container)
             await _docker(
                 *compose_args,
                 "down",
@@ -214,16 +198,11 @@ class HarborRuntime:
                 check=False,
             )
 
-    async def _image_for(self, task_dir: Path) -> str:
+    async def _build_image(self, env_dir: Path) -> str:
         from hud.eval.runtime import _docker
 
-        env_dir = task_dir / "environment"
-        cached = self._image_cache.get(env_dir)
-        if cached is not None:
-            return cached
-        tag = f"hud-harbor:{_hash_directory(env_dir)}"
+        tag = f"hud-harbor:{_hash_directory(env_dir)}-{uuid.uuid4().hex[:8]}"
         await _docker("build", "--tag", tag, str(env_dir))
-        self._image_cache[env_dir] = tag
         return tag
 
     def _environment_for(
@@ -236,6 +215,7 @@ class HarborRuntime:
     ) -> Environment:
         env = Environment(task.env)
         workspace_daemon = _DockerWorkspace(workspace, container=container, guest_path="/app")
+        verifier_timeout = _verifier_timeout(task_dir)
 
         @env.initialize
         async def _up() -> None:
@@ -249,25 +229,42 @@ class HarborRuntime:
         @env.template(id=task.id, description=f"Harbor task {task.id}")
         async def _run_harbor_task() -> AsyncGenerator[Any, Any]:
             answer = yield (task_dir / "instruction.md").read_text(encoding="utf-8")
-            yield await self._grade(container, logs, answer)
+            yield await self._grade(container, logs, answer, verifier_timeout=verifier_timeout)
 
         return env
 
-    async def _grade(self, container: str, logs: Path, answer: Any) -> dict[str, Any]:
-        from hud.eval.runtime import _docker
-
+    async def _grade(
+        self, container: str, logs: Path, answer: Any, *, verifier_timeout: float
+    ) -> dict[str, Any]:
         answer_file = logs / "agent_answer.txt"
         answer_file.parent.mkdir(parents=True, exist_ok=True)
         answer_file.write_text("" if answer is None else str(answer), encoding="utf-8")
-        out, err = await _docker(
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
             "exec",
             "--workdir",
             "/app",
             container,
             "bash",
             "/tests/test.sh",
-            check=False,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        try:
+            out_bytes, err_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=verifier_timeout
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {
+                "score": 0.0,
+                "isError": True,
+                "content": f"Harbor verifier timed out after {verifier_timeout:.0f}s",
+                "info": {"verifier_timeout_sec": verifier_timeout},
+            }
+        out = out_bytes.decode("utf-8", "replace")
+        err = err_bytes.decode("utf-8", "replace")
         reward, info = _read_harbor_reward(logs / "verifier")
         info.update(
             {
@@ -293,8 +290,6 @@ class _DockerWorkspace(Workspace):
         self._container = container
 
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
-        import asyncio
-
         command = process.command or "bash -l"
         proc = await asyncio.create_subprocess_exec(
             "docker",
@@ -329,6 +324,22 @@ class _DockerWorkspace(Workspace):
         process.exit(proc.returncode if proc.returncode is not None else 0)
 
 
+_DEFAULT_VERIFIER_TIMEOUT = 600.0
+
+
+def _verifier_timeout(task_dir: Path) -> float:
+    """The task's ``[verifier] timeout_sec``, or the Harbor default."""
+    try:
+        config: dict[str, Any] = tomllib.loads((task_dir / "task.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return _DEFAULT_VERIFIER_TIMEOUT
+    verifier = config.get("verifier")
+    timeout = verifier.get("timeout_sec") if isinstance(verifier, dict) else None
+    if isinstance(timeout, int | float) and not isinstance(timeout, bool) and timeout > 0:
+        return float(timeout)
+    return _DEFAULT_VERIFIER_TIMEOUT
+
+
 def _read_harbor_reward(verifier_logs: Path) -> tuple[float | None, dict[str, Any]]:
     reward_json = verifier_logs / "reward.json"
     if reward_json.is_file():
@@ -340,12 +351,6 @@ def _read_harbor_reward(verifier_logs: Path) -> tuple[float | None, dict[str, An
                 value = data.get(key)
                 if isinstance(value, int | float):
                     return float(value), {"reward_file": str(reward_json), "reward_json": data}
-            numeric = [float(value) for value in data.values() if isinstance(value, int | float)]
-            if numeric:
-                return sum(numeric) / len(numeric), {
-                    "reward_file": str(reward_json),
-                    "reward_json": data,
-                }
         return None, {"reward_file": str(reward_json), "reward_parse_error": "no numeric reward"}
 
     reward_txt = verifier_logs / "reward.txt"

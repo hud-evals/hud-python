@@ -153,28 +153,75 @@ def test_resolve_placement_runtime_hud_uses_tunnel(
     assert isinstance(placement, HUDRuntime)
 
 
-def test_load_local_taskset_uses_harbor_loader_for_harbor_dirs(tmp_path: Path) -> None:
+def test_load_local_taskset_uses_hud_loader_by_default(tmp_path: Path) -> None:
     _write_harbor_task(tmp_path)
 
-    taskset, source_kind = eval_mod._load_local_taskset(tmp_path)
+    taskset = eval_mod._load_local_taskset(tmp_path, None)
 
-    assert source_kind == "harbor"
+    assert len(taskset) == 0
+
+
+def test_load_local_taskset_hints_harbor_format_on_zero_task_harbor_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_harbor_task(tmp_path)
+    hints: list[str] = []
+    monkeypatch.setattr(eval_mod.hud_console, "hint", lambda message, **_: hints.append(message))
+
+    taskset = eval_mod._load_local_taskset(tmp_path, None)
+
+    assert len(taskset) == 0
+    assert any("--format harbor" in hint for hint in hints)
+
+
+def test_load_local_taskset_rejects_unknown_format(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsupported task source format"):
+        eval_mod._load_local_taskset(tmp_path, "unknown")
+
+
+def test_load_local_taskset_uses_harbor_loader_when_format_is_harbor(tmp_path: Path) -> None:
+    _write_harbor_task(tmp_path)
+
+    taskset = eval_mod._load_local_taskset(tmp_path, "harbor")
+
     assert len(taskset) == 1
     assert taskset["demo-task"].id == "demo-task"
 
 
-def test_resolve_placement_local_harbor_uses_harbor_runtime(tmp_path: Path) -> None:
+def test_resolve_placement_local_harbor_format_uses_harbor_runtime(tmp_path: Path) -> None:
     from integrations.harbor import HarborRuntime
 
     _write_harbor_task(tmp_path)
 
     placement = eval_mod._resolve_placement(
-        EvalConfig(runtime="local"),
+        EvalConfig(runtime="local", format="harbor"),
         tmp_path,
-        source_kind="harbor",
     )
 
     assert isinstance(placement, HarborRuntime)
+
+
+def test_resolve_placement_local_hud_format_uses_local_runtime(tmp_path: Path) -> None:
+    from hud.eval import LocalRuntime
+
+    _write_harbor_task(tmp_path)
+
+    placement = eval_mod._resolve_placement(EvalConfig(runtime="local"), tmp_path)
+
+    assert isinstance(placement, LocalRuntime)
+
+
+def test_harbor_format_rejects_nonlocal_source() -> None:
+    with pytest.raises(typer.Exit):
+        EvalConfig(source="platform/taskset", format="harbor").resolve_runtime()
+
+
+def test_harbor_format_rejects_nonlocal_runtime(tmp_path: Path) -> None:
+    _write_harbor_task(tmp_path)
+
+    with pytest.raises(typer.Exit):
+        EvalConfig(source=str(tmp_path), format="harbor", runtime="hud").resolve_runtime()
 
 
 def test_resolve_placement_remote_uses_hosted_runtime(

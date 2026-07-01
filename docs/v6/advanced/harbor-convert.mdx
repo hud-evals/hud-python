@@ -9,8 +9,9 @@ task dirs - is a *frontend* that loads into the same primitives (`Environment`,
 `Task`, `Taskset`). Integrations are **loaders, not converters**: no codegen
 roundtrip to run foreign tasks. The Harbor integration lives in the SDK repo at
 [`integrations/harbor.py`](https://github.com/hud-evals/hud-python/blob/main/integrations/harbor.py)
-- a recipe built only on the public SDK surface; copy it into your project or
-run it from a checkout.
+- a public-surface loader that maps Harbor folders into SDK primitives. The
+included `HarborRuntime` is maintained with the SDK for local Docker execution;
+copy the loader into your project or run it from a checkout.
 
 ## Prerequisites
 
@@ -44,11 +45,11 @@ from integrations.harbor import HarborRuntime
 job = await taskset.run(agent, runtime=HarborRuntime("./harbor_tasks"))
 ```
 
-The eval CLI also detects local Harbor task directories and datasets when using
-local runtime placement:
+The eval CLI can run local Harbor task directories and datasets when you opt
+into the Harbor source format:
 
 ```bash
-hud eval ./harbor_tasks claude --task-ids cancel-async-tasks --max-steps 30
+hud eval ./harbor_tasks claude --format harbor --task-ids cancel-async-tasks --max-steps 30
 ```
 
 ## Export HUD tasks to Harbor
