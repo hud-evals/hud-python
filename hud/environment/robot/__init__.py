@@ -15,15 +15,17 @@ share the ``robot`` wire codec defined there.
 
 from __future__ import annotations
 
-from .bridge import RobotBridge
+from .bridge import IsaacBridge, RobotBridge, VecRobotBridge
 from .endpoint import RobotEndpoint
 from .sim_runner import InlineSimRunner, MainThreadSimRunner, SimRunner, ThreadSimRunner
 
 __all__ = [
     "InlineSimRunner",
+    "IsaacBridge",
     "MainThreadSimRunner",
     "RobotBridge",
     "RobotEndpoint",
     "SimRunner",
     "ThreadSimRunner",
+    "VecRobotBridge",
 ]

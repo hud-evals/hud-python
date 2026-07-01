@@ -63,6 +63,16 @@ class Adapter:
         """Translate a policy action into the env's action space (default identity)."""
         return action
 
+    def adapt_chunk(self, chunk: ActionArray, obs: dict[str, Any]) -> ActionArray:
+        """Translate a freshly-inferred ``[T, A]`` chunk to env space, given the query-time
+        observation it was inferred from (default identity).
+
+        The vectorized harness calls this once per slot at inference time (not per step), so a
+        chunk expressed relative to the query state — e.g. DROID joint *deltas* that must be
+        added to the query-time joints for absolute targets — can be converted in one shot.
+        """
+        return chunk
+
 
 class LeRobotAdapter(Adapter):
     """Vanilla LeRobot adapter for a standard image/state env.
@@ -89,6 +99,28 @@ class LeRobotAdapter(Adapter):
         return action
 
 
+class VecLeRobotAdapter(LeRobotAdapter):
+    """Batched :class:`LeRobotAdapter` for a vectorized env (:class:`~hud.agents.robot.vec_agent.VecRobotAgent`).
+
+    Same wiring, but the obs arrays carry a leading ``N`` and the whole batch maps in one go:
+    state stays ``[N, S]``, each camera ``[N, H, W, C]`` uint8 becomes ``[N, C, H, W]`` float in
+    ``[0, 1]``, and the shared task is repeated to ``N`` (one prompt per env in the batch).
+    """
+
+    def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
+        import torch  # pyright: ignore[reportMissingImports]
+
+        data = obs["data"]
+        n = len(np.asarray(data[self.state_key]))
+        batch: dict[str, Any] = {
+            "observation.state": torch.from_numpy(np.asarray(data[self.state_key], dtype=np.float32)),
+            "task": [prompt] * n,
+        }
+        for model_key, env_key in zip(self.model_image_keys, self.image_keys, strict=False):
+            batch[model_key] = torch.from_numpy(np.asarray(data[env_key])).permute(0, 3, 1, 2).float() / 255.0
+        return batch
+
+
 class OpenPIAdapter(Adapter):
     """unwraps obs['data'] to OpenPI wire keys, attaches prompt; actions are passthrough"""
 
@@ -102,4 +134,5 @@ __all__ = [
     "Adapter",
     "LeRobotAdapter",
     "OpenPIAdapter",
+    "VecLeRobotAdapter",
 ]

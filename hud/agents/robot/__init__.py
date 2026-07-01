@@ -23,10 +23,11 @@ This subpackage needs the ``robot`` extra (``pip install 'hud[robot]'``) for
 
 from __future__ import annotations
 
-from .adapter import Adapter, LeRobotAdapter, OpenPIAdapter
+from .adapter import Adapter, LeRobotAdapter, OpenPIAdapter, VecLeRobotAdapter
 from .agent import ROBOT_PROTOCOL, RobotAgent
 from .batching import BatchedAgent, BatchedModel
-from .model import LeRobotModel, Model
+from .model import LeRobotModel, Model, RemoteModel
+from .vec_agent import VecRobotAgent
 
 __all__ = [
     "ROBOT_PROTOCOL",
@@ -37,5 +38,8 @@ __all__ = [
     "LeRobotModel",
     "Model",
     "OpenPIAdapter",
+    "RemoteModel",
     "RobotAgent",
+    "VecLeRobotAdapter",
+    "VecRobotAgent",
 ]

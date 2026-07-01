@@ -95,7 +95,9 @@ class RobotClient(CapabilityClient):
         msg = await self._queue.get()
         if "error" in msg:
             raise RuntimeError(f"robot env error:\n{msg['error']}")
-        terminated = bool(msg.pop("terminated", False))
+        # Passthrough (no bool() coercion): a scalar bool for single-env bridges, an [N]
+        # mask for vectorized ones (RobotClient serves both; the wire decides the shape).
+        terminated = msg.pop("terminated", False)
         meta = msg.pop("meta", None)
         out: dict[str, Any] = {"data": msg, "terminated": terminated}
         if meta is not None:

@@ -26,7 +26,7 @@ import numpy as np
 from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
 
-from .record import Recorder
+from .record import EpisodeRecorder
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
@@ -78,7 +78,7 @@ class RobotAgent(Agent):
     _tick: int
     #: Records all telemetry (observation/inference steps + video) and, when ``save``, a
     #: LeRobot dataset. Agent-lifetime (the dataset spans every episode); created lazily.
-    _recorder: Recorder | None = None
+    _recorder: EpisodeRecorder | None = None
 
     def setup_robot(self, client: RobotClient) -> None:
         """Discover the env's action/observation layout and bind the adapter to it."""
@@ -98,7 +98,7 @@ class RobotAgent(Agent):
         # One recorder for the agent's life so its LeRobot dataset spans every episode;
         # begin() opens this episode (fresh video stream, prompt) and takes the run it records onto.
         if self._recorder is None:
-            self._recorder = Recorder(client, save=self.save)
+            self._recorder = EpisodeRecorder(client, save=self.save)
         self._recorder.begin(run, prompt)
         if self.adapter is not None:
             self.adapter.reset()
