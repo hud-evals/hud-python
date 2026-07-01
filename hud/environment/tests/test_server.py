@@ -7,7 +7,10 @@ object, nor a ``{"score": ...}`` dict) instead of silently grading 0.0.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
+from pydantic import BaseModel
 
 from hud.clients import HudProtocolError
 from hud.environment import Answer, Environment
@@ -15,6 +18,13 @@ from hud.eval import Run
 from hud.graders import EvaluationResult
 
 from .conftest import served
+
+
+class _Payload(BaseModel):
+    text: str
+
+
+_Mode = Literal["upper", "lower"]
 
 
 async def test_dict_grade_without_numeric_score_errors_loudly() -> None:
@@ -79,3 +89,34 @@ def test_answer_holds_parsed_content_and_raw_string() -> None:
     answer = Answer(content={"final": "42"}, raw='{"final": "42"}')
     assert answer.content == {"final": "42"}
     assert answer.raw == '{"final": "42"}'
+
+
+async def test_start_coerces_postponed_rich_annotations() -> None:
+    env = Environment("coerce")
+
+    @env.template()
+    async def typed(mode: _Mode, payload: _Payload, retries: int | None = None):
+        if mode == "upper":
+            prompt = payload.text.upper()
+        elif mode == "lower":
+            prompt = payload.text.lower()
+        else:
+            raise ValueError(f"unexpected mode: {mode!r}")
+        if retries is not None:
+            prompt += "!" * retries
+        yield prompt
+        yield 1.0
+
+    assert callable(typed)
+    async with served(env) as client:
+        async with Run(
+            client,
+            "typed",
+            {
+                "mode": '"upper"',
+                "payload": '{"text":"hello"}',
+                "retries": "3",
+            },
+        ) as run:
+            run.trace.content = "x"
+        assert run.prompt == "HELLO!!!"

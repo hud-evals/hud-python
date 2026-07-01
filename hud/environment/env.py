@@ -98,7 +98,7 @@ class _TaskFactory(Generic[P]):
         #: Type the agent must produce (``None`` = plain text). Drives answer
         #: deserialization into ``Answer[T]``.
         self.return_type = returns
-        self.sig = inspect.signature(func)
+        self.sig = inspect.signature(func, eval_str=True)
         functools.update_wrapper(self, func)
 
     def manifest_entry(self) -> dict[str, Any]:
