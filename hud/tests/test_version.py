@@ -5,4 +5,4 @@ def test_import():
     """Test that the package can be imported."""
     import hud
 
-    assert hud.__version__ == "0.6.8.dev1"
+    assert hud.__version__ == "0.6.8"
