@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import textwrap
 from typing import TYPE_CHECKING
 
 import pytest
 
-from integrations.harbor import detect, export, load
+from hud.eval import Task
+from integrations.harbor import HarborRuntime, detect, export, load
+from integrations.harbor_runtime import (
+    _compose_file,
+    _compose_overlay,
+    _dockerfile_declared_generated_app_files,
+    _ensure_dockerfile_created_dirs,
+    _ensure_start_script,
+    _host_path_for_app_file,
+    _preserved_image_paths,
+    _read_harbor_reward,
+    _verifier_timeout,
+)
 
 from .conftest import make_harbor_task
 
@@ -72,6 +86,406 @@ def test_load_skips_unparseable_toml_but_keeps_the_rest(tmp_path: Path) -> None:
 
     # Unparseable config degrades gracefully; the task itself still loads.
     assert {task.id for task in taskset} == {"good", "broken"}
+
+
+def test_harbor_runtime_accepts_dataset_dirs(single_task: Path) -> None:
+    runtime = HarborRuntime(single_task.parent)
+
+    assert single_task.name in runtime._task_dirs
+
+
+async def test_harbor_runtime_builds_unique_images_per_acquisition(
+    single_task: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        calls.append((args, check))
+        return "", ""
+
+    monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
+    runtime = HarborRuntime(single_task.parent)
+
+    first = await runtime._build_image(single_task / "environment")
+    second = await runtime._build_image(single_task / "environment")
+
+    assert first != second
+    assert first.startswith("hud-harbor:")
+    assert second.startswith("hud-harbor:")
+    assert [args[2] for args, _ in calls] == [first, second]
+
+
+async def test_compose_container_cleans_up_after_failed_up(
+    single_task: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = single_task / "environment" / "docker-compose.yaml"
+    compose.write_text("services:\n  main:\n    build: .\n", encoding="utf-8")
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        calls.append((args, check))
+        if args[-3:] == ("up", "--detach", "--build"):
+            raise RuntimeError("compose failed")
+        return "", ""
+
+    monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
+    runtime = HarborRuntime(single_task.parent)
+
+    with pytest.raises(RuntimeError, match="compose failed"):
+        async with runtime._compose_container(
+            Task(env="bench", id=single_task.name),
+            compose,
+            tmp_path / "workspace",
+            single_task / "tests",
+            tmp_path / "logs",
+            [],
+        ):
+            raise AssertionError("compose acquisition should not yield")
+
+    assert any(
+        args[-5:] == ("down", "--volumes", "--remove-orphans", "--rmi", "local") and check is False
+        for args, check in calls
+    )
+
+
+async def test_compose_container_cleans_up_when_main_service_is_missing(
+    single_task: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = single_task / "environment" / "docker-compose.yaml"
+    compose.write_text("services:\n  api:\n    build: .\n", encoding="utf-8")
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        calls.append((args, check))
+        return "", ""
+
+    monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
+    runtime = HarborRuntime(single_task.parent)
+
+    with pytest.raises(RuntimeError, match="did not create a main service"):
+        async with runtime._compose_container(
+            Task(env="bench", id=single_task.name),
+            compose,
+            tmp_path / "workspace",
+            single_task / "tests",
+            tmp_path / "logs",
+            [],
+        ):
+            raise AssertionError("compose acquisition should not yield")
+
+    assert any(
+        args[-5:] == ("down", "--volumes", "--remove-orphans", "--rmi", "local") and check is False
+        for args, check in calls
+    )
+
+
+def test_compose_file_detection_prefers_harbor_names(tmp_path: Path) -> None:
+    env = tmp_path / "environment"
+    env.mkdir()
+    compose = env / "docker-compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+
+    assert _compose_file(env) == compose
+
+
+def test_compose_overlay_mounts_main_workspace_tests_and_logs(tmp_path: Path) -> None:
+    overlay = _compose_overlay(
+        workspace=tmp_path / "workspace",
+        tests_dir=tmp_path / "tests",
+        logs=tmp_path / "logs",
+        preserved_paths=[],
+    )
+
+    assert "main:" in overlay
+    assert 'entrypoint: ["sleep"]' in overlay
+    assert f"{tmp_path / 'workspace'}:/app" in overlay
+    assert f"{tmp_path / 'tests'}:/tests:ro" in overlay
+    assert f"{tmp_path / 'logs'}:/logs" in overlay
+
+
+def test_compose_overlay_preserves_image_dependency_subpaths(tmp_path: Path) -> None:
+    overlay = _compose_overlay(
+        workspace=tmp_path / "workspace",
+        tests_dir=tmp_path / "tests",
+        logs=tmp_path / "logs",
+        preserved_paths=["/app/node_modules"],
+    )
+
+    assert '      - "/app/node_modules"' in overlay
+
+
+def test_preserved_image_paths_detects_node_and_php_dependency_dirs(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "composer.json").write_text("{}", encoding="utf-8")
+
+    assert _preserved_image_paths(tmp_path) == ["/app/node_modules", "/app/vendor"]
+
+
+def test_preserved_image_paths_detects_node_build_output(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text(
+        "FROM node:20-slim\nRUN npm ci\nRUN npm run build\n",
+        encoding="utf-8",
+    )
+
+    assert _preserved_image_paths(tmp_path) == ["/app/node_modules", "/app/dist"]
+
+
+def test_ensure_start_script_recreates_build_generated_entrypoint(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "docker-entrypoint.sh").write_text("echo start\n", encoding="utf-8")
+
+    _ensure_start_script(workspace)
+
+    start = workspace / "start_app.sh"
+    assert start.exists()
+    text = start.read_text(encoding="utf-8")
+    assert "exec sh /app/docker-entrypoint.sh" in text
+
+
+def test_ensure_start_script_preserves_dockerfile_generated_command(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "docker-entrypoint.sh").write_text('exec "$@"\n', encoding="utf-8")
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "RUN printf '%s\\n' '#!/usr/bin/env bash' 'set -e' 'cd /app' "
+        "'exec /app/docker-entrypoint.sh gunicorn --bind 0.0.0.0:8000 src.main:app' "
+        "> /app/start_app.sh && chmod +x /app/start_app.sh\n",
+        encoding="utf-8",
+    )
+
+    _ensure_start_script(workspace)
+
+    text = (workspace / "start_app.sh").read_text(encoding="utf-8")
+    assert "exec /app/docker-entrypoint.sh gunicorn --bind 0.0.0.0:8000 src.main:app" in text
+    assert (workspace / "docker-entrypoint.sh").stat().st_mode & 0o111
+
+
+def test_ensure_start_script_restores_generated_entrypoint(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "RUN printf '#!/bin/sh\\npython -m src.seed --init\\n"
+        "exec uvicorn src.main:app --host 0.0.0.0 --port 8000\\n' "
+        "> /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh\n"
+        "RUN printf '%s\\n' '#!/usr/bin/env bash' 'set -e' 'cd /app' "
+        "'exec /app/docker-entrypoint.sh' > /app/start_app.sh && chmod +x /app/start_app.sh\n",
+        encoding="utf-8",
+    )
+
+    _ensure_start_script(workspace)
+
+    entrypoint = workspace / "docker-entrypoint.sh"
+    assert entrypoint.exists()
+    assert entrypoint.stat().st_mode & 0o111
+    assert "python -m src.seed --init" in entrypoint.read_text(encoding="utf-8")
+    assert "exec /app/docker-entrypoint.sh" in (workspace / "start_app.sh").read_text(
+        encoding="utf-8",
+    )
+
+
+def test_ensure_dockerfile_created_dirs_restores_app_dirs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM node:20-slim\n"
+        "RUN mkdir -p static/uploads /app/tmp/cache && mkdir -p /var/lib/ignored\n",
+        encoding="utf-8",
+    )
+
+    _ensure_dockerfile_created_dirs(workspace)
+
+    assert (workspace / "static" / "uploads").is_dir()
+    assert (workspace / "tmp" / "cache").is_dir()
+    assert not (workspace / "var" / "lib" / "ignored").exists()
+
+
+def test_dockerfile_declared_generated_app_files_detects_seeded_sqlite_db(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "ENV DB_PATH=/app/data/salon_workforce.db\n"
+        "RUN python -m src.seed --init\n",
+        encoding="utf-8",
+    )
+
+    assert _dockerfile_declared_generated_app_files(workspace) == [
+        "/app/data/salon_workforce.db",
+    ]
+    assert _host_path_for_app_file(workspace, "/app/data/salon_workforce.db") == (
+        workspace / "data" / "salon_workforce.db"
+    )
+
+
+def test_dockerfile_declared_generated_app_files_ignores_non_app_or_non_db_paths(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\n"
+        "ENV DB_PATH=/var/lib/app.db CACHE_PATH=/app/cache\n"
+        "ENV SOME_DATABASE_PATH=/app/data/app.txt\n",
+        encoding="utf-8",
+    )
+
+    assert _dockerfile_declared_generated_app_files(workspace) == []
+    assert _host_path_for_app_file(workspace, "/tmp/app.db") is None
+
+
+async def test_compose_container_restores_image_generated_db_files(
+    single_task: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = single_task / "environment" / "docker-compose.yaml"
+    compose.write_text("services:\n  main:\n    build: .\n", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Dockerfile").write_text(
+        "FROM python:3.11-slim\nENV DB_PATH=/app/data/app.db\n", encoding="utf-8"
+    )
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        calls.append(args)
+        if args[0] == "compose" and args[-3:] == ("ps", "-q", "main"):
+            return "maincontainer\n", ""
+        if args[0] == "inspect":
+            return "sha256:mainimage\n", ""
+        if args[0] == "create":
+            return "tempcontainer\n", ""
+        return "", ""
+
+    monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
+    runtime = HarborRuntime(single_task.parent)
+
+    async with runtime._compose_container(
+        Task(env="bench", id=single_task.name),
+        compose,
+        workspace,
+        single_task / "tests",
+        tmp_path / "logs",
+        [],
+    ):
+        pass
+
+    assert ("inspect", "--format", "{{.Image}}", "maincontainer") in calls
+    assert (
+        "cp",
+        "tempcontainer:/app/data/app.db",
+        str(workspace / "data" / "app.db"),
+    ) in calls
+
+
+def test_read_harbor_reward_prefers_reward_and_score_keys(tmp_path: Path) -> None:
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+    (verifier / "reward.json").write_text(json.dumps({"reward": 0.5, "total": 5}), "utf-8")
+
+    reward, info = _read_harbor_reward(verifier)
+
+    assert reward == 0.5
+    assert info["reward_json"] == {"reward": 0.5, "total": 5}
+
+
+def test_read_harbor_reward_rejects_dict_without_reward_or_score(tmp_path: Path) -> None:
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+    (verifier / "reward.json").write_text(json.dumps({"passed": 3, "total": 5}), "utf-8")
+
+    reward, info = _read_harbor_reward(verifier)
+
+    assert reward is None
+    assert info["reward_parse_error"] == "no numeric reward"
+
+
+def test_verifier_timeout_reads_task_toml(single_task: Path) -> None:
+    assert _verifier_timeout(single_task) == 120.0
+
+
+def test_verifier_timeout_defaults_when_missing_or_invalid(tmp_path: Path) -> None:
+    no_verifier = tmp_path / "no-verifier"
+    no_verifier.mkdir()
+    (no_verifier / "task.toml").write_text('[metadata]\ncategory = "systems"\n', "utf-8")
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "task.toml").write_text("not toml [", "utf-8")
+
+    assert _verifier_timeout(no_verifier) == 600.0
+    assert _verifier_timeout(broken) == 600.0
+    assert _verifier_timeout(tmp_path / "missing") == 600.0
+
+
+async def test_grade_reads_reward_after_verifier_completes(
+    single_task: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logs = tmp_path / "logs"
+    (logs / "verifier").mkdir(parents=True)
+    (logs / "verifier" / "reward.txt").write_text("1.0\n", "utf-8")
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"verifier out", b""
+
+    async def fake_exec(*args: str, **kwargs: object) -> FakeProc:
+        assert args[:2] == ("docker", "exec")
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    runtime = HarborRuntime(single_task.parent)
+
+    result = await runtime._grade("container", logs, "done", verifier_timeout=120.0)
+
+    assert result["score"] == 1.0
+    assert result["info"]["stdout"] == "verifier out"
+    assert (logs / "agent_answer.txt").read_text("utf-8") == "done"
+
+
+async def test_grade_times_out_when_verifier_hangs(
+    single_task: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeProc:
+        killed = False
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+        def kill(self) -> None:
+            self.killed = True
+
+        async def wait(self) -> int:
+            return -9
+
+    proc = FakeProc()
+
+    async def fake_exec(*args: str, **kwargs: object) -> FakeProc:
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    runtime = HarborRuntime(single_task.parent)
+
+    result = await runtime._grade("container", tmp_path / "logs", None, verifier_timeout=0.05)
+
+    assert result["isError"] is True
+    assert "timed out" in result["content"]
+    assert proc.killed
 
 
 # ─── export: HUD tasks -> Harbor task folders ───────────────────────────

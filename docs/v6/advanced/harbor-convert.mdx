@@ -9,8 +9,9 @@ task dirs - is a *frontend* that loads into the same primitives (`Environment`,
 `Task`, `Taskset`). Integrations are **loaders, not converters**: no codegen
 roundtrip to run foreign tasks. The Harbor integration lives in the SDK repo at
 [`integrations/harbor.py`](https://github.com/hud-evals/hud-python/blob/main/integrations/harbor.py)
-- a recipe built only on the public SDK surface; copy it into your project or
-run it from a checkout.
+- a public-surface loader that maps Harbor folders into SDK primitives. The
+included `HarborRuntime` is maintained with the SDK for local Docker execution;
+copy the loader into your project or run it from a checkout.
 
 ## Prerequisites
 
@@ -26,22 +27,29 @@ directly - one row per task dir (`id` = the dir name), sharing one declarative
 ```python
 from integrations.harbor import detect, load
 
-assert detect("./terminal-bench")
-taskset = load("./terminal-bench")
+assert detect("./harbor_tasks")
+taskset = load("./harbor_tasks")
 
 for task in taskset:
     print(task.env, task.id)
 ```
 
-Like every task row, the result carries no placement. Run it by supplying one -
-today that means a substrate already serving the control channel
-(`runtime=Runtime(url)`); a docker provider that builds and runs each task's
-`environment/` image is the planned follow-up:
+Like every task row, the result carries no placement. Run it by supplying one.
+For local Docker-backed Harbor execution, use `HarborRuntime`; it builds the
+task's `environment/` image, runs a fresh container, exposes the workspace
+through HUD's normal shell capability, and grades by running `tests/test.sh`:
 
 ```python
-from hud import Runtime
+from integrations.harbor import HarborRuntime
 
-job = await taskset.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
+job = await taskset.run(agent, runtime=HarborRuntime("./harbor_tasks"))
+```
+
+The eval CLI can run local Harbor task directories and datasets when you opt
+into the Harbor source format:
+
+```bash
+hud eval ./harbor_tasks claude --format harbor --task-ids cancel-async-tasks --max-steps 30
 ```
 
 ## Export HUD tasks to Harbor
