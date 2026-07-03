@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import shlex
-import shutil
+import os
 import tempfile
 import tomllib
 import uuid
@@ -30,16 +29,19 @@ if TYPE_CHECKING:
 class HarborRuntime:
     """Run Harbor task directories through HUD's local rollout engine.
 
-    The provider builds the Harbor task's ``environment/`` Docker context, runs
-    a fresh container with a writable host workspace mounted at ``/app``, and
-    serves a small HUD control channel from the host process. If the task ships a
-    ``docker-compose.yaml``/``.yml``, the provider starts it with an overlay that
-    keeps the ``main`` service idle while preserving sidecars such as databases.
-    The agent receives normal HUD SSH/SFTP access; shell commands execute inside
-    the main container via ``docker exec`` while file transfer edits the mounted
-    host workspace. Grading runs the Harbor ``tests/test.sh`` inside the same
-    main container, bounded by the task's ``[verifier] timeout_sec``, and reads
-    ``/logs/verifier/reward.json`` or ``reward.txt``.
+    The provider builds the Harbor task's ``environment/`` Docker context, then
+    materializes the built image's working directory onto a writable host
+    workspace and bind-mounts it back over the same guest path. Because the
+    workspace is the image's actual working directory (source *plus* every file
+    the build generated — start scripts, installed dependencies, compiled output,
+    seeded databases — with their original mode bits), the agent sees exactly
+    what the image would run, and edits made over SFTP are visible to the running
+    process. If the task ships a ``docker-compose.yaml``/``.yml``, the provider
+    starts it with an overlay that keeps the ``main`` service idle while
+    preserving sidecars such as databases. Shell commands execute inside the main
+    container via ``docker exec``. Grading runs the Harbor ``tests/test.sh``
+    inside the same main container, bounded by the task's ``[verifier]
+    timeout_sec``, and reads ``/logs/verifier/reward.json`` or ``reward.txt``.
     """
 
     def __init__(
@@ -56,7 +58,7 @@ class HarborRuntime:
 
     @contextlib.asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        from hud.eval.runtime import Runtime, _local
+        from hud.eval.runtime import Runtime, _docker, _local
 
         task_dir = self._task_dirs.get(task.id)
         if task_dir is None:
@@ -72,23 +74,23 @@ class HarborRuntime:
             tmp_path = Path(tmp)
             workspace = tmp_path / "workspace"
             logs = tmp_path / "logs"
-            shutil.copytree(env_dir, workspace)
-            _ensure_start_script(workspace)
-            _ensure_dockerfile_created_dirs(workspace)
-            preserved_paths = _preserved_image_paths(workspace)
+            workspace.mkdir()
             logs.mkdir(parents=True, exist_ok=True)
+
+            image = await self._build_image(env_dir)
+            workdir = await _image_workdir(image)
+            await _materialize_workspace(image, workspace, workdir)
 
             compose_file = _compose_file(env_dir)
             if compose_file is not None:
+                await _docker("image", "rm", image, check=False)
                 acquire = self._compose_container(
-                    task, compose_file, workspace, tests_dir, logs, preserved_paths
+                    task, compose_file, workspace, workdir, tests_dir, logs
                 )
             else:
-                acquire = self._single_container(
-                    task, task_dir, workspace, tests_dir, logs, preserved_paths
-                )
+                acquire = self._single_container(task, image, workspace, workdir, tests_dir, logs)
             async with acquire as (container, provider):
-                env = self._environment_for(task, task_dir, workspace, logs, container)
+                env = self._environment_for(task, task_dir, workspace, workdir, logs, container)
                 async with _local(env) as runtime:
                     yield Runtime(
                         runtime.url,
@@ -105,35 +107,30 @@ class HarborRuntime:
     async def _single_container(
         self,
         task: Task,
-        task_dir: Path,
+        image: str,
         workspace: Path,
+        workdir: str,
         tests_dir: Path,
         logs: Path,
-        preserved_paths: list[str],
     ) -> AsyncIterator[tuple[str, str]]:
         from hud.eval.runtime import _docker
 
-        env_dir = task_dir / "environment"
-        image = await self._build_image(env_dir)
-        await _restore_image_generated_files(image, workspace)
         container_name = f"hud-harbor-{_slugify(task.id)}-{uuid.uuid4().hex[:8]}"
-        preserved_volume_args = [arg for path in preserved_paths for arg in ("--volume", path)]
         out, _ = await _docker(
             "run",
             "--detach",
             "--name",
             container_name,
             "--workdir",
-            "/app",
+            workdir,
             "--entrypoint",
             "sleep",
             "--volume",
-            f"{workspace}:/app",
+            f"{workspace}:{workdir}",
             "--volume",
             f"{tests_dir}:/tests:ro",
             "--volume",
             f"{logs}:/logs",
-            *preserved_volume_args,
             image,
             "infinity",
         )
@@ -142,7 +139,7 @@ class HarborRuntime:
             yield container, "harbor"
         finally:
             with contextlib.suppress(Exception):
-                await _release_mount_permissions(container)
+                await _release_mount_permissions(container, workdir)
             await _docker("rm", "--force", "--volumes", container, check=False)
             await _docker("image", "rm", image, check=False)
 
@@ -152,21 +149,16 @@ class HarborRuntime:
         task: Task,
         compose_file: Path,
         workspace: Path,
+        workdir: str,
         tests_dir: Path,
         logs: Path,
-        preserved_paths: list[str],
     ) -> AsyncIterator[tuple[str, str]]:
         from hud.eval.runtime import _docker
 
         project = f"hud-harbor-{_slugify(task.id)}-{uuid.uuid4().hex[:8]}"
         overlay = workspace.parent / "compose.hud.yaml"
         overlay.write_text(
-            _compose_overlay(
-                workspace=workspace,
-                tests_dir=tests_dir,
-                logs=logs,
-                preserved_paths=preserved_paths,
-            ),
+            _compose_overlay(workspace=workspace, workdir=workdir, tests_dir=tests_dir, logs=logs),
             encoding="utf-8",
             newline="\n",
         )
@@ -180,14 +172,11 @@ class HarborRuntime:
                 raise RuntimeError(
                     f"docker compose project {project} did not create a main service"
                 )
-            if _dockerfile_declared_generated_app_files(workspace):
-                image_out, _ = await _docker("inspect", "--format", "{{.Image}}", container)
-                await _restore_image_generated_files(image_out.strip(), workspace)
             yield container, "harbor-compose"
         finally:
             if container:
                 with contextlib.suppress(Exception):
-                    await _release_mount_permissions(container)
+                    await _release_mount_permissions(container, workdir)
             await _docker(
                 *compose_args,
                 "down",
@@ -210,11 +199,12 @@ class HarborRuntime:
         task: Task,
         task_dir: Path,
         workspace: Path,
+        workdir: str,
         logs: Path,
         container: str,
     ) -> Environment:
         env = Environment(task.env)
-        workspace_daemon = _DockerWorkspace(workspace, container=container, guest_path="/app")
+        workspace_daemon = _DockerWorkspace(workspace, container=container, guest_path=workdir)
         verifier_timeout = _verifier_timeout(task_dir)
 
         @env.initialize
@@ -229,12 +219,14 @@ class HarborRuntime:
         @env.template(id=task.id, description=f"Harbor task {task.id}")
         async def _run_harbor_task() -> AsyncGenerator[Any, Any]:
             answer = yield (task_dir / "instruction.md").read_text(encoding="utf-8")
-            yield await self._grade(container, logs, answer, verifier_timeout=verifier_timeout)
+            yield await self._grade(
+                container, workdir, logs, answer, verifier_timeout=verifier_timeout
+            )
 
         return env
 
     async def _grade(
-        self, container: str, logs: Path, answer: Any, *, verifier_timeout: float
+        self, container: str, workdir: str, logs: Path, answer: Any, *, verifier_timeout: float
     ) -> dict[str, Any]:
         answer_file = logs / "agent_answer.txt"
         answer_file.parent.mkdir(parents=True, exist_ok=True)
@@ -243,7 +235,7 @@ class HarborRuntime:
             "docker",
             "exec",
             "--workdir",
-            "/app",
+            workdir,
             container,
             "bash",
             "/tests/test.sh",
@@ -340,6 +332,48 @@ def _verifier_timeout(task_dir: Path) -> float:
     return _DEFAULT_VERIFIER_TIMEOUT
 
 
+async def _image_workdir(image: str) -> str:
+    """The image's configured ``WORKDIR``, or ``/app`` when it declares none."""
+    from hud.eval.runtime import _docker
+
+    out, _ = await _docker("image", "inspect", "--format", "{{.Config.WorkingDir}}", image)
+    return out.strip() or "/app"
+
+
+async def _materialize_workspace(image: str, workspace: Path, workdir: str) -> None:
+    """Copy the built image's ``workdir`` onto the host workspace, then own it.
+
+    The ``workdir`` bind mount would otherwise shadow everything the Docker build
+    generated there (start scripts, installed dependencies, compiled output,
+    seeded databases). Copying the image's actual ``workdir`` out first makes the
+    mounted workspace a faithful, editable copy of what the image runs. Files
+    arrive owned by the container's build user; hand them to the host user so the
+    agent can edit them over SFTP and teardown can remove them.
+    """
+    from hud.eval.runtime import _docker
+
+    out, _ = await _docker("create", image, "true")
+    container = out.strip()
+    try:
+        await _docker("cp", f"{container}:{workdir}/.", str(workspace))
+    finally:
+        await _docker("rm", "--force", "--volumes", container, check=False)
+
+    if hasattr(os, "getuid"):
+        await _docker(
+            "run",
+            "--rm",
+            "--volume",
+            f"{workspace}:{workdir}",
+            image,
+            "chown",
+            "-R",
+            f"{os.getuid()}:{os.getgid()}",
+            workdir,
+            check=False,
+        )
+
+
 def _read_harbor_reward(verifier_logs: Path) -> tuple[float | None, dict[str, Any]]:
     reward_json = verifier_logs / "reward.json"
     if reward_json.is_file():
@@ -364,7 +398,7 @@ def _read_harbor_reward(verifier_logs: Path) -> tuple[float | None, dict[str, An
     return None, {}
 
 
-async def _release_mount_permissions(container: str) -> None:
+async def _release_mount_permissions(container: str, workdir: str) -> None:
     """Let the host user delete files that container-root created in mounts."""
     from hud.eval.runtime import _docker
 
@@ -373,7 +407,7 @@ async def _release_mount_permissions(container: str) -> None:
         container,
         "sh",
         "-lc",
-        "chmod -R a+rwX /app /logs 2>/dev/null || true",
+        f"chmod -R a+rwX {workdir} /logs 2>/dev/null || true",
         check=False,
     )
 
@@ -386,299 +420,25 @@ def _compose_file(env_dir: Path) -> Path | None:
     return None
 
 
-def _compose_overlay(
-    *,
-    workspace: Path,
-    tests_dir: Path,
-    logs: Path,
-    preserved_paths: list[str] | None = None,
-) -> str:
-    """Compose override that keeps Harbor's main service idle for agent work."""
-    preserved_paths = preserved_paths or []
-    volume_lines = [
-        f"      - {json.dumps(f'{workspace}:/app')}",
-        f"      - {json.dumps(f'{tests_dir}:/tests:ro')}",
-        f"      - {json.dumps(f'{logs}:/logs')}",
-    ]
-    volume_lines.extend(f"      - {json.dumps(path)}" for path in preserved_paths)
+def _compose_overlay(*, workspace: Path, workdir: str, tests_dir: Path, logs: Path) -> str:
+    """Compose override that keeps Harbor's main service idle for agent work.
+
+    Only ``main`` is touched: it is parked on ``sleep`` with the materialized
+    workspace mounted over its working directory, and the Harbor ``/tests`` and
+    ``/logs`` paths bound in. Every other service (databases, caches) is
+    inherited from the task's own compose file unchanged.
+    """
     return "\n".join(
         [
             "services:",
             "  main:",
-            "    build:",
-            f"      context: {json.dumps(str(workspace))}",
-            "    working_dir: /app",
+            f"    working_dir: {json.dumps(workdir)}",
             '    entrypoint: ["sleep"]',
             '    command: ["infinity"]',
             "    volumes:",
-            *volume_lines,
+            f"      - {json.dumps(f'{workspace}:{workdir}')}",
+            f"      - {json.dumps(f'{tests_dir}:/tests:ro')}",
+            f"      - {json.dumps(f'{logs}:/logs')}",
             "",
         ],
     )
-
-
-def _preserved_image_paths(workspace: Path) -> list[str]:
-    """Image-populated subpaths that should survive the editable ``/app`` mount."""
-    paths: list[str] = []
-    if (workspace / "package.json").is_file():
-        paths.append("/app/node_modules")
-        if _node_build_output_is_image_populated(workspace, "dist"):
-            paths.append("/app/dist")
-    if (workspace / "composer.json").is_file():
-        paths.append("/app/vendor")
-    return paths
-
-
-def _node_build_output_is_image_populated(workspace: Path, dirname: str) -> bool:
-    if (workspace / dirname).exists():
-        return False
-    dockerfile = workspace / "Dockerfile"
-    if not dockerfile.is_file():
-        return False
-    dockerfile_text = dockerfile.read_text(encoding="utf-8")
-    entrypoint = workspace / "docker-entrypoint.sh"
-    entrypoint_text = entrypoint.read_text(encoding="utf-8") if entrypoint.is_file() else ""
-    return (
-        "npm run build" in dockerfile_text
-        or f"/app/{dirname}" in dockerfile_text
-        or f" {dirname}/" in entrypoint_text
-        or f" {dirname}" in entrypoint_text
-    )
-
-
-def _ensure_start_script(workspace: Path) -> None:
-    """Preserve build-generated /app/start_app.sh hidden by the workspace mount."""
-    start = workspace / "start_app.sh"
-    entrypoint = workspace / "docker-entrypoint.sh"
-    if not entrypoint.is_file():
-        _restore_dockerfile_script(workspace, entrypoint, "/app/docker-entrypoint.sh")
-    if entrypoint.is_file():
-        entrypoint.chmod(entrypoint.stat().st_mode | 0o111)
-    if start.exists():
-        start.chmod(start.stat().st_mode | 0o111)
-        return
-    text = _script_from_dockerfile(workspace, "/app/start_app.sh")
-    if text is None and entrypoint.is_file():
-        text = "#!/usr/bin/env bash\nset -e\ncd /app\nexec sh /app/docker-entrypoint.sh\n"
-    if text is None:
-        return
-    start.write_text(text, encoding="utf-8", newline="\n")
-    start.chmod(0o755)
-
-
-def _ensure_dockerfile_created_dirs(workspace: Path) -> None:
-    """Recreate simple Dockerfile-created ``/app`` dirs hidden by the bind mount."""
-    for path in _dockerfile_created_app_dirs(workspace):
-        path.mkdir(parents=True, exist_ok=True)
-
-
-async def _restore_image_generated_files(image: str, workspace: Path) -> None:
-    """Copy selected build-generated files from the image into the workspace.
-
-    Some Harbor images initialize file-backed databases during ``docker build``.
-    The editable ``/app`` bind mount hides those generated files, so copy them
-    out of the built image before starting the task container.
-    """
-    container_paths = _dockerfile_declared_generated_app_files(workspace)
-    if not container_paths:
-        return
-
-    from hud.eval.runtime import _docker
-
-    out, _ = await _docker("create", image, "true")
-    container = out.strip()
-    try:
-        for container_path in container_paths:
-            host_path = _host_path_for_app_file(workspace, container_path)
-            if host_path is None or host_path.exists():
-                continue
-            host_path.parent.mkdir(parents=True, exist_ok=True)
-            await _docker("cp", f"{container}:{container_path}", str(host_path), check=False)
-    finally:
-        await _docker("rm", "--force", "--volumes", container, check=False)
-
-
-def _dockerfile_declared_generated_app_files(workspace: Path) -> list[str]:
-    """Find Dockerfile-declared file-backed DB paths under ``/app``."""
-    dockerfile = workspace / "Dockerfile"
-    if not dockerfile.is_file():
-        return []
-
-    paths: list[str] = []
-    for instruction in _dockerfile_logical_lines(dockerfile.read_text(encoding="utf-8")):
-        stripped = instruction.strip()
-        if not stripped.startswith("ENV "):
-            continue
-        for key, value in _env_pairs(stripped.removeprefix("ENV ").strip()):
-            if not _is_generated_db_env_key(key):
-                continue
-            if _is_app_database_path(value):
-                paths.append(value)
-    return list(dict.fromkeys(paths))
-
-
-def _env_pairs(body: str) -> list[tuple[str, str]]:
-    try:
-        tokens = shlex.split(body)
-    except ValueError:
-        return []
-    if not tokens:
-        return []
-
-    pairs: list[tuple[str, str]] = []
-    if all("=" in token for token in tokens):
-        for token in tokens:
-            key, value = token.split("=", 1)
-            pairs.append((key, value))
-        return pairs
-
-    if len(tokens) >= 2:
-        pairs.append((tokens[0], tokens[1]))
-    return pairs
-
-
-def _is_generated_db_env_key(key: str) -> bool:
-    normalized = key.upper()
-    return normalized in {
-        "DB_PATH",
-        "DATABASE_PATH",
-        "SQLITE_PATH",
-        "SQLITE_DB_PATH",
-        "SQLITE_DATABASE_PATH",
-    } or normalized.endswith(("_DB_PATH", "_DATABASE_PATH", "_SQLITE_PATH"))
-
-
-def _is_app_database_path(path: str) -> bool:
-    lowered = path.lower()
-    return lowered.startswith("/app/") and lowered.endswith((".db", ".sqlite", ".sqlite3"))
-
-
-def _host_path_for_app_file(workspace: Path, container_path: str) -> Path | None:
-    if not container_path.startswith("/app/"):
-        return None
-    rel = container_path.removeprefix("/app/")
-    if rel.startswith("../") or "/../" in rel or rel == "..":
-        return None
-    return workspace / rel
-
-
-def _dockerfile_created_app_dirs(workspace: Path) -> list[Path]:
-    dockerfile = workspace / "Dockerfile"
-    if not dockerfile.is_file():
-        return []
-    paths: list[Path] = []
-    for instruction in _dockerfile_logical_lines(dockerfile.read_text(encoding="utf-8")):
-        stripped = instruction.strip()
-        if not stripped.startswith("RUN "):
-            continue
-        command = stripped.removeprefix("RUN ").strip()
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            continue
-        index = 0
-        while index < len(tokens):
-            if tokens[index] != "mkdir":
-                index += 1
-                continue
-            index += 1
-            while index < len(tokens):
-                token = tokens[index]
-                if token in {"&&", "||", ";"}:
-                    break
-                if token.startswith("-"):
-                    index += 1
-                    continue
-                host_path = _app_dir_from_mkdir_token(workspace, token)
-                if host_path is not None:
-                    paths.append(host_path)
-                index += 1
-    return paths
-
-
-def _app_dir_from_mkdir_token(workspace: Path, token: str) -> Path | None:
-    if not token or any(char in token for char in "$*?["):
-        return None
-    raw = token.rstrip("/")
-    if raw in {"", "."}:
-        return None
-    if raw.startswith("/app/"):
-        rel = raw.removeprefix("/app/")
-    elif raw == "/app":
-        return workspace
-    elif raw.startswith("/"):
-        return None
-    else:
-        rel = raw
-    if rel.startswith("../") or "/../" in rel or rel == "..":
-        return None
-    return workspace / rel
-
-
-def _restore_dockerfile_script(workspace: Path, host_path: Path, container_path: str) -> None:
-    """Restore a Dockerfile-generated script hidden by a bind mount."""
-    text = _script_from_dockerfile(workspace, container_path)
-    if text is None:
-        return
-    host_path.write_text(text, encoding="utf-8", newline="\n")
-    host_path.chmod(0o755)
-
-
-def _script_from_dockerfile(workspace: Path, container_path: str) -> str | None:
-    """Extract a Dockerfile-generated script from a simple ``RUN printf`` command."""
-    dockerfile = workspace / "Dockerfile"
-    if not dockerfile.is_file():
-        return None
-    for instruction in _dockerfile_logical_lines(dockerfile.read_text(encoding="utf-8")):
-        stripped = instruction.strip()
-        if not stripped.startswith("RUN ") or container_path not in stripped:
-            continue
-        command = stripped.removeprefix("RUN ").strip()
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            continue
-        redirect = _redirect_index(tokens, container_path)
-        if redirect is None or redirect < 2 or tokens[0] != "printf":
-            continue
-        text = _script_from_printf_args(tokens[1:redirect])
-        if text is not None:
-            return text
-    return None
-
-
-def _redirect_index(tokens: list[str], target: str) -> int | None:
-    for index, token in enumerate(tokens):
-        if token in {">", ">>"} and index + 1 < len(tokens) and tokens[index + 1] == target:
-            return index
-        if token in {f">{target}", f">>{target}"}:
-            return index
-    return None
-
-
-def _script_from_printf_args(args: list[str]) -> str | None:
-    if not args:
-        return None
-    if args[0] in {"%s\\n", "%s\n"}:
-        if len(args) < 2:
-            return None
-        return "\n".join(args[1:]) + "\n"
-    if len(args) == 1:
-        return args[0].replace("\\r", "\r").replace("\\n", "\n").replace("\\t", "\t")
-    return None
-
-
-def _dockerfile_logical_lines(text: str) -> list[str]:
-    """Join backslash-continued Dockerfile lines for simple instruction parsing."""
-    lines: list[str] = []
-    current = ""
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip()
-        if line.endswith("\\"):
-            current += line[:-1] + " "
-            continue
-        lines.append(current + line)
-        current = ""
-    if current:
-        lines.append(current)
-    return lines

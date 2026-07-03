@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import textwrap
 from typing import TYPE_CHECKING
 
@@ -14,11 +15,8 @@ from integrations.harbor import HarborRuntime, detect, export, load
 from integrations.harbor_runtime import (
     _compose_file,
     _compose_overlay,
-    _dockerfile_declared_generated_app_files,
-    _ensure_dockerfile_created_dirs,
-    _ensure_start_script,
-    _host_path_for_app_file,
-    _preserved_image_paths,
+    _image_workdir,
+    _materialize_workspace,
     _read_harbor_reward,
     _verifier_timeout,
 )
@@ -139,9 +137,9 @@ async def test_compose_container_cleans_up_after_failed_up(
             Task(env="bench", id=single_task.name),
             compose,
             tmp_path / "workspace",
+            "/app",
             single_task / "tests",
             tmp_path / "logs",
-            [],
         ):
             raise AssertionError("compose acquisition should not yield")
 
@@ -172,9 +170,9 @@ async def test_compose_container_cleans_up_when_main_service_is_missing(
             Task(env="bench", id=single_task.name),
             compose,
             tmp_path / "workspace",
+            "/app",
             single_task / "tests",
             tmp_path / "logs",
-            [],
         ):
             raise AssertionError("compose acquisition should not yield")
 
@@ -193,198 +191,66 @@ def test_compose_file_detection_prefers_harbor_names(tmp_path: Path) -> None:
     assert _compose_file(env) == compose
 
 
-def test_compose_overlay_mounts_main_workspace_tests_and_logs(tmp_path: Path) -> None:
+def test_compose_overlay_parks_main_and_mounts_workspace_tests_and_logs(tmp_path: Path) -> None:
     overlay = _compose_overlay(
         workspace=tmp_path / "workspace",
+        workdir="/srv/app",
         tests_dir=tmp_path / "tests",
         logs=tmp_path / "logs",
-        preserved_paths=[],
     )
 
     assert "main:" in overlay
     assert 'entrypoint: ["sleep"]' in overlay
-    assert f"{tmp_path / 'workspace'}:/app" in overlay
+    assert 'working_dir: "/srv/app"' in overlay
+    assert f"{tmp_path / 'workspace'}:/srv/app" in overlay
     assert f"{tmp_path / 'tests'}:/tests:ro" in overlay
     assert f"{tmp_path / 'logs'}:/logs" in overlay
 
 
-def test_compose_overlay_preserves_image_dependency_subpaths(tmp_path: Path) -> None:
-    overlay = _compose_overlay(
-        workspace=tmp_path / "workspace",
-        tests_dir=tmp_path / "tests",
-        logs=tmp_path / "logs",
-        preserved_paths=["/app/node_modules"],
-    )
+async def test_image_workdir_reads_config_working_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        assert args == ("image", "inspect", "--format", "{{.Config.WorkingDir}}", "img")
+        return "/srv/app\n", ""
 
-    assert '      - "/app/node_modules"' in overlay
+    monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
 
-
-def test_preserved_image_paths_detects_node_and_php_dependency_dirs(tmp_path: Path) -> None:
-    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "composer.json").write_text("{}", encoding="utf-8")
-
-    assert _preserved_image_paths(tmp_path) == ["/app/node_modules", "/app/vendor"]
+    assert await _image_workdir("img") == "/srv/app"
 
 
-def test_preserved_image_paths_detects_node_build_output(tmp_path: Path) -> None:
-    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "Dockerfile").write_text(
-        "FROM node:20-slim\nRUN npm ci\nRUN npm run build\n",
-        encoding="utf-8",
-    )
+async def test_image_workdir_defaults_to_app_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        return "\n", ""
 
-    assert _preserved_image_paths(tmp_path) == ["/app/node_modules", "/app/dist"]
+    monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
 
-
-def test_ensure_start_script_recreates_build_generated_entrypoint(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "docker-entrypoint.sh").write_text("echo start\n", encoding="utf-8")
-
-    _ensure_start_script(workspace)
-
-    start = workspace / "start_app.sh"
-    assert start.exists()
-    text = start.read_text(encoding="utf-8")
-    assert "exec sh /app/docker-entrypoint.sh" in text
+    assert await _image_workdir("img") == "/app"
 
 
-def test_ensure_start_script_preserves_dockerfile_generated_command(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "docker-entrypoint.sh").write_text('exec "$@"\n', encoding="utf-8")
-    (workspace / "Dockerfile").write_text(
-        "FROM python:3.11-slim\n"
-        "RUN printf '%s\\n' '#!/usr/bin/env bash' 'set -e' 'cd /app' "
-        "'exec /app/docker-entrypoint.sh gunicorn --bind 0.0.0.0:8000 src.main:app' "
-        "> /app/start_app.sh && chmod +x /app/start_app.sh\n",
-        encoding="utf-8",
-    )
-
-    _ensure_start_script(workspace)
-
-    text = (workspace / "start_app.sh").read_text(encoding="utf-8")
-    assert "exec /app/docker-entrypoint.sh gunicorn --bind 0.0.0.0:8000 src.main:app" in text
-    assert (workspace / "docker-entrypoint.sh").stat().st_mode & 0o111
-
-
-def test_ensure_start_script_restores_generated_entrypoint(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "Dockerfile").write_text(
-        "FROM python:3.11-slim\n"
-        "RUN printf '#!/bin/sh\\npython -m src.seed --init\\n"
-        "exec uvicorn src.main:app --host 0.0.0.0 --port 8000\\n' "
-        "> /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh\n"
-        "RUN printf '%s\\n' '#!/usr/bin/env bash' 'set -e' 'cd /app' "
-        "'exec /app/docker-entrypoint.sh' > /app/start_app.sh && chmod +x /app/start_app.sh\n",
-        encoding="utf-8",
-    )
-
-    _ensure_start_script(workspace)
-
-    entrypoint = workspace / "docker-entrypoint.sh"
-    assert entrypoint.exists()
-    assert entrypoint.stat().st_mode & 0o111
-    assert "python -m src.seed --init" in entrypoint.read_text(encoding="utf-8")
-    assert "exec /app/docker-entrypoint.sh" in (workspace / "start_app.sh").read_text(
-        encoding="utf-8",
-    )
-
-
-def test_ensure_dockerfile_created_dirs_restores_app_dirs(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "Dockerfile").write_text(
-        "FROM node:20-slim\n"
-        "RUN mkdir -p static/uploads /app/tmp/cache && mkdir -p /var/lib/ignored\n",
-        encoding="utf-8",
-    )
-
-    _ensure_dockerfile_created_dirs(workspace)
-
-    assert (workspace / "static" / "uploads").is_dir()
-    assert (workspace / "tmp" / "cache").is_dir()
-    assert not (workspace / "var" / "lib" / "ignored").exists()
-
-
-def test_dockerfile_declared_generated_app_files_detects_seeded_sqlite_db(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "Dockerfile").write_text(
-        "FROM python:3.11-slim\n"
-        "ENV DB_PATH=/app/data/salon_workforce.db\n"
-        "RUN python -m src.seed --init\n",
-        encoding="utf-8",
-    )
-
-    assert _dockerfile_declared_generated_app_files(workspace) == [
-        "/app/data/salon_workforce.db",
-    ]
-    assert _host_path_for_app_file(workspace, "/app/data/salon_workforce.db") == (
-        workspace / "data" / "salon_workforce.db"
-    )
-
-
-def test_dockerfile_declared_generated_app_files_ignores_non_app_or_non_db_paths(
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "Dockerfile").write_text(
-        "FROM python:3.11-slim\n"
-        "ENV DB_PATH=/var/lib/app.db CACHE_PATH=/app/cache\n"
-        "ENV SOME_DATABASE_PATH=/app/data/app.txt\n",
-        encoding="utf-8",
-    )
-
-    assert _dockerfile_declared_generated_app_files(workspace) == []
-    assert _host_path_for_app_file(workspace, "/tmp/app.db") is None
-
-
-async def test_compose_container_restores_image_generated_db_files(
-    single_task: Path,
+async def test_materialize_workspace_copies_image_workdir_and_owns_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    compose = single_task / "environment" / "docker-compose.yaml"
-    compose.write_text("services:\n  main:\n    build: .\n", encoding="utf-8")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / "Dockerfile").write_text(
-        "FROM python:3.11-slim\nENV DB_PATH=/app/data/app.db\n", encoding="utf-8"
-    )
     calls: list[tuple[str, ...]] = []
 
     async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
         calls.append(args)
-        if args[0] == "compose" and args[-3:] == ("ps", "-q", "main"):
-            return "maincontainer\n", ""
-        if args[0] == "inspect":
-            return "sha256:mainimage\n", ""
         if args[0] == "create":
-            return "tempcontainer\n", ""
+            return "tempcid\n", ""
         return "", ""
 
     monkeypatch.setattr("hud.eval.runtime._docker", fake_docker)
-    runtime = HarborRuntime(single_task.parent)
 
-    async with runtime._compose_container(
-        Task(env="bench", id=single_task.name),
-        compose,
-        workspace,
-        single_task / "tests",
-        tmp_path / "logs",
-        [],
-    ):
-        pass
+    await _materialize_workspace("img", workspace, "/app")
 
-    assert ("inspect", "--format", "{{.Image}}", "maincontainer") in calls
-    assert (
-        "cp",
-        "tempcontainer:/app/data/app.db",
-        str(workspace / "data" / "app.db"),
-    ) in calls
+    # Contents of the image's workdir are copied out into the host workspace.
+    assert ("cp", "tempcid:/app/.", str(workspace)) in calls
+    # The throwaway container is removed.
+    assert any(a[0] == "rm" for a in calls)
+    # On POSIX hosts, ownership is handed to the host user via a chown pass.
+    if hasattr(os, "getuid"):
+        assert any(a[0] == "run" and "chown" in a and a[-1] == "/app" for a in calls)
 
 
 def test_read_harbor_reward_prefers_reward_and_score_keys(tmp_path: Path) -> None:
@@ -448,7 +314,7 @@ async def test_grade_reads_reward_after_verifier_completes(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     runtime = HarborRuntime(single_task.parent)
 
-    result = await runtime._grade("container", logs, "done", verifier_timeout=120.0)
+    result = await runtime._grade("container", "/app", logs, "done", verifier_timeout=120.0)
 
     assert result["score"] == 1.0
     assert result["info"]["stdout"] == "verifier out"
@@ -481,7 +347,9 @@ async def test_grade_times_out_when_verifier_hangs(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     runtime = HarborRuntime(single_task.parent)
 
-    result = await runtime._grade("container", tmp_path / "logs", None, verifier_timeout=0.05)
+    result = await runtime._grade(
+        "container", "/app", tmp_path / "logs", None, verifier_timeout=0.05
+    )
 
     assert result["isError"] is True
     assert "timed out" in result["content"]
