@@ -18,6 +18,7 @@ mutable state.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -39,6 +40,20 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
+
+# Tool calls whose arguments never parsed as JSON (usually a completion truncated at the token
+# limit): _dispatch_call answers the call id with an error result so the model can re-issue.
+MALFORMED_TOOL_ARGS_KEY = "__hud_malformed_tool_arguments__"
+
+
+def parse_tool_arguments(raw: str | None, *, tool_name: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError as e:
+        logger.warning("Malformed tool-call arguments for %s: %s", tool_name, e)
+        return {MALFORMED_TOOL_ARGS_KEY: f"{e} in arguments: {(raw or '')[:200]!r}"}
+    return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else {}
+
 
 MessageT = TypeVar("MessageT")
 ConfigT = TypeVar("ConfigT", bound="AgentConfig")
@@ -242,6 +257,22 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         call: MCPToolCall,
         state: RunState[MessageT],
     ) -> MCPToolResult:
+        args_maybe = call.arguments if isinstance(call.arguments, dict) else {}
+        if MALFORMED_TOOL_ARGS_KEY in args_maybe:
+            return MCPToolResult(
+                content=[
+                    mcp_types.TextContent(
+                        type="text",
+                        text=(
+                            f"tool error: arguments for {call.name!r} were not valid JSON "
+                            f"(response likely truncated at the output-token limit): "
+                            f"{args_maybe[MALFORMED_TOOL_ARGS_KEY]}. "
+                            f"Re-issue the tool call with complete JSON arguments."
+                        ),
+                    )
+                ],
+                isError=True,
+            )
         tool = state.tools.get(call.name)
         if tool is None:
             return MCPToolResult(

@@ -6,6 +6,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+import mcp.types as mcp_types
+
 from hud.agents.openai_compatible.agent import OpenAIChatAgent, OpenAIChatRunState
 from hud.agents.types import OpenAIChatConfig
 
@@ -81,3 +83,48 @@ async def test_get_response_error_path() -> None:
     result = await agent.get_response(_state(agent))
     assert result.done is True
     assert result.error is not None and "boom" in result.error
+
+
+async def test_get_response_malformed_tool_args_do_not_crash() -> None:
+    """Truncated arguments must yield a dispatchable sentinel call, not a rollout-killing
+    JSONDecodeError (live Qwen failure: 'Unterminated string starting at line 1 column 13')."""
+    from hud.agents.tool_agent import MALFORMED_TOOL_ARGS_KEY
+
+    tc = SimpleNamespace(
+        type="function",
+        id="c1",
+        function=SimpleNamespace(name="bash", arguments='{"command": "'),
+    )
+    agent = _agent(_response("", [tc]))
+    state = _state(agent)
+    result = await agent.get_response(state)
+    assert result.error is None
+    assert [c.name for c in result.tool_calls] == ["bash"]
+    assert result.tool_calls[0].id == "c1"  # provider still gets a result
+    assert MALFORMED_TOOL_ARGS_KEY in (result.tool_calls[0].arguments or {})
+    assert result.done is False  # the loop continues
+    # the RECORDED assistant message must replay "{}" — a raw malformed arguments string 500s
+    # some backends (Qwen/vLLM re-parse it when templating history)
+    recorded = state.messages[-1]
+    assert recorded["tool_calls"][0]["function"]["arguments"] == "{}"
+
+
+async def test_dispatch_returns_error_result_for_malformed_args() -> None:
+    from hud.agents.tool_agent import MALFORMED_TOOL_ARGS_KEY
+    from hud.types import MCPToolCall
+
+    agent = _agent(_response("", []))
+    state = _state(agent)
+    state.tools = {}
+    call = MCPToolCall(
+        id="c1",
+        name="bash",
+        arguments={MALFORMED_TOOL_ARGS_KEY: "Unterminated string starting at: line 1 column 13"},
+    )
+    result = await agent._dispatch_call(call, state)
+    assert result.isError is True
+    content = result.content[0]
+    assert isinstance(content, mcp_types.TextContent)
+    text = content.text
+    assert "not valid JSON" in text and "Re-issue" in text
+    assert "Unterminated string" in text

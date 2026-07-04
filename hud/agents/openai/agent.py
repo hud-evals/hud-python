@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -24,7 +23,7 @@ from openai.types.responses.response_input_param import (
 )
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
-from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tool_agent import RunState, ToolAgent, parse_tool_arguments
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
 from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
@@ -273,7 +272,9 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                     tool_calls.append(
                         MCPToolCall(
                             name=item.name or "",
-                            arguments=json.loads(item.arguments),
+                            arguments=parse_tool_arguments(
+                                item.arguments, tool_name=item.name or ""
+                            ),
                             id=item.call_id,
                         )
                     )

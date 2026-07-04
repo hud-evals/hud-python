@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -10,7 +9,12 @@ from typing import TYPE_CHECKING, Any, cast
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
-from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tool_agent import (
+    MALFORMED_TOOL_ARGS_KEY,
+    RunState,
+    ToolAgent,
+    parse_tool_arguments,
+)
 from hud.agents.types import AgentStep, OpenAIChatConfig, Sample, Usage
 from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
@@ -170,6 +174,14 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         choice = response.choices[0]
         message = choice.message
         function_calls = [tc for tc in message.tool_calls or [] if tc.type == "function"]
+        tool_calls: list[MCPToolCall] = [
+            MCPToolCall(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=parse_tool_arguments(tc.function.arguments, tool_name=tc.function.name),
+            )
+            for tc in function_calls
+        ]
 
         assistant_message = message.model_dump(exclude_none=True)
         reasoning_content = getattr(message, "reasoning_content", None)
@@ -187,10 +199,17 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
                     "type": "function",
                     "function": {
                         "name": tc.function.name,
-                        "arguments": tc.function.arguments,
+                        # Replaying a malformed arguments string 500s some backends (Qwen/vLLM
+                        # re-parse it when templating history); record "{}" instead — the raw
+                        # string rides in the sentinel and the trace.
+                        "arguments": (
+                            "{}"
+                            if MALFORMED_TOOL_ARGS_KEY in (call.arguments or {})
+                            else tc.function.arguments
+                        ),
                     },
                 }
-                for tc in function_calls
+                for tc, call in zip(function_calls, tool_calls, strict=True)
             ]
         messages.append(cast("ChatCompletionMessageParam", assistant_message))
 
@@ -218,15 +237,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
                 else:
                     chat_state.continuation_token_ids = None
                     chat_state.continuation_message_count = None
-
-        tool_calls: list[MCPToolCall] = []
-        for tc in function_calls:
-            provider_name = tc.function.name
-            raw_args = json.loads(tc.function.arguments or "{}")
-            arguments = cast("dict[str, Any]", raw_args) if isinstance(raw_args, dict) else {}
-            tool_calls.append(
-                MCPToolCall(id=tc.id, name=provider_name, arguments=arguments),
-            )
 
         usage: Usage | None = None
         if response.usage is not None:
