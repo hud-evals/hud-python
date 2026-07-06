@@ -7,7 +7,6 @@ MCP-server hot-reload / Docker / inspector mode is no longer supported.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -60,10 +59,10 @@ def _serve_environment(env: Any, host: str, port: int) -> None:
         highlight=False,
     )
     hud_console.hint("Press Ctrl+C to stop.")
-    from hud.environment.server import serve
+    from hud.environment.server import serve_blocking
 
     try:
-        asyncio.run(serve(env, host, port))
+        serve_blocking(env, host, port)
     except KeyboardInterrupt:
         hud_console.info("Stopped.")
 
