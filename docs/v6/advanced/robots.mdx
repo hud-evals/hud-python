@@ -204,7 +204,7 @@ async def pick_and_place(task_id: str, seed: int = 0):
 ```
 
 The result dict carries a `"slots"` list with one score dict per env slot (a single env is a batch
-of one). Aggregates sit at the top; the [grouped eval](#vectorized-envs-and-grouped-evals) path
+of one). Aggregates sit at the top; the [vectorized eval](#vectorized-envs-and-evals) path
 grades each trace from its slot.
 
 ## Agent side
@@ -297,15 +297,16 @@ into a single stacked forward.
 ```python
 from hud.agents.robot.batching import BatchedAgent
 
-agent = BatchedAgent(MyRobotAgent(), batch_size=8)   # set batch_size to your max_concurrent
+agent = BatchedAgent(MyRobotAgent())   # sizes itself to the live concurrency
 
 job = await taskset.run(agent, runtime=DockerRuntime("hud-libero-env"), max_concurrent=8)
 ```
 
-Each tick, up to `batch_size` concurrent observations are stacked into one `[N, ...]` batch, run
-through a single forward, and scattered back to each rollout; a short `max_wait_s` (default 50 ms)
-flushes early when fewer rollouts are live, so the tail of a suite never stalls. Set `batch_size` to
-match `max_concurrent` so a full batch can form.
+Each tick, the concurrent observations queued within a short window (`max_wait_s`, default 50 ms)
+are stacked into one `[N, ...]` batch, run through a single forward, and scattered back to each
+rollout - so the batch is as wide as whatever is in flight, and the tail of a suite never stalls.
+`max_concurrent` already bounds the width; pass `batch_size=` only to cap the forward below it
+(e.g. VRAM headroom).
 
 `BatchedAgent` needs an **in-process, stateless** model whose `infer` runs the whole `[N, ...]` batch
 in one forward - `LeRobotModel` qualifies. A remote OpenPI policy server is not supported (its protocol
@@ -313,7 +314,7 @@ has no batched-request shape); run one agent per rollout against it instead. `Ba
 ownership of the agent you pass (it swaps in the batched model in place), so give it a dedicated
 instance rather than one you also use for unbatched runs.
 
-## Vectorized envs and grouped evals
+## Vectorized envs and evals
 
 A GPU sim like Isaac runs many env copies in one instance, so batching at the model isn't enough -
 the *environment itself* is vectorized. Three roles stay decoupled:
@@ -339,6 +340,23 @@ job = await taskset.run(
 Distinct from `group` - statistical repeats as separate instances - and they compose:
 `group=3, num_envs=5` is 3 instances x 5 traces per task. Grading is per slot: the engine reads
 the template result's `"slots"` list and grades trace `i` from `slots[i]`.
+
+### Run parameters
+
+Everything about *how* an eval executes lives on `Taskset.run` (the future `hud eval` CLI maps
+onto the same parameters):
+
+| Parameter | What it determines |
+|-----------|--------------------|
+| `runtime` | *Where* each instance runs: a provider (`Runtime(url)`, `LocalRuntime`, `DockerRuntime`, ...) acquired once per instance, or `HostedRuntime` to delegate rollouts to the platform. Unset: local source if the tasks share one, else the HUD tunnel. |
+| `group` | Statistical repeats: each task runs as `group` *independent instances* (own runtime, reset, connection). Without `num_envs` the repeats share a `group_id`. |
+| `num_envs` | Slots per instance: each task runs as *one vectorized instance* whose N seeded perturbations become N graded traces sharing a `group_id`. Composes with `group` (instances x slots). Needs a `drive`-capable agent and a self-managed runtime. |
+| `max_concurrent` | How many *instances* are in flight at once - it never counts slots. |
+| `rollout_timeout` | Wall-clock cap (seconds) per instance on the local path; a breach errors that instance's run(s) without stalling the batch. |
+| `job` | An open `Job` to accumulate into, so one platform job spans several `run(...)` calls (e.g. a training arc). Unset: a fresh job per call. |
+
+Runs produced per task = `group` x `num_envs` (each defaulting to 1). Everything about *what* runs
+stays on the task rows (task args) and the agent - the run parameters never change task content.
 
 ## Contract
 
