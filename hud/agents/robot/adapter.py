@@ -79,17 +79,18 @@ class LeRobotAdapter(Adapter):
     """
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
+        torch_mod: Any = torch  # torch ships no stubs; keep strict mode quiet
         data = obs["data"]
         state = np.asarray(data[self.state_key], dtype=np.float32)
         batched = state.ndim > 1  # [N, S] vs [S]
         batch: dict[str, Any] = {
-            "observation.state": torch.from_numpy(state),
+            "observation.state": torch_mod.from_numpy(state),
             "task": [prompt] * len(state) if batched else prompt,
         }
         for model_key, env_key in zip(self.model_image_keys, self.image_keys, strict=False):
-            img = torch.from_numpy(np.asarray(data[env_key]))
+            img = torch_mod.from_numpy(np.asarray(data[env_key]))
             perm = (0, 3, 1, 2) if batched else (2, 0, 1)
             batch[model_key] = img.permute(*perm).float() / 255.0
         return batch
