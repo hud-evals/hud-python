@@ -22,7 +22,7 @@ from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
-from .run import rollout, rollout_group
+from .run import rollout, vec_rollout
 from .runtime import HostedRuntime, HUDRuntime, LocalRuntime, _declared_env, _declared_names
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
@@ -269,7 +269,7 @@ class Taskset:
         one id. Returned ``job.runs`` preserves expansion order (task-major,
         then group).
 
-        ``num_envs`` selects grouped execution (:func:`~hud.eval.run.rollout_group`):
+        ``num_envs`` selects vectorized execution (:func:`~hud.eval.run.vec_rollout`):
         each task instance runs one *vectorized* env whose N slots (each its own
         seeded perturbation) become N graded traces sharing a group_id. Distinct
         from ``group`` — statistical repeats as separate instances — and they
@@ -322,15 +322,15 @@ class Taskset:
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
         if num_envs is not None and isinstance(placement, HostedRuntime):
-            raise ValueError("num_envs (grouped rollouts) requires a self-managed runtime")
+            raise ValueError("num_envs (vectorized rollouts) requires a self-managed runtime")
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> list[Run]:
             assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
                 return [await placement.run(task, agent, job_id=job_id, group_id=group_id)]
-            if num_envs is not None:  # grouped: one instance -> num_envs graded runs
-                return await rollout_group(
+            if num_envs is not None:  # vectorized: one instance -> num_envs graded runs
+                return await vec_rollout(
                     task,
                     agent,
                     runtime=placement,

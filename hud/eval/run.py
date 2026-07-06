@@ -415,7 +415,7 @@ async def rollout(
     return run
 
 
-async def rollout_group(
+async def vec_rollout(
     task: Task,
     agent: Any,
     *,
@@ -425,25 +425,23 @@ async def rollout_group(
     group_id: str | None = None,
     rollout_timeout: float | None = None,
 ) -> list[Run]:
-    """Drive one env instance's ``num_envs`` slots to graded runs (one group).
+    """Drive one vectorized env instance to ``num_envs`` graded runs.
 
-    The grouped counterpart of :func:`rollout`, domain-agnostic: one runtime,
-    one task start (``num_envs`` is injected into the task args — an env whose
-    template doesn't accept it fails loudly), then the agent drives every slot
-    over one connection via its ``drive(runs, client)`` entry, and the grade's
-    ``"slots"`` list (one dict per slot, the soft convention grouped envs
-    return) grades each run. The runs are *receipts*: the agent records spans
-    onto the trace ids minted here; this atom owns trace lifecycle and grading.
-
-    A future scheduler may pack *different* compatible tasks into one
-    instance's slots; the atom's task -> runs shape already permits it.
+    The vectorized counterpart of :func:`rollout`, still domain-agnostic: one
+    runtime, one task start (``num_envs`` injected into the task args; an env
+    whose template doesn't accept it fails loudly), the agent's
+    ``drive(runs, client)`` entry drives every slot over one connection, and
+    the grade's ``"slots"`` list grades run ``i``. The runs are *receipts* —
+    this atom owns trace lifecycle and grading. Its task -> runs shape also
+    permits a future scheduler packing different compatible tasks into one
+    instance's slots.
     """
     if not hasattr(agent, "drive"):
         raise TypeError(
-            f"{type(agent).__name__} cannot drive a grouped rollout "
+            f"{type(agent).__name__} cannot drive a vectorized rollout "
             "(needs a drive(runs, client) entry, e.g. hud.agents.robot.RobotAgent)"
         )
-    if job_id is None:  # a lone grouped rollout is a job of one instance
+    if job_id is None:  # a lone vectorized rollout is a job of one instance
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     group_id = group_id or uuid.uuid4().hex
@@ -476,8 +474,10 @@ async def rollout_group(
             for run in runs:
                 run.prompt = prompt
                 run._runtime = addr.url
-                await trace_enter(run.trace_id, job_id=job_id, group_id=group_id, model=None)
-                with set_trace_context(run.trace_id):  # opening user step per trace
+                tid = run.trace.trace_id
+                assert tid is not None  # minted above
+                await trace_enter(tid, job_id=job_id, group_id=group_id, model=None)
+                with set_trace_context(tid):  # opening user step per trace
                     run.record(Step(source="user", messages=run.prompt_messages))
             _phase = "agent loop"
             await _bounded(agent.drive(runs, client))
@@ -487,7 +487,7 @@ async def rollout_group(
             if len(slots) != num_envs:
                 raise ValueError(
                     f"grade returned {len(slots)} slots for {num_envs} envs "
-                    "(grouped envs must return one 'slots' entry per slot)"
+                    "(vectorized envs must return one 'slots' entry per slot)"
                 )
             for run, slot in zip(runs, slots, strict=True):
                 run.grade = Grade.from_dict(slot)
@@ -498,7 +498,7 @@ async def rollout_group(
             if isinstance(exc, TimeoutError) and rollout_timeout
             else str(exc)
         )
-        logger.warning("grouped rollout failed (%s): %s", _phase, detail)
+        logger.warning("vectorized rollout failed (%s): %s", _phase, detail)
         for run in runs:
             run.trace.status = "error"
             run.record(Step(source="system", error=f"[{_phase}] {detail}"))
@@ -507,4 +507,4 @@ async def rollout_group(
     return runs
 
 
-__all__ = ["Grade", "Run", "rollout", "rollout_group"]
+__all__ = ["Grade", "Run", "rollout", "vec_rollout"]
