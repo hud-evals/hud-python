@@ -9,8 +9,8 @@ one connection (one batched forward per refill).
 Two entries, one loop:
 
 - ``__call__(run)`` — the generic rollout contract (one run, one trace).
-- ``drive(runs, client)`` — the grouped-eval entry
-  (:func:`hud.eval.run.rollout_group`): N runs sharing one env instance, spans
+- ``drive(runs, client)`` — the vectorized-eval entry
+  (:func:`hud.eval.run.vec_rollout`): N runs sharing one env instance, spans
   recorded per slot onto each run's trace.
 
 Most policies use :class:`~.adapter.LeRobotAdapter`; a policy whose spaces
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
     from hud.eval.run import Run
 
-    from .adapter import Adapter
+    from .adapter import ActionArray, Adapter
     from .model import Model
 
 ROBOT_PROTOCOL = "openpi/0"
@@ -98,9 +98,9 @@ class RobotAgent(Agent):
             fps = robot.get_control_rate()
             recorders = [
                 # A live run (single path) records through it so steps land on
-                # run.trace for training; grouped receipts emit by trace id.
+                # run.trace for training; vectorized receipts emit by trace id.
                 TraceRecorder(run=r, fps=fps, obs_space=obs_space)
-                if r._client is not None
+                if r._client is not None  # pyright: ignore[reportPrivateUsage]
                 else TraceRecorder(trace_id=r.trace_id, fps=fps, obs_space=obs_space)
                 for r in runs
             ]
@@ -142,15 +142,18 @@ class RobotAgent(Agent):
         max_steps: int,
     ) -> None:
         """One batched forward per refill; execute chunks open-loop per slot."""
+        model = self.model
+        assert model is not None  # checked in drive()
         adapter = self.adapter
         n = len(recorders)
-        chunks: list[deque[np.ndarray]] = [deque() for _ in range(n)]
+        chunks: list[deque[ActionArray]] = [deque() for _ in range(n)]
         ever_done = np.zeros(n, dtype=bool)
 
         for step in range(max_steps):
             done = np.atleast_1d(np.asarray(obs["terminated"], dtype=bool)).reshape(-1)
-            for i in np.nonzero(done)[0]:  # a reset slot re-infers for its new episode
-                chunks[i].clear()
+            for c, d in zip(chunks, done, strict=True):
+                if d:  # a reset slot re-infers for its new episode
+                    c.clear()
             ever_done |= done
             if step and ever_done.all():
                 print(f"[agent] all slots terminated at step {step}", flush=True)
@@ -169,9 +172,9 @@ class RobotAgent(Agent):
                 if n == 1:
                     # ainfer is the coalescing point for cross-rollout batching
                     # (BatchedModel), so the single slot goes through it.
-                    chunk = np.atleast_2d(await self.model.ainfer(batch))[None]  # [1, T, A]
+                    chunk = np.atleast_2d(await model.ainfer(batch))[None]  # [1, T, A]
                 else:
-                    chunk = np.asarray(await asyncio.to_thread(self.model.infer, batch))
+                    chunk = np.asarray(await asyncio.to_thread(model.infer, batch))
                 for i, c in enumerate(chunks):
                     if not c:
                         rows = chunk[i]
@@ -181,7 +184,7 @@ class RobotAgent(Agent):
                         c.extend(rows)
                         recorders[i].record_inference(rows, tick=step)
 
-            raw = [chunks[i].popleft() for i in range(n)]
+            raw: list[ActionArray] = [chunks[i].popleft() for i in range(n)]
             if adapter is not None:  # per-step execution-time hook (default identity)
                 raw = [
                     adapter.adapt_action(a, {"data": {k: v[i] for k, v in data.items()}})
