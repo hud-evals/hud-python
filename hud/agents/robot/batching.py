@@ -25,10 +25,13 @@ if TYPE_CHECKING:
 class BatchedModel(Model):
     """Coalesce concurrent ``ainfer`` calls into one stacked ``inner.infer``.
 
-    A lazily-started worker drains up to ``batch_size`` queued calls (or waits up to
-    ``max_wait_s`` for stragglers — which avoids stalling when fewer rollouts are live,
-    e.g. the tail of a suite), stacks them into one ``[N, ...]`` batch, runs a single
-    forward, and scatters the ``[N, T, A]`` rows back to each caller.
+    A lazily-started worker waits up to ``max_wait_s`` for callers to queue, stacks
+    them into one ``[N, ...]`` batch, runs a single forward, and scatters the
+    ``[N, T, A]`` rows back to each caller. With no ``batch_size`` the batch sizes
+    itself to whatever is in flight — the scheduler's ``max_concurrent`` already
+    bounds that, so the two never need manual pairing. Pass ``batch_size`` only to
+    cap the forward below the live concurrency (e.g. VRAM headroom); a set cap also
+    flushes the window early once reached, saving the tail of ``max_wait_s``.
 
     ``inner`` must be an in-process, stateless model whose :meth:`~Model.infer` runs the
     whole ``[N, ...]`` batch in one forward (e.g. :class:`~hud.agents.robot.model.LeRobotModel`).
@@ -37,9 +40,11 @@ class BatchedModel(Model):
     batch would be mis-sent as a single env. Run one agent per rollout against it instead.
     """
 
-    def __init__(self, inner: Model, *, batch_size: int, max_wait_s: float = 0.05) -> None:
+    def __init__(
+        self, inner: Model, *, batch_size: int | None = None, max_wait_s: float = 0.05
+    ) -> None:
         self.inner = inner
-        self.batch_size = int(batch_size)
+        self.batch_size = None if batch_size is None else int(batch_size)
         self.max_wait_s = float(max_wait_s)
         # Bound to the running loop on first ainfer (the harness owns the loop).
         self._queue: asyncio.Queue[tuple[Any, asyncio.Future[ActionArray]]] | None = None
@@ -64,7 +69,7 @@ class BatchedModel(Model):
         while True:
             items = [await self._queue.get()]  # block for the first caller
             deadline = loop.time() + self.max_wait_s
-            while len(items) < self.batch_size:
+            while self.batch_size is None or len(items) < self.batch_size:
                 timeout = deadline - loop.time()
                 if timeout <= 0:
                     break
@@ -111,7 +116,9 @@ class BatchedAgent(Agent):
     also use that same instance for direct, unbatched :class:`RobotAgent` rollouts.
     """
 
-    def __init__(self, agent: RobotAgent, *, batch_size: int, max_wait_s: float = 0.05) -> None:
+    def __init__(
+        self, agent: RobotAgent, *, batch_size: int | None = None, max_wait_s: float = 0.05
+    ) -> None:
         if agent.model is None:
             raise RuntimeError("BatchedAgent needs agent.model set")
         self._template = agent
