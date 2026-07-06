@@ -108,7 +108,7 @@ class RobotBridge(ABC):
     def result(self) -> dict[str, Any]:
         """The episode grade: per-slot dicts under ``"slots"``, means at the top.
 
-        The grouped eval path grades each trace from ``slots[i]``; single-result
+        The vectorized eval path grades each trace from ``slots[i]``; single-result
         consumers read the aggregate ``score``/``success`` unchanged.
         """
         slots = self.result_slots()
