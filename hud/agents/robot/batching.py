@@ -18,7 +18,7 @@ from .model import Model
 if TYPE_CHECKING:
     from hud.eval.run import Run
 
-    from ._types import ActionArray
+    from .adapter import ActionArray
     from .agent import RobotAgent
 
 
@@ -97,11 +97,10 @@ class BatchedModel(Model):
 class BatchedAgent(Agent):
     """Drive many rollouts concurrently against one shared, batched model.
 
-    Per run: a shallow clone of ``agent`` (its own episode state) sharing a per-run
-    adapter copy and the single :class:`BatchedModel`, so concurrent ``ainfer`` calls
-    coalesce into one forward. Relies on the agent keeping per-run state out of
-    ``__init__`` (assigned in ``on_episode_start``) so the clones stay isolated, and on
-    the model being stateless (no per-episode ``reset``) since it is shared across clones.
+    Per run: a shallow clone of ``agent`` sharing a per-run adapter copy and the
+    single :class:`BatchedModel`, so concurrent ``ainfer`` calls coalesce into one
+    forward. The adapter copy keeps per-env bindings isolated; the model is
+    stateless by contract, so sharing it across clones is safe.
 
     Requires an in-process batchable model; :class:`~hud.agents.robot.model.RemoteModel`
     is not supported (the OpenPI server protocol has no batched-request shape).

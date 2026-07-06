@@ -1,45 +1,38 @@
-"""Robot agent harness: drive a ``robot`` capability with a policy.
+"""Agent-side robot harness: drive a ``robot`` env with a VLA policy.
 
-The harness splits a policy rollout into three seams, each replaceable on its own:
+- :class:`~.agent.RobotAgent` — the harness: connects to the ``robot``
+  capability, reads the contract, drives N >= 1 env slots with one open-loop
+  chunk queue. Subclass and set ``self.model`` + ``self.adapter``.
+- :class:`~.model.Model` / :class:`~.model.LeRobotModel` /
+  :class:`~.model.RemoteModel` — the policy and its inference mechanics.
+- :class:`~.adapter.Adapter` / :class:`~.adapter.LeRobotAdapter` /
+  :class:`~.adapter.OpenPIAdapter` — env <-> policy space translation.
+- :class:`~.batching.BatchedAgent` — many concurrent single-env rollouts
+  sharing one batched model.
+- :class:`~.dataset.DatasetWriter` — opt-in LeRobot v3 dataset recording
+  (``agent.save = True``).
 
-- :class:`~hud.agents.robot.agent.RobotAgent` — the loop: connect to the env's
-  ``robot`` capability, observe, act, stop.
-- :class:`~hud.agents.robot.model.Model` — *how to run* the policy (preprocess →
-  forward → postprocess). :class:`~hud.agents.robot.model.LeRobotModel` ships the
-  LeRobot checkpoint convention.
-- :class:`~hud.agents.robot.adapter.Adapter` — translate between the env's
-  observation/action spaces (from the contract) and the policy's.
-
-Wrap an agent in :class:`~hud.agents.robot.batching.BatchedAgent` to run many rollouts
-concurrently off one batched GPU forward (``max_concurrent`` rollouts, shared model).
-
-Per-tick platform tracing is emitted by the loop itself: each step records an
-:class:`~hud.agents.types.ObservationStep`, and each re-inference an
-:class:`~hud.agents.types.InferenceStep`, so runs stream live into the HUD trace viewer.
-
-This subpackage needs the ``robot`` extra (``pip install 'hud[robot]'``) for
-``numpy`` + ``msgpack``; importing :mod:`hud.agents` alone never pulls them in.
+This subpackage needs the ``robot`` extra (``pip install 'hud[robot]'``).
 """
 
 from __future__ import annotations
 
-from .adapter import Adapter, LeRobotAdapter, OpenPIAdapter, VecLeRobotAdapter
+from .adapter import Adapter, LeRobotAdapter, OpenPIAdapter
 from .agent import ROBOT_PROTOCOL, RobotAgent
 from .batching import BatchedAgent, BatchedModel
+from .dataset import DatasetWriter
 from .model import LeRobotModel, Model, RemoteModel
-from .vec_agent import VecRobotAgent
 
 __all__ = [
     "ROBOT_PROTOCOL",
     "Adapter",
     "BatchedAgent",
     "BatchedModel",
+    "DatasetWriter",
     "LeRobotAdapter",
     "LeRobotModel",
     "Model",
     "OpenPIAdapter",
     "RemoteModel",
     "RobotAgent",
-    "VecLeRobotAdapter",
-    "VecRobotAgent",
 ]
