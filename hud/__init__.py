@@ -61,6 +61,15 @@ __all__ = [
 ]
 
 
+def __getattr__(name: str) -> object:
+    # Lazy: hud.wrap pulls in the robot extra (numpy, websockets) only when used.
+    if name == "wrap":
+        from .environment.robot import wrap
+
+        return wrap
+    raise AttributeError(f"module 'hud' has no attribute {name!r}")
+
+
 try:
     from .version import __version__
 except ImportError:

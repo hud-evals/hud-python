@@ -1,31 +1,36 @@
-"""Env-side robot runtime: the ``robot`` bridge + its building blocks.
+"""Env-side robot runtime: bridges, the control endpoint, and gym integration.
 
-This package holds everything an *environment* needs to own a simulator and serve it to
-an agent over the ``robot`` WebSocket protocol:
+Everything an *environment* needs to own a simulator and serve it to an agent
+over the ``robot`` WebSocket protocol:
 
-- :class:`~hud.environment.robot.bridge.RobotBridge` — the server-side (synchronous)
-  bridge: one sim step per received action.
-- :class:`~hud.environment.robot.sim_runner.SimRunner` (``Inline`` / ``Thread`` /
-  ``MainThread``) — the strategy for *which thread* runs the thread-affine simulator.
+- :class:`~.bridge.RobotBridge` — the batched-first bridge base (``num_envs``
+  slots in lockstep; a plain single env is a batch of one).
+- :class:`~.bridge.GymBridge` / :class:`~.gym.Gym` — the generic gym-factory
+  path (``env.gym(make_env)``): contract derivation, capability, episode control.
+- :class:`~.endpoint.RobotEndpoint` — the control handle, local or remote.
+- :func:`hud.wrap` (:mod:`~.wrap`) — one-line trace streaming for any gym env.
+- :class:`~.sim_thread.SimThread` — the one process shape: the sim owns the
+  main thread, serving runs on a background loop thread.
 
-The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives under
-:mod:`hud.capabilities` (it is a capability *client*, dialed by the agent); these two ends
-share the ``robot`` wire codec defined there.
+The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives
+under :mod:`hud.capabilities`; both ends share the wire codec defined there.
 """
 
 from __future__ import annotations
 
-from .bridge import IsaacBridge, RobotBridge, VecRobotBridge
+from .bridge import GymBridge, RobotBridge
 from .endpoint import RobotEndpoint
-from .sim_runner import InlineSimRunner, MainThreadSimRunner, SimRunner, ThreadSimRunner
+from .gym import Gym
+from .sim_thread import SimThread, run_with_sim
+from .wrap import TracedEnv, wrap
 
 __all__ = [
-    "InlineSimRunner",
-    "IsaacBridge",
-    "MainThreadSimRunner",
+    "Gym",
+    "GymBridge",
     "RobotBridge",
     "RobotEndpoint",
-    "SimRunner",
-    "ThreadSimRunner",
-    "VecRobotBridge",
+    "SimThread",
+    "TracedEnv",
+    "run_with_sim",
+    "wrap",
 ]
