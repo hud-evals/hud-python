@@ -182,7 +182,8 @@ class RobotAgent(Agent):
                             slot = {"data": {k: v[i] for k, v in data.items()}}
                             rows = adapter.adapt_chunk(rows, slot)
                         c.extend(rows)
-                        recorders[i].record_inference(rows, tick=step)
+                        if not ever_done[i]:  # finished slots still act, but stop recording
+                            recorders[i].record_inference(rows, tick=step)
 
             raw: list[ActionArray] = [chunks[i].popleft() for i in range(n)]
             if adapter is not None:  # per-step execution-time hook (default identity)
