@@ -167,6 +167,9 @@ class Environment(LegacyEnvMixin):
         # stands up). Run once by the serving substrate around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
+        #: Sims attached via :meth:`gym`; when present, the server runs the
+        #: sim-main process shape (sim on the main thread, serving beside it).
+        self._sims: list[Any] = []
         self._init_legacy()
 
     # ─── task registration ───────────────────────────────────────────
@@ -304,6 +307,32 @@ class Environment(LegacyEnvMixin):
             await ws.stop()
 
         return ws
+
+    def gym(self, factory: Any, *, name: str = "robot", **kwargs: Any) -> Any:
+        """Attach a gym-style sim serving ``name`` over the ``robot`` protocol.
+
+        ``factory`` is any callable returning a gym-style env (the same ``make_env``
+        an EnvHub repo exposes). Registers the start → publish → stop lifecycle on
+        this env's hooks; nothing is built until the env serves. Extra kwargs go to
+        :class:`~hud.environment.robot.Gym` (``fps=``, ``contract=``, ...).
+        Returns the handle templates drive episodes through (``sim.reset`` /
+        ``sim.result``).
+        """
+        from hud.environment.robot import Gym
+
+        sim = Gym(factory, **kwargs)
+        self._sims.append(sim)  # the server serves sim-main when any are attached
+
+        @self.initialize
+        async def _up() -> None:
+            await sim.start()
+            self.add_capability(sim.capability(name))
+
+        @self.shutdown
+        async def _down() -> None:
+            await sim.stop()
+
+        return sim
 
     # ─── substrate-run daemon lifecycle ──────────────────────────────────
 
