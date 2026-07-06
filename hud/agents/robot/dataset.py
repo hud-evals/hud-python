@@ -14,7 +14,7 @@ come from the environment:
 from __future__ import annotations
 
 import atexit
-import importlib
+import importlib.util
 import logging
 import os
 import time
@@ -43,7 +43,7 @@ def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any
     vectors = [
         n
         for n, f in feats.items()
-        if f.get("role") == "observation" and f.get("dtype") not in ("image", "string")
+        if f.get("role") == "observation" and not _is_image(f) and f.get("dtype") != "string"
     ]
     single_state = len(vectors) == 1
 
@@ -53,24 +53,36 @@ def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any
         role, dtype, shape = f.get("role"), f.get("dtype"), tuple(f.get("shape") or ())
         leaf = name.split("/")[-1]  # contract keys are slash-paths; LeRobot wants the leaf
         if role == "observation" and dtype != "string":
-            if dtype == "image":
+            if _is_image(f):
                 key, dtype = f"observation.images.{leaf}", "video"
             elif leaf == "state" or single_state:
                 key = "observation.state"
             else:
                 key = f"observation.{leaf}"
-            features[key] = {"dtype": dtype, "shape": shape, "names": _names(f, leaf)}
+            # Derived contracts omit dtype/shape; default the dtype, and leave a
+            # missing shape empty for add() to fill from the first real frame.
+            features[key] = {"dtype": dtype or "float32", "shape": shape, "names": _names(f, leaf)}
             key_map[name] = key
         elif role == "action":
-            features["action"] = {"dtype": dtype, "shape": shape, "names": _names(f, "act")}
+            features["action"] = {
+                "dtype": dtype or "float32",
+                "shape": shape,
+                "names": _names(f, "act"),
+            }
     return features, key_map
+
+
+def _is_image(feature: dict[str, Any]) -> bool:
+    """A camera feature: authored contracts say ``dtype: image``, derived ones tag
+    the (load-bearing) image ``type`` — accept both."""
+    return feature.get("dtype") == "image" or feature.get("type") in ("rgb", "bgr", "gray", "depth")
 
 
 def _names(feature: dict[str, Any], base: str) -> list[str]:
     """Contract per-element labels, else positional defaults sized to the (rank-1) shape."""
     if names := feature.get("names"):
         return list(names)
-    if feature.get("dtype") == "image":
+    if _is_image(feature):
         return ["height", "width", "channel"]
     return [f"{base}_{i}" for i in range(int((feature.get("shape") or [1])[0]))]
 
@@ -99,6 +111,12 @@ class DatasetWriter:
         """One frame: the wire observation dict + the executed env-space action."""
         if not self._enabled:
             return
+        if self._ds is None:  # derived contracts carry no shapes; fill from the first frame
+            for wire, key in self._key_map.items():
+                if not self._features[key]["shape"] and wire in data:
+                    self._features[key]["shape"] = tuple(np.shape(data[wire]))
+            if not self._features["action"]["shape"]:
+                self._features["action"]["shape"] = tuple(np.shape(action))
         ds = self._ensure_dataset()
         row: dict[str, Any] = {}
         for wire, key in self._key_map.items():
