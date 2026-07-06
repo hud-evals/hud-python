@@ -415,4 +415,96 @@ async def rollout(
     return run
 
 
-__all__ = ["Grade", "Run", "rollout"]
+async def rollout_group(
+    task: Task,
+    agent: Any,
+    *,
+    runtime: Provider,
+    num_envs: int,
+    job_id: str | None = None,
+    group_id: str | None = None,
+    rollout_timeout: float | None = None,
+) -> list[Run]:
+    """Drive one env instance's ``num_envs`` slots to graded runs (one group).
+
+    The grouped counterpart of :func:`rollout`, domain-agnostic: one runtime,
+    one task start (``num_envs`` is injected into the task args — an env whose
+    template doesn't accept it fails loudly), then the agent drives every slot
+    over one connection via its ``drive(runs, client)`` entry, and the grade's
+    ``"slots"`` list (one dict per slot, the soft convention grouped envs
+    return) grades each run. The runs are *receipts*: the agent records spans
+    onto the trace ids minted here; this atom owns trace lifecycle and grading.
+
+    A future scheduler may pack *different* compatible tasks into one
+    instance's slots; the atom's task -> runs shape already permits it.
+    """
+    if not hasattr(agent, "drive"):
+        raise TypeError(
+            f"{type(agent).__name__} cannot drive a grouped rollout "
+            "(needs a drive(runs, client) entry, e.g. hud.agents.robot.RobotAgent)"
+        )
+    if job_id is None:  # a lone grouped rollout is a job of one instance
+        job_id = uuid.uuid4().hex
+        await job_enter(job_id, name=task.id, group=1)
+    group_id = group_id or uuid.uuid4().hex
+
+    runs = [Run(None, task.id, task.args) for _ in range(num_envs)]
+    for run in runs:
+        run.trace.trace_id = uuid.uuid4().hex
+        run.job_id = job_id
+        run.group_id = group_id
+        run.slug = task.slug or task.default_slug()
+
+    loop = asyncio.get_running_loop()
+    deadline = None if rollout_timeout is None else loop.time() + rollout_timeout
+
+    async def _bounded(awaitable: Any) -> Any:
+        # One shared wall-clock deadline across provision, start, and the agent
+        # loop (see rollout._bounded for why a read-timeout is not enough).
+        if deadline is None:
+            return await awaitable
+        return await asyncio.wait_for(awaitable, max(deadline - loop.time(), 0.0))
+
+    _phase = "provisioning"
+    try:
+        async with contextlib.AsyncExitStack() as stack:
+            addr = cast("Runtime", await _bounded(stack.enter_async_context(runtime(task))))
+            _phase = "starting task"
+            client = cast("HudClient", await _bounded(stack.enter_async_context(connect(addr))))
+            args = {**task.args, "num_envs": num_envs}
+            prompt = (await _bounded(client.start_task(task.id, args))).get("prompt")
+            for run in runs:
+                run.prompt = prompt
+                run._runtime = addr.url
+                await trace_enter(run.trace_id, job_id=job_id, group_id=group_id, model=None)
+                with set_trace_context(run.trace_id):  # opening user step per trace
+                    run.record(Step(source="user", messages=run.prompt_messages))
+            _phase = "agent loop"
+            await _bounded(agent.drive(runs, client))
+            _phase = "grading"
+            evaluation = await client.grade({"answer": None})
+            slots = evaluation.get("slots") or []
+            if len(slots) != num_envs:
+                raise ValueError(
+                    f"grade returned {len(slots)} slots for {num_envs} envs "
+                    "(grouped envs must return one 'slots' entry per slot)"
+                )
+            for run, slot in zip(runs, slots, strict=True):
+                run.grade = Grade.from_dict(slot)
+                run.trace.status = "completed"
+    except Exception as exc:  # isolate: one bad instance never kills the batch
+        detail = (
+            f"timed out after {rollout_timeout:.0f}s"
+            if isinstance(exc, TimeoutError) and rollout_timeout
+            else str(exc)
+        )
+        logger.warning("grouped rollout failed (%s): %s", _phase, detail)
+        for run in runs:
+            run.trace.status = "error"
+            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+    for run in runs:
+        await trace_exit(run)
+    return runs
+
+
+__all__ = ["Grade", "Run", "rollout", "rollout_group"]

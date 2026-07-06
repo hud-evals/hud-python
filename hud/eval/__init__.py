@@ -32,7 +32,7 @@ from hud.types import Trace
 
 from .chat import Chat
 from .job import Job
-from .run import Grade, Run, rollout
+from .run import Grade, Run, rollout, rollout_group
 from .runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -75,4 +75,5 @@ __all__ = [
     "Taskset",
     "Trace",
     "rollout",
+    "rollout_group",
 ]
