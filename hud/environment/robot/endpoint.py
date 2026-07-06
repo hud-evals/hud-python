@@ -119,8 +119,6 @@ class RobotEndpoint:
         )
         return res
 
-    """ in your simulation program where bridge is started """
-
     # ── serving: expose a local bridge so a remote endpoint can drive it ──
     async def serve(self, host: str = "127.0.0.1", port: int = 9100) -> asyncio.AbstractServer:
         """Serve this (local) bridge's control surface over JSON-RPC.
@@ -135,6 +133,25 @@ class RobotEndpoint:
         server = await asyncio.start_server(self._handle, host, port)
         print(f"[env] control endpoint listening on {host}:{port}", flush=True)
         return server
+
+    def serve_blocking(self, host: str = "0.0.0.0", port: int = 9100) -> None:  # noqa: S104 — split-process sims serve cross-host
+        """Serve this (local) bridge for the process's lifetime, with the sim owning
+        the main thread — the entry a split-process sim program calls last.
+
+        Same shape as ``hud.environment.server``: the control endpoint runs on a
+        background loop thread; every sim touch drains here on main.
+        """
+        from .sim_thread import run_with_sim
+
+        async def _serve() -> None:
+            server = await self.serve(host, port)
+            try:
+                await asyncio.Event().wait()  # until SIGTERM / Ctrl-C cancels
+            finally:
+                server.close()
+                await self._local_bridge().stop()
+
+        run_with_sim(_serve)
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         with contextlib.suppress(ConnectionResetError, asyncio.IncompleteReadError):

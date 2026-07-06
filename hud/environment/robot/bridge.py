@@ -1,22 +1,25 @@
-"""Env-side ``robot`` bridges: the base classes users subclass to wrap their sim.
+"""Env-side ``robot`` bridges: the base class and every shipped variant.
 
 The *server* side of the ``robot`` protocol (agent-side client:
-:class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined there.
-Three layers, smallest to largest:
+:class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined
+there. Bridges are **batched-first**: one bridge serves ``num_envs`` slots in
+lockstep (``[N, ...]`` obs frames, ``[N, A]`` actions, an ``[N]`` ``terminated``
+mask). ``num_envs == 1`` — a plain single-env sim — speaks the scalar framing
+(per-env arrays, scalar ``terminated``) on the same code path.
 
-- :class:`RobotBridge` — single-agent, one sim step per received action.
-- :class:`VecRobotBridge` — the same loop but every frame carries batched ``[N, ...]`` arrays
-  (``terminated`` an ``[N]`` mask, action ``[N, A]``), for a vectorized env served in lockstep.
-- :class:`IsaacBridge` — a :class:`VecRobotBridge` that owns an Isaac Lab env: main-thread sim
-  threading, rebuild-on-instance-change, and a :meth:`~IsaacBridge.serve_forever` pump loop.
+- :class:`RobotBridge` — subclass with your sim: ``reset`` / ``step`` /
+  ``get_observation``. The base owns the WebSocket serve loop.
+- :class:`GymBridge` — the generic bridge over any gym-style env factory;
+  users get one via ``env.gym(make_env)`` and never subclass it.
 
-An injected :class:`~.sim_runner.SimRunner` owns *which thread runs the (thread-affine) sim*,
-so subclasses stay thread-naive.
+Every sim touch routes through the process :class:`~.sim_thread.SimThread`, so
+bridges stay thread-naive (see :mod:`~.sim_thread` for the one process shape).
 """
 
 from __future__ import annotations
 
 import contextlib
+import inspect
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -27,39 +30,31 @@ import websockets.exceptions
 # The openpi/0 wire codec is defined alongside the agent-side client; reuse it so both
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
 from hud.capabilities.robot import _packb, _unpackb
+from hud.telemetry.robot import to_numpy
 
-from .sim_runner import InlineSimRunner, MainThreadSimRunner, SimRunner
-
-# Task args that vary *within* one built Isaac env (cheap reset), vs. env-defining args that
-# need a full rebuild (Isaac bakes assets at construction, so a new family/size is a new env).
-EPISODIC_KEYS = ("seed", "background_id", "instruction_id")
+from .introspect import probe_success, split_observation
+from .sim_thread import SimThread
 
 
 class RobotBridge(ABC):
     """Serves ``robot`` over WebSocket; subclass and implement the env hooks.
 
-    **Subclass contract:** implement :meth:`step`, :meth:`get_observation`, and
-    :meth:`reset`. The base owns the WebSocket serve loop; subclasses own the sim.
+    **Subclass contract:** implement :meth:`reset`, :meth:`step`, and
+    :meth:`get_observation`. The base owns the WebSocket serve loop; subclasses
+    own the sim and set ``num_envs`` (default 1).
 
     - :meth:`reset` initialises the sim for a new episode and returns the task
-      prompt. The base resets scoring state and pushes the first frame for you.
-    - :meth:`step` advances the sim by one action.
-    - :meth:`get_observation` returns ``(data, terminated)`` for the current state
-      or ``None`` if not ready.
-    - :meth:`result` returns the episode score dict. The default implementation
-      covers the common binary-success case; override for richer scoring (e.g.
-      fractional subtask progress or realtime stats). Concrete bridges must set
-      ``self.success``, ``self.total_reward``, and ``self.terminated`` during
-      :meth:`step` for the default to work.
+      prompt. The base resets scoring state and pushes the first frame.
+    - :meth:`step` advances the sim by one action (``[A]``, or ``[N, A]`` batched).
+    - :meth:`get_observation` returns ``(data, terminated)`` — per-env arrays +
+      scalar bool for ``num_envs == 1``, ``[N, ...]`` arrays + ``[N]`` mask
+      otherwise — or ``None`` if not ready.
+    - :meth:`result_slots` returns one score dict per slot. The default covers
+      the common single-env binary-success case from ``self.success`` /
+      ``self.total_reward``; batched bridges override it.
     """
 
-    def __init__(
-        self,
-        *,
-        host: str = "127.0.0.1",
-        port: int = 0,
-        sim_runner: SimRunner | None = None,
-    ) -> None:
+    def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
         # Loopback + ephemeral by default; the concrete address is published in the
         # manifest post-``start()`` and tunneled, so no env manages bridge ports.
         self._host = host
@@ -68,10 +63,11 @@ class RobotBridge(ABC):
         self._server: Any = None
         # Connect-time metadata frame (sent first on each connection); subclasses may set it.
         self.metadata: dict[str, Any] = {}
-        # Which thread runs the (thread-affine) sim. Default InlineSimRunner (loop
-        # thread); inject a ThreadSimRunner (or custom) when render-heavy or thread-bound.
-        self._sim_runner: SimRunner = sim_runner or InlineSimRunner()
-        # Episode scoring read by ``result()``; subclasses update in ``reset``/``step``.
+        # Every sim touch runs on the process sim thread (see sim_thread.py).
+        self._sim = SimThread.shared()
+        self.num_envs: int = 1
+        # Episode scoring read by ``result()``; single-env subclasses update these
+        # in ``reset``/``step`` (batched bridges override result_slots instead).
         self.task_description: str = ""
         self.total_reward: float = 0.0
         self.success: bool = False
@@ -89,32 +85,38 @@ class RobotBridge(ABC):
 
     @abstractmethod
     async def reset(self, **kwargs: Any) -> str:
-        """Reset the sim for a new episode; return the task prompt.
-
-        Take whatever task kwargs you need (e.g. ``task_id``, ``seed``). The base
-        resets scoring + sends the first obs — just reset your sim and return the prompt.
-        """
+        """Reset the sim for a new episode; return the task prompt."""
 
     @abstractmethod
     def step(self, action: np.ndarray) -> None:
         """Advance the sim by one action."""
 
     @abstractmethod
-    def get_observation(self) -> tuple[dict[str, np.ndarray], bool] | None:
+    def get_observation(self) -> tuple[dict[str, np.ndarray], Any] | None:
         """Return ``(data, terminated)`` for the current state, or ``None`` if not ready."""
 
-    def result(self) -> dict[str, Any]:
-        """Return the episode score dict after the episode ends.
+    def result_slots(self) -> list[dict[str, Any]]:
+        """One score dict per slot. Default: single-env binary success."""
+        return [
+            {
+                "score": 1.0 if self.success else 0.0,
+                "success": bool(self.success),
+                "total_reward": float(self.total_reward),
+            }
+        ]
 
-        Default: binary success score + total reward. Override when the bridge
-        tracks richer scoring (fractional subtask progress, realtime stats, …).
-        The returned dict is forwarded to the harness, so include any fields the
-        downstream consumers expect.
+    def result(self) -> dict[str, Any]:
+        """The episode grade: per-slot dicts under ``"slots"``, means at the top.
+
+        The grouped eval path grades each trace from ``slots[i]``; single-result
+        consumers read the aggregate ``score``/``success`` unchanged.
         """
+        slots = self.result_slots()
         return {
-            "score": 1.0 if self.success else 0.0,
-            "success": bool(self.success),
-            "total_reward": float(self.total_reward),
+            "score": float(np.mean([s["score"] for s in slots])),
+            "success": float(np.mean([float(s["success"]) for s in slots])),
+            "total_reward": float(np.mean([s.get("total_reward", 0.0) for s in slots])),
+            "slots": slots,
         }
 
     @property
@@ -122,8 +124,7 @@ class RobotBridge(ABC):
         """The bridge's concrete ``ws://`` address — publish this in the manifest.
 
         With an ephemeral port (the default) the address only exists once
-        :meth:`start` has bound the socket, so publish from an
-        ``@env.initialize`` hook *after* ``await bridge.start()``.
+        :meth:`start` has bound the socket, so publish after ``await bridge.start()``.
         """
         if self._port == 0:
             raise RuntimeError("bridge bound to an ephemeral port; call start() before reading url")
@@ -155,7 +156,7 @@ class RobotBridge(ABC):
             await self._send_observation()  # current obs on connect (if ready)
             async for raw in ws:
                 action = _unpackb(raw)["actions"]  # codec already returns an ndarray
-                await self._sim_runner.call(self.step, action)  # on the sim thread
+                await self._sim.call(self.step, action)  # on the sim thread
                 await self._send_observation()
         except websockets.exceptions.ConnectionClosed:
             pass
@@ -171,138 +172,179 @@ class RobotBridge(ABC):
                 self._client = None
 
     async def _send_observation(self) -> None:
-        """Send the current observation to the connected agent (if any)."""
+        """Send the current observation to the connected agent (if any).
+
+        Framing follows ``num_envs``: scalar ``terminated`` for a single env, an
+        ``[N]`` mask for a batch — the one place the two wire shapes meet.
+        """
         if self._client is None:
             return
-        out = await self._sim_runner.call(self.get_observation)
+        out = await self._sim.call(self.get_observation)
         if out is None:
             return
         data, terminated = out
-        # openpi-style flat obs dict: array fields at the top level, terminated alongside.
-        msg = {**data, "terminated": bool(terminated)}
+        done = np.asarray(terminated, dtype=bool)
+        msg = {**data, "terminated": bool(done.ravel()[0]) if self.num_envs == 1 else done}
         with contextlib.suppress(websockets.exceptions.ConnectionClosed):
             await self._client.send(_packb(msg))
 
 
-class VecRobotBridge(RobotBridge):
-    """A :class:`RobotBridge` that serves a whole *vectorized* env in lockstep.
+class GymBridge(RobotBridge):
+    """Serve any gym-style env factory over the ``robot`` protocol, generically.
 
-    Same single-agent WebSocket loop, but every frame carries batched ``[N, ...]`` arrays
-    and ``terminated`` is an ``[N]`` per-env mask (not a scalar); the agent sends back one
-    ``[N, A]`` action. Subclasses implement the batched :meth:`step` / :meth:`get_observation`
-    (which returns ``(data{name: [N, ...]}, terminated[N])``). The wire codec already carries
-    arrays of any rank, so the only single-env assumption to drop is the scalar ``terminated``.
+    Task args are partitioned by the factory's signature: args the factory
+    accepts define the env (a change rebuilds it — so ``num_envs`` in the
+    factory signature is the vectorization declaration); everything else is
+    episodic and flows to ``env.reset(seed=..., options=...)``.
     """
 
-    async def _send_observation(self) -> None:
-        if self._client is None:
-            return
-        out = await self._sim_runner.call(self.get_observation)
-        if out is None:
-            return
-        data, terminated = out
-        msg = {**data, "terminated": np.asarray(terminated, dtype=bool)}  # [N] mask, not a scalar
-        with contextlib.suppress(websockets.exceptions.ConnectionClosed):
-            await self._client.send(_packb(msg))
-
-
-class IsaacBridge(VecRobotBridge):
-    """Serve an Isaac Lab env's whole vectorized batch over ``robot``.
-
-    The reusable base for any Isaac Lab / Omniverse benchmark: one process owns one
-    ``num_envs`` env and serves the whole batch in lockstep (``[N, ...]`` obs in, ``[N, A]``
-    action out). It encodes the Isaac gotchas once — Isaac/Omniverse pins the simulator to the
-    **main thread** and ``env.reset()`` nests a ``run_until_complete`` for USD loading, so every
-    sim touch is routed through a :class:`~.sim_runner.MainThreadSimRunner` and executed by
-    :meth:`serve_forever`'s pump loop *outside* any asyncio task.
-
-    **Subclass contract:** implement :meth:`make_env` and :meth:`observe`. Optionally override
-    :meth:`prompt` (defaults to the env's ``instruction``), :meth:`instance_key` (which task
-    args trigger a rebuild), and :meth:`result` (defaults to the env's ``extras["metrics"]``).
-    """
-
-    def __init__(self, *, sim_runner: SimRunner | None = None, **kwargs: Any) -> None:
-        super().__init__(sim_runner=sim_runner or MainThreadSimRunner(), **kwargs)
+    def __init__(self, factory: Any, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._factory = factory
+        self._factory_params = {
+            n
+            for n, p in inspect.signature(factory).parameters.items()
+            if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+        }
         self.env: Any = None
-        self.base: Any = None  # env.unwrapped
-        self._instance: Any = None  # current env-defining key; a mismatch forces a rebuild
-        self._done: np.ndarray | None = None
+        self.batched = False  # env carries a leading [N] dim (any env exposing num_envs)
+        self._obs: Any = None  # latest observation (reset or step)
+        self._instance: Any = None  # current env-defining args; a mismatch rebuilds
+        self._is_torch = False
+        # Per-slot episode scoring, sticky until the next reset.
+        self._done: np.ndarray = np.zeros(1, dtype=bool)
+        self._success: np.ndarray = np.zeros(1, dtype=bool)
+        self._acc_reward: np.ndarray = np.zeros(1)
+        self._seen_success = False  # any env-reported success signal this episode
 
-    # ── subclass hooks ────────────────────────────────────────────────────────
-    @abstractmethod
-    def make_env(self, **task_args: Any) -> Any:
-        """Build (and return) the gym env for the resolved task. Called on the sim thread."""
+    # ── env lifecycle (all sim touches on the sim thread) ───────────────────────
 
-    @abstractmethod
-    def observe(self) -> dict[str, np.ndarray]:
-        """The current batched observation as ``{contract_key: [N, ...] ndarray}``."""
+    async def ensure_env(self, **task_args: Any) -> None:
+        """Build the env (factory defaults unless task args say otherwise). Idempotent."""
+        if self.env is None:
+            await self._sim.call(self._sync_reset, task_args)
 
-    def prompt(self) -> str:
-        return self.base.instruction
-
-    def instance_key(self, task_args: dict[str, Any]) -> Any:
-        """The env-defining subset of the task args; a change here rebuilds the env."""
-        return tuple(sorted((k, v) for k, v in task_args.items() if k not in EPISODIC_KEYS))
-
-    # ── bridge protocol (all sim touches run on the main thread) ───────────────
     async def reset(self, **task_args: Any) -> str:
-        return await self._sim_runner.call(self._sync_reset, task_args)
+        return await self._sim.call(self._sync_reset, task_args)
+
+    async def stop(self) -> None:
+        await super().stop()
+        if self.env is not None:
+            await self._sim.call(self.env.close)
+            self.env = None
 
     def _sync_reset(self, task_args: dict[str, Any]) -> str:
-        key = self.instance_key(task_args)
+        build = {k: v for k, v in task_args.items() if k in self._factory_params}
+        episodic = {k: v for k, v in task_args.items() if k not in self._factory_params}
+        key = tuple(sorted(build.items()))
         if self.env is None or key != self._instance:
             if self.env is not None:
                 self.env.close()
-            self.env = self.make_env(**task_args)
-            self.base = self.env.unwrapped
+            self.env = self._factory(**build)
             self._instance = key
-        self.env.reset(seed=task_args.get("seed"))
-        self._done = np.zeros(self.base.num_envs, dtype=bool)
-        return self.prompt()
+            base = getattr(self.env, "unwrapped", self.env)
+            n = getattr(self.env, "num_envs", getattr(base, "num_envs", None))
+            self.batched = n is not None
+            self.num_envs = int(n or 1)
+        seed = episodic.pop("seed", None)
+        obs, _ = self.env.reset(seed=seed, options=episodic or None)
+        self._obs = obs  # the first frame an agent sees on connect/reset
+        self._is_torch = "torch" in type(_first_leaf(obs)).__module__
+        self._done = np.zeros(self.num_envs, dtype=bool)
+        self._success = np.zeros(self.num_envs, dtype=bool)
+        self._acc_reward = np.zeros(self.num_envs)
+        self._seen_success = False
+        return self._prompt(task_args)
+
+    def _prompt(self, task_args: dict[str, Any]) -> str:
+        base = getattr(self.env, "unwrapped", self.env)
+        for attr in ("task_description", "instruction"):
+            text = getattr(getattr(base, "cfg", None), attr, None) or getattr(base, attr, None)
+            if isinstance(text, str) and text:
+                return text
+        return ", ".join(f"{k}={v}" for k, v in sorted(task_args.items())) or "run the task"
+
+    def sample_observation(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """One per-env ``(state, frames)`` sample for contract derivation (post-build)."""
+        state, frames = split_observation(self._obs, batched=self.batched)
+        if self.batched:
+            state = {k: to_numpy(v)[0] for k, v in state.items()}
+            frames = {k: to_numpy(v)[0] for k, v in frames.items()}
+        return state, frames
+
+    # ── bridge protocol ──────────────────────────────────────────────────────────
 
     def step(self, action: np.ndarray) -> None:
-        import torch
+        act: Any = np.array(action, dtype=np.float32)  # wire buffer is read-only
+        if not self.batched:
+            act = act[0] if act.ndim > 1 else act  # single plain env: drop the batch dim
+        elif act.ndim == 1:
+            act = act[None]  # batched-of-one served scalar-framed: restore the [N] dim
+        # The wire carries floats; discrete/int action spaces need their dtype + shape back.
+        space = getattr(self.env, "action_space", None)
+        dtype = getattr(space, "dtype", None)
+        if dtype is not None and np.issubdtype(dtype, np.integer):
+            act = act.astype(dtype).reshape(getattr(space, "shape", act.shape) or ())
+        if self._is_torch:
+            import torch
 
-        # np.array (copy) not asarray: the wire-decoded buffer is read-only, which torch warns on.
-        act = torch.as_tensor(np.array(action, dtype=np.float32), device=self.base.device)
-        _, _, terminated, truncated, _ = self.env.step(act)
-        self._done = (terminated | truncated).detach().cpu().numpy().astype(bool)
+            base = getattr(self.env, "unwrapped", self.env)
+            act = torch.as_tensor(act, device=getattr(base, "device", None))
+        obs, reward, terminated, truncated, info = self.env.step(act)
+        self._obs = obs
+        done = np.atleast_1d(to_numpy(terminated)).astype(bool) | np.atleast_1d(
+            to_numpy(truncated)
+        ).astype(bool)
+        self._acc_reward += np.atleast_1d(to_numpy(reward)) * ~self._done
+        newly = done & ~self._done
+        if newly.any():
+            success = self._resolve_success(info)
+            if success is not None:
+                self._seen_success = True
+                self._success |= success & newly
+        self._done |= done
 
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
-        if self.base is None:
+    def _resolve_success(self, info: Any) -> np.ndarray | None:
+        """Env-reported success at a done step: info keys, else Isaac's termination term."""
+        found = probe_success(info, num_envs=self.num_envs)
+        if found is not None:
+            return found
+        base = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(base, "termination_manager", None)
+        if manager is not None:
+            try:
+                return np.atleast_1d(to_numpy(manager.get_term("success"))).astype(bool)
+            except Exception:
+                return None
+        return None
+
+    def get_observation(self) -> tuple[dict[str, np.ndarray], Any] | None:
+        if self.env is None or self._obs is None:
             return None
-        return self.observe(), self._done
+        state, frames = split_observation(self._obs, batched=self.batched)
+        data = {k: to_numpy(v) for k, v in {**state, **frames}.items()}
+        if self.batched and self.num_envs == 1:
+            data = {k: v[0] for k, v in data.items()}  # batched-of-one: squeeze to scalar framing
+        return data, self._done if self.num_envs > 1 else bool(self._done[0])
 
-    def result(self, **extra: Any) -> dict[str, Any]:
-        """Episode-batch score from the env's ``extras["metrics"]`` (set pre-reset by the env)."""
-        m = dict(self.base.extras.get("metrics", {})) if self.base is not None else {}
-        return {
-            "score": float(m.get("force_penalized_score", m.get("success_rate", 0.0))),
-            "success": float(m.get("success_rate", 0.0)),
-            **m,
-            **extra,
-        }
-
-    # ── serving: own the Kit main thread, drain sim touches between frames ──────
-    def serve_forever(self, simulation_app: Any, *, host: str = "0.0.0.0", port: int = 9100) -> None:
-        """Serve the control endpoint + robot WebSocket on the Kit main thread, blocking for the
-        process lifetime. Each pass services socket IO once, drains queued sim touches (task-free,
-        on main), then pumps Kit — the one loop Isaac and asyncio can share.
-        """
-        import asyncio
-
-        from .endpoint import RobotEndpoint
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(RobotEndpoint(self).serve(host, port))
-        drain = getattr(self._sim_runner, "drain", None)
-        while simulation_app.is_running():
-            loop.run_until_complete(asyncio.sleep(0))  # advance control + robot WS tasks once
-            if drain is not None:
-                drain()  # execute queued sim touches on main, outside any task
-            simulation_app.update()  # pump Kit (renders cameras, steps physics queue)
-        loop.run_until_complete(self.stop())
+    def result_slots(self) -> list[dict[str, Any]]:
+        """Per-slot grades: env-reported success when available, else accumulated reward."""
+        # The env's own success check outranks accumulated shaped reward.
+        scores = self._success if self._seen_success else self._acc_reward
+        return [
+            {
+                "score": float(scores[i]),
+                "success": bool(self._success[i]),
+                "total_reward": float(self._acc_reward[i]),
+            }
+            for i in range(self.num_envs)
+        ]
 
 
-__all__ = ["EPISODIC_KEYS", "IsaacBridge", "RobotBridge", "VecRobotBridge"]
+def _first_leaf(obs: Any) -> Any:
+    while isinstance(obs, dict):
+        obs = next(iter(obs.values()))
+    return obs
+
+
+__all__ = ["GymBridge", "RobotBridge"]
