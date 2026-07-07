@@ -22,7 +22,7 @@ import contextlib
 import json
 import uuid
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
@@ -134,6 +134,9 @@ class MCPToolCall(CallToolRequestParams):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
     annotation: str | None = None  # Optional explanation of why this action is taken
     provider_name: str | None = None  # Original provider tool name when it differs from MCP name
+    #: Widened to admit the raw provider string when it didn't parse as JSON;
+    #: a str is never executed — dispatch answers it with an error result.
+    arguments: dict[str, Any] | str | None = None
 
     def __str__(self) -> str:
         """Format tool call as plain text."""
@@ -296,6 +299,13 @@ class Step(BaseModel):
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
+#: Why the rollout stopped; anything but "done" means a limit cut it off.
+StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
+
+#: The configurable subset of stop reasons (``AgentConfig.stop_on``): policy
+#: conditions the loop may either stop on or answer with an error result.
+StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
+
 
 class Trace(BaseModel):
     """The agent's trajectory for one rollout — ordered ``Step``s that ship as spans.
@@ -320,6 +330,7 @@ class Trace(BaseModel):
     steps: list[SerializeAsAny[Step]] = Field(default_factory=list[Step])
 
     status: TraceStatus | None = None
+    stop_reason: StopReason | None = None
     content: str | None = Field(default=None)
 
     # Trajectory metadata that has no structured home (provider session info,
@@ -360,6 +371,11 @@ class Trace(BaseModel):
         return self.status == "error"
 
     @property
+    def is_truncated(self) -> bool:
+        """Whether a limit (step budget, token cap, timeout) cut the rollout off."""
+        return self.stop_reason is not None and self.stop_reason != "done"
+
+    @property
     def error(self) -> str | None:
         """The most recent step error, if any (errors live on steps)."""
         return self.final(lambda step: step.error)
@@ -398,6 +414,8 @@ __all__ = [
     "MCPToolResult",
     "Step",
     "StepSource",
+    "StopCondition",
+    "StopReason",
     "TaskCall",
     "Trace",
     "TraceStatus",

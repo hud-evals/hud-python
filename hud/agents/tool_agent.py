@@ -18,7 +18,6 @@ mutable state.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -31,7 +30,7 @@ from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient
-from hud.types import AgentType, MCPToolCall, MCPToolResult, Step
+from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -41,19 +40,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Tool calls whose arguments never parsed as JSON (usually a completion truncated at the token
-# limit): _dispatch_call answers the call id with an error result so the model can re-issue.
-MALFORMED_TOOL_ARGS_KEY = "__hud_malformed_tool_arguments__"
-
-
-def parse_tool_arguments(raw: str | None, *, tool_name: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(raw or "{}")
-    except json.JSONDecodeError as e:
-        logger.warning("Malformed tool-call arguments for %s: %s", tool_name, e)
-        return {MALFORMED_TOOL_ARGS_KEY: f"{e} in arguments: {(raw or '')[:200]!r}"}
-    return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else {}
-
+# Output-token-cap finish reasons: OpenAI "length", Claude "max_tokens", Gemini "MAX_TOKENS".
+TRUNCATION_FINISH_REASONS = frozenset({"length", "max_tokens", "MAX_TOKENS"})
 
 MessageT = TypeVar("MessageT")
 ConfigT = TypeVar("ConfigT", bound="AgentConfig")
@@ -198,6 +186,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         try:
             step: AgentStep | None = None
             hit_max = False
+            stopped: StopCondition | None = None
 
             for turn in range(1, max_steps + 1):
                 logger.info("step %d/%d", turn, max_steps)
@@ -227,6 +216,9 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                         continue
                     break
 
+                if (stopped := self._stop_condition(step)) is not None:
+                    break
+
                 for call in step.tool_calls:
                     call_started_at = now_iso()
                     result = await self._dispatch_call(call, state)
@@ -244,7 +236,14 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
 
             trace.content = step.content if step else None
             trace.status = "error" if step is not None and step.error else "completed"
-            trace.extra["stop_reason"] = "max_steps" if hit_max else "done"
+            if stopped is not None:
+                trace.stop_reason = stopped
+            elif hit_max:
+                trace.stop_reason = "max_steps"
+            elif step is not None and step.finish_reason in TRUNCATION_FINISH_REASONS:
+                trace.stop_reason = "length"
+            else:
+                trace.stop_reason = "done"
         except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as exc:
@@ -252,22 +251,31 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             trace.status = "error"
             run.record(Step(source="system", error=str(exc)))
 
+    def _stop_condition(self, step: AgentStep) -> StopCondition | None:
+        """The first configured stop condition this turn trips, if any."""
+        stop_on = self.config.stop_on
+        if "length" in stop_on and step.finish_reason in TRUNCATION_FINISH_REASONS:
+            return "length"
+        if "malformed_tool_call" in stop_on and any(
+            isinstance(call.arguments, str) for call in step.tool_calls
+        ):
+            return "malformed_tool_call"
+        return None
+
     async def _dispatch_call(
         self,
         call: MCPToolCall,
         state: RunState[MessageT],
     ) -> MCPToolResult:
-        args_maybe = call.arguments if isinstance(call.arguments, dict) else {}
-        if MALFORMED_TOOL_ARGS_KEY in args_maybe:
+        if isinstance(call.arguments, str):
             return MCPToolResult(
                 content=[
                     mcp_types.TextContent(
                         type="text",
                         text=(
-                            f"tool error: arguments for {call.name!r} were not valid JSON "
-                            f"(response likely truncated at the output-token limit): "
-                            f"{args_maybe[MALFORMED_TOOL_ARGS_KEY]}. "
-                            f"Re-issue the tool call with complete JSON arguments."
+                            f"the arguments for this {call.name!r} call arrived incomplete "
+                            f"(cut off mid-generation or invalid JSON), so it was not executed. "
+                            f"Received: {call.arguments[:200]!r}. Re-issue the call in full."
                         ),
                     )
                 ],
@@ -279,7 +287,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 content=[mcp_types.TextContent(type="text", text=f"unknown tool: {call.name!r}")],
                 isError=True,
             )
-        args = call.arguments if isinstance(call.arguments, dict) else {}
+        args = call.arguments or {}
         try:
             return await tool.execute(args)
         except (TimeoutError, asyncio.CancelledError):

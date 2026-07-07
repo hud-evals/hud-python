@@ -6,8 +6,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.openai_compatible.agent import OpenAIChatAgent, OpenAIChatRunState
 from hud.agents.types import OpenAIChatConfig
 
@@ -34,11 +32,21 @@ def _agent(response: Any, error: Exception | None = None) -> OpenAIChatAgent:
 
 
 def _response(content: str, tool_calls: list[Any]) -> Any:
+    dump: dict[str, Any] = {"role": "assistant", "content": content}
+    if tool_calls:
+        dump["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            }
+            for tc in tool_calls
+        ]
     message = SimpleNamespace(
         content=content,
         tool_calls=tool_calls,
         refusal=None,
-        model_dump=lambda exclude_none=True: {"role": "assistant", "content": content},
+        model_dump=lambda exclude_none=True: dump,
     )
     choice = SimpleNamespace(message=message, finish_reason="stop", logprobs=None)
     return SimpleNamespace(
@@ -85,11 +93,9 @@ async def test_get_response_error_path() -> None:
     assert result.error is not None and "boom" in result.error
 
 
-async def test_get_response_malformed_tool_args_do_not_crash() -> None:
-    """Truncated arguments must yield a dispatchable sentinel call, not a rollout-killing
-    JSONDecodeError (live Qwen failure: 'Unterminated string starting at line 1 column 13')."""
-    from hud.agents.tool_agent import MALFORMED_TOOL_ARGS_KEY
-
+async def test_get_response_malformed_tool_args() -> None:
+    """Unparseable arguments (e.g. truncated at the token limit) yield a call carrying
+    the raw string, and the recorded message replays "{}" so history stays parseable."""
     tc = SimpleNamespace(
         type="function",
         id="c1",
@@ -99,32 +105,9 @@ async def test_get_response_malformed_tool_args_do_not_crash() -> None:
     state = _state(agent)
     result = await agent.get_response(state)
     assert result.error is None
-    assert [c.name for c in result.tool_calls] == ["bash"]
-    assert result.tool_calls[0].id == "c1"  # provider still gets a result
-    assert MALFORMED_TOOL_ARGS_KEY in (result.tool_calls[0].arguments or {})
-    assert result.done is False  # the loop continues
-    # the RECORDED assistant message must replay "{}" — a raw malformed arguments string 500s
-    # some backends (Qwen/vLLM re-parse it when templating history)
+    assert result.done is False
+    (call,) = result.tool_calls
+    assert call.id == "c1"
+    assert call.arguments == '{"command": "'
     recorded = state.messages[-1]
     assert recorded["tool_calls"][0]["function"]["arguments"] == "{}"
-
-
-async def test_dispatch_returns_error_result_for_malformed_args() -> None:
-    from hud.agents.tool_agent import MALFORMED_TOOL_ARGS_KEY
-    from hud.types import MCPToolCall
-
-    agent = _agent(_response("", []))
-    state = _state(agent)
-    state.tools = {}
-    call = MCPToolCall(
-        id="c1",
-        name="bash",
-        arguments={MALFORMED_TOOL_ARGS_KEY: "Unterminated string starting at: line 1 column 13"},
-    )
-    result = await agent._dispatch_call(call, state)
-    assert result.isError is True
-    content = result.content[0]
-    assert isinstance(content, mcp_types.TextContent)
-    text = content.text
-    assert "not valid JSON" in text and "Re-issue" in text
-    assert "Unterminated string" in text

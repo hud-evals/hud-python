@@ -64,7 +64,8 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
 Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so it
 points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeSDKAgent` runs the `claude`
 CLI over an `ssh` capability, against the env's filesystem. Every knob (`model`, `max_steps`,
-`system_prompt`, `citations_enabled`) lives on the config; `__call__(run)` takes only the run.
+`system_prompt`, `citations_enabled`, `stop_on`) lives on the config; `__call__(run)`
+takes only the run.
 
 ## create_agent {#create-agent}
 
