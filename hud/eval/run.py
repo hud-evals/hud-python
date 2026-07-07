@@ -375,7 +375,7 @@ async def rollout(
                                 "rollout agent loop timed out after %.0fs; grading partial",
                                 rollout_timeout,
                             )
-                            run.trace.extra["stop_reason"] = "timeout"
+                            run.trace.stop_reason = "timeout"
                             run.record(
                                 Step(
                                     source="system",

@@ -332,7 +332,7 @@ async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
     # recorded, so it is graded rather than discarded as a zero-reward cancel.
     assert run.reward == 1.0
     assert run.trace.status == "completed"
-    assert run.trace.extra.get("stop_reason") == "timeout"
+    assert run.trace.stop_reason == "timeout"
     assert run.trace_id is not None
 
 

@@ -35,6 +35,7 @@ from hud.types import (
     RobotStepSource,
     Step,
     StepSource,
+    StopCondition,
     Trace,
 )
 from hud.utils.serialization import json_safe_value
@@ -50,6 +51,9 @@ class AgentConfig(BaseModel):
     max_steps: int = 10
     system_prompt: str | None = None
     citations_enabled: bool = False
+    #: Conditions that end the rollout instead of being answered with an error
+    #: result the model can react to; training configs typically stop on both.
+    stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
     hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
 
     model_name: str = "Agent"

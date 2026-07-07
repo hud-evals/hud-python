@@ -133,8 +133,9 @@ async def trace_exit(run: Run) -> None:
             # reports a trace-level error.
             "error": run.trace.error if run.trace.is_error else None,
             "evaluation_result": run.evaluation or None,
-            # Trajectory metadata (e.g. ``stop_reason``: max_steps vs done) the
-            # platform stores on the trace for display; never load-bearing.
+            "stop_reason": run.trace.stop_reason,
+            # Trajectory metadata the platform stores on the trace for display;
+            # never load-bearing.
             "metadata": run.trace.extra or None,
         },
     )

@@ -270,12 +270,17 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                         "".join(summary.text for summary in item.summary),
                     )
                 case "function_call":
-                    tool_calls.append(
-                        MCPToolCall(
-                            name=item.name or "",
-                            arguments=json.loads(item.arguments),
-                            id=item.call_id,
+                    fn_arguments: dict[str, Any] | str
+                    try:
+                        parsed = json.loads(item.arguments or "{}")
+                        fn_arguments = (
+                            cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else {}
                         )
+                    except json.JSONDecodeError as e:
+                        logger.warning("Malformed tool-call arguments for %s: %s", item.name, e)
+                        fn_arguments = item.arguments
+                    tool_calls.append(
+                        MCPToolCall(name=item.name or "", arguments=fn_arguments, id=item.call_id)
                     )
                 case "computer_call":
                     if item.actions:
@@ -313,12 +318,16 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                 completion_tokens=response.usage.output_tokens,
                 cached_tokens=response.usage.input_tokens_details.cached_tokens,
             )
+        # The Responses API has no finish_reason; truncation surfaces as
+        # incomplete_details.reason ("max_output_tokens" / "content_filter").
+        incomplete = response.incomplete_details
         return AgentStep(
             content="".join(text_chunks),
             reasoning="\n".join(reasoning_chunks) if reasoning_chunks else None,
             citations=citations,
             tool_calls=tool_calls,
             done=not tool_calls,
+            finish_reason=incomplete.reason if incomplete is not None else None,
             model=response.model,
             usage=usage,
         )

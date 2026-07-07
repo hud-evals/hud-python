@@ -46,13 +46,16 @@ def _run_with(trace_id: str, *, extra: dict[str, Any]) -> Run:
     return run
 
 
-async def test_trace_exit_propagates_stop_reason_as_metadata(recorder: _Recorder) -> None:
-    await job_mod.trace_exit(_run_with("abc", extra={"stop_reason": "max_steps"}))
+async def test_trace_exit_propagates_stop_reason(recorder: _Recorder) -> None:
+    run = _run_with("abc", extra={})
+    run.trace.stop_reason = "max_steps"
+    await job_mod.trace_exit(run)
 
     assert len(recorder.calls) == 1
     path, body = recorder.calls[0]
     assert path == "/trace/abc/exit"
-    assert body["metadata"] == {"stop_reason": "max_steps"}
+    assert body["stop_reason"] == "max_steps"
+    assert "metadata" not in body
 
 
 async def test_trace_exit_omits_metadata_when_extra_empty(recorder: _Recorder) -> None:

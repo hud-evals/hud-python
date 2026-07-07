@@ -390,7 +390,7 @@ class HUDConsole:
 
         return result
 
-    def format_tool_call(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+    def format_tool_call(self, name: str, arguments: dict[str, Any] | str | None = None) -> str:
         """Format a tool call in compact HUD style.
 
         Args:
