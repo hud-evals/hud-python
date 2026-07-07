@@ -40,8 +40,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Output-token-cap finish reasons: OpenAI "length", Claude "max_tokens", Gemini "MAX_TOKENS".
-TRUNCATION_FINISH_REASONS = frozenset({"length", "max_tokens", "MAX_TOKENS"})
+# Output-token-cap finish reasons: OpenAI chat "length", Responses "max_output_tokens",
+# Claude "max_tokens", Gemini "MAX_TOKENS".
+TRUNCATION_FINISH_REASONS = frozenset({"length", "max_output_tokens", "max_tokens", "MAX_TOKENS"})
 
 MessageT = TypeVar("MessageT")
 ConfigT = TypeVar("ConfigT", bound="AgentConfig")

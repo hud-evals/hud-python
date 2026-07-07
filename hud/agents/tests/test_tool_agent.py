@@ -161,15 +161,17 @@ async def test_loop_max_steps_is_normal_termination() -> None:
 
 async def test_loop_marks_length_finish_as_truncated() -> None:
     # A final turn cut off at the provider token cap (e.g. mid-tool-call) ends the
-    # rollout normally but is a truncation, not a natural finish.
-    agent = DictAgent([AgentStep(content="partial", done=True, finish_reason="length")])
-    run = _FakeRun()
+    # rollout normally but is a truncation, not a natural finish — across every
+    # provider's finish-reason vocabulary.
+    for finish_reason in ("length", "max_output_tokens", "max_tokens", "MAX_TOKENS"):
+        agent = DictAgent([AgentStep(content="partial", done=True, finish_reason=finish_reason)])
+        run = _FakeRun()
 
-    await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+        await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
 
-    assert run.trace.status == "completed"
-    assert run.trace.stop_reason == "length"
-    assert run.trace.is_truncated is True
+        assert run.trace.status == "completed"
+        assert run.trace.stop_reason == "length"
+        assert run.trace.is_truncated is True
 
 
 async def test_loop_answers_malformed_call_by_default() -> None:
