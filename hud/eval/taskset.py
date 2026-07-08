@@ -234,7 +234,9 @@ class Taskset:
             f"no placement for env(s) {', '.join(missing) or '<none>'}: pass runtime= — "
             'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
             "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
-            "(a served substrate), or HUDRuntime() (your deployed env)"
+            "(a served substrate), or HUDRuntime() (your deployed env). A row taken "
+            "from a loaded taskset keeps its placement when run through it: "
+            'taskset.filter(["slug"]).run(...)'
         )
 
     async def run(
