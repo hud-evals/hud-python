@@ -53,7 +53,7 @@ from hud.utils.process import ProcessGroup, create_process_group_exec
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+    from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 
     from hud.agents.base import Agent
     from hud.environment.env import Environment
@@ -158,30 +158,30 @@ def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
 
 
 class LocalRuntime:
-    """The local provider: a fresh env per rollout, served in this process.
+    """The local provider: serve a fresh env per rollout, in this process.
 
-    *source* is any pointer to the env: a ``.py`` file or directory declaring
-    it (imported as a throwaway module per acquisition; sibling imports
-    resolve; *env* pins one name when it declares several), a live
-    :class:`~hud.environment.Environment` declared at module level (its
-    declaring module's file is the recipe — the instance itself is never
-    served, so every rollout is still fresh), or a
-    ``(task) -> Environment`` constructor for envs built in code::
+    *source* points at the env in whatever form you have:
+
+    - a ``.py`` file or directory — imported fresh per acquisition (sibling
+      imports resolve); *env* pins one name when several are declared,
+      defaulting to the placed task's env
+    - a live :class:`~hud.environment.Environment` — shorthand for its
+      declaring file; the instance itself is never served
+    - a ``(task) -> Environment`` callable — called per acquisition with the
+      placed row
+
+    ::
 
         runtime = LocalRuntime("env.py")
         runtime = LocalRuntime(env)
-        runtime = LocalRuntime(harbor.environment_for)
+        runtime = LocalRuntime(lambda task: build_env(task.env))
 
-    Each acquisition serves its fresh env on an ephemeral loopback port;
-    ``ready_timeout`` bounds ``@env.initialize`` startup. The freshness
-    boundary is the env's own source: it is re-imported per rollout, while
-    modules it imports follow normal Python import caching and are shared
-    process-wide — state an env keeps in helper modules persists across
-    rollouts. Env hooks also run in this process and share its event loop,
-    so blocking env code stalls concurrent rollouts. Use
-    :class:`SubprocessRuntime` or :class:`DockerRuntime` when rollouts need
-    whole-process isolation; ``Runtime(url)`` attaches rollouts to a
-    substrate served elsewhere.
+    ``ready_timeout`` bounds ``@env.initialize`` startup. Freshness covers
+    the env's own source; modules it imports are cached as usual and shared
+    across rollouts. Hooks share this process's event loop, so blocking env
+    code stalls concurrent rollouts — use :class:`SubprocessRuntime` or
+    :class:`DockerRuntime` for process isolation, and ``Runtime(url)`` to
+    attach to a substrate served elsewhere.
     """
 
     def __init__(
@@ -259,20 +259,60 @@ class LocalRuntime:
             yield runtime
 
 
-def _declaring_file(env: Environment) -> Path | None:
-    """The file of a loaded module holding *env* in its globals, else None.
+def _live_envs() -> Iterator[tuple[Environment, str]]:
+    """Envs declared in loaded, file-backed modules' globals, with their files.
 
-    Located by identity, so re-importing the file re-declares this env; a
-    module without a file (a notebook ``__main__``) cannot.
+    The in-memory counterpart of scanning ``.py`` sources on disk
+    (:func:`~hud.environment.load_environment`): an env found here can be
+    served fresh by re-importing its file. Envs in modules without a file
+    (a notebook ``__main__``) are not yielded — re-import could not
+    reconstruct them.
     """
+    from hud.environment.env import Environment as _Environment
+
     for module in list(sys.modules.values()):
         module_file = getattr(module, "__file__", None)
         module_vars = getattr(module, "__dict__", None)
         if not module_file or not isinstance(module_vars, dict):
             continue
-        if any(value is env for value in list(module_vars.values())):
-            return Path(module_file)
-    return None
+        for value in list(module_vars.values()):
+            if isinstance(value, _Environment):
+                yield value, module_file
+
+
+def _declaring_file(env: Environment) -> Path | None:
+    """The file of a loaded module holding *env* in its globals, else None."""
+    return next((Path(file) for live, file in _live_envs() if live is env), None)
+
+
+def _declared_env(name: str) -> Environment | None:
+    """The one live env named *name*, else None; two distinct ones raise.
+
+    The same instance re-exported across modules is one match; distinct envs
+    claiming one name are ambiguous.
+    """
+    matches = {id(env): env for env, _ in _live_envs() if env.name == name}
+    if len(matches) > 1:
+        files = sorted({file for env, file in _live_envs() if env.name == name})
+        raise ValueError(
+            f"env name {name!r} is declared by multiple live environments "
+            f"({', '.join(files)}); pass runtime= explicitly — the exact "
+            "instance disambiguates: runtime=LocalRuntime(env)"
+        )
+    return next(iter(matches.values()), None)
+
+
+def _declared_names(source: Path) -> set[str]:
+    """Env names a ``.py`` source (file or directory) declares at module level."""
+    from hud.environment.env import Environment as _Environment
+    from hud.utils.modules import iter_modules
+
+    return {
+        value.name
+        for module in iter_modules(source)
+        for value in vars(module).values()
+        if isinstance(value, _Environment)
+    }
 
 
 class SubprocessRuntime:

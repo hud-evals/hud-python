@@ -14,18 +14,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sys
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hud.environment.env import Environment
 from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HostedRuntime, HUDRuntime, LocalRuntime
+from .runtime import HostedRuntime, HUDRuntime, LocalRuntime, _declared_env, _declared_names
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -38,50 +36,6 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
-
-
-def _declared_env(name: str) -> Environment | None:
-    """A live env named *name* declared in a loaded module's globals, else None.
-
-    The in-memory counterpart of :func:`~hud.environment.load_environment`'s
-    file scan: an env declared at module top level in an imported module can
-    be served fresh from its file (``LocalRuntime`` locates it). Distinct
-    envs claiming one name is ambiguous and raises; the same instance
-    re-exported across modules is one match. Envs not in any file-backed
-    module's globals (constructed inside a function, a notebook cell)
-    return None.
-    """
-    matches: dict[int, tuple[Environment, str]] = {}
-    for module in list(sys.modules.values()):
-        module_file = getattr(module, "__file__", None)
-        module_vars = getattr(module, "__dict__", None)
-        if not module_file or not isinstance(module_vars, dict):
-            continue
-        for value in list(module_vars.values()):
-            if isinstance(value, Environment) and value.name == name:
-                matches.setdefault(id(value), (value, module_file))
-    if not matches:
-        return None
-    if len(matches) > 1:
-        files = sorted({file for _, file in matches.values()})
-        raise ValueError(
-            f"env name {name!r} is declared by multiple live environments "
-            f"({', '.join(files)}); pass runtime= explicitly — the exact "
-            "instance disambiguates: runtime=LocalRuntime(env)"
-        )
-    return next(iter(matches.values()))[0]
-
-
-def _declared_names(source: Path) -> set[str]:
-    """Env names a ``.py`` source (file or directory) declares at module level."""
-    from hud.utils.modules import iter_modules
-
-    return {
-        value.name
-        for module in iter_modules(source)
-        for value in vars(module).values()
-        if isinstance(value, Environment)
-    }
 
 
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
