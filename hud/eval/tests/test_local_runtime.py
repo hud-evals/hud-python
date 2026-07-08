@@ -211,6 +211,67 @@ def test_rejects_a_non_pointer_argument() -> None:
         LocalRuntime(cast("Any", 42))
 
 
+async def test_failed_startup_still_runs_shutdown_hooks() -> None:
+    from hud.eval.runtime import _local
+
+    env = _sums_env()
+    lifecycle: list[str] = []
+
+    @env.initialize
+    async def _up() -> None:
+        lifecycle.append("up")
+
+    @env.shutdown
+    async def _down() -> None:
+        lifecycle.append("down")
+
+    @env.initialize
+    async def _boom() -> None:
+        raise RuntimeError("daemon failed to start")
+
+    with pytest.raises(RuntimeError, match="daemon failed to start"):
+        async with _local(env):
+            pass
+
+    assert lifecycle == ["up", "down"]
+
+
+async def test_tasks_only_module_resolves_envs_imported_from_elsewhere(
+    tmp_path, monkeypatch, request
+) -> None:
+    # The env lives in a separate importable package, not next to tasks.py:
+    # the origin declares no envs, so resolution falls through to the live
+    # env the tasks module imported.
+    env_dir = tmp_path / "pkg"
+    env_dir.mkdir()
+    (env_dir / "sums_envmod.py").write_text(_SUMS_ENV.format(name="sums"), encoding="utf-8")
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    (tasks_dir / "tasks.py").write_text(
+        "from sums_envmod import add\n\ntasks = [add(a=2, b=3)]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(env_dir))
+    request.addfinalizer(lambda: sys.modules.pop("sums_envmod", None))
+
+    taskset = Taskset.from_module(tasks_dir / "tasks.py")
+    job = await taskset.run(_FnAgent(_solve_add))
+
+    assert [run.reward for run in job.runs] == [1.0]
+
+
+async def test_single_file_taskset_never_drags_in_a_same_named_sibling(tmp_path) -> None:
+    (tmp_path / "env_a.py").write_text(
+        _SUMS_ENV.format(name="sums") + "\ntasks = [add(a=2, b=3)]\n", encoding="utf-8"
+    )
+    (tmp_path / "env_b.py").write_text(_SUMS_ENV.format(name="sums"), encoding="utf-8")
+
+    taskset = Taskset.from_module(tmp_path / "env_a.py")
+    job = await taskset.run(_FnAgent(_solve_add))
+
+    assert [run.reward for run in job.runs] == [1.0]
+
+
 # ─── seam defenses ─────────────────────────────────────────────────────
 
 

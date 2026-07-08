@@ -72,6 +72,18 @@ def _declared_env(name: str) -> Environment | None:
     return next(iter(matches.values()))[0]
 
 
+def _declared_names(source: Path) -> set[str]:
+    """Env names a ``.py`` source (file or directory) declares at module level."""
+    from hud.utils.modules import iter_modules
+
+    return {
+        value.name
+        for module in iter_modules(source)
+        for value in vars(module).values()
+        if isinstance(value, Environment)
+    }
+
+
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
     suffix = f" ({group} times)" if group > 1 else ""
     if len(tasks) == 1:
@@ -244,8 +256,13 @@ class Taskset:
 
     def _resolve_placement(self) -> Provider | HUDRuntime:
         if self.origin and self.origin.startswith("module:"):
+            # The origin claims the rows only if it actually declares their
+            # envs (a tasks-only module importing its envs from elsewhere
+            # does not) — and it serves as the exact path, so a same-named
+            # variant in a sibling file is never dragged in.
             source = Path(self.origin[len("module:") :])
-            return LocalRuntime(source if source.is_dir() else source.parent)
+            if self.environment_names() <= _declared_names(source):
+                return LocalRuntime(source)
         if self.origin and self.origin.startswith("api:"):
             return HUDRuntime()
         declared = {name: _declared_env(name) for name in self.environment_names()}

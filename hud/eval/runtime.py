@@ -173,11 +173,15 @@ class LocalRuntime:
         runtime = LocalRuntime(harbor.environment_for)
 
     Each acquisition serves its fresh env on an ephemeral loopback port;
-    ``ready_timeout`` bounds ``@env.initialize`` startup. Env hooks run in
-    this process and share its event loop — blocking env code stalls
-    concurrent rollouts. Use :class:`SubprocessRuntime` or
-    :class:`DockerRuntime` for process isolation; ``Runtime(url)`` attaches
-    rollouts to a substrate served elsewhere.
+    ``ready_timeout`` bounds ``@env.initialize`` startup. The freshness
+    boundary is the env's own source: it is re-imported per rollout, while
+    modules it imports follow normal Python import caching and are shared
+    process-wide — state an env keeps in helper modules persists across
+    rollouts. Env hooks also run in this process and share its event loop,
+    so blocking env code stalls concurrent rollouts. Use
+    :class:`SubprocessRuntime` or :class:`DockerRuntime` when rollouts need
+    whole-process isolation; ``Runtime(url)`` attaches rollouts to a
+    substrate served elsewhere.
     """
 
     def __init__(
@@ -731,9 +735,11 @@ async def _local(env: Environment, *, ready_timeout: float | None = None) -> Asy
     """
     from hud.environment.server import bind
 
-    started = env.start()
-    await (asyncio.wait_for(started, ready_timeout) if ready_timeout is not None else started)
+    # start() inside the try: a failed or timed-out initialize hook still gets
+    # its already-started daemons torn down by stop() (best-effort per hook).
     try:
+        started = env.start()
+        await (asyncio.wait_for(started, ready_timeout) if ready_timeout is not None else started)
         server = await bind(env, "127.0.0.1", 0)
         host, port = server.sockets[0].getsockname()[:2]
         serve_task = asyncio.create_task(server.serve_forever())

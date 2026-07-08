@@ -92,9 +92,11 @@ Serves a fresh env per rollout, in this process, over the same control channel a
 - **a `(task) -> Environment` constructor** for envs built in code (integrations, parameterized
   envs), called fresh per rollout with the placed row.
 
-`ready_timeout` bounds `@env.initialize` startup. Env hooks run in this process and share its event
-loop - keep envs async, or use `SubprocessRuntime` / `DockerRuntime` when the env should not share
-your process's fate.
+`ready_timeout` bounds `@env.initialize` startup. The freshness boundary is the env's own source:
+it is re-imported per rollout, while modules it imports follow normal Python import caching and are
+shared process-wide - state kept in helper modules persists across rollouts. Env hooks run in this
+process and share its event loop - keep envs async, or use `SubprocessRuntime` / `DockerRuntime`
+when rollouts need whole-process isolation.
 
 ### `SubprocessRuntime`
 
