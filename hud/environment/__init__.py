@@ -5,7 +5,8 @@ protocol); ``load_environment`` selects one from authored ``.py`` source;
 :mod:`~hud.environment.server` is the serving entry point substrates run.
 How a substrate comes up — placement — belongs to the eval engine: see
 :mod:`hud.eval.runtime` (:class:`~hud.eval.runtime.Runtime`, the ``Provider``
-contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
+contract, ``LocalRuntime``, ``SubprocessRuntime``, ``DockerRuntime``,
+``HUDRuntime``).
 
 The env-side robot runtime (bridges, action providers, sim runners, contract
 tooling, recording glue) lives in :mod:`hud.environment.robot`; import it

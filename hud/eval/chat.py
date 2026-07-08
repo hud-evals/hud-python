@@ -96,7 +96,8 @@ class Chat:
                 (stateless per run, e.g. ``create_agent("claude-sonnet-4-5")``).
             runtime: The env placement each turn's rollout runs against — a
                 :class:`~hud.eval.runtime.Provider` such as
-                ``LocalRuntime("env.py")`` or ``Runtime("tcp://...")``. Chat is
+                ``LocalRuntime(env)``, ``SubprocessRuntime("env.py")``, or
+                ``Runtime("tcp://...")``. Chat is
                 interactive and local: it drives the agent loop in this process,
                 so hosted placement does not apply.
         """
@@ -133,7 +134,7 @@ class Chat:
         if self._runtime is None:
             raise RuntimeError(
                 "Chat needs a runtime to converse against — pass an env placement, "
-                'e.g. runtime=Runtime("tcp://...") or runtime=LocalRuntime("env.py").'
+                'e.g. runtime=LocalRuntime(env) or runtime=Runtime("tcp://...").'
             )
         if self.job is None:  # one job spans the whole conversation
             self.job = await Job.start(self._task.id)

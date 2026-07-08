@@ -155,9 +155,10 @@ hud eval env.py claude --runtime hud    # same env, executed on HUD's hosted inf
 [runtime](/v6/reference/runtime) and run a taskset against it:
 
 ```python
-from hud.eval import LocalRuntime, DockerRuntime, ModalRuntime, HUDRuntime
+from hud.eval import LocalRuntime, SubprocessRuntime, DockerRuntime, ModalRuntime, HUDRuntime
 
-LocalRuntime("env.py")     # local child process - fastest iteration
+LocalRuntime(env)          # this process - live env objects
+SubprocessRuntime("env.py") # local child process serving a source file
 DockerRuntime("my-env")    # a fresh container per rollout
 ModalRuntime("my-env")     # a Modal cloud sandbox per rollout
 HUDRuntime()               # HUD's hosted infra (after `hud deploy`)
@@ -199,12 +200,12 @@ You can run this programmatically:
 
 ```python
 from hud.agents import create_agent
-from hud.eval import LocalRuntime
+from hud.eval import SubprocessRuntime
 from tasks import TASKS
 
 agent = create_agent("claude-sonnet-4-5")               # routed through the HUD gateway
 
-job = await TASKS.run(agent, runtime=LocalRuntime("env.py"))   # start the run
+job = await TASKS.run(agent, runtime=SubprocessRuntime("env.py"))   # start the run
 print(job.reward)
 ```
 {/*

@@ -5,7 +5,7 @@ schedules the rollout engine over them. HUD job/trace reporting lives in
 :mod:`hud.eval.job`; platform persistence in :mod:`hud.eval.sync`::
 
     job = await Taskset("bugs", [fix_bug(difficulty=d) for d in range(5)]).run(
-        agent, runtime=LocalRuntime("env.py")
+        agent, runtime=SubprocessRuntime("env.py")
     )
 """
 
@@ -23,7 +23,7 @@ from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HostedRuntime, HUDRuntime, LocalRuntime
+from .runtime import HostedRuntime, HUDRuntime
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -264,13 +264,9 @@ class Taskset:
 
         # Placement is chosen once for the batch: HostedRuntime delegates the
         # whole rollout to the platform, anything else is a Provider driven
-        # locally by rollout().
-        # No runtime: serve the tasks' shared source locally if they were minted
-        # in-process from one file (the common authoring case); otherwise (mixed
-        # or wire-loaded rows with no source) default to the HUD runtime tunnel.
-        if runtime is None:
-            sources = {t._source for t in task_list if t._source is not None}
-            runtime = LocalRuntime(next(iter(sources))) if len(sources) == 1 else None
+        # locally by rollout(). No runtime defaults to the HUD runtime tunnel
+        # by env name; live envs in this process are a placement too
+        # (``runtime=LocalRuntime(env)``), never recovered from the rows.
         placement = runtime if runtime is not None else HUDRuntime()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 

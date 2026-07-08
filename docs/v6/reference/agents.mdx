@@ -105,11 +105,11 @@ with a [runtime](/v6/reference/runtime):
 
 ```python
 from hud.agents import create_agent
-from hud.eval import LocalRuntime, Taskset
+from hud.eval import SubprocessRuntime, Taskset
 
 agent = create_agent("claude-sonnet-4-5")
 taskset = Taskset.from_file("tasks.py")        # scaffolded tasks.py exports a list of tasks
-job = await taskset.run(agent, runtime=LocalRuntime("env.py"))
+job = await taskset.run(agent, runtime=SubprocessRuntime("env.py"))
 print(job.reward)
 ```
 

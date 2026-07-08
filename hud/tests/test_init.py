@@ -55,6 +55,7 @@ class TestHudInit:
             "RuntimeLimits",
             "RuntimeResources",
             "LocalRuntime",
+            "SubprocessRuntime",
             "SyncPlan",
             "Task",
             "Taskset",

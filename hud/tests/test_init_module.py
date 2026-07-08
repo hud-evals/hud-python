@@ -35,6 +35,7 @@ class TestInitModule:
             "RuntimeLimits",
             "RuntimeResources",
             "LocalRuntime",
+            "SubprocessRuntime",
             "SyncPlan",
             "Task",
             "Taskset",

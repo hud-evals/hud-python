@@ -9,16 +9,18 @@ A **runtime** chooses where each rollout's environment runs. You pass it to `tas
 runtime changes.
 
 ```python
-from hud import LocalRuntime
+from hud import LocalRuntime, SubprocessRuntime
 
-await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
+await taskset.run(agent, runtime=LocalRuntime(env))                # serve a live env in-process
+await taskset.run(agent, runtime=SubprocessRuntime("env.py"))      # serve env.py in a child process
 ```
 
 ## Built-in runtimes
 
 | Runtime | Where the env runs | When to reach for it |
 |---------|--------------------|----------------------|
-| `LocalRuntime("env.py")` | A child process from your source | Fastest iteration; local development |
+| `LocalRuntime(env)` | This process, serving live `Environment` objects | Fastest iteration; envs materialized in code |
+| `SubprocessRuntime("env.py")` | A child process from your source | Local development with process isolation |
 | `DockerRuntime("my-env")` | A fresh local container per rollout | Reproducibility and parity with production |
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
@@ -26,14 +28,14 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout on a HUD-leased box | Agent and env run together off your machine |
 
-Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
-HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
+Most runtimes are on the top-level package (`from hud import LocalRuntime, SubprocessRuntime,
+DockerRuntime, HUDRuntime, HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from
+`hud.eval`.
 
 <Note>
-**Omit `runtime=` and it's inferred** from each task's `_source`, the file its template was defined
-in. When every task shares one `_source`, that source is served locally as `LocalRuntime(source)`;
-otherwise (mixed sources, or rows loaded from a file or the platform with no source) it falls back to
-`HUDRuntime()`. Pass a runtime explicitly the moment you want something else.
+**Omit `runtime=`** and the run defaults to `HUDRuntime()` - the deployed env leased by each row's
+`env` name. Tasks are pure data; a placement is always supplied at run time, never recovered from
+the rows.
 </Note>
 
 To deploy an environment to the platform and run against it, see
@@ -65,7 +67,7 @@ RuntimeConfig(
 
 Support differs per runtime: `DockerRuntime`, `ModalRuntime`, and `DaytonaRuntime` accept it (Docker
 ignores `limits`; Daytona ignores `run_timeout_s` and resource overrides when booting from a snapshot).
-`LocalRuntime` and `HUDRuntime` reject a per-task `runtime_config`.
+`LocalRuntime`, `SubprocessRuntime`, and `HUDRuntime` reject a per-task `runtime_config`.
 
 ## Runtime directory
 
@@ -74,7 +76,25 @@ The constructor for each built-in runtime:
 ### `LocalRuntime`
 
 ```python
-LocalRuntime(path, *, env=None, ready_timeout=120.0)
+LocalRuntime(envs)
+```
+
+- **`envs`** - a live `Environment`, or a mapping of env name to `Environment` / zero-arg factory
+  for mixed-env tasksets. Rows join by `task.env` name.
+
+An `Environment` *instance* is a shared substrate: its daemons start on the first acquisition and
+stop after the last, every rollout shares the env's capabilities and state, and each rollout gets its
+own control channel so concurrent runs never collide. A *factory* is fresh per acquisition - built,
+served, and stopped around each rollout - for envs whose state a rollout mutates.
+
+Serving is in-process on a loopback port through the same control channel as every placement; only
+isolation differs. Env hooks share this process's event loop, so keep envs async - or use
+`SubprocessRuntime` / `DockerRuntime` when the env should not share the orchestrator's fate.
+
+### `SubprocessRuntime`
+
+```python
+SubprocessRuntime(path, *, env=None, ready_timeout=120.0)
 ```
 
 - **`path`** - `.py` file (or directory) that declares the env. The child's working directory is the source's directory, so sibling imports and relative data paths resolve.

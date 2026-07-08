@@ -13,16 +13,17 @@ agents see eval only through the ``Run`` handle they are driven with. (Sole
 exception: calling an ``@env.template`` declaration constructs the eval ``Task``
 row.)
 
-Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a
-local source, ``DockerRuntime`` an image, ``Runtime(url)`` an env served
-elsewhere, ``HUDRuntime`` a HUD runtime tunnel, or ``HostedRuntime`` to run the
-whole rollout remotely on the platform::
+Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime``
+live envs in this process, ``SubprocessRuntime`` a local source,
+``DockerRuntime`` an image, ``Runtime(url)`` an env served elsewhere,
+``HUDRuntime`` a HUD runtime tunnel, or ``HostedRuntime`` to run the whole
+rollout remotely on the platform::
 
-    from hud.eval import LocalRuntime, Taskset
+    from hud.eval import LocalRuntime, SubprocessRuntime, Taskset
 
-    job = await my_task(a=1).run(agent, runtime=LocalRuntime("env.py"))
+    job = await my_task(a=1).run(agent, runtime=LocalRuntime(env))
     job = await Taskset("demo", [my_task(d) for d in range(5)]).run(
-        agent, runtime=LocalRuntime("env.py"), group=8
+        agent, runtime=SubprocessRuntime("env.py"), group=8
     )
 """
 
@@ -46,6 +47,7 @@ from .runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    SubprocessRuntime,
 )
 from .sync import SyncPlan
 from .task import Task
@@ -68,6 +70,7 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "SubprocessRuntime",
     "SyncPlan",
     "Task",
     "Taskset",

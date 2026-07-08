@@ -5,7 +5,7 @@
 loopback, a container, a cloud sandbox), starts the task, drives the agent,
 grades, and tears down, filling a :class:`Run` along the way::
 
-    run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
+    run = await rollout(task, agent, runtime=SubprocessRuntime("env.py"))
 
 It is the *client-here* path: the agent loop runs in this process against a
 :class:`~hud.eval.runtime.Provider`'s channel. The same driver runs on the
