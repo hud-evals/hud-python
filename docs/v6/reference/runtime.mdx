@@ -31,13 +31,17 @@ Most runtimes are on the top-level package (`from hud import LocalRuntime, Docke
 HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
 
 <Note>
-**Omit `runtime=`** and what is already known decides: a taskset loaded from local `.py` source
-(`Taskset.from_file` / `from_module`) serves that source's directory; a platform taskset
-(`from_api`) runs on the platform; tasks naming envs declared at module top level in modules you've
-imported serve each fresh from its defining file — so `my_task().run(agent)` works in the same
-project that defines the env. Anything else raises, naming the forms to pass — there is no silent
-fallback. Tasks are pure data: rows never carry placement; resolution reads the taskset's origin and
-the process at run time, and an ambiguous env name (declared by two live envs) is a loud error.
+**You can usually omit `runtime=`.** A run without one uses what HUD already knows:
+
+- a taskset loaded from Python source (`Taskset.from_file` / `from_module`) runs against that source
+- a platform taskset (`Taskset.from_api`) runs on the platform
+- otherwise, if the envs your tasks name are defined in files you've imported, each rollout gets a
+  fresh env served from its file — so `my_task().run(agent)` just works in the project that defines
+  the env
+
+When none of these apply, `run` raises and lists the runtimes you can pass — it never silently picks
+one. If two imported files define an env with the same name, that's also an error; disambiguate by
+passing the instance you mean: `runtime=LocalRuntime(env)`.
 </Note>
 
 To deploy an environment to the platform and run against it, see
