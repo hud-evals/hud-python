@@ -76,16 +76,17 @@ The constructor for each built-in runtime:
 ### `LocalRuntime`
 
 ```python
-LocalRuntime(envs)
+LocalRuntime(envs)            # shared: a live env, or {env_name: env}
+LocalRuntime(build=fn)        # fresh: fn(task) -> Environment per rollout
 ```
 
-- **`envs`** - a live `Environment`, or a mapping of env name to `Environment` / zero-arg factory
-  for mixed-env tasksets. Rows join by `task.env` name.
-
-An `Environment` *instance* is a shared substrate: its daemons start on the first acquisition and
-stop after the last, every rollout shares the env's capabilities and state, and each rollout gets its
-own control channel so concurrent runs never collide. A *factory* is fresh per acquisition - built,
-served, and stopped around each rollout - for envs whose state a rollout mutates.
+- **`envs`** - a live `Environment`, or a mapping of env name to `Environment` for mixed-env
+  tasksets. Rows join by `task.env` name. Shared substrate: daemons start on the first acquisition
+  and stop after the last, every rollout shares the env's capabilities and state, and each rollout
+  gets its own control channel so concurrent runs never collide.
+- **`build`** - a callable receiving the placed task row and returning the env to serve for it.
+  Fresh per acquisition - built, served, and stopped around each rollout - for envs whose state a
+  rollout mutates, or whose construction depends on the row.
 
 Serving is in-process on a loopback port through the same control channel as every placement; only
 isolation differs. Env hooks share this process's event loop, so keep envs async - or use

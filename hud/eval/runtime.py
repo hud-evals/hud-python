@@ -7,8 +7,8 @@ transparent, so "co-located" (loopback) and "split" (agent here, env
 elsewhere) are the same code, differing only in the url.
 
 - :class:`LocalRuntime` — serves live :class:`Environment` objects in-process
-  (rows join by env name; instances are shared substrates, factories fresh
-  per acquisition).
+  (rows join by env name; shared substrates, or ``build=`` for a fresh env
+  constructed from each placed row).
 - :class:`SubprocessRuntime` — runs a child process serving the row's env from
   a ``.py`` source (the path is always given, never recovered from a live
   object).
@@ -161,20 +161,19 @@ def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
 class LocalRuntime:
     """The in-process provider: serve live :class:`Environment` objects from here.
 
-    The placement whose right-hand side is objects you already hold — a single
-    env, or a mapping of env name to env / zero-arg factory for a mixed-env
-    taskset. Rows join by ``task.env`` name, like every placement::
+    Two forms, one per lifecycle. *Shared*: pass an env you already hold (or a
+    mapping of env name -> env for a mixed-env taskset); rows join by
+    ``task.env`` name, the env's daemons start on first acquisition and stop
+    after the last, and every rollout shares its capabilities and state — but
+    each gets its own control channel (a bound channel holds at most one
+    suspended task, so concurrent runs never collide). *Fresh*: pass
+    ``build=``, a callable receiving the placed row and returning the env to
+    serve for it — built, served, and stopped around each rollout, for envs
+    whose state a rollout mutates::
 
         job = await taskset.run(agent, runtime=LocalRuntime(env))
-        job = await taskset.run(agent, runtime=LocalRuntime({"tb-g1": make_g1}))
-
-    An :class:`Environment` *instance* is a shared substrate: its daemons
-    start on first acquisition and stop after the last, and every rollout
-    placed on it shares the env's capabilities and state — but each gets its
-    own control channel (a bound channel holds at most one suspended task, so
-    concurrent runs never collide). A *factory* is fresh per acquisition —
-    built, served, and stopped around each rollout — for envs whose state a
-    rollout mutates.
+        job = await taskset.run(agent, runtime=LocalRuntime({"g1": g1, "g2": g2}))
+        job = await taskset.run(agent, runtime=LocalRuntime(build=env_for_row))
 
     Serving is in-process on a loopback port, through the same control channel
     as any placement — only isolation differs: env hooks run in this process
@@ -185,28 +184,39 @@ class LocalRuntime:
 
     def __init__(
         self,
-        envs: Environment | Mapping[str, Environment | Callable[[], Environment]],
+        envs: Environment | Mapping[str, Environment] | None = None,
+        *,
+        build: Callable[[Task], Environment] | None = None,
     ) -> None:
         if isinstance(envs, (str, Path)):
             raise TypeError(
                 "LocalRuntime serves live Environment objects; "
                 "use SubprocessRuntime(path) to serve a source file."
             )
+        if (envs is None) == (build is None):
+            raise TypeError("LocalRuntime: pass exactly one of envs or build=")
         from hud.environment.env import Environment as _Environment
 
-        if isinstance(envs, Mapping):
-            self._envs: dict[str, _Environment | Callable[[], _Environment]] = dict(envs)
+        self._build = build
+        if envs is None:
+            self._envs: dict[str, _Environment] = {}
         elif isinstance(envs, _Environment):
             self._envs = {envs.name: envs}
+        elif isinstance(envs, Mapping):
+            bad = {name: e for name, e in envs.items() if not isinstance(e, _Environment)}
+            if bad:
+                raise TypeError(
+                    f"LocalRuntime: mapping values must be live Environments, got {bad!r}; "
+                    "for per-row construction pass build= instead"
+                )
+            self._envs = dict(envs)
+            if not self._envs:
+                raise ValueError("LocalRuntime: no environments given")
         else:
-            # A factory has no name until called, so the join key must be
-            # explicit: pass factories as {env_name: factory}.
             raise TypeError(
                 f"LocalRuntime: expected an Environment or a mapping of "
-                f"env name -> Environment/factory; got {envs!r}"
+                f"env name -> Environment; got {envs!r}"
             )
-        if not self._envs:
-            raise ValueError("LocalRuntime: no environments given")
         # Shared-instance daemon refcounts, keyed by env name: start on first
         # acquisition, stop after the last.
         self._leases: dict[str, int] = {}
@@ -218,21 +228,19 @@ class LocalRuntime:
 
         if task.runtime_config is not None:
             raise ValueError("LocalRuntime does not support task runtime_config")
-        entry = self._envs.get(task.env)
-        if entry is None:
+        if self._build is not None:
+            env = self._build(task)
+            if not isinstance(env, _Environment):
+                raise TypeError(f"LocalRuntime build= returned {env!r}, not an Environment")
+            async with _local(env) as runtime:
+                yield runtime
+            return
+        env = self._envs.get(task.env)
+        if env is None:
             raise KeyError(
                 f"LocalRuntime has no environment named {task.env!r} (has: {sorted(self._envs)})"
             )
-        if isinstance(entry, _Environment):
-            async with self._acquire_shared(task.env, entry) as runtime:
-                yield runtime
-            return
-        env = entry()
-        if not isinstance(env, _Environment):
-            raise TypeError(
-                f"LocalRuntime factory for {task.env!r} returned {env!r}, not an Environment"
-            )
-        async with _local(env) as runtime:
+        async with self._acquire_shared(task.env, env) as runtime:
             yield runtime
 
     @asynccontextmanager

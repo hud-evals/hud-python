@@ -1,10 +1,10 @@
 """LocalRuntime: the in-process placement over live ``Environment`` objects.
 
-Rows join by env name like every placement; an ``Environment`` instance is a
-shared substrate (daemons started once, refcounted across acquisitions, one
-control channel per acquisition), a factory in a mapping is fresh per
-acquisition. Everything still crosses the control channel — these tests drive
-the real rollout engine against envs that only exist in this process.
+Shared form: live envs (single or name-keyed mapping), daemons started once and
+refcounted across acquisitions, one control channel per acquisition. Fresh
+form: ``build=``, constructing an env from the placed row per acquisition.
+Everything still crosses the control channel — these tests drive the real
+rollout engine against envs that only exist in this process.
 """
 
 from __future__ import annotations
@@ -113,23 +113,22 @@ async def test_shared_env_runs_grouped_taskset() -> None:
     assert all(run.reward == 1.0 for run in job.runs)
 
 
-async def test_factory_builds_fresh_env_per_acquisition() -> None:
-    built: list[Environment] = []
+async def test_build_makes_fresh_env_per_acquisition_from_the_row() -> None:
+    built: list[str] = []
 
-    def factory() -> Environment:
-        env = _sums_env()
-        built.append(env)
-        return env
+    def build(task: Task) -> Environment:
+        built.append(task.env)
+        return _sums_env(task.env)
 
     task = Task(env="sums", id="add", args={"a": 1, "b": 2})
     job = await task.run(
         _FnAgent(_solve_add),
-        runtime=LocalRuntime({"sums": factory}),
+        runtime=LocalRuntime(build=build),
         group=3,
     )
 
     assert all(run.reward == 1.0 for run in job.runs)
-    assert len(built) == 3
+    assert built == ["sums", "sums", "sums"]
 
 
 async def test_mapping_joins_rows_by_env_name() -> None:
@@ -175,6 +174,13 @@ def test_rejects_path_argument_pointing_at_subprocess_runtime() -> None:
         LocalRuntime(cast("Any", "env.py"))
 
 
-def test_rejects_bare_factory_without_a_name() -> None:
-    with pytest.raises(TypeError, match="mapping"):
-        LocalRuntime(cast("Any", _sums_env))
+def test_rejects_factory_as_mapping_value() -> None:
+    with pytest.raises(TypeError, match="build="):
+        LocalRuntime(cast("Any", {"sums": _sums_env}))
+
+
+def test_requires_exactly_one_of_envs_or_build() -> None:
+    with pytest.raises(TypeError, match="exactly one"):
+        LocalRuntime()
+    with pytest.raises(TypeError, match="exactly one"):
+        LocalRuntime(_sums_env(), build=lambda task: _sums_env())
