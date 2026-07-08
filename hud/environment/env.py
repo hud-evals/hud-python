@@ -120,13 +120,7 @@ class _TaskFactory(Generic[P]):
         from hud.eval.task import Task
 
         bound = self.sig.bind(*args, **kwargs)
-        task = Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
-        # Record where this template was defined so ``task.run()`` can default to
-        # serving that source locally (in-process only; never crosses the wire).
-        source = inspect.getsourcefile(self.func)
-        if source is not None:
-            task._source = source
-        return task
+        return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
 
 
 class Environment(LegacyEnvMixin):

@@ -59,7 +59,7 @@ and [Tasks & Tasksets](/v6/reference/tasks).
 You rarely serve by hand - `hud eval`, [`task.run()`](/v6/reference/tasks), and `Taskset.run()` bring
 the environment up for you, and the [runtime](/v6/reference/runtime) you pass decides where. Serving
 itself belongs to `hud.environment.server`, the entry point every substrate runs: a
-[`LocalRuntime`](/v6/reference/runtime#localruntime) child process, a container CMD, or `hud serve`.
+[`SubprocessRuntime`](/v6/reference/runtime#subprocessruntime) child process, a container CMD, or `hud serve`.
 
 | Function | Description |
 |----------|-------------|

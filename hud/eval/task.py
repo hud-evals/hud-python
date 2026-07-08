@@ -24,7 +24,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field
 
 from .runtime import RuntimeConfig
 
@@ -40,8 +40,8 @@ class Task(BaseModel):
 
     Pure data — holds no execution state, so one ``Task`` can drive many
     concurrent rollouts. ``run`` it for a graded :class:`~hud.eval.job.Job`;
-    placement comes from ``runtime=`` (a provider), else the source the task was
-    minted from (local), else the HUD runtime tunnel by ``env`` name.
+    placement comes from ``runtime=`` (a provider), else the HUD runtime
+    tunnel by ``env`` name.
     """
 
     env: str = Field(min_length=1)
@@ -56,12 +56,6 @@ class Task(BaseModel):
     #: Optional row-level runtime construction input. Runtime adapters apply the
     #: supported subset into their native launch shape or reject it.
     runtime_config: RuntimeConfig | None = None
-
-    #: In-process only: the source file the template was defined in, captured
-    #: when a template factory mints the task. Lets ``run`` default to serving
-    #: that source locally. Excluded from the wire (a row loaded from JSON has
-    #: none, and falls back to HUD runtime tunnel placement).
-    _source: str | None = PrivateAttr(default=None)
 
     def default_slug(self) -> str:
         """A stable slug from the task id, disambiguated by an args hash when present."""
@@ -90,8 +84,8 @@ class Task(BaseModel):
         open ``job`` from :meth:`Job.start` to accumulate into), ``group``
         repeats sharing a group_id, ``max_concurrent`` capping parallelism —
         over a taskset of one. ``runtime`` is the placement; left unset it
-        serves the task's source locally when minted in-process, else falls
-        back to the HUD runtime tunnel by ``env`` name.
+        falls back to the HUD runtime tunnel by ``env`` name. For a local
+        run, pass one explicitly (``runtime=LocalRuntime("env.py")``).
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 

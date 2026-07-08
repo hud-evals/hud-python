@@ -1,7 +1,7 @@
 """The rollout engine: ``rollout(task, agent)`` and its schedulers.
 
 These drive the engine end-to-end through the real placement path: a pure-data
-``Task`` row plus ``runtime=LocalRuntime(env_file)`` — a child process serves the env, the
+``Task`` row plus ``runtime=SubprocessRuntime(env_file)`` — a child process serves the env, the
 engine connects over the wire, the agent answers, grading comes back. The
 engine contract is a graded :class:`Run` with a trace id (always under a job —
 there are no standalone traces), and failure isolation that never raises: a
@@ -31,7 +31,7 @@ from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.environment import Environment
-from hud.eval import Job, LocalRuntime, Task, Taskset
+from hud.eval import Job, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
 from hud.eval.runtime import _local
 
@@ -155,7 +155,7 @@ async def _wait_for_pid_inactive(pid: int, max_wait: float = 2.0) -> bool:
 
 
 async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
-    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=LocalRuntime(env_file))
+    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file))
 
     assert run.reward == 1.0
     assert run.trace.content == "5"
@@ -249,7 +249,7 @@ async def test_local_runtime_startup_failure_kills_spawned_children(tmp_path: Pa
 
     try:
         with pytest.raises(RuntimeError, match="startup boom"):
-            async with LocalRuntime(env_file, ready_timeout=2.0)(Task(env="leaky", id="noop")):
+            async with SubprocessRuntime(env_file, ready_timeout=2.0)(Task(env="leaky", id="noop")):
                 pass
         pid = int(pid_file.read_text())
         assert await _wait_for_pid_inactive(pid)
@@ -263,7 +263,7 @@ async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Pat
     def boom(prompt: str) -> str:
         raise RuntimeError("agent exploded")
 
-    run = await rollout(_add_task(2, 3), _FnAgent(boom), runtime=LocalRuntime(env_file))
+    run = await rollout(_add_task(2, 3), _FnAgent(boom), runtime=SubprocessRuntime(env_file))
 
     assert run.trace.is_error
     assert "agent exploded" in (run.trace.error or "")
@@ -291,7 +291,7 @@ async def test_mid_run_failure_still_grades_best_effort(env_file: Path) -> None:
     # The agent answers correctly, then fails. The env is still alive, so the
     # run is graded best-effort: the reward is captured even though it errored.
     run = await rollout(
-        _add_task(2, 3), _AnswerThenBoomAgent(_solve_add), runtime=LocalRuntime(env_file)
+        _add_task(2, 3), _AnswerThenBoomAgent(_solve_add), runtime=SubprocessRuntime(env_file)
     )
 
     assert run.trace.is_error
@@ -358,7 +358,7 @@ async def test_provider_is_called_with_the_task_row_being_placed(env_file: Path)
         # The scheduler half of placement: the row is the request, so a
         # provider can size/route each substrate per task.
         placed.append(f"{task.env}/{task.id}:{task.args['a']}")
-        return LocalRuntime(env_file)(task)
+        return SubprocessRuntime(env_file)(task)
 
     run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=placer)
 
@@ -367,7 +367,7 @@ async def test_provider_is_called_with_the_task_row_being_placed(env_file: Path)
 
 
 async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
-    job = await _add_task(2, 3).run(_FnAgent(_solve_add), runtime=LocalRuntime(env_file))
+    job = await _add_task(2, 3).run(_FnAgent(_solve_add), runtime=SubprocessRuntime(env_file))
 
     (run,) = job.runs
     assert job.reward == 1.0
@@ -377,7 +377,7 @@ async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
 
 async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None:
     job = await _add_task(1, 2).run(
-        _FnAgent(_solve_add), runtime=LocalRuntime(env_file), group=2, max_concurrent=1
+        _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file), group=2, max_concurrent=1
     )
 
     assert job.group == 2
@@ -388,7 +388,7 @@ async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None
 
 async def test_open_job_spans_multiple_scheduler_calls(env_file: Path) -> None:
     session = await Job.start("session", group=2)
-    provider = LocalRuntime(env_file)
+    provider = SubprocessRuntime(env_file)
 
     job1 = await _add_task(1, 1).run(_FnAgent(_solve_add), runtime=provider, job=session)
     job2 = await _add_task(2, 2).run(_FnAgent(_solve_add), runtime=provider, job=session)
@@ -434,7 +434,7 @@ async def test_one_spawn_serves_each_rows_env_in_a_mixed_taskset(
     # One provider, two envs: each acquisition serves the row it was called
     # with (the task ids only exist on their own env, so a misplacement
     # would fail the rollout).
-    job = await Taskset("zoo", rows).run(_FnAgent(_solve_add), runtime=LocalRuntime(path))
+    job = await Taskset("zoo", rows).run(_FnAgent(_solve_add), runtime=SubprocessRuntime(path))
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
     assert [run.prompt for run in job.runs] == ["alpha:1:2", "beta:3:4"]
@@ -444,7 +444,7 @@ async def test_rollout_threads_job_and_group_ids(env_file: Path) -> None:
     run = await rollout(
         _add_task(1, 1),
         _FnAgent(_solve_add),
-        runtime=LocalRuntime(env_file),
+        runtime=SubprocessRuntime(env_file),
         job_id="j1",
         group_id="g1",
     )

@@ -94,7 +94,7 @@ def _resolve(
     """
     from contextlib import nullcontext
 
-    from hud.eval.runtime import LocalRuntime, Runtime
+    from hud.eval.runtime import Runtime, SubprocessRuntime
 
     attach = url
     if attach is None and source is None:
@@ -118,7 +118,7 @@ def _resolve(
         hud_console.error(f"No task matching {task!r} (available: {available})")
         raise typer.Exit(1)
     selected = matches[0]
-    placement = LocalRuntime(_spawn_target(source or "."))(selected)
+    placement = SubprocessRuntime(_spawn_target(source or "."))(selected)
     return selected.id, args or selected.args, placement
 
 

@@ -132,8 +132,9 @@ class Chat:
         )
         if self._runtime is None:
             raise RuntimeError(
-                "Chat needs a runtime to converse against — pass an env placement, "
-                'e.g. runtime=Runtime("tcp://...") or runtime=LocalRuntime("env.py").'
+                "Chat needs a runtime to converse against — pass an env placement: "
+                'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
+                "Runtime(url) (a served substrate), or HUDRuntime() (your deployed env)."
             )
         if self.job is None:  # one job spans the whole conversation
             self.job = await Job.start(self._task.id)
