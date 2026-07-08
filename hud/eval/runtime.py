@@ -726,10 +726,8 @@ async def _local(env: Environment, *, ready_timeout: float | None = None) -> Asy
 
     One env lifecycle (start → serve → stop) around one bound control
     channel; ``ready_timeout`` bounds ``env.start()`` (initialize
-    hooks/daemons). ``LocalRuntime`` enters this per acquisition; code
-    already running *inside* a placed substrate adapts it (``AgentTool``
-    sub-rollouts: ``runtime=lambda _: _local(env)``); test harnesses enter
-    it directly.
+    hooks/daemons). ``LocalRuntime`` enters this per acquisition with the
+    fresh env it built; test harnesses enter it directly with a live one.
     """
     from hud.environment.server import bind
 

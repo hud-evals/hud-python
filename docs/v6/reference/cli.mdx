@@ -105,7 +105,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
-| `--runtime` | Placement: `local`, `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
+| `--runtime` | Placement: `local` (a child process per rollout, serving the env source — `SubprocessRuntime`), `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
 | `--remote` | Run the whole rollout remotely on the HUD platform. |
 | `--yes`, `-y` | Skip confirmation prompt. |
 
