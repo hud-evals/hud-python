@@ -84,8 +84,8 @@ class Task(BaseModel):
         open ``job`` from :meth:`Job.start` to accumulate into), ``group``
         repeats sharing a group_id, ``max_concurrent`` capping parallelism —
         over a taskset of one. ``runtime`` is the placement; left unset it
-        falls back to the HUD runtime tunnel by ``env`` name. To run against
-        a live env in this process, pass ``runtime=LocalRuntime(env)``.
+        falls back to the HUD runtime tunnel by ``env`` name. For a local
+        run, pass one explicitly (``runtime=LocalRuntime("env.py")``).
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 

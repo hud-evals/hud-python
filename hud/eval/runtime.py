@@ -6,12 +6,12 @@ from this process (:func:`hud.eval.run.rollout`). The channel is location
 transparent, so "co-located" (loopback) and "split" (agent here, env
 elsewhere) are the same code, differing only in the url.
 
-- :class:`LocalRuntime` — serves live :class:`Environment` objects in-process
-  (rows join by env name; shared substrates, or ``build=`` for a fresh env
-  constructed from each placed row).
-- :class:`SubprocessRuntime` — runs a child process serving the row's env from
-  a ``.py`` source (the path is always given, never recovered from a live
-  object).
+- :class:`LocalRuntime` — serve a fresh env per rollout, in this process,
+  from any pointer to it: a ``.py`` source path, a live module-level
+  :class:`Environment` (its declaring file is the recipe), or a
+  ``(task) -> Environment`` constructor.
+- :class:`SubprocessRuntime` — serve the row's env from a ``.py`` source in a
+  child process, when the env should not share the orchestrator's fate.
 - :class:`DockerRuntime` — ``docker run``s an image whose CMD serves the channel.
 - ``Runtime(url)`` — the ``nullcontext`` of providers: yields itself, a
   *borrowed, shared* substrate provisioned elsewhere (env served anywhere —
@@ -36,7 +36,6 @@ import logging
 import sys
 import uuid
 from collections import deque
-from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,7 +53,7 @@ from hud.utils.process import ProcessGroup, create_process_group_exec
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Sequence
+    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
     from hud.agents.base import Agent
     from hud.environment.env import Environment
@@ -159,68 +158,79 @@ def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
 
 
 class LocalRuntime:
-    """The in-process provider: serve live :class:`Environment` objects from here.
+    """The local provider: a fresh env per rollout, served in this process.
 
-    Two forms, one per lifecycle. *Shared*: pass an env you already hold (or a
-    mapping of env name -> env for a mixed-env taskset); rows join by
-    ``task.env`` name, the env's daemons start on first acquisition and stop
-    after the last, and every rollout shares its capabilities and state — but
-    each gets its own control channel (a bound channel holds at most one
-    suspended task, so concurrent runs never collide). *Fresh*: pass
-    ``build=``, a callable receiving the placed row and returning the env to
-    serve for it — built, served, and stopped around each rollout, for envs
-    whose state a rollout mutates::
+    *source* is any pointer to the env: a ``.py`` file or directory declaring
+    it (imported as a throwaway module per acquisition; sibling imports
+    resolve; *env* pins one name when it declares several), a live
+    :class:`~hud.environment.Environment` declared at module level (its
+    declaring module's file is the recipe — the instance itself is never
+    served, so every rollout is still fresh), or a
+    ``(task) -> Environment`` constructor for envs built in code::
 
-        job = await taskset.run(agent, runtime=LocalRuntime(env))
-        job = await taskset.run(agent, runtime=LocalRuntime({"g1": g1, "g2": g2}))
-        job = await taskset.run(agent, runtime=LocalRuntime(build=env_for_row))
+        runtime = LocalRuntime("env.py")
+        runtime = LocalRuntime(env)
+        runtime = LocalRuntime(harbor.environment_for)
 
-    Serving is in-process on a loopback port, through the same control channel
-    as any placement — only isolation differs: env hooks run in this process
-    and share its event loop, so blocking env code stalls concurrent rollouts.
-    Use :class:`SubprocessRuntime` or :class:`DockerRuntime` when the env
-    should not share the orchestrator's fate.
+    Each acquisition serves its fresh env on an ephemeral loopback port;
+    ``ready_timeout`` bounds ``@env.initialize`` startup. Env hooks run in
+    this process and share its event loop — blocking env code stalls
+    concurrent rollouts. Use :class:`SubprocessRuntime` or
+    :class:`DockerRuntime` for process isolation; ``Runtime(url)`` attaches
+    rollouts to a substrate served elsewhere.
     """
 
     def __init__(
         self,
-        envs: Environment | Mapping[str, Environment] | None = None,
+        source: str | Path | Environment | Callable[[Task], Environment],
         *,
-        build: Callable[[Task], Environment] | None = None,
+        env: str | None = None,
+        ready_timeout: float = 120.0,
     ) -> None:
-        if isinstance(envs, (str, Path)):
-            raise TypeError(
-                "LocalRuntime serves live Environment objects; "
-                "use SubprocessRuntime(path) to serve a source file."
-            )
-        if (envs is None) == (build is None):
-            raise TypeError("LocalRuntime: pass exactly one of envs or build=")
         from hud.environment.env import Environment as _Environment
 
-        self._build = build
-        if envs is None:
-            self._envs: dict[str, _Environment] = {}
-        elif isinstance(envs, _Environment):
-            self._envs = {envs.name: envs}
-        elif isinstance(envs, Mapping):
-            bad = {name: e for name, e in envs.items() if not isinstance(e, _Environment)}
-            if bad:
+        self.ready_timeout = ready_timeout
+        # A live instance may have been mutated since its module was imported;
+        # verify the fresh copy still declares its templates, so drift fails
+        # at acquisition with the cause named instead of "unknown task" later.
+        expected_templates: frozenset[str] = frozenset()
+        if isinstance(source, _Environment):
+            file = _declaring_file(source)
+            if file is None:
                 raise TypeError(
-                    f"LocalRuntime: mapping values must be live Environments, got {bad!r}; "
-                    "for per-row construction pass build= instead"
+                    f"LocalRuntime: env {source.name!r} is not declared at module "
+                    "level in an importable file, so it cannot be rebuilt fresh per "
+                    "rollout; pass its constructor instead: "
+                    "LocalRuntime(lambda task: <build the env>)"
                 )
-            self._envs = dict(envs)
-            if not self._envs:
-                raise ValueError("LocalRuntime: no environments given")
+            expected_templates = frozenset(source.tasks)
+            source, env = file, env or source.name
+        if isinstance(source, (str, Path)):
+            path, pinned = Path(source).resolve(), env
+            from hud.environment import load_environment
+
+            def _load(task: Task) -> _Environment:
+                loaded = load_environment(path, name=pinned or task.env)
+                missing = expected_templates - loaded.tasks.keys()
+                if missing:
+                    raise ValueError(
+                        f"env {loaded.name!r} loaded from {path} lacks template(s) "
+                        f"{sorted(missing)} present on the live instance — it was "
+                        "modified after import; pass a constructor instead: "
+                        "LocalRuntime(lambda task: <build the env>)"
+                    )
+                return loaded
+
+            self._build: Callable[[Task], _Environment] = _load
+        elif callable(source):
+            if env is not None:
+                raise TypeError("LocalRuntime: env= applies only to source paths")
+            self._build = source
         else:
             raise TypeError(
-                f"LocalRuntime: expected an Environment or a mapping of "
-                f"env name -> Environment; got {envs!r}"
+                f"LocalRuntime: expected a source path, a live Environment, or a "
+                f"(task) -> Environment constructor; got {source!r}"
             )
-        # Shared-instance daemon refcounts, keyed by env name: start on first
-        # acquisition, stop after the last.
-        self._leases: dict[str, int] = {}
-        self._lock = asyncio.Lock()
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
@@ -228,36 +238,37 @@ class LocalRuntime:
 
         if task.runtime_config is not None:
             raise ValueError("LocalRuntime does not support task runtime_config")
-        if self._build is not None:
+        try:
             env = self._build(task)
-            if not isinstance(env, _Environment):
-                raise TypeError(f"LocalRuntime build= returned {env!r}, not an Environment")
-            async with _local(env) as runtime:
-                yield runtime
-            return
-        env = self._envs.get(task.env)
-        if env is None:
-            raise KeyError(
-                f"LocalRuntime has no environment named {task.env!r} (has: {sorted(self._envs)})"
-            )
-        async with self._acquire_shared(task.env, env) as runtime:
+        except RuntimeError as e:
+            # The source ran an event loop at import — usually an unguarded
+            # top-level run call; name the actual mistake.
+            if "running event loop" not in str(e):
+                raise
+            raise RuntimeError(
+                "the env source ran async code while being imported to place a "
+                'rollout — guard top-level run calls with `if __name__ == "__main__":`'
+            ) from e
+        if not isinstance(env, _Environment):
+            raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
+        async with _local(env, ready_timeout=self.ready_timeout) as runtime:
             yield runtime
 
-    @asynccontextmanager
-    async def _acquire_shared(self, name: str, env: Environment) -> AsyncIterator[Runtime]:
-        async with self._lock:
-            if self._leases.get(name, 0) == 0:
-                await env.start()
-            self._leases[name] = self._leases.get(name, 0) + 1
-        try:
-            async with _bind_channel(env) as runtime:
-                yield runtime
-        finally:
-            async with self._lock:
-                self._leases[name] -= 1
-                if self._leases[name] == 0:
-                    del self._leases[name]
-                    await env.stop()
+
+def _declaring_file(env: Environment) -> Path | None:
+    """The file of a loaded module holding *env* in its globals, else None.
+
+    Located by identity, so re-importing the file re-declares this env; a
+    module without a file (a notebook ``__main__``) cannot.
+    """
+    for module in list(sys.modules.values()):
+        module_file = getattr(module, "__file__", None)
+        module_vars = getattr(module, "__dict__", None)
+        if not module_file or not isinstance(module_vars, dict):
+            continue
+        if any(value is env for value in list(module_vars.values())):
+            return Path(module_file)
+    return None
 
 
 class SubprocessRuntime:
@@ -710,42 +721,33 @@ async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
 
 
 @asynccontextmanager
-async def _bind_channel(env: Environment) -> AsyncIterator[Runtime]:
-    """Bind one control channel over an already-started env, as a runtime.
+async def _local(env: Environment, *, ready_timeout: float | None = None) -> AsyncIterator[Runtime]:
+    """Substrate-side serving: a live env owned by *this* process, as a runtime.
 
-    Each bound channel holds at most one suspended task, so concurrent
-    rollouts on a shared env each get their own channel (see
-    ``LocalRuntime``); the env's daemon lifecycle is the caller's concern.
+    One env lifecycle (start → serve → stop) around one bound control
+    channel; ``ready_timeout`` bounds ``env.start()`` (initialize
+    hooks/daemons). ``LocalRuntime`` enters this per acquisition; code
+    already running *inside* a placed substrate adapts it (``AgentTool``
+    sub-rollouts: ``runtime=lambda _: _local(env)``); test harnesses enter
+    it directly.
     """
     from hud.environment.server import bind
 
-    server = await bind(env, "127.0.0.1", 0)
-    host, port = server.sockets[0].getsockname()[:2]
-    serve_task = asyncio.create_task(server.serve_forever())
+    started = env.start()
+    await (asyncio.wait_for(started, ready_timeout) if ready_timeout is not None else started)
     try:
-        yield Runtime(f"tcp://{host}:{port}")
-    finally:
-        serve_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await serve_task
-        server.close()
-        with contextlib.suppress(Exception):
-            await server.wait_closed()
-
-
-@asynccontextmanager
-async def _local(env: Environment) -> AsyncIterator[Runtime]:
-    """Substrate-side serving: a live env owned by *this* process, as a runtime.
-
-    One env lifecycle (start → serve → stop) around one bound channel — the
-    single-use form ``LocalRuntime`` builds on. Code already running *inside*
-    a placed substrate adapts it (``AgentTool`` sub-rollouts:
-    ``runtime=lambda _: _local(env)``); test harnesses enter it directly.
-    """
-    await env.start()
-    try:
-        async with _bind_channel(env) as runtime:
-            yield runtime
+        server = await bind(env, "127.0.0.1", 0)
+        host, port = server.sockets[0].getsockname()[:2]
+        serve_task = asyncio.create_task(server.serve_forever())
+        try:
+            yield Runtime(f"tcp://{host}:{port}")
+        finally:
+            serve_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await serve_task
+            server.close()
+            with contextlib.suppress(Exception):
+                await server.wait_closed()
     finally:
         await env.stop()
 

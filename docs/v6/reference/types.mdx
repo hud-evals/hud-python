@@ -67,7 +67,7 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 | `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
 
 ```python
-job = await ts.run(agent, runtime=SubprocessRuntime("env.py"), group=4)
+job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
 print(job.reward)   # mean across every run
 ```
 

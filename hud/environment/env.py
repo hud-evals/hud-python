@@ -76,7 +76,7 @@ class _TaskFactory(Generic[P]):
     binds a runnable :class:`~hud.eval.Task`::
 
         task = fix_bug(difficulty=3)  # -> Task
-        job = await task.run(agent, runtime=LocalRuntime(env))
+        job = await task.run(agent, runtime=LocalRuntime("env.py"))
     """
 
     def __init__(

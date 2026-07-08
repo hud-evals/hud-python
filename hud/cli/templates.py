@@ -87,10 +87,10 @@ async def test():
 
     agent = ClaudeAgent()
 
-    # Calling a task binds a runnable Task; ``runtime=LocalRuntime(env)`` serves the
-    # live env in this process and runs the task against it over the wire.
+    # Calling a task binds a runnable Task; ``runtime=LocalRuntime(__file__)`` serves this
+    # file in a child process and runs the task against it over the wire.
     task = count(sentence="Strawberry world", letter="r")
-    job = await task.run(agent, runtime=LocalRuntime(env))
+    job = await task.run(agent, runtime=LocalRuntime(__file__))
 
     print("reward:", job.reward)
 

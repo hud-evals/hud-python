@@ -5,7 +5,7 @@ schedules the rollout engine over them. HUD job/trace reporting lives in
 :mod:`hud.eval.job`; platform persistence in :mod:`hud.eval.sync`::
 
     job = await Taskset("bugs", [fix_bug(difficulty=d) for d in range(5)]).run(
-        agent, runtime=SubprocessRuntime("env.py")
+        agent, runtime=LocalRuntime("env.py")
     )
 """
 
@@ -14,16 +14,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hud.environment.env import Environment
 from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HostedRuntime, HUDRuntime
+from .runtime import HostedRuntime, HUDRuntime, LocalRuntime
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -36,6 +38,38 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
+
+
+def _declared_env(name: str) -> Environment | None:
+    """A live env named *name* declared in a loaded module's globals, else None.
+
+    The in-memory counterpart of :func:`~hud.environment.load_environment`'s
+    file scan: an env declared at module top level in an imported module can
+    be served fresh from its file (``LocalRuntime`` locates it). Distinct
+    envs claiming one name is ambiguous and raises; the same instance
+    re-exported across modules is one match. Envs not in any file-backed
+    module's globals (constructed inside a function, a notebook cell)
+    return None.
+    """
+    matches: dict[int, tuple[Environment, str]] = {}
+    for module in list(sys.modules.values()):
+        module_file = getattr(module, "__file__", None)
+        module_vars = getattr(module, "__dict__", None)
+        if not module_file or not isinstance(module_vars, dict):
+            continue
+        for value in list(module_vars.values()):
+            if isinstance(value, Environment) and value.name == name:
+                matches.setdefault(id(value), (value, module_file))
+    if not matches:
+        return None
+    if len(matches) > 1:
+        files = sorted({file for _, file in matches.values()})
+        raise ValueError(
+            f"env name {name!r} is declared by multiple live environments "
+            f"({', '.join(files)}); pass runtime= explicitly — the exact "
+            "instance disambiguates: runtime=LocalRuntime(env)"
+        )
+    return next(iter(matches.values()))[0]
 
 
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
@@ -208,6 +242,30 @@ class Taskset:
         """Return env names referenced by tasks in this taskset."""
         return {task.env for task in self}
 
+    def _resolve_placement(self) -> Provider | HUDRuntime:
+        if self.origin and self.origin.startswith("module:"):
+            source = Path(self.origin[len("module:") :])
+            return LocalRuntime(source if source.is_dir() else source.parent)
+        if self.origin and self.origin.startswith("api:"):
+            return HUDRuntime()
+        declared = {name: _declared_env(name) for name in self.environment_names()}
+        if declared and all(declared.values()):
+            providers = {
+                name: LocalRuntime(env) for name, env in declared.items() if env is not None
+            }
+            logger.info(
+                "no runtime given: serving %s fresh from their declaring modules",
+                ", ".join(sorted(providers)),
+            )
+            return lambda task: providers[task.env](task)
+        missing = sorted(name for name, env in declared.items() if env is None)
+        raise ValueError(
+            f"no placement for env(s) {', '.join(missing) or '<none>'}: pass runtime= — "
+            'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
+            "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
+            "(a served substrate), or HUDRuntime() (your deployed env)"
+        )
+
     async def run(
         self,
         agent: Agent,
@@ -224,7 +282,12 @@ class Taskset:
         placement: a :class:`~hud.eval.runtime.Provider` (the env served
         somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
         or :class:`~hud.eval.runtime.HostedRuntime` to run each rollout remotely
-        on the platform (left unset: HUD tunnel by env name). One provider serves a mixed-env
+        on the platform. Left unset, what is already known decides: a
+        taskset loaded from local ``.py`` source serves that source's
+        directory; a platform taskset runs on the platform; rows naming envs
+        declared in imported modules serve each fresh from its file; anything
+        else raises, naming the forms to pass. One provider serves a
+        mixed-env
         taskset and can size each substrate per row. Registers one HUD job as
         the platform receipt and reports each run's trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
@@ -264,10 +327,14 @@ class Taskset:
 
         # Placement is chosen once for the batch: HostedRuntime delegates the
         # whole rollout to the platform, anything else is a Provider driven
-        # locally by rollout(). No runtime defaults to the HUD runtime tunnel
-        # by env name; live envs in this process are a placement too
-        # (``runtime=LocalRuntime(env)``), never recovered from the rows.
-        placement = runtime if runtime is not None else HUDRuntime()
+        # locally by rollout(). No runtime: what the taskset or this process
+        # already knows decides (rows never carry placement) — a loaded
+        # taskset runs where it came from; rows naming envs declared in
+        # imported modules serve each fresh from its file; anything else is
+        # an error naming the forms to pass.
+        if runtime is None:
+            runtime = self._resolve_placement()
+        placement = runtime
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> Run:

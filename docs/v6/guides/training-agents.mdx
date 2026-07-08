@@ -93,7 +93,7 @@ One job spans the session; each step appends a batch and trains on it:
 
 - **Open the job** with `group=8` - 8 rollouts per task, so the rewards are comparable (next).
 - **Roll out** the batch, the same eval as the [previous guide](/v6/guides/running-an-eval). The
-  [runtime](/v6/reference/runtime) sets where it runs; swap `SubprocessRuntime` for `HUDRuntime()` unchanged.
+  [runtime](/v6/reference/runtime) sets where it runs; swap `LocalRuntime` for `HUDRuntime()` unchanged.
 - **Nudge** with `trainer.step` - the one line that learns. It scores each rollout against its group,
   shifts the weights, then **promotes** them so the gateway serves the new ones at once.
 
@@ -106,7 +106,7 @@ One job spans the session; each step appends a batch and trains on it:
 
 ```python
 import asyncio
-from hud import TrainingClient, Taskset, SubprocessRuntime
+from hud import TrainingClient, Taskset, LocalRuntime
 from hud.agents import create_agent
 from hud.eval import Job
 
@@ -122,7 +122,7 @@ async def main():
     session = await Job.start(MODEL, group=8)   # one job spans the session
     for step in range(10):
         start = len(session.runs)
-        await taskset.run(agent, runtime=SubprocessRuntime("env.py"), job=session)
+        await taskset.run(agent, runtime=LocalRuntime("env.py"), job=session)
         batch = session.runs[start:]                          # this step's rollouts
         await trainer.step(batch, learning_rate=1e-5, group_size=8)   # nudge + promote
         print(f"step {step}  reward {sum(r.reward for r in batch) / len(batch):.2f}")

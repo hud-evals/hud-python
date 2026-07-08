@@ -9,18 +9,17 @@ A **runtime** chooses where each rollout's environment runs. You pass it to `tas
 runtime changes.
 
 ```python
-from hud import LocalRuntime, SubprocessRuntime
+from hud import LocalRuntime
 
-await taskset.run(agent, runtime=LocalRuntime(env))                # serve a live env in-process
-await taskset.run(agent, runtime=SubprocessRuntime("env.py"))      # serve env.py in a child process
+await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
 ```
 
 ## Built-in runtimes
 
 | Runtime | Where the env runs | When to reach for it |
 |---------|--------------------|----------------------|
-| `LocalRuntime(env)` | This process, serving live `Environment` objects | Fastest iteration; envs materialized in code |
-| `SubprocessRuntime("env.py")` | A child process from your source | Local development with process isolation |
+| `LocalRuntime("env.py")` | This process, loaded fresh from your source per rollout | Fastest iteration; local development |
+| `SubprocessRuntime("env.py")` | A child process from your source | Local runs isolated from your process |
 | `DockerRuntime("my-env")` | A fresh local container per rollout | Reproducibility and parity with production |
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
@@ -28,14 +27,17 @@ await taskset.run(agent, runtime=SubprocessRuntime("env.py"))      # serve env.p
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout on a HUD-leased box | Agent and env run together off your machine |
 
-Most runtimes are on the top-level package (`from hud import LocalRuntime, SubprocessRuntime,
-DockerRuntime, HUDRuntime, HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from
-`hud.eval`.
+Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
+HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
 
 <Note>
-**Omit `runtime=`** and the run defaults to `HUDRuntime()` - the deployed env leased by each row's
-`env` name. Tasks are pure data; a placement is always supplied at run time, never recovered from
-the rows.
+**Omit `runtime=`** and what is already known decides: a taskset loaded from local `.py` source
+(`Taskset.from_file` / `from_module`) serves that source's directory; a platform taskset
+(`from_api`) runs on the platform; tasks naming envs declared at module top level in modules you've
+imported serve each fresh from its defining file — so `my_task().run(agent)` works in the same
+project that defines the env. Anything else raises, naming the forms to pass — there is no silent
+fallback. Tasks are pure data: rows never carry placement; resolution reads the taskset's origin and
+the process at run time, and an ambiguous env name (declared by two live envs) is a loud error.
 </Note>
 
 To deploy an environment to the platform and run against it, see
@@ -67,7 +69,7 @@ RuntimeConfig(
 
 Support differs per runtime: `DockerRuntime`, `ModalRuntime`, and `DaytonaRuntime` accept it (Docker
 ignores `limits`; Daytona ignores `run_timeout_s` and resource overrides when booting from a snapshot).
-`LocalRuntime`, `SubprocessRuntime`, and `HUDRuntime` reject a per-task `runtime_config`.
+`LocalRuntime` and `HUDRuntime` reject a per-task `runtime_config`.
 
 ## Runtime directory
 
@@ -76,21 +78,23 @@ The constructor for each built-in runtime:
 ### `LocalRuntime`
 
 ```python
-LocalRuntime(envs)            # shared: a live env, or {env_name: env}
-LocalRuntime(build=fn)        # fresh: fn(task) -> Environment per rollout
+LocalRuntime(source, *, env=None, ready_timeout=120.0)
 ```
 
-- **`envs`** - a live `Environment`, or a mapping of env name to `Environment` for mixed-env
-  tasksets. Rows join by `task.env` name. Shared substrate: daemons start on the first acquisition
-  and stop after the last, every rollout shares the env's capabilities and state, and each rollout
-  gets its own control channel so concurrent runs never collide.
-- **`build`** - a callable receiving the placed task row and returning the env to serve for it.
-  Fresh per acquisition - built, served, and stopped around each rollout - for envs whose state a
-  rollout mutates, or whose construction depends on the row.
+Serves a fresh env per rollout, in this process, over the same control channel as every placement.
+`source` is any pointer to the env:
 
-Serving is in-process on a loopback port through the same control channel as every placement; only
-isolation differs. Env hooks share this process's event loop, so keep envs async - or use
-`SubprocessRuntime` / `DockerRuntime` when the env should not share the orchestrator's fate.
+- **a `.py` file or directory** that declares it, imported fresh per rollout (sibling imports
+  resolve). **`env`** pins one name when the source declares several; it defaults to the placed
+  task's env.
+- **a live `Environment`** declared at module level - its declaring module's file is the recipe;
+  the instance itself is never served, so every rollout is still fresh.
+- **a `(task) -> Environment` constructor** for envs built in code (integrations, parameterized
+  envs), called fresh per rollout with the placed row.
+
+`ready_timeout` bounds `@env.initialize` startup. Env hooks run in this process and share its event
+loop - keep envs async, or use `SubprocessRuntime` / `DockerRuntime` when the env should not share
+your process's fate.
 
 ### `SubprocessRuntime`
 
