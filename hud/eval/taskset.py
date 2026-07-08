@@ -303,12 +303,12 @@ class Taskset:
         # taskset runs where it came from; rows naming envs declared in
         # imported modules serve each fresh from its file; anything else is
         # an error naming the forms to pass.
-        if runtime is None:
-            runtime = self._resolve_placement()
-        placement = runtime
+        # An empty taskset schedules nothing, so it needs no placement.
+        placement = runtime if runtime is not None or not task_list else self._resolve_placement()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> Run:
+            assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
                 return await placement.run(task, agent, job_id=job_id, group_id=group_id)
             return await rollout(

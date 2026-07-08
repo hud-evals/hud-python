@@ -272,6 +272,101 @@ async def test_single_file_taskset_never_drags_in_a_same_named_sibling(tmp_path)
     assert [run.reward for run in job.runs] == [1.0]
 
 
+async def test_empty_taskset_runs_without_a_placement() -> None:
+    job = await Taskset("empty", []).run(_FnAgent(_solve_add))
+
+    assert job.runs == []
+
+
+async def test_reexporting_tasks_module_does_not_claim_the_env(
+    tmp_path, monkeypatch, request
+) -> None:
+    # tasks.py re-exports the env object alongside the factory: the origin
+    # must not claim it (re-import of tasks.py would reuse the cached env
+    # module) — each rollout rebuilds the env from its real file instead.
+    env_dir = tmp_path / "pkg"
+    env_dir.mkdir()
+    (env_dir / "sums_reexp_envmod.py").write_text(
+        "from hud import Environment\n\n"
+        "LOADS = []\n"
+        'env = Environment("sums")\n\n\n'
+        '@env.template(id="add")\nasync def add(a: int, b: int):\n'
+        "    LOADS.append(1)\n"
+        '    answer = yield f"add:{a}:{b}:{len(LOADS)}"\n'
+        "    yield 1.0 if answer == str(a + b) else 0.0\n",
+        encoding="utf-8",
+    )
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    (tasks_dir / "tasks.py").write_text(
+        "from sums_reexp_envmod import add, env\n\ntasks = [add(a=2, b=3)]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(env_dir))
+    request.addfinalizer(lambda: sys.modules.pop("sums_reexp_envmod", None))
+
+    def _solve(prompt: str) -> str:
+        _, a, b, loads = prompt.split(":")
+        assert loads == "1"  # a fresh env module per rollout, not the cached one
+        return str(int(a) + int(b))
+
+    taskset = Taskset.from_module(tasks_dir / "tasks.py")
+    job = await taskset.run(_FnAgent(_solve), group=2)
+
+    assert [run.reward for run in job.runs] == [1.0, 1.0]
+
+
+async def test_package_reexported_env_pointer_uses_the_declaring_submodule(
+    tmp_path, monkeypatch, request
+) -> None:
+    pkg = tmp_path / "sums_pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("from .env_mod import env\n", encoding="utf-8")
+    (pkg / "env_mod.py").write_text(_SUMS_ENV.format(name="sums"), encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    request.addfinalizer(
+        lambda: [sys.modules.pop(m, None) for m in ("sums_pkg", "sums_pkg.env_mod")]
+    )
+    import importlib
+
+    sums_pkg = importlib.import_module("sums_pkg")
+
+    run = await rollout(
+        Task(env="sums", id="add", args={"a": 2, "b": 3}),
+        _FnAgent(_solve_add),
+        runtime=LocalRuntime(sums_pkg.env),
+    )
+
+    assert run.reward == 1.0
+
+
+async def test_template_can_lazily_import_a_sibling_module(tmp_path) -> None:
+    (tmp_path / "lazy_helper.py").write_text("ANSWER_SUFFIX = ':ok'\n", encoding="utf-8")
+    (tmp_path / "env.py").write_text(
+        "from hud import Environment\n\n"
+        'env = Environment("sums")\n\n\n'
+        '@env.template(id="add")\nasync def add(a: int, b: int):\n'
+        "    import lazy_helper\n"
+        '    answer = yield f"add:{a}:{b}{lazy_helper.ANSWER_SUFFIX}"\n'
+        "    yield 1.0 if answer == str(a + b) else 0.0\n",
+        encoding="utf-8",
+    )
+
+    def _solve(prompt: str) -> str:
+        _, a, b, ok = prompt.split(":")
+        assert ok == "ok"
+        return str(int(a) + int(b))
+
+    job = await Task(env="sums", id="add", args={"a": 2, "b": 3}).run(
+        _FnAgent(_solve),
+        runtime=LocalRuntime(tmp_path / "env.py"),
+        group=2,
+        max_concurrent=2,
+    )
+
+    assert [run.reward for run in job.runs] == [1.0, 1.0]
+
+
 # ─── seam defenses ─────────────────────────────────────────────────────
 
 

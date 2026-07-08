@@ -199,18 +199,21 @@ class LocalRuntime:
         # at acquisition with the cause named instead of "unknown task" later.
         expected_templates: frozenset[str] = frozenset()
         if isinstance(source, _Environment):
-            file = _declaring_file(source)
+            file = _declaring_file(source, env or source.name)
             if file is None:
                 raise TypeError(
-                    f"LocalRuntime: env {source.name!r} is not declared at module "
-                    "level in an importable file, so it cannot be rebuilt fresh per "
-                    "rollout; pass its constructor instead: "
+                    f"LocalRuntime: env {source.name!r} is not rebuilt by importing "
+                    "any file this process has loaded (constructed in a function or "
+                    "notebook cell, or declared inside a package using relative "
+                    "imports); pass its constructor instead: "
                     "LocalRuntime(lambda task: <build the env>)"
                 )
             expected_templates = frozenset(source.tasks)
             source, env = file, env or source.name
+        self._source_dir: Path | None = None
         if isinstance(source, (str, Path)):
             path, pinned = Path(source).resolve(), env
+            self._source_dir = path if path.is_dir() else path.parent
             from hud.environment import load_environment
 
             def _load(task: Task) -> _Environment:
@@ -242,21 +245,32 @@ class LocalRuntime:
 
         if task.runtime_config is not None:
             raise ValueError("LocalRuntime does not support task runtime_config")
+        # The source dir stays importable for the whole acquisition, not just
+        # the initial import, so a template can lazily import a sibling
+        # module at run time (as it could under the child-process runtime).
+        # Always insert-and-remove one entry: balanced under concurrency.
+        if self._source_dir is not None:
+            sys.path.insert(0, str(self._source_dir))
         try:
-            env = self._build(task)
-        except RuntimeError as e:
-            # The source ran an event loop at import — usually an unguarded
-            # top-level run call; name the actual mistake.
-            if "running event loop" not in str(e):
-                raise
-            raise RuntimeError(
-                "the env source ran async code while being imported to place a "
-                'rollout — guard top-level run calls with `if __name__ == "__main__":`'
-            ) from e
-        if not isinstance(env, _Environment):
-            raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
-        async with _local(env, ready_timeout=self.ready_timeout) as runtime:
-            yield runtime
+            try:
+                env = self._build(task)
+            except RuntimeError as e:
+                # The source ran an event loop at import — usually an unguarded
+                # top-level run call; name the actual mistake.
+                if "running event loop" not in str(e):
+                    raise
+                raise RuntimeError(
+                    "the env source ran async code while being imported to place a "
+                    'rollout — guard top-level run calls with `if __name__ == "__main__":`'
+                ) from e
+            if not isinstance(env, _Environment):
+                raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
+            async with _local(env, ready_timeout=self.ready_timeout) as runtime:
+                yield runtime
+        finally:
+            if self._source_dir is not None:
+                with contextlib.suppress(ValueError):
+                    sys.path.remove(str(self._source_dir))
 
 
 def _live_envs() -> Iterator[tuple[Environment, str]]:
@@ -280,9 +294,28 @@ def _live_envs() -> Iterator[tuple[Environment, str]]:
                 yield value, module_file
 
 
-def _declaring_file(env: Environment) -> Path | None:
-    """The file of a loaded module holding *env* in its globals, else None."""
-    return next((Path(file) for live, file in _live_envs() if live is env), None)
+def _declaring_file(env: Environment, name: str) -> Path | None:
+    """A file whose fresh import re-declares *env*, else None.
+
+    Candidate files hold the instance in their module globals, but a holder
+    may be a re-exporter (``from .env import env`` in a package
+    ``__init__``, a tasks file re-exporting its env): validate each by
+    loading it fresh — a declarer yields a *new* instance under *name*, a
+    re-exporter yields the same live one (or fails to import standalone).
+    ``__init__.py`` holders are tried last.
+    """
+    from hud.environment import load_environment
+
+    candidates = dict.fromkeys(Path(file) for live, file in _live_envs() if live is env)
+    for file in sorted(candidates, key=lambda f: f.name == "__init__.py"):
+        try:
+            probe = load_environment(file, name=name)
+        except Exception as e:
+            logger.debug("candidate %s does not rebuild env %r: %s", file, name, e)
+            continue
+        if probe is not env:
+            return file
+    return None
 
 
 def _declared_env(name: str) -> Environment | None:
@@ -303,15 +336,21 @@ def _declared_env(name: str) -> Environment | None:
 
 
 def _declared_names(source: Path) -> set[str]:
-    """Env names a ``.py`` source (file or directory) declares at module level."""
+    """Env names a ``.py`` source (file or directory) itself declares.
+
+    A fresh execution of the source yields *new* instances for envs it
+    declares; an env it merely imports is the already-live one and does not
+    count — importing the source again could not rebuild it.
+    """
     from hud.environment.env import Environment as _Environment
     from hud.utils.modules import iter_modules
 
+    live = {id(env) for env, _ in _live_envs()}
     return {
         value.name
         for module in iter_modules(source)
         for value in vars(module).values()
-        if isinstance(value, _Environment)
+        if isinstance(value, _Environment) and id(value) not in live
     }
 
 
