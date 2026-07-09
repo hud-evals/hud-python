@@ -80,6 +80,7 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
                 name=final_name,
                 weight=normalized_weight,
                 value=item.value,
+                criteria=item.criteria,
                 metadata=item.metadata,
             )
         )
@@ -140,10 +141,16 @@ def _boolean_subscore(
     name: str, weight: float, subscores: list[SubScore], value: float
 ) -> SubScore:
     unique_names = _dedupe_subscore_names(subscores)
+    criteria = [
+        c if c.source is not None else c.model_copy(update={"source": unique_name})
+        for unique_name, subscore in zip(unique_names, subscores, strict=True)
+        for c in subscore.criteria or []
+    ]
     return SubScore(
         name=name,
         value=value,
         weight=weight,
+        criteria=criteria or None,
         metadata={
             "subscores": unique_names,
             "subscore_metadata": {

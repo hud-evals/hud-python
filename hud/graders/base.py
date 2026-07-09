@@ -26,14 +26,18 @@ class Grader:
 
         if isinstance(result, tuple):
             score, metadata = result
+            metadata = dict(metadata)
         else:
             score = result
             metadata = {}
+
+        criteria = metadata.pop("criteria", None)
 
         return SubScore(
             name=name or cls.name,
             weight=weight,
             value=float(score),
+            criteria=criteria,
             metadata={**metadata, "_parameters": json_safe_dict(kwargs)},
         )
 

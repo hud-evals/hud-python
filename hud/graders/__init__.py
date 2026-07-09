@@ -27,7 +27,7 @@ from .base import Grader
 from .bash import BashGrader
 from .combine import _combine_subscores, combine, combine_all, combine_any
 from .judge import LLMJudgeGrader
-from .results import EvaluationResult, SubScore
+from .results import CriterionResult, EvaluationResult, SubScore
 from .text import (
     contains,
     contains_all,
@@ -40,6 +40,7 @@ from .text import (
 
 __all__ = [
     "BashGrader",
+    "CriterionResult",
     "EvaluationResult",
     "Grader",
     "LLMJudgeGrader",

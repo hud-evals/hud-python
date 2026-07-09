@@ -9,7 +9,7 @@ Graders turn an agent's answer into a reward. HUD ships reusable ones so you don
 ```python
 from hud.graders import (
     BashGrader, LLMJudgeGrader, Grader,
-    SubScore, EvaluationResult,
+    SubScore, EvaluationResult, CriterionResult,
     combine, combine_any, combine_all,
     exact_match, contains, contains_any, contains_all,
     numeric_match, f1_score, normalize,
@@ -96,6 +96,9 @@ result = await LLMJudgeGrader.grade(
 `criteria` items are strings, or `(requirement, weight)` tuples. A negative weight marks an error to
 avoid: the criterion scores as a penalty, MET when the answer actually makes the mistake.
 
+Each judgment is reported as a [`CriterionResult`](#criterionresult) on the returned
+`SubScore.criteria`, so the per-criterion verdicts and reasons survive into the trace.
+
 ## `combine` - compose multiple graders
 
 `combine` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
@@ -134,9 +137,13 @@ class LengthGrader(Grader):
 result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 ```
 
+A rubric-style custom grader can report per-criterion verdicts by returning a list of
+`CriterionResult` under the `"criteria"` metadata key; `grade` promotes it to the typed
+`SubScore.criteria` field.
+
 ## `SubScore` and `EvaluationResult`
 
-A `SubScore` is one component of a grade: `name`, `value` (0-1), `weight` (default `1.0`; negative = penalty), optional `metadata`.
+A `SubScore` is one component of a grade: `name`, `value` (0-1), `weight` (default `1.0`; negative = penalty), optional `criteria` and `metadata`.
 
 An `EvaluationResult` is the combined grade payload you can yield from a task:
 
@@ -150,6 +157,22 @@ An `EvaluationResult` is the combined grade payload you can yield from a task:
 | `isError` | `False` | Whether grading itself failed. |
 
 `EvaluationResult.from_float(value)` wraps a bare reward.
+
+## `CriterionResult`
+
+Where a `SubScore` decomposes the reward numerically, criteria justify it: each
+`CriterionResult` is one checked requirement with a pass/fail verdict. Criteria
+ride on the `SubScore` of the grader that checked them: `LLMJudgeGrader` emits
+one per criterion on its returned subscore, and `combine` carries them through
+into `EvaluationResult.subscores`.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `criterion` | - | The requirement that was checked. |
+| `passed` | - | Whether it was met. For negative-weight criteria, `True` means the error is present. |
+| `weight` | `1.0` | Rubric weight; negative marks an error to avoid. |
+| `reason` | `None` | The grader's justification for the verdict. |
+| `source` | `None` | Originating subscore name; set by `combine_any`/`combine_all` when they collapse inputs into one subscore. |
 
 Graders run as the second yield of a [task](/v6/reference/tasks); for choosing a reward that separates
 good work from bad, see [designing tasks](/v6/reference/advice).

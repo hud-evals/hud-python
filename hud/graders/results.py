@@ -1,4 +1,4 @@
-"""Grading result shapes: ``SubScore`` and ``EvaluationResult``."""
+"""Grading result shapes: ``CriterionResult``, ``SubScore``, and ``EvaluationResult``."""
 
 from __future__ import annotations
 
@@ -6,6 +6,31 @@ import warnings
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class CriterionResult(BaseModel):
+    """One graded rubric criterion: a checked requirement with its verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    criterion: str = Field(..., description="The requirement that was checked")
+    passed: bool = Field(
+        ...,
+        description="Whether the criterion was met. For negative-weight "
+        "(error-to-avoid) criteria, True means the error is present.",
+    )
+    weight: float = Field(
+        default=1.0,
+        description="Rubric weight of this criterion. Negative marks an error to avoid.",
+    )
+    reason: str | None = Field(
+        default=None, description="The grader's justification for the verdict"
+    )
+    source: str | None = Field(
+        default=None,
+        description="Name of the subscore that checked this criterion. Set when "
+        "combinators collapse subscores and positional attribution is lost.",
+    )
 
 
 class SubScore(BaseModel):
@@ -24,6 +49,10 @@ class SubScore(BaseModel):
         "Negative weights represent penalties.",
     )
     value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
+    criteria: list[CriterionResult] | None = Field(
+        default=None,
+        description="Itemized criterion verdicts behind this subscore's value",
+    )
     metadata: dict[str, Any] | None = Field(default=None, exclude=True)
 
     @property
@@ -81,4 +110,4 @@ class EvaluationResult(BaseModel):
         return cls(reward=value, done=True)
 
 
-__all__ = ["EvaluationResult", "SubScore"]
+__all__ = ["CriterionResult", "EvaluationResult", "SubScore"]

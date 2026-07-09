@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
 import warnings
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from hud.graders import (
     BashGrader,
+    CriterionResult,
     EvaluationResult,
     Grader,
+    LLMJudgeGrader,
     SubScore,
     combine,
     combine_all,
@@ -38,6 +43,29 @@ class TestResultShapes:
     def test_evaluation_result_warns_when_subscores_disagree_with_reward(self) -> None:
         with pytest.warns(UserWarning):
             EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
+
+    def test_subscore_serializes_criteria(self) -> None:
+        result = EvaluationResult(
+            reward=1.0,
+            subscores=[
+                SubScore(
+                    name="judge",
+                    value=1.0,
+                    weight=1.0,
+                    criteria=[CriterionResult(criterion="Mentions Paris", passed=True)],
+                )
+            ],
+        )
+        dumped = result.model_dump(mode="json")
+        assert dumped["subscores"][0]["criteria"] == [
+            {
+                "criterion": "Mentions Paris",
+                "passed": True,
+                "weight": 1.0,
+                "reason": None,
+                "source": None,
+            }
+        ]
 
 
 class TestNormalize:
@@ -287,6 +315,20 @@ class TestCombine:
         assert result.subscores is not None
         assert result.subscores[0].metadata == metadata
 
+    async def test_combine_keeps_criteria_on_subscores(self) -> None:
+        judge_criteria = [
+            CriterionResult(criterion="Mentions Paris", passed=True),
+            CriterionResult(criterion="Names the river", passed=False),
+        ]
+        result = await combine(
+            SubScore(name="judge", value=1.0, weight=0.5, criteria=judge_criteria),
+            SubScore(name="tests", value=0.0, weight=0.5),
+        )
+        assert result.subscores is not None
+        by_name = {subscore.name: subscore for subscore in result.subscores}
+        assert by_name["judge"].criteria == judge_criteria
+        assert by_name["tests"].criteria is None
+
     async def test_combine_preserves_negative_reward_without_validator_warning(self) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -341,6 +383,23 @@ class TestGrader:
         assert subscore.metadata["_parameters"]["marker"] == "ok"
         assert subscore.metadata["_parameters"]["payload"] == "<object: not serializable>"
 
+    async def test_grade_promotes_criteria_metadata_to_typed_field(self) -> None:
+        class RubricGrader(Grader):
+            name = "rubric"
+
+            @classmethod
+            async def compute_score(cls, **kwargs: object) -> tuple[float, dict[str, object]]:
+                return 1.0, {
+                    "criteria": [CriterionResult(criterion="did the thing", passed=True)],
+                    "extra": "kept",
+                }
+
+        subscore = await RubricGrader.grade(weight=1.0)
+        assert subscore.criteria == [CriterionResult(criterion="did the thing", passed=True)]
+        assert subscore.metadata is not None
+        assert "criteria" not in subscore.metadata
+        assert subscore.metadata["extra"] == "kept"
+
 
 class TestBooleanCombinators:
     def test_combine_any_picks_max(self) -> None:
@@ -353,6 +412,21 @@ class TestBooleanCombinators:
         )
         assert combined.name == "any"
         assert combined.value == 1.0
+
+    def test_combine_any_propagates_criteria_from_inputs(self) -> None:
+        combined = combine_any(
+            weight=1.0,
+            subscores=[
+                SubScore(
+                    name="judge",
+                    value=1.0,
+                    weight=0.5,
+                    criteria=[CriterionResult(criterion="c1", passed=True)],
+                ),
+                SubScore(name="tests", value=0.0, weight=0.5),
+            ],
+        )
+        assert combined.criteria == [CriterionResult(criterion="c1", passed=True, source="judge")]
 
     def test_combine_any_preserves_metadata_for_duplicate_named_subscores(self) -> None:
         combined = combine_any(
@@ -397,6 +471,52 @@ class TestBooleanCombinators:
                 "BashGrader-2": {"exit_code": 1},
             },
         }
+
+
+class _FakeGatewayClient:
+    """Judges MET when the criterion text (inside the user prompt) contains 'met:'."""
+
+    def __init__(self) -> None:
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs: Any) -> Any:
+        user_prompt: str = kwargs["messages"][1]["content"]
+        status = "MET" if "met:" in user_prompt else "UNMET"
+        content = json.dumps({"criterion_status": status, "explanation": "because"})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+
+class TestLLMJudgeGrader:
+    async def test_compute_score_returns_typed_criteria(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
+        )
+        score, metadata = await LLMJudgeGrader.compute_score(
+            answer="some answer",
+            criteria=["met: mentions Paris", ("names the river", 3.0)],
+        )
+        assert score == pytest.approx(0.25)
+        criteria = metadata["criteria"]
+        assert [(c.criterion, c.passed, c.weight, c.reason, c.source) for c in criteria] == [
+            ("met: mentions Paris", True, 1.0, "because", None),
+            ("names the river", False, 3.0, "because", None),
+        ]
+
+    async def test_grade_puts_criteria_on_subscore(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
+        )
+        subscore = await LLMJudgeGrader.grade(
+            weight=1.0, answer="some answer", criteria=["met: correct"]
+        )
+        assert subscore.criteria == [
+            CriterionResult(criterion="met: correct", passed=True, weight=1.0, reason="because")
+        ]
+        assert subscore.metadata is not None
+        assert "criteria" not in subscore.metadata
+        assert subscore.metadata["model"] == "claude-haiku-4-5"
 
 
 @pytest.mark.skipif(not _HAS_BASH, reason="/bin/bash not available (e.g. Windows)")
