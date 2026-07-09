@@ -350,7 +350,7 @@ def _write_environment(
     shutil.copytree(source_dir, env_out, ignore=_make_ignore(out_root))
 
     # Drop any copied taskset files and the source Dockerfile name we don't use.
-    for stale in env_out.glob("*.json"):
+    for stale in env_out.glob("*.json*"):
         stale.unlink()
     for name in ("Dockerfile.hud", "dockerfile"):
         leftover = env_out / name
