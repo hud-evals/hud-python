@@ -49,7 +49,7 @@ def jobs_command(
 
 
 def _list_jobs(*, json_output: bool, limit: int) -> None:
-    from hud.utils.platform import PlatformClient
+    from hud.utils.platform import PlatformClient, list_items
 
     client = PlatformClient.from_settings()
     try:
@@ -58,7 +58,7 @@ def _list_jobs(*, json_output: bool, limit: int) -> None:
         console.print(f"[red]Failed to fetch jobs: {e}[/red]")
         raise typer.Exit(1) from e
 
-    items = data if isinstance(data, list) else (data.get("items") or [])
+    items = list_items(data)
 
     if json_output:
         console.print_json(json.dumps(items, indent=2, default=str))
@@ -99,7 +99,7 @@ def _list_jobs(*, json_output: bool, limit: int) -> None:
 
 def _show_job_traces(job_id: str, *, json_output: bool, limit: int) -> None:
     from hud.settings import settings
-    from hud.utils.platform import PlatformClient
+    from hud.utils.platform import PlatformClient, list_items
 
     client = PlatformClient.from_settings()
     try:
@@ -108,7 +108,7 @@ def _show_job_traces(job_id: str, *, json_output: bool, limit: int) -> None:
         console.print(f"[red]Failed to fetch traces: {e}[/red]")
         raise typer.Exit(1) from e
 
-    items = data if isinstance(data, list) else (data.get("items") or [])
+    items = list_items(data)
 
     if json_output:
         console.print_json(json.dumps(items, indent=2, default=str))

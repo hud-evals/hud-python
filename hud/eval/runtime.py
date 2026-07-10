@@ -47,7 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, list_items
 from hud.utils.process import ProcessGroup, create_process_group_exec
 
 from .run import Grade, Run, rollout
@@ -1165,6 +1165,7 @@ class HostedRuntime:
         model_id: str,
         *,
         group: int,
+        expected: int,
         max_steps: int | None = None,
         name: str | None = None,
     ) -> tuple[str, list[Run]]:
@@ -1176,8 +1177,16 @@ class HostedRuntime:
         is born linked to its named task and the dashboard groups and labels
         them (``my-task (2)``) instead of falling back to trace UUIDs.
 
-        Returns the server-minted job id and one folded ``Run`` per trace, in
-        the platform's trace order.
+        ``expected`` is the caller's tasks x group count — the completion bar
+        when the submission response under-reports its traces. ``run_timeout``
+        bounds the whole batch here (the platform runs its traces
+        concurrently, so the wall-clock is set by the slowest rollout, not the
+        batch size); on timeout or cancel, every submitted trace is cancelled
+        platform-side before the error propagates.
+
+        Returns the server-minted job id and one folded ``Run`` per submitted
+        trace in submission order, each ``group_id`` carrying the trace's task
+        version id (the ``group`` rollouts of one task share it).
         """
         platform = PlatformClient.from_settings()
         if not platform.api_key:
@@ -1197,37 +1206,55 @@ class HostedRuntime:
             raise RuntimeError(f"run_list returned no job_id: {data}")
         from hud.settings import settings as sdk_settings
 
-        logger.info("job: %s/jobs/%s", sdk_settings.hud_web_url.rstrip("/"), job_id)
-        submitted = [
-            str(t.get("trace_id") or "") for t in data.get("traces") or [] if t.get("trace_id")
-        ]
+        logger.info("job: %s/jobs/%s", sdk_settings.hud_web_url, job_id)
+        submitted = [str(t["trace_id"]) for t in data.get("traces") or [] if t.get("trace_id")]
         try:
-            states = await self._await_job_terminal(platform, job_id, expected=len(submitted))
-        except asyncio.CancelledError:
+            states = await self._await_job_terminal(
+                platform, job_id, expected=max(expected, len(submitted))
+            )
+        except (TimeoutError, asyncio.CancelledError):
             for trace_id in submitted:
                 await self._cancel(platform, trace_id)
             raise
-        runs: list[Run] = []
+        # The poll page's order is arbitrary and may contain strays (retried or
+        # duplicated traces); keep one state per submitted trace, in submission
+        # order. Without a submission list, fall back to first-seen order.
+        by_id: dict[str, dict[str, Any]] = {}
         for state in states:
             trace_id = str(state.get("id") or state.get("trace_id") or "")
+            if trace_id and (not submitted or trace_id in set(submitted)):
+                by_id.setdefault(trace_id, state)
+        ordered = [t for t in submitted if t in by_id] if submitted else list(by_id)
+        runs: list[Run] = []
+        for trace_id in ordered:
+            state = by_id[trace_id]
             run = self._fold(state, trace_id)
             run.trace.trace_id = trace_id
             run.job_id = job_id
+            version = state.get("task_version_id")
+            run.group_id = str(version) if version else None
             runs.append(run)
         return job_id, runs
 
     async def _await_job_terminal(
         self, platform: PlatformClient, job_id: str, *, expected: int
     ) -> list[dict[str, Any]]:
+        # Assumes the traces endpoint returns the full set in one page (a bare
+        # list today). A trace is over when its status is terminal or, for a
+        # status outside the known vocabulary, when its end_time is stamped —
+        # otherwise one unrecognized terminal status would stall the batch.
         loop = asyncio.get_event_loop()
         deadline = loop.time() + self.run_timeout
         while True:
             data = await platform.aget(f"/jobs/{job_id}/traces")
-            items = data if isinstance(data, list) else (data.get("items") or [])
+            items = list_items(data)
             if (
                 items
                 and len(items) >= expected
-                and all(item.get("status") in _TERMINAL_TRACE_STATUSES for item in items)
+                and all(
+                    item.get("status") in _TERMINAL_TRACE_STATUSES or item.get("end_time")
+                    for item in items
+                )
             ):
                 return items
             if loop.time() >= deadline:
@@ -1237,7 +1264,7 @@ class HostedRuntime:
             await asyncio.sleep(self.poll_interval)
 
 
-def gateway_batch_spec(agent: Agent) -> tuple[str, int | None] | None:
+def _gateway_batch_spec(agent: Agent) -> tuple[str, int | None] | None:
     """``(platform model id, max_steps)`` when ``agent`` fits the batch shape.
 
     ``/rollouts/run_list`` carries only a platform model id and a step budget,
@@ -1273,24 +1300,22 @@ def gateway_batch_spec(agent: Agent) -> tuple[str, int | None] | None:
     diverged = {
         key
         for key in set(config) | set(default)
-        if key not in ("model", "max_steps", "auto_respond")
-        and config.get(key) != default.get(key)
+        if key not in ("model", "max_steps", "auto_respond") and config.get(key) != default.get(key)
     }
     if diverged:
         logger.debug("batch submit skipped; custom agent config: %s", sorted(diverged))
         return None
-    from hud.utils.gateway import list_gateway_models
+    from hud.utils.gateway import resolve_gateway_model
 
     try:
-        models = list_gateway_models()
+        entry = resolve_gateway_model(model)
     except Exception as exc:
         logger.debug("batch submit skipped; model catalog unavailable: %s", exc)
         return None
-    for entry in models:
-        if entry.id and model in (entry.model_name, entry.name, entry.id):
-            return entry.id, max_steps if isinstance(max_steps, int) else None
-    logger.debug("batch submit skipped; model %r not in the platform catalog", model)
-    return None
+    if entry is None or not entry.id:
+        logger.debug("batch submit skipped; model %r not in the platform catalog", model)
+        return None
+    return entry.id, max_steps if isinstance(max_steps, int) else None
 
 
 def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:

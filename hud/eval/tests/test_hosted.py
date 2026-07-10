@@ -545,29 +545,29 @@ def _catalog_models() -> list[Any]:
 
 
 def test_gateway_batch_spec_stock_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    from hud.eval.runtime import gateway_batch_spec
+    from hud.eval.runtime import _gateway_batch_spec
     from hud.utils import gateway
 
     monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
     agent = _agent()
     agent.config.max_steps = 25
 
-    assert gateway_batch_spec(agent) == ("model-uuid-1", 25)
+    assert _gateway_batch_spec(agent) == ("model-uuid-1", 25)
 
 
 def test_gateway_batch_spec_rejects_custom_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    from hud.eval.runtime import gateway_batch_spec
+    from hud.eval.runtime import _gateway_batch_spec
     from hud.utils import gateway
 
     monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
     agent = _agent()
     agent.config.system_prompt = "be brief"  # diverges from the type's defaults
 
-    assert gateway_batch_spec(agent) is None
+    assert _gateway_batch_spec(agent) is None
 
 
 def test_gateway_batch_spec_rejects_unknown_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    from hud.eval.runtime import gateway_batch_spec
+    from hud.eval.runtime import _gateway_batch_spec
     from hud.utils import gateway
 
     monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
@@ -575,7 +575,7 @@ def test_gateway_batch_spec_rejects_unknown_model(monkeypatch: pytest.MonkeyPatc
         OpenAIChatConfig(model="not-in-catalog", api_key="k", base_url="http://localhost")
     )
 
-    assert gateway_batch_spec(agent) is None
+    assert _gateway_batch_spec(agent) is None
 
 
 @pytest.mark.asyncio
@@ -586,8 +586,17 @@ async def test_run_taskset_submits_batch_and_folds_runs(
         [
             [{"id": "t-1", "status": "running"}, {"id": "t-2", "status": "queued"}],
             [
-                {"id": "t-1", "status": "completed", "reward": 1.0},
-                {"id": "t-2", "status": "error", "reward": None, "error": "boom"},
+                # Reversed order plus a stray trace: the fold must restore
+                # submission order and keep only the submitted traces.
+                {"id": "t-stray", "status": "completed", "reward": 1.0},
+                {
+                    "id": "t-2",
+                    "status": "error",
+                    "reward": None,
+                    "error": "boom",
+                    "task_version_id": "v-a",
+                },
+                {"id": "t-1", "status": "completed", "reward": 1.0, "task_version_id": "v-a"},
             ],
         ]
     )
@@ -597,7 +606,7 @@ async def test_run_taskset_submits_batch_and_folds_runs(
     hosted = HostedRuntime(poll_interval=0.01)
 
     job_id, runs = await hosted.run_taskset(
-        "ts-123", "model-uuid-1", group=2, max_steps=40, name="My Batch"
+        "ts-123", "model-uuid-1", group=2, expected=2, max_steps=40, name="My Batch"
     )
 
     assert job_id == "9a1b2c3d-0000-0000-0000-000000000001"
@@ -611,10 +620,11 @@ async def test_run_taskset_submits_batch_and_folds_runs(
         "name": "My Batch",
     }
     assert platform.polled == 2  # first page non-terminal, second page terminal
+    assert [run.trace.trace_id for run in runs] == ["t-1", "t-2"]  # submission order, stray dropped
     assert [run.reward for run in runs] == [1.0, 0.0]
     assert runs[0].trace.status == "completed"
     assert runs[1].trace.status == "error"
-    assert runs[0].trace.trace_id == "t-1"
+    assert [run.group_id for run in runs] == ["v-a", "v-a"]  # task version id as the group key
     assert runs[0].job_id == job_id
 
 
@@ -626,7 +636,14 @@ async def test_taskset_run_dispatches_platform_taskset_to_run_list(
     from hud.utils import gateway
 
     platform = _FakeBatchPlatform(
-        [[{"id": "t-1", "status": "completed", "reward": 0.5}]], trace_ids=["t-1"]
+        [
+            [
+                {"id": "t-1", "status": "completed", "reward": 0.5, "task_version_id": "v-a"},
+                {"id": "t-2", "status": "completed", "reward": 0.5, "task_version_id": "v-a"},
+                {"id": "t-3", "status": "completed", "reward": 0.5, "task_version_id": "v-a"},
+            ]
+        ],
+        trace_ids=["t-1", "t-2", "t-3"],
     )
     monkeypatch.setattr(
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
@@ -655,7 +672,8 @@ async def test_taskset_run_dispatches_platform_taskset_to_run_list(
     assert job.id == "9a1b2c3d-0000-0000-0000-000000000001"
     assert job.taskset_id == "ts-123"
     assert entered == []
-    assert [run.reward for run in job.runs] == [0.5]
+    assert [run.reward for run in job.runs] == [0.5, 0.5, 0.5]
+    assert {run.group_id for run in job.runs} == {"v-a"}
 
 
 @pytest.mark.asyncio

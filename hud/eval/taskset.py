@@ -29,7 +29,7 @@ from .runtime import (
     LocalRuntime,
     _declared_env,
     _declared_names,
-    gateway_batch_spec,
+    _gateway_batch_spec,
 )
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
@@ -273,7 +273,10 @@ class Taskset:
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
         instead, so a longer arc (a training session) spans many calls under
         one id. Returned ``job.runs`` preserves expansion order (task-major,
-        then group).
+        then group) — except on the one-request batch path (a platform
+        taskset run wholesale on ``HostedRuntime`` with a stock gateway
+        model), where runs come back in the platform's submission order,
+        each ``group_id`` carrying its trace's task version id.
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
@@ -307,23 +310,21 @@ class Taskset:
             and task_list
             and self.api_id is not None
             and isinstance(runtime, HostedRuntime)
+            and (batch := _gateway_batch_spec(agent)) is not None
         ):
-            batch = gateway_batch_spec(agent)
-            if batch is not None:
-                model_id, max_steps = batch
-                name = _job_name(self.name, task_list, group)
-                batch_job_id, runs = await runtime.run_taskset(
-                    self.api_id,
-                    model_id,
-                    group=group,
-                    max_steps=max_steps,
-                    name=name,
-                )
-                batch_job = Job(
-                    id=batch_job_id, name=name, group=group, taskset_id=self.api_id
-                )
-                batch_job.runs.extend(runs)
-                return batch_job
+            model_id, max_steps = batch
+            name = _job_name(self.name, task_list, group)
+            batch_job_id, runs = await runtime.run_taskset(
+                self.api_id,
+                model_id,
+                group=group,
+                expected=len(expanded),
+                max_steps=max_steps,
+                name=name,
+            )
+            batch_job = Job(id=batch_job_id, name=name, group=group, taskset_id=self.api_id)
+            batch_job.runs.extend(runs)
+            return batch_job
 
         if job is None:
             job = Job(

@@ -111,3 +111,12 @@ def list_gateway_models() -> list[GatewayModelInfo]:
     """Models available through the HUD gateway (the platform model catalog)."""
     payload = PlatformClient.from_settings().get("/models")
     return GatewayModelsResponse.model_validate(payload).items
+
+
+def resolve_gateway_model(model: str) -> GatewayModelInfo | None:
+    """The catalog entry whose id, name, or model name matches ``model``, if any."""
+    wanted = normalize_gateway_model_id(model)
+    for entry in list_gateway_models():
+        if wanted in (entry.model_name, entry.name, entry.id):
+            return entry
+    return None
