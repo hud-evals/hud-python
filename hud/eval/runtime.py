@@ -1274,7 +1274,7 @@ def _gateway_batch_spec(agent: Agent) -> tuple[str, int | None] | None:
     None, and the caller keeps the per-rollout ``/rollouts/submit`` path that
     carries the full agent spec.
     """
-    spec_of = getattr(agent, "hosted_spec", None)
+    spec_of: Callable[[], dict[str, Any]] | None = getattr(agent, "hosted_spec", None)
     if not callable(spec_of):
         return None
     try:
