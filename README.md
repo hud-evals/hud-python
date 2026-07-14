@@ -10,7 +10,7 @@ HUD is a platform for building RL environments for AI agents, across coding, bro
 
 To learn more, see the [documentation](https://docs.hud.ai) and [environment reference](https://docs.hud.ai/v6/reference/environment).
 
-[![PyPI](https://img.shields.io/pypi/v/hud-python?style=flat-square)](https://pypi.org/project/hud-python/)
+[![PyPI](https://img.shields.io/pypi/v/hud?style=flat-square)](https://pypi.org/project/hud/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Add docs to Cursor](https://img.shields.io/badge/Add%20docs%20to-Cursor-black?style=flat-square)](https://cursor.com/en/install-mcp?name=docs-hud-python&config=eyJ1cmwiOiJodHRwczovL2RvY3MuaHVkLmFpL21jcCJ9)
 [![Discord](https://img.shields.io/discord/1327447144772407390?label=Discord&logo=discord&style=flat-square)](https://discord.gg/wkjtmHYYjm)
@@ -22,11 +22,13 @@ To learn more, see the [documentation](https://docs.hud.ai) and [environment ref
 
 ```bash
 # Install the CLI (recommended)
-uv tool install hud-python --python 3.12
+uv tool install hud --python 3.12
 
 # …or as a library
-pip install hud-python
+pip install hud
 ```
+
+> Previously published as [`hud-python`](https://pypi.org/project/hud-python/), which now just installs `hud`. The import and CLI names are unchanged.
 
 Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys) and set it:
 

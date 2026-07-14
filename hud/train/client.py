@@ -188,13 +188,13 @@ class TrainingClient(BaseTrainingClient):
         ``forward`` → run ``loss_fn`` locally (torch autograd) → ship per-token
         gradients to ``backward``. Any differentiable loss over π_θ and the
         :class:`DatumTensors` scalars works (e.g. GLM double-sided IS). Requires
-        torch (``pip install 'hud-python[train]'``).
+        torch (``pip install 'hud[train]'``).
         """
         try:
             import torch
         except ImportError as exc:
             raise ImportError(
-                "forward_backward_custom requires torch; install 'hud-python[train]'"
+                "forward_backward_custom requires torch; install 'hud[train]'"
             ) from exc
 
         forward = await self.forward(trajectories, group_size=group_size, reward_scale=reward_scale)

@@ -10,7 +10,7 @@ agent uses ``client.binding(...)`` (wire data) rather than ``client.open(...)``
 The agent is stateless w.r.t. the env: it holds only config and is driven by
 ``await agent(run)``, receiving the run handle per call. ``browser-use`` is an
 optional dependency
-(``hud-python[browseruse]``), imported lazily inside ``rollout``.
+(``hud[browseruse]``), imported lazily inside ``rollout``.
 """
 
 from __future__ import annotations

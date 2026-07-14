@@ -195,7 +195,7 @@ class VideoStreamer:
             importlib.import_module("av")
         except Exception as exc:
             raise RuntimeError(
-                "robot video streaming requires PyAV — `pip install 'hud-python[robot]'`"
+                "robot video streaming requires PyAV — `pip install 'hud[robot]'`"
             ) from exc
         self._fps = fps
         self._trace_id = trace_id
