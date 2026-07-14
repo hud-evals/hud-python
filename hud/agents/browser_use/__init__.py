@@ -1,4 +1,4 @@
-"""browser-use SDK integration (optional dependency ``hud-python[browseruse]``)."""
+"""browser-use SDK integration (optional dependency ``hud[browseruse]``)."""
 
 from .agent import BrowserUseAgent, BrowserUseConfig
 

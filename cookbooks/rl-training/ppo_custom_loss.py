@@ -16,7 +16,7 @@ long and short trajectories contribute evenly.
     uv run ppo_custom_loss.py --steps 10   # set MODEL below (pick one with `hud models`)
 
 Requires torch (declared in this cookbook's pyproject; in the SDK it is the
-``hud-python[train]`` extra).
+``hud[train]`` extra).
 """
 
 from __future__ import annotations

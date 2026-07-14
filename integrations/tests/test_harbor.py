@@ -93,7 +93,7 @@ tasks = [solve(n=2)]
 
 _DOCKERFILE = """\
 FROM python:3.11-slim
-RUN pip install hud-python
+RUN pip install hud
 COPY env.py ./
 CMD ["hud", "serve", "env:env"]
 """
