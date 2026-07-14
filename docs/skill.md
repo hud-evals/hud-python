@@ -220,7 +220,7 @@ Get the opponent's tokens from the gateway call with `extra_body={"return_token_
 await trainer.set_head(checkpoint_id)   # or: hud models head <slug> --set <id>
 ```
 
-**Custom loss / primitives.** Author the loss yourself (e.g. double-sided IS) with `forward_backward_custom` — the service returns per-token tensors, your torch function makes the gradients (needs `pip install 'hud-python[train]'`). Drop to `forward_backward` + `optim_step` directly when you want the `forward_backward` metrics or gradient accumulation (`num_substeps`) in between; `step` is just the two chained.
+**Custom loss / primitives.** Author the loss yourself (e.g. double-sided IS) with `forward_backward_custom` — the service returns per-token tensors, your torch function makes the gradients (needs `pip install 'hud[train]'`). Drop to `forward_backward` + `optim_step` directly when you want the `forward_backward` metrics or gradient accumulation (`num_substeps`) in between; `step` is just the two chained.
 
 ---
 

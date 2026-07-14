@@ -1,10 +1,10 @@
 """Version checking utilities for HUD CLI.
 
-This module handles checking for updates to the hud-python package
+This module handles checking for updates to the hud package
 and prompting users to upgrade when a new version is available.
 
 Features:
-- Checks PyPI for the latest version of hud-python
+- Checks PyPI for the latest version of hud
 - Caches results for 6 hours to avoid excessive API calls
 - Displays a friendly prompt when an update is available
 - Can be disabled with HUD_SKIP_VERSION_CHECK=1 environment variable
@@ -41,7 +41,7 @@ VERSION_CACHE_FILE = CACHE_DIR / "version_check.json"
 CACHE_DURATION = 6 * 60 * 60
 
 # PyPI API URL for package info
-PYPI_URL = "https://pypi.org/pypi/hud-python/json"
+PYPI_URL = "https://pypi.org/pypi/hud/json"
 
 
 class VersionInfo(NamedTuple):
@@ -62,7 +62,7 @@ def _is_in_virtualenv() -> bool:
 
 
 def _get_current_version() -> str:
-    """Get the currently installed version of hud-python."""
+    """Get the currently installed version of hud."""
     try:
         from hud import __version__
 
@@ -166,7 +166,7 @@ def _compare_versions(current: str, latest: str) -> bool:
 
 
 def check_for_updates() -> VersionInfo | None:
-    """Check for updates to hud-python.
+    """Check for updates to hud.
 
     This function checks PyPI for the latest version and caches the result
     for 6 hours to avoid excessive API calls.
@@ -238,12 +238,12 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
         info = check_for_updates()
         if info and info.is_outdated:
             if _is_in_virtualenv():
-                upgrade_cmd = "uv sync --upgrade-package hud-python"
+                upgrade_cmd = "uv sync --upgrade-package hud"
             else:
-                upgrade_cmd = "uv tool upgrade hud-python"
+                upgrade_cmd = "uv tool upgrade hud"
 
             console.print(
-                f"[yellow]🆕 A new version of hud-python is available: "
+                f"[yellow]🆕 A new version of hud is available: "
                 f"[bold cyan]{escape(info.latest)}[/bold cyan] "
                 f"(current: [dim]{escape(info.current)}[/dim])\n"
                 f"   Run: [bold yellow]{escape(upgrade_cmd)}[/bold yellow] to update[/yellow]"

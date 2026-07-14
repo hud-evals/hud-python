@@ -5,7 +5,7 @@ description = "Direct Fireworks Training API RL loop over HUD-style arithmetic t
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "fireworks-ai[training]",
-    "hud-python",
+    "hud",
     "matplotlib",
     "python-dotenv",
     "torch>=2",
@@ -16,4 +16,4 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-hud-python = { path = "../..", editable = true }
+hud = { path = "../..", editable = true }

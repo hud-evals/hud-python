@@ -1,6 +1,6 @@
 [project]
-name = "hud-python"
-version = "0.6.8"
+name = "hud"
+version = "0.6.9"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -18,7 +18,7 @@ dependencies = [
     "mcp>=1.24.0,<2.0",
     "fastmcp==3.0.2",
     # For all inference agents
-    "openai>=2.26.0",
+    "openai==2.44.0",
     "anthropic>=0.78.0",
     "google-genai",
     # CLI dependencies
@@ -110,7 +110,7 @@ packages = ["hud"]
 
 [project.optional-dependencies]
 # AI providers (openai, anthropic, google-genai) are now core dependencies; this
-# extra is kept empty so `hud-python[agents]` and the `agent` alias still resolve.
+# extra is kept empty so `hud[agents]` and the `agent` alias still resolve.
 agents = []
 
 # AWS Bedrock support for ClaudeAgent
@@ -120,7 +120,7 @@ bedrock = [
 
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
-    "hud-python[agents]",  # Include agents for dev
+    "hud[agents]",  # Include agents for dev
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff >=0.11.8, <0.15.0",
@@ -132,7 +132,7 @@ dev = [
 ]
 
 # Alias for backwards compatibility
-agent = ["hud-python[agents]"]
+agent = ["hud[agents]"]
 browseruse = [
     "browser-use>=0.11.13",
 ]

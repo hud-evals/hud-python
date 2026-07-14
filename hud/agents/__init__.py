@@ -135,7 +135,7 @@ def __getattr__(name: str) -> object:
         value = getattr(import_module(module_name), symbol)
     except ModuleNotFoundError as exc:
         raise ImportError(
-            f"{name} requires the agents extra. Install with: pip install 'hud-python[agents]'"
+            f"{name} requires the agents extra. Install with: pip install 'hud[agents]'"
         ) from exc
     globals()[name] = value
     return value
