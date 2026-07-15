@@ -20,10 +20,27 @@ uv tool install hud
 And replace `hud-python` with `hud` in `pyproject.toml`, `requirements.txt`,
 Dockerfiles, and CI configs.
 
-Note: if you have a pre-rename `hud-python` (< 0.6.9) already installed, run
-`pip uninstall hud-python` before installing `hud` — both ship the same
-top-level `hud` package and would overwrite each other. Upgrading in place
-(`pip install -U hud-python`) is also safe: it moves you onto this shim.
+uv upgrades handle the rename in place: `uv sync --upgrade-package hud-python`,
+`uv tool upgrade hud-python`, and `uv pip install -U hud-python` all land on
+this shim plus `hud` cleanly.
+
+pip in-place upgrades do not. Pre-rename `hud-python` (< 0.6.9) and `hud` ship
+the same top-level `hud` package, and `pip install -U hud-python` installs
+`hud` first, then deletes its files while removing the old `hud-python`. In an
+environment that already has `hud-python`, uninstall first:
+
+```bash
+python -m pip uninstall -y hud-python
+python -m pip install hud
+```
+
+If an in-place pip upgrade already broke an environment (`pip list` shows
+`hud`, but importing it fails or the CLI reports `No module named 'hud.cli'`),
+recover with:
+
+```bash
+python -m pip install --force-reinstall --no-deps hud
+```
 
 Docs: [docs.hud.ai](https://docs.hud.ai) · Source:
 [github.com/hud-evals/hud-python](https://github.com/hud-evals/hud-python)

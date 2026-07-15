@@ -46,9 +46,11 @@ classifiers = [
 "Bug Tracker" = "https://github.com/hud-evals/hud-python/issues"
 "Documentation" = "https://docs.hud.ai"
 
+# Routed through hud._entry so an environment gutted by a pip in-place upgrade
+# across the hud-python -> hud rename reports its recovery command.
 [project.scripts]
-hud = "hud.cli:main"
-hud-python = "hud.cli:main"
+hud = "hud._entry:main"
+hud-python = "hud._entry:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -91,8 +91,10 @@ def _warn_legacy_hud_python() -> None:
 
         warnings.warn(
             f"Both 'hud' and a pre-rename 'hud-python' ({legacy}) are installed; they ship "
-            "the same 'hud' package and overwrite each other. Run 'pip uninstall hud-python' "
-            "and then reinstall 'hud'.",
+            "the same 'hud' package and overwrite each other. Run "
+            "'pip uninstall -y hud-python' and then 'pip install --force-reinstall "
+            "--no-deps hud' (a plain reinstall is a no-op: pip already considers "
+            "'hud' installed).",
             RuntimeWarning,
             stacklevel=3,
         )

@@ -26,10 +26,12 @@ classifiers = [
 
 # Entry points reference modules provided by the 'hud' dependency, so
 # `uv tool install hud-python` / `uv tool upgrade hud-python` keep producing
-# working executables after the rename.
+# working executables after the rename. They route through hud._entry, which
+# survives a pip in-place upgrade across the rename and reports the recovery
+# command instead of a bare ModuleNotFoundError.
 [project.scripts]
-hud = "hud.cli:main"
-hud-python = "hud.cli:main"
+hud = "hud._entry:main"
+hud-python = "hud._entry:main"
 
 # Pass-through extras so `pip install 'hud-python[robot]'` etc. keep resolving.
 [project.optional-dependencies]

@@ -28,7 +28,7 @@ uv tool install hud --python 3.12
 pip install hud
 ```
 
-> Previously published as [`hud-python`](https://pypi.org/project/hud-python/), which now just installs `hud`. The import and CLI names are unchanged.
+> Previously published as [`hud-python`](https://pypi.org/project/hud-python/), which now just installs `hud`. The import and CLI names are unchanged. uv upgrades handle the rename in place; pip users with an existing install should run `pip uninstall -y hud-python` first, then `pip install hud`.
 
 Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys) and set it:
 
