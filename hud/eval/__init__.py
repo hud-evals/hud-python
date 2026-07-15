@@ -48,6 +48,7 @@ from .runtime import (
     RuntimeResources,
     SubprocessRuntime,
 )
+from .stats import GroupStats, JobStats
 from .sync import SyncPlan
 from .task import Task
 from .taskset import Taskset
@@ -57,9 +58,11 @@ __all__ = [
     "DaytonaRuntime",
     "DockerRuntime",
     "Grade",
+    "GroupStats",
     "HUDRuntime",
     "HostedRuntime",
     "Job",
+    "JobStats",
     "LocalRuntime",
     "ModalRuntime",
     "Provider",

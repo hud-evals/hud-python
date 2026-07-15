@@ -21,9 +21,14 @@ group and check that outcomes differ:
 ```python
 taskset = Taskset("spread-check", [my_task(seed=s) for s in range(5)])
 job = await taskset.run(agent, group=16)
-rewards = [run.reward for run in job.runs]
-# All 0.0 (or all 1.0) -> no signal. You want a non-degenerate spread.
+print(job.stats.within_group_reward_std)
+print(f"groups with spread: {job.stats.informative_group_count}/{job.stats.eligible_group_count}")
+# 0/N means every group is constant and produces zero relative advantage.
 ```
+
+The `hud eval --group N` summary prints the same diagnostics automatically, including all-zero,
+all-one, and errored groups. `within_group_reward_std` is `None` when no group contains at least two
+runs.
 
 - **All-zero** at small group sizes *may* still be learnable at training scale (larger `k` surfaces
   occasional successes), but it's a red flag worth investigating.

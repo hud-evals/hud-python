@@ -7,8 +7,9 @@ the legacy ``EvalContext``.
 
 from __future__ import annotations
 
-from statistics import mean, pstdev
 from typing import TYPE_CHECKING, Any
+
+from hud.eval.stats import JobStats
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,10 +40,10 @@ def display_runs(
         print("No results to display")  # noqa: T201
         return
 
+    stats = JobStats.from_runs(runs)
     rewards = [r.reward for r in runs]
-    errors = [r for r in runs if r.trace.is_error]
-    mean_reward = mean(rewards)
-    std_reward = pstdev(rewards) if len(rewards) > 1 else 0.0
+    mean_reward = stats.reward_mean
+    std_reward = stats.reward_std
     success_rate = sum(1 for r in rewards if r > _SUCCESS_THRESHOLD) / len(runs)
 
     try:
@@ -53,6 +54,10 @@ def display_runs(
         console = HUDConsole().console  # configured for Windows-safe encoding
     except ImportError:
         print(f"\n{name or 'Eval'}: {len(runs)} runs, mean reward {mean_reward:.3f}")  # noqa: T201
+        if stats.within_group_reward_std is not None:
+            print(  # noqa: T201
+                f"Groups with spread: {stats.informative_group_count}/{stats.eligible_group_count}"
+            )
         return
 
     title = f"'{name}' Results" if name else "Evaluation Complete"
@@ -65,8 +70,34 @@ def display_runs(
         f"  [dim]Mean reward:[/dim] [green]{mean_reward:.3f}[/green] +/- {std_reward:.3f}"
     )
     console.print(f"  [dim]Success rate:[/dim] [yellow]{success_rate * 100:.1f}%[/yellow]")
-    if errors:
-        console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
+    if stats.error_count:
+        console.print(f"  [dim]Errors:[/dim] [red]{stats.error_count}[/red]")
+
+    within_group_std = stats.within_group_reward_std
+    if within_group_std is not None:
+        spread_style = (
+            "green"
+            if stats.informative_group_count == stats.eligible_group_count
+            else "yellow"
+            if stats.informative_group_count
+            else "red"
+        )
+        console.print(
+            f"  [dim]Within-group std:[/dim] [{spread_style}]"
+            f"{within_group_std:.3f}[/{spread_style}]"
+        )
+        console.print(
+            f"  [dim]Groups with spread:[/dim] [{spread_style}]"
+            f"{stats.informative_group_count}/{stats.eligible_group_count}[/{spread_style}]"
+        )
+        if stats.constant_group_count:
+            console.print(
+                f"  [dim]Constant groups:[/dim] {stats.constant_group_count} "
+                f"({stats.all_zero_group_count} all-zero, "
+                f"{stats.all_one_group_count} all-one)"
+            )
+        if stats.error_group_count:
+            console.print(f"  [dim]Groups with errors:[/dim] [red]{stats.error_group_count}[/red]")
 
     if show_details and len(runs) <= 50:
         table = Table(title="Details", show_header=True, header_style="bold")
@@ -92,7 +123,18 @@ def display_runs(
             table.add_row(*row)
         console.print(table)
 
-    if std_reward > 0.3:
+    if stats.eligible_group_count and not stats.informative_group_count:
+        if std_reward > 0:
+            console.print(
+                "\n[yellow]Global reward variance comes entirely from differences between groups; "
+                "every group is constant.[/yellow]"
+            )
+        else:
+            console.print(
+                "\n[yellow]No within-group reward spread; grouped training would produce zero "
+                "relative advantage.[/yellow]"
+            )
+    elif std_reward > 0.3:
         console.print(f"\n[yellow]High variance (std={std_reward:.3f})[/yellow]")
     console.print()
 

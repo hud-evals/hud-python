@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 from hud.utils.platform import PlatformClient
 
+from .stats import JobStats
+
 if TYPE_CHECKING:
     from .run import Run
 
@@ -60,6 +62,24 @@ class Job:
         if not self.runs:
             return 0.0
         return sum(run.reward for run in self.runs) / len(self.runs)
+
+    @property
+    def groups(self) -> dict[str, list[Run]]:
+        """Runs grouped by scheduler-assigned GRPO group id.
+
+        Runs without a ``group_id`` are omitted rather than guessed into a
+        group. Task and taskset execution always assign one.
+        """
+        out: dict[str, list[Run]] = {}
+        for run in self.runs:
+            if run.group_id is not None:
+                out.setdefault(run.group_id, []).append(run)
+        return out
+
+    @property
+    def stats(self) -> JobStats:
+        """Global and within-group reward diagnostics for this job."""
+        return JobStats.from_runs(self.runs)
 
     @property
     def results(self) -> dict[str, list[Run]]:

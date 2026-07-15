@@ -108,7 +108,7 @@ One job spans the session; each step appends a batch and trains on it:
 import asyncio
 from hud import TrainingClient, Taskset, LocalRuntime
 from hud.agents import create_agent
-from hud.eval import Job
+from hud.eval import Job, JobStats
 
 MODEL = "arith-rl"   # the model you forked above
 
@@ -125,7 +125,11 @@ async def main():
         await taskset.run(agent, runtime=LocalRuntime("env.py"), job=session)
         batch = session.runs[start:]                          # this step's rollouts
         await trainer.step(batch, learning_rate=1e-5, group_size=8)   # nudge + promote
-        print(f"step {step}  reward {sum(r.reward for r in batch) / len(batch):.2f}")
+        stats = JobStats.from_runs(batch)
+        print(
+            f"step {step}  reward {stats.reward_mean:.2f}  "
+            f"groups with spread {stats.informative_group_count}/{stats.eligible_group_count}"
+        )
 
 asyncio.run(main())
 ```

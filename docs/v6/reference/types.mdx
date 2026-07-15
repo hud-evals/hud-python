@@ -7,7 +7,7 @@ icon: "code"
 The serializable shapes agents, tasks, and graders exchange.
 
 ```python
-from hud import Grade, Job, Run, Trace
+from hud import Grade, GroupStats, Job, JobStats, Run, Trace
 from hud.types import Step
 from hud.agents.types import AgentStep, Citation, SubagentStep, ToolStep
 from hud.environment import Answer
@@ -64,12 +64,22 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
 | `reward` | `float` | Property: mean reward across runs (`0.0` for an empty job). |
+| `groups` | `dict[str, list[Run]]` | Property: runs grouped by scheduler-assigned GRPO group id; ungrouped runs are omitted. |
+| `stats` | `JobStats` | Property: global reward statistics plus within-group reward diagnostics. |
 | `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
 
 ```python
 job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
 print(job.reward)   # mean across every run
+print(job.stats.within_group_reward_std)
 ```
+
+`JobStats.from_runs(runs)` computes the same diagnostics for a slice of a longer-running job, such as
+one training step. Its global fields are `run_count`, `error_count`, `reward_mean`, and `reward_std`.
+Group diagnostics include `groups`, `eligible_group_count`, `informative_group_count`,
+`constant_group_count`, `all_zero_group_count`, `all_one_group_count`, `error_group_count`,
+`within_group_reward_std`, and `informative_group_rate`. A `GroupStats` entry records its id, run and
+error counts, reward mean/std/min/max, and whether its repeated rewards are informative or constant.
 
 Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
 multi-turn chat - open one with `Job.start(name, *, group=1, taskset_id=None)` and pass it as `job=`;

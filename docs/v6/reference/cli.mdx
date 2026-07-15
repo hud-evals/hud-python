@@ -98,7 +98,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
 | `--gateway`, `-g` | Force LLM calls through the HUD gateway. Implied when only `HUD_API_KEY` is set (no provider key); pass it to force the gateway when a provider key is also present. |
-| `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
+| `--group` (alias `--group-size`) | Runs per task. Summaries report within-group std, groups with reward spread, constant groups, and error groups. |
 | `--max-concurrent` | Cap parallel rollouts. |
 | `--max-steps` | Cap steps per task (default 10). |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
