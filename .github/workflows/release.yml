@@ -14,18 +14,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      # Only 'hud' is published. The old 'hud-python' name is closed off by a
+      # final release that refuses to install and points at 'hud'; its source
+      # lives in hud-python/ and is published once, by hand.
       - name: Build and publish 'hud' to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           uv build
           uv publish
-
-      # 'hud-python' is an empty shim that depends on 'hud' (the package was
-      # renamed). Published in lockstep so old install commands keep working.
-      - name: Build and publish 'hud-python' shim to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          uv build shim
-          uv publish shim/dist/*

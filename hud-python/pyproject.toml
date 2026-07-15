@@ -1,0 +1,29 @@
+# Final release under the old 'hud-python' name: sdist-only, no wheel, so
+# setup.py runs at build time and exits with migration instructions before
+# the installer touches the environment. Published once, by hand, after a
+# live 'hud' release exists:
+#   HUD_PYTHON_ALLOW_BUILD=1 uv build --sdist hud-python
+#   uv publish hud-python/dist/*
+[project]
+name = "hud-python"
+version = "0.6.10"
+description = "The HUD SDK was renamed to 'hud'. Install that instead."
+readme = "README.md"
+authors = [
+    { name = "HUD", email = "founders@hud.ai" },
+]
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 7 - Inactive",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/hud-evals/hud-python"
+"Documentation" = "https://docs.hud.ai"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
