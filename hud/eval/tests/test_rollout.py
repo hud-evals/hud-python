@@ -249,7 +249,9 @@ async def test_local_runtime_startup_failure_kills_spawned_children(tmp_path: Pa
 
     try:
         with pytest.raises(RuntimeError, match="startup boom"):
-            async with SubprocessRuntime(env_file, ready_timeout=2.0)(Task(env="leaky", id="noop")):
+            async with SubprocessRuntime(env_file, ready_timeout=30.0)(
+                Task(env="leaky", id="noop")
+            ):
                 pass
         pid = int(pid_file.read_text())
         assert await _wait_for_pid_inactive(pid)

@@ -103,7 +103,7 @@ class OpenAIConfig(AgentConfig):
     """Configuration for OpenAIAgent."""
 
     model_name: str = "OpenAI"
-    model: str = Field(default="gpt-5.5", validation_alias=_model_alias)
+    model: str = Field(default="gpt-5.6", validation_alias=_model_alias)
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Any = None  # openai Reasoning

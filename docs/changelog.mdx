@@ -3,6 +3,17 @@ title: "Changelog"
 description: "Product updates and release notes for the HUD SDK and platform, covering new features, CLI commands, integrations, and UI changes by release date."
 ---
 
+<Update label="July 14, 2026">
+## GPT-5.6 Support
+
+- **GPT-5.6 family** — `gpt-5.6` (Sol), `gpt-5.6-terra`, and `gpt-5.6-luna` are available through the
+  HUD gateway and `create_agent`. `OpenAIAgent` now defaults to `gpt-5.6`.
+- **Reasoning controls** — GPT-5.6 reasoning passes through `OpenAIConfig.reasoning` unchanged: effort
+  levels `none` through `xhigh` and `max`, and `mode` (`standard` or `pro`).
+- **OpenAI SDK floor** — the SDK now requires `openai>=2.45.0` (Responses API function-call outputs use
+  the current content-item types).
+</Update>
+
 <Update label="May 6, 2026">
 ## Models, Tasksets, Templates & Sharing
 
