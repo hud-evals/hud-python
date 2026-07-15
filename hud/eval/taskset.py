@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
     from .run import Run
     from .runtime import Provider
+    from .source_framework import SourceFrameworkName
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
@@ -248,6 +249,7 @@ class Taskset:
         max_concurrent: int | None = None,
         job: Job | None = None,
         rollout_timeout: float | None = None,
+        source_framework: SourceFrameworkName = "hud",
     ) -> Job:
         """Run every task x ``group`` with an optional concurrency cap.
 
@@ -273,6 +275,9 @@ class Taskset:
         as a failed/errored run so one wedged rollout (e.g. a stuck sampling
         stream) cannot stall the whole batch. ``HUDRuntime`` carries its own
         ``run_timeout`` instead.
+
+        ``source_framework`` declares the environments' provenance. Resolve it
+        from the environment source tree before starting the batch.
         """
         group = group or (job.group if job else 1)
         if group < 1:
@@ -312,7 +317,13 @@ class Taskset:
         async def _run(task: Task, group_id: str) -> Run:
             assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
-                return await placement.run(task, agent, job_id=job_id, group_id=group_id)
+                return await placement.run(
+                    task,
+                    agent,
+                    job_id=job_id,
+                    group_id=group_id,
+                    source_framework=source_framework,
+                )
             return await rollout(
                 task,
                 agent,
@@ -320,6 +331,7 @@ class Taskset:
                 job_id=job_id,
                 group_id=group_id,
                 rollout_timeout=rollout_timeout,
+                source_framework=source_framework,
             )
 
         async def _one(task: Task, group_id: str) -> Run:

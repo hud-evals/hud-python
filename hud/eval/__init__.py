@@ -48,6 +48,7 @@ from .runtime import (
     RuntimeResources,
     SubprocessRuntime,
 )
+from .source_framework import resolve_source_framework
 from .sync import SyncPlan
 from .task import Task
 from .taskset import Taskset
@@ -74,5 +75,6 @@ __all__ = [
     "Task",
     "Taskset",
     "Trace",
+    "resolve_source_framework",
     "rollout",
 ]

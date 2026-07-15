@@ -46,6 +46,16 @@ def _run_with(trace_id: str, *, extra: dict[str, Any]) -> Run:
     return run
 
 
+async def test_trace_enter_defaults_source_framework_to_hud(recorder: _Recorder) -> None:
+    await job_mod.trace_enter("abc", job_id="j", group_id=None, model="m")
+
+    assert len(recorder.calls) == 1
+    path, body = recorder.calls[0]
+    assert path == "/trace/abc/enter"
+    assert body["source_framework"] == "hud"
+    assert body["model"] == "m"
+
+
 async def test_trace_exit_propagates_stop_reason(recorder: _Recorder) -> None:
     run = _run_with("abc", extra={})
     run.trace.stop_reason = "max_steps"

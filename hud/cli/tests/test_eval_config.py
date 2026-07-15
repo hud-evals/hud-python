@@ -148,6 +148,23 @@ def test_resolve_placement_remote_uses_hosted_runtime(
     placement = eval_mod._resolve_placement(EvalConfig(remote=True), tmp_path)
 
     assert isinstance(placement, HostedRuntime)
+    assert placement.source == tmp_path
+    assert placement.source_framework is None
+
+
+def test_resolve_placement_remote_platform_taskset_declares_hud_framework(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import HostedRuntime
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "api_key", "sk-hud-test")
+
+    placement = eval_mod._resolve_placement(EvalConfig(remote=True), None)
+
+    assert isinstance(placement, HostedRuntime)
+    assert placement.source is None
+    assert placement.source_framework == "hud"
 
 
 def test_runtime_cli_override_clears_config_remote() -> None:

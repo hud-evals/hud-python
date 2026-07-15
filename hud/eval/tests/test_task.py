@@ -152,7 +152,7 @@ async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.Monk
 
     task = Task(env="hosted-env", id="solve", args={"n": 1})
     taskset = taskset_mod.Taskset("hosted", [task], origin="api:ts_123")
-    job = await taskset.run(cast("Agent", object()))
+    job = await taskset.run(cast("Agent", object()), source_framework="hud")
 
     (run,) = job.runs
     assert run.trace.status == "completed"

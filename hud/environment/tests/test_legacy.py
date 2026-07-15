@@ -120,7 +120,11 @@ async def test_taskset_concurrent_grouped_rollouts() -> None:
     taskset = Taskset("adds", (add(a=i, b=i + 1) for i in range(4)))
 
     job = await taskset.run(
-        _FnAgent(_solve_add), runtime=lambda _row: _local(env), group=2, max_concurrent=3
+        _FnAgent(_solve_add),
+        runtime=lambda _row: _local(env),
+        group=2,
+        max_concurrent=3,
+        source_framework="hud",
     )
     runs = job.runs
 
@@ -144,7 +148,7 @@ async def test_taskset_isolates_a_failing_rollout() -> None:
         return _solve_add(prompt)
 
     job = await Taskset("adds", (add(a=i, b=1) for i in range(4))).run(
-        _FnAgent(solve_or_boom), runtime=lambda _row: _local(env)
+        _FnAgent(solve_or_boom), runtime=lambda _row: _local(env), source_framework="hud"
     )
     runs = job.runs
 

@@ -740,7 +740,13 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
-        return HostedRuntime()
+        # A platform taskset has no local source tree. All currently exported
+        # platform tasksets are HUD-authored; future export records can carry
+        # their framework explicitly here.
+        return HostedRuntime(
+            source=source_path,
+            source_framework="hud" if source_path is None else None,
+        )
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
@@ -833,12 +839,23 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
 
     agent = _build_agent(cfg)
     placement = _resolve_placement(cfg, source_path if is_local else None)
+    if is_local:
+        from hud.eval import resolve_source_framework
+
+        source_root = source_path if source_path.is_dir() else source_path.parent
+        source_framework = resolve_source_framework(source_root)
+        if source_framework is None:
+            raise ValueError(f"could not determine source framework from {source_root}")
+    else:
+        # Platform tasksets currently contain HUD-authored environments.
+        source_framework = "hud"
 
     job = await taskset.run(
         agent,
         runtime=placement,
         group=cfg.group_size,
         max_concurrent=cfg.max_concurrent,
+        source_framework=source_framework,
     )
     if job.runs and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"{settings.hud_web_url}/jobs/{job.id}")

@@ -155,7 +155,12 @@ async def _wait_for_pid_inactive(pid: int, max_wait: float = 2.0) -> bool:
 
 
 async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
-    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file))
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        source_framework="hud",
+    )
 
     assert run.reward == 1.0
     assert run.trace.content == "5"
@@ -200,6 +205,7 @@ async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) 
         Task(env="opencode_report", id="write_report"),
         agent,
         runtime=lambda _task: _local(env),
+        source_framework="hud",
     )
 
     assert run.reward == 1.0
@@ -263,7 +269,12 @@ async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Pat
     def boom(prompt: str) -> str:
         raise RuntimeError("agent exploded")
 
-    run = await rollout(_add_task(2, 3), _FnAgent(boom), runtime=SubprocessRuntime(env_file))
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(boom),
+        runtime=SubprocessRuntime(env_file),
+        source_framework="hud",
+    )
 
     assert run.trace.is_error
     assert "agent exploded" in (run.trace.error or "")
@@ -291,7 +302,10 @@ async def test_mid_run_failure_still_grades_best_effort(env_file: Path) -> None:
     # The agent answers correctly, then fails. The env is still alive, so the
     # run is graded best-effort: the reward is captured even though it errored.
     run = await rollout(
-        _add_task(2, 3), _AnswerThenBoomAgent(_solve_add), runtime=SubprocessRuntime(env_file)
+        _add_task(2, 3),
+        _AnswerThenBoomAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        source_framework="hud",
     )
 
     assert run.trace.is_error
@@ -326,6 +340,7 @@ async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
         _SlowAgent(_solve_add),
         runtime=lambda _row: _local(env),
         rollout_timeout=0.5,
+        source_framework="hud",
     )
 
     # The deadline fired mid-loop, but the run was live with an answer already
@@ -342,7 +357,12 @@ async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
         raise RuntimeError("no substrate for you")
         yield  # pragma: no cover
 
-    run = await rollout(_add_task(1, 1), _FnAgent(_solve_add), runtime=broken_provider)
+    run = await rollout(
+        _add_task(1, 1),
+        _FnAgent(_solve_add),
+        runtime=broken_provider,
+        source_framework="hud",
+    )
 
     assert run.trace.is_error
     assert "no substrate for you" in (run.trace.error or "")
@@ -360,14 +380,20 @@ async def test_provider_is_called_with_the_task_row_being_placed(env_file: Path)
         placed.append(f"{task.env}/{task.id}:{task.args['a']}")
         return SubprocessRuntime(env_file)(task)
 
-    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=placer)
+    run = await rollout(
+        _add_task(2, 3), _FnAgent(_solve_add), runtime=placer, source_framework="hud"
+    )
 
     assert run.reward == 1.0
     assert placed == ["sums/add:2"]
 
 
 async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
-    job = await _add_task(2, 3).run(_FnAgent(_solve_add), runtime=SubprocessRuntime(env_file))
+    job = await _add_task(2, 3).run(
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        source_framework="hud",
+    )
 
     (run,) = job.runs
     assert job.reward == 1.0
@@ -377,7 +403,11 @@ async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
 
 async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None:
     job = await _add_task(1, 2).run(
-        _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file), group=2, max_concurrent=1
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        group=2,
+        max_concurrent=1,
+        source_framework="hud",
     )
 
     assert job.group == 2
@@ -390,8 +420,12 @@ async def test_open_job_spans_multiple_scheduler_calls(env_file: Path) -> None:
     session = await Job.start("session", group=2)
     provider = SubprocessRuntime(env_file)
 
-    job1 = await _add_task(1, 1).run(_FnAgent(_solve_add), runtime=provider, job=session)
-    job2 = await _add_task(2, 2).run(_FnAgent(_solve_add), runtime=provider, job=session)
+    job1 = await _add_task(1, 1).run(
+        _FnAgent(_solve_add), runtime=provider, job=session, source_framework="hud"
+    )
+    job2 = await _add_task(2, 2).run(
+        _FnAgent(_solve_add), runtime=provider, job=session, source_framework="hud"
+    )
 
     # Both calls accumulate into the one open job (group defaults to the job's).
     assert job1 is session
@@ -434,7 +468,9 @@ async def test_one_spawn_serves_each_rows_env_in_a_mixed_taskset(
     # One provider, two envs: each acquisition serves the row it was called
     # with (the task ids only exist on their own env, so a misplacement
     # would fail the rollout).
-    job = await Taskset("zoo", rows).run(_FnAgent(_solve_add), runtime=SubprocessRuntime(path))
+    job = await Taskset("zoo", rows).run(
+        _FnAgent(_solve_add), runtime=SubprocessRuntime(path), source_framework="hud"
+    )
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
     assert [run.prompt for run in job.runs] == ["alpha:1:2", "beta:3:4"]
@@ -447,6 +483,7 @@ async def test_rollout_threads_job_and_group_ids(env_file: Path) -> None:
         runtime=SubprocessRuntime(env_file),
         job_id="j1",
         group_id="g1",
+        source_framework="hud",
     )
 
     assert run.reward == 1.0

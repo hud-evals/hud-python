@@ -11,7 +11,11 @@ Example::
     from hud.agents import create_agent
     from tasks import assistant  # an @env.template taking ``messages``
 
-    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
+    chat = Chat(
+        assistant(messages=[]),
+        create_agent("claude-sonnet-4-5"),
+        source_framework="hud",
+    )
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
 
@@ -38,6 +42,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
 
     from .runtime import Provider
+    from .source_framework import SourceFrameworkName
     from .task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -84,6 +89,7 @@ class Chat:
         /,
         *,
         runtime: Provider | None = None,
+        source_framework: SourceFrameworkName = "hud",
     ) -> None:
         """Initialize Chat.
 
@@ -99,10 +105,13 @@ class Chat:
                 ``LocalRuntime("env.py")`` or ``Runtime("tcp://...")``. Chat is
                 interactive and local: it drives the agent loop in this process,
                 so hosted placement does not apply.
+            source_framework: Explicit provenance for a served runtime whose
+                local source tree is unavailable.
         """
         self._task = task
         self._agent = agent
         self._runtime = runtime
+        self._source_framework: SourceFrameworkName = source_framework
         self.messages: list[dict[str, Any]] = []
         #: The conversation's job — every turn's run reports under it
         #: (started on the first ``send``).
@@ -138,7 +147,13 @@ class Chat:
             )
         if self.job is None:  # one job spans the whole conversation
             self.job = await Job.start(self._task.id)
-        run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
+        run = await rollout(
+            task,
+            self._agent,
+            runtime=self._runtime,
+            job_id=self.job.id,
+            source_framework=self._source_framework,
+        )
         self.job.runs.append(run)
         result = run.trace
         if result.is_error:

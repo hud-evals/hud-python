@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.environment.env import Environment
 
+    from .source_framework import SourceFrameworkName
     from .task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
@@ -898,6 +899,7 @@ class HUDRuntime:
     def __init__(self, *, run_timeout: float = 3600.0, runtime_url: str | None = None) -> None:
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
+        self.source_framework: SourceFrameworkName = "hud"
 
     async def run(
         self,
@@ -915,6 +917,7 @@ class HUDRuntime:
             trace_id=trace_id,
             job_id=job_id,
             group_id=group_id,
+            source_framework=self.source_framework,
         )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
@@ -1034,9 +1037,17 @@ class HostedRuntime:
     def __init__(
         self,
         *,
+        source: str | Path | None = None,
+        source_framework: SourceFrameworkName | None = None,
         poll_interval: float = 5.0,
         run_timeout: float = 3600.0,
     ) -> None:
+        # Directory used to resolve ``source_framework`` (expects Dockerfile.hud).
+        self.source: Path | None = None
+        if source is not None:
+            path = Path(source).expanduser().resolve()
+            self.source = path if path.is_dir() else path.parent
+        self.source_framework: SourceFrameworkName | None = source_framework
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
 
@@ -1048,6 +1059,7 @@ class HostedRuntime:
         job_id: str,
         group_id: str | None = None,
         trace_id: str | None = None,
+        source_framework: SourceFrameworkName | None = None,
     ) -> Run:
         """Submit one rollout, await its terminal trace, and fold it into a ``Run``.
 
@@ -1061,7 +1073,12 @@ class HostedRuntime:
         trace_id = trace_id or uuid.uuid4().hex
         try:
             state = await self._submit_and_await(
-                task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
+                task,
+                agent,
+                job_id=job_id,
+                group_id=group_id,
+                trace_id=trace_id,
+                source_framework=source_framework,
             )
         except (TimeoutError, asyncio.CancelledError):
             raise
@@ -1083,6 +1100,7 @@ class HostedRuntime:
         job_id: str,
         group_id: str | None,
         trace_id: str,
+        source_framework: SourceFrameworkName | None,
     ) -> dict[str, Any]:
         spec_of = getattr(agent, "hosted_spec", None)
         if not callable(spec_of):
@@ -1094,6 +1112,16 @@ class HostedRuntime:
         platform = PlatformClient.from_settings()
         if not platform.api_key:
             raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
+        from .source_framework import resolve_source_framework
+
+        source_framework = source_framework or self.source_framework
+        if source_framework is None and self.source is not None:
+            source_framework = resolve_source_framework(self.source)
+        if source_framework is None:
+            raise ValueError(
+                "hosted execution requires source_framework provenance; "
+                "pass source_framework explicitly or provide a source tree with Dockerfile.hud"
+            )
         payload: dict[str, Any] = {
             # The SDK's hex ids travel as canonical UUID strings.
             "trace_id": str(uuid.UUID(trace_id)),
@@ -1102,6 +1130,7 @@ class HostedRuntime:
             "task": task.id,
             "args": task.args,
             "agent": spec,
+            "source_framework": source_framework,
         }
         if group_id is not None:
             payload["group_id"] = group_id

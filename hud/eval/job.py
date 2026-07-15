@@ -105,18 +105,26 @@ async def trace_enter(
     *,
     job_id: str | None,
     group_id: str | None,
+    source_framework: str = "hud",
     model: str | None = None,
 ) -> None:
     """Report that one rollout started.
 
     ``model`` is the model string the agent will sample (when known); the
     platform resolves it and attributes the trace immediately on enter.
+    Resolve ``source_framework`` from the environment source tree before
+    entering the trace.
     """
     if not _reporting_enabled():
         return
     await _report(
         f"/trace/{trace_id}/enter",
-        {"job_id": job_id, "group_id": group_id, "model": model},
+        {
+            "job_id": job_id,
+            "group_id": group_id,
+            "model": model,
+            "source_framework": source_framework,
+        },
     )
 
 

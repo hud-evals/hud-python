@@ -52,12 +52,12 @@ class TestChatConstruction:
             Chat(dummy_task)  # type: ignore[call-arg]
 
     def test_messages_start_empty_and_are_the_public_history(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, _EchoAgent())
+        chat = Chat(dummy_task, _EchoAgent(), source_framework="hud")
         assert chat.messages == []
         assert chat.job is None  # the conversation's job starts on the first send
         # History is the plain ``messages`` list: persist/restore it directly.
         chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
-        assert Chat(dummy_task, _EchoAgent()).messages == []
+        assert Chat(dummy_task, _EchoAgent(), source_framework="hud").messages == []
 
 
 _CHAT_ENV = """\
@@ -89,7 +89,12 @@ class TestSend:
     async def test_send_runs_a_turn_and_stores_prompt_message_format(
         self, chat_env_file: Path
     ) -> None:
-        chat = Chat(_chat_task(), _EchoAgent(), runtime=SubprocessRuntime(chat_env_file))
+        chat = Chat(
+            _chat_task(),
+            _EchoAgent(),
+            runtime=SubprocessRuntime(chat_env_file),
+            source_framework="hud",
+        )
 
         trace = await chat.send("hello")
 
@@ -107,7 +112,12 @@ class TestSend:
         assert assistant_msg["content"]["text"] == "echo:hello"
 
     async def test_one_job_spans_the_conversation(self, chat_env_file: Path) -> None:
-        chat = Chat(_chat_task(), _EchoAgent(), runtime=SubprocessRuntime(chat_env_file))
+        chat = Chat(
+            _chat_task(),
+            _EchoAgent(),
+            runtime=SubprocessRuntime(chat_env_file),
+            source_framework="hud",
+        )
 
         await chat.send("hello")
         await chat.send("again")
@@ -125,7 +135,12 @@ class TestSend:
             async def __call__(self, run: Any) -> None:
                 raise RuntimeError("agent exploded")
 
-        chat = Chat(_chat_task(), _Boom(), runtime=SubprocessRuntime(chat_env_file))
+        chat = Chat(
+            _chat_task(),
+            _Boom(),
+            runtime=SubprocessRuntime(chat_env_file),
+            source_framework="hud",
+        )
 
         with pytest.raises(RuntimeError, match="agent exploded"):
             await chat.send("hello")

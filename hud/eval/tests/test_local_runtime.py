@@ -106,6 +106,7 @@ async def test_source_path_serves_a_fresh_env_per_rollout(tmp_path) -> None:
         _FnAgent(_solve),
         runtime=LocalRuntime(tmp_path / "env.py"),
         group=2,
+        source_framework="hud",
     )
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
@@ -116,6 +117,7 @@ async def test_live_env_pointer_resolves_to_its_declaring_file(imported_env) -> 
         Task(env="sums", id="add", args={"a": 2, "b": 3}),
         _FnAgent(_solve_add),
         runtime=LocalRuntime(imported_env.env),
+        source_framework="hud",
     )
 
     assert run.reward == 1.0
@@ -138,6 +140,7 @@ async def test_constructor_builds_fresh_per_rollout_from_the_row() -> None:
         runtime=LocalRuntime(env_for),
         group=3,
         max_concurrent=3,
+        source_framework="hud",
     )
 
     assert all(run.reward == 1.0 for run in job.runs)
@@ -170,7 +173,7 @@ async def test_module_loaded_taskset_serves_its_source_by_default(tmp_path, requ
     request.addfinalizer(lambda: sys.modules.pop("env", None))
 
     taskset = Taskset.from_module(tmp_path / "tasks.py")
-    job = await taskset.run(_FnAgent(_solve_add))
+    job = await taskset.run(_FnAgent(_solve_add), source_framework="hud")
 
     assert len(job.runs) == 2
     assert all(run.reward == 1.0 for run in job.runs)
@@ -178,7 +181,7 @@ async def test_module_loaded_taskset_serves_its_source_by_default(tmp_path, requ
 
 async def test_minted_tasks_resolve_a_declared_env_by_name(imported_env) -> None:
     job = await Taskset("sums", [imported_env.add(a=2, b=3), imported_env.add(a=4, b=5)]).run(
-        _FnAgent(_solve_add)
+        _FnAgent(_solve_add), source_framework="hud"
     )
 
     assert len(job.runs) == 2
@@ -187,7 +190,7 @@ async def test_minted_tasks_resolve_a_declared_env_by_name(imported_env) -> None
 
 async def test_no_placement_fails_with_the_forms_to_pass() -> None:
     with pytest.raises(ValueError, match="no placement for env"):
-        await Task(env="ghost", id="add").run(_FnAgent(_solve_add))
+        await Task(env="ghost", id="add").run(_FnAgent(_solve_add), source_framework="hud")
 
 
 async def test_ambiguous_env_name_fails_loudly(imported_env, tmp_path, request) -> None:
@@ -201,7 +204,7 @@ async def test_ambiguous_env_name_fails_loudly(imported_env, tmp_path, request) 
     try:
         spec.loader.exec_module(module)
         with pytest.raises(ValueError, match="LocalRuntime\\(env\\)"):
-            await Task(env="sums", id="add").run(_FnAgent(_solve_add))
+            await Task(env="sums", id="add").run(_FnAgent(_solve_add), source_framework="hud")
     finally:
         del sys.modules[module_name]
 
@@ -255,7 +258,7 @@ async def test_tasks_only_module_resolves_envs_imported_from_elsewhere(
     request.addfinalizer(lambda: sys.modules.pop("sums_envmod", None))
 
     taskset = Taskset.from_module(tasks_dir / "tasks.py")
-    job = await taskset.run(_FnAgent(_solve_add))
+    job = await taskset.run(_FnAgent(_solve_add), source_framework="hud")
 
     assert [run.reward for run in job.runs] == [1.0]
 
@@ -267,13 +270,13 @@ async def test_single_file_taskset_never_drags_in_a_same_named_sibling(tmp_path)
     (tmp_path / "env_b.py").write_text(_SUMS_ENV.format(name="sums"), encoding="utf-8")
 
     taskset = Taskset.from_module(tmp_path / "env_a.py")
-    job = await taskset.run(_FnAgent(_solve_add))
+    job = await taskset.run(_FnAgent(_solve_add), source_framework="hud")
 
     assert [run.reward for run in job.runs] == [1.0]
 
 
 async def test_empty_taskset_runs_without_a_placement() -> None:
-    job = await Taskset("empty", []).run(_FnAgent(_solve_add))
+    job = await Taskset("empty", []).run(_FnAgent(_solve_add), source_framework="hud")
 
     assert job.runs == []
 
@@ -311,7 +314,7 @@ async def test_reexporting_tasks_module_does_not_claim_the_env(
         return str(int(a) + int(b))
 
     taskset = Taskset.from_module(tasks_dir / "tasks.py")
-    job = await taskset.run(_FnAgent(_solve), group=2)
+    job = await taskset.run(_FnAgent(_solve), group=2, source_framework="hud")
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
 
@@ -335,6 +338,7 @@ async def test_package_reexported_env_pointer_uses_the_declaring_submodule(
         Task(env="sums", id="add", args={"a": 2, "b": 3}),
         _FnAgent(_solve_add),
         runtime=LocalRuntime(sums_pkg.env),
+        source_framework="hud",
     )
 
     assert run.reward == 1.0
@@ -362,6 +366,7 @@ async def test_template_can_lazily_import_a_sibling_module(tmp_path) -> None:
         runtime=LocalRuntime(tmp_path / "env.py"),
         group=2,
         max_concurrent=2,
+        source_framework="hud",
     )
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]

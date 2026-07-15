@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 
@@ -33,6 +33,16 @@ from hud.eval.runtime import (
 from hud.eval.task import Task
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+@pytest.fixture
+def hud_env(tmp_path: Path) -> Path:
+    """Minimal env tree that resolves ``source_framework`` to ``hud``."""
+    (tmp_path / "Dockerfile.hud").write_text("FROM python:3.11\n")
+    return tmp_path
 
 
 class _FakePlatform:
@@ -112,7 +122,9 @@ async def test_run_rejects_non_gateway_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_submits_and_polls_to_terminal(
+    monkeypatch: pytest.MonkeyPatch, hud_env: Path
+) -> None:
     platform = _FakePlatform(
         [
             {"status": "pending"},
@@ -124,7 +136,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HostedRuntime(poll_interval=0.0)
+    hosted = HostedRuntime(source=hud_env, poll_interval=0.0)
     trace_id = uuid.uuid4().hex
     job_id = uuid.uuid4().hex
     task = Task(
@@ -160,6 +172,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
     }
     assert payload["group_id"] == "g1"
+    assert payload["source_framework"] == "hud"
     assert payload["agent"]["type"] == "openai_compatible"
     assert payload["agent"]["config"]["model"] == "test-model"
 
@@ -167,13 +180,14 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.asyncio
 async def test_run_preserves_runtime_config_null_override(
     monkeypatch: pytest.MonkeyPatch,
+    hud_env: Path,
 ) -> None:
     platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
     monkeypatch.setattr(
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    await HostedRuntime(poll_interval=0.0).run(
+    await HostedRuntime(source=hud_env, poll_interval=0.0).run(
         Task(env="sums", id="add", runtime_config=RuntimeConfig(resources=None)),
         _agent(),
         job_id=uuid.uuid4().hex,
@@ -184,13 +198,15 @@ async def test_run_preserves_runtime_config_null_override(
 
 
 @pytest.mark.asyncio
-async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_timeout_requests_platform_cancel(
+    monkeypatch: pytest.MonkeyPatch, hud_env: Path
+) -> None:
     platform = _FakePlatform([{"status": "running"}])
     monkeypatch.setattr(
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HostedRuntime(poll_interval=0.0, run_timeout=0.0)
+    hosted = HostedRuntime(source=hud_env, poll_interval=0.0, run_timeout=0.0)
     task = Task(env="sums", id="add", args={})
 
     with pytest.raises(TimeoutError, match="hosted rollout"):
@@ -201,14 +217,16 @@ async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch, hud_env: Path) -> None:
     platform = _FakePlatform([{"status": "completed", "reward": 1.0, "error": None}])
     monkeypatch.setattr(
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     task = Task(env="sums", id="add", args={"a": 2, "b": 3})
-    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
+    run = await HostedRuntime(source=hud_env, poll_interval=0.0).run(
+        task, _agent(), job_id=uuid.uuid4().hex
+    )
 
     assert run.reward == 1.0
     assert run.trace.status == "completed"
@@ -220,18 +238,55 @@ async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch, hud_env: Path) -> None:
     platform = _FakePlatform([{"status": "error", "reward": None, "error": "env exploded"}])
     monkeypatch.setattr(
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     task = Task(env="sums", id="add", args={})
-    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
+    run = await HostedRuntime(source=hud_env, poll_interval=0.0).run(
+        task, _agent(), job_id=uuid.uuid4().hex
+    )
 
     assert run.reward == 0.0
     assert run.trace.is_error
     assert "env exploded" in (run.trace.error or "")
+
+
+@pytest.mark.asyncio
+async def test_run_fails_when_source_framework_unresolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    run = await HostedRuntime(source=tmp_path, poll_interval=0.0).run(
+        Task(env="sums", id="add"), _agent(), job_id=uuid.uuid4().hex
+    )
+
+    assert run.trace.is_error
+    assert "source_framework provenance" in (run.trace.error or "")
+    assert platform.posts == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepts_explicit_framework_without_local_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    run = await HostedRuntime(source_framework="hud", poll_interval=0.0).run(
+        Task(env="sums", id="add"), _agent(), job_id=uuid.uuid4().hex
+    )
+
+    assert run.trace.status == "completed"
+    assert platform.posts[0][1]["source_framework"] == "hud"
 
 
 @pytest.mark.asyncio
@@ -251,7 +306,7 @@ async def test_scheduler_drives_provider_locally(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
 
     job = await Taskset("t", [Task(env="e", id="x")]).run(
-        _agent(), runtime=Runtime("tcp://127.0.0.1:1")
+        _agent(), runtime=Runtime("tcp://127.0.0.1:1"), source_framework="hud"
     )
 
     assert len(job.runs) == 1
@@ -274,11 +329,12 @@ async def test_scheduler_delegates_hosted(monkeypatch: pytest.MonkeyPatch) -> No
             return run
 
     job = await Taskset("t", [Task(env="e", id="x")]).run(
-        _agent(), runtime=_RecordingHostedRuntime()
+        _agent(), runtime=_RecordingHostedRuntime(), source_framework="hud"
     )
 
     assert len(job.runs) == 1
     assert "job_id" in seen and "group_id" in seen
+    assert seen["source_framework"] == "hud"
 
 
 @pytest.mark.asyncio

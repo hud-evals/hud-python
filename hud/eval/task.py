@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
     from .job import Job
     from .runtime import HostedRuntime, Provider
+    from .source_framework import SourceFrameworkName
 
 
 class Task(BaseModel):
@@ -77,6 +78,7 @@ class Task(BaseModel):
         max_concurrent: int | None = None,
         job: Job | None = None,
         rollout_timeout: float | None = None,
+        source_framework: SourceFrameworkName = "hud",
     ) -> Job:
         """Run this task with ``agent``: the single-task form of ``Taskset.run``.
 
@@ -86,6 +88,8 @@ class Task(BaseModel):
         over a taskset of one. ``runtime`` is the placement; left unset it
         falls back to the HUD runtime tunnel by ``env`` name. For a local
         run, pass one explicitly (``runtime=LocalRuntime("env.py")``).
+        ``source_framework`` declares the environment's provenance. Resolve it
+        from the environment source tree before starting the run.
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 
@@ -97,6 +101,7 @@ class Task(BaseModel):
             max_concurrent=max_concurrent,
             job=job,
             rollout_timeout=rollout_timeout,
+            source_framework=source_framework,
         )
 
 
