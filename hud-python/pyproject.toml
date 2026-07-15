@@ -1,9 +1,7 @@
 # Final release under the old 'hud-python' name: sdist-only, no wheel, so
 # setup.py runs at build time and exits with migration instructions before
-# the installer touches the environment. Published once, by hand, after a
-# live 'hud' release exists:
-#   HUD_PYTHON_ALLOW_BUILD=1 uv build --sdist hud-python
-#   uv publish hud-python/dist/*
+# the installer touches the environment. Published once via the manually
+# dispatched 'Publish hud-python' workflow, after a live 'hud' release exists.
 [project]
 name = "hud-python"
 version = "0.6.10"
