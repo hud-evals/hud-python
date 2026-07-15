@@ -1,43 +1,20 @@
-"""Grading result shapes: ``CriterionResult``, ``SubScore``, and ``EvaluationResult``."""
+"""Grading result shapes: ``SubScore`` and ``EvaluationResult``."""
 
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class CriterionResult(BaseModel):
-    """One graded rubric criterion: a checked requirement with its verdict."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    criterion: str = Field(..., description="The requirement that was checked")
-    passed: bool = Field(
-        ...,
-        description="Whether the criterion was met. For negative-weight "
-        "(error-to-avoid) criteria, True means the error is present.",
-    )
-    weight: float = Field(
-        default=1.0,
-        description="Rubric weight of this criterion. Negative marks an error to avoid.",
-    )
-    reason: str | None = Field(
-        default=None, description="The grader's justification for the verdict"
-    )
-    source: str | None = Field(
-        default=None,
-        description="Name of the subscore that checked this criterion. Set when "
-        "combinators collapse subscores and positional attribution is lost.",
-    )
-
-
 class SubScore(BaseModel):
-    """Individual subscore for debugging and transparency.
+    """One node in the grade breakdown tree.
 
-    SubScores allow breaking down the final reward into component parts,
-    making it easier to understand what contributed to the evaluation.
+    A leaf subscore is a single measurement: a grader run, or one rubric
+    criterion (value ``0``/``1``, with ``reason`` justifying the verdict).
+    A node with ``aggregation`` derived its value from ``children``, which are
+    kept verbatim so the full grading history stays inspectable.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -49,16 +26,63 @@ class SubScore(BaseModel):
         "Negative weights represent penalties.",
     )
     value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
-    criteria: list[CriterionResult] | None = Field(
-        default=None,
-        description="Itemized criterion verdicts behind this subscore's value",
+    reason: str | None = Field(
+        default=None, description="The grader's justification for this value"
     )
-    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
+    aggregation: Literal["any", "all", "rubric"] | None = Field(
+        default=None,
+        description="How value was derived from children: 'any' (max), 'all' (min), "
+        "or 'rubric' (weighted pass-fraction). None for leaf subscores.",
+    )
+    children: list[SubScore] | None = Field(
+        default=None,
+        description="Input subscores this node was combined from",
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Grader-specific details (parameters, stdout, judge model, ...)",
+    )
 
     @property
     def score(self) -> float:
         """Alias for value. Deprecated — use .value instead."""
         return self.value
+
+    @model_validator(mode="after")
+    def _check_aggregation(self) -> SubScore:
+        if self.aggregation is None:
+            return self
+        if not self.children:
+            raise ValueError(f"aggregation={self.aggregation!r} requires children")
+        if self.aggregation == "any":
+            expected = max(c.value for c in self.children)
+        elif self.aggregation == "all":
+            expected = min(c.value for c in self.children)
+        else:
+            expected = _rubric_value(self.children)
+        if abs(expected - self.value) > 0.01:
+            warnings.warn(
+                f"SubScore {self.name!r}: value={self.value:.4f} disagrees with "
+                f"{self.aggregation}(children)={expected:.4f}",
+                stacklevel=2,
+            )
+        return self
+
+
+def _rubric_value(subscores: list[SubScore]) -> float:
+    """Weighted pass-fraction: sum(value*weight) over positive weight, clamped to 0-1.
+
+    Negative weights are penalties: on those children, value ``1.0`` means the
+    error is present and subtracts. An all-negative rubric starts at ``1.0``.
+    """
+    total_positive = sum(max(0.0, s.weight) for s in subscores)
+    total_negative = sum(abs(s.weight) for s in subscores if s.weight < 0)
+    weighted_sum = sum(s.value * s.weight for s in subscores)
+    if total_positive > 0:
+        return max(0.0, min(1.0, weighted_sum / total_positive))
+    if total_negative > 0:
+        return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
+    return 0.0
 
 
 class EvaluationResult(BaseModel):
@@ -110,4 +134,4 @@ class EvaluationResult(BaseModel):
         return cls(reward=value, done=True)
 
 
-__all__ = ["CriterionResult", "EvaluationResult", "SubScore"]
+__all__ = ["EvaluationResult", "SubScore"]
