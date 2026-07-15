@@ -19,7 +19,7 @@ first is safe in every state, including a broken or half-migrated install):
     pip install hud
 
     # or for a uv-managed tool:
-    uv tool uninstall hud-python; uv tool install hud
+    uv tool uninstall hud-python; uv tool install hud --reinstall
 
 Then replace 'hud-python' with 'hud' in requirements files, pyproject.toml,
 Dockerfiles, and CI configs. The import name ('import hud') and the CLI
