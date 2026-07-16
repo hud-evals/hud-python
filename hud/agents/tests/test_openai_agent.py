@@ -11,7 +11,9 @@ from typing import Any, cast
 from openai.types.responses import ResponseOutputText
 
 from hud.agents.openai.agent import OpenAIAgent, OpenAIRunState
+from hud.agents.openai.tools.base import format_openai_result
 from hud.agents.types import OpenAIConfig
+from hud.types import MCPToolCall, MCPToolResult
 
 
 class FakeResponses:
@@ -37,6 +39,17 @@ def test_format_message_shapes_user_text() -> None:
     agent = _agent(SimpleNamespace(id="r", output=[]))
     msg = cast("dict[str, Any]", agent._format_message("user", "hello"))
     assert msg["role"] == "user"
+
+
+def test_format_openai_result_empty_output_emits_one_text_item() -> None:
+    # The Responses API rejects a function_call_output with an empty output
+    # list, so a contentless tool result must still produce one input_text item.
+    call = MCPToolCall(id="call_1", name="noop")
+    formatted = cast("dict[str, Any]", format_openai_result(call, MCPToolResult(content=[])))
+
+    assert formatted["type"] == "function_call_output"
+    assert formatted["call_id"] == "call_1"
+    assert formatted["output"] == [{"type": "input_text", "text": ""}]
 
 
 def _api_response(

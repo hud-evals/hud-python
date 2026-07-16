@@ -37,6 +37,7 @@ CODEX_MODELS = {
     "gpt-5.1",
     "gpt-5.3-codex",
     "gpt-5.4",
+    "gpt-5.6",
 }
 
 PROMPT_TEMPLATE = """You are a skilled software developer. Complete the following task:
