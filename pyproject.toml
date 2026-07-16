@@ -48,7 +48,6 @@ classifiers = [
 
 [project.scripts]
 hud = "hud.cli:main"
-hud-python = "hud.cli:main"
 
 [build-system]
 requires = ["hatchling"]
