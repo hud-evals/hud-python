@@ -843,9 +843,10 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         from hud.eval import resolve_source_framework
 
         source_root = source_path if source_path.is_dir() else source_path.parent
-        source_framework = resolve_source_framework(source_root)
-        if source_framework is None:
-            raise ValueError(f"could not determine source framework from {source_root}")
+        # No marker file just means the local path only holds tasks (e.g. the
+        # env runs behind --runtime hud or a tcp:// url); use the SDK default
+        # rather than refusing to run.
+        source_framework = resolve_source_framework(source_root) or "hud"
     else:
         # Platform tasksets currently contain HUD-authored environments.
         source_framework = "hud"
