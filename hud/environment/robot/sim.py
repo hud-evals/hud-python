@@ -1,15 +1,15 @@
-"""One way to run any simulation: the sim owns the process main thread.
+"""The sim-process shape every sim program runs: the sim owns the main thread.
 
-A simulator is usually *thread-affine* (every touch must run on the thread that
-created its GL/device context) and some — Isaac/Omniverse — must own the process
-main thread outright: Kit drives its own main-thread loop and ``env.reset()``
-nests ``run_until_complete``, which cannot run inside an asyncio task.
-
-So HUD serves every sim with one process shape: serving (control channel +
-robot WebSocket) runs on a background loop thread, and every sim touch is
-queued to the main thread via a :class:`SimThread`. :func:`run_with_sim` is
-that shape — cheap CPU envs just block on the queue; when Kit is loaded, the
-idle hook pumps it between touches.
+There is one way to serve a simulator (see :mod:`~.bridge`), whatever the sim:
+serving — the robot WebSocket and the control side channel — runs on a
+background loop thread, and every sim touch is queued to the process main
+thread through the shared :class:`SimThread`. One shape because the hardest
+sims demand it: a simulator is usually *thread-affine* (every touch must run
+on the thread that created its GL/device context), and Isaac/Omniverse must
+own the process main thread outright — Kit drives its own main-thread loop and
+``env.reset()`` nests ``run_until_complete``, which cannot run inside an
+asyncio task. Cheap CPU envs pay ~nothing: the main thread just blocks on the
+queue.
 
 Before :meth:`SimThread.run` starts (tests, in-loop use) calls execute inline
 on the caller — the degenerate single-thread case.
@@ -97,11 +97,7 @@ class SimThread:
             fut.set_exception(exc)
 
 
-def run_with_sim(
-    serve: Callable[[], Coroutine[Any, Any, Any]],
-    *,
-    sim: SimThread | None = None,
-) -> None:
+def run_with_sim(serve: Callable[[], Coroutine[Any, Any, Any]]) -> None:
     """THE process shape for serving a sim, blocking for the serve's lifetime.
 
     ``await serve()`` runs on a background loop thread while the shared
@@ -109,7 +105,7 @@ def run_with_sim(
     cancel the serve coroutine; the sim keeps draining through its teardown
     (``env.stop()`` touches the sim too), then this returns.
     """
-    sim = sim or SimThread.shared()
+    sim = SimThread.shared()
     sim.bind()  # claim main before serving starts, so no touch runs inline elsewhere
     loop = asyncio.new_event_loop()
     done = threading.Event()
