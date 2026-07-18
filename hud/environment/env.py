@@ -167,9 +167,6 @@ class Environment(LegacyEnvMixin):
         # stands up). Run once by the serving substrate around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
-        #: Sims attached via :meth:`gym`; when present, the server runs the
-        #: sim-main process shape (sim on the main thread, serving beside it).
-        self._sims: list[Any] = []
         self._init_legacy()
 
     # ─── task registration ───────────────────────────────────────────
@@ -308,25 +305,29 @@ class Environment(LegacyEnvMixin):
 
         return ws
 
-    def gym(self, factory: Any, *, name: str = "robot", **kwargs: Any) -> Any:
+    def gym(self, target: Any, *, name: str = "robot", **kwargs: Any) -> Any:
         """Attach a gym-style sim serving ``name`` over the ``robot`` protocol.
 
-        ``factory`` is any callable returning a gym-style env (the same ``make_env``
-        an EnvHub repo exposes). Registers the start → publish → stop lifecycle on
-        this env's hooks; nothing is built until the env serves. Extra kwargs go to
-        :class:`~hud.environment.robot.Gym` (``fps=``, ``contract=``, ...).
-        Returns the handle templates drive episodes through (``sim.reset`` /
-        ``sim.result``).
+        ``target`` declares the env: a module-level factory (the same
+        ``make_env`` an EnvHub repo exposes), a gymnasium registry id
+        (``"CartPole-v1"``), or a constructed registry env — reduced here to
+        its spec and closed, since only the declaration crosses the fork. The
+        sim runs in its own process (spawned at serve time; see
+        :mod:`hud.environment.robot.bridge`); this registers the spawn →
+        publish → teardown lifecycle on this env's hooks — nothing runs until
+        the env serves. Extra kwargs go to the sim program (``fps=``,
+        ``contract=``). Returns the
+        :class:`~hud.environment.robot.RobotEndpoint` templates drive episodes
+        through (``sim.reset`` / ``sim.result``).
         """
-        from hud.environment.robot import Gym
+        from hud.environment.robot import RobotEndpoint, gym_command
 
-        sim = Gym(factory, **kwargs)
-        self._sims.append(sim)  # the server serves sim-main when any are attached
+        sim = RobotEndpoint.spawn(gym_command(target, **kwargs))
 
         @self.initialize
         async def _up() -> None:
             await sim.start()
-            self.add_capability(sim.capability(name))
+            self.add_capability(await sim.capability(name))
 
         @self.shutdown
         async def _down() -> None:
