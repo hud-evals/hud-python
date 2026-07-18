@@ -67,8 +67,6 @@ from hud.eval import DockerRuntime, Task, Taskset
 CHECKPOINT = "lerobot/pi05_libero_finetuned"
 
 class PI05Agent(RobotAgent):
-    max_steps = 400
-
     def __init__(self):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         policy = PI05Policy.from_pretrained(CHECKPOINT).to(device).eval()

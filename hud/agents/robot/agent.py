@@ -49,8 +49,6 @@ class RobotAgent(Agent):
     """
 
     robot_protocol: ClassVar[str] = ROBOT_PROTOCOL
-    #: Max control ticks before the episode is cut off.
-    max_steps: ClassVar[int] = 520
     #: How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
     #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair
@@ -62,14 +60,14 @@ class RobotAgent(Agent):
     #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
-    async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
+    async def __call__(self, run: Run, *, max_steps: int = 520) -> None:
         """The generic rollout contract: one run, one trace."""
         await self.drive([run], run.client, max_steps=max_steps)
         run.trace.status = "completed"
         run.trace.content = "done"
 
     async def drive(
-        self, runs: list[Run], client: HudClient, *, max_steps: int | None = None
+        self, runs: list[Run], client: HudClient, *, max_steps: int = 520
     ) -> None:
         """Drive every env slot to termination, recording onto ``runs[i]``'s trace.
 
@@ -115,13 +113,7 @@ class RobotAgent(Agent):
 
             print(f"[agent] episode started: {prompt!r} (n={n})", flush=True)
             await self._loop(
-                robot,
-                obs,
-                prompt,
-                recorders,
-                writer,
-                single=single,
-                max_steps=max_steps or self.max_steps,
+                robot, obs, prompt, recorders, writer, single=single, max_steps=max_steps
             )
             for rec in recorders:
                 rec.close()
@@ -139,7 +131,7 @@ class RobotAgent(Agent):
         writer: Any,
         *,
         single: bool,
-        max_steps: int,
+        max_steps: int = 520,
     ) -> None:
         """One batched forward per refill; execute chunks open-loop per slot."""
         model = self.model
