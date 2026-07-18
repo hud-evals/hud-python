@@ -200,33 +200,51 @@ async def _frames(
 class _ControlChannel:
     """Serving-time state for one bound control channel.
 
-    Owns what the declaration must not: runtime state — at most one suspended
-    task at a time, living on the channel itself (scoped to this server; two
-    servers for one env never share). ``start`` replaces it, ``grade``
-    consumes it, ``cancel`` clears it, and a connection drop leaves it in
-    place — which is exactly the split start/grade flow (e.g. harbor's
-    verifier reconnecting to grade) with no parking handoff to manage.
+    Owns what the declaration must not: runtime state — one suspended task per
+    session, keyed by session id (scoped to this server; two servers for one
+    env never share). A session's ``start`` replaces its own runner, ``grade``
+    consumes it, ``cancel`` clears it. A connection drop parks the session's
+    runner in place; a later connection grades it by resuming the session
+    (``hello`` with its id) or, when exactly one session is parked, by a plain
+    ``tasks.grade`` — the split start/grade flow (e.g. ``hud task grade`` or
+    harbor's verifier reconnecting to grade) with no parking handoff to manage.
     """
 
     def __init__(self, env: Environment) -> None:
         self.env = env
-        self._runner: TaskRunner | None = None
+        #: Suspended tasks by session id. An entry whose session has no live
+        #: connection is parked, awaiting a resume (or adoption) to grade.
+        self._runners: dict[str, TaskRunner] = {}
+        self._live: set[str] = set()
 
-    async def start(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
-        await self.cancel()
-        self._runner = TaskRunner(self.env.tasks[task_id], args)
-        return await self._runner.start()
+    async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        await self.cancel(session_id)
+        runner = TaskRunner(self.env.tasks[task_id], args)
+        self._runners[session_id] = runner
+        return await runner.start()
 
-    async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
-        runner, self._runner = self._runner, None
+    async def grade(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        runner = self._runners.pop(session_id, None)
         if runner is None:
-            raise _NoTaskInProgress("no task in progress")
+            runner = self._adopt_parked()
         return await runner.grade(payload)
 
-    async def cancel(self) -> None:
-        if self._runner is not None:
-            await self._runner.cancel()
-            self._runner = None
+    def _adopt_parked(self) -> TaskRunner:
+        """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
+        parked = sorted(sid for sid in self._runners if sid not in self._live)
+        if not parked:
+            raise _NoTaskInProgress("no task in progress")
+        if len(parked) > 1:
+            raise _NoTaskInProgress(
+                f"{len(parked)} parked sessions ({', '.join(parked)}); "
+                "resume one by sending hello with its session_id"
+            )
+        return self._runners.pop(parked[0])
+
+    async def cancel(self, session_id: str) -> None:
+        runner = self._runners.pop(session_id, None)
+        if runner is not None:
+            await runner.cancel()
 
     async def session(
         self,
@@ -237,6 +255,7 @@ class _ControlChannel:
         """One control session: JSON-RPC dispatch for the connection's lifetime."""
         env = self.env
         session_id = "sess-" + secrets.token_hex(4)
+        self._live.add(session_id)
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -246,71 +265,93 @@ class _ControlChannel:
             if msg_id is not None:
                 await send_frame(writer, error(msg_id, code, message))
 
-        async for msg in _frames(first, reader):
-            method = msg.get("method", "")
-            params = msg.get("params") or {}
-            msg_id = msg.get("id")
+        try:
+            async for msg in _frames(first, reader):
+                method = msg.get("method", "")
+                params = msg.get("params") or {}
+                msg_id = msg.get("id")
 
-            try:
-                if method == "hello":
-                    # env.start() ran before serving, so hook-published
-                    # capabilities (e.g. a workspace's ssh address) are
-                    # already concrete here.
-                    bindings = [c.to_manifest() for c in env.capabilities]
-                    await reply_to(
-                        msg_id,
-                        {
-                            "session_id": session_id,
-                            "env": {"name": env.name, "version": env.version},
-                            "bindings": bindings,
-                        },
-                    )
+                try:
+                    if method == "hello":
+                        requested = params.get("session_id")
+                        if requested is not None and requested != session_id:
+                            if not isinstance(requested, str):
+                                await error_to(
+                                    msg_id, -32602, "hello: 'session_id' must be a string"
+                                )
+                                continue
+                            if requested in self._live:
+                                await error_to(
+                                    msg_id, -32600, f"session {requested!r} has a live connection"
+                                )
+                                continue
+                            if requested not in self._runners:
+                                await error_to(msg_id, -32600, f"unknown session: {requested!r}")
+                                continue
+                            # Resume: this connection becomes the parked session.
+                            self._live.discard(session_id)
+                            session_id = requested
+                            self._live.add(session_id)
+                        # env.start() ran before serving, so hook-published
+                        # capabilities (e.g. a workspace's ssh address) are
+                        # already concrete here.
+                        bindings = [c.to_manifest() for c in env.capabilities]
+                        await reply_to(
+                            msg_id,
+                            {
+                                "session_id": session_id,
+                                "env": {"name": env.name, "version": env.version},
+                                "bindings": bindings,
+                            },
+                        )
 
-                elif method == "tasks.list":
-                    await reply_to(
-                        msg_id,
-                        {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
-                    )
+                    elif method == "tasks.list":
+                        await reply_to(
+                            msg_id,
+                            {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
+                        )
 
-                elif method == "tasks.start":
-                    task_id = params.get("id")
-                    if not isinstance(task_id, str):
-                        await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
-                        continue
-                    args = params.get("args") or {}
-                    if not isinstance(args, dict):
-                        await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
-                        continue
-                    try:
-                        prompt = await self.start(task_id, args)
-                    except KeyError:
-                        await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
-                        continue
-                    await reply_to(msg_id, prompt)
+                    elif method == "tasks.start":
+                        task_id = params.get("id")
+                        if not isinstance(task_id, str):
+                            await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
+                            continue
+                        args = params.get("args") or {}
+                        if not isinstance(args, dict):
+                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
+                            continue
+                        try:
+                            prompt = await self.start(session_id, task_id, args)
+                        except KeyError:
+                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
+                            continue
+                        await reply_to(msg_id, prompt)
 
-                elif method == "tasks.grade":
-                    try:
-                        evaluation = await self.grade(params)
-                    except _NoTaskInProgress:
-                        await error_to(msg_id, -32600, "no task in progress")
-                        continue
-                    await reply_to(msg_id, evaluation)
+                    elif method == "tasks.grade":
+                        try:
+                            evaluation = await self.grade(session_id, params)
+                        except _NoTaskInProgress as exc:
+                            await error_to(msg_id, -32600, str(exc))
+                            continue
+                        await reply_to(msg_id, evaluation)
 
-                elif method == "tasks.cancel":
-                    await self.cancel()
-                    await reply_to(msg_id, {"cancelled": True})
+                    elif method == "tasks.cancel":
+                        await self.cancel(session_id)
+                        await reply_to(msg_id, {"cancelled": True})
 
-                elif method == "bye":
-                    await self.cancel()
-                    await reply_to(msg_id, {"goodbye": True})
-                    return
+                    elif method == "bye":
+                        await self.cancel(session_id)
+                        await reply_to(msg_id, {"goodbye": True})
+                        return
 
-                else:
-                    await error_to(msg_id, -32601, f"method not found: {method}")
+                    else:
+                        await error_to(msg_id, -32601, f"method not found: {method}")
 
-            except Exception as exc:
-                LOGGER.exception("error handling %s", method)
-                await error_to(msg_id, -32000, str(exc))
+                except Exception as exc:
+                    LOGGER.exception("error handling %s", method)
+                    await error_to(msg_id, -32000, str(exc))
+        finally:
+            self._live.discard(session_id)
 
 
 async def _stream(
