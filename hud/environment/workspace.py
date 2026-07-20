@@ -44,10 +44,13 @@ class _PrefixSFTPServer(asyncssh.SFTPServer):
     otherwise resolve to ``<root>/workspace/...`` and fail. Strip the guest
     prefix first so SFTP and bash agree on what ``/workspace`` means.
 
-    SFTP is handled by the serving process itself, so with ``shell_uid`` set
-    (shell sessions dropped to that uid) files created here would otherwise be
-    owned by the server's user and un-editable from the shell; *chown_uid*
-    hands anything this session creates to that uid.
+    SFTP is handled by the serving process itself (as root when ``shell_uid``
+    drops shell sessions), so *chown_uid* hands anything a session creates to
+    that uid — otherwise the files would be root-owned and un-editable from
+    the dropped shell. Under the wall it also refuses paths that resolve
+    outside the workspace: asyncssh's chroot is prefix-based and follows
+    symlinks, so an agent could otherwise create ``link -> /`` and read host
+    files (including the relocated SSH keys) through the root server process.
     """
 
     def __init__(
@@ -68,7 +71,24 @@ class _PrefixSFTPServer(asyncssh.SFTPServer):
                 path = b"/"
             elif path.startswith(self._guest_prefix + b"/"):
                 path = path[len(self._guest_prefix) :]
-        return super().map_path(path)
+        mapped = super().map_path(path)
+        self._ensure_within_chroot(mapped)
+        return mapped
+
+    def _ensure_within_chroot(self, mapped: bytes) -> None:
+        """Reject operations whose real path escapes the workspace.
+
+        Only enforced under the privilege wall (``chown_uid`` set); normal
+        workspaces keep asyncssh's prefix-only chroot so legitimate outward
+        symlinks in a repo still work. This is a best-effort guard, not a
+        kernel boundary — SFTP runs in-process, so a symlink swapped between
+        this check and the syscall is a residual TOCTOU risk.
+        """
+        if self._chown_uid is None or not self._chroot:
+            return
+        real = os.path.realpath(mapped)
+        if real != self._chroot and not real.startswith(self._chroot + b"/"):
+            raise asyncssh.SFTPNoSuchFile("path escapes the workspace")
 
     def _claim(self, real_path: bytes) -> None:
         if self._chown_uid is None:
@@ -438,12 +458,19 @@ class Workspace:
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
+        inherit_host_env: bool = True,
     ) -> list[str]:
-        """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable."""
+        """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
+
+        bwrap ``--clearenv`` then re-injects ``full_env`` via ``--setenv``, so
+        with ``inherit_host_env=False`` the host environment (server secrets)
+        is left out and only ``self.env`` + ``env`` reach the sandbox.
+        """
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
         target_cwd = cwd if cwd is not None else self._guest_path
-        full_env = {**os.environ, **self.env, **(env or {})}
+        base_env = dict(os.environ) if inherit_host_env else {}
+        full_env = {**base_env, **self.env, **(env or {})}
         argv: list[str] = [
             self._bwrap,
             "--die-with-parent",
@@ -489,7 +516,14 @@ class Workspace:
             return ["cmd.exe"]
         if self._bwrap is not None:
             inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
-            argv = self.bwrap_argv(inner, cwd=cwd, env=env)
+            if self._drops_privileges():
+                # Don't let bwrap re-inject host secrets via --setenv; feed it
+                # the same minimal environment as the non-bwrap dropped shell.
+                argv = self.bwrap_argv(
+                    inner, cwd=cwd, env=self._session_env() or {}, inherit_host_env=False
+                )
+            else:
+                argv = self.bwrap_argv(inner, cwd=cwd, env=env)
         elif command is not None:
             argv = ["bash", "-lc", command]
         else:

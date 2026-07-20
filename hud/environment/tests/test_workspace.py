@@ -10,7 +10,7 @@ from pathlib import Path
 import asyncssh
 import pytest
 
-from hud.environment.workspace import Workspace
+from hud.environment.workspace import Workspace, _PrefixSFTPServer
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
 
@@ -115,6 +115,70 @@ async def test_dropped_session_env_excludes_server_secrets(
     assert "HUD_API_KEY" not in session_env
     assert session_env["CUSTOM"] == "1"
     assert "PATH" in session_env
+
+
+def _sftp_server(root: Path, *, chown_uid: int | None) -> _PrefixSFTPServer:
+    # map_path doesn't touch the channel; None is enough to exercise it.
+    return _PrefixSFTPServer(
+        None,  # type: ignore[arg-type]
+        chroot=str(root).encode(),
+        guest_prefix=b"/workspace",
+        chown_uid=chown_uid,
+    )
+
+
+def test_sftp_map_path_blocks_symlink_escape_under_the_wall(tmp_path: Path) -> None:
+    """Every SFTP op resolves paths through map_path; under the wall it must
+    refuse ones whose real target escapes the workspace (e.g. an on-disk
+    ``escape -> /host/secret`` the dropped shell created), which a raw
+    ``open`` would otherwise follow as root."""
+    root = tmp_path / "root"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("host-only")
+    (root / "escape").symlink_to(secret)
+    (root / "ok.txt").write_text("inside")
+
+    srv = _sftp_server(root, chown_uid=1000)
+    with pytest.raises(asyncssh.SFTPNoSuchFile):
+        srv.map_path(b"/escape")
+    # Paths that stay inside are unaffected.
+    assert srv.map_path(b"/ok.txt") == str(root / "ok.txt").encode()
+
+
+def test_sftp_map_path_leaves_escape_to_asyncssh_without_the_wall(tmp_path: Path) -> None:
+    """Without the wall, the containment guard is off — asyncssh's own
+    prefix chroot governs, so behavior for normal workspaces is unchanged."""
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "escape").symlink_to(tmp_path / "secret.txt")
+    srv = _sftp_server(root, chown_uid=None)
+    assert srv.map_path(b"/escape") == str(root / "escape").encode()
+
+
+def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bwrap path must not re-inject host secrets via --setenv."""
+    monkeypatch.setenv("HUD_API_KEY", "super-secret")
+    monkeypatch.setattr(Workspace, "_drops_privileges", lambda self: True)
+
+    ws = Workspace(tmp_path / "root", shell_uid=1000, env={"CUSTOM": "1"})
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    argv = ws.shell_argv("echo hi")
+
+    setenv_keys = {argv[i + 1] for i, tok in enumerate(argv) if tok == "--setenv"}
+    assert "HUD_API_KEY" not in setenv_keys
+    assert "CUSTOM" in setenv_keys and "PATH" in setenv_keys
+
+
+def test_bwrap_inherits_host_env_when_not_walled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HUD_SENTINEL", "visible")
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    argv = ws.bwrap_argv(["bash", "-lc", "true"])
+    setenv_keys = {argv[i + 1] for i, tok in enumerate(argv) if tok == "--setenv"}
+    assert "HUD_SENTINEL" in setenv_keys
 
 
 def test_shell_uid_wraps_sessions_in_setpriv(
