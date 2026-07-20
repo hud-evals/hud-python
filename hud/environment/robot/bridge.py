@@ -252,7 +252,9 @@ class RobotBridge(ABC):
         slot: _Slot | None = None
         try:
             await ws.send(_packb(self.metadata))  # connect-time metadata frame
-            raw = await ws.recv()
+            # Fail fast on a client that never claims (it would otherwise deadlock:
+            # we wait for the claim frame, it waits for an observation).
+            raw = await asyncio.wait_for(ws.recv(), timeout=self.step_timeout)
             if isinstance(raw, str):
                 raise RuntimeError(raw)
             claim = _unpackb(raw)

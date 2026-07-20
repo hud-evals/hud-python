@@ -63,10 +63,15 @@ class RobotAgent(Agent):
             raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
 
         # Per-episode slot token from tasks.start (opaque; env put it under "robot").
-        robot_info = run.started.get("robot") if isinstance(run.started.get("robot"), dict) else {}
-        token = robot_info.get("token")
+        # The bridge won't send observations until the connection claims a slot, so a
+        # missing token would deadlock connect — fail fast instead.
+        robot_info = run.started.get("robot")
+        token = robot_info.get("token") if isinstance(robot_info, dict) else None
         if not isinstance(token, str):
-            token = None
+            raise RuntimeError(
+                "run.started carries no robot slot token; the env template must yield "
+                '{"robot": {"token": ...}} from endpoint.reset() before the agent runs'
+            )
 
         robot = await RobotClient.connect(run.client.binding(self.robot_protocol), token=token)
         try:
