@@ -308,17 +308,10 @@ class Environment(LegacyEnvMixin):
     def gym(self, target: Any, *, name: str = "robot", **kwargs: Any) -> Any:
         """Attach a gym-style sim serving ``name`` over the ``robot`` protocol.
 
-        ``target`` declares the env: a module-level factory (the same
-        ``make_env`` an EnvHub repo exposes), a gymnasium registry id
-        (``"CartPole-v1"``), or a constructed registry env — reduced here to
-        its spec and closed, since only the declaration crosses the fork. The
-        sim runs in its own process (spawned at serve time; see
-        :mod:`hud.environment.robot.bridge`); this registers the spawn →
-        publish → teardown lifecycle on this env's hooks — nothing runs until
-        the env serves. Extra kwargs go to the sim program (``fps=``,
-        ``contract=``). Returns the
-        :class:`~hud.environment.robot.RobotEndpoint` templates drive episodes
-        through (``sim.reset`` / ``sim.result``).
+        ``target`` is a factory, gymnasium id (``"CartPole-v1"``), or constructed
+        registry env (reduced to its spec). Registers spawn → publish → teardown
+        on this env's hooks; nothing runs until serve. Returns a
+        :class:`~hud.environment.robot.RobotEndpoint` (``sim.reset`` / ``sim.result``).
         """
         from hud.environment.robot import RobotEndpoint, gym_command
 
