@@ -71,26 +71,20 @@ class RobotClient(CapabilityClient):
     async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
         """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
 
-        HUD bridges require the claim and send nothing until it arrives — pass the
-        token from ``endpoint.reset()``. Omit it only for servers without slots.
+        A ``None`` token binds the sole claimed slot on a single-env bridge;
+        vectorized bridges (ambiguous slots) reject it — pass the token from
+        ``endpoint.reset()`` there.
         """
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None)
         # Consume initial metadata; string means env error.
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
-        # Bind this connection to a claimed episode slot (scalar openpi from here).
-        if token is not None:
+        # Bind this connection to an episode slot (scalar openpi from here). HUD
+        # bridges require the claim frame; plain openpi servers have no slots.
+        meta = _unpackb(raw)
+        if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
             await ws.send(_packb({"claim": token}))
-        else:
-            # A slotted bridge sends nothing until a claim arrives - fail fast
-            # instead of blocking forever in get_observation().
-            meta = _unpackb(raw)
-            if isinstance(meta, dict) and meta.get("claim_required"):
-                await ws.close()
-                raise RuntimeError(
-                    "this robot env requires a slot claim; pass token= from endpoint.reset()"
-                )
         return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:
