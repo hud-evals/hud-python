@@ -68,13 +68,19 @@ class RobotClient(CapabilityClient):
         return action, observations
 
     @classmethod
-    async def connect(cls, cap: Capability) -> Self:
-        ws = await websockets.connect(cap.url, max_size=None)
+    async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
+        """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame."""
+        # No keepalive: heavy sims (Isaac resets) legitimately stall for
+        # minutes between frames; a ping timeout would kill a healthy rollout.
+        ws = await websockets.connect(cap.url, max_size=None, ping_interval=None)
         # Consume the connect-time metadata frame (always first); a string frame
         # is the env's error convention.
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
+        # Bind this connection to a claimed episode slot (scalar openpi from here).
+        if token is not None:
+            await ws.send(_packb({"claim": token}))
         return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:
@@ -95,11 +101,13 @@ class RobotClient(CapabilityClient):
         msg = await self._queue.get()
         if "error" in msg:
             raise RuntimeError(f"robot env error:\n{msg['error']}")
-        # Passthrough (no bool() coercion): a scalar bool for single-env bridges, an [N]
-        # mask for vectorized ones (RobotClient serves both; the wire decides the shape).
+        # Scalar openpi: each connection is one slot; terminated is always a bool.
         terminated = msg.pop("terminated", False)
         meta = msg.pop("meta", None)
+        reward = msg.pop("reward", None)
         out: dict[str, Any] = {"data": msg, "terminated": terminated}
+        if reward is not None:
+            out["reward"] = reward  # per-step reward sibling (RL collection)
         if meta is not None:
             out["meta"] = meta
         return out
