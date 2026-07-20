@@ -1,4 +1,4 @@
-"""Workspace: a directory + bwrap-isolated SSH server (bash + SFTP chroot)."""
+"""Workspace: a directory + bwrap-isolated SSH server."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import asyncssh
 
@@ -33,82 +33,6 @@ _warned_no_bwrap = False
 
 def _is_root() -> bool:
     return sys.platform != "win32" and hasattr(os, "geteuid") and os.geteuid() == 0
-
-
-class _PrefixSFTPServer(asyncssh.SFTPServer):
-    """Chroot SFTP whose root is also addressable as the guest mount path.
-
-    ``bash`` runs at the guest mount (``/workspace`` via bwrap on Linux, or the
-    root dir on Windows), so agents naturally write to ``/workspace/env.py``.
-    The chroot already makes the root ``/``, so a leading ``/workspace`` would
-    otherwise resolve to ``<root>/workspace/...`` and fail. Strip the guest
-    prefix first so SFTP and bash agree on what ``/workspace`` means.
-
-    SFTP is handled by the serving process itself (as root when ``shell_uid``
-    drops shell sessions), so *chown_uid* hands anything a session creates to
-    that uid — otherwise the files would be root-owned and un-editable from
-    the dropped shell. Under the wall it also refuses paths that resolve
-    outside the workspace: asyncssh's chroot is prefix-based and follows
-    symlinks, so an agent could otherwise create ``link -> /`` and read host
-    files (including the relocated SSH keys) through the root server process.
-    """
-
-    def __init__(
-        self,
-        chan: asyncssh.SSHServerChannel[bytes],
-        *,
-        chroot: bytes,
-        guest_prefix: bytes,
-        chown_uid: int | None = None,
-    ) -> None:
-        super().__init__(chan, chroot=chroot)
-        self._guest_prefix = guest_prefix.rstrip(b"/")
-        self._chown_uid = chown_uid
-
-    def map_path(self, path: bytes) -> bytes:
-        if self._guest_prefix and self._guest_prefix not in (b"", b"/"):
-            if path == self._guest_prefix:
-                path = b"/"
-            elif path.startswith(self._guest_prefix + b"/"):
-                path = path[len(self._guest_prefix) :]
-        mapped = super().map_path(path)
-        self._ensure_within_chroot(mapped)
-        return mapped
-
-    def _ensure_within_chroot(self, mapped: bytes) -> None:
-        """Reject operations whose real path escapes the workspace.
-
-        Only enforced under the privilege wall (``chown_uid`` set); normal
-        workspaces keep asyncssh's prefix-only chroot so legitimate outward
-        symlinks in a repo still work. This is a best-effort guard, not a
-        kernel boundary — SFTP runs in-process, so a symlink swapped between
-        this check and the syscall is a residual TOCTOU risk.
-        """
-        if self._chown_uid is None or not self._chroot:
-            return
-        real = os.path.realpath(mapped)
-        if real != self._chroot and not real.startswith(self._chroot + b"/"):
-            raise asyncssh.SFTPNoSuchFile("path escapes the workspace")
-
-    def _claim(self, real_path: bytes) -> None:
-        if self._chown_uid is None:
-            return
-        # Best-effort: chown needs root; without it the file already belongs
-        # to the (non-dropped) session user anyway.
-        with contextlib.suppress(OSError):
-            os.chown(real_path, self._chown_uid, self._chown_uid)
-
-    def open(self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs) -> Any:
-        real_path = self.map_path(path)
-        created = not os.path.lexists(real_path)
-        result = super().open(path, pflags, attrs)
-        if created and os.path.lexists(real_path):
-            self._claim(real_path)
-        return result
-
-    def mkdir(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        super().mkdir(path, attrs)
-        self._claim(self.map_path(path))
 
 
 # ─────────────────────────── mount declarations ───────────────────────────
@@ -164,7 +88,7 @@ _DEFAULT_USER = "agent"
 
 
 class Workspace:
-    """Directory + bwrap-isolated SSH (bash + chroot'd SFTP).
+    """Directory + bwrap-isolated SSH.
 
     The standard shell daemon: ``env.workspace(root)`` attaches one to an
     :class:`~hud.environment.Environment`, which starts it and publishes its
@@ -173,10 +97,10 @@ class Workspace:
     time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)
     to publish the capability yourself.
 
-    ``shell_uid`` drops agent sessions to that uid when the serving process
-    is root (``setpriv`` for shell sessions; SFTP-created files are chowned
-    to it) — the privilege wall for substrates where bwrap is unavailable and
-    the env process holds secrets the agent must not read. No-op off root.
+    ``shell_uid`` drops agent sessions to that uid with ``setpriv`` when the
+    serving process is root — the privilege wall for substrates where bwrap
+    is unavailable and the env process holds secrets the agent must not read.
+    No-op off root.
     """
 
     def __init__(
@@ -217,8 +141,8 @@ class Workspace:
         self._bwrap = shutil.which("bwrap")
         # Without bwrap there is no `/workspace` mount — the sandbox *is* the real
         # directory, so address it by its real path. Otherwise `cd /workspace`
-        # lands in a phantom dir and the editor/SFTP/bash disagree on where files
-        # are. Only override the default; respect an explicit guest_path.
+        # lands in a phantom dir and the editor/bash disagree on where files are.
+        # Only override the default; respect an explicit guest_path.
         if self._bwrap is None and guest_path == "/workspace":
             self._guest_path = self.root.as_posix()
         # ssh config
@@ -316,8 +240,6 @@ class Workspace:
             server_host_keys=[self._host_key],
             authorized_client_keys=str(self._authorized_keys_path),
             process_factory=self._handle_process,
-            sftp_factory=self._sftp_factory,
-            allow_scp=True,
             line_editor=False,
             keepalive_interval=30,
             encoding=None,
@@ -537,8 +459,7 @@ class Workspace:
 
     def _credentials_dir(self) -> Path:
         """Key material lives outside the served root: the root is the agent's
-        surface (shell cwd, SFTP chroot, diff tracking), so secrets don't
-        belong in it.
+        shell cwd and diff-tracking surface, so secrets don't belong in it.
 
         ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
         atomically, so a local user can't pre-place a symlink at the path to
@@ -691,29 +612,57 @@ class Workspace:
             process.exit(127)
             return
 
+        stdin = sub.process.stdin
+        stdout = sub.stdout
+        stderr = sub.stderr
+        assert stdin is not None
+        assert stdout is not None
+        assert stderr is not None
+
+        async def relay_stdin() -> None:
+            try:
+                while chunk := await process.stdin.read(65536):
+                    stdin.write(chunk)
+                    await stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                stdin.close()
+
+        stdin_task = asyncio.create_task(relay_stdin())
+        stdout_task = asyncio.create_task(stdout.read())
+        stderr_task = asyncio.create_task(stderr.read())
         try:
-            stdout_data, stderr_data = await sub.communicate(
-                input=None,
-                max_wait=3600.0,
-            )
+            async with asyncio.timeout(3600.0):
+                _, stdout_data, stderr_data = await asyncio.gather(
+                    sub.wait(),
+                    stdout_task,
+                    stderr_task,
+                )
+            await sub.terminate()
+            stdin_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stdin_task
         except TimeoutError:
+            await sub.terminate()
+            stdin_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stdin_task
             process.stderr.write(b"workspace: command timed out after 3600s\n")
             process.exit(1)
             return
+        except BaseException:
+            await sub.terminate()
+            stdin_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stdin_task
+            raise
 
         if stdout_data:
             process.stdout.write(stdout_data)
         if stderr_data:
             process.stderr.write(stderr_data)
         process.exit(sub.returncode if sub.returncode is not None else 0)
-
-    def _sftp_factory(self, chan: asyncssh.SSHServerChannel[bytes]) -> asyncssh.SFTPServer:
-        return _PrefixSFTPServer(
-            chan,
-            chroot=str(self.root).encode(),
-            guest_prefix=self._guest_path.encode(),
-            chown_uid=self._shell_uid if self._drops_privileges() else None,
-        )
 
 
 __all__ = [

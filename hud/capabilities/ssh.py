@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import shlex
 from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
 
@@ -42,12 +44,73 @@ class SSHClient(CapabilityClient):
 
     @property
     def conn(self) -> asyncssh.SSHClientConnection:
-        """Raw asyncssh connection — use for ``run``, SFTP, port forwarding, etc."""
+        """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
+
+    async def read_text(self, path: str) -> str:
+        """Read a UTF-8 text file through the exec channel."""
+        if self._is_windows:
+            quoted = _powershell_quote(path)
+            command = (
+                "powershell -NoProfile -NonInteractive -Command "
+                f'"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"'
+            )
+            result = await self._conn.run(command, check=True)
+            return base64.b64decode(_stdout(result)).decode("utf-8", errors="replace")
+        result = await self._conn.run(f"cat -- {shlex.quote(path)}", check=True)
+        return _stdout(result)
+
+    async def write_text(self, path: str, content: str) -> None:
+        """Write UTF-8 text through the exec channel without command interpolation."""
+        if self._is_windows:
+            quoted = _powershell_quote(path)
+            await self._conn.run(
+                "powershell -NoProfile -NonInteractive -Command "
+                f'"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"',
+                check=True,
+            )
+            raw = content.encode("utf-8")
+            for offset in range(0, len(raw), 6144):
+                payload = base64.b64encode(raw[offset : offset + 6144]).decode("ascii")
+                await self._conn.run(
+                    "powershell -NoProfile -NonInteractive -Command "
+                    f"\"$b=[Convert]::FromBase64String('{payload}');"
+                    f"$f=[IO.File]::Open({quoted},[IO.FileMode]::Append,"
+                    "[IO.FileAccess]::Write,[IO.FileShare]::Read);"
+                    'try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"',
+                    check=True,
+                )
+            return
+        await self._conn.run(f"cat > {shlex.quote(path)}", input=content, check=True)
+
+    async def listdir(self, path: str) -> list[str]:
+        """List direct children through the exec channel."""
+        if self._is_windows:
+            quoted = _powershell_quote(path)
+            command = (
+                "powershell -NoProfile -NonInteractive -Command "
+                f'"Get-ChildItem -Force -Name -LiteralPath {quoted}"'
+            )
+        else:
+            command = f"ls -1A -- {shlex.quote(path)}"
+        result = await self._conn.run(command, check=True)
+        return sorted(line for line in _stdout(result).splitlines() if line not in (".", ".."))
+
+    @property
+    def _is_windows(self) -> bool:
+        return self.capability.params.get("shell") in ("cmd", "powershell")
 
     async def close(self) -> None:
         self._conn.close()
         await self._conn.wait_closed()
+
+
+def _stdout(result: asyncssh.SSHCompletedProcess) -> str:
+    return result.stdout if isinstance(result.stdout, str) else ""
+
+
+def _powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 __all__ = ["SSHClient"]

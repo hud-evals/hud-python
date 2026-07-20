@@ -10,12 +10,15 @@ rejected by the remote shell (and silently fails under PowerShell), so the
 
 from __future__ import annotations
 
+import base64
+import re
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
+from hud.capabilities import Capability, SSHClient
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
 
@@ -42,45 +45,28 @@ def test_posix_shell_runs_inline_with_install_check() -> None:
 # ─── _exec end-to-end over a fake SSH workspace ────────────────────────
 
 
-class _FakeFile:
-    def __init__(self, name: str, sink: dict[str, bytes]) -> None:
-        self._name = name
-        self._sink = sink
-
-    async def __aenter__(self) -> _FakeFile:
-        return self
-
-    async def __aexit__(self, *exc: Any) -> None:
-        return None
-
-    async def write(self, data: bytes) -> None:
-        self._sink[self._name] = self._sink.get(self._name, b"") + data
-
-
-class _FakeSFTP:
-    def __init__(self, sink: dict[str, bytes]) -> None:
-        self._sink = sink
-
-    async def __aenter__(self) -> _FakeSFTP:
-        return self
-
-    async def __aexit__(self, *exc: Any) -> None:
-        return None
-
-    def open(self, name: str, mode: str) -> _FakeFile:
-        return _FakeFile(name, self._sink)
-
-
 class _FakeConn:
     def __init__(self, sink: dict[str, bytes], result: Any) -> None:
         self._sink = sink
         self._result = result
         self.ran: list[str] = []
+        self.write_commands: list[str] = []
 
-    def start_sftp_client(self) -> _FakeSFTP:
-        return _FakeSFTP(self._sink)
-
-    async def run(self, cmd: str, *, check: bool = True) -> Any:
+    async def run(self, cmd: str, *, input: str | None = None, check: bool = True) -> Any:
+        if input is not None or cmd.startswith("powershell "):
+            self.write_commands.append(cmd)
+            name = next(
+                path
+                for path in (".hud_prompt.txt", ".hud_run.bat", ".hud_mcp_config.json")
+                if path in cmd
+            )
+            if input is not None:
+                self._sink[name] = input.encode()
+            elif match := re.search(r"FromBase64String\('([^']+)'\)", cmd):
+                self._sink[name] += base64.b64decode(match.group(1))
+            else:
+                self._sink[name] = b""
+            return SimpleNamespace(stdout="", stderr="", exit_status=0)
         self.ran.append(cmd)
         return self._result
 
@@ -100,7 +86,13 @@ _STREAM_JSON = (
 
 def _agent_with_conn(shell: str, conn: _FakeConn) -> ClaudeSDKAgent:
     agent = ClaudeSDKAgent()
-    agent._ssh = cast("Any", SimpleNamespace(conn=conn))
+    capability = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"shell": shell},
+    )
+    agent._ssh = SSHClient(capability, cast("Any", conn))
     agent._shell = shell
     return agent
 
@@ -114,6 +106,7 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     await agent._exec(run, prompt="build it", max_steps=5)
 
     assert conn.ran == ["cmd /c .hud_run.bat"]
+    assert all(command.startswith("powershell ") for command in conn.write_commands)
     assert sink[".hud_run.bat"].startswith(b"@echo off\r\n")
     assert sink[".hud_prompt.txt"] == b"build it"
     assert run.trace.status == "completed"
@@ -129,6 +122,7 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     await agent._exec(run, prompt="build it", max_steps=5)
 
     assert ".hud_run.bat" not in sink
+    assert conn.write_commands == ["cat > .hud_prompt.txt"]
     assert len(conn.ran) == 1
     assert "install.sh" in conn.ran[0]
     assert "claude" in conn.ran[0]

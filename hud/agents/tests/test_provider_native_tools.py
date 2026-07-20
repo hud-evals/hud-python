@@ -29,66 +29,32 @@ class _Completed:
         self.exit_status = exit_status
 
 
-class _FakeOpenFile:
-    def __init__(self, store: dict[str, bytes], path: str, mode: str) -> None:
-        self._store = store
-        self._path = path
-        self._mode = mode
-        self._written = b""
-
-    async def __aenter__(self) -> _FakeOpenFile:
-        return self
-
-    async def __aexit__(self, *_: object) -> bool:
-        if "w" in self._mode:
-            self._store[self._path] = self._written
-        return False
-
-    async def read(self) -> bytes:
-        return self._store.get(self._path, b"")
-
-    async def write(self, data: bytes) -> None:
-        self._written += data
-
-
-class _FakeSFTP:
-    def __init__(self, store: dict[str, bytes]) -> None:
-        self._store = store
-
-    async def __aenter__(self) -> _FakeSFTP:
-        return self
-
-    async def __aexit__(self, *_: object) -> bool:
-        return False
-
-    def open(self, path: str, mode: str) -> _FakeOpenFile:
-        return _FakeOpenFile(self._store, path, mode)
-
-    async def listdir(self, path: str) -> list[str]:
-        prefix = path.rstrip("/")
-        if not prefix:
-            prefix = "/"
-        if prefix != "/":
-            prefix += "/"
-        names: set[str] = set()
-        for file_path in self._store:
-            if not file_path.startswith(prefix):
-                continue
-            rest = file_path[len(prefix) :]
-            if rest:
-                names.add(rest.split("/", 1)[0])
-        return sorted(names)
-
-
 class _Conn:
     def __init__(self, completed: _Completed, store: dict[str, bytes]) -> None:
         self._completed = completed
         self._store = store
         self.commands: list[str] = []
 
-    async def run(self, command: str, check: bool = False) -> _Completed:
+    async def run(
+        self, command: str, *, input: str | None = None, check: bool = False
+    ) -> _Completed:
         self.commands.append(command)
         parts = shlex.split(command)
+        if len(parts) == 3 and parts[:2] == ["cat", "--"]:
+            return _Completed(stdout=self._store.get(parts[2], b"").decode())
+        if len(parts) == 3 and parts[:2] == ["cat", ">"]:
+            assert input is not None
+            self._store[parts[2]] = input.encode()
+            return _Completed()
+        if len(parts) == 4 and parts[:3] == ["ls", "-1A", "--"]:
+            prefix = parts[3].rstrip("/")
+            prefix = "/" if not prefix else prefix + "/"
+            names = {
+                rest.split("/", 1)[0]
+                for file_path in self._store
+                if file_path.startswith(prefix) and (rest := file_path[len(prefix) :])
+            }
+            return _Completed(stdout="\n".join(sorted(names)))
         if len(parts) == 3 and parts[:2] in (["test", "-d"], ["test", "-e"]):
             path = parts[2]
             exists = path in self._store or any(
@@ -103,12 +69,9 @@ class _Conn:
             return _Completed(exit_status=0)
         return self._completed
 
-    def start_sftp_client(self) -> _FakeSFTP:
-        return _FakeSFTP(self._store)
-
 
 class _FakeSSH(SSHClient):
-    """Duck-typed ``SSHClient``: ``conn.run`` (bash) + ``conn.start_sftp_client`` (files)."""
+    """SSH client with an in-memory exec-channel filesystem."""
 
     def __init__(
         self,
@@ -203,7 +166,7 @@ async def test_openai_compatible_bash_uses_workdir_and_timeout() -> None:
     assert _commands(tool) == ["cd '/tmp/my dir' && timeout 3s bash -lc 'echo hi'"]
 
 
-async def test_openai_compatible_write_stores_file_via_workspace_sftp() -> None:
+async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
     ssh = _FakeSSH()
     tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
 
@@ -325,7 +288,7 @@ def test_claude_bash_to_params_carries_native_schema() -> None:
     assert params == {"type": "bash_20250124", "name": "bash"}
 
 
-# ─── editor tools over SFTP ───────────────────────────────────────────
+# ─── editor tools over SSH exec ───────────────────────────────────────
 
 
 async def test_claude_text_editor_creates_file() -> None:
