@@ -176,6 +176,11 @@ async def test_wall_hands_preexisting_contents_to_the_dropped_uid(
     _wall(monkeypatch)
     handed: list[str] = []
     monkeypatch.setattr(os, "lchown", lambda p, u, g: handed.append(os.fsdecode(p)))
+    monkeypatch.setattr(
+        os,
+        "chown",
+        lambda p, u, g, dir_fd=None, follow_symlinks=True: handed.append(os.fsdecode(p)),
+    )
 
     root = tmp_path / "root"
     (root / "pkg").mkdir(parents=True)
@@ -188,6 +193,23 @@ async def test_wall_hands_preexisting_contents_to_the_dropped_uid(
         assert {"root", "pkg", "mod.py"} <= names
     finally:
         await ws.stop()
+
+
+@pytest.mark.asyncio
+async def test_wall_handoff_failure_refuses_to_serve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial ownership handoff silently breaks the workspace contract;
+    the server must fail loudly instead of serving root-owned files."""
+    _wall(monkeypatch)
+
+    def deny(p: object, u: int, g: int) -> None:
+        raise PermissionError("operation not permitted")
+
+    monkeypatch.setattr(os, "lchown", deny)
+    ws = Workspace(tmp_path / "root", shell_uid=1000)
+    with pytest.raises(PermissionError):
+        await ws.start()
 
 
 def test_shell_uid_is_a_noop_off_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

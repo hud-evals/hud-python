@@ -62,14 +62,17 @@ class _FakeConn:
     ) -> Any:
         if input is not None or cmd.startswith("powershell "):
             self.write_commands.append(cmd)
+            script = cmd
+            if match := re.search(r"-EncodedCommand (\S+)", cmd):
+                script = base64.b64decode(match.group(1)).decode("utf-16-le")
             name = next(
                 path
                 for path in (".hud_prompt.txt", ".hud_run.bat", ".hud_mcp_config.json")
-                if path in cmd
+                if path in script
             )
             if input is not None:
                 self._sink[name] = input.encode()
-            elif match := re.search(r"FromBase64String\('([^']+)'\)", cmd):
+            elif match := re.search(r"FromBase64String\('([^']+)'\)", script):
                 self._sink[name] += base64.b64decode(match.group(1))
             else:
                 self._sink[name] = b""

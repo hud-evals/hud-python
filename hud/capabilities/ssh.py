@@ -80,11 +80,8 @@ class SSHClient(CapabilityClient):
         path = self.map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
-            command = (
-                "powershell -NoProfile -NonInteractive -Command "
-                f'"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"'
-            )
-            result = await self._conn.run(command, check=True)
+            script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
+            result = await self._conn.run(_powershell(script), check=True)
             return base64.b64decode(_stdout(result)).decode("utf-8", errors="replace")
         # encoding=None transports raw bytes: a strict connection-level UTF-8
         # decode would raise on files with invalid UTF-8 instead of replacing.
@@ -96,22 +93,18 @@ class SSHClient(CapabilityClient):
         path = self.map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
-            await self._conn.run(
-                "powershell -NoProfile -NonInteractive -Command "
-                f'"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"',
-                check=True,
-            )
+            truncate = f"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"
+            await self._conn.run(_powershell(truncate), check=True)
             raw = content.encode("utf-8")
             for offset in range(0, len(raw), 6144):
                 payload = base64.b64encode(raw[offset : offset + 6144]).decode("ascii")
-                await self._conn.run(
-                    "powershell -NoProfile -NonInteractive -Command "
-                    f"\"$b=[Convert]::FromBase64String('{payload}');"
+                script = (
+                    f"$b=[Convert]::FromBase64String('{payload}');"
                     f"$f=[IO.File]::Open({quoted},[IO.FileMode]::Append,"
                     "[IO.FileAccess]::Write,[IO.FileShare]::Read);"
-                    'try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"',
-                    check=True,
+                    "try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"
                 )
+                await self._conn.run(_powershell(script), check=True)
             return
         await self._conn.run(f"cat > {shlex.quote(path)}", input=content, check=True)
 
@@ -119,12 +112,8 @@ class SSHClient(CapabilityClient):
         """List direct children through the exec channel."""
         path = self.map_path(path)
         if self._is_windows:
-            quoted = _powershell_quote(path)
-            command = (
-                "powershell -NoProfile -NonInteractive -Command "
-                f'"Get-ChildItem -Force -Name -LiteralPath {quoted}"'
-            )
-            result = await self._conn.run(command, check=True)
+            script = f"Get-ChildItem -Force -Name -LiteralPath {_powershell_quote(path)}"
+            result = await self._conn.run(_powershell(script), check=True)
             listing = _stdout(result)
         else:
             command = f"ls -1A -- {shlex.quote(path)}"
@@ -139,6 +128,19 @@ class SSHClient(CapabilityClient):
     async def close(self) -> None:
         self._conn.close()
         await self._conn.wait_closed()
+
+
+def _powershell(script: str) -> str:
+    """Wrap a script for remote execution with no quoting at all.
+
+    ``-Command "..."`` breaks against the built-in Windows workspace: its exec
+    handler splits with ``shlex.split(posix=False)`` (quotes retained) and
+    ``subprocess`` re-quotes, so PowerShell sees a string literal instead of a
+    script. ``-EncodedCommand`` carries the script as base64 UTF-16LE — no
+    quotes to mangle anywhere.
+    """
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
 
 
 def _stdout(result: asyncssh.SSHCompletedProcess) -> str:

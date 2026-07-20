@@ -218,16 +218,20 @@ class Workspace:
         if self._drops_privileges():
             # The workspace is the agent's surface: hand the whole tree to the
             # dropped uid, or contents baked in as root (e.g. a Docker COPY)
-            # stay un-editable from the dropped shell. lchown so an in-tree
-            # symlink can't redirect the chown outside the workspace.
+            # stay un-editable from the dropped shell. fwalk + dir_fd-relative
+            # no-follow chown is the kernel boundary: a symlink swapped in
+            # mid-walk can't redirect ownership outside the workspace. Failures
+            # raise — a partial handoff would silently break the documented
+            # guarantee that the agent can edit its workspace.
             assert self._shell_uid is not None
             uid = self._shell_uid
-            with contextlib.suppress(OSError):
-                os.lchown(self.root, uid, uid)
-            for dirpath, dirnames, filenames in os.walk(self.root):
+            os.lchown(self.root, uid, uid)
+            for _dirpath, dirnames, filenames, dirfd in os.fwalk(self.root):
                 for entry in (*dirnames, *filenames):
-                    with contextlib.suppress(OSError):
-                        os.lchown(os.path.join(dirpath, entry), uid, uid)
+                    # A concurrent session may unlink entries mid-walk; a
+                    # vanished path needs no handoff.
+                    with contextlib.suppress(FileNotFoundError):
+                        os.chown(entry, uid, uid, dir_fd=dirfd, follow_symlinks=False)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
