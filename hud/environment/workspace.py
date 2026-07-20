@@ -100,7 +100,9 @@ class Workspace:
     ``shell_uid`` drops agent sessions to that uid with ``setpriv`` when the
     serving process is root — the privilege wall for substrates where bwrap
     is unavailable and the env process holds secrets the agent must not read.
-    No-op off root.
+    No-op off root. Only the workspace directory itself is handed to the uid
+    at start (O(1), on the serving path); pre-staged content is the author's
+    to own via ``COPY --chown`` or task setup.
     """
 
     def __init__(
@@ -216,22 +218,17 @@ class Workspace:
                 )
         self.root.mkdir(parents=True, exist_ok=True)
         if self._drops_privileges():
-            # The workspace is the agent's surface: hand the whole tree to the
-            # dropped uid, or contents baked in as root (e.g. a Docker COPY)
-            # stay un-editable from the dropped shell. fwalk + dir_fd-relative
-            # no-follow chown is the kernel boundary: a symlink swapped in
-            # mid-walk can't redirect ownership outside the workspace. Failures
-            # raise — a partial handoff would silently break the documented
-            # guarantee that the agent can edit its workspace.
+            # Make the workspace dir itself writable by the dropped uid so a
+            # fresh workspace is usable out of the box. This is O(1) and must
+            # stay that way: it runs on the serving path, before the control
+            # port binds. We deliberately do NOT recurse — a baked tree
+            # (node_modules, a venv, a dataset) can hold hundreds of thousands
+            # of files, and walking it here delays the bind past the deploy
+            # readiness probe. Ownership of pre-staged content is the env
+            # author's job, done where it's cheap and scoped: at build time
+            # (`COPY --chown`) or in task setup over just what was staged.
             assert self._shell_uid is not None
-            uid = self._shell_uid
-            os.lchown(self.root, uid, uid)
-            for _dirpath, dirnames, filenames, dirfd in os.fwalk(self.root):
-                for entry in (*dirnames, *filenames):
-                    # A concurrent session may unlink entries mid-walk; a
-                    # vanished path needs no handoff.
-                    with contextlib.suppress(FileNotFoundError):
-                        os.chown(entry, uid, uid, dir_fd=dirfd, follow_symlinks=False)
+            os.lchown(self.root, self._shell_uid, self._shell_uid)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

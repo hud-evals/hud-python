@@ -303,7 +303,7 @@ Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation
 | `host` | `str` | SSH bind host. Default `"127.0.0.1"`. |
 | `port` | `int` | SSH bind port (`0` binds an ephemeral port). Default `0`. |
 | `user` | `str` | SSH username. Default `"agent"`. |
-| `shell_uid` | `int \| None` | When serving as root, run every agent command as this uid/gid with cleared supplementary groups and `no_new_privs`. Default `None`. |
+| `shell_uid` | `int \| None` | When serving as root, run every agent command as this uid/gid with cleared supplementary groups and `no_new_privs`. Only the workspace directory itself is handed to the uid at start (O(1)); own pre-staged content via `COPY --chown` or task setup. Default `None`. |
 | `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
 | `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
 | `track_files` | `bool` | Serve file-tracking telemetry over the workspace lifecycle. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on). |
