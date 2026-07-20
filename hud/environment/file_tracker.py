@@ -44,7 +44,7 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     ".hg",
     ".svn",
     ".jj",
-    # The Workspace's own SSH credential dir, materialized under root at serve time.
+    # HUD CLI state written into env dirs (e.g. deploy's .hud/config.json).
     ".hud/",
     "*.so",
     "*.o",

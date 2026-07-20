@@ -133,12 +133,7 @@ class ClaudeSDKAgent(Agent):
 
         mcp_config_path = await self._write_mcp_config()
 
-        # Write prompt to file via SFTP — avoids all shell quoting issues.
-        async with (
-            self._ssh.conn.start_sftp_client() as sftp,
-            sftp.open(".hud_prompt.txt", "wb") as f,
-        ):
-            await f.write(prompt.encode("utf-8"))
+        await self._ssh.write_text(".hud_prompt.txt", prompt)
 
         run_cmd = self._build_cli_command(
             prompt=prompt,
@@ -151,11 +146,7 @@ class ClaudeSDKAgent(Agent):
         if invocation.script_name is not None:
             assert invocation.script_body is not None
             # cmd.exe mangles inline quotes, so the command rides a batch file.
-            async with (
-                self._ssh.conn.start_sftp_client() as sftp,
-                sftp.open(invocation.script_name, "wb") as f,
-            ):
-                await f.write(invocation.script_body.encode("utf-8"))
+            await self._ssh.write_text(invocation.script_name, invocation.script_body)
 
         full_cmd = invocation.command
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
@@ -202,17 +193,14 @@ class ClaudeSDKAgent(Agent):
         return env
 
     async def _write_mcp_config(self) -> str | None:
-        """Write MCP config via SFTP and return the file path, or None."""
+        """Write MCP config into the workspace and return its path."""
         if not self._mcp_servers or self._ssh is None:
             return None
         mcp_json = json.dumps({"mcpServers": self._mcp_servers}, indent=2)
-        # Write into the workspace root (SFTP is chrooted there).
-        sftp_path = ".hud_mcp_config.json"
-        async with self._ssh.conn.start_sftp_client() as sftp, sftp.open(sftp_path, "wb") as f:
-            await f.write(mcp_json.encode("utf-8"))
-        # Return the absolute path the CLI will see (cwd = workspace root).
-        logger.info("Wrote MCP config via SFTP")
-        return sftp_path
+        path = ".hud_mcp_config.json"
+        await self._ssh.write_text(path, mcp_json)
+        logger.info("Wrote MCP config")
+        return path
 
     def _build_cli_command(
         self,

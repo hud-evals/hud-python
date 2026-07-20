@@ -1,0 +1,26 @@
+name: Publish hud-python
+
+# Publishes the final release under the old 'hud-python' name: an sdist that
+# refuses to install and points at 'hud' (see hud-python/README.md). Run once,
+# after a live 'hud' release exists. PyPI rejects re-uploads of an existing
+# version, so re-running cannot double-publish.
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build and publish 'hud-python' to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          HUD_PYTHON_ALLOW_BUILD: "1"
+        run: |
+          uv build --sdist hud-python
+          uv publish hud-python/dist/*

@@ -1,6 +1,6 @@
 [project]
 name = "hud"
-version = "0.6.9"
+version = "0.6.10"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -48,7 +48,6 @@ classifiers = [
 
 [project.scripts]
 hud = "hud.cli:main"
-hud-python = "hud.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -59,6 +58,7 @@ exclude = [
     "docs/",
     "cookbooks/",
     "integrations/",
+    "hud-python/",
     "**/checkpoints/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -85,9 +85,9 @@ allow-direct-references = true
 [tool.hatch.build.targets.sdist]
 include = [
     "hud/**",
-    "README.md",
-    "LICENSE",
-    "pyproject.toml"
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml"
 ]
 exclude = [
     "*/tests/",
@@ -209,6 +209,7 @@ lint.ignore = [
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
 "**/cookbooks/**/*.py" = ["ALL"]
 "scripts/*.py" = ["T201", "INP001"]  # dev scripts: print is the interface
+"hud-python/setup.py" = ["INP001"]  # standalone package, not a module
 
 
 [tool.ruff.format]
