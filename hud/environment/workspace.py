@@ -9,9 +9,10 @@ import os
 import shutil
 import socket
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
@@ -30,6 +31,10 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 _warned_no_bwrap = False
 
 
+def _serving_as_root() -> bool:
+    return sys.platform != "win32" and hasattr(os, "geteuid") and os.geteuid() == 0
+
+
 class _PrefixSFTPServer(asyncssh.SFTPServer):
     """Chroot SFTP whose root is also addressable as the guest mount path.
 
@@ -38,13 +43,24 @@ class _PrefixSFTPServer(asyncssh.SFTPServer):
     The chroot already makes the root ``/``, so a leading ``/workspace`` would
     otherwise resolve to ``<root>/workspace/...`` and fail. Strip the guest
     prefix first so SFTP and bash agree on what ``/workspace`` means.
+
+    SFTP is handled by the serving process itself, so with ``shell_uid`` set
+    (shell sessions dropped to that uid) files created here would otherwise be
+    owned by the server's user and un-editable from the shell; *chown_uid*
+    hands anything this session creates to that uid.
     """
 
     def __init__(
-        self, chan: asyncssh.SSHServerChannel[bytes], *, chroot: bytes, guest_prefix: bytes
+        self,
+        chan: asyncssh.SSHServerChannel[bytes],
+        *,
+        chroot: bytes,
+        guest_prefix: bytes,
+        chown_uid: int | None = None,
     ) -> None:
         super().__init__(chan, chroot=chroot)
         self._guest_prefix = guest_prefix.rstrip(b"/")
+        self._chown_uid = chown_uid
 
     def map_path(self, path: bytes) -> bytes:
         if self._guest_prefix and self._guest_prefix not in (b"", b"/"):
@@ -53,6 +69,26 @@ class _PrefixSFTPServer(asyncssh.SFTPServer):
             elif path.startswith(self._guest_prefix + b"/"):
                 path = path[len(self._guest_prefix) :]
         return super().map_path(path)
+
+    def _claim(self, real_path: bytes) -> None:
+        if self._chown_uid is None:
+            return
+        # Best-effort: chown needs root; without it the file already belongs
+        # to the (non-dropped) session user anyway.
+        with contextlib.suppress(OSError):
+            os.chown(real_path, self._chown_uid, self._chown_uid)
+
+    def open(self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs) -> Any:
+        real_path = self.map_path(path)
+        created = not os.path.lexists(real_path)
+        result = super().open(path, pflags, attrs)
+        if created and os.path.lexists(real_path):
+            self._claim(real_path)
+        return result
+
+    def mkdir(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
+        super().mkdir(path, attrs)
+        self._claim(self.map_path(path))
 
 
 # ─────────────────────────── mount declarations ───────────────────────────
@@ -116,6 +152,11 @@ class Workspace:
     data — keys, sockets, and the root directory materialize only at serve
     time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)
     to publish the capability yourself.
+
+    ``shell_uid`` drops agent sessions to that uid when the serving process
+    is root (``setpriv`` for shell sessions; SFTP-created files are chowned
+    to it) — the privilege wall for substrates where bwrap is unavailable and
+    the env process holds secrets the agent must not read. No-op off root.
     """
 
     def __init__(
@@ -135,6 +176,7 @@ class Workspace:
         host_key_path: Path | None = None,
         authorized_client_keys: list[Path] | None = None,
         track_files: bool = False,
+        shell_uid: int | None = None,
     ) -> None:
         self.root: Path = Path(root).resolve()
         # Unique id for this instance's credential subdirectory so parallel
@@ -164,6 +206,7 @@ class Workspace:
         self._ssh_host = host
         self._ssh_port = port
         self._ssh_user = user
+        self._shell_uid = shell_uid
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
@@ -288,7 +331,9 @@ class Workspace:
         self._sock = None
         self._bound_host = None
         self._bound_port = None
-        shutil.rmtree(self.root / ".hud" / "ssh" / self._cred_id, ignore_errors=True)
+        shutil.rmtree(
+            Path(tempfile.gettempdir()) / "hud-workspace-creds" / self._cred_id, ignore_errors=True
+        )
 
     # ─── ssh accessors / capability ───────────────────────────────────
 
@@ -406,23 +451,37 @@ class Workspace:
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> list[str]:
-        """Per-session shell argv (bwrap'd if available, else host shell)."""
-        if self._bwrap is not None:
-            inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
-            return self.bwrap_argv(inner, cwd=cwd, env=env)
+        """Per-session shell argv (bwrap'd if available, else host shell).
+
+        With ``shell_uid`` set and the serving process running as root, the
+        whole session is wrapped in ``setpriv`` to drop to that uid.
+        """
         if sys.platform == "win32":
             if command is not None:
                 return ["cmd.exe", "/c", command]
             return ["cmd.exe"]
-        if command is not None:
-            return ["bash", "-lc", command]
-        return ["bash", "-l"]
+        if self._bwrap is not None:
+            inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
+            argv = self.bwrap_argv(inner, cwd=cwd, env=env)
+        elif command is not None:
+            argv = ["bash", "-lc", command]
+        else:
+            argv = ["bash", "-l"]
+        if self._shell_uid is not None and _serving_as_root():
+            uid = str(self._shell_uid)
+            argv = ["setpriv", "--reuid", uid, "--regid", uid, "--clear-groups", "--", *argv]
+        return argv
 
     # ─── ssh server internals ─────────────────────────────────────────
 
     def _credentials_dir(self) -> Path:
-        d = self.root / ".hud" / "ssh" / self._cred_id
+        """Key material lives outside the served root: the root is the agent's
+        surface (shell cwd, SFTP chroot, diff tracking), so secrets don't
+        belong in it."""
+        d = Path(tempfile.gettempdir()) / "hud-workspace-creds" / self._cred_id
         d.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(d, 0o700)
         return d
 
     def _load_or_generate_host_key(self) -> tuple[asyncssh.SSHKey, str]:
@@ -573,6 +632,7 @@ class Workspace:
             chan,
             chroot=str(self.root).encode(),
             guest_prefix=self._guest_path.encode(),
+            chown_uid=self._shell_uid if _serving_as_root() else None,
         )
 
 
