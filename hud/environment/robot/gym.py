@@ -248,9 +248,19 @@ class GymBridge(RobotBridge):
         if self.env is None:
             await self._run_on_sim(self._sync_reset, task_args)
 
-    async def start(self) -> None:
-        """Build the env and derive/load the contract, then bring up the wire."""
-        await self.ensure_env()
+    def _load_contract_if_present(self) -> None:
+        """Load a pre-written contract.json without touching Isaac (lazy spawn)."""
+        if self.contract or self._contract_path is None:
+            return
+        path = Path(self._contract_path)
+        if path.exists():
+            self.contract = json.loads(path.read_text())
+            self._fps = self._fps or int(self.contract.get("control_rate") or 15)
+
+    def _ensure_contract_from_env(self) -> None:
+        """Derive/load contract once the env exists (first reset under lazy spawn)."""
+        if self.contract or self.env is None:
+            return
         state, frames = self.sample_observation()
         existed = self._contract_path is not None and Path(self._contract_path).exists()
         self.contract = load_or_write_contract(
@@ -262,10 +272,24 @@ class GymBridge(RobotBridge):
         )
         if not existed and self._contract_path is not None:
             print(f"[env] wrote {self._contract_path} (edit names to relabel plots)", flush=True)
+
+    async def start(self) -> None:
+        """Bring up the wire immediately; Isaac builds on first reset (lazy spawn).
+
+        Cold Isaac boots can take several minutes. Announcing ``HUD_SIM_PORT``
+        before ``make_env`` keeps the parent server alive while the child cooks.
+        """
+        self._load_contract_if_present()
+        if "num_envs" in self._defaults:
+            self.num_envs = int(self._defaults["num_envs"])
+            self.batched = self.num_envs > 0
+        print("[env] lazy spawn: announcing port before Isaac boot", flush=True)
         await super().start()
 
     async def reset(self, **task_args: Any) -> str:
-        return await self._run_on_sim(self._sync_reset, task_args)
+        prompt = await self._run_on_sim(self._sync_reset, task_args)
+        self._ensure_contract_from_env()
+        return prompt
 
     async def stop(self) -> None:
         await super().stop()

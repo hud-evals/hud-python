@@ -61,7 +61,7 @@ class RobotEndpoint:
         cmd: Sequence[str] | None = None,
         host: str | None = None,
         port: int | None = None,
-        connect_timeout_s: float = 240.0,
+        connect_timeout_s: float = 900.0,
     ) -> None:
         self._cmd = list(cmd) if cmd is not None else None  # set => spawned mode
         self._host = host
@@ -75,12 +75,12 @@ class RobotEndpoint:
         self._lock = asyncio.Lock()
 
     @classmethod
-    def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 240.0) -> RobotEndpoint:
+    def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
         """An endpoint that forks *cmd* (a sim program; see :mod:`~.bridge`) and owns it."""
         return cls(cmd=cmd, connect_timeout_s=connect_timeout_s)
 
     @classmethod
-    def remote(cls, host: str, port: int, *, connect_timeout_s: float = 240.0) -> RobotEndpoint:
+    def remote(cls, host: str, port: int, *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
         """An endpoint attached to a sim process something else runs."""
         return cls(host=host, port=port, connect_timeout_s=connect_timeout_s)
 
