@@ -36,7 +36,12 @@ class _Conn:
         self.commands: list[str] = []
 
     async def run(
-        self, command: str, *, input: str | None = None, check: bool = False
+        self,
+        command: str,
+        *,
+        input: str | None = None,
+        check: bool = False,
+        encoding: str | None = "utf-8",
     ) -> _Completed:
         self.commands.append(command)
         parts = shlex.split(command)
@@ -189,6 +194,30 @@ async def test_absolute_paths_anchor_to_the_capability_cwd() -> None:
     assert ssh.files["/workspace/REPORT.md"] == b"done"
     # Paths already inside the workspace are untouched.
     assert await cast("SSHClient", ssh).read_text("/workspace/f.txt") == "inside"
+
+
+def test_map_path_clamps_traversal_like_a_chroot() -> None:
+    ssh = cast("SSHClient", _FakeSSH(cwd="/workspace"))
+    assert ssh.map_path("/workspace/../etc/passwd") == "/workspace/etc/passwd"
+    assert ssh.map_path("/../etc/passwd") == "/workspace/etc/passwd"
+    assert ssh.map_path("../../etc/passwd") == "/workspace/etc/passwd"
+    assert ssh.map_path("a/../b.txt") == "/workspace/b.txt"
+    assert ssh.map_path("/") == "/workspace"
+    assert ssh.map_path(".") == "/workspace"
+
+
+async def test_read_maps_the_directory_predicate_and_listing_together() -> None:
+    """`test -d`, listing, and reads must agree on the anchored path, or
+    absolute workspace dirs are misclassified as files."""
+    ssh = _FakeSSH(cwd="/workspace", files={"/workspace/pkg/mod.py": b"x = 1\n"})
+    tool = ReadTool(spec=ReadTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    result = await tool.execute({"filePath": "/pkg"})
+
+    text = result_text(result)
+    assert "<type>directory</type>" in text
+    assert "mod.py" in text
+    assert "test -d /workspace/pkg" in cast("Any", ssh).conn.commands
 
 
 async def test_openai_compatible_edit_rewrites_unique_match() -> None:

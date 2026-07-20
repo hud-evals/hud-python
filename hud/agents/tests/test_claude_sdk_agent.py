@@ -52,7 +52,14 @@ class _FakeConn:
         self.ran: list[str] = []
         self.write_commands: list[str] = []
 
-    async def run(self, cmd: str, *, input: str | None = None, check: bool = True) -> Any:
+    async def run(
+        self,
+        cmd: str,
+        *,
+        input: str | None = None,
+        check: bool = True,
+        encoding: str | None = "utf-8",
+    ) -> Any:
         if input is not None or cmd.startswith("powershell "):
             self.write_commands.append(cmd)
             name = next(

@@ -467,6 +467,13 @@ class Workspace:
         else:
             argv = ["bash", "-l"]
         if self._drops_privileges():
+            if self._bwrap is None:
+                # The session env (self.env + per-call overrides) is injected
+                # only *after* the drop: vars like LD_PRELOAD in it must never
+                # be in the environment of the root-run setpriv itself.
+                session = {**(self._session_env() or {}), **(env or {})}
+                env_bin = shutil.which("env") or "/usr/bin/env"
+                argv = [env_bin, "-i", *[f"{k}={v}" for k, v in session.items()], *argv]
             setpriv = self._setpriv()
             assert setpriv is not None  # guaranteed by _drops_privileges
             uid = str(self._shell_uid)
@@ -522,13 +529,14 @@ class Workspace:
         return auth_path
 
     def _session_env(self) -> dict[str, str] | None:
-        """Environment for a shell session (non-bwrap path).
+        """Environment the agent's shell session sees.
 
         When dropping privileges, the child would otherwise inherit the
         server's full environment — including any secrets the env process
         holds (the reason ``shell_uid`` exists) — so build a minimal, safe
-        environment from scratch. Otherwise preserve the inherited-env
-        behavior, layering ``self.env`` overrides.
+        environment from scratch. It reaches the shell only *after* the drop
+        (``env -i`` inside setpriv, or bwrap ``--setenv``). Otherwise preserve
+        the inherited-env behavior, layering ``self.env`` overrides.
         """
         if self._drops_privileges():
             base = {
@@ -543,7 +551,15 @@ class Workspace:
 
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         argv = self.shell_argv(process.command)
-        proc_env = self._session_env()
+        if self._drops_privileges():
+            # The pre-drop processes (setpriv, bwrap) run as root; caller env
+            # like an LD_PRELOAD in self.env must not load into them. The
+            # session env is injected after the drop by shell_argv.
+            proc_env: dict[str, str] | None = {
+                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            }
+        else:
+            proc_env = self._session_env()
 
         if sys.platform == "win32":
             # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's

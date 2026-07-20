@@ -147,7 +147,22 @@ def test_shell_uid_wraps_sessions_in_setpriv(
         "--clear-groups",
         "--",
     ]
+    # The session env rides `env -i` *inside* the setpriv wrapper, so it only
+    # takes effect after the drop.
+    assert argv[7].endswith("/env") and argv[8] == "-i"
     assert "echo hi" in argv
+
+
+def test_caller_env_is_injected_only_after_the_drop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent-influenced var like LD_PRELOAD must not be in the environment
+    of the root-run setpriv; it may only reach the post-drop shell."""
+    _wall(monkeypatch)
+    ws = Workspace(tmp_path / "root", shell_uid=1000, env={"LD_PRELOAD": "/workspace/evil.so"})
+    argv = ws.shell_argv("echo hi")
+    assert argv[0] == "/usr/bin/setpriv"
+    assert "LD_PRELOAD=/workspace/evil.so" in argv[argv.index("-i") :]
 
 
 @pytest.mark.asyncio
