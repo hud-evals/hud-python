@@ -37,10 +37,10 @@ async def _down():
 
 @env.template(id="libero_spatial")
 async def libero_spatial(libero_task_id: int, init_state_id: int = 0):
-    prompt = await endpoint.reset(task_suite="libero_spatial",
-                                  task_id=libero_task_id, init_state_id=init_state_id)
-    yield {"prompt": prompt}
-    yield await endpoint.result()
+    ep = await endpoint.reset(task_suite="libero_spatial",
+                              task_id=libero_task_id, init_state_id=init_state_id)
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await endpoint.result(token=ep["token"])
 ```
 
 The image's CMD serves it with the standard entry point (`hud serve env.py --host 0.0.0.0 --port 8765`). This env lives in HUD's `demos/` examples tree, a sibling of the `hud-python` SDK; build it from the parent directory that holds **both** `demos/` and `hud-python/` so the image can install the SDK from local source:
