@@ -1,10 +1,14 @@
-"""Gym-style env integration: introspection + ``hud.wrap`` trace streaming.
+"""Gym-style env integration: introspection, the served path, and ``hud.wrap``.
 
 Two consumers share the introspection here (split observations, probe success,
 derive a minimal contract) and stay in lockstep because of it:
 
-- :class:`~.bridge.GymBridge` — the served path (``env.gym(...)``).
-- :func:`hud.wrap` / :class:`TracedEnv` — the loop-owning path: wrap any
+- :class:`GymBridge` - the served path (``env.gym(...)``): a generic
+  :class:`~.bridge.RobotBridge` over any gym-style target, spawned as
+  ``python -m hud.environment.robot.gym <target>``. This module is that sim
+  program; :func:`gym_command` builds the argv, so both ends of the format
+  live here.
+- :func:`hud.wrap` / :class:`TracedEnv` - the loop-owning path: wrap any
   ``gym.Env``, ``gym.vector.VectorEnv``, or batched-tensor Isaac env you drive
   yourself and every episode streams to the platform as a trace (numeric
   state, per-camera H.264 video, actions, reward/success) under one job::
@@ -20,14 +24,18 @@ so edits stick.
 from __future__ import annotations
 
 import atexit
+import inspect
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Self
 
 import numpy as np
 
 from hud.telemetry.robot import JobRecorder, to_numpy
+
+from .bridge import RobotBridge, serve_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +49,17 @@ SUCCESS_KEYS = ("success", "is_success", "task_success")
 def num_envs_of(env: Any) -> int | None:
     """``num_envs`` from the env or its unwrapped core (gymnasium 1.x wrappers
     no longer forward attributes, so an Isaac env inside ``gym.make`` hides it)."""
-    n = getattr(env, "num_envs", None)
-    if n is None:
-        n = getattr(getattr(env, "unwrapped", env), "num_envs", None)
-    return None if n is None else int(n)
+    for obj in (env, getattr(env, "unwrapped", env)):
+        n = getattr(obj, "num_envs", None)
+        if n is not None:
+            return int(n)
+    return None
 
 
 def is_batched(env: Any) -> bool:
     """Vectorized (gym VectorEnv) or batched-tensor (Isaac) envs carry a leading [N] dim.
 
-    Any env exposing ``num_envs`` is batched — Isaac keeps batch semantics even at
+    Any env exposing ``num_envs`` is batched - Isaac keeps batch semantics even at
     ``num_envs == 1``; plain ``gym.Env``s don't have the attribute at all.
     """
     if num_envs_of(env) is not None:
@@ -79,7 +88,7 @@ def split_observation(obs: Any, *, batched: bool = False) -> tuple[dict[str, Any
 
     A camera frame is a channel-last image (rank 3, or rank 4 when batched); state is
     any flat numeric vector. Anything else is dropped. Batched arrays keep their
-    leading ``[N]`` dim — the recorder slices per slot.
+    leading ``[N]`` dim - the recorder slices per slot.
     """
     state: dict[str, Any] = {}
     frames: dict[str, Any] = {}
@@ -113,7 +122,7 @@ def detect_fps(env: Any) -> int:
 
 
 def capture_task_params(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Reset parametrization as json-safe trace metadata — the full kwargs, never a label."""
+    """Reset parametrization as json-safe trace metadata - the full kwargs, never a label."""
 
     def safe(v: Any) -> Any:
         if v is None or isinstance(v, (str, int, float, bool)):
@@ -146,7 +155,7 @@ def load_or_write_contract(
     """The contract round-trip: load the user-edited file if present, else derive a
     minimal contract from one (per-env) sample observation and write it once.
 
-    Derived: just enough to structure the spaces and label plots — cameras as rgb
+    Derived: just enough to structure the spaces and label plots - cameras as rgb
     observations, state vectors with positional names, one action feature. Users
     edit the written file to rename dimensions; nothing else is derived on purpose.
     """
@@ -167,6 +176,239 @@ def load_or_write_contract(
     return contract
 
 
+# ── GymBridge: the served path (what env.gym() spawns) ────────────────────────
+
+
+class GymBridge(RobotBridge):
+    """Serve any gym-style env over the ``robot`` protocol, generically.
+
+    ``target`` is how this process builds the env: a factory callable, or a
+    string — a gymnasium registry id, or a declared env's spec as JSON
+    (:func:`gym_command` reduces an env instance to the latter).
+
+    Task args are partitioned into env-defining **build args** (a change
+    rebuilds the env) and episodic args flowing to ``env.reset(seed=...,
+    options=...)``. For a factory, its signature is the partition — so
+    ``num_envs`` in the signature is the vectorization declaration; for a
+    registry target, ``num_envs`` is the one build arg (``gym.make_vec``).
+    Default build kwargs (e.g. ``num_envs=8`` from ``env.gym(..., num_envs=8)``)
+    fill in when the task does not pass them.
+
+    ``fps`` overrides the detected control rate; ``contract`` is the
+    ``contract.json`` round-trip path (load beats derive, so user edits stick;
+    ``None`` disables the file).
+    """
+
+    def __init__(
+        self,
+        target: Any,
+        *,
+        fps: int | None = None,
+        contract: str | Path | None = "contract.json",
+        **defaults: Any,
+    ) -> None:
+        host = defaults.pop("host", "127.0.0.1")
+        port = int(defaults.pop("port", 0))
+        super().__init__(host=host, port=port)
+        self._target = target
+        self._fps = fps
+        self._contract_path = contract
+        self._defaults = defaults  # e.g. num_envs from env.gym(..., num_envs=8)
+        # Task args that define the env build (everything else is episodic).
+        if callable(target):
+            self._build_params = {
+                n
+                for n, p in inspect.signature(target).parameters.items()
+                if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+            }
+        else:
+            self._build_params = {"num_envs"}  # registry targets: vectorization only
+        self.env: Any = None
+        self.batched = False  # env carries a leading [N] dim (any env exposing num_envs)
+        self._obs: Any = None  # latest observation (reset or step)
+        self._instance: Any = None  # current env-defining args; a mismatch rebuilds
+        self._is_torch = False
+        # Per-slot episode scoring, sticky until the next reset.
+        self._done: np.ndarray = np.zeros(1, dtype=bool)
+        self._success: np.ndarray = np.zeros(1, dtype=bool)
+        self._acc_reward: np.ndarray = np.zeros(1)
+        self._step_reward: np.ndarray = np.zeros(1)  # last env.step reward (RL wire sibling)
+        self._seen_success = False  # any env-reported success signal this episode
+
+    @property
+    def _unwrapped(self) -> Any:
+        """The env's unwrapped core (gymnasium wrappers hide Isaac attributes)."""
+        return getattr(self.env, "unwrapped", self.env)
+
+    # ── env lifecycle (all sim touches on the sim thread) ───────────────────────
+
+    async def ensure_env(self, **task_args: Any) -> None:
+        """Build the env (factory defaults unless task args say otherwise). Idempotent."""
+        if self.env is None:
+            await self._run_on_sim(self._sync_reset, task_args)
+
+    async def start(self) -> None:
+        """Build the env and derive/load the contract, then bring up the wire."""
+        await self.ensure_env()
+        state, frames = self.sample_observation()
+        existed = self._contract_path is not None and Path(self._contract_path).exists()
+        self.contract = load_or_write_contract(
+            self._contract_path,
+            state,
+            frames,
+            action_dim_of(self.env, batched=self.batched),
+            self._fps or detect_fps(self.env),
+        )
+        if not existed and self._contract_path is not None:
+            print(f"[env] wrote {self._contract_path} (edit names to relabel plots)", flush=True)
+        await super().start()
+
+    async def reset(self, **task_args: Any) -> str:
+        return await self._run_on_sim(self._sync_reset, task_args)
+
+    async def stop(self) -> None:
+        await super().stop()
+        if self.env is not None:
+            await self._run_on_sim(self.env.close)
+            self.env = None
+
+    def _sync_reset(self, task_args: dict[str, Any]) -> str:
+        # Defaults from env.gym(..., num_envs=N) fill in when the task omits them.
+        merged = {**self._defaults, **task_args}
+        build = {k: v for k, v in merged.items() if k in self._build_params}
+        episodic = {k: v for k, v in merged.items() if k not in self._build_params}
+        key = tuple(sorted(build.items()))
+        if self.env is None or key != self._instance:
+            if self.env is not None:
+                self.env.close()
+            self.env = self._build_env(build)
+            self._instance = key
+            n = num_envs_of(self.env)
+            self.batched = n is not None
+            self.num_envs = n or 1
+        seed = episodic.pop("seed", None)
+        obs, _ = self.env.reset(seed=seed, options=episodic or None)
+        self._obs = obs  # the first frame an agent sees on connect/reset
+        self._is_torch = "torch" in type(_first_leaf(obs)).__module__
+        self._done = np.zeros(self.num_envs, dtype=bool)
+        self._success = np.zeros(self.num_envs, dtype=bool)
+        self._acc_reward = np.zeros(self.num_envs)
+        self._step_reward = np.zeros(self.num_envs, dtype=np.float32)
+        self._seen_success = False
+        return self._prompt(merged)
+
+    def _build_env(self, build: dict[str, Any]) -> Any:
+        """Build the env from the target: factory call, or registry make/make_vec."""
+        if callable(self._target):
+            return self._target(**build)
+        import gymnasium
+        from gymnasium.envs.registration import EnvSpec
+
+        env_id, kwargs = self._target, dict(build)
+        if env_id.startswith("{"):  # a declared env's spec, re-made in this process
+            spec = EnvSpec.from_json(env_id)
+            env_id, kwargs = spec.id, {**spec.kwargs, **kwargs}
+        if "num_envs" in kwargs:
+            return gymnasium.make_vec(env_id, **kwargs)
+        return gymnasium.make(env_id, **kwargs)
+
+    def _prompt(self, task_args: dict[str, Any]) -> str:
+        base = self._unwrapped
+        for attr in ("task_description", "instruction"):
+            text = getattr(getattr(base, "cfg", None), attr, None) or getattr(base, attr, None)
+            if isinstance(text, str) and text:
+                return text
+        return ", ".join(f"{k}={v}" for k, v in sorted(task_args.items())) or "run the task"
+
+    def sample_observation(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """One per-env ``(state, frames)`` sample for contract derivation (post-build)."""
+        state, frames = split_observation(self._obs, batched=self.batched)
+        if self.batched:
+            state = {k: to_numpy(v)[0] for k, v in state.items()}
+            frames = {k: to_numpy(v)[0] for k, v in frames.items()}
+        return state, frames
+
+    # ── bridge protocol ──────────────────────────────────────────────────────────
+
+    def step(self, action: np.ndarray) -> None:
+        act: Any = np.array(action, dtype=np.float32)  # wire buffer is read-only
+        if not self.batched:
+            act = act[0] if act.ndim > 1 else act  # single plain env: drop the batch dim
+        elif act.ndim == 1:
+            act = act[None]
+        # The wire carries floats; discrete/int action spaces need their dtype + shape back.
+        space = getattr(self.env, "action_space", None)
+        dtype = getattr(space, "dtype", None)
+        if dtype is not None and np.issubdtype(dtype, np.integer):
+            act = act.astype(dtype).reshape(getattr(space, "shape", act.shape) or ())
+        if self._is_torch:
+            import torch
+
+            act = torch.as_tensor(act, device=getattr(self._unwrapped, "device", None))
+        obs, reward, terminated, truncated, info = self.env.step(act)
+        self._obs = obs
+        done = np.atleast_1d(to_numpy(terminated)).astype(bool) | np.atleast_1d(
+            to_numpy(truncated)
+        ).astype(bool)
+        # Per-step reward for the RL wire (get_observation attaches it as a sibling).
+        self._step_reward = np.atleast_1d(to_numpy(reward)).astype(np.float32)
+        self._acc_reward += self._step_reward * ~self._done
+        newly = done & ~self._done
+        if newly.any():
+            success = self._resolve_success(info)
+            if success is not None:
+                self._seen_success = True
+                self._success |= success & newly
+        self._done |= done
+
+    def _resolve_success(self, info: Any) -> np.ndarray | None:
+        """Env-reported success at a done step: info keys, else Isaac's termination term."""
+        found = probe_success(info, num_envs=self.num_envs)
+        if found is not None:
+            return found
+        manager = getattr(self._unwrapped, "termination_manager", None)
+        if manager is not None:
+            try:
+                return np.atleast_1d(to_numpy(manager.get_term("success"))).astype(bool)
+            except Exception:
+                return None
+        return None
+
+    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+        """Always ``[N, ...]`` arrays + ``[N]`` terminated for the barrier fan-out."""
+        if self.env is None or self._obs is None:
+            return None
+        state, frames = split_observation(self._obs, batched=self.batched)
+        data = {k: to_numpy(v) for k, v in {**state, **frames}.items()}
+        # Last env.step reward rides along for RL collection (client lifts it
+        # out of "data" to a top-level sibling, like "terminated").
+        data["reward"] = self._step_reward
+        if not self.batched:
+            # Plain single env: lift scalars to a batch of one for uniform slicing.
+            data = {k: (v if getattr(v, "ndim", 0) >= 1 and v.shape[:1] == (1,) else np.asarray(v)[None])
+                    for k, v in data.items()}
+        return data, np.asarray(self._done, dtype=bool).reshape(self.num_envs)
+
+    def result_slots(self) -> list[dict[str, Any]]:
+        """Per-slot grades: env-reported success when available, else accumulated reward."""
+        # The env's own success check outranks accumulated shaped reward.
+        scores = self._success if self._seen_success else self._acc_reward
+        return [
+            {
+                "score": float(scores[i]),
+                "success": bool(self._success[i]),
+                "total_reward": float(self._acc_reward[i]),
+            }
+            for i in range(self.num_envs)
+        ]
+
+
+def _first_leaf(obs: Any) -> Any:
+    while isinstance(obs, dict):
+        obs = next(iter(obs.values()))
+    return obs
+
+
 # ── hud.wrap: trace streaming for a loop you own ──────────────────────────────
 
 
@@ -176,12 +418,12 @@ class TracedEnv:
     Plain envs are recorded as a batch of one; vectorized/batched envs fan out into one
     trace per episode per slot (``done[i]`` closes slot ``i``'s trace and opens the next).
 
-    - ``job`` — job name on the platform (default: the env's spec id / class name).
-    - ``job_id`` — share one job across several wrapped envs (multi-task suites).
-    - ``task`` — optional instruction/label shown on each trace's timeline.
-    - ``fps`` — control rate override (default: detected from the env).
-    - ``contract`` — path for the derived contract round-trip; ``None`` disables it.
-    - ``record_indices`` — which env slots get rich traces (default: first 4).
+    - ``job`` - job name on the platform (default: the env's spec id / class name).
+    - ``job_id`` - share one job across several wrapped envs (multi-task suites).
+    - ``task`` - optional instruction/label shown on each trace's timeline.
+    - ``fps`` - control rate override (default: detected from the env).
+    - ``contract`` - path for the derived contract round-trip; ``None`` disables it.
+    - ``record_indices`` - which env slots get rich traces (default: first 4).
     """
 
     def __init__(
@@ -197,7 +439,7 @@ class TracedEnv:
     ) -> None:
         self.env = env
         self._batched = is_batched(env)
-        self._n = num_envs_of(env) or 1
+        self._num_envs = num_envs_of(env) or 1
         self._fps = fps or detect_fps(env)
         self._job = job or getattr(getattr(env, "spec", None), "id", None) or type(env).__name__
         self._job_id = job_id
@@ -233,21 +475,19 @@ class TracedEnv:
         info = result[4] if len(result) > 4 else {}
         if self._rec is not None:
             state, frames = split_observation(obs, batched=self._batched)
-            done = np.atleast_1d(to_numpy(terminated)).astype(bool) | np.atleast_1d(
-                to_numpy(truncated)
-            ).astype(bool)
-            if not self._batched:  # record a plain env as a batch of one
+            # Episode ends on either gym flag; coerce to a 1-D bool mask.
+            done = np.atleast_1d(to_numpy(terminated) | to_numpy(truncated)).astype(bool)
+            if not self._batched:  # plain env → batch of one for the recorder
                 state = {k: v[None] for k, v in state.items()}
                 frames = {k: v[None] for k, v in frames.items()}
                 action = to_numpy(action)[None]
-            reward = np.atleast_1d(to_numpy(reward))
             self._rec.record(
                 obs=state or None,
                 frames=frames or None,
                 action=action,
-                reward=reward,
+                reward=np.atleast_1d(to_numpy(reward)),
                 done=done,
-                success=probe_success(info, num_envs=self._n),
+                success=probe_success(info, num_envs=self._num_envs),
             )
         return result
 
@@ -262,31 +502,34 @@ class TracedEnv:
     def _start(self, obs: Any) -> JobRecorder:
         """First reset: derive/load the contract, then open the job's recorder."""
         state, frames = split_observation(obs, batched=self._batched)
+        # Contract naming uses one per-env sample (slot 0 when batched).
         sample = {k: to_numpy(v)[0] if self._batched else v for k, v in state.items()}
-        existed = self._contract_path is not None and self._contract_path.exists()
+        path = self._contract_path
+        wrote = path is not None and not path.exists()
         contract = load_or_write_contract(
-            self._contract_path,
+            path,
             sample,
             frames,
             action_dim_of(self.env, batched=self._batched),
             self._fps,
         )
-        if not existed and self._contract_path is not None:
-            logger.info("hud.wrap: wrote %s (edit names to relabel plots)", self._contract_path)
-        feats = contract.get("features", {})
+        if wrote:
+            logger.info("hud.wrap: wrote %s (edit names to relabel plots)", path)
+        features = contract.get("features", {})
         return JobRecorder(
             self._job,
-            self._n,
+            self._num_envs,
             record_indices=self._record_indices,
             fps=int(contract.get("control_rate") or self._fps),
             job_id=self._job_id,
             prompt=self._task,
             action_names=next(
-                (f.get("names") for f in feats.values() if f.get("role") == "action"), None
+                (f.get("names") for f in features.values() if f.get("role") == "action"),
+                None,
             ),
             state_names={
                 k: f["names"]
-                for k, f in feats.items()
+                for k, f in features.items()
                 if f.get("role") == "observation" and f.get("names")
             },
         )
@@ -298,17 +541,98 @@ class TracedEnv:
         self.close()
 
 
-# The public verb: ``hud.wrap(env, job=...)`` — construction is the wrapping.
+# The public verb: ``hud.wrap(env, job=...)`` - construction is the wrapping.
 wrap = TracedEnv
+
+
+# ── the sim program (python -m hud.environment.robot.gym) ─────────────────────
+
+
+def gym_command(
+    target: Any,
+    *,
+    fps: int | None = None,
+    contract: str | None = "contract.json",
+    **defaults: Any,
+) -> list[str]:
+    """Build the command line that spawns *target* as a sim process (what ``env.gym`` runs).
+
+    ``env.py`` only declares the sim, it never runs it — this builds the argv
+    for the child process that will. A live env object can't cross that
+    boundary, only text can, so *target* is reduced to something the child can
+    rebuild itself: a factory's source path, a registry id as-is, or a
+    constructed env's spec (id + kwargs) — closed here since only the spec
+    crosses over; the child calls ``gym.make`` again for its own instance.
+    ``fps`` / ``contract`` / build defaults (e.g. ``num_envs=``) flow through
+    to the :class:`GymBridge` the CLI builds.
+    """
+    if callable(target):
+        name = getattr(target, "__qualname__", "")
+        if not name or "." in name or "<" in name:
+            raise ValueError(f"env.gym factory must be a module-level callable, got {target!r}")
+        target = f"{inspect.getfile(target)}:{name}"
+    elif not isinstance(target, str):
+        spec = getattr(target, "spec", None)  # registry-made envs carry their EnvSpec
+        if spec is None:
+            raise ValueError(
+                f"env.gym: {target!r} has no registry spec; pass a gymnasium id "
+                "or a module-level factory instead"
+            )
+        target_env, target = target, spec.to_json()
+        target_env.close()  # only the spec crosses; free the declaration-time instance
+    cmd = [sys.executable, "-m", "hud.environment.robot.gym", target]
+    if fps is not None:
+        cmd += ["--fps", str(fps)]
+    if contract is not None:
+        cmd += ["--contract", str(contract)]
+    # Build defaults (num_envs, etc.) as --key value pairs the CLI re-applies.
+    for key, value in defaults.items():
+        cmd += [f"--{key.replace('_', '-')}", str(value)]
+    return cmd
+
+
+def main() -> None:
+    import argparse
+
+    from hud.utils.modules import load_module
+
+    parser = argparse.ArgumentParser(description="Serve a gym-style env as a robot sim.")
+    parser.add_argument("target", help="'path/to/module.py:factory', a registry id, or spec JSON.")
+    parser.add_argument("--fps", type=int, default=None, help="Control-rate override.")
+    parser.add_argument("--contract", default=None, help="contract.json round-trip path.")
+    parser.add_argument("--host", default="127.0.0.1", help="Control-channel interface.")
+    parser.add_argument("--port", type=int, default=0, help="Control-channel port (0 = ephemeral).")
+    parser.add_argument("--num-envs", type=int, default=None, help="Vectorized slot count.")
+    args, unknown = parser.parse_known_args()
+
+    target: Any = args.target
+    if ".py:" in target:  # factory by source path; ids / spec JSON pass through
+        path, _, attr = target.rpartition(":")
+        target = getattr(load_module(path), attr)
+    defaults: dict[str, Any] = {}
+    if args.num_envs is not None:
+        defaults["num_envs"] = args.num_envs
+    # Further --key value pairs from gym_command become build defaults.
+    for flag, value in zip(unknown, unknown[1:]):
+        if flag.startswith("--"):
+            defaults[flag[2:].replace("-", "_")] = value
+    bridge = GymBridge(target, fps=args.fps, contract=args.contract, **defaults)
+    serve_bridge(bridge, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
 
 
 __all__ = [
     "SUCCESS_KEYS",
+    "GymBridge",
     "TracedEnv",
     "action_dim_of",
     "capture_task_params",
     "detect_fps",
     "flatten_observation",
+    "gym_command",
     "is_batched",
     "load_or_write_contract",
     "num_envs_of",

@@ -464,7 +464,7 @@ def serve_blocking(env: Environment, host: str, port: int) -> None:
 
     Sims never run here: an env with attached sims (``env.gym(...)``) spawns
     each one as its own process from an ``@env.initialize`` hook (see
-    :mod:`hud.environment.robot.bridge`), so every env serves the same way.
+    :mod:`hud.environment.robot.gym`), so every env serves the same way.
     """
     asyncio.run(_serve_until_terminated(env, host, port))
 
