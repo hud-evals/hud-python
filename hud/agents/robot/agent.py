@@ -52,7 +52,10 @@ class RobotAgent(Agent):
     adapter: Adapter | None = None
 
     async def __call__(self, run: Run, *, max_steps: int = 520) -> None:
-        """The generic rollout contract: one run, one scalar robot connection."""
+        """The generic rollout contract: one run, one scalar robot connection.
+
+        ``max_steps`` caps control ticks (default 520); omit it for the default.
+        """
         if self.model is None:
             raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         prompt = run.prompt
@@ -99,7 +102,7 @@ class RobotAgent(Agent):
         recorder: TraceRecorder,
         writer: Any,
         *,
-        max_steps: int = 520,
+        max_steps: int,
     ) -> None:
         """Open-loop chunk queue: ainfer refills, then execute one action per tick."""
         model = self.model
