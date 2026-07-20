@@ -123,6 +123,9 @@ class Run:
         #: chat-style / multi-turn prompts. Agents consume the normalized
         #: views: :attr:`prompt_messages` / :attr:`prompt_text`.
         self.prompt: str | list[Any] | None = None
+        #: Full ``tasks.start`` reply frame — prompt plus any per-episode data
+        #: the env handed the agent (e.g. a robot slot token under ``robot``).
+        self.started: dict[str, Any] = {}
         #: The structured grading result (all-default until graded on exit).
         self.grade = Grade()
         self.trace = Trace()
@@ -201,6 +204,7 @@ class Run:
     async def __aenter__(self) -> Self:
         started_at = now_iso()
         started = await self.client.start_task(self._task_id, self._args)
+        self.started = started
         self.prompt = started.get("prompt")
         self.record(
             Step(
