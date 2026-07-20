@@ -1,6 +1,6 @@
 """Robot trace recording: numeric state, per-camera H.264 video, action chunks.
 
-Shared by both sides of the robot stack (the agent harness, ``hud.wrap``, the
+Shared by both sides of the robot stack (the agent harness, ``wrap``, the
 gym bridges), so it lives under telemetry rather than either side:
 
 - :class:`TraceRecorder` — one trace. Emits spans with an explicit ``trace_id``

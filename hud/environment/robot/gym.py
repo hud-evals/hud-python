@@ -1,4 +1,4 @@
-"""Gym-style env integration: introspection, the served path, and ``hud.wrap``.
+"""Gym-style env integration: introspection, the served path, and ``wrap``.
 
 Two consumers share the introspection here (split observations, probe success,
 derive a minimal contract) and stay in lockstep because of it:
@@ -8,12 +8,13 @@ derive a minimal contract) and stay in lockstep because of it:
   ``python -m hud.environment.robot.gym <target>``. This module is that sim
   program; :func:`gym_command` builds the argv, so both ends of the format
   live here.
-- :func:`hud.wrap` / :class:`TracedEnv` - the loop-owning path: wrap any
+- :func:`wrap` / :class:`TracedEnv` - the loop-owning path: wrap any
   ``gym.Env``, ``gym.vector.VectorEnv``, or batched-tensor Isaac env you drive
   yourself and every episode streams to the platform as a trace (numeric
   state, per-camera H.264 video, actions, reward/success) under one job::
 
-      env = hud.wrap(make_env(...), job="chess-eval")
+      from hud.environment.robot import wrap
+      env = wrap(make_env(...), job="chess-eval")
 
 On first reset a minimal ``contract.json`` is written next to your script
 describing how the observation/action spaces were interpreted; edit its
@@ -409,7 +410,7 @@ def _first_leaf(obs: Any) -> Any:
     return obs
 
 
-# ── hud.wrap: trace streaming for a loop you own ──────────────────────────────
+# ── wrap: trace streaming for a loop you own ──────────────────────────────────
 
 
 class TracedEnv:
@@ -514,7 +515,7 @@ class TracedEnv:
             self._fps,
         )
         if wrote:
-            logger.info("hud.wrap: wrote %s (edit names to relabel plots)", path)
+            logger.info("wrap: wrote %s (edit names to relabel plots)", path)
         features = contract.get("features", {})
         return JobRecorder(
             self._job,
@@ -541,7 +542,7 @@ class TracedEnv:
         self.close()
 
 
-# The public verb: ``hud.wrap(env, job=...)`` - construction is the wrapping.
+# The public verb: ``from hud.environment.robot import wrap`` - construction is the wrapping.
 wrap = TracedEnv
 
 

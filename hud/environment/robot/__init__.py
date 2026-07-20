@@ -15,8 +15,8 @@ thread and a bridge serves the wire. The env server holds a
   or remote (attached), same control surface either way.
 - :func:`~.bridge.serve_bridge` — the sim program's blocking entry (custom
   bridges call it last).
-- :func:`hud.wrap` (:mod:`~.gym`) — one-line trace streaming for any gym env
-  you drive yourself, plus the shared gym introspection.
+- :func:`~.gym.wrap` — one-line trace streaming for any gym env you drive
+  yourself, plus the shared gym introspection.
 
 The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives
 under :mod:`hud.capabilities`; both ends share the wire codec defined there.
