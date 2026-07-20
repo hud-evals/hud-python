@@ -135,6 +135,8 @@ class RobotBridge(ABC):
         self.total_reward: float = 0.0
         self.success: bool = False
         self.terminated: bool = False
+        # kwargs of the current batch's global reset; later claims must match.
+        self._episode_kwargs: dict[str, Any] = {}
 
     async def _run_on_sim(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run ``fn(*args)`` on the sim thread, awaited on the caller's loop.
@@ -155,9 +157,19 @@ class RobotBridge(ABC):
             self.success = False
             self.terminated = False
             self.task_description = await self.reset(**kwargs)
+            self._episode_kwargs = kwargs
             self._registry.configure(self.num_envs)
             slot = self._registry.slots[0]
         else:
+            # Lockstep sim: one global reset serves the whole batch, so a later claim
+            # cannot get its own task/seed — reject differing kwargs instead of
+            # silently running the first claim's task.
+            if kwargs and kwargs != self._episode_kwargs:
+                raise ValueError(
+                    f"slots share one batch reset ({self._episode_kwargs}); a concurrent "
+                    f"claim cannot use different task kwargs ({kwargs}) — group tasks with "
+                    "identical args, or use one sim per distinct task/seed"
+                )
             slot = self._registry.free_slot()
             if slot is None:
                 raise RuntimeError(f"all {self.num_envs} slots are claimed")
@@ -186,14 +198,14 @@ class RobotBridge(ABC):
         """Return ``(data[N, ...], terminated[N])``, or ``None`` if not ready."""
 
     def result_slots(self) -> list[dict[str, Any]]:
-        """One score dict per slot. Default: single-env binary success."""
-        return [
-            {
-                "score": 1.0 if self.success else 0.0,
-                "success": bool(self.success),
-                "total_reward": float(self.total_reward),
-            }
-        ]
+        """One score dict per slot. Default: the scalar episode grade for every slot
+        (vectorized bridges with per-slot scoring override this)."""
+        grade = {
+            "score": 1.0 if self.success else 0.0,
+            "success": bool(self.success),
+            "total_reward": float(self.total_reward),
+        }
+        return [dict(grade) for _ in range(self.num_envs)]
 
     def hold_action(self) -> np.ndarray:
         """Action used for idle/stalled slots at a barrier step (zeros)."""
@@ -201,7 +213,8 @@ class RobotBridge(ABC):
             (f for f in self.contract.get("features", {}).values() if f.get("role") == "action"),
             {},
         )
-        shape = action.get("shape") or (1,)
+        # Derived contracts carry only per-dim names, no shape; the label count is the dim.
+        shape = action.get("shape") or (len(action.get("names") or []) or 1,)
         return np.zeros(shape, dtype=np.float32)
 
     @property
