@@ -82,6 +82,15 @@ class RobotClient(CapabilityClient):
         # Bind this connection to a claimed episode slot (scalar openpi from here).
         if token is not None:
             await ws.send(_packb({"claim": token}))
+        else:
+            # A slotted bridge sends nothing until a claim arrives - fail fast
+            # instead of blocking forever in get_observation().
+            meta = _unpackb(raw)
+            if isinstance(meta, dict) and meta.get("claim_required"):
+                await ws.close()
+                raise RuntimeError(
+                    "this robot env requires a slot claim; pass token= from endpoint.reset()"
+                )
         return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:

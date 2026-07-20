@@ -92,17 +92,21 @@ class RobotAgent(Agent):
                 writer = DatasetWriter(robot.contract, fps=fps)
 
             print(f"[agent] episode started: {prompt!r}", flush=True)
-            await self._loop(
-                robot,
-                obs,
-                prompt,
-                recorder,
-                writer,
-                max_steps=self.max_steps if max_steps is None else max_steps,
-            )
-            recorder.close()
-            if writer is not None:
-                writer.end_episode()
+            try:
+                await self._loop(
+                    robot,
+                    obs,
+                    prompt,
+                    recorder,
+                    writer,
+                    max_steps=self.max_steps if max_steps is None else max_steps,
+                )
+            finally:
+                # Flush video tails / commit the buffered episode even when the
+                # rollout raises mid-loop.
+                recorder.close()
+                if writer is not None:
+                    writer.end_episode()
         finally:
             await robot.close()
         run.trace.status = "completed"
@@ -125,14 +129,13 @@ class RobotAgent(Agent):
         chunk: deque[ActionArray] = deque()
 
         for step in range(max_steps):
-            terminated = bool(np.asarray(obs["terminated"]).reshape(-1)[0])
+            # Record every frame, including the terminal one.
+            recorder.record_observation(obs["data"], tick=step)
             # Already done (including a pre-terminated first obs) → don't act.
-            if terminated:
+            if bool(np.asarray(obs["terminated"]).reshape(-1)[0]):
                 if step:
                     print(f"[agent] terminated at step {step}", flush=True)
                 break
-
-            recorder.record_observation(obs["data"], tick=step)
 
             if not chunk:  # refill with a fresh forward (BatchedModel coalesces ainfer)
                 batch = adapter.adapt_observation(obs, prompt) if adapter else obs
