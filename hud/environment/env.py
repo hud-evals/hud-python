@@ -284,7 +284,7 @@ class Environment(LegacyEnvMixin):
 
         When ``track_files`` is set (defaulting to ``HUD_FILE_TRACKING_ENABLED``)
         the workspace also publishes an observation-only ``filetracking/1``
-        capability the rollout streams diffs from.
+        capability the rollout streams setup and agent diffs from.
         """
         if track_files is None:
             from hud.settings import settings

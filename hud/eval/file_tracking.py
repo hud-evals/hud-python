@@ -1,10 +1,10 @@
 """Rollout-level file-tracking observer.
 
 Wraps the agent loop: if the env published a ``filetracking/1`` capability and
-file tracking is on, open it, skip the scenario-setup churn, then sample diffs
-on a fixed interval. On teardown it flushes the trailing diff plus changed
-deliverable artifacts. Decoupled from the tool loop — spans are self-timestamped
-and the viewer correlates them to steps by time.
+file tracking is on, emit scenario setup as a distinct diff layer, then sample
+agent diffs on a fixed interval. On teardown it flushes the trailing diff plus
+changed deliverable artifacts. Decoupled from the tool loop — spans are
+self-timestamped and the viewer correlates them to steps by time.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ _FILETRACKING_SCHEMA = "hud.filetracking.v1"
 _FileTrackingSpanName: TypeAlias = Literal[
     "filetracking.capture",
     "filetracking.diff",
+    "filetracking.setup",
     "filetracking.snapshot",
 ]
 
@@ -122,16 +123,18 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         yield
         return
 
-    # Open the capability, re-baseline past scenario setup (so the first emitted
-    # diff is the agent's, not setup churn), and emit the post-setup manifest as
-    # the reconstruction anchor (paths + hashes, no content). Tracking is
-    # observation-only, so any setup failure — a refused tunnel, a failed
-    # re-baseline (which would misattribute setup edits to the agent), or a
-    # missing anchor — skips tracking rather than breaking the agent loop.
+    # Capture scenario setup as its own layer, then emit the post-setup manifest
+    # that anchors the agent-edit timeline. Tracking is observation-only, so any
+    # setup failure skips tracking rather than breaking the agent loop.
     ft: FileTrackingClient | None = None
     try:
         ft = await FileTrackingClient.connect(cap)
-        await ft.call("advance")
+        setup = await ft.call("setup")
+        _emit_file_tracking(
+            "filetracking.setup",
+            setup,
+            started_at=now_iso(),
+        )
         _emit_file_tracking(
             "filetracking.snapshot",
             await ft.call("snapshot"),
