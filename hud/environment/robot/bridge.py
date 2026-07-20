@@ -287,10 +287,6 @@ class RobotBridge(ABC):
                 slot.action = None
                 self._action_event.set()  # wake the barrier so it doesn't wait on us
 
-    def _live_slots(self) -> list[_Slot]:
-        """Claimed slots with a live connection — the barrier's participants."""
-        return [s for s in self._registry.claimed() if s.ws is not None]
-
     async def _tick_loop(self) -> None:
         """Gather claimed slots' actions (or timeout → hold), step once, fan out."""
         while True:
@@ -299,10 +295,13 @@ class RobotBridge(ABC):
             except TimeoutError:
                 pass
             self._action_event.clear()
-            claimed = self._live_slots()
-            if not claimed:
+            claimed = self._registry.claimed()
+            # No live connection at all → don't step; episodes must not advance unseen.
+            if not any(s.ws is not None for s in claimed):
                 continue
-            # Wait until every live claimed slot has an action, or step_timeout elapses.
+            # Barrier over every *claimed* slot: one whose agent is still dialing
+            # (claimed, no WS yet) blocks too, so its episode can't advance before
+            # the first observation. step_timeout marks stragglers idle (hold).
             deadline = asyncio.get_running_loop().time() + self.step_timeout
             while True:
                 pending = [s for s in claimed if s.action is None and not s.idle]
@@ -316,10 +315,10 @@ class RobotBridge(ABC):
                 self._action_event.clear()
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._action_event.wait(), timeout=remaining)
-                claimed = self._live_slots()
-                if not claimed:
+                claimed = self._registry.claimed()
+                if not any(s.ws is not None for s in claimed):
                     break
-            if not claimed:
+            if not any(s.ws is not None for s in claimed):
                 continue
             hold = self.hold_action()
             # Stack one row per sim slot (idle/unconnected claimed → hold; free → hold).
