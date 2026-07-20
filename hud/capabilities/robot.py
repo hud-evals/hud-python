@@ -69,10 +69,13 @@ class RobotClient(CapabilityClient):
 
     @classmethod
     async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
-        """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame."""
+        """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
+
+        HUD bridges require the claim and send nothing until it arrives — pass the
+        token from ``endpoint.reset()``. Omit it only for servers without slots.
+        """
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None)
         # Consume initial metadata; string means env error.
- 
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
