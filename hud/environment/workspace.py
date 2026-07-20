@@ -169,6 +169,15 @@ class Workspace:
         self._ft_host: str | None = None
         self._ft_port: int | None = None
 
+    def _setpriv(self) -> str | None:
+        """Absolute path to ``setpriv``, resolved via the *server's* PATH.
+
+        Sessions must exec it by absolute path: session env can carry an
+        agent-writable PATH, and a bare name resolved through it would run
+        an agent-planted binary as root before the drop happens.
+        """
+        return shutil.which("setpriv")
+
     def _drops_privileges(self) -> bool:
         """Whether sessions are dropped to ``shell_uid`` on this host.
 
@@ -180,7 +189,7 @@ class Workspace:
             self._shell_uid is not None
             and _is_root()
             and sys.platform == "linux"
-            and shutil.which("setpriv") is not None
+            and self._setpriv() is not None
         )
 
     def _prepare_runtime(self) -> None:
@@ -207,12 +216,18 @@ class Workspace:
                 )
         self.root.mkdir(parents=True, exist_ok=True)
         if self._drops_privileges():
-            # The dropped uid must be able to create entries in its own
-            # workspace; the root is otherwise owned by root:root at 0755.
-            # Non-recursive: pre-existing contents are the caller's to own.
+            # The workspace is the agent's surface: hand the whole tree to the
+            # dropped uid, or contents baked in as root (e.g. a Docker COPY)
+            # stay un-editable from the dropped shell. lchown so an in-tree
+            # symlink can't redirect the chown outside the workspace.
             assert self._shell_uid is not None
+            uid = self._shell_uid
             with contextlib.suppress(OSError):
-                os.chown(self.root, self._shell_uid, self._shell_uid)
+                os.lchown(self.root, uid, uid)
+            for dirpath, dirnames, filenames in os.walk(self.root):
+                for entry in (*dirnames, *filenames):
+                    with contextlib.suppress(OSError):
+                        os.lchown(os.path.join(dirpath, entry), uid, uid)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -349,6 +364,7 @@ class Workspace:
             host_pubkey=self.ssh_host_pubkey,
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
+            cwd=self._guest_path,
         )
 
     @property
@@ -440,10 +456,10 @@ class Workspace:
             inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
             if self._drops_privileges():
                 # Don't let bwrap re-inject host secrets via --setenv; feed it
-                # the same minimal environment as the non-bwrap dropped shell.
-                argv = self.bwrap_argv(
-                    inner, cwd=cwd, env=self._session_env() or {}, inherit_host_env=False
-                )
+                # the same minimal environment as the non-bwrap dropped shell,
+                # keeping explicit per-call overrides.
+                walled_env = {**(self._session_env() or {}), **(env or {})}
+                argv = self.bwrap_argv(inner, cwd=cwd, env=walled_env, inherit_host_env=False)
             else:
                 argv = self.bwrap_argv(inner, cwd=cwd, env=env)
         elif command is not None:
@@ -451,8 +467,10 @@ class Workspace:
         else:
             argv = ["bash", "-l"]
         if self._drops_privileges():
+            setpriv = self._setpriv()
+            assert setpriv is not None  # guaranteed by _drops_privileges
             uid = str(self._shell_uid)
-            argv = ["setpriv", "--reuid", uid, "--regid", uid, "--clear-groups", "--", *argv]
+            argv = [setpriv, "--reuid", uid, "--regid", uid, "--clear-groups", "--", *argv]
         return argv
 
     # ─── ssh server internals ─────────────────────────────────────────
@@ -515,7 +533,9 @@ class Workspace:
         if self._drops_privileges():
             base = {
                 "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-                "HOME": os.environ.get("HOME", "/tmp"),  # noqa: S108 - overridden by self.env
+                # The server's HOME (/root) is unreadable by the dropped uid;
+                # the workspace is the one directory guaranteed writable.
+                "HOME": self._guest_path,
                 "TERM": os.environ.get("TERM", "xterm"),
             }
             return {**base, **self.env}

@@ -79,10 +79,12 @@ class _FakeSSH(SSHClient):
         stdout: str = "ok",
         exit_status: int = 0,
         files: dict[str, bytes] | None = None,
+        cwd: str | None = None,
     ) -> None:
         self.files: dict[str, bytes] = files or {}
+        params = {"cwd": cwd} if cwd else {}
         super().__init__(
-            Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22"),
+            Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22", params=params),
             cast("Any", _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)),
         )
 
@@ -174,6 +176,19 @@ async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
 
     assert result.isError is False
     assert ssh.files["/REPORT.md"] == b"done"
+
+
+async def test_absolute_paths_anchor_to_the_capability_cwd() -> None:
+    """The old SFTP chroot resolved ``/REPORT.md`` against the workspace root;
+    exec-channel file helpers must keep that contract via the capability cwd."""
+    ssh = _FakeSSH(cwd="/workspace", files={"/workspace/f.txt": b"inside"})
+    tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    await tool.execute({"filePath": "/REPORT.md", "content": "done"})
+
+    assert ssh.files["/workspace/REPORT.md"] == b"done"
+    # Paths already inside the workspace are untouched.
+    assert await cast("SSHClient", ssh).read_text("/workspace/f.txt") == "inside"
 
 
 async def test_openai_compatible_edit_rewrites_unique_match() -> None:

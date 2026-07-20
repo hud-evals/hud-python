@@ -47,8 +47,25 @@ class SSHClient(CapabilityClient):
         """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
 
+    def _map_path(self, path: str) -> str:
+        """Anchor absolute paths to the session cwd (the served workspace).
+
+        The old SFTP subsystem was chrooted, so harness tools address files as
+        ``/REPORT.md`` meaning workspace-relative. The exec channel sees the
+        real filesystem; replicate the chroot by prefixing absolute paths with
+        the capability's ``cwd`` unless they already point inside it. Relative
+        paths resolve against the session cwd natively.
+        """
+        cwd = str(self.capability.params.get("cwd", "")).rstrip("/")
+        if not cwd or not path.startswith("/"):
+            return path
+        if path == cwd or path.startswith(cwd + "/"):
+            return path
+        return cwd + path
+
     async def read_text(self, path: str) -> str:
         """Read a UTF-8 text file through the exec channel."""
+        path = self._map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
             command = (
@@ -62,6 +79,7 @@ class SSHClient(CapabilityClient):
 
     async def write_text(self, path: str, content: str) -> None:
         """Write UTF-8 text through the exec channel without command interpolation."""
+        path = self._map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
             await self._conn.run(
@@ -85,6 +103,7 @@ class SSHClient(CapabilityClient):
 
     async def listdir(self, path: str) -> list[str]:
         """List direct children through the exec channel."""
+        path = self._map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
             command = (

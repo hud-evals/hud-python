@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -70,8 +71,18 @@ async def test_file_operations_use_the_exec_channel(tmp_path: Path) -> None:
             await client.write_text("hello world.txt", "héllo\n")
             assert await client.read_text("hello world.txt") == "héllo\n"
             assert await client.listdir(".") == ["hello world.txt"]
+            # Absolute paths anchor to the workspace, like the old SFTP chroot.
+            await client.write_text("/REPORT.md", "done")
+            assert (tmp_path / "root" / "REPORT.md").read_text() == "done"
+            assert await client.read_text("/REPORT.md") == "done"
+            assert "REPORT.md" in await client.listdir("/")
     finally:
         await ws.stop()
+
+
+def _wall(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Workspace, "_drops_privileges", lambda self: True)
+    monkeypatch.setattr(Workspace, "_setpriv", lambda self: "/usr/bin/setpriv")
 
 
 @pytest.mark.asyncio
@@ -79,7 +90,7 @@ async def test_dropped_session_env_excludes_server_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A dropped shell must not inherit the server's environment (secrets)."""
-    monkeypatch.setattr(Workspace, "_drops_privileges", lambda self: True)
+    _wall(monkeypatch)
     monkeypatch.setenv("HUD_API_KEY", "super-secret")
 
     ws = Workspace(tmp_path / "root", shell_uid=1000, env={"CUSTOM": "1"})
@@ -88,20 +99,24 @@ async def test_dropped_session_env_excludes_server_secrets(
     assert "HUD_API_KEY" not in session_env
     assert session_env["CUSTOM"] == "1"
     assert "PATH" in session_env
+    # The server's HOME (/root) is unreadable by the dropped uid.
+    assert session_env["HOME"] == ws._guest_path
 
 
 def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The bwrap path must not re-inject host secrets via --setenv."""
+    """The bwrap path must not re-inject host secrets via --setenv, while
+    per-call env overrides still reach the sandbox."""
     monkeypatch.setenv("HUD_API_KEY", "super-secret")
-    monkeypatch.setattr(Workspace, "_drops_privileges", lambda self: True)
+    _wall(monkeypatch)
 
     ws = Workspace(tmp_path / "root", shell_uid=1000, env={"CUSTOM": "1"})
     monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
-    argv = ws.shell_argv("echo hi")
+    argv = ws.shell_argv("echo hi", env={"PER_CALL": "1"})
 
     setenv_keys = {argv[i + 1] for i, tok in enumerate(argv) if tok == "--setenv"}
     assert "HUD_API_KEY" not in setenv_keys
     assert "CUSTOM" in setenv_keys and "PATH" in setenv_keys
+    assert "PER_CALL" in setenv_keys
 
 
 def test_bwrap_inherits_host_env_when_not_walled(
@@ -118,11 +133,44 @@ def test_bwrap_inherits_host_env_when_not_walled(
 def test_shell_uid_wraps_sessions_in_setpriv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(Workspace, "_drops_privileges", lambda self: True)
+    _wall(monkeypatch)
     ws = Workspace(tmp_path / "root", shell_uid=1000)
     argv = ws.shell_argv("echo hi")
-    assert argv[:7] == ["setpriv", "--reuid", "1000", "--regid", "1000", "--clear-groups", "--"]
+    # Absolute path: a bare name would resolve through the session PATH,
+    # which the agent can influence — that lookup happens before the drop.
+    assert argv[:7] == [
+        "/usr/bin/setpriv",
+        "--reuid",
+        "1000",
+        "--regid",
+        "1000",
+        "--clear-groups",
+        "--",
+    ]
     assert "echo hi" in argv
+
+
+@pytest.mark.asyncio
+async def test_wall_hands_preexisting_contents_to_the_dropped_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contents baked in before serve (e.g. a Docker COPY as root) must become
+    editable from the dropped shell, not just the top-level directory."""
+    _wall(monkeypatch)
+    handed: list[str] = []
+    monkeypatch.setattr(os, "lchown", lambda p, u, g: handed.append(os.fsdecode(p)))
+
+    root = tmp_path / "root"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "mod.py").write_text("x = 1\n")
+
+    ws = Workspace(root, shell_uid=1000)
+    await ws.start()
+    try:
+        names = {Path(p).name for p in handed}
+        assert {"root", "pkg", "mod.py"} <= names
+    finally:
+        await ws.stop()
 
 
 def test_shell_uid_is_a_noop_off_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
