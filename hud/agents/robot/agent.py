@@ -40,6 +40,8 @@ class RobotAgent(Agent):
     """
 
     robot_protocol: ClassVar[str] = ROBOT_PROTOCOL
+    #: Max control ticks before the episode is cut off. Subclasses may override.
+    max_steps: ClassVar[int] = 520
     #: How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
     #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair.
@@ -51,10 +53,10 @@ class RobotAgent(Agent):
     #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
-    async def __call__(self, run: Run, *, max_steps: int = 520) -> None:
+    async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
         """The generic rollout contract: one run, one scalar robot connection.
 
-        ``max_steps`` caps control ticks (default 520); omit it for the default.
+        ``max_steps`` caps control ticks; omit it to use the class ``max_steps`` (520).
         """
         if self.model is None:
             raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
@@ -90,7 +92,14 @@ class RobotAgent(Agent):
                 writer = DatasetWriter(robot.contract, fps=fps)
 
             print(f"[agent] episode started: {prompt!r}", flush=True)
-            await self._loop(robot, obs, prompt, recorder, writer, max_steps=max_steps)
+            await self._loop(
+                robot,
+                obs,
+                prompt,
+                recorder,
+                writer,
+                max_steps=self.max_steps if max_steps is None else max_steps,
+            )
             recorder.close()
             if writer is not None:
                 writer.end_episode()
@@ -117,11 +126,11 @@ class RobotAgent(Agent):
 
         for step in range(max_steps):
             terminated = bool(np.asarray(obs["terminated"]).reshape(-1)[0])
-            if step and terminated:
-                print(f"[agent] terminated at step {step}", flush=True)
-                break
+            # Already done (including a pre-terminated first obs) → don't act.
             if terminated:
-                chunk.clear()
+                if step:
+                    print(f"[agent] terminated at step {step}", flush=True)
+                break
 
             recorder.record_observation(obs["data"], tick=step)
 
