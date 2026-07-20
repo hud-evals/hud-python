@@ -42,7 +42,8 @@ async def test_credentials_live_outside_the_served_root(tmp_path: Path) -> None:
         # The daemon still works from the external credentials.
         async with await _connect(ws) as conn:
             result = await conn.run("echo ok")
-            assert result.stdout is not None and "ok" in result.stdout
+            stdout = result.stdout
+            assert isinstance(stdout, str) and "ok" in stdout
     finally:
         await ws.stop()
     assert not key_path.exists()
