@@ -150,6 +150,46 @@ class Runtime:
         return nullcontext(self)
 
 
+class Shared:
+    """Refcounting provider: N concurrent rollouts share one substrate.
+
+    The first ``__call__`` provisions via *inner*; later callers reuse that
+    address until the last exit tears it down. ``width`` is the intended
+    concurrent occupancy (e.g. a robot sim's ``num_envs``); when callers pass
+    a smaller ``max_concurrent`` at the scheduler, slots are underfilled —
+    that is allowed. Use with ``Taskset.run(..., group=width, max_concurrent=width)``.
+    """
+
+    def __init__(self, inner: Provider, *, width: int) -> None:
+        if width < 1:
+            raise ValueError("Shared width must be >= 1")
+        self.inner = inner
+        self.width = width
+        self._addr: Runtime | None = None
+        self._refs = 0
+        self._stack: contextlib.AsyncExitStack | None = None
+        self._lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> Any:
+        async with self._lock:
+            if self._addr is None:
+                self._stack = contextlib.AsyncExitStack()
+                await self._stack.__aenter__()
+                self._addr = await self._stack.enter_async_context(self.inner(task))
+            self._refs += 1
+            addr = self._addr
+        try:
+            yield addr
+        finally:
+            async with self._lock:
+                self._refs -= 1
+                if self._refs == 0 and self._stack is not None:
+                    await self._stack.aclose()
+                    self._stack = None
+                    self._addr = None
+
+
 def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
     modal_uri_prefix = "modal://"
     if image_uri.startswith(modal_uri_prefix):
@@ -1216,5 +1256,6 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "Shared",
     "SubprocessRuntime",
 ]

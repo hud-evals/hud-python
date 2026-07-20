@@ -32,7 +32,7 @@ from hud.types import Trace
 
 from .chat import Chat
 from .job import Job
-from .run import Grade, Run, rollout, vec_rollout
+from .run import Grade, Run, rollout
 from .runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -46,6 +46,7 @@ from .runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    Shared,
     SubprocessRuntime,
 )
 from .sync import SyncPlan
@@ -69,11 +70,11 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "Shared",
     "SubprocessRuntime",
     "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
     "rollout",
-    "vec_rollout",
 ]

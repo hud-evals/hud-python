@@ -22,8 +22,15 @@ from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
-from .run import rollout, vec_rollout
-from .runtime import HostedRuntime, HUDRuntime, LocalRuntime, _declared_env, _declared_names
+from .run import rollout
+from .runtime import (
+    HostedRuntime,
+    HUDRuntime,
+    LocalRuntime,
+    Shared,
+    _declared_env,
+    _declared_names,
+)
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -245,7 +252,6 @@ class Taskset:
         *,
         runtime: Provider | HostedRuntime | None = None,
         group: int | None = None,
-        num_envs: int | None = None,
         max_concurrent: int | None = None,
         job: Job | None = None,
         rollout_timeout: float | None = None,
@@ -269,13 +275,10 @@ class Taskset:
         one id. Returned ``job.runs`` preserves expansion order (task-major,
         then group).
 
-        ``num_envs`` selects vectorized execution (:func:`~hud.eval.run.vec_rollout`):
-        each task instance runs one *vectorized* env whose N slots (each its own
-        seeded perturbation) become N graded traces sharing a group_id. Distinct
-        from ``group`` — statistical repeats as separate instances — and they
-        compose: ``group=3, num_envs=5`` is 3 instances x 5 traces per task.
-        ``max_concurrent`` always counts instances. Requires a self-managed
-        runtime and a ``drive``-capable agent (e.g. ``RobotAgent``).
+        ``group`` is the statistical-repeat multiplier (one GRPO group_id per
+        task's repeats). To land those repeats on one shared substrate (e.g. a
+        vectorized robot sim), pass a :class:`~hud.eval.runtime.Shared` provider
+        with ``width`` matching ``group`` / ``max_concurrent``.
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
@@ -288,19 +291,14 @@ class Taskset:
             raise ValueError("group must be >= 1")
         if max_concurrent is not None and max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
-        if num_envs is not None and num_envs < 1:
-            raise ValueError("num_envs must be >= 1")
 
         # Tasks are pure rows, shared across rollouts. The ``group`` repeats of one
-        # task share a group_id (the GRPO group) — except under ``num_envs``, where
-        # each instance's N slot-traces are their own group.
+        # task share a group_id (the GRPO group).
         expanded: list[tuple[Task, str]] = []
         task_list = list(self)
         for task in task_list:
             group_id = uuid.uuid4().hex
-            expanded.extend(
-                (task, uuid.uuid4().hex if num_envs else group_id) for _ in range(group)
-            )
+            expanded.extend((task, group_id) for _ in range(group))
 
         if job is None:
             job = Job(
@@ -321,24 +319,20 @@ class Taskset:
         # an error naming the forms to pass.
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
-        if num_envs is not None and isinstance(placement, HostedRuntime):
-            raise ValueError("num_envs (vectorized rollouts) requires a self-managed runtime")
+        # Shared substrates need every slot occupied concurrently — a smaller cap starves the barrier.
+        if isinstance(placement, Shared) and (
+            max_concurrent is None or max_concurrent < placement.width
+        ):
+            raise ValueError(
+                f"Shared(width={placement.width}) requires max_concurrent>={placement.width} "
+                f"(got {max_concurrent!r})"
+            )
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> list[Run]:
             assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
                 return [await placement.run(task, agent, job_id=job_id, group_id=group_id)]
-            if num_envs is not None:  # vectorized: one instance -> num_envs graded runs
-                return await vec_rollout(
-                    task,
-                    agent,
-                    runtime=placement,
-                    num_envs=num_envs,
-                    job_id=job_id,
-                    group_id=group_id,
-                    rollout_timeout=rollout_timeout,
-                )
             return [
                 await rollout(
                     task,
@@ -357,11 +351,10 @@ class Taskset:
                 return await _run(task, group_id)
 
         logger.info(
-            "running %d rollouts (%d tasks x %d group)%s%s",
+            "running %d rollouts (%d tasks x %d group)%s",
             len(expanded),
             len(task_list),
             group,
-            f" x {num_envs} envs" if num_envs else "",
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
         waves = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
