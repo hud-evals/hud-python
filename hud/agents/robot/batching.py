@@ -25,19 +25,15 @@ if TYPE_CHECKING:
 class BatchedModel(Model):
     """Coalesce concurrent ``ainfer`` calls into one stacked ``inner.infer``.
 
-    A lazily-started worker waits up to ``max_wait_s`` for callers to queue, stacks
-    them into one ``[N, ...]`` batch, runs a single forward, and scatters the
-    ``[N, T, A]`` rows back to each caller. With no ``batch_size`` the batch sizes
-    itself to whatever is in flight — the scheduler's ``max_concurrent`` already
-    bounds that, so the two never need manual pairing. Pass ``batch_size`` only to
-    cap the forward below the live concurrency (e.g. VRAM headroom); a set cap also
-    flushes the window early once reached, saving the tail of ``max_wait_s``.
+    Waits up to ``max_wait_s`` for callers, stacks to ``[N, ...]``, one forward,
+    scatters ``[N, T, A]`` rows back. Omit ``batch_size`` to size to in-flight
+    callers (``max_concurrent`` already bounds that); set it only to cap below
+    concurrency (e.g. VRAM) - that also flushes early when full.
 
-    ``inner`` must be an in-process, stateless model whose :meth:`~Model.infer` runs the
-    whole ``[N, ...]`` batch in one forward (e.g. :class:`~hud.agents.robot.model.LeRobotModel`).
-    :class:`~hud.agents.robot.model.RemoteModel` is **not** supported: it does one WebSocket
-    request per env and the OpenPI server protocol has no batched-request shape, so a stacked
-    batch would be mis-sent as a single env. Run one agent per rollout against it instead.
+    ``inner`` must batch the leading ``N`` in one in-process forward
+    (e.g. :class:`~hud.agents.robot.model.LeRobotModel`). Not
+    :class:`~hud.agents.robot.model.RemoteModel` (OpenPI has no batched request;
+    use one agent per rollout).
     """
 
     def __init__(
@@ -102,18 +98,13 @@ class BatchedModel(Model):
 class BatchedAgent(Agent):
     """Drive many rollouts concurrently against one shared, batched model.
 
-    Per run: a shallow clone of ``agent`` sharing a per-run adapter copy and the
-    single :class:`BatchedModel`, so concurrent ``ainfer`` calls coalesce into one
-    forward. The adapter copy keeps per-env bindings isolated; the model is
-    stateless by contract, so sharing it across clones is safe.
+    Per run: shallow-clone ``agent`` with a per-run adapter copy and the shared
+    :class:`BatchedModel` (stateless by contract; adapter copy keeps env bindings
+    isolated). Not for :class:`~hud.agents.robot.model.RemoteModel`.
 
-    Requires an in-process batchable model; :class:`~hud.agents.robot.model.RemoteModel`
-    is not supported (the OpenPI server protocol has no batched-request shape).
-
-    Takes ownership of ``agent``: it swaps ``agent.model`` for a :class:`BatchedModel` wrapper
-    in place (so the wrapper is shared by every per-run clone). The passed-in instance is
-    therefore permanently batched — hand :class:`BatchedAgent` a dedicated agent and don't
-    also use that same instance for direct, unbatched :class:`RobotAgent` rollouts.
+    Takes ownership: wraps ``agent.model`` in place with :class:`BatchedModel`,
+    shared by every clone. Pass a dedicated agent - do not also use that instance
+    for unbatched :class:`RobotAgent` rollouts.
     """
 
     def __init__(
