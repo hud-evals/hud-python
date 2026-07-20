@@ -60,7 +60,17 @@ class SSHClient(CapabilityClient):
         cwd = str(self.capability.params.get("cwd", "")).rstrip("/")
         if not cwd:
             return path
-        if path == cwd or path.startswith(cwd + "/"):
+        if self._is_windows:
+            # The workspace publishes cwd via as_posix() (e.g. "C:/work") but
+            # callers pass native paths ("C:\work\file.txt"); NTFS paths are
+            # case-insensitive.
+            path = path.replace("\\", "/")
+            if path.lower() == cwd.lower() or path.lower().startswith(cwd.lower() + "/"):
+                path = path[len(cwd) :]
+            elif len(path) >= 2 and path[1] == ":" and path[0].isalpha():
+                # Drive-absolute outside the workspace: anchor like the chroot.
+                path = path[2:]
+        elif path == cwd or path.startswith(cwd + "/"):
             path = path[len(cwd) :]
         normalized = posixpath.normpath("/" + path.lstrip("/"))
         return cwd if normalized == "/" else cwd + normalized

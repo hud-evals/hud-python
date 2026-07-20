@@ -138,18 +138,20 @@ def test_shell_uid_wraps_sessions_in_setpriv(
     argv = ws.shell_argv("echo hi")
     # Absolute path: a bare name would resolve through the session PATH,
     # which the agent can influence — that lookup happens before the drop.
-    assert argv[:7] == [
+    # --no-new-privs: a setuid binary must not let the shell regain root.
+    assert argv[:8] == [
         "/usr/bin/setpriv",
         "--reuid",
         "1000",
         "--regid",
         "1000",
         "--clear-groups",
+        "--no-new-privs",
         "--",
     ]
     # The session env rides `env -i` *inside* the setpriv wrapper, so it only
     # takes effect after the drop.
-    assert argv[7].endswith("/env") and argv[8] == "-i"
+    assert argv[8].endswith("/env") and argv[9] == "-i"
     assert "echo hi" in argv
 
 

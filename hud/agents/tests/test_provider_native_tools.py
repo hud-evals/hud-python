@@ -206,6 +206,24 @@ def test_map_path_clamps_traversal_like_a_chroot() -> None:
     assert ssh.map_path(".") == "/workspace"
 
 
+def test_map_path_handles_windows_native_paths() -> None:
+    """The workspace publishes cwd via as_posix(); callers pass native
+    backslash paths, and NTFS compares case-insensitively."""
+    cap = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"shell": "powershell", "cwd": "C:/work"},
+    )
+    ssh = SSHClient(cap, cast("Any", None))
+    assert ssh.map_path("C:\\work\\file.txt") == "C:/work/file.txt"
+    assert ssh.map_path("C:\\Work\\sub\\f.txt") == "C:/work/sub/f.txt"
+    assert ssh.map_path("D:\\other\\f.txt") == "C:/work/other/f.txt"
+    assert ssh.map_path("\\temp\\f.txt") == "C:/work/temp/f.txt"
+    assert ssh.map_path("sub\\f.txt") == "C:/work/sub/f.txt"
+    assert ssh.map_path("C:\\work\\..\\secrets.txt") == "C:/work/secrets.txt"
+
+
 async def test_read_maps_the_directory_predicate_and_listing_together() -> None:
     """`test -d`, listing, and reads must agree on the anchored path, or
     absolute workspace dirs are misclassified as files."""

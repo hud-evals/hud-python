@@ -477,7 +477,20 @@ class Workspace:
             setpriv = self._setpriv()
             assert setpriv is not None  # guaranteed by _drops_privileges
             uid = str(self._shell_uid)
-            argv = [setpriv, "--reuid", uid, "--regid", uid, "--clear-groups", "--", *argv]
+            # --no-new-privs: without it a setuid binary (or passwordless
+            # sudo) inside the workspace would let the dropped shell regain
+            # root and read the secrets the wall protects.
+            argv = [
+                setpriv,
+                "--reuid",
+                uid,
+                "--regid",
+                uid,
+                "--clear-groups",
+                "--no-new-privs",
+                "--",
+                *argv,
+            ]
         return argv
 
     # ─── ssh server internals ─────────────────────────────────────────
