@@ -5,8 +5,8 @@ A simulator always runs in its own process — the **sim program**
 thread and a bridge serves the wire. The env server holds a
 :class:`~.endpoint.RobotEndpoint` on it:
 
-- :class:`~.bridge.RobotBridge` — the batched-first bridge base (``num_envs``
-  slots in lockstep; a plain single env is a batch of one): the agent's
+- :class:`~.bridge.RobotBridge` — bridge base (``num_envs`` slots in lockstep
+  internally; scalar openpi wire per claimed connection): the agent's
   ``robot`` WebSocket plus the JSON-RPC control side channel.
 - :class:`~.bridge.GymBridge` / :func:`~.bridge.gym_command` — the generic
   gym path (``env.gym(...)`` — a factory, registry id, or declared env):
