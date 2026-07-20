@@ -31,7 +31,7 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 _warned_no_bwrap = False
 
 
-def _serving_as_root() -> bool:
+def _is_root() -> bool:
     return sys.platform != "win32" and hasattr(os, "geteuid") and os.geteuid() == 0
 
 
@@ -179,9 +179,8 @@ class Workspace:
         shell_uid: int | None = None,
     ) -> None:
         self.root: Path = Path(root).resolve()
-        # Unique id for this instance's credential subdirectory so parallel
-        # Workspace objects sharing the same root don't race on key generation.
-        self._cred_id = os.urandom(8).hex()
+        # Per-instance credential dir, materialized lazily (see _credentials_dir).
+        self._cred_dir: Path | None = None
 
         # Path the root is mounted at inside the sandbox (and the default cwd).
         # Defaults to /workspace; set to the root's real path for callers that
@@ -226,10 +225,31 @@ class Workspace:
         self._ft_host: str | None = None
         self._ft_port: int | None = None
 
+    def _drops_privileges(self) -> bool:
+        """Whether sessions are dropped to ``shell_uid`` on this host.
+
+        Only when serving as root on Linux with ``setpriv`` present —
+        ``setpriv`` is a util-linux command and the drop is meaningless off
+        root. Off root the option is a documented no-op.
+        """
+        return (
+            self._shell_uid is not None
+            and _is_root()
+            and sys.platform == "linux"
+            and shutil.which("setpriv") is not None
+        )
+
     def _prepare_runtime(self) -> None:
         """Materialize filesystem credentials and bind the SSH socket."""
         if self._sock is not None:
             return
+        if self._shell_uid is not None and _is_root() and not self._drops_privileges():
+            # Fail closed: serving as root while unable to drop would run every
+            # agent shell as root, exactly what shell_uid exists to prevent.
+            raise RuntimeError(
+                "shell_uid is set and the server is root, but privileges cannot be dropped "
+                "(setpriv is required on Linux). Refusing to serve agent shells as root."
+            )
         if self._bwrap is None and sys.platform != "win32":
             # Once per process: repeating this for every Workspace is noise, and
             # on macOS (no bubblewrap exists) it is an expected state.
@@ -242,6 +262,13 @@ class Workspace:
                     "Install bubblewrap, or run inside a Linux container that has it.",
                 )
         self.root.mkdir(parents=True, exist_ok=True)
+        if self._drops_privileges():
+            # The dropped uid must be able to create entries in its own
+            # workspace; the root is otherwise owned by root:root at 0755.
+            # Non-recursive: pre-existing contents are the caller's to own.
+            assert self._shell_uid is not None
+            with contextlib.suppress(OSError):
+                os.chown(self.root, self._shell_uid, self._shell_uid)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -331,9 +358,9 @@ class Workspace:
         self._sock = None
         self._bound_host = None
         self._bound_port = None
-        shutil.rmtree(
-            Path(tempfile.gettempdir()) / "hud-workspace-creds" / self._cred_id, ignore_errors=True
-        )
+        if self._cred_dir is not None:
+            shutil.rmtree(self._cred_dir, ignore_errors=True)
+            self._cred_dir = None
 
     # ─── ssh accessors / capability ───────────────────────────────────
 
@@ -467,7 +494,7 @@ class Workspace:
             argv = ["bash", "-lc", command]
         else:
             argv = ["bash", "-l"]
-        if self._shell_uid is not None and _serving_as_root():
+        if self._drops_privileges():
             uid = str(self._shell_uid)
             argv = ["setpriv", "--reuid", uid, "--regid", uid, "--clear-groups", "--", *argv]
         return argv
@@ -477,12 +504,15 @@ class Workspace:
     def _credentials_dir(self) -> Path:
         """Key material lives outside the served root: the root is the agent's
         surface (shell cwd, SFTP chroot, diff tracking), so secrets don't
-        belong in it."""
-        d = Path(tempfile.gettempdir()) / "hud-workspace-creds" / self._cred_id
-        d.mkdir(parents=True, exist_ok=True)
-        with contextlib.suppress(OSError):
-            os.chmod(d, 0o700)
-        return d
+        belong in it.
+
+        ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
+        atomically, so a local user can't pre-place a symlink at the path to
+        redirect the private keys the server writes here.
+        """
+        if self._cred_dir is None:
+            self._cred_dir = Path(tempfile.mkdtemp(prefix="hud-workspace-creds-"))
+        return self._cred_dir
 
     def _load_or_generate_host_key(self) -> tuple[asyncssh.SSHKey, str]:
         if self._ssh_host_key_path is not None:
@@ -518,11 +548,27 @@ class Workspace:
         auth_path.write_text("\n".join(pub_lines) + "\n", encoding="ascii")
         return auth_path
 
+    def _session_env(self) -> dict[str, str] | None:
+        """Environment for a shell session (non-bwrap path).
+
+        When dropping privileges, the child would otherwise inherit the
+        server's full environment — including any secrets the env process
+        holds (the reason ``shell_uid`` exists) — so build a minimal, safe
+        environment from scratch. Otherwise preserve the inherited-env
+        behavior, layering ``self.env`` overrides.
+        """
+        if self._drops_privileges():
+            base = {
+                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+                "HOME": os.environ.get("HOME", "/tmp"),  # noqa: S108 - overridden by self.env
+                "TERM": os.environ.get("TERM", "xterm"),
+            }
+            return {**base, **self.env}
+        return {**os.environ, **self.env} if self.env else None
+
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         argv = self.shell_argv(process.command)
-        # Merge workspace env overrides so callers can inject PATH / env vars even
-        # when bwrap is unavailable (bwrap_argv handles this itself via --setenv).
-        proc_env: dict[str, str] | None = {**os.environ, **self.env} if self.env else None
+        proc_env = self._session_env()
 
         if sys.platform == "win32":
             # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
@@ -632,7 +678,7 @@ class Workspace:
             chan,
             chroot=str(self.root).encode(),
             guest_prefix=self._guest_path.encode(),
-            chown_uid=self._shell_uid if _serving_as_root() else None,
+            chown_uid=self._shell_uid if self._drops_privileges() else None,
         )
 
 
