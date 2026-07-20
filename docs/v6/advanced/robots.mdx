@@ -533,7 +533,7 @@ downstream (`hud eval`, tasksets, the agent) is unchanged; only *where the bridg
 | Symbol | Where | Role |
 |--------|-------|------|
 | `env.gym(make_env)` / `Gym` | `hud.environment.robot` | Declarative sim: contract, capability, and serving derived from a gym factory |
-| `hud.wrap(env)` | `hud` | One-line trace streaming for any gym-style env you drive yourself |
+| `wrap(env)` | `hud.environment.robot` | One-line trace streaming for any gym-style env you drive yourself |
 | `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
 | `RobotEndpoint.capability(...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
