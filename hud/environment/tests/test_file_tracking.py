@@ -30,7 +30,7 @@ async def _call(
     return result
 
 
-async def test_diff_snapshot_advance_roundtrip(tmp_path: Path) -> None:
+async def test_diff_snapshot_setup_roundtrip(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("x\n")
     tracker = FileTracker(tmp_path)
     tracker.take_baseline()
@@ -55,9 +55,11 @@ async def test_diff_snapshot_advance_roundtrip(tmp_path: Path) -> None:
         snapshot = await _call(reader, writer, "snapshot")
         assert any(entry["path"] == "a.txt" for entry in snapshot["files"])
 
-        # advance() re-baselines without erroring.
+        # setup() emits scenario changes and starts a clean agent-edit layer.
         (tmp_path / "b.txt").write_text("z\n")
-        await _call(reader, writer, "advance")
+        setup = await _call(reader, writer, "setup")
+        assert setup["files_changed"] == 1
+        assert setup["patches"][0]["path"] == "b.txt"
         assert (await _call(reader, writer, "diff"))["files_changed"] == 0
 
         # flush() returns the trailing diff plus bounded changed deliverables.

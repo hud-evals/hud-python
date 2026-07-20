@@ -149,6 +149,8 @@ class PatchEntry:
     patch: str  # unified diff text (placeholder for binary/redacted/over-limit)
     size_before: int = 0
     size_after: int = 0
+    content_hash_before: str | None = None
+    content_hash_after: str | None = None
 
 
 @dataclass
@@ -180,6 +182,8 @@ class DiffResult:
                     "patch": p.patch,
                     "size_before": p.size_before,
                     "size_after": p.size_after,
+                    "content_hash_before": p.content_hash_before,
+                    "content_hash_after": p.content_hash_after,
                 }
                 for p in self.patches
             ],
@@ -265,20 +269,25 @@ class FileTracker:
         )
         return snapshot
 
-    def advance_baseline(self) -> None:
-        """Re-scan and update the tracking baseline WITHOUT producing a diff.
-
-        Used after scenario setup (which writes many files that are not agent
-        edits), so subsequent diffs and final artifact capture start clean.
-        """
-        prev_count = len(self._previous_snapshot.files) if self._previous_snapshot else 0
-        snapshot = self._scan()
-        self._baseline_snapshot = snapshot
-        self._previous_snapshot = snapshot
-        if len(snapshot.files) != prev_count:
-            LOGGER.info(
-                "file diff baseline advanced: %d files (was %d)", len(snapshot.files), prev_count
+    def take_setup_snapshot(self) -> DiffResult:
+        """Capture setup changes and establish the agent-edit baseline."""
+        if self._previous_snapshot is None:
+            baseline = self.take_baseline()
+            return DiffResult(
+                patches=[],
+                snapshot_timestamp=baseline.timestamp,
+                scan_duration_ms=baseline.scan_duration_ms,
+                files_scanned=len(baseline.files),
+                files_changed=0,
             )
+
+        current = self._scan()
+        diff = self._diff(self._previous_snapshot, current)
+        # Setup and agent edits are separate layers. Even when the setup diff is
+        # capped, agent tracking must start from the complete post-setup state.
+        self._baseline_snapshot = current
+        self._previous_snapshot = current
+        return diff
 
     def take_snapshot(self) -> DiffResult:
         """Scan and diff against the previous snapshot, then advance the baseline."""
@@ -408,7 +417,7 @@ class FileTracker:
             payload["truncated"] = True
         return payload
 
-    def _capture_file(self, status: str, entry: FileEntry) -> dict[str, Any] | None:
+    def _capture_file(self, status: str | None, entry: FileEntry) -> dict[str, Any] | None:
         raw_path = self._root / entry.rel_path
         try:
             if raw_path.is_symlink():
@@ -425,27 +434,45 @@ class FileTracker:
         try:
             if not path.is_file():
                 return None
-            stat = path.stat()
-            if stat.st_size != entry.size or stat.st_size > self._MAX_CAPTURE_FILE_BYTES:
+            stat_before = path.stat()
+            if (
+                stat_before.st_size != entry.size
+                or stat_before.st_mtime_ns != entry.mtime_ns
+                or stat_before.st_size > self._MAX_CAPTURE_FILE_BYTES
+            ):
                 return None
             with path.open("rb") as f:
                 data = f.read()
+                stat_after = os.fstat(f.fileno())
         except (PermissionError, OSError):
             return None
 
-        if len(data) != entry.size:
+        if (
+            len(data) != entry.size
+            or stat_after.st_size != entry.size
+            or stat_after.st_mtime_ns != entry.mtime_ns
+            or stat_after.st_dev != stat_before.st_dev
+            or stat_after.st_ino != stat_before.st_ino
+        ):
+            return None
+
+        content_hash = hashlib.sha256(data).hexdigest()
+        if len(entry.content_hash) == 64 and content_hash != entry.content_hash:
             return None
 
         suffix = PurePosixPath(entry.rel_path).suffix.lower()
-        content_type = CAPTURE_CONTENT_TYPES.get(
-            suffix,
-            mimetypes.guess_type(entry.rel_path)[0] or "application/octet-stream",
-        )
-        return {
+        content_type = CAPTURE_CONTENT_TYPES.get(suffix) or mimetypes.guess_type(entry.rel_path)[0]
+        if content_type is None:
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                content_type = "application/octet-stream"
+            else:
+                content_type = "text/plain" if b"\x00" not in data else "application/octet-stream"
+        result: dict[str, Any] = {
             "path": entry.rel_path,
-            "status": status,
             "size": entry.size,
-            "content_hash": hashlib.sha256(data).hexdigest(),
+            "content_hash": content_hash,
             "content_type": content_type,
             "file": {
                 "type": "file",
@@ -453,6 +480,9 @@ class FileTracker:
                 "media_type": content_type,
             },
         }
+        if status is not None:
+            result["status"] = status
+        return result
 
     # ─── scanning ─────────────────────────────────────────────────────
 
@@ -670,6 +700,8 @@ class FileTracker:
                     patch=patch_text,
                     size_before=size_before,
                     size_after=size_after,
+                    content_hash_before=old_entry.content_hash if old_entry else None,
+                    content_hash_after=new_entry.content_hash if new_entry else None,
                 )
             )
 
@@ -740,9 +772,12 @@ class _FileTrackingHandler:
                         elif method == "snapshot":
                             manifest = self._tracker.current_manifest()
                             result = {"files": manifest, "files_scanned": len(manifest)}
-                        elif method == "advance":
-                            await loop.run_in_executor(None, self._tracker.advance_baseline)
-                            result = {"advanced": True}
+                        elif method == "setup":
+                            setup = await loop.run_in_executor(
+                                None,
+                                self._tracker.take_setup_snapshot,
+                            )
+                            result = setup.to_dict()
                         elif method == "flush":
                             result = await loop.run_in_executor(None, self._tracker.flush_changes)
                         else:

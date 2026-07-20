@@ -358,9 +358,8 @@ async def rollout(
                 async with live:  # start on enter; grade on exit
                     run = live  # bound only once live: an earlier failure synthesizes
                     _phase = "agent loop"
-                    # File tracking (when enabled) streams workspace diffs to
-                    # telemetry for the duration of the agent loop; setup churn is
-                    # skipped because the run is already started here.
+                    # File tracking (when enabled) emits setup separately, then
+                    # streams workspace diffs for the duration of the agent loop.
                     async with file_tracking_observer(client):
                         try:
                             await _bounded(agent(run))
