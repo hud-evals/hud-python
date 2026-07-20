@@ -1,8 +1,9 @@
 """Agent-side robot harness: drive a ``robot`` env with a VLA policy.
 
 - :class:`~.agent.RobotAgent` — the harness: connects to the ``robot``
-  capability, reads the contract, drives N >= 1 env slots with one open-loop
-  chunk queue. Subclass and set ``self.model`` + ``self.adapter``.
+  capability (claiming a slot token from ``run.started``), reads the contract,
+  drives one scalar connection with an open-loop chunk queue. Subclass and
+  set ``self.model`` + ``self.adapter``.
 - :class:`~.model.Model` / :class:`~.model.LeRobotModel` /
   :class:`~.model.RemoteModel` — the policy and its inference mechanics.
 - :class:`~.adapter.Adapter` / :class:`~.adapter.LeRobotAdapter` /
