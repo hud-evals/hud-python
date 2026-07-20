@@ -21,8 +21,13 @@ bridge's ``robot`` WebSocket, and templates drive episodes through the handle::
     @env.template(id="pawn_lift")
     async def pawn_lift(task: str = "solo_pawn_lift", seed: int = 0):
         ep = await sim.reset(task=task, seed=seed)  # {prompt, token}
-        yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
-        yield await sim.result(token=ep["token"])
+        yield {"prompt": ep["prompt"]}
+        yield await sim.result()
+
+A single-env sim has one slot, so the template may omit the token as above. A
+vectorized sim (``num_envs > 1``) must thread it through so each session grades
+its own slot: ``yield {"prompt": ..., "robot": {"token": ep["token"]}}`` and
+``sim.result(token=ep["token"])``.
 """
 
 from __future__ import annotations
@@ -167,8 +172,12 @@ class RobotEndpoint:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
         return await self._call("reset", task_args)
 
-    async def result(self, *, token: str, **extra: Any) -> dict[str, Any]:
-        """This slot's score dict (frees the slot), merged with any caller ``extra``."""
+    async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
+        """This slot's score dict (frees the slot), merged with any caller ``extra``.
+
+        ``token`` may be omitted on a single-env bridge (one claimed slot);
+        vectorized envs must pass the token from :meth:`reset`.
+        """
         res = {**(await self._call("result", {"token": token})), **extra}
         print(
             f"[env] result: success={res.get('success')} "

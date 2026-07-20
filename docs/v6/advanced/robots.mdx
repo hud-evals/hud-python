@@ -104,12 +104,17 @@ sim = env.gym(make_env)   # make_env: any callable returning a gym-style env
 @env.template()
 async def pick_and_place(task: str = "default", seed: int = 0):
     ep = await sim.reset(task=task, seed=seed)  # {prompt, token}
-    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
-    yield await sim.result(token=ep["token"])
+    yield {"prompt": ep["prompt"]}
+    yield await sim.result()
 ```
 
 Task args are partitioned by the factory's signature: args the factory accepts define the env (a
 change rebuilds it), everything else is episodic and flows to `env.reset(seed=..., options=...)`.
+
+A single-env sim has one slot, so the template may omit the slot token as above. A vectorized sim
+(`num_envs > 1`) must thread it through so each session grades its own slot — yield
+`{"prompt": ep["prompt"], "robot": {"token": ep["token"]}}` and call `sim.result(token=ep["token"])`;
+see [vectorized evals](#vectorized-envs-and-evals).
 For a sim that isn't gym-shaped, subclass the **bridge** instead:
 
 ```python

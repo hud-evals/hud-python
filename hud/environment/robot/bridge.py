@@ -67,8 +67,20 @@ class _SlotRegistry:
         # v1: a freed slot is only reclaimable after all slots free (whole-batch episodes).
         return next((s for s in self.slots if s.token is None and not s.used), None)
 
-    def by_token(self, token: str) -> _Slot | None:
-        return next((s for s in self.slots if s.token == token), None)
+    def resolve(self, token: str | None) -> _Slot:
+        """Token → its claimed slot; ``None`` binds the sole claimed slot (single-env)."""
+        if token is None:
+            claimed = self.claimed()
+            if len(claimed) != 1:
+                raise ValueError(
+                    f"tokenless claim needs exactly one claimed slot, found {len(claimed)}; "
+                    "pass the token from reset()"
+                )
+            return claimed[0]
+        slot = next((s for s in self.slots if s.token == token), None)
+        if slot is None:
+            raise ValueError(f"unknown episode token: {token!r}")
+        return slot
 
     def claimed(self) -> list[_Slot]:
         return [s for s in self.slots if s.token is not None]
@@ -176,11 +188,9 @@ class RobotBridge(ABC):
         token = self._registry.claim(slot)
         return {"prompt": self.task_description, "token": token}
 
-    def _release_episode(self, token: str) -> dict[str, Any]:
+    def _release_episode(self, token: str | None) -> dict[str, Any]:
         """Control-plane result: this slot's score, then free it."""
-        slot = self._registry.by_token(token)
-        if slot is None:
-            raise ValueError(f"unknown episode token: {token!r}")
+        slot = self._registry.resolve(token)
         grade = self.result_slots()[slot.index]
         self._registry.release(slot)
         return grade
@@ -273,12 +283,11 @@ class RobotBridge(ABC):
             if isinstance(raw, str):
                 raise RuntimeError(raw)
             claim = _unpackb(raw)
-            token = claim.get("claim")
-            if not isinstance(token, str):
-                raise ValueError("first frame must be {\"claim\": <token>}")
-            slot = self._registry.by_token(token)
-            if slot is None:
-                raise ValueError(f"unknown claim token: {token!r}")
+            if not isinstance(claim, dict) or "claim" not in claim:
+                raise ValueError('first frame must be {"claim": <token or None>}')
+            # A None claim binds the sole claimed slot — single-env agents skip
+            # the token plumbing; ambiguous (vectorized) claims error instead.
+            slot = self._registry.resolve(claim["claim"])
             if slot.ws is not None:
                 raise RuntimeError(f"slot {slot.index} already has a live connection")
             slot.ws = ws
@@ -363,8 +372,10 @@ class RobotBridge(ABC):
         i = slot.index
         # Slice the [N, ...] batch down to this slot's scalar row.
         msg = {
-            **{k: (v[i] if getattr(v, "ndim", 0) >= 1 and len(v) == self.num_envs else v)
-               for k, v in data.items()},
+            **{
+                k: (v[i] if getattr(v, "ndim", 0) >= 1 and len(v) == self.num_envs else v)
+                for k, v in data.items()
+            },
             "terminated": bool(np.asarray(terminated).reshape(-1)[i]),
         }
         with contextlib.suppress(websockets.exceptions.ConnectionClosed):
@@ -399,8 +410,8 @@ class RobotBridge(ABC):
             return await self._claim_episode(**params)
         if method == "result":
             token = params.get("token")
-            if not isinstance(token, str):
-                raise ValueError("result: 'token' must be a string")
+            if token is not None and not isinstance(token, str):
+                raise ValueError("result: 'token' must be a string when given")
             return self._release_episode(token)
         raise ValueError(f"unknown method {method!r}")
 
