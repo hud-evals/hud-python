@@ -1,29 +1,11 @@
-"""The sim-process ``robot`` bridge base — and the sim program shape.
+"""Sim-process ``robot`` bridge: WebSocket obs/action + JSON-RPC control.
 
-The *server* side of the ``robot`` protocol (agent-side client:
-:class:`~hud.capabilities.robot.RobotClient`); both share the wire codec defined
-there. A bridge lives in the sim's own process and serves two channels: the
-agent's obs/action **WebSocket** and the env server's JSON-RPC **control side
-channel** (a :class:`~.endpoint.RobotEndpoint` drives episodes through it).
-
-Internally the sim may be vectorized (``num_envs`` slots in lockstep). On the
-wire every connection is scalar openpi: one claim token binds a connection to
-one slot; the bridge barriers actions across claimed slots, steps once, and
-fans scalar obs back. Single-env is the one-slot degenerate case.
-
-- :class:`RobotBridge` — subclass with your sim: ``reset`` / ``step`` /
-  ``get_observation``, and set ``self.contract``. The base owns both channels.
-  (The generic gym-style bridge, :class:`~.gym.GymBridge`, lives in :mod:`~.gym`.)
-- :func:`serve_bridge` — the blocking entry every sim program calls last.
-
-Inside the sim process the sim owns the main thread and serving runs on a
-background loop thread; every sim touch is queued to main through
-:meth:`RobotBridge._run_on_sim`. One shape because the hardest sims demand it:
-sims are usually *thread-affine* (every touch must run on the thread that owns
-their GL/device context), and Isaac/Omniverse must own the process main thread
-outright — Kit drives its own main-thread loop and ``env.reset()`` nests
-``run_until_complete``. Cheap CPU envs pay ~nothing: main just blocks on the
-queue.
+Subclass :class:`RobotBridge` (``reset`` / ``step`` / ``get_observation``);
+:func:`serve_bridge` is the blocking entry. Wire is scalar openpi per claimed
+slot; the sim may be vectorized internally (barrier step, fan-out). Sim owns
+main; serving runs on a background loop and queues touches via
+:meth:`RobotBridge._run_on_sim` (thread-affine / Isaac). Gym path:
+:class:`~.gym.GymBridge`.
 """
 
 from __future__ import annotations
