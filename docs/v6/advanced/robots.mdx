@@ -103,8 +103,9 @@ sim = env.gym(make_env)   # make_env: any callable returning a gym-style env
 
 @env.template()
 async def pick_and_place(task: str = "default", seed: int = 0):
-    yield {"prompt": await sim.reset(task=task, seed=seed)}
-    yield await sim.result()
+    ep = await sim.reset(task=task, seed=seed)  # {prompt, token}
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await sim.result(token=ep["token"])
 ```
 
 Task args are partitioned by the factory's signature: args the factory accepts define the env (a
@@ -117,14 +118,14 @@ from hud.environment.robot import RobotBridge
 class MySimBridge(RobotBridge):
     async def reset(self, task_id: str, seed: int = 0) -> str:
         ...                              # build the episode
-        await self._send_observation()   # push the first frame
         return self.task_description     # becomes the task prompt
 
     def step(self, action) -> None:
         ...  # advance one tick; set success / terminated
 
     def get_observation(self):
-        return {"agentview_image": frame, "state": vec}, self.terminated
+        # Always [N, ...] arrays + [N] terminated (N=1 is fine).
+        return {"agentview_image": frames, "state": vecs}, done_mask
 ```
 
 
@@ -199,13 +200,13 @@ async def _down():
 
 @env.template()
 async def pick_and_place(task_id: str, seed: int = 0):
-    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
-    yield await endpoint.result()  # {"score", "success", "total_reward", "slots": [...]}
+    ep = await endpoint.reset(task_id=task_id, seed=seed)  # {prompt, token}
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await endpoint.result(token=ep["token"])  # this slot's {score, success, total_reward}
 ```
 
-The result dict carries a `"slots"` list with one score dict per env slot (a single env is a batch
-of one). Aggregates sit at the top; the [vectorized eval](#vectorized-envs-and-evals) path
-grades each trace from its slot.
+Each session grades one slot. A vectorized sim fans N concurrent sessions across its slots; see
+[vectorized evals](#vectorized-envs-and-evals).
 
 ## Agent side
 
@@ -316,47 +317,44 @@ instance rather than one you also use for unbatched runs.
 
 ## Vectorized envs and evals
 
-A GPU sim like Isaac runs many env copies in one instance, so batching at the model isn't enough -
-the *environment itself* is vectorized. Three roles stay decoupled:
+A GPU sim like Isaac amortizes its cost by stepping many env copies together in one process
+(`num_envs`). Getting N graded rollouts by booting N separate containers throws that away - each
+one pays for its own physics from scratch. Instead, N rollouts share one vectorized instance, and
+every layer keeps the plain single-env contract described above:
 
-- **The environment declares what it is.** A sim factory accepting `num_envs` is the declaration;
-  the template passes it through (`await sim.reset(task=task, seed=seed, num_envs=num_envs)`). Any
-  vectorized env still runs as a plain single env when `num_envs` is 1.
-- **The agent declares what it can drive.** A stock `RobotAgent` drives N >= 1 slots over one
-  connection with one batched forward per refill - nothing extra to implement.
-- **The run selects how.** `num_envs` on `Taskset.run` turns each task into one vectorized
-  instance whose N slots (each its own seeded perturbation) become N graded traces sharing a
-  group:
+- **Vectorization is sim config, not an eval parameter.** A factory that accepts `num_envs` makes
+  `env.gym(make_env, num_envs=8)` build an eight-way batched sim. Internally the bridge steps
+  every claimed slot together each tick, but each rollout still gets its own ordinary WebSocket -
+  one observation in, one action out, no batch dimension on the wire.
+- **The agent is unchanged.** A stock `RobotAgent` drives one connection per rollout, same as a
+  single-env run. It claims its slot with the token the environment handed back on `tasks.start`
+  (`run.started["robot"]["token"]`); concurrent rollouts still coalesce GPU forwards through
+  [`BatchedModel`](#batching).
+- **`group` picks how many rollouts; `Shared` puts them on one substrate.** Left alone, `group`
+  rollouts would each provision a fresh container. Wrapping the provider in
+  [`Shared(provider, width=N)`](/v6/reference/runtime#shared) instead provisions one and lets
+  all `N` reuse it:
 
 ```python
+from hud.eval import Shared, DockerRuntime
+
 job = await taskset.run(
     MyAgent(),
-    runtime=Runtime("tcp://127.0.0.1:9100"),
-    num_envs=5,          # slots per instance -> 5 graded traces per task
-    max_concurrent=2,    # instances in flight (each has its own runtime)
+    runtime=Shared(DockerRuntime("hud-isaac-env"), width=8),
+    group=8,
+    max_concurrent=8,
 )
 ```
 
-Distinct from `group` - statistical repeats as separate instances - and they compose:
-`group=3, num_envs=5` is 3 instances x 5 traces per task. Grading is per slot: the engine reads
-the template result's `"slots"` list and grades trace `i` from `slots[i]`.
+Each rollout opens its own control-channel connection and claims a slot on it: the first
+`tasks.start` resets the sim and claims slot 0, later starts claim whatever is free, and a start
+once every slot is taken errors instead of queuing silently. Grading is the same call every
+rollout already makes - the environment resolves it to that rollout's slot and returns one
+`Grade`, exactly as a single-env run would.
 
-### Run parameters
-
-Everything about *how* an eval executes lives on `Taskset.run` (the future `hud eval` CLI maps
-onto the same parameters):
-
-| Parameter | What it determines |
-|-----------|--------------------|
-| `runtime` | *Where* each instance runs: a provider (`Runtime(url)`, `LocalRuntime`, `DockerRuntime`, ...) acquired once per instance, or `HostedRuntime` to delegate rollouts to the platform. Unset: local source if the tasks share one, else the HUD tunnel. |
-| `group` | Statistical repeats: each task runs as `group` *independent instances* (own runtime, reset, connection). Without `num_envs` the repeats share a `group_id`. |
-| `num_envs` | Slots per instance: each task runs as *one vectorized instance* whose N seeded perturbations become N graded traces sharing a `group_id`. Composes with `group` (instances x slots). Needs a `drive`-capable agent and a self-managed runtime. |
-| `max_concurrent` | How many *instances* are in flight at once - it never counts slots. |
-| `rollout_timeout` | Wall-clock cap (seconds) per instance on the local path; a breach errors that instance's run(s) without stalling the batch. |
-| `job` | An open `Job` to accumulate into, so one platform job spans several `run(...)` calls (e.g. a training arc). Unset: a fresh job per call. |
-
-Runs produced per task = `group` x `num_envs` (each defaulting to 1). Everything about *what* runs
-stays on the task rows (task args) and the agent - the run parameters never change task content.
+`group` and `max_concurrent` are the ordinary [`Taskset.run` parameters](/v6/reference/tasks#running);
+set `max_concurrent` to `width` so every slot fills and none sit idle waiting for a rollout that
+never starts.
 
 ## Contract
 
@@ -511,8 +509,9 @@ async def _down():
 
 @env.template()
 async def pick_and_place(task_id: str, seed: int = 0):
-    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
-    yield await endpoint.result()
+    ep = await endpoint.reset(task_id=task_id, seed=seed)
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await endpoint.result(token=ep["token"])
 ```
 
 **Sim process** - your program builds the bridge and serves its control surface, blocking for the
@@ -535,15 +534,15 @@ downstream (`hud eval`, tasksets, the agent) is unchanged; only *where the bridg
 |--------|-------|------|
 | `env.gym(make_env)` / `Gym` | `hud.environment.robot` | Declarative sim: contract, capability, and serving derived from a gym factory |
 | `hud.wrap(env)` | `hud` | One-line trace streaming for any gym-style env you drive yourself |
-| `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (batched-first); subclass `RobotBridge` for a custom sim |
-| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (local or `.remote()`); `serve_blocking()` for a split process |
-| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
+| `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
+| `RobotEndpoint.capability(...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
-| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
-| `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue driving N >= 1 env slots |
+| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
+| `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `BatchedAgent` / `BatchedModel` | `hud.agents.robot.batching` | Many concurrent rollouts against one shared, batched model |
-| `Taskset.run(..., num_envs=N)` | `hud.eval` | Grouped eval: one vectorized instance per task, N graded traces |
+| `Shared(provider, width=N)` | `hud.eval` | Refcounting provider: N concurrent rollouts share one substrate |
 
 ## See also
 
