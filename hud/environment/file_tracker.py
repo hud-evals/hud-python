@@ -289,6 +289,12 @@ class FileTracker:
         self._previous_snapshot = current
         return diff
 
+    def advance_baseline(self) -> None:
+        """Establish the current filesystem state as the agent-edit baseline."""
+        current = self._scan()
+        self._baseline_snapshot = current
+        self._previous_snapshot = current
+
     def take_snapshot(self) -> DiffResult:
         """Scan and diff against the previous snapshot, then advance the baseline."""
         if self._previous_snapshot is None:
@@ -778,6 +784,9 @@ class _FileTrackingHandler:
                                 self._tracker.take_setup_snapshot,
                             )
                             result = setup.to_dict()
+                        elif method == "advance":
+                            await loop.run_in_executor(None, self._tracker.advance_baseline)
+                            result = {"advanced": True}
                         elif method == "flush":
                             result = await loop.run_in_executor(None, self._tracker.flush_changes)
                         else:

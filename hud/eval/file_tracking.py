@@ -1,10 +1,10 @@
 """Rollout-level file-tracking observer.
 
 Wraps the agent loop: if the env published a ``filetracking/1`` capability and
-file tracking is on, emit scenario setup as a distinct diff layer, then sample
-agent diffs on a fixed interval. On teardown it flushes the trailing diff plus
-changed deliverable artifacts. Decoupled from the tool loop — spans are
-self-timestamped and the viewer correlates them to steps by time.
+file tracking is on, capture scenario setup when the server advertises support,
+then sample agent diffs on a fixed interval. On teardown it flushes the trailing
+diff plus changed deliverable artifacts. Decoupled from the tool loop — spans
+are self-timestamped and the viewer correlates them to steps by time.
 """
 
 from __future__ import annotations
@@ -123,18 +123,20 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         yield
         return
 
-    # Capture scenario setup as its own layer, then emit the post-setup manifest
-    # that anchors the agent-edit timeline. Tracking is observation-only, so any
-    # setup failure skips tracking rather than breaking the agent loop.
+    # New servers expose setup changes; legacy filetracking/1 servers only know
+    # how to advance past setup. Both establish the same agent-edit baseline.
     ft: FileTrackingClient | None = None
     try:
         ft = await FileTrackingClient.connect(cap)
-        setup = await ft.call("setup")
-        _emit_file_tracking(
-            "filetracking.setup",
-            setup,
-            started_at=now_iso(),
-        )
+        if cap.params.get("setup_diff") is True:
+            setup = await ft.call("setup")
+            _emit_file_tracking(
+                "filetracking.setup",
+                setup,
+                started_at=now_iso(),
+            )
+        else:
+            await ft.call("advance")
         _emit_file_tracking(
             "filetracking.snapshot",
             await ft.call("snapshot"),
