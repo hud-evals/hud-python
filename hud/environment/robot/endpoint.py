@@ -19,9 +19,10 @@ bridge's ``robot`` WebSocket, and templates drive episodes through the handle::
 
 
     @env.template(id="pawn_lift")
-    async def pawn_lift(task: str = "solo_pawn_lift", seed: int = 0, num_envs: int = 1):
-        yield {"prompt": await sim.reset(task=task, seed=seed, num_envs=num_envs)}
-        yield await sim.result()
+    async def pawn_lift(task: str = "solo_pawn_lift", seed: int = 0):
+        ep = await sim.reset(task=task, seed=seed)  # {prompt, token}
+        yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+        yield await sim.result(token=ep["token"])
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ class RobotEndpoint:
         self._forward: asyncio.Task[None] | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
+        # N sessions share this one TCP link; serialize send+read so replies don't cross.
+        self._lock = asyncio.Lock()
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 240.0) -> RobotEndpoint:
@@ -160,13 +163,13 @@ class RobotEndpoint:
 
         return Capability.robot(name=name, url=await self.url(), contract=await self.contract())
 
-    async def reset(self, **task_args: Any) -> str:
-        """Start a new episode; return the task prompt."""
-        return (await self._call("reset", task_args))["prompt"]
+    async def reset(self, **task_args: Any) -> dict[str, Any]:
+        """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
+        return await self._call("reset", task_args)
 
-    async def result(self, **extra: Any) -> dict[str, Any]:
-        """The episode score dict, merged with any caller ``extra`` metadata."""
-        res = {**(await self._call("result")), **extra}
+    async def result(self, *, token: str, **extra: Any) -> dict[str, Any]:
+        """This slot's score dict (frees the slot), merged with any caller ``extra``."""
+        res = {**(await self._call("result", {"token": token})), **extra}
         print(
             f"[env] result: success={res.get('success')} "
             f"total_reward={res.get('total_reward', 0.0):.3f}",
@@ -175,18 +178,19 @@ class RobotEndpoint:
         return res
 
     async def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        # Strictly request/reply, one call at a time, so a constant id is enough.
+        # One in-flight RPC: N sessions share this link; constant id is enough under the lock.
         if self._writer is None or self._reader is None:
             raise RuntimeError("not connected; call start() first")
-        await send_frame(
-            self._writer, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
-        )
-        msg = await read_frame(self._reader)
-        if msg is None:
-            raise ConnectionError(f"connection closed awaiting {method!r} reply")
-        if "error" in msg:
-            raise RuntimeError(f"{method} failed: {msg['error']['message']}")
-        return msg["result"]
+        async with self._lock:
+            await send_frame(
+                self._writer, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
+            )
+            msg = await read_frame(self._reader)
+            if msg is None:
+                raise ConnectionError(f"connection closed awaiting {method!r} reply")
+            if "error" in msg:
+                raise RuntimeError(f"{method} failed: {msg['error']['message']}")
+            return msg["result"]
 
 
 async def _forward_lines(stream: asyncio.StreamReader) -> None:
