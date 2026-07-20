@@ -14,7 +14,13 @@ from hud.telemetry.context import set_trace_context
 if TYPE_CHECKING:
     import pytest
 
-_CAP = Capability(name="filetracking", protocol="filetracking/1", url="tcp://127.0.0.1:1")
+_CAP = Capability(
+    name="filetracking",
+    protocol="filetracking/1",
+    url="tcp://127.0.0.1:1",
+    params={"setup_diff": True},
+)
+_LEGACY_CAP = Capability(name="filetracking", protocol="filetracking/1", url=_CAP.url)
 
 
 class _FakeFt:
@@ -26,6 +32,7 @@ class _FakeFt:
     ) -> None:
         self.setup_raises = setup_raises
         self.flush_result = flush_result
+        self.advance_calls = 0
         self.setup_calls = 0
         self.snapshot_calls = 0
         self.diff_calls = 0
@@ -36,6 +43,9 @@ class _FakeFt:
         self.close_calls += 1
 
     async def call(self, method: str) -> dict[str, Any]:
+        if method == "advance":
+            self.advance_calls += 1
+            return {"advanced": True}
         if method == "setup":
             self.setup_calls += 1
             if self.setup_raises:
@@ -59,8 +69,11 @@ class _FakeFt:
 
 
 class _BoundClient:
-    def binding(self, name: str) -> object:
-        return _CAP
+    def __init__(self, cap: Capability = _CAP) -> None:
+        self.cap = cap
+
+    def binding(self, name: str) -> Capability:
+        return self.cap
 
 
 def _record_emitters(
@@ -92,11 +105,15 @@ def _record_emitters(
     return diffs, setups, snapshots, captures
 
 
-def _connects_to(monkeypatch: pytest.MonkeyPatch, ft: _FakeFt) -> None:
+def _connects_to(
+    monkeypatch: pytest.MonkeyPatch,
+    ft: _FakeFt,
+    cap: Capability = _CAP,
+) -> None:
     class _FakeFileTrackingClient:
         @classmethod
-        async def connect(cls, cap: Capability) -> _FakeFt:
-            assert cap == _CAP
+        async def connect(cls, requested_cap: Capability) -> _FakeFt:
+            assert requested_cap == cap
             return ft
 
     monkeypatch.setattr(observer, "FileTrackingClient", _FakeFileTrackingClient)
@@ -145,6 +162,29 @@ async def test_successful_setup_anchors_and_polls(monkeypatch: pytest.MonkeyPatc
     assert ft.close_calls == 1
     assert diffs  # at least one diff streamed
     assert {"files_changed": 1, "patches": [{"path": "final.txt"}]} in diffs
+    assert captures == [{"files_captured": 1, "files": [{"path": "report.xlsx"}]}]
+
+
+async def test_legacy_server_advances_without_setup_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "telemetry_enabled", True)
+    monkeypatch.setattr(settings, "file_tracking_interval", 60.0)
+    diffs, setups, snapshots, captures = _record_emitters(monkeypatch)
+    ft = _FakeFt()
+    _connects_to(monkeypatch, ft, _LEGACY_CAP)
+
+    async with observer.file_tracking_observer(_BoundClient(_LEGACY_CAP)):  # type: ignore[arg-type]
+        pass
+
+    assert ft.advance_calls == 1
+    assert ft.setup_calls == 0
+    assert ft.snapshot_calls == 1
+    assert setups == []
+    assert len(snapshots) == 1
+    assert diffs == [{"files_changed": 1, "patches": [{"path": "final.txt"}]}]
     assert captures == [{"files_captured": 1, "files": [{"path": "report.xlsx"}]}]
 
 

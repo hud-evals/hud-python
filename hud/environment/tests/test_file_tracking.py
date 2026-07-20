@@ -55,6 +55,11 @@ async def test_diff_snapshot_setup_roundtrip(tmp_path: Path) -> None:
         snapshot = await _call(reader, writer, "snapshot")
         assert any(entry["path"] == "a.txt" for entry in snapshot["files"])
 
+        # advance() remains available to clients that predate setup diffs.
+        (tmp_path / "legacy.txt").write_text("legacy\n")
+        assert await _call(reader, writer, "advance") == {"advanced": True}
+        assert (await _call(reader, writer, "diff"))["files_changed"] == 0
+
         # setup() emits scenario changes and starts a clean agent-edit layer.
         (tmp_path / "b.txt").write_text("z\n")
         setup = await _call(reader, writer, "setup")

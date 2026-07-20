@@ -51,7 +51,9 @@ async def test_serving_publishes_the_workspace_capability(
         assert cap.protocol == "ssh/2"
         assert cap.url.startswith("ssh://")
         assert cap.params["host_pubkey"].startswith("ssh-ed25519")
-        assert client.binding("filetracking").protocol == "filetracking/1"
+        filetracking = client.binding("filetracking")
+        assert filetracking.protocol == "filetracking/1"
+        assert filetracking.params == {"setup_diff": True}
         # Key material lives outside the served root (the agent's surface).
         assert not (tmp_path / "root" / ".hud").exists()
 
