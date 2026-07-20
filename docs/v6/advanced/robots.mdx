@@ -450,8 +450,8 @@ it already produces, so it runs in *your* process - not the environment containe
 sims (e.g. Isaac/RoboLab) whose dependency stack conflicts with `lerobot`; only your machine needs
 `pip install 'lerobot[dataset]'`.
 
-Each rollout writes its own dataset (tagged with its trace id, so a shard maps back to its
-trace), finalized at process exit. Saving is single-env; a vectorized run streams telemetry only.
+All rollouts in a process record into one shared dataset: each buffers its episode and commits
+it whole, so concurrent runs (e.g. `BatchedAgent`) interleave safely. Finalized at process exit.
 Destination and Hub push come from the environment:
 
 | Env var | Effect |
