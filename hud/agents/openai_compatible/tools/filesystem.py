@@ -66,6 +66,9 @@ class ReadTool(_FilesystemTool):
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
+        # Map once so the directory predicate and the file read agree on
+        # the same workspace-anchored path.
+        path = self.client.map_path(path)
         offset = _read_offset(arguments.get("offset"))
         limit = _positive_int(arguments.get("limit"), default=DEFAULT_READ_LIMIT, name="limit")
         if not (await self.bash(f"test -d {shlex.quote(path)}")).isError:
@@ -193,6 +196,9 @@ class EditTool(_FilesystemTool):
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
+        # Map once so existence checks, mkdir, and the write all target
+        # the same workspace-anchored path.
+        path = self.client.map_path(path)
         old = arguments.get("oldString")
         new = arguments.get("newString")
         if not isinstance(old, str):
@@ -252,6 +258,7 @@ class WriteTool(_FilesystemTool):
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
+        path = self.client.map_path(path)
         content = arguments.get("content")
         if not isinstance(content, str):
             raise ValueError("content is required")
@@ -287,8 +294,8 @@ class GrepTool(_FilesystemTool):
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str):
             raise ValueError("pattern is required")
-        path = arguments.get("path") or "."
-        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(str(path))}"
+        path = self.client.map_path(str(arguments.get("path") or "."))
+        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(path)}"
         include = arguments.get("include")
         if isinstance(include, str) and include:
             cmd += f" --include={shlex.quote(include)}"
@@ -311,8 +318,8 @@ class GlobTool(_FilesystemTool):
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str):
             raise ValueError("pattern is required")
-        path = arguments.get("path") or "."
-        return await self.bash(f"find {shlex.quote(str(path))} -name {shlex.quote(pattern)}")
+        path = self.client.map_path(str(arguments.get("path") or "."))
+        return await self.bash(f"find {shlex.quote(path)} -name {shlex.quote(pattern)}")
 
 
 def _positive_int(value: Any, *, default: int, name: str) -> int:
