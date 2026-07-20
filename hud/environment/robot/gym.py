@@ -587,8 +587,9 @@ def gym_command(
     if contract is not None:
         cmd += ["--contract", str(contract)]
     # Build defaults (num_envs, etc.) as --key value pairs the CLI re-applies.
+    # JSON-encoded so the child gets real bools/ints/strings back (see main()).
     for key, value in defaults.items():
-        cmd += [f"--{key.replace('_', '-')}", str(value)]
+        cmd += [f"--{key.replace('_', '-')}", json.dumps(value)]
     return cmd
 
 
@@ -613,10 +614,14 @@ def main() -> None:
     defaults: dict[str, Any] = {}
     if args.num_envs is not None:
         defaults["num_envs"] = args.num_envs
-    # Further --key value pairs from gym_command become build defaults.
+    # Further --key value pairs from gym_command become build defaults. JSON
+    # round-trip restores real types; bare strings (hand-written argv) pass as-is.
     for flag, value in zip(unknown, unknown[1:]):
         if flag.startswith("--"):
-            defaults[flag[2:].replace("-", "_")] = value
+            try:
+                defaults[flag[2:].replace("-", "_")] = json.loads(value)
+            except json.JSONDecodeError:
+                defaults[flag[2:].replace("-", "_")] = value
     bridge = GymBridge(target, fps=args.fps, contract=args.contract, **defaults)
     serve_bridge(bridge, host=args.host, port=args.port)
 

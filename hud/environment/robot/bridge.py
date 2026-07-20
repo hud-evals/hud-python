@@ -264,7 +264,9 @@ class RobotBridge(ABC):
         """One agent connection: claim a slot, then feed actions into the barrier."""
         slot: _Slot | None = None
         try:
-            await ws.send(_packb(self.metadata))  # connect-time metadata frame
+            # Connect-time metadata frame; claim_required lets clients without a
+            # token fail fast instead of waiting forever for an observation.
+            await ws.send(_packb({**self.metadata, "claim_required": True}))
             # Fail fast on a client that never claims (it would otherwise deadlock:
             # we wait for the claim frame, it waits for an observation).
             raw = await asyncio.wait_for(ws.recv(), timeout=self.step_timeout)
@@ -300,6 +302,9 @@ class RobotBridge(ABC):
             if slot is not None and slot.ws is ws:
                 slot.ws = None
                 slot.action = None
+                # Idle, not pending: a dropped connection must not stall the barrier
+                # for the other slots (a reconnect clears idle again).
+                slot.idle = True
                 self._action_event.set()  # wake the barrier so it doesn't wait on us
 
     async def _tick_loop(self) -> None:
