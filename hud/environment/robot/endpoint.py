@@ -159,7 +159,11 @@ class RobotEndpoint:
         return (await self._call("url"))["url"]
 
     async def contract(self) -> dict[str, Any]:
-        """The env's self-describing wire contract, read from the bridge."""
+        """The env's self-describing wire contract, read from the bridge.
+
+        Under lazy spawn this may build the env and derive ``contract.json`` when
+        none was pre-written — so a capability published at initialize is complete.
+        """
         return (await self._call("contract"))["contract"]
 
     async def capability(self, name: str = "robot") -> Capability:
