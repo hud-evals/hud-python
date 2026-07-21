@@ -383,7 +383,7 @@ class Workspace:
             name=name,
             protocol="filetracking/1",
             url=f"tcp://{self._ft_host}:{self._ft_port}",
-            params={"setup_diff": True},
+            params={"root": self.root.as_posix(), "setup_diff": True},
         )
 
     # ─── argv builders (public — useful if you want your own subprocess) ──

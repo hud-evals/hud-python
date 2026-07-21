@@ -105,6 +105,8 @@ def test_secret_files_are_tracked_but_content_is_never_emitted(tmp_path: Path) -
     tracker = FileTracker(tmp_path)
     tracker.take_baseline()
 
+    assert tracker.current_manifest() == []
+
     (tmp_path / ".env").write_text("API_KEY=supersecretvalue\nDB_PASSWORD=hunter2\n")
     diff = tracker.take_snapshot()
 
