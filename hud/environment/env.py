@@ -313,7 +313,8 @@ class Environment(LegacyEnvMixin):
         on this env's hooks; nothing runs until serve. Returns a
         :class:`~hud.environment.robot.RobotEndpoint` (``sim.reset`` / ``sim.result``).
         """
-        from hud.environment.robot import RobotEndpoint, gym_command
+        from hud.environment.robot import RobotEndpoint
+        from hud.environment.robot.gym import gym_command
 
         sim = RobotEndpoint.spawn(gym_command(target, **kwargs))
 

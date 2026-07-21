@@ -247,8 +247,8 @@ For a sim that isn't gym-shaped, subclass `RobotBridge` instead:
 from hud.environment.robot import RobotBridge
 
 class MySimBridge(RobotBridge):
-    async def reset(self, task_id: str, seed: int = 0) -> str:
-        ...                              # build the episode
+    def reset(self, task_id: str, seed: int = 0) -> str:
+        ...                              # build the episode (runs on the sim thread)
         return self.task_description     # becomes the task prompt
 
     def step(self, action) -> None:
@@ -261,6 +261,8 @@ class MySimBridge(RobotBridge):
 
 Those three methods are all you write. Under the hood the framework takes care of communication
 with the agent and starting/stopping as well as stepping of the simulator at the *control rate*.
+All three hooks run on the sim thread (main under `serve_bridge`), so thread-affine sims such as
+Isaac are safe without extra hopping in your subclass.
 
 - **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
 - **`step`** applies one action and advances the sim a tick, setting `success` / `terminated` as the

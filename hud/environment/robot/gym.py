@@ -243,11 +243,6 @@ class GymBridge(RobotBridge):
 
     # ── env lifecycle (all sim touches on the sim thread) ───────────────────────
 
-    async def ensure_env(self, **task_args: Any) -> None:
-        """Build the env (factory defaults unless task args say otherwise). Idempotent."""
-        if self.env is None:
-            await self._run_on_sim(self._sync_reset, task_args)
-
     def _load_contract_if_present(self) -> None:
         """Load a pre-written contract.json when present (skips the start-time probe)."""
         if self.contract or self._contract_path is None:
@@ -273,6 +268,16 @@ class GymBridge(RobotBridge):
         if not existed and self._contract_path is not None:
             print(f"[env] wrote {self._contract_path} (edit names to relabel plots)", flush=True)
 
+    async def ensure_contract(self) -> dict[str, Any]:
+        """Return the wire contract, probing the env when start() did not already.
+
+        ``start()`` mints the contract for ``env.gym`` publish; this covers a
+        bare ``contract`` RPC (tests / custom callers) that skips that path.
+        """
+        if not self.contract:
+            await self._run_on_sim(self.reset)
+        return self.contract
+
     async def start(self) -> None:
         """Bind the wire with a complete contract so ``env.initialize`` can publish it.
 
@@ -290,22 +295,11 @@ class GymBridge(RobotBridge):
                 "[env] no contract found; building env to probe observation/action structure",
                 flush=True,
             )
-            await self._run_on_sim(self._sync_reset, {})
-            self._ensure_contract_from_env()
+            await self._run_on_sim(self.reset)
         await super().start()
 
-    async def reset(self, **task_args: Any) -> str:
-        prompt = await self._run_on_sim(self._sync_reset, task_args)
-        self._ensure_contract_from_env()  # no-op when start() already probed
-        return prompt
-
-    async def stop(self) -> None:
-        await super().stop()
-        if self.env is not None:
-            await self._run_on_sim(self.env.close)
-            self.env = None
-
-    def _sync_reset(self, task_args: dict[str, Any]) -> str:
+    def reset(self, **task_args: Any) -> str:
+        """Build/reset the gym env on the sim thread (base claim hops here)."""
         # Defaults from env.gym(..., num_envs=N) fill in when the task omits them.
         merged = {**self._defaults, **task_args}
         build = {k: v for k, v in merged.items() if k in self._build_params}
@@ -328,7 +322,14 @@ class GymBridge(RobotBridge):
         self._acc_reward = np.zeros(self.num_envs)
         self._step_reward = np.zeros(self.num_envs, dtype=np.float32)
         self._seen_success = False
+        self._ensure_contract_from_env()  # no-op when start() already probed
         return self._prompt(merged)
+
+    async def stop(self) -> None:
+        await super().stop()
+        if self.env is not None:
+            await self._run_on_sim(self.env.close)
+            self.env = None
 
     def _build_env(self, build: dict[str, Any]) -> Any:
         """Build the env from the target: factory call, or registry make/make_vec."""

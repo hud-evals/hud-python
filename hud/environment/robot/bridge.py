@@ -45,7 +45,7 @@ class _Slot:
     token: str | None = None
     ws: Any = None
     action: np.ndarray | None = None
-    idle: bool = False  # timed out waiting for an action; hold next step
+    idle: bool = False  # hold next step (dialing timed out, or WS dropped)
     # Touched this episode; after release stays unreclaimable until the next global reset.
     used: bool = False
 
@@ -109,7 +109,8 @@ class RobotBridge(ABC):
     :meth:`get_observation`, and set ``self.contract`` (the wire contract the
     capability publishes) before serving. The base owns the WebSocket serve
     loop and the control listener; subclasses own the sim and set ``num_envs``
-    (default 1).
+    (default 1). All three hooks run on the sim thread via :meth:`_run_on_sim`
+    (under :func:`serve_bridge`, that is main — safe for Isaac / thread-affine sims).
 
     - :meth:`reset` initialises the sim for a new episode and returns the task
       prompt. The base resets scoring state.
@@ -119,7 +120,9 @@ class RobotBridge(ABC):
     - :meth:`result_slots` returns one score dict per slot.
     """
 
-    #: Seconds to wait for every claimed slot's action before stepping with holds.
+    #: Seconds to wait for a *still-dialing* claimed slot before stepping with a
+    #: hold. Connected slots never hit this — slow inference must not advance the
+    #: sim with zeros.
     step_timeout: float = 30.0
 
     def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
@@ -150,16 +153,16 @@ class RobotBridge(ABC):
         # kwargs of the current batch's global reset; later claims must match.
         self._episode_kwargs: dict[str, Any] = {}
 
-    async def _run_on_sim(self, fn: Callable[..., Any], *args: Any) -> Any:
-        """Run ``fn(*args)`` on the sim thread, awaited on the caller's loop.
+    async def _run_on_sim(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Run ``fn(*args, **kwargs)`` on the sim thread, awaited on the caller's loop.
 
         Before :func:`serve_bridge` binds a sim thread (tests, in-loop use) calls
         execute inline on the caller — the degenerate single-thread case.
         """
         if self._sim_ident is None or threading.get_ident() == self._sim_ident:
-            return fn(*args)  # not serving yet, or already on the sim thread
+            return fn(*args, **kwargs)  # not serving yet, or already on the sim thread
         fut: Future[Any] = Future()
-        self._sim_q.put((lambda: fn(*args), fut))
+        self._sim_q.put((lambda: fn(*args, **kwargs), fut))
         return await asyncio.wrap_future(fut)
 
     async def _claim_episode(self, **kwargs: Any) -> dict[str, Any]:
@@ -168,7 +171,9 @@ class RobotBridge(ABC):
             self.total_reward = 0.0
             self.success = False
             self.terminated = False
-            self.task_description = await self.reset(**kwargs)
+            # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
+            # on the background serve loop.
+            self.task_description = await self._run_on_sim(self.reset, **kwargs)
             self._episode_kwargs = kwargs
             self._registry.configure(self.num_envs)
             slot = self._registry.slots[0]
@@ -196,8 +201,12 @@ class RobotBridge(ABC):
         return grade
 
     @abstractmethod
-    async def reset(self, **kwargs: Any) -> str:
-        """Reset the sim for a new episode; return the task prompt."""
+    def reset(self, **kwargs: Any) -> str:
+        """Reset the sim for a new episode; return the task prompt.
+
+        Always invoked on the sim thread (via :meth:`_run_on_sim`) — implement
+        this as ordinary sync code, same as :meth:`step` / :meth:`get_observation`.
+        """
 
     @abstractmethod
     def step(self, action: np.ndarray) -> None:
@@ -293,7 +302,8 @@ class RobotBridge(ABC):
             slot.ws = ws
             slot.action = None
             slot.idle = False
-            await self._send_slot_observation(slot)
+            # First frame after claim: one sim read, then this slot's scalar row.
+            await self._send_slot_observation(slot, await self._run_on_sim(self.get_observation))
             async for frame in ws:
                 action = _unpackb(frame)["actions"]  # codec already returns an ndarray
                 slot.action = np.asarray(action, dtype=np.float32)
@@ -317,7 +327,7 @@ class RobotBridge(ABC):
                 self._action_event.set()  # wake the barrier so it doesn't wait on us
 
     async def _tick_loop(self) -> None:
-        """Gather claimed slots' actions (or timeout → hold), step once, fan out."""
+        """Gather claimed slots' actions (or dialing-timeout → hold), step once, fan out."""
         while True:
             try:
                 await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
@@ -328,22 +338,32 @@ class RobotBridge(ABC):
             # No live connection at all → don't step; episodes must not advance unseen.
             if not any(s.ws is not None for s in claimed):
                 continue
-            # Barrier over every *claimed* slot: one whose agent is still dialing
-            # (claimed, no WS yet) blocks too, so its episode can't advance before
-            # the first observation. step_timeout marks stragglers idle (hold).
+            # Barrier over every *claimed* slot: dialing (no WS yet) blocks too, so
+            # its episode can't advance before the first observation. step_timeout
+            # only holds still-dialing slots — a connected agent mid-inference waits.
             deadline = asyncio.get_running_loop().time() + self.step_timeout
             while True:
                 pending = [s for s in claimed if s.action is None and not s.idle]
                 if not pending:
                     break
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    for s in pending:
-                        s.idle = True  # hold this step
-                    break
-                self._action_event.clear()
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._action_event.wait(), timeout=remaining)
+                dialing = [s for s in pending if s.ws is None]
+                connected_pending = [s for s in pending if s.ws is not None]
+                if dialing:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        for s in dialing:
+                            s.idle = True  # never connected → hold so the batch can move
+                        if not connected_pending:
+                            break
+                        # Connected agents still deciding — keep waiting without a deadline.
+                        continue
+                    self._action_event.clear()
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(self._action_event.wait(), timeout=remaining)
+                else:
+                    # Only live agents pending: wait for an action (or a disconnect).
+                    self._action_event.clear()
+                    await self._action_event.wait()
                 claimed = self._registry.claimed()
                 if not any(s.ws is not None for s in claimed):
                     break
@@ -357,18 +377,21 @@ class RobotBridge(ABC):
                 rows.append(np.asarray(row, dtype=np.float32).reshape(-1))
                 s.action = None
             actions = np.stack(rows)
+            # One step + one batched obs on the sim thread, then fan-out (not N reads).
             await self._run_on_sim(self.step, actions)
+            batch = await self._run_on_sim(self.get_observation)
             for s in claimed:
-                await self._send_slot_observation(s)
+                await self._send_slot_observation(s, batch)
 
-    async def _send_slot_observation(self, slot: _Slot) -> None:
-        """Fan one scalar obs frame to a claimed connection."""
-        if slot.ws is None:
+    async def _send_slot_observation(
+        self,
+        slot: _Slot,
+        batch: tuple[dict[str, np.ndarray], np.ndarray] | None,
+    ) -> None:
+        """Fan one scalar obs frame to a claimed connection from a batched read."""
+        if slot.ws is None or batch is None:
             return
-        out = await self._run_on_sim(self.get_observation)
-        if out is None:
-            return
-        data, terminated = out
+        data, terminated = batch
         i = slot.index
         # Slice the [N, ...] batch down to this slot's scalar row.
         msg = {
@@ -401,11 +424,22 @@ class RobotBridge(ABC):
         with contextlib.suppress(Exception):
             await writer.wait_closed()
 
+    async def ensure_contract(self) -> dict[str, Any]:
+        """Return the wire contract, deriving it when a subclass can.
+
+        Default is the already-set ``self.contract``. Lazy-spawn bridges
+        (:class:`~.gym.GymBridge`) override to build the env and derive when
+        no pre-written ``contract.json`` was loaded at start — so
+        ``endpoint.capability()`` publishes a real manifest, not ``{}``.
+        """
+        return self.contract
+
     async def _dispatch_control(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "url":
             return {"url": self.url}
         if method == "contract":
-            return {"contract": self.contract}
+            # May trigger env build under lazy spawn when the contract is still empty.
+            return {"contract": await self.ensure_contract()}
         if method == "reset":
             return await self._claim_episode(**params)
         if method == "result":
