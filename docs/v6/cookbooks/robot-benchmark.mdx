@@ -29,7 +29,7 @@ endpoint = RobotEndpoint(LiberoSimBridge(use_delta=True))  # drive the bridge th
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
+    env.add_capability(await endpoint.capability())
 
 @env.shutdown
 async def _down():

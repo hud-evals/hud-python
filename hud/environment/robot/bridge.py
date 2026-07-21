@@ -522,4 +522,16 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
     thread.join(timeout=30)
 
 
+def main() -> None:
+    """Child entry: ``python -m hud.environment.robot.bridge path.py:ClassName``."""
+    from hud.utils.modules import load_module
+
+    path, _, name = sys.argv[1].rpartition(":")
+    serve_bridge(getattr(load_module(path), name)())
+
+
+if __name__ == "__main__":
+    main()
+
+
 __all__ = ["PORT_ANNOUNCEMENT", "RobotBridge", "serve_bridge"]

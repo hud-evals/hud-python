@@ -34,12 +34,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
+import sys
 from typing import TYPE_CHECKING, Any
 
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
-from .bridge import PORT_ANNOUNCEMENT
+from .bridge import PORT_ANNOUNCEMENT, RobotBridge
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,19 +53,33 @@ if TYPE_CHECKING:
 class RobotEndpoint:
     """Drive a simulation bridge living in another process.
 
-    Build with :meth:`spawn` (own the sim process) or :meth:`remote` (attach to
-    one served elsewhere); :meth:`start` brings the link up either way.
+    Build with a bridge class/instance (``start()`` spawns its process),
+    :meth:`spawn` (explicit argv), or :meth:`remote` (attach).
     """
 
     def __init__(
         self,
+        bridge: type[RobotBridge] | RobotBridge | None = None,
         *,
         cmd: Sequence[str] | None = None,
         host: str | None = None,
         port: int | None = None,
         connect_timeout_s: float = 900.0,
     ) -> None:
+        if bridge is not None:
+            # Child re-imports the class and serve_bridge()'s it (ctor args not forwarded).
+            cls = bridge if isinstance(bridge, type) else type(bridge)
+            name = getattr(cls, "__qualname__", "")
+            if not name or "." in name or "<" in name:
+                raise ValueError(f"bridge class must be module-level, got {bridge!r}")
+            cmd = [
+                sys.executable,
+                "-m",
+                "hud.environment.robot.bridge",
+                f"{inspect.getfile(cls)}:{name}",
+            ]
         self._cmd = list(cmd) if cmd is not None else None  # set => spawned mode
+
         self._host = host
         self._port = port
         self._connect_timeout_s = connect_timeout_s

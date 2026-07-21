@@ -13,8 +13,8 @@ thread and a bridge serves the wire. The env server holds a
   episode control.
 - :class:`~.endpoint.RobotEndpoint` — the env server's handle: spawn (owned)
   or remote (attached), same control surface either way.
-- :func:`~.bridge.serve_bridge` — the sim program's blocking entry (custom
-  bridges call it last).
+- :func:`~.bridge.serve_bridge` — the sim program's blocking entry
+  (``RobotEndpoint(MyBridge)`` spawns it; custom containers can call it too).
 - :func:`~.gym.wrap` — one-line trace streaming for any gym env you drive
   yourself, plus the shared gym introspection.
 

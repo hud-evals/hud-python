@@ -308,23 +308,22 @@ Actions come back the same way: the agent sends them under openpi's `actions` ke
 </Accordion>
 
 `RobotEndpoint` is the env's control handle on the bridge - the one surface it drives an episode
-through. `start` / `stop` bring the bridge's socket up and down; `capability` publishes the `robot`
-binding once that URL exists (call it after `start`); `reset` begins an episode and returns its
-prompt; `result` returns the episode's score. It's control-plane only - the agent's observe/act loop
-tunnels straight to the bridge's WebSocket - and the same calls work whether the bridge is local
-(shown here) or in another process.
+through. Pass your bridge class (or instance); `start` spawns the sim process and serves it,
+`capability` publishes the `robot` binding (contract comes from the bridge), `reset` /
+`result` run the episode. Control-plane only - the agent's observe/act loop tunnels straight
+to the bridge's WebSocket.
 
 ```python
 from hud import Environment
 from hud.environment.robot import RobotEndpoint
 
 env = Environment(name="my-sim")
-endpoint = RobotEndpoint(MySimBridge())  # the env drives the bridge only through the endpoint
+endpoint = RobotEndpoint(MySimBridge())  # start() spawns + serves the bridge process
 
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
+    env.add_capability(await endpoint.capability())
 
 @env.shutdown
 async def _down():
