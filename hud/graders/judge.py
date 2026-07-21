@@ -105,14 +105,13 @@ class LLMJudgeGrader(Grader):
                 name=criterion.requirement,
                 value=1.0 if met else 0.0,
                 weight=criterion.weight,
-                reason=reason,
+                metadata={"reason": reason},
             )
 
         verdicts = list(await asyncio.gather(*(_judge(c) for c in parsed)))
         return SubScore(
             name=cls.name,
             value=_rubric_value(verdicts),
-            aggregation="rubric",
             children=verdicts,
             metadata={"model": model},
         )

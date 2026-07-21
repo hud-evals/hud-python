@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -11,10 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class SubScore(BaseModel):
     """One node in the grade breakdown tree.
 
-    A leaf subscore is a single measurement: a grader run, or one rubric
-    criterion (value ``0``/``1``, with ``reason`` justifying the verdict).
-    A node can record how its value was derived in ``aggregation`` and preserve
-    the inputs as ``children`` so the full grading history stays inspectable.
+    A leaf subscore is a single measurement. A parent preserves the subscores
+    used to derive its value in ``children``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -26,14 +24,6 @@ class SubScore(BaseModel):
         "Negative weights represent penalties.",
     )
     value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
-    reason: str | None = Field(
-        default=None, description="The grader's justification for this value"
-    )
-    aggregation: Literal["any", "all", "rubric"] | None = Field(
-        default=None,
-        description="How value was derived from children: 'any' (max), 'all' (min), "
-        "or 'rubric' (weighted pass-fraction). None for leaf subscores.",
-    )
     children: list[SubScore] | None = Field(
         default=None,
         description="Input subscores this node was combined from",

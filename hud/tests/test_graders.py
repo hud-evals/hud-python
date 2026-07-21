@@ -47,11 +47,9 @@ class TestResultShapes:
         node = SubScore(
             name="any",
             value=1.0,
-            aggregation="any",
             children=[SubScore(name="tests", value=1.0, metadata={"exit_code": 0})],
         )
         dumped = node.model_dump(mode="json")
-        assert dumped["aggregation"] == "any"
         assert dumped["children"][0]["name"] == "tests"
         assert dumped["children"][0]["metadata"] == {"exit_code": 0}
 
@@ -59,18 +57,17 @@ class TestResultShapes:
         node = SubScore(
             name="judge",
             value=1.0,
-            aggregation="rubric",
-            children=[SubScore(name="Mentions Paris", value=1.0, reason="says Paris")],
+            children=[
+                SubScore(name="Mentions Paris", value=1.0, metadata={"reason": "says Paris"})
+            ],
         )
         dumped = node.model_dump(mode="json")
         assert dumped["children"][0] == {
             "name": "Mentions Paris",
             "weight": 1.0,
             "value": 1.0,
-            "reason": "says Paris",
-            "aggregation": None,
             "children": None,
-            "metadata": None,
+            "metadata": {"reason": "says Paris"},
         }
 
 
@@ -317,24 +314,23 @@ class TestCombine:
     async def test_combine_propagates_metadata(self) -> None:
         metadata = {"stdout": "ok"}
         result = await combine(SubScore(name="grader", value=1.0, weight=1.0, metadata=metadata))
-        assert result.info == {"grader": metadata}
+        assert result.info == {}
         assert result.subscores is not None
         assert result.subscores[0].metadata == metadata
         assert result.model_dump(mode="json")["subscores"][0]["metadata"] == metadata
 
     async def test_combine_keeps_rubric_children_on_subscores(self) -> None:
         verdicts = [
-            SubScore(name="Mentions Paris", value=1.0, reason="says Paris"),
-            SubScore(name="Names the river", value=0.0, reason="no river"),
+            SubScore(name="Mentions Paris", value=1.0, metadata={"reason": "says Paris"}),
+            SubScore(name="Names the river", value=0.0, metadata={"reason": "no river"}),
         ]
         result = await combine(
-            SubScore(name="judge", value=0.5, weight=0.5, aggregation="rubric", children=verdicts),
+            SubScore(name="judge", value=0.5, weight=0.5, children=verdicts),
             SubScore(name="tests", value=0.0, weight=0.5),
         )
         assert result.subscores is not None
         by_name = {subscore.name: subscore for subscore in result.subscores}
         assert by_name["judge"].children == verdicts
-        assert by_name["judge"].aggregation == "rubric"
         assert by_name["tests"].children is None
 
     async def test_combine_preserves_combinator_children(self) -> None:
@@ -351,7 +347,6 @@ class TestCombine:
         assert result.subscores is not None
         by_name = {subscore.name: subscore for subscore in result.subscores}
         any_node = by_name["any"]
-        assert any_node.aggregation == "any"
         assert any_node.children is not None
         assert [child.name for child in any_node.children] == ["pytest", "make"]
         assert by_name["format"].children is None
@@ -397,7 +392,7 @@ class TestGrader:
             name = "DummyGrader"
 
             @classmethod
-            async def compute_score(cls, **kwargs: object) -> float:
+            async def compute_score(cls, **kwargs: object) -> Any:
                 return 0.75
 
         subscore = await DummyGrader.grade(weight=0.4, marker="ok", payload=object())
@@ -414,7 +409,7 @@ class TestGrader:
             name = "tuple"
 
             @classmethod
-            async def compute_score(cls, **kwargs: object) -> tuple[float, dict[str, object]]:
+            async def compute_score(cls, **kwargs: object) -> Any:
                 return 0.75, {"source": "released-contract"}
 
         subscore = await TupleGrader.grade(weight=0.4, marker="ok")
@@ -425,7 +420,7 @@ class TestGrader:
         assert subscore.metadata["source"] == "released-contract"
         assert subscore.metadata["_parameters"]["marker"] == "ok"
 
-    async def test_grade_preserves_returned_subscore_name_without_override(self) -> None:
+    async def test_grade_uses_grader_name_without_override(self) -> None:
         class RubricGrader(Grader):
             name = "rubric"
 
@@ -434,7 +429,7 @@ class TestGrader:
                 return SubScore(name="specific-rubric", value=1.0)
 
         subscore = await RubricGrader.grade(weight=0.7)
-        assert subscore.name == "specific-rubric"
+        assert subscore.name == "rubric"
         assert subscore.weight == pytest.approx(0.7)
 
     async def test_grade_stamps_name_and_weight_on_returned_subscore(self) -> None:
@@ -446,15 +441,14 @@ class TestGrader:
                 return SubScore(
                     name="ignored",
                     value=1.0,
-                    reason="did the thing",
-                    metadata={"extra": "kept"},
+                    metadata={"reason": "did the thing", "extra": "kept"},
                 )
 
         subscore = await RubricGrader.grade(weight=0.7, name="my-rubric")
         assert subscore.name == "my-rubric"
         assert subscore.weight == pytest.approx(0.7)
-        assert subscore.reason == "did the thing"
         assert subscore.metadata is not None
+        assert subscore.metadata["reason"] == "did the thing"
         assert subscore.metadata["extra"] == "kept"
         assert "_parameters" in subscore.metadata
 
@@ -476,14 +470,12 @@ class TestBooleanCombinators:
             name="judge",
             value=1.0,
             weight=0.5,
-            aggregation="rubric",
-            children=[SubScore(name="c1", value=1.0, reason="met")],
+            children=[SubScore(name="c1", value=1.0, metadata={"reason": "met"})],
         )
         combined = combine_any(
             weight=1.0,
             subscores=[rubric, SubScore(name="tests", value=0.0, weight=0.5)],
         )
-        assert combined.aggregation == "any"
         assert combined.children is not None
         assert combined.children[0].children == rubric.children
         assert combined.children[1].children is None
@@ -531,10 +523,8 @@ class TestBooleanCombinators:
             ],
         )
         assert combined.value == 1.0
-        assert combined.aggregation == "all"
         assert combined.children is not None
         inner = combined.children[0]
-        assert inner.aggregation == "any"
         assert inner.children is not None
         assert [child.name for child in inner.children] == ["pytest", "make"]
 
@@ -562,11 +552,10 @@ class TestLLMJudgeGrader:
             criteria=["met: mentions Paris", ("names the river", 3.0)],
         )
         assert subscore.value == pytest.approx(0.25)
-        assert subscore.aggregation == "rubric"
         assert subscore.children is not None
-        assert [(c.name, c.value, c.weight, c.reason) for c in subscore.children] == [
-            ("met: mentions Paris", 1.0, 1.0, "because"),
-            ("names the river", 0.0, 3.0, "because"),
+        assert [(c.name, c.value, c.weight, c.metadata) for c in subscore.children] == [
+            ("met: mentions Paris", 1.0, 1.0, {"reason": "because"}),
+            ("names the river", 0.0, 3.0, {"reason": "because"}),
         ]
 
     async def test_compute_score_applies_negative_criterion_penalty(
@@ -589,7 +578,12 @@ class TestLLMJudgeGrader:
             weight=1.0, answer="some answer", criteria=["met: correct"]
         )
         assert subscore.children == [
-            SubScore(name="met: correct", value=1.0, weight=1.0, reason="because")
+            SubScore(
+                name="met: correct",
+                value=1.0,
+                weight=1.0,
+                metadata={"reason": "because"},
+            )
         ]
         assert subscore.metadata is not None
         assert subscore.metadata["model"] == "claude-haiku-4-5"
@@ -630,5 +624,4 @@ class TestBashGrader:
         assert by_name["BashGrader-1"].metadata["exit_code"] == 0
         assert by_name["BashGrader-2"].metadata is not None
         assert by_name["BashGrader-2"].metadata["exit_code"] != 0
-        assert result.info["BashGrader-1"]["exit_code"] == 0
-        assert result.info["BashGrader-2"]["exit_code"] != 0
+        assert result.info == {}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import warnings
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING
 
 from .results import EvaluationResult, SubScore
 
@@ -71,15 +71,12 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
         )
 
     normalized_subscores: list[SubScore] = []
-    metadata: dict[str, Any] = {}
 
     for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
         normalized_weight = item.weight / positive_weight_sum if item.weight > 0 else item.weight
         normalized_subscores.append(
             item.model_copy(update={"name": final_name, "weight": normalized_weight})
         )
-        if item.metadata is not None:
-            metadata[final_name] = item.metadata
 
     reward = float(sum(item.value * item.weight for item in normalized_subscores))
 
@@ -87,7 +84,6 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
         reward=reward,
         done=True,
         subscores=normalized_subscores,
-        info=metadata,
     )
 
 
@@ -134,7 +130,6 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
 def _boolean_subscore(
     name: str,
     weight: float,
-    aggregation: Literal["any", "all"],
     subscores: list[SubScore],
     value: float,
 ) -> SubScore:
@@ -146,7 +141,6 @@ def _boolean_subscore(
         name=name,
         value=value,
         weight=weight,
-        aggregation=aggregation,
         children=children,
     )
 
@@ -155,14 +149,14 @@ def combine_any(weight: float, subscores: list[SubScore], *, name: str = "any") 
     """Subscore that passes if any input passes (max); inputs kept as children."""
     if not subscores:
         raise ValueError("subscores must not be empty")
-    return _boolean_subscore(name, weight, "any", subscores, max(s.value for s in subscores))
+    return _boolean_subscore(name, weight, subscores, max(s.value for s in subscores))
 
 
 def combine_all(weight: float, subscores: list[SubScore], *, name: str = "all") -> SubScore:
     """Subscore that passes only if all inputs pass (min); inputs kept as children."""
     if not subscores:
         raise ValueError("subscores must not be empty")
-    return _boolean_subscore(name, weight, "all", subscores, min(s.value for s in subscores))
+    return _boolean_subscore(name, weight, subscores, min(s.value for s in subscores))
 
 
 __all__ = ["_combine_subscores", "combine", "combine_all", "combine_any"]
