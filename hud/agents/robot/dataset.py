@@ -3,8 +3,9 @@
 Each rollout holds a :class:`DatasetWriter` that buffers its ``(observation,
 executed action)`` frames and commits whole episodes into one process-shared
 dataset — so concurrent rollouts (e.g. :class:`~hud.agents.robot.batching.BatchedAgent`
-clones) record into a single dataset instead of one shard each. Finalized at
-process exit (or an explicit :meth:`finalize`), optionally pushed to the HF Hub.
+clones) record into a single dataset instead of one shard each. A class lock
+serializes commits so episodes stay contiguous. Finalized at process exit (or
+an explicit :meth:`finalize`), optionally pushed to the HF Hub.
 The contract drives the schema with no extra wiring. Destination + push come
 from the environment:
 
@@ -19,6 +20,7 @@ import atexit
 import importlib.util
 import logging
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -93,10 +95,12 @@ class DatasetWriter:
     telemetry-only runs never break."""
 
     # One dataset per process: concurrent rollouts (e.g. BatchedAgent clones) each
-    # buffer their own episode but commit into the same root.
+    # buffer their own episode but commit into the same root under ``_lock``.
     _ds: ClassVar[Any | None] = None
     _root: ClassVar[Path | None] = None
     _repo_id: ClassVar[str] = ""
+    # Serialize create / add_frame / save_episode / finalize across rollouts.
+    _lock: ClassVar[threading.RLock] = threading.RLock()
 
     def __init__(self, contract: dict[str, Any], *, fps: int) -> None:
         self._contract = contract
@@ -138,38 +142,48 @@ class DatasetWriter:
         self._frames.append(row)
 
     def end_episode(self) -> None:
-        """Commit the buffered episode to the shared dataset in one synchronous
-        pass (no awaits), so concurrent rollouts' episodes never interleave."""
+        """Commit this rollout's buffered episode to the shared dataset.
+
+        Whole episodes stay contiguous: ``_lock`` serializes create / add_frame /
+        save_episode so concurrent BatchedAgent rollouts cannot interleave frames.
+        """
         if not self._frames:
             return
-        ds = self._ensure_dataset()
-        for row in self._frames:
-            ds.add_frame(row)
-        ds.save_episode()
-        self._frames.clear()
+        with DatasetWriter._lock:
+            ds = self._ensure_dataset()
+            for row in self._frames:
+                ds.add_frame(row)
+            ds.save_episode()
+            self._frames.clear()
 
     def finalize(self) -> None:
         """Flush, write the parquet footer + optionally push to the Hub. Idempotent."""
-        self.end_episode()
-        ds, DatasetWriter._ds = DatasetWriter._ds, None
-        if ds is None:
-            return
-        ds.finalize()
-        print(f"[agent] saved LeRobot dataset -> {DatasetWriter._root}", flush=True)
-        if not os.environ.get("HF_REPO"):
-            return
-        private = os.environ.get("HF_PRIVATE", "0") not in ("0", "", "false", "False")
-        try:  # best-effort: the on-disk dataset is the source of truth
-            ds.push_to_hub(private=private)
-            print(
-                f"[agent] pushed -> https://huggingface.co/datasets/{DatasetWriter._repo_id}",
-                flush=True,
-            )
-        except Exception as exc:
-            logger.exception("HF push failed for %s", DatasetWriter._repo_id)
-            print(f"[agent] WARNING: HF push failed: {exc!r} (dataset still on disk)", flush=True)
+        with DatasetWriter._lock:
+            # Re-entrant: end_episode takes the same lock when frames remain.
+            self.end_episode()
+            ds, DatasetWriter._ds = DatasetWriter._ds, None
+            if ds is None:
+                return
+            root, repo_id = DatasetWriter._root, DatasetWriter._repo_id
+            ds.finalize()
+            print(f"[agent] saved LeRobot dataset -> {root}", flush=True)
+            if not os.environ.get("HF_REPO"):
+                return
+            private = os.environ.get("HF_PRIVATE", "0") not in ("0", "", "false", "False")
+            try:  # best-effort: the on-disk dataset is the source of truth
+                ds.push_to_hub(private=private)
+                print(f"[agent] pushed -> https://huggingface.co/datasets/{repo_id}", flush=True)
+            except Exception as exc:
+                logger.exception("HF push failed for %s", repo_id)
+                print(
+                    f"[agent] WARNING: HF push failed: {exc!r} (dataset still on disk)", flush=True
+                )
 
     def _ensure_dataset(self) -> Any:
+        """Return the process-shared dataset, creating it on first commit.
+
+        Caller must hold ``_lock`` (create is check-then-act on ``_ds``).
+        """
         if DatasetWriter._ds is not None:
             return DatasetWriter._ds
         lerobot_dataset: Any = importlib.import_module("lerobot.datasets.lerobot_dataset")
