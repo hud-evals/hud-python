@@ -94,7 +94,7 @@ class Grade:
         raw = dict(data)
         if isinstance(subscores := data.get("subscores"), list):
             raw["subscores"] = [
-                SubScore.model_validate(subscore).model_dump(mode="json") for subscore in subscores
+                SubScore.model_validate(subscore).to_summary() for subscore in subscores
             ]
         return cls(
             reward=float(data.get("score") or 0.0),

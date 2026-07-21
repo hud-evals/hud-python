@@ -6,6 +6,7 @@ import warnings
 from typing import Any, cast
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -15,7 +16,7 @@ from pydantic import (
     model_validator,
 )
 
-_SPAN_SERIALIZATION_CONTEXT = "hud_span"
+_SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
 
 
 class SubScore(BaseModel):
@@ -38,8 +39,9 @@ class SubScore(BaseModel):
         default=None,
         description="Input subscores this node was combined from",
     )
-    metadata: dict[str, Any] | None = Field(
+    info: dict[str, Any] | None = Field(
         default=None,
+        validation_alias=AliasChoices("info", "metadata"),
         description="Grader-specific details recorded on the evaluation span",
     )
 
@@ -47,12 +49,28 @@ class SubScore(BaseModel):
     def _serialize(
         self,
         handler: SerializerFunctionWrapHandler,
-        info: SerializationInfo,
+        serialization_info: SerializationInfo,
     ) -> dict[str, Any]:
         data = cast("dict[str, Any]", handler(self))
-        if not (info.context or {}).get(_SPAN_SERIALIZATION_CONTEXT):
-            data.pop("metadata", None)
+        if (serialization_info.context or {}).get(_SUMMARY_SERIALIZATION_CONTEXT):
+            data.pop("info", None)
         return data
+
+    def to_summary(self) -> dict[str, Any]:
+        """Serialize the score breakdown without span-only info."""
+        return self.model_dump(
+            mode="json",
+            context={_SUMMARY_SERIALIZATION_CONTEXT: True},
+        )
+
+    @property
+    def metadata(self) -> dict[str, Any] | None:
+        """Compatibility alias for ``info``."""
+        return self.info
+
+    @metadata.setter
+    def metadata(self, value: dict[str, Any] | None) -> None:
+        self.info = value
 
     @property
     def score(self) -> float:
@@ -107,13 +125,6 @@ class EvaluationResult(BaseModel):
     def from_float(cls, value: float) -> EvaluationResult:
         """Create an EvaluationResult from a simple float reward."""
         return cls(reward=value, done=True)
-
-    def model_dump_for_span(self) -> dict[str, Any]:
-        """Serialize the evaluation with span-only subscore details."""
-        return self.model_dump(
-            mode="json",
-            context={_SPAN_SERIALIZATION_CONTEXT: True},
-        )
 
 
 __all__ = ["EvaluationResult", "SubScore"]

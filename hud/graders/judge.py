@@ -84,7 +84,7 @@ class LLMJudgeGrader(Grader):
         del kwargs
         parsed = _parse_criteria(criteria)
         if not parsed:
-            return SubScore(name=cls.name, value=0.0, metadata={"error": "no criteria provided"})
+            return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})
 
         from hud.utils.gateway import build_gateway_client
 
@@ -105,7 +105,7 @@ class LLMJudgeGrader(Grader):
                 name=criterion.requirement,
                 value=1.0 if met else 0.0,
                 weight=criterion.weight,
-                metadata={"reason": reason},
+                info={"reason": reason},
             )
 
         verdicts = list(await asyncio.gather(*(_judge(c) for c in parsed)))
@@ -113,7 +113,7 @@ class LLMJudgeGrader(Grader):
             name=cls.name,
             value=_rubric_value(verdicts),
             children=verdicts,
-            metadata={"model": model},
+            info={"model": model},
         )
 
 

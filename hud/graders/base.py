@@ -14,7 +14,7 @@ class Grader:
 
     Subclasses implement ``compute_score`` (async) and return a ``SubScore``.
     The ``grade`` classmethod applies the caller's ``name`` override and
-    ``weight``, and records parameters in metadata for reproducibility.
+    ``weight``, and records parameters in info for reproducibility.
     """
 
     name: str = "BaseGrader"
@@ -24,8 +24,8 @@ class Grader:
         """Run the grader and package the result as a ``SubScore``."""
         result: Any = await cls.compute_score(**kwargs)
         if isinstance(result, tuple):
-            score, metadata = result
-            result = SubScore(name=cls.name, value=float(score), metadata=metadata)
+            score, info = result
+            result = SubScore(name=cls.name, value=float(score), info=info)
         elif not isinstance(result, SubScore):
             result = SubScore(name=cls.name, value=float(result))
 
@@ -33,7 +33,7 @@ class Grader:
             update={
                 "name": name or cls.name,
                 "weight": weight,
-                "metadata": {**(result.metadata or {}), "_parameters": json_safe_dict(kwargs)},
+                "info": {**(result.info or {}), "_parameters": json_safe_dict(kwargs)},
             }
         )
 

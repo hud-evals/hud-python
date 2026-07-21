@@ -53,7 +53,7 @@ class BashGrader(Grader):
             return SubScore(
                 name=cls.name,
                 value=0.0,
-                metadata={
+                info={
                     "exit_code": None,
                     "stdout": "",
                     "stderr": "",
@@ -65,7 +65,7 @@ class BashGrader(Grader):
             return SubScore(
                 name=cls.name,
                 value=0.0,
-                metadata={
+                info={
                     "exit_code": None,
                     "stdout": "",
                     "stderr": "/bin/bash not found",
@@ -76,7 +76,7 @@ class BashGrader(Grader):
         return SubScore(
             name=cls.name,
             value=1.0 if returncode == 0 else 0.0,
-            metadata={"exit_code": returncode, "stdout": stdout, "stderr": stderr},
+            info={"exit_code": returncode, "stdout": stdout, "stderr": stderr},
         )
 
 

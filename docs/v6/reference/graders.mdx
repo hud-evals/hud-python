@@ -98,7 +98,7 @@ avoid: the criterion scores as a penalty, MET when the answer actually makes the
 
 The returned `SubScore` has one child per criterion: `name` is the requirement, `value` is
 `1.0`/`0.0` for the verdict (on a negative-weight criterion, `1.0` means the error is present),
-and `metadata["reason"]` is the judge's justification. The rubric value is the weighted
+and `info["reason"]` is the judge's justification. The rubric value is the weighted
 pass-fraction: `sum(value * weight)` over the positive weights, clamped to 0-1.
 
 ## `combine` - compose multiple graders
@@ -139,14 +139,10 @@ class LengthGrader(Grader):
 result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 ```
 
-Use `metadata` for grader-specific details and `children` for nested results such as rubric
+Use `info` for grader-specific details and `children` for nested results such as rubric
 verdicts. `grade` applies the caller's weight and optional name override, then records the call
-parameters under `_parameters`. Legacy float and `(float, metadata)` returns are still coerced to
+parameters under `_parameters`. Legacy float and `(float, info)` returns are still coerced to
 `SubScore` for backwards compatibility.
-
-Subscore metadata is recorded on the task's evaluation span for trace inspection but omitted from
-the persisted `evaluation_result`. Names, values, weights, and child relationships remain in the
-persisted score breakdown.
 
 ## `SubScore` and `EvaluationResult`
 
@@ -159,7 +155,7 @@ preserves the measurements used to derive its value in `children`:
 | `value` | - | Measurement, 0-1. |
 | `weight` | `1.0` | Weight in the parent's combination; negative = penalty. |
 | `children` | `None` | Input subscores this node was combined from. |
-| `metadata` | `None` | Grader-specific details recorded on the evaluation span. |
+| `info` | `None` | Grader-specific details recorded on the evaluation span. |
 
 An `EvaluationResult` is the combined grade payload you can yield from a task:
 

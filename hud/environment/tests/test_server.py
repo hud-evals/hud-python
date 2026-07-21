@@ -70,7 +70,7 @@ async def test_score_dict_passes_through_with_extra_keys() -> None:
         assert run.grade.info == {"detail": "partial credit"}
 
 
-async def test_evaluation_result_metadata_reaches_evaluate_step() -> None:
+async def test_evaluation_result_info_reaches_evaluate_step() -> None:
     env = Environment("modelgrade")
 
     @env.template()
@@ -88,10 +88,10 @@ async def test_evaluation_result_metadata_reaches_evaluate_step() -> None:
                         SubScore(
                             name="criterion",
                             value=1.0,
-                            metadata={"reason": "because"},
+                            info={"reason": "because"},
                         )
                     ],
-                    metadata={"model": "judge-model"},
+                    info={"model": "judge-model"},
                 )
             ],
         )
@@ -101,8 +101,8 @@ async def test_evaluation_result_metadata_reaches_evaluate_step() -> None:
             run.trace.content = "x"
         assert run.reward == 0.75
         assert run.grade.info == {"max_tile": 256}
-        assert "metadata" not in run.evaluation["subscores"][0]
-        assert "metadata" not in run.evaluation["subscores"][0]["children"][0]
+        assert "info" not in run.evaluation["subscores"][0]
+        assert "info" not in run.evaluation["subscores"][0]["children"][0]
         evaluate_step = run.trace.steps[-1]
         assert evaluate_step.task_call is not None
         assert evaluate_step.task_call.phase == "evaluate"
@@ -123,10 +123,10 @@ async def test_evaluation_result_metadata_reaches_evaluate_step() -> None:
                             "weight": 1.0,
                             "value": 1.0,
                             "children": None,
-                            "metadata": {"reason": "because"},
+                            "info": {"reason": "because"},
                         }
                     ],
-                    "metadata": {"model": "judge-model"},
+                    "info": {"model": "judge-model"},
                 }
             ],
         }
