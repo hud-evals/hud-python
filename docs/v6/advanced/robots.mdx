@@ -85,15 +85,24 @@ drives model until env terminates.
 - **`Model`** - the actual stateless checkpoint of the model (includes pre-/post-processing)
 - **`Adapter`** - translates the env's observation space to the model's, and the model's action space to the env's
 
-**The contract** (of the environment) - the one artifact both sides share: a self-describing JSON schema of the
-embodiment's control rate, observation and action spaces, carried in the capability's manifest params. 
+[**The contract**](#contract) (of the environment) - the one artifact both sides share: a self-describing JSON
+schema of the environment including the embodiment's control rate, observation and action spaces, 
+carried in the capability's manifest params. 
 The agent wires observations to policy inputs purely from the manifest; there is no shared config.
+In addition, the contract serves to define useful metadata that you can easily toggle to improve 
+trace visualization on the platform.
 
 ## Environment side
 
-For a gym-style sim you implement nothing: `env.gym(make_env)` takes any callable returning a
-gym-style env, derives the [contract](#contract) from a sample observation, serves the sim over the
-``robot`` WebSocket, and returns the handle templates drive episodes through:
+HUD has two ways to build the environment side: [`env.gym`](#gym-style-envs) for anything
+gym-shaped, which derives the contract, capability, and serving for you, or a
+[custom `RobotBridge`](#custom-bridges) for a sim that isn't.
+
+## Gym-style envs
+
+Calling `env.gym(make_env)` derives the [contract](#contract) from a sample observation, serves
+the env over the `robot` WebSocket, and returns a [`RobotEndpoint`](#custom-bridges) - the handle
+templates drive episodes through:
 
 ```python env.py
 from hud import Environment
@@ -108,14 +117,132 @@ async def pick_and_place(task: str = "default", seed: int = 0):
     yield await sim.result()
 ```
 
-Task args are partitioned by the factory's signature: args the factory accepts define the env (a
-change rebuilds it), everything else is episodic and flows to `env.reset(seed=..., options=...)`.
+`env.gym` takes one argument, in any of three forms:
 
-A single-env sim has one slot, so the template may omit the slot token as above. A vectorized sim
-(`num_envs > 1`) must thread it through so each session grades its own slot — yield
+- **A factory callable**, like `make_env` above - a module-level function that returns a
+  gym-style env. Its signature splits task args into build args (a change rebuilds the env) and
+  episodic args, which flow to `env.reset(seed=..., options=...)`.
+- **A gymnasium registry id**, a string such as `"CartPole-v1"` - built with `gym.make` (or
+  `gym.make_vec` when `num_envs` is passed).
+- **An already-constructed env** made through the gymnasium registry - `env.gym` reduces it to
+  its spec and rebuilds it in the sim process.
+
+`env.gym` serves either a standard, single-instance env or a vectorized one - one gym env that
+internally holds `num_envs` copies of the environment, stepped together in the same process for
+GPU efficiency. Each copy is a **slot**, and a vectorized sim hands back a slot token on
+`reset` so the rollout that claimed it can step and grade that copy alone, leaving the rest
+untouched.
+
+A single-env sim has only one slot, so the template may omit the token, as above. A vectorized
+sim (`num_envs > 1`) must thread it through so each session grades its own slot - yield
 `{"prompt": ep["prompt"], "robot": {"token": ep["token"]}}` and call `sim.result(token=ep["token"])`;
-see [vectorized evals](#vectorized-envs-and-evals).
-For a sim that isn't gym-shaped, subclass the **bridge** instead:
+see [vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
+
+You can find gym-shaped environments in various places - [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub),
+including Isaac Lab Arena environments, or environments built into LeRobot directly.
+
+<Accordion title="Example: Isaac Lab Arena (EnvHub)">
+Vectorized (`num_envs=4`), with cameras enabled for RTX frames. `make_env` downloads the
+[EnvHub](https://huggingface.co/docs/lerobot/en/envhub_isaaclab_arena) repo's module and calls its
+`make_env` the same way LeRobot's loader does.
+
+```python env.py
+from __future__ import annotations
+import os
+from hud import Environment
+
+HUB = "nvidia/isaaclab-arena-envs"
+
+def make_env(num_envs: int = 4):
+    from lerobot.envs.configs import IsaaclabArenaEnv
+    from lerobot.envs.utils import (
+        _call_make_env,
+        _download_hub_file,
+        _import_hub_module,
+        _normalize_hub_result,
+    )
+
+    cfg = IsaaclabArenaEnv(
+        hub_path=HUB,
+        environment="gr1_microwave",
+        embodiment="gr1_pink",
+        object="mustard_bottle",
+        headless=True,
+        enable_cameras=True,  # required with headless for RTX frames
+        camera_keys="robot_pov_cam_rgb",
+        num_envs=num_envs,
+        episode_length=50,
+        state_keys="robot_joint_pos",
+        state_dim=54,
+        action_dim=36,  # GR1
+        task="Reach out to the microwave and open it.",
+    )
+    repo_id, _, local_file, _ = _download_hub_file(cfg.hub_path, True, None)
+    module = _import_hub_module(local_file, repo_id)
+    suites = _normalize_hub_result(_call_make_env(module, num_envs, False, cfg))
+    return next(iter(next(iter(suites.values())).values()))
+
+
+env = Environment(name="arena")
+sim = env.gym(make_env, num_envs=4, fps=30)
+
+
+@env.template()
+async def episode(seed: int = 0):
+    ep = await sim.reset(seed=seed)
+    # Vectorized: token pins this rollout's slot.
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await sim.result(token=ep["token"])
+```
+</Accordion>
+
+<Accordion title="Example: Meta-World (built into LeRobot)">
+Meta-World ships inside LeRobot itself rather than as an EnvHub repo, so `make_env` calls
+LeRobot's own factory directly. GymBridge keeps the env's `pixels` and `agent_pos` keys as-is.
+
+```python metaworld_sim.py
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("MUJOCO_GL", "egl")
+
+
+def make_env(task: str = "assembly-v3"):
+    from lerobot.envs.configs import MetaworldEnv
+    from lerobot.envs.factory import make_env as lerobot_make_env
+
+    # Unwrap vec-of-one; pixels_agent_pos = camera + 4-D eef/gripper state.
+    suites = lerobot_make_env(MetaworldEnv(task=task, obs_type="pixels_agent_pos"), n_envs=1)
+    suite = next(iter(suites))
+    task_id = next(iter(suites[suite]))
+    return suites[suite][task_id].envs[0]
+```
+
+```python env.py
+from metaworld_sim import make_env
+
+from hud import Environment
+
+env = Environment(name="metaworld")
+# LeRobot hardcodes render_fps=80; Meta-World control is slower - pin playback.
+sim = env.gym(make_env, fps=20)
+
+
+@env.template()
+async def episode(task: str = "assembly-v3", seed: int = 0):
+    """One Meta-World episode; task name is a build arg (e.g. assembly-v3, dial-turn-v3)."""
+    ep = await sim.reset(task=task, seed=seed)
+    yield {"prompt": ep["prompt"]}
+    yield await sim.result()
+```
+
+Needs `metaworld` / `lerobot[metaworld]` installe.
+</Accordion>
+
+## Custom bridges
+
+For a sim that isn't gym-shaped, subclass `RobotBridge` instead:
 
 ```python
 from hud.environment.robot import RobotBridge
@@ -133,9 +260,8 @@ class MySimBridge(RobotBridge):
         return {"agentview_image": frames, "state": vecs}, done_mask
 ```
 
-
-Those three methods are all you write. Under the hood the framework takes care of communication 
-with the agent and  starting/stopping as well as stepping of the simulator at the *control rate*.
+Those three methods are all you write. Under the hood the framework takes care of communication
+with the agent and starting/stopping as well as stepping of the simulator at the *control rate*.
 
 - **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
 - **`step`** applies one action and advances the sim a tick, setting `success` / `terminated` as the
@@ -185,7 +311,7 @@ through. `start` / `stop` bring the bridge's socket up and down; `capability` pu
 binding once that URL exists (call it after `start`); `reset` begins an episode and returns its
 prompt; `result` returns the episode's score. It's control-plane only - the agent's observe/act loop
 tunnels straight to the bridge's WebSocket - and the same calls work whether the bridge is local
-(shown here) or [in another process](#running-a-sim-in-another-process).
+(shown here) or in another process.
 
 ```python
 from hud import Environment
@@ -209,9 +335,6 @@ async def pick_and_place(task_id: str, seed: int = 0):
     yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
     yield await endpoint.result(token=ep["token"])  # this slot's {score, success, total_reward}
 ```
-
-Each session grades one slot. A vectorized sim fans N concurrent sessions across its slots; see
-[vectorized evals](#vectorized-envs-and-evals).
 
 ## Agent side
 
