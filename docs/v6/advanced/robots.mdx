@@ -31,8 +31,7 @@ pip install 'hud[robot]'
 </CodeGroup>
 
 ## Overview
-Like with other HUD workflows there's the environment side
-(server - containerized, served on the runtime) and the agent side (client - swappable, model with harness).
+Like with other HUD workflows there's the environment side and the agent side.
 For robotics the **environment side** 
 translates incoming actions into changes in the digital or physical environment and serves observations. 
 The **agent side** owns the policy: it reads those observations, runs
@@ -545,18 +544,6 @@ spec - the closed symbol sets and known traps - lives outside the SDK alongside 
 
 </Accordion>
 
-## How sims run
-
-The loop is lockstep - the bridge steps the sim once per received action. A simulator is usually
-**thread-affine** (every touch must run on the thread that created its GL/device context), and some
-runtimes - Isaac/Omniverse - must own the process main thread outright. HUD therefore serves every
-sim with one process shape: **the sim owns the main thread**, serving (the control channel and the
-robot WebSocket) runs on a background loop thread, and the framework queues every sim touch back to
-the main thread. A cheap CPU sim blocks on that queue; when Omniverse is loaded, the main thread
-also pumps Kit between touches.
-
-There is nothing to configure. `hud serve` and `python -m hud.environment.server` detect an
-attached sim and pick the shape; any fix to the loop applies to every sim the same way.
 
 ## Recording datasets
 
@@ -564,14 +551,14 @@ Set `agent.save = True` (wire it to a `--save` flag on your runner) to also reco
 `(observation, executed action)` tick into a **LeRobot v3 dataset** - the rollouts you just ran,
 ready to finetune a policy on. Telemetry streams either way; saving is the opt-in extra.
 
-Recording is **agent-side**: it consumes the observations the agent already receives and the actions
-it already produces, so it runs in *your* process - not the environment container. That sidesteps
-sims (e.g. Isaac/RoboLab) whose dependency stack conflicts with `lerobot`; only your machine needs
-`pip install 'lerobot[dataset]'`.
+Recording is **agent-side**: it consumes the observations and actions the agent already sees, so
+it runs in *your* process, never the environment container. Only your machine needs
+`pip install 'lerobot[dataset]'` - the sim's own dependency stack (e.g. Isaac/RoboLab) never
+enters the picture.
 
-All rollouts in a process record into one shared dataset: each buffers its episode and commits
-it whole, so concurrent runs (e.g. `BatchedAgent`) interleave safely. Finalized at process exit.
-Destination and Hub push come from the environment:
+All rollouts in a process record into one shared dataset: each buffers its episode and commits it
+whole, so concurrent runs (e.g. `BatchedAgent`) interleave safely, and the dataset finalizes at
+process exit. Destination and Hub push come from the environment:
 
 | Env var | Effect |
 |---------|--------|
@@ -583,68 +570,6 @@ The [contract](#contract) drives the schema with no extra wiring: image features
 `observation.images.<camera>` (encoded to per-episode video), the lone state vector becomes
 `observation.state`, the action becomes `action`, and the task prompt rides along as each frame's
 `task`.
-
-
-## Running a sim in another process
-
-Serving in one process is the default (see [how sims run](#how-sims-run)), but the sim can also
-live in its own process - on another machine, or built against a dependency stack the env
-container can't carry. The env code stays essentially unchanged.
-
-`RobotEndpoint` is built for exactly this: the same control surface (`start` / `reset` / `result` /
-`stop`) works whether the bridge is local or remote.
-
-- **Env process** - publish a *remote* handle with `RobotEndpoint.remote(host, port)`. It dials the
-  sim process and forwards every control call over JSON-RPC.
-- **Sim process** - wrap the real bridge and expose it with
-  `RobotEndpoint(bridge).serve_blocking(host, port)`, the same sim-owns-main shape `hud serve` uses.
-
-The two planes split cleanly, which is why the agent never knows the sim is remote:
-
-- **Control plane** (`start` / `reset` / `result`) - JSON-RPC between the remote endpoint and the
-  serving process.
-- **Data plane** (the agent's `observe → act` loop) - tunnels straight to the bridge's `robot`
-  WebSocket; the contract stays env-side.
-
-**Env side** - identical to the local example, but the endpoint is remote and you `connect()` to it
-first:
-
-```python env.py
-from hud import Environment
-from hud.environment.robot import RobotEndpoint
-
-env = Environment(name="isaac-sim")
-endpoint = RobotEndpoint.remote("127.0.0.1", 9100)   # a handle on the bridge in the sim process
-
-@env.initialize
-async def _up():
-    await endpoint.connect()    # retries until the sim process is serving
-    await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
-
-@env.shutdown
-async def _down():
-    await endpoint.close()      # drops the link; does not stop the sim
-
-@env.template()
-async def pick_and_place(task_id: str, seed: int = 0):
-    ep = await endpoint.reset(task_id=task_id, seed=seed)
-    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
-    yield await endpoint.result(token=ep["token"])
-```
-
-**Sim process** - your program builds the bridge and serves its control surface, blocking for the
-process's lifetime with the sim owning the main thread:
-
-```python sim_main.py
-from hud.environment.robot import RobotEndpoint
-
-bridge = MySimBridge()
-RobotEndpoint(bridge).serve_blocking("127.0.0.1", 9100)
-```
-
-Bring the two up together - the env's `connect()` retries until the sim is listening. Everything
-downstream (`hud eval`, tasksets, the agent) is unchanged; only *where the bridge runs* moved.
 
 
 ## API summary
