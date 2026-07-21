@@ -278,7 +278,7 @@ class Taskset:
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
         task's repeats). To land those repeats on one shared substrate (e.g. a
         vectorized robot sim), pass a :class:`~hud.eval.runtime.Shared` provider
-        with ``width`` matching ``group`` / ``max_concurrent``.
+        with ``width`` equal to both ``group`` and ``max_concurrent``.
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
@@ -319,12 +319,11 @@ class Taskset:
         # an error naming the forms to pass.
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
-        # Shared substrates need every slot occupied concurrently — a smaller cap starves the barrier.
-        if isinstance(placement, Shared) and (
-            max_concurrent is None or max_concurrent < placement.width
-        ):
+        # Shared substrates have exactly ``width`` slots: a smaller cap starves the
+        # barrier; a larger one over-claims and fails mid-batch on reset.
+        if isinstance(placement, Shared) and max_concurrent != placement.width:
             raise ValueError(
-                f"Shared(width={placement.width}) requires max_concurrent>={placement.width} "
+                f"Shared(width={placement.width}) requires max_concurrent={placement.width} "
                 f"(got {max_concurrent!r})"
             )
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
