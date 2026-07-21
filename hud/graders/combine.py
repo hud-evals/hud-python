@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import warnings
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .results import EvaluationResult, SubScore
 
@@ -71,12 +71,15 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
         )
 
     normalized_subscores: list[SubScore] = []
+    metadata: dict[str, Any] = {}
 
     for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
         normalized_weight = item.weight / positive_weight_sum if item.weight > 0 else item.weight
         normalized_subscores.append(
             item.model_copy(update={"name": final_name, "weight": normalized_weight})
         )
+        if item.metadata is not None:
+            metadata[final_name] = item.metadata
 
     reward = float(sum(item.value * item.weight for item in normalized_subscores))
 
@@ -84,6 +87,7 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
         reward=reward,
         done=True,
         subscores=normalized_subscores,
+        info=metadata,
     )
 
 

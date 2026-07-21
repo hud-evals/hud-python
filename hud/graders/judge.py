@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from .base import Grader
-from .results import SubScore, _rubric_value
+from .results import SubScore
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -154,6 +154,18 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
     # Fallback: scan for a verdict token (UNMET contains MET, so test it first).
     upper = text.upper()
     return ("UNMET" not in upper and "MET" in upper), text[:200]
+
+
+def _rubric_value(subscores: list[SubScore]) -> float:
+    """Aggregate criterion verdicts into a rubric score."""
+    total_positive = sum(max(0.0, subscore.weight) for subscore in subscores)
+    total_negative = sum(abs(subscore.weight) for subscore in subscores if subscore.weight < 0)
+    weighted_sum = sum(subscore.value * subscore.weight for subscore in subscores)
+    if total_positive > 0:
+        return max(0.0, min(1.0, weighted_sum / total_positive))
+    if total_negative > 0:
+        return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
+    return 0.0
 
 
 __all__ = ["LLMJudgeGrader"]

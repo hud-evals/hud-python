@@ -73,44 +73,6 @@ class TestResultShapes:
             "metadata": None,
         }
 
-    def test_subscore_aggregation_requires_children(self) -> None:
-        with pytest.raises(ValueError, match="requires children"):
-            SubScore(name="any", value=1.0, aggregation="any")
-
-    def test_subscore_warns_when_value_disagrees_with_aggregation(self) -> None:
-        with pytest.warns(UserWarning, match="disagrees"):
-            SubScore(
-                name="all",
-                value=1.0,
-                aggregation="all",
-                children=[SubScore(name="tests", value=0.0)],
-            )
-
-    def test_rubric_aggregation_is_weighted_pass_fraction(self) -> None:
-        node = SubScore(
-            name="judge",
-            value=0.25,
-            aggregation="rubric",
-            children=[
-                SubScore(name="met", value=1.0, weight=1.0),
-                SubScore(name="unmet", value=0.0, weight=3.0),
-            ],
-        )
-        assert node.value == 0.25
-
-    def test_rubric_aggregation_negative_weight_penalizes(self) -> None:
-        # A fired error criterion (value 1.0, negative weight) subtracts.
-        with pytest.warns(UserWarning, match="disagrees"):
-            SubScore(
-                name="judge",
-                value=1.0,
-                aggregation="rubric",
-                children=[
-                    SubScore(name="met", value=1.0, weight=1.0),
-                    SubScore(name="error fired", value=1.0, weight=-0.5),
-                ],
-            )
-
 
 class TestNormalize:
     def test_lowercases(self) -> None:
@@ -355,7 +317,7 @@ class TestCombine:
     async def test_combine_propagates_metadata(self) -> None:
         metadata = {"stdout": "ok"}
         result = await combine(SubScore(name="grader", value=1.0, weight=1.0, metadata=metadata))
-        assert result.info == {}
+        assert result.info == {"grader": metadata}
         assert result.subscores is not None
         assert result.subscores[0].metadata == metadata
         assert result.model_dump(mode="json")["subscores"][0]["metadata"] == metadata
@@ -446,6 +408,34 @@ class TestGrader:
         assert subscore.metadata is not None
         assert subscore.metadata["_parameters"]["marker"] == "ok"
         assert subscore.metadata["_parameters"]["payload"] == "<object: not serializable>"
+
+    async def test_grade_coerces_legacy_tuple_metadata(self) -> None:
+        class TupleGrader(Grader):
+            name = "tuple"
+
+            @classmethod
+            async def compute_score(cls, **kwargs: object) -> tuple[float, dict[str, object]]:
+                return 0.75, {"source": "released-contract"}
+
+        subscore = await TupleGrader.grade(weight=0.4, marker="ok")
+        assert subscore.name == "tuple"
+        assert subscore.value == pytest.approx(0.75)
+        assert subscore.weight == pytest.approx(0.4)
+        assert subscore.metadata is not None
+        assert subscore.metadata["source"] == "released-contract"
+        assert subscore.metadata["_parameters"]["marker"] == "ok"
+
+    async def test_grade_preserves_returned_subscore_name_without_override(self) -> None:
+        class RubricGrader(Grader):
+            name = "rubric"
+
+            @classmethod
+            async def compute_score(cls, **kwargs: object) -> SubScore:
+                return SubScore(name="specific-rubric", value=1.0)
+
+        subscore = await RubricGrader.grade(weight=0.7)
+        assert subscore.name == "specific-rubric"
+        assert subscore.weight == pytest.approx(0.7)
 
     async def test_grade_stamps_name_and_weight_on_returned_subscore(self) -> None:
         class RubricGrader(Grader):
@@ -579,6 +569,18 @@ class TestLLMJudgeGrader:
             ("names the river", 0.0, 3.0, "because"),
         ]
 
+    async def test_compute_score_applies_negative_criterion_penalty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
+        )
+        subscore = await LLMJudgeGrader.compute_score(
+            answer="some answer",
+            criteria=[("met: positive", 1.0), ("met: error", -0.5)],
+        )
+        assert subscore.value == pytest.approx(0.5)
+
     async def test_grade_puts_verdicts_on_children(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
@@ -628,3 +630,5 @@ class TestBashGrader:
         assert by_name["BashGrader-1"].metadata["exit_code"] == 0
         assert by_name["BashGrader-2"].metadata is not None
         assert by_name["BashGrader-2"].metadata["exit_code"] != 0
+        assert result.info["BashGrader-1"]["exit_code"] == 0
+        assert result.info["BashGrader-2"]["exit_code"] != 0

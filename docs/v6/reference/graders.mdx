@@ -124,9 +124,12 @@ async def composed(answer: str = ""):
 
 The subscores appear in the trace, so a partial reward is legible. `combine_any`/`combine_all` fold alternatives into a single component you can feed to `combine` - e.g. "tests pass via `pytest` OR via `make test`" as one 0/1 subscore. The combined `SubScore` keeps its inputs on `children` and records the operator on `aggregation`, so the full grading tree - every grader run, its rubric verdicts, and how they were combined - survives into the trace. Combinators nest: a `combine_all` over `combine_any` nodes produces a deeper tree.
 
+Top-level subscore metadata remains mirrored into `EvaluationResult.info` for compatibility with
+existing trace consumers while the structured copy travels with each subscore.
+
 ## Custom graders
 
-Subclass `Grader` and implement async `compute_score`, returning a float or a `SubScore`:
+Subclass `Grader` and implement async `compute_score`, returning a `SubScore`:
 
 ```python
 class LengthGrader(Grader):
@@ -134,14 +137,15 @@ class LengthGrader(Grader):
 
     @classmethod
     async def compute_score(cls, answer: str = "", target: int = 100, **kwargs):
-        return 1.0 if len(answer) >= target else 0.0
+        return SubScore(name=cls.name, value=1.0 if len(answer) >= target else 0.0)
 
 result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 ```
 
-Return a `SubScore` to attach a `reason`, `children` (e.g. rubric verdicts), or `metadata`
-(diagnostics); `grade` stamps the caller's `name` and `weight` onto it and records the call
-parameters under the `_parameters` metadata key.
+Use `metadata` for diagnostics, `reason` for a human-readable explanation, and `children` for
+nested results such as rubric verdicts. `grade` applies the caller's weight and optional name
+override, then records the call parameters under `_parameters`. Legacy float and
+`(float, metadata)` returns are still coerced to `SubScore` for backwards compatibility.
 
 ## `SubScore` and `EvaluationResult`
 

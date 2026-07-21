@@ -13,8 +13,8 @@ class SubScore(BaseModel):
 
     A leaf subscore is a single measurement: a grader run, or one rubric
     criterion (value ``0``/``1``, with ``reason`` justifying the verdict).
-    A node with ``aggregation`` derived its value from ``children``, which are
-    kept verbatim so the full grading history stays inspectable.
+    A node can record how its value was derived in ``aggregation`` and preserve
+    the inputs as ``children`` so the full grading history stays inspectable.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -47,42 +47,6 @@ class SubScore(BaseModel):
     def score(self) -> float:
         """Alias for value. Deprecated — use .value instead."""
         return self.value
-
-    @model_validator(mode="after")
-    def _check_aggregation(self) -> SubScore:
-        if self.aggregation is None:
-            return self
-        if not self.children:
-            raise ValueError(f"aggregation={self.aggregation!r} requires children")
-        if self.aggregation == "any":
-            expected = max(c.value for c in self.children)
-        elif self.aggregation == "all":
-            expected = min(c.value for c in self.children)
-        else:
-            expected = _rubric_value(self.children)
-        if abs(expected - self.value) > 0.01:
-            warnings.warn(
-                f"SubScore {self.name!r}: value={self.value:.4f} disagrees with "
-                f"{self.aggregation}(children)={expected:.4f}",
-                stacklevel=2,
-            )
-        return self
-
-
-def _rubric_value(subscores: list[SubScore]) -> float:
-    """Weighted pass-fraction: sum(value*weight) over positive weight, clamped to 0-1.
-
-    Negative weights are penalties: on those children, value ``1.0`` means the
-    error is present and subtracts. An all-negative rubric starts at ``1.0``.
-    """
-    total_positive = sum(max(0.0, s.weight) for s in subscores)
-    total_negative = sum(abs(s.weight) for s in subscores if s.weight < 0)
-    weighted_sum = sum(s.value * s.weight for s in subscores)
-    if total_positive > 0:
-        return max(0.0, min(1.0, weighted_sum / total_positive))
-    if total_negative > 0:
-        return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
-    return 0.0
 
 
 class EvaluationResult(BaseModel):
