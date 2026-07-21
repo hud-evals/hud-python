@@ -16,10 +16,10 @@ derive a minimal contract) and stay in lockstep because of it:
       from hud.environment.robot import wrap
       env = wrap(make_env(...), job="chess-eval")
 
-On first reset a minimal ``contract.json`` is written next to your script
-describing how the observation/action spaces were interpreted; edit its
-``names`` to relabel the platform's plots. An existing file is loaded instead,
-so edits stick.
+If no contract file exists, ``GymBridge.start`` builds the env once (factory
+defaults) and writes a minimal ``contract.json`` before the capability is
+published — the agent binds from that manifest. Edit ``names`` to relabel
+plots; an existing file is loaded instead, so edits stick.
 """
 
 from __future__ import annotations
@@ -249,7 +249,7 @@ class GymBridge(RobotBridge):
             await self._run_on_sim(self._sync_reset, task_args)
 
     def _load_contract_if_present(self) -> None:
-        """Load a pre-written contract.json without touching Isaac (lazy spawn)."""
+        """Load a pre-written contract.json when present (skips the start-time probe)."""
         if self.contract or self._contract_path is None:
             return
         path = Path(self._contract_path)
@@ -258,7 +258,7 @@ class GymBridge(RobotBridge):
             self._fps = self._fps or int(self.contract.get("control_rate") or 15)
 
     def _ensure_contract_from_env(self) -> None:
-        """Derive/load contract once the env exists (first reset under lazy spawn)."""
+        """Derive/load contract from a sample observation once the env exists."""
         if self.contract or self.env is None:
             return
         state, frames = self.sample_observation()
@@ -274,21 +274,29 @@ class GymBridge(RobotBridge):
             print(f"[env] wrote {self._contract_path} (edit names to relabel plots)", flush=True)
 
     async def start(self) -> None:
-        """Bring up the wire immediately; Isaac builds on first reset (lazy spawn).
+        """Bind the wire with a complete contract so ``env.initialize`` can publish it.
 
-        Cold Isaac boots can take several minutes. Announcing ``HUD_SIM_PORT``
-        before ``make_env`` keeps the parent server alive while the child cooks.
+        A contract file is loaded when present. Otherwise the env is built with
+        factory defaults and probed here — ``@env.initialize`` awaits this — so
+        the capability manifest is never empty when the agent binds.
         """
         self._load_contract_if_present()
         if "num_envs" in self._defaults:
             self.num_envs = int(self._defaults["num_envs"])
             self.batched = self.num_envs > 0
-        print("[env] lazy spawn: announcing port before Isaac boot", flush=True)
+        if not self.contract:
+            # Manifest is minted from bridge.contract right after start returns.
+            print(
+                "[env] no contract found; building env to probe observation/action structure",
+                flush=True,
+            )
+            await self._run_on_sim(self._sync_reset, {})
+            self._ensure_contract_from_env()
         await super().start()
 
     async def reset(self, **task_args: Any) -> str:
         prompt = await self._run_on_sim(self._sync_reset, task_args)
-        self._ensure_contract_from_env()
+        self._ensure_contract_from_env()  # no-op when start() already probed
         return prompt
 
     async def stop(self) -> None:
