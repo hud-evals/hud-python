@@ -154,10 +154,9 @@ class Shared:
     """Refcounting provider: N concurrent rollouts share one substrate.
 
     The first ``__call__`` provisions via *inner*; later callers reuse that
-    address until the last exit tears it down. ``width`` is the intended
-    concurrent occupancy (e.g. a robot sim's ``num_envs``); when callers pass
-    a smaller ``max_concurrent`` at the scheduler, slots are underfilled —
-    that is allowed. Use with ``Taskset.run(..., group=width, max_concurrent=width)``.
+    address until the last exit tears it down. ``width`` is the hard cap on
+    concurrent occupancy (e.g. a robot sim's ``num_envs``) — a further acquire
+    raises. Pair with ``Taskset.run(..., group=width, max_concurrent=width)``.
     """
 
     def __init__(self, inner: Provider, *, width: int) -> None:
@@ -173,10 +172,20 @@ class Shared:
     @asynccontextmanager
     async def __call__(self, task: Task) -> Any:
         async with self._lock:
+            if self._refs >= self.width:
+                raise RuntimeError(
+                    f"Shared(width={self.width}) already has {self._refs} concurrent "
+                    "callers; raise max_concurrent no higher than width"
+                )
             if self._addr is None:
-                self._stack = contextlib.AsyncExitStack()
-                await self._stack.__aenter__()
-                self._addr = await self._stack.enter_async_context(self.inner(task))
+                stack = contextlib.AsyncExitStack()
+                await stack.__aenter__()
+                try:
+                    self._addr = await stack.enter_async_context(self.inner(task))
+                except BaseException:
+                    await stack.aclose()  # failed boot — don't orphan a half-open stack
+                    raise
+                self._stack = stack  # publish only after inner succeeds
             self._refs += 1
             addr = self._addr
         try:
