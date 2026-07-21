@@ -168,19 +168,17 @@ def test_caller_env_is_injected_only_after_the_drop(
 
 
 @pytest.mark.asyncio
-async def test_wall_hands_preexisting_contents_to_the_dropped_uid(
+async def test_wall_handoff_is_top_level_only_and_never_walks_the_tree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Contents baked in before serve (e.g. a Docker COPY as root) must become
-    editable from the dropped shell, not just the top-level directory."""
+    """The handoff must be O(1): only the workspace dir is chowned. Recursing
+    over baked content (node_modules, a venv) on the serving path would delay
+    the control-port bind past the deploy readiness probe."""
     _wall(monkeypatch)
     handed: list[str] = []
     monkeypatch.setattr(os, "lchown", lambda p, u, g: handed.append(os.fsdecode(p)))
-    monkeypatch.setattr(
-        os,
-        "chown",
-        lambda p, u, g, dir_fd=None, follow_symlinks=True: handed.append(os.fsdecode(p)),
-    )
+    monkeypatch.setattr(os, "walk", lambda *a, **k: pytest.fail("handoff must not walk the tree"))
+    monkeypatch.setattr(os, "fwalk", lambda *a, **k: pytest.fail("handoff must not walk the tree"))
 
     root = tmp_path / "root"
     (root / "pkg").mkdir(parents=True)
@@ -189,8 +187,7 @@ async def test_wall_hands_preexisting_contents_to_the_dropped_uid(
     ws = Workspace(root, shell_uid=1000)
     await ws.start()
     try:
-        names = {Path(p).name for p in handed}
-        assert {"root", "pkg", "mod.py"} <= names
+        assert [Path(p).name for p in handed] == ["root"]
     finally:
         await ws.stop()
 
@@ -199,8 +196,8 @@ async def test_wall_hands_preexisting_contents_to_the_dropped_uid(
 async def test_wall_handoff_failure_refuses_to_serve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A partial ownership handoff silently breaks the workspace contract;
-    the server must fail loudly instead of serving root-owned files."""
+    """A failed ownership handoff leaves a workspace the agent can't write;
+    the server must fail loudly instead of serving it."""
     _wall(monkeypatch)
 
     def deny(p: object, u: int, g: int) -> None:
