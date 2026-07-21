@@ -14,6 +14,7 @@ derive a minimal contract) and stay in lockstep because of it:
   state, per-camera H.264 video, actions, reward/success) under one job::
 
       from hud.environment.robot import wrap
+
       env = wrap(make_env(...), job="chess-eval")
 
 If no contract file exists, ``GymBridge.start`` builds the env once (factory
@@ -26,6 +27,7 @@ from __future__ import annotations
 
 import atexit
 import inspect
+import itertools
 import json
 import logging
 import sys
@@ -419,8 +421,12 @@ class GymBridge(RobotBridge):
         data["reward"] = self._step_reward
         if not self.batched:
             # Plain single env: lift scalars to a batch of one for uniform slicing.
-            data = {k: (v if getattr(v, "ndim", 0) >= 1 and v.shape[:1] == (1,) else np.asarray(v)[None])
-                    for k, v in data.items()}
+            data = {
+                k: (
+                    v if getattr(v, "ndim", 0) >= 1 and v.shape[:1] == (1,) else np.asarray(v)[None]
+                )
+                for k, v in data.items()
+            }
         return data, np.asarray(self._done, dtype=bool).reshape(self.num_envs)
 
     def result_slots(self) -> list[dict[str, Any]]:
@@ -649,7 +655,7 @@ def main() -> None:
         defaults["num_envs"] = args.num_envs
     # Further --key value pairs from gym_command become build defaults. JSON
     # round-trip restores real types; bare strings (hand-written argv) pass as-is.
-    for flag, value in zip(unknown, unknown[1:]):
+    for flag, value in itertools.pairwise(unknown):
         if flag.startswith("--"):
             try:
                 defaults[flag[2:].replace("-", "_")] = json.loads(value)
