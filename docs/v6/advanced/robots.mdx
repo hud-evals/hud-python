@@ -445,23 +445,12 @@ instance rather than one you also use for unbatched runs.
 
 ## Vectorized envs and evals
 
-A GPU sim like Isaac amortizes its cost by stepping many env copies together in one process
-(`num_envs`). Getting N graded rollouts by booting N separate containers throws that away - each
-one pays for its own physics from scratch. Instead, N rollouts share one vectorized instance, and
-every layer keeps the plain single-env contract described above:
-
-- **Vectorization is sim config, not an eval parameter.** A factory that accepts `num_envs` makes
-  `env.gym(make_env, num_envs=8)` build an eight-way batched sim. Internally the bridge steps
-  every claimed slot together each tick, but each rollout still gets its own ordinary WebSocket -
-  one observation in, one action out, no batch dimension on the wire.
-- **The agent is unchanged.** A stock `RobotAgent` drives one connection per rollout, same as a
-  single-env run. It claims its slot with the token the environment handed back on `tasks.start`
-  (`run.started["robot"]["token"]`); concurrent rollouts still coalesce GPU forwards through
-  [`BatchedModel`](#batching).
-- **`group` picks how many rollouts; `Shared` puts them on one substrate.** Left alone, `group`
-  rollouts would each provision a fresh container. Wrapping the provider in
-  [`Shared(provider, width=N)`](/v6/reference/runtime#shared) instead provisions one and lets
-  all `N` reuse it:
+Grading N rollouts by booting N separate containers wastes a GPU sim's whole advantage - each
+container pays for its own physics from scratch, when a sim like Isaac Sim could instead step all
+N copies together in one [vectorized](#gym-style-envs) instance. Running an eval against a vectorized sim needs no changes to
+the agent or the env's contract, only to how the eval provisions rollouts: wrap the runtime in
+[`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `group` rollouts share that one
+substrate instead of provisioning `N` containers.
 
 ```python
 from hud.eval import Shared, DockerRuntime
@@ -474,15 +463,17 @@ job = await taskset.run(
 )
 ```
 
-Each rollout opens its own control-channel connection and claims a slot on it: the first
-`tasks.start` resets the sim and claims slot 0, later starts claim whatever is free, and a start
-once every slot is taken errors instead of queuing silently. Grading is the same call every
-rollout already makes - the environment resolves it to that rollout's slot and returns one
-`Grade`, exactly as a single-env run would.
+`group` and `max_concurrent` are the ordinary [`Taskset.run` parameters](/v6/reference/tasks#running).
+A few things to note:
 
-`group` and `max_concurrent` are the ordinary [`Taskset.run` parameters](/v6/reference/tasks#running);
-set `max_concurrent` to `width` so every slot fills and none sit idle waiting for a rollout that
-never starts.
+- **The agent doesn't change.** Each rollout still drives one ordinary WebSocket connection and
+  calls `reset` / `result` as usual - the environment resolves each call to that rollout's own
+  [slot](#gym-style-envs).
+- **Slots fill in order, then stop.** The first `reset` claims slot 0; once every slot is taken, a
+  further `reset` errors instead of queuing, so set `max_concurrent` to `width` so every slot fills.
+- **EnvHub sims work unchanged.** A [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub)
+  package's `make_env` often already returns a vectorized sim, so `env.gym(make_env, num_envs=N)`
+  serves it directly.
 
 ## Contract
 
