@@ -23,3 +23,50 @@ jobs:
         run: |
           uv build
           uv publish
+
+  deploy-docs:
+    if: ${{ !github.event.release.prerelease }}
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MINTLIFY_API_KEY: ${{ secrets.MINTLIFY_API_KEY }}
+      MINTLIFY_PROJECT_ID: ${{ vars.MINTLIFY_PROJECT_ID }}
+    steps:
+      - name: Deploy docs to Mintlify
+        run: |
+          : "${MINTLIFY_API_KEY:?MINTLIFY_API_KEY is not configured}"
+          : "${MINTLIFY_PROJECT_ID:?MINTLIFY_PROJECT_ID is not configured}"
+
+          response=$(curl --silent --show-error --fail-with-body \
+            --request POST \
+            --url "https://api.mintlify.com/v1/project/update/${MINTLIFY_PROJECT_ID}" \
+            --header "Authorization: Bearer ${MINTLIFY_API_KEY}")
+          status_id=$(jq -er '.statusId' <<< "$response")
+
+          for _ in {1..60}; do
+            response=$(curl --silent --show-error --fail-with-body \
+              --url "https://api.mintlify.com/v1/project/update-status/${status_id}" \
+              --header "Authorization: Bearer ${MINTLIFY_API_KEY}")
+            status=$(jq -er '.status' <<< "$response")
+
+            case "$status" in
+              success)
+                exit 0
+                ;;
+              failure)
+                jq -r '.summary, (.logs[]? // empty)' <<< "$response"
+                exit 1
+                ;;
+              queued|in_progress)
+                sleep 10
+                ;;
+              *)
+                echo "Unknown Mintlify deployment status: $status"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "Timed out waiting for Mintlify deployment $status_id."
+          exit 1
