@@ -195,10 +195,14 @@ class RobotBridge(ABC):
         token = self._registry.claim(slot)
         return {"prompt": self.task_description, "token": token}
 
-    def _release_episode(self, token: str | None) -> dict[str, Any]:
-        """Control-plane result: this slot's score, then free it."""
+    async def _release_episode(self, token: str | None) -> dict[str, Any]:
+        """Control-plane result: this slot's score, then free it.
+
+        Scores are written in ``step`` on the sim thread — read them there too
+        so grading never races a mid-step update on the serve loop.
+        """
         slot = self._registry.resolve(token)
-        grade = self.result_slots()[slot.index]
+        grade = (await self._run_on_sim(self.result_slots))[slot.index]
         self._registry.release(slot)
         return grade
 
@@ -220,7 +224,10 @@ class RobotBridge(ABC):
 
     def result_slots(self) -> list[dict[str, Any]]:
         """One score dict per slot. Default: the scalar episode grade for every slot
-        (vectorized bridges with per-slot scoring override this)."""
+        (vectorized bridges with per-slot scoring override this).
+
+        Invoked on the sim thread via :meth:`_run_on_sim` (same as ``step``).
+        """
         grade = {
             "score": 1.0 if self.success else 0.0,
             "success": bool(self.success),
@@ -446,7 +453,7 @@ class RobotBridge(ABC):
             token = params.get("token")
             if token is not None and not isinstance(token, str):
                 raise ValueError("result: 'token' must be a string when given")
-            return self._release_episode(token)
+            return await self._release_episode(token)
         raise ValueError(f"unknown method {method!r}")
 
 
