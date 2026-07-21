@@ -523,11 +523,16 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
 
 
 def main() -> None:
-    """Child entry: ``python -m hud.environment.robot.bridge path.py:ClassName``."""
+    """Child entry: ``python -m hud.environment.robot.bridge path.py:Class [--init JSON]``."""
+    import json
+
     from hud.utils.modules import load_module
 
     path, _, name = sys.argv[1].rpartition(":")
-    serve_bridge(getattr(load_module(path), name)())
+    kwargs: dict[str, Any] = {}
+    if len(sys.argv) >= 4 and sys.argv[2] == "--init":
+        kwargs = json.loads(sys.argv[3])
+    serve_bridge(getattr(load_module(path), name)(**kwargs))
 
 
 if __name__ == "__main__":

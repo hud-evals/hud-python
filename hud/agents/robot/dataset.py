@@ -3,9 +3,11 @@
 Each rollout holds a :class:`DatasetWriter` that buffers its ``(observation,
 executed action)`` frames and commits whole episodes into one process-shared
 dataset — so concurrent rollouts (e.g. :class:`~hud.agents.robot.batching.BatchedAgent`
-clones) record into a single dataset instead of one shard each. A class lock
-serializes commits so episodes stay contiguous. Finalized at process exit (or
-an explicit :meth:`finalize`), optionally pushed to the HF Hub.
+clones) record into a single dataset instead of one shard each. The shared
+dataset (and an ``atexit`` finalizer that flushes open buffers) is created on
+the first frame. A class lock serializes commits so episodes stay contiguous.
+Finalized at process exit (or an explicit :meth:`finalize`), optionally pushed
+to the HF Hub.
 The contract drives the schema with no extra wiring. Destination + push come
 from the environment:
 
@@ -139,7 +141,11 @@ class DatasetWriter:
         act_ft = self._features["action"]
         row["action"] = np.asarray(action, dtype=act_ft["dtype"]).reshape(act_ft["shape"])
         row["task"] = task
-        self._frames.append(row)
+        # Open the shared dataset on the first frame so atexit can flush if we
+        # die before end_episode (still in-memory until then; kill -9 loses it).
+        with DatasetWriter._lock:
+            self._ensure_dataset()
+            self._frames.append(row)
 
     def end_episode(self) -> None:
         """Commit this rollout's buffered episode to the shared dataset.
@@ -180,7 +186,7 @@ class DatasetWriter:
                 )
 
     def _ensure_dataset(self) -> Any:
-        """Return the process-shared dataset, creating it on first commit.
+        """Return the process-shared dataset, creating it on first frame.
 
         Caller must hold ``_lock`` (create is check-then-act on ``_ds``).
         """

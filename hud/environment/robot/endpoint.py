@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -48,6 +49,27 @@ if TYPE_CHECKING:
 
     from hud.capabilities import Capability
     from hud.utils.process import ProcessGroup
+
+
+def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
+    """JSON-safe subclass ``__init__`` kwargs from a declaration instance (skip base host/port)."""
+    base = set(inspect.signature(RobotBridge.__init__).parameters) - {"self"}
+    out: dict[str, Any] = {}
+    for name, param in inspect.signature(type(bridge).__init__).parameters.items():
+        if name == "self" or name in base:
+            continue
+        if param.kind not in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY):
+            continue
+        attr = name if hasattr(bridge, name) else f"_{name}"
+        if not hasattr(bridge, attr):
+            continue
+        value = getattr(bridge, attr)
+        try:
+            json.dumps(value)  # stream sinks / recorders are not child-portable
+        except TypeError:
+            continue
+        out[name] = value
+    return out
 
 
 class RobotEndpoint:
@@ -67,7 +89,7 @@ class RobotEndpoint:
         connect_timeout_s: float = 900.0,
     ) -> None:
         if bridge is not None:
-            # Child re-imports the class and serve_bridge()'s it (ctor args not forwarded).
+            # Child re-imports the class; instance ctor kwargs ride along as --init JSON.
             cls = bridge if isinstance(bridge, type) else type(bridge)
             name = getattr(cls, "__qualname__", "")
             if not name or "." in name or "<" in name:
@@ -78,6 +100,8 @@ class RobotEndpoint:
                 "hud.environment.robot.bridge",
                 f"{inspect.getfile(cls)}:{name}",
             ]
+            if isinstance(bridge, RobotBridge) and (kwargs := _bridge_init_kwargs(bridge)):
+                cmd += ["--init", json.dumps(kwargs)]
         self._cmd = list(cmd) if cmd is not None else None  # set => spawned mode
 
         self._host = host
