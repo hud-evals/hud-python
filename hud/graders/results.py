@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
+
+_SPAN_SERIALIZATION_CONTEXT = "hud_span"
 
 
 class SubScore(BaseModel):
@@ -32,6 +42,17 @@ class SubScore(BaseModel):
         default=None,
         description="Grader-specific details recorded on the evaluation span",
     )
+
+    @model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        info: SerializationInfo,
+    ) -> dict[str, Any]:
+        data = cast("dict[str, Any]", handler(self))
+        if not (info.context or {}).get(_SPAN_SERIALIZATION_CONTEXT):
+            data.pop("metadata", None)
+        return data
 
     @property
     def score(self) -> float:
@@ -86,6 +107,13 @@ class EvaluationResult(BaseModel):
     def from_float(cls, value: float) -> EvaluationResult:
         """Create an EvaluationResult from a simple float reward."""
         return cls(reward=value, done=True)
+
+    def model_dump_for_span(self) -> dict[str, Any]:
+        """Serialize the evaluation with span-only subscore details."""
+        return self.model_dump(
+            mode="json",
+            context={_SPAN_SERIALIZATION_CONTEXT: True},
+        )
 
 
 __all__ = ["EvaluationResult", "SubScore"]

@@ -165,7 +165,7 @@ class TaskRunner:
         if isinstance(evaluation, EvaluationResult):
             # Forward the full grade frame so metadata (info/content/done/isError/
             # subscores) survives; the wire names the score "score", the model "reward".
-            frame = evaluation.model_dump(mode="json")
+            frame = evaluation.model_dump_for_span()
             frame["score"] = frame.pop("reward")
             return frame
         return {"score": _score_value(evaluation)}

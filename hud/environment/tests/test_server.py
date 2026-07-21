@@ -101,12 +101,35 @@ async def test_evaluation_result_metadata_reaches_evaluate_step() -> None:
             run.trace.content = "x"
         assert run.reward == 0.75
         assert run.grade.info == {"max_tile": 256}
-        assert run.evaluation["subscores"][0]["metadata"] == {"model": "judge-model"}
-        assert run.evaluation["subscores"][0]["children"][0]["metadata"] == {"reason": "because"}
+        assert "metadata" not in run.evaluation["subscores"][0]
+        assert "metadata" not in run.evaluation["subscores"][0]["children"][0]
         evaluate_step = run.trace.steps[-1]
         assert evaluate_step.task_call is not None
         assert evaluate_step.task_call.phase == "evaluate"
-        assert evaluate_step.task_call.result == run.evaluation
+        assert evaluate_step.task_call.result == {
+            "score": 0.75,
+            "done": True,
+            "content": "nice",
+            "info": {"max_tile": 256},
+            "isError": False,
+            "subscores": [
+                {
+                    "name": "judge",
+                    "weight": 1.0,
+                    "value": 0.75,
+                    "children": [
+                        {
+                            "name": "criterion",
+                            "weight": 1.0,
+                            "value": 1.0,
+                            "children": None,
+                            "metadata": {"reason": "because"},
+                        }
+                    ],
+                    "metadata": {"model": "judge-model"},
+                }
+            ],
+        }
 
 
 def test_answer_holds_parsed_content_and_raw_string() -> None:

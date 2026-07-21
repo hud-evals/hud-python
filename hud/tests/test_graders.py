@@ -43,7 +43,7 @@ class TestResultShapes:
         with pytest.warns(UserWarning):
             EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
 
-    def test_subscore_serializes_metadata_and_children(self) -> None:
+    def test_subscore_omits_metadata_from_standard_serialization(self) -> None:
         node = SubScore(
             name="any",
             value=1.0,
@@ -51,24 +51,30 @@ class TestResultShapes:
         )
         dumped = node.model_dump(mode="json")
         assert dumped["children"][0]["name"] == "tests"
-        assert dumped["children"][0]["metadata"] == {"exit_code": 0}
+        assert "metadata" not in dumped
+        assert "metadata" not in dumped["children"][0]
 
-    def test_subscore_serializes_rubric_children(self) -> None:
-        node = SubScore(
-            name="judge",
-            value=1.0,
-            children=[
-                SubScore(name="Mentions Paris", value=1.0, metadata={"reason": "says Paris"})
+    def test_evaluation_span_serializes_recursive_metadata(self) -> None:
+        result = EvaluationResult(
+            reward=1.0,
+            subscores=[
+                SubScore(
+                    name="judge",
+                    value=1.0,
+                    children=[
+                        SubScore(
+                            name="Mentions Paris",
+                            value=1.0,
+                            metadata={"reason": "says Paris"},
+                        )
+                    ],
+                    metadata={"model": "judge-model"},
+                )
             ],
         )
-        dumped = node.model_dump(mode="json")
-        assert dumped["children"][0] == {
-            "name": "Mentions Paris",
-            "weight": 1.0,
-            "value": 1.0,
-            "children": None,
-            "metadata": {"reason": "says Paris"},
-        }
+        dumped = result.model_dump_for_span()
+        assert dumped["subscores"][0]["metadata"] == {"model": "judge-model"}
+        assert dumped["subscores"][0]["children"][0]["metadata"] == {"reason": "says Paris"}
 
 
 class TestNormalize:
@@ -317,7 +323,7 @@ class TestCombine:
         assert result.info == {}
         assert result.subscores is not None
         assert result.subscores[0].metadata == metadata
-        assert result.model_dump(mode="json")["subscores"][0]["metadata"] == metadata
+        assert "metadata" not in result.model_dump(mode="json")["subscores"][0]
 
     async def test_combine_keeps_rubric_children_on_subscores(self) -> None:
         verdicts = [
