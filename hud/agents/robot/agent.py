@@ -73,14 +73,20 @@ class RobotAgent(Agent):
 
         robot = await RobotClient.connect(run.client.binding(self.robot_protocol), token=token)
         try:
-            _, obs_space = robot.spaces()
+            action_space, obs_space = robot.spaces()
             if self.adapter is not None:
-                self.adapter.bind(*robot.spaces())
+                self.adapter.bind(action_space, obs_space)
                 self.adapter.reset()
 
             obs = await robot.get_observation()
             fps = robot.get_control_rate()
-            recorder = TraceRecorder(run=run, fps=fps, obs_space=obs_space)
+            # Contract labels: obs_space for state, action names for InferenceStep plots.
+            recorder = TraceRecorder(
+                run=run,
+                fps=fps,
+                obs_space=obs_space,
+                action_names=action_space.get("names"),
+            )
             writer = None
             if self.save:
                 from .dataset import DatasetWriter
