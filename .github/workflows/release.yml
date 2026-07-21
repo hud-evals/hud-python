@@ -1,11 +1,13 @@
 name: Release
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
 jobs:
   deploy:
+    if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     environment: pypi
     steps:
@@ -25,7 +27,7 @@ jobs:
           uv publish
 
   deploy-docs:
-    if: ${{ !github.event.release.prerelease }}
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (needs.deploy.result == 'success' && !github.event.release.prerelease)) }}
     needs: deploy
     runs-on: ubuntu-latest
     timeout-minutes: 15
