@@ -367,6 +367,7 @@ class FileTracker:
         return [
             {"path": e.rel_path, "size": e.size, "content_hash": e.content_hash}
             for e in sorted(snapshot.files.values(), key=lambda e: e.rel_path)
+            if not e.redacted
         ]
 
     def _capture_artifacts(self, current: Snapshot) -> dict[str, Any]:
