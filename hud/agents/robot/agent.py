@@ -14,7 +14,7 @@ match the env natively can set ``adapter = None`` (raw pass-through).
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 
@@ -68,8 +68,11 @@ class RobotAgent(Agent):
         # Single-env templates may omit it — a None claim binds the sole claimed
         # slot; vectorized bridges reject the ambiguity at connect.
         robot_info = run.started.get("robot")
-        raw_token = robot_info.get("token") if isinstance(robot_info, dict) else None
-        token = raw_token if isinstance(raw_token, str) else None
+        token: str | None = None
+        if isinstance(robot_info, dict):
+            raw_token = cast("dict[str, Any]", robot_info).get("token")
+            if isinstance(raw_token, str):
+                token = raw_token
 
         robot = await RobotClient.connect(run.client.binding(self.robot_protocol), token=token)
         try:

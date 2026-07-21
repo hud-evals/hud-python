@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Self, cast
 
 import numpy as np
 import websockets
@@ -84,7 +84,7 @@ class RobotClient(CapabilityClient):
         # bridges require the claim frame; plain openpi servers have no slots.
         meta = _unpackb(raw)
         if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
-            await ws.send(_packb({"claim": token}))
+            await ws.send(cast("Any", _packb({"claim": token})))
         return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:

@@ -18,10 +18,9 @@ import signal
 import sys
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import websockets
@@ -31,6 +30,9 @@ import websockets.exceptions
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
 from hud.capabilities.robot import _packb, _unpackb
 from hud.environment.utils import error, read_frame, reply, send_frame
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: Line the sim program prints once its control channel is bound; the spawning
 #: RobotEndpoint reads it from this process's stdout.
@@ -329,10 +331,8 @@ class RobotBridge(ABC):
     async def _tick_loop(self) -> None:
         """Gather claimed slots' actions (or dialing-timeout → hold), step once, fan out."""
         while True:
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
-            except TimeoutError:
-                pass
             self._action_event.clear()
             claimed = self._registry.claimed()
             # No live connection at all → don't step; episodes must not advance unseen.

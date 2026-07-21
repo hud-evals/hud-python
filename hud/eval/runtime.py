@@ -171,7 +171,7 @@ class Shared:
         self._lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> Any:
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         async with self._lock:
             if self._refs >= self.width:
                 raise RuntimeError(
