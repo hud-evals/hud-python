@@ -144,6 +144,10 @@ verdicts. `grade` applies the caller's weight and optional name override, then r
 parameters under `_parameters`. Legacy float and `(float, metadata)` returns are still coerced to
 `SubScore` for backwards compatibility.
 
+Subscore metadata is recorded on the task's evaluation span for trace inspection but omitted from
+the persisted `evaluation_result`. Names, values, weights, and child relationships remain in the
+persisted score breakdown.
+
 ## `SubScore` and `EvaluationResult`
 
 A `SubScore` is one node in the grade breakdown tree. A leaf is a single measurement; a parent
@@ -155,7 +159,7 @@ preserves the measurements used to derive its value in `children`:
 | `value` | - | Measurement, 0-1. |
 | `weight` | `1.0` | Weight in the parent's combination; negative = penalty. |
 | `children` | `None` | Input subscores this node was combined from. |
-| `metadata` | `None` | Grader-specific details (parameters, explanations, stdout, judge model, ...). |
+| `metadata` | `None` | Grader-specific details recorded on the evaluation span. |
 
 An `EvaluationResult` is the combined grade payload you can yield from a task:
 

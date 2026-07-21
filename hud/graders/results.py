@@ -30,7 +30,7 @@ class SubScore(BaseModel):
     )
     metadata: dict[str, Any] | None = Field(
         default=None,
-        description="Grader-specific details (parameters, stdout, judge model, ...)",
+        description="Grader-specific details recorded on the evaluation span",
     )
 
     @property

@@ -120,6 +120,29 @@ async def trace_enter(
     )
 
 
+def _evaluation_result_for_exit(evaluation: dict[str, Any]) -> dict[str, Any] | None:
+    """Remove span-only subscore metadata from the persisted trace result."""
+    if not evaluation:
+        return None
+
+    result = dict(evaluation)
+    subscores = result.get("subscores")
+    if isinstance(subscores, list):
+        result["subscores"] = [_subscore_for_exit(subscore) for subscore in subscores]
+    return result
+
+
+def _subscore_for_exit(subscore: Any) -> Any:
+    if not isinstance(subscore, dict):
+        return subscore
+
+    result = {key: value for key, value in subscore.items() if key != "metadata"}
+    children = result.get("children")
+    if isinstance(children, list):
+        result["children"] = [_subscore_for_exit(child) for child in children]
+    return result
+
+
 async def trace_exit(run: Run) -> None:
     """Report one finished rollout (status / reward / error / metadata) from its ``Run``."""
     if not _reporting_enabled() or run.trace.trace_id is None:
@@ -132,7 +155,7 @@ async def trace_exit(run: Run) -> None:
             # Recovered step errors stay on the steps; only an errored run
             # reports a trace-level error.
             "error": run.trace.error if run.trace.is_error else None,
-            "evaluation_result": run.evaluation or None,
+            "evaluation_result": _evaluation_result_for_exit(run.evaluation),
             "stop_reason": run.trace.stop_reason,
             # Trajectory metadata the platform stores on the trace for display;
             # never load-bearing.
