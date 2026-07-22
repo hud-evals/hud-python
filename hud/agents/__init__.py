@@ -30,7 +30,16 @@ if TYPE_CHECKING:
 def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     """Create an agent routed through the HUD gateway.
 
-    For direct API access with provider API keys, instantiate the agent classes directly.
+    Attaches a gateway ``model_client`` for local loops (``HUDRuntime`` /
+    ``LocalRuntime``). For ``HostedRuntime``, that client is stripped by
+    :meth:`~hud.agents.tool_agent.ToolAgent.hosted_spec` and rebuilt on the
+    platform from the model name — ``system_prompt``, ``completion_kwargs``
+    (including ``return_token_ids`` / Tinker kwargs), and other config still
+    travel. True BYOK / custom clients are not serializable; use
+    ``HUDRuntime`` for those TrainingClient workflows.
+
+    For direct API access with provider API keys, instantiate the agent classes
+    directly.
     """
     requested_model = model
     model = normalize_gateway_model_id(model)

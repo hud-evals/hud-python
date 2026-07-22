@@ -38,6 +38,18 @@ Gradients accumulate across `forward_backward` / `forward_backward_custom` / `ba
 | `TrainingClient` | Drives managed training for one model slug. |
 | `CheckpointResponse` | One node in the model's checkpoint tree. |
 
+## Runtime placement
+
+Training reuses the same [runtime](/v6/reference/runtime) placement as eval. Which one you pick
+matters for how the agent is constructed:
+
+| Placement | Agent loop | Use for training when |
+| --- | --- | --- |
+| `LocalRuntime` / `HUDRuntime` | Local (this process) | Default. `create_agent` gateway clients, `system_prompt`, and `completion_kwargs` (`return_token_ids`, Tinker/Qwen kwargs) apply in-process. Required for a true BYOK / custom `model_client`. |
+| `HostedRuntime` | Remote (serialized agent) | Co-located env+agent on a leased box. `create_agent(...)` is supported: the gateway client is rebuilt remotely and config kwargs still travel. Custom / BYOK clients fail early — switch to `HUDRuntime`. |
+
+Cookbooks that load a platform taskset (`Taskset.from_api`) use `HUDRuntime()` for this reason.
+
 ## TrainingClient
 
 A `TrainingClient` drives managed training for one model: it accumulates gradients from rewarded

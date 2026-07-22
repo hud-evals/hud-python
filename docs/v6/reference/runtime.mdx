@@ -173,6 +173,14 @@ Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRu
 runs the agent right next to it. This process only submits the rollout and polls its trace to
 completion. It requires a gateway agent that can serialize its identity (Claude/OpenAI/Gemini).
 
+Agents from [`create_agent`](/v6/reference/agents#create-agent) are supported: the local gateway
+`model_client` is stripped and rebuilt on the platform, while `system_prompt`,
+`completion_kwargs` (including `return_token_ids` and Tinker/Qwen request kwargs), and other
+config travel intact. A true BYOK / custom `model_client` cannot be serialized — use
+`HUDRuntime` (or `LocalRuntime`) so the agent loop stays on your machine. For
+[`TrainingClient`](/v6/reference/training#trainingclient) workflows, prefer `HUDRuntime` unless
+you specifically need co-located hosted execution.
+
 ### `Runtime`
 
 ```python

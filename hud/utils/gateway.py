@@ -8,7 +8,7 @@ gateway lives in :func:`hud.agents.create_agent`.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from google.genai import Client as GenaiClient
 
     GatewayClient: TypeAlias = AsyncAnthropic | AsyncAnthropicBedrock | GenaiClient | AsyncOpenAI
+
+_T = TypeVar("_T")
 
 
 class GatewayProviderInfo(BaseModel):
@@ -88,22 +90,56 @@ def build_gateway_client(provider: str) -> GatewayClient:
     if provider == "anthropic":
         from anthropic import AsyncAnthropic
 
-        return AsyncAnthropic(api_key=settings.api_key, base_url=settings.hud_gateway_url)
+        client: GatewayClient = AsyncAnthropic(
+            api_key=settings.api_key, base_url=settings.hud_gateway_url
+        )
+        return mark_gateway_client(client)
 
     if provider == "gemini":
         from google import genai
         from google.genai.types import HttpOptions
 
-        return genai.Client(
+        client = genai.Client(
             api_key=settings.api_key,
             http_options=HttpOptions(
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
             ),
         )
+        return mark_gateway_client(client)
 
     # OpenAI-compatible (openai, azure, together, groq, fireworks, etc.)
-    return AsyncOpenAI(api_key=settings.api_key, base_url=settings.hud_gateway_url)
+    client = AsyncOpenAI(api_key=settings.api_key, base_url=settings.hud_gateway_url)
+    return mark_gateway_client(client)
+
+
+_HUD_GATEWAY_CLIENT_ATTR = "_hud_gateway_client"
+# Identity fallback for clients that reject attribute assignment (e.g. bare
+# ``object()`` in tests). Real SDK clients take the attribute mark.
+_GATEWAY_CLIENT_IDS: set[int] = set()
+
+
+def mark_gateway_client(client: _T) -> _T:
+    """Tag a client built for the HUD gateway so hosted serialization can drop it."""
+    try:
+        setattr(client, _HUD_GATEWAY_CLIENT_ATTR, True)
+    except (AttributeError, TypeError):
+        _GATEWAY_CLIENT_IDS.add(id(client))
+    return client
+
+
+def is_gateway_client(client: object | None) -> bool:
+    """True when ``client`` is missing or was built by :func:`build_gateway_client`.
+
+    Hosted reconstruction rebuilds a gateway client from the model name, so a
+    tagged gateway client is safe to strip from ``hosted_spec``. A true BYOK /
+    custom client is not.
+    """
+    if client is None:
+        return True
+    if bool(getattr(client, _HUD_GATEWAY_CLIENT_ATTR, False)):
+        return True
+    return id(client) in _GATEWAY_CLIENT_IDS
 
 
 @lru_cache(maxsize=1)
