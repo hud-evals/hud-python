@@ -28,9 +28,18 @@ class Adapter:
     policy's image-slot names; everything env-side is learned in :meth:`bind`.
     """
 
-    def __init__(self, *, model_image_keys: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model_image_keys: list[str] | None = None,
+        chunk_size: int | None = None,
+    ) -> None:
         #: The policy's ordered image-slot names (model side; known at load time).
         self.model_image_keys: list[str] = list(model_image_keys or [])
+        #: Open-loop horizon: how many predicted actions to execute before re-querying.
+        #: ``None`` = full model chunk. Applied by :class:`~.agent.RobotAgent`, not here —
+        #: so subclass ``adapt_chunk`` overrides stay free of truncation duty.
+        self.chunk_size: int | None = chunk_size
         #: The env's action feature and observation layout (set in :meth:`bind`).
         self.action_space: dict[str, Any] = {}
         self.image_keys: list[str] = []

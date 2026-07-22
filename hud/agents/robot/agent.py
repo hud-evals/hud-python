@@ -145,8 +145,12 @@ class RobotAgent(Agent):
             if not chunk:  # refill with a fresh forward (BatchedModel coalesces ainfer)
                 batch = adapter.adapt_observation(obs, prompt) if adapter else obs
                 rows = np.atleast_2d(await model.ainfer(batch))
-                if adapter is not None:  # e.g. deltas -> absolute vs the query obs
+                if adapter is not None:
+                    # Policy chunk → env space (e.g. relative → absolute at query obs).
                     rows = adapter.adapt_chunk(rows, obs)
+                    # Open-loop horizon: keep only the first N actions, then replan.
+                    if adapter.chunk_size is not None:
+                        rows = rows[: adapter.chunk_size]
                 chunk.extend(rows)
                 recorder.record_inference(rows, tick=step)
 
