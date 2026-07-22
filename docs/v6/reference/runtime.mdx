@@ -154,7 +154,10 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 HUDRuntime(*, run_timeout=3600.0, runtime_url=None)
 ```
 
-- **`run_timeout`** - bound on one rollout end to end, including instance startup.
+- **`run_timeout`** - hard wall-clock bound on one rollout end to end (session
+  ready, agent loop, and grade/cancel with a short teardown grace). Forwarded
+  as `rollout_timeout` into the local rollout driver. Session hello still caps
+  at 300s via `ready_timeout = min(run_timeout, 300)`.
 - **`runtime_url`** - override the runtime endpoint the tunnel connects to.
 
 The SDK leases your deployed env by name and tunnels to its control channel; the agent loop runs local.
@@ -172,6 +175,8 @@ Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRu
 **whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and
 runs the agent right next to it. This process only submits the rollout and polls its trace to
 completion. It requires a gateway agent that can serialize its identity (Claude/OpenAI/Gemini).
+A timeout cancels the platform rollout and returns a terminal failed `Run` (it does not raise),
+so one wedged hosted rollout cannot collapse the rest of a `Taskset.run` batch.
 
 ### `Runtime`
 

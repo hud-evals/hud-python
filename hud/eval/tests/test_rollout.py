@@ -338,6 +338,61 @@ async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
     assert run.trace_id is not None
 
 
+async def test_wedged_grade_cannot_stall_the_rollout() -> None:
+    """A disconnected tunnel during grade must hit the teardown grace, not hang."""
+    from hud.eval import run as run_mod
+
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    class _HangOnGrade:
+        """Wraps a live client but never returns from grade()."""
+
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._inner, name)
+
+        async def grade(self, *_a: Any, **_k: Any) -> dict[str, Any]:
+            await asyncio.sleep(3600)
+            return {}
+
+        async def cancel(self) -> None:
+            return None
+
+    real_connect = run_mod.connect
+
+    @asynccontextmanager
+    async def _connect_hanging(addr: Any) -> AsyncIterator[Any]:
+        async with real_connect(addr) as client:
+            yield _HangOnGrade(client)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(run_mod, "connect", _connect_hanging)
+    monkeypatch.setattr(run_mod, "_TEARDOWN_GRACE_S", 0.2)
+    try:
+        started = asyncio.get_running_loop().time()
+        run = await rollout(
+            _add_task(2, 3),
+            _FnAgent(_solve_add),
+            runtime=lambda _row: _local(env),
+            rollout_timeout=0.3,
+        )
+        elapsed = asyncio.get_running_loop().time() - started
+    finally:
+        monkeypatch.undo()
+
+    assert elapsed < 5.0  # must not wait on the hung grade
+    assert run.trace.is_error
+    assert run.trace.stop_reason == "timeout"
+    assert "grading timed out" in (run.trace.error or "")
+
+
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
     @asynccontextmanager
     async def broken_provider(task: TaskRow) -> AsyncIterator[Runtime]:

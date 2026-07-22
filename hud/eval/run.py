@@ -50,6 +50,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.eval.run")
 
+#: Extra seconds allowed for grade/cancel after the hard ``rollout_timeout``
+#: deadline. Keeps salvage grading usable without letting a wedged tunnel hang
+#: the batch indefinitely.
+_TEARDOWN_GRACE_S = 30.0
+
 
 def _prompt_message(item: Any) -> mcp_types.PromptMessage:
     """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
@@ -114,10 +119,21 @@ class Run:
     half-working.
     """
 
-    def __init__(self, client: HudClient | None, task_id: str, args: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        client: HudClient | None,
+        task_id: str,
+        args: dict[str, Any],
+        *,
+        deadline: float | None = None,
+    ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
+        #: Shared wall-clock end (``loop.time()``) for this rollout, if any.
+        #: Provision/agent honor it strictly; grade/cancel get a short grace
+        #: after it so a wedged JSON-RPC read cannot stall the batch forever.
+        self._deadline = deadline
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -218,6 +234,18 @@ class Run:
             self.record(Step(source="user", messages=self.prompt_messages))
         return self
 
+    async def _await_teardown(self, awaitable: Any) -> Any:
+        """Await teardown RPC (grade/cancel) under the rollout deadline + grace.
+
+        Provision and the agent loop use the hard ``deadline``. Grade and cancel
+        may run briefly past it so a partial trajectory can still be scored, but
+        never unbounded — a wedged tunnel during grade used to stall the batch.
+        """
+        if self._deadline is None:
+            return await awaitable
+        remaining = self._deadline + _TEARDOWN_GRACE_S - asyncio.get_running_loop().time()
+        return await asyncio.wait_for(awaitable, max(remaining, 0.0))
+
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
@@ -229,7 +257,8 @@ class Run:
             exc_type, asyncio.CancelledError | KeyboardInterrupt
         ):
             self.trace.status = "cancelled"
-            await self.client.cancel()
+            with contextlib.suppress(Exception, TimeoutError):
+                await self._await_teardown(self.client.cancel())
             return False
 
         answer: dict[str, Any] = {"answer": self.trace.content}
@@ -237,17 +266,27 @@ class Run:
 
         # A mid-run error grades best-effort (capture a salvageable reward, keep
         # status=error), but a grade failure must not mask the original error. A
-        # clean run grades normally — a grader fault propagates. grade() also
-        # blocks on an unbounded JSON-RPC read (not bound by rollout_timeout).
-        if exc_type is not None:
+        # clean run grades normally — a grader fault propagates. Grade/cancel
+        # are bound by the rollout deadline plus a short teardown grace.
+        try:
+            if exc_type is not None:
+                self.trace.status = "error"
+                try:
+                    evaluation = await self._await_teardown(self.client.grade(answer))
+                except Exception as grade_exc:
+                    logger.warning("grade failed after mid-run error: %s", grade_exc)
+                    return False
+            else:
+                evaluation = await self._await_teardown(self.client.grade(answer))
+        except TimeoutError:
+            logger.warning("rollout grading timed out; leaving run terminal without a grade")
             self.trace.status = "error"
-            try:
-                evaluation = await self.client.grade(answer)
-            except Exception as grade_exc:
-                logger.warning("grade failed after mid-run error: %s", grade_exc)
-                return False
-        else:
-            evaluation = await self.client.grade(answer)
+            if self.trace.stop_reason is None:
+                self.trace.stop_reason = "timeout"
+            self.record(Step(source="system", error="grading timed out"))
+            with contextlib.suppress(Exception, TimeoutError):
+                await self._await_teardown(self.client.cancel())
+            return False
 
         self.grade = Grade.from_dict(evaluation)
         self.record(
@@ -311,9 +350,12 @@ async def rollout(
     start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
     the real run — prompt, placement record, and the partial trace the agent
     built — marked as errored, and still graded best-effort so a salvageable
-    reward is captured. Either way the logged warning names the lifecycle
-    phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``) so
-    callers can tell where the failure landed without reading the trace.
+    reward is captured. Grade and cancel share the same wall-clock deadline
+    plus a short teardown grace, so a disconnected tunnel during grading
+    cannot leave the batch waiting indefinitely. Either way the logged warning
+    names the lifecycle phase (``provisioning``, ``starting task``,
+    ``agent loop``, ``grading``) so callers can tell where the failure landed
+    without reading the trace.
     """
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
@@ -339,11 +381,14 @@ async def rollout(
 
             One shared deadline across provision, connect, and the agent loop —
             not a fresh budget per phase — so the bounded work cannot exceed
-            ``rollout_timeout`` in total. A client read-timeout is not enough on
-            its own: a wedged upstream that trickles bytes resets the read timer
-            forever, so a single stuck sampling call could otherwise hang the
-            rollout — and the batch waits on it — indefinitely. A breach surfaces
-            as ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
+            ``rollout_timeout`` in total. Grade and cancel get a short grace
+            past that deadline (see :data:`_TEARDOWN_GRACE_S`) so salvage
+            scoring still works, but a wedged JSON-RPC read cannot hang the
+            batch. A client read-timeout is not enough on its own: a wedged
+            upstream that trickles bytes resets the read timer forever, so a
+            single stuck sampling call could otherwise hang the rollout — and
+            the batch waits on it — indefinitely. A breach surfaces as
+            ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
             """
             if deadline is None:
                 return await awaitable
@@ -359,7 +404,7 @@ async def rollout(
                 addr = cast("Runtime", await _bounded(stack.enter_async_context(runtime(task))))
                 _phase = "starting task"
                 client = cast("HudClient", await _bounded(stack.enter_async_context(connect(addr))))
-                live = Run(client, task.id, task.args)
+                live = Run(client, task.id, task.args, deadline=deadline)
                 live._runtime = addr.url  # the placement record for the receipt
                 async with live:  # start on enter; grade on exit
                     run = live  # bound only once live: an earlier failure synthesizes

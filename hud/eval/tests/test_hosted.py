@@ -193,11 +193,15 @@ async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPa
     hosted = HostedRuntime(poll_interval=0.0, run_timeout=0.0)
     task = Task(env="sums", id="add", args={})
 
-    with pytest.raises(TimeoutError, match="hosted rollout"):
-        await hosted.run(task, _agent(), job_id=uuid.uuid4().hex)
+    run = await hosted.run(task, _agent(), job_id=uuid.uuid4().hex)
 
     cancel_posts = [(p, b) for p, b in platform.posts if p == "/rollouts/cancel"]
     assert len(cancel_posts) == 1
+    # Timeout must return a terminal failed Run so Taskset.gather cannot drop
+    # the rest of the batch (HUD-2099).
+    assert run.trace.is_error
+    assert run.trace.stop_reason == "timeout"
+    assert "did not finish" in (run.trace.error or "")
 
 
 @pytest.mark.asyncio
@@ -293,7 +297,7 @@ async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr("hud.eval.runtime.rollout", fake_rollout)
 
-    runtime = HUDRuntime()
+    runtime = HUDRuntime(run_timeout=90.0)
     job_id = uuid.uuid4().hex
     trace_id = uuid.uuid4().hex
     run = await runtime.run(
@@ -309,6 +313,33 @@ async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch)
     assert seen["job_id"] == job_id
     assert seen["group_id"] == "g1"
     assert seen["trace_id"] == trace_id
+    assert seen["rollout_timeout"] == 90.0
+
+
+@pytest.mark.asyncio
+async def test_taskset_uses_hud_runtime_run_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hud.eval.taskset as taskset_mod
+    from hud.eval.taskset import Taskset
+
+    seen: dict[str, Any] = {}
+
+    async def fake_rollout(task: Task, agent: Any, **kwargs: Any) -> Run:
+        seen.update(kwargs)
+        run = Run(None, task.id, {})
+        run.trace.status = "completed"
+        return run
+
+    monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
+    monkeypatch.setattr(taskset_mod, "job_enter", lambda *a, **k: asyncio.sleep(0))
+    monkeypatch.setattr(taskset_mod, "flush", lambda timeout=120.0: True)
+
+    job = await Taskset("t", [Task(env="e", id="x")]).run(
+        _agent(),
+        runtime=HUDRuntime(run_timeout=42.0),
+    )
+
+    assert len(job.runs) == 1
+    assert seen["rollout_timeout"] == 42.0
 
 
 @pytest.mark.asyncio
