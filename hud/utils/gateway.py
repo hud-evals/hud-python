@@ -114,17 +114,15 @@ def build_gateway_client(provider: str) -> GatewayClient:
 
 
 _HUD_GATEWAY_CLIENT_ATTR = "_hud_gateway_client"
-# Identity fallback for clients that reject attribute assignment (e.g. bare
-# ``object()`` in tests). Real SDK clients take the attribute mark.
-_GATEWAY_CLIENT_IDS: set[int] = set()
 
 
 def mark_gateway_client(client: _T) -> _T:
-    """Tag a client built for the HUD gateway so hosted serialization can drop it."""
-    try:
-        setattr(client, _HUD_GATEWAY_CLIENT_ATTR, True)
-    except (AttributeError, TypeError):
-        _GATEWAY_CLIENT_IDS.add(id(client))
+    """Tag a client built for the HUD gateway so hosted serialization can drop it.
+
+    The mark lives on the instance (``setattr``). Clients that reject attributes
+    are not supported — real provider SDK clients accept them.
+    """
+    setattr(client, _HUD_GATEWAY_CLIENT_ATTR, True)
     return client
 
 
@@ -137,9 +135,7 @@ def is_gateway_client(client: object | None) -> bool:
     """
     if client is None:
         return True
-    if bool(getattr(client, _HUD_GATEWAY_CLIENT_ATTR, False)):
-        return True
-    return id(client) in _GATEWAY_CLIENT_IDS
+    return bool(getattr(client, _HUD_GATEWAY_CLIENT_ATTR, False))
 
 
 @lru_cache(maxsize=1)

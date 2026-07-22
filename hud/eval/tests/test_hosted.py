@@ -98,6 +98,9 @@ def test_hosted_spec_strips_create_agent_gateway_client(monkeypatch: pytest.Monk
     from hud.agents import create_agent
     from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo, mark_gateway_client
 
+    class _GatewayStub:
+        """Attribute-capable stand-in for a provider SDK client."""
+
     model = GatewayModelInfo(
         id="arith-rl",
         model_name="arith-rl",
@@ -107,7 +110,7 @@ def test_hosted_spec_strips_create_agent_gateway_client(monkeypatch: pytest.Monk
     monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
     monkeypatch.setattr(
         "hud.agents.build_gateway_client",
-        lambda _provider: mark_gateway_client(object()),
+        lambda _provider: mark_gateway_client(_GatewayStub()),
     )
 
     agent = create_agent(
@@ -141,6 +144,29 @@ def test_hosted_spec_rejects_custom_model_client() -> None:
         agent.hosted_spec()
     with pytest.raises(ValueError, match="HUDRuntime"):
         agent.hosted_spec()
+
+
+def test_mark_gateway_client_round_trip() -> None:
+    from hud.utils.gateway import is_gateway_client, mark_gateway_client
+
+    class _Stub:
+        pass
+
+    tagged = mark_gateway_client(_Stub())
+    assert is_gateway_client(tagged)
+    assert not is_gateway_client(_Stub())
+    assert is_gateway_client(None)
+
+
+def test_mark_gateway_client_works_on_async_openai() -> None:
+    """Provider SDK clients must accept the attribute mark (no id-registry fallback)."""
+    from openai import AsyncOpenAI
+
+    from hud.utils.gateway import is_gateway_client, mark_gateway_client
+
+    client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+    assert is_gateway_client(mark_gateway_client(client))
+    assert not is_gateway_client(AsyncOpenAI(api_key="test", base_url="http://localhost"))
 
 
 @pytest.mark.asyncio
