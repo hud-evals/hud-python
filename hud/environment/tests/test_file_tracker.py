@@ -105,6 +105,8 @@ def test_secret_files_are_tracked_but_content_is_never_emitted(tmp_path: Path) -
     tracker = FileTracker(tmp_path)
     tracker.take_baseline()
 
+    assert tracker.current_manifest() == []
+
     (tmp_path / ".env").write_text("API_KEY=supersecretvalue\nDB_PASSWORD=hunter2\n")
     diff = tracker.take_snapshot()
 
@@ -138,11 +140,11 @@ def test_vcs_config_files_are_redacted(tmp_path: Path) -> None:
     assert "new-token@example.com" not in patch.patch
 
 
-def test_capture_changed_deliverables_since_advanced_baseline(tmp_path: Path) -> None:
+def test_capture_changed_deliverables_since_setup_snapshot(tmp_path: Path) -> None:
     (tmp_path / "setup.xlsx").write_bytes(b"setup workbook")
     tracker = FileTracker(tmp_path)
     tracker.take_baseline()
-    tracker.advance_baseline()
+    tracker.take_setup_snapshot()
 
     (tmp_path / "analysis.py").write_text("print('tracked by diff')\n")
     (tmp_path / "notes.txt").write_text("tracked by diff\n")
@@ -277,6 +279,38 @@ def test_manifest_carries_paths_and_hashes(tmp_path: Path) -> None:
     assert len(entry["content_hash"]) == 64  # sha256 hex
 
 
+def test_setup_snapshot_returns_changes_and_resets_agent_baseline(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("before\n")
+    tracker = FileTracker(tmp_path)
+    initial = tracker.take_baseline()
+
+    source.write_text("after\n")
+    (tmp_path / "generated.txt").write_text("setup\n")
+    setup = tracker.take_setup_snapshot()
+
+    patches = {patch.rel_path: patch for patch in setup.patches}
+    assert set(patches) == {"generated.txt", "source.py"}
+    assert patches["source.py"].content_hash_before == initial.files["source.py"].content_hash
+    assert patches["source.py"].content_hash_after == tracker.current_manifest()[1]["content_hash"]
+    assert tracker.take_snapshot().files_changed == 0
+
+
+def test_setup_snapshot_keeps_complete_agent_baseline_when_diff_is_capped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+    (tmp_path / "generated.txt").write_text("setup\n")
+    monkeypatch.setattr(FileTracker, "_MAX_DIFF_BYTES", 0)
+
+    setup = tracker.take_setup_snapshot()
+
+    assert setup.truncated is True
+    assert setup.patches == []
+    assert tracker.take_snapshot().files_changed == 0
+
+
 def test_to_dict_shape_matches_wire_contract(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("1\n")
     tracker = FileTracker(tmp_path)
@@ -292,4 +326,12 @@ def test_to_dict_shape_matches_wire_contract(tmp_path: Path) -> None:
         "files_changed",
         "patches",
     }
-    assert set(payload["patches"][0]) == {"path", "status", "patch", "size_before", "size_after"}
+    assert set(payload["patches"][0]) == {
+        "path",
+        "status",
+        "patch",
+        "size_before",
+        "size_after",
+        "content_hash_before",
+        "content_hash_after",
+    }

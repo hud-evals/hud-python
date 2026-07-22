@@ -112,7 +112,7 @@ async def run_coding_task(
 
     print("=" * 60)
     (run,) = job.runs
-    if run.trace.isError:
+    if run.trace.is_error:
         print(f"❌ Task failed: {run.trace.content}")
         return
     print("✅ Task completed!")

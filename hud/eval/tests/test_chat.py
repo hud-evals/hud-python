@@ -1,6 +1,6 @@
 """``Chat`` — multi-turn conversation runner over a task.
 
-Turn tests place each turn's rollout with ``runtime=LocalRuntime(env_file)`` — a pure-data
+Turn tests place each turn's rollout with ``runtime=SubprocessRuntime(env_file)`` — a pure-data
 ``Task`` row against a chat-style env served from a child process.
 """
 
@@ -13,7 +13,7 @@ import pytest
 from mcp.types import TextContent
 
 from hud.agents.base import Agent
-from hud.eval import LocalRuntime, Task
+from hud.eval import SubprocessRuntime, Task
 from hud.eval.chat import Chat, _content_to_blocks
 
 if TYPE_CHECKING:
@@ -89,7 +89,7 @@ class TestSend:
     async def test_send_runs_a_turn_and_stores_prompt_message_format(
         self, chat_env_file: Path
     ) -> None:
-        chat = Chat(_chat_task(), _EchoAgent(), runtime=LocalRuntime(chat_env_file))
+        chat = Chat(_chat_task(), _EchoAgent(), runtime=SubprocessRuntime(chat_env_file))
 
         trace = await chat.send("hello")
 
@@ -107,7 +107,7 @@ class TestSend:
         assert assistant_msg["content"]["text"] == "echo:hello"
 
     async def test_one_job_spans_the_conversation(self, chat_env_file: Path) -> None:
-        chat = Chat(_chat_task(), _EchoAgent(), runtime=LocalRuntime(chat_env_file))
+        chat = Chat(_chat_task(), _EchoAgent(), runtime=SubprocessRuntime(chat_env_file))
 
         await chat.send("hello")
         await chat.send("again")
@@ -125,7 +125,7 @@ class TestSend:
             async def __call__(self, run: Any) -> None:
                 raise RuntimeError("agent exploded")
 
-        chat = Chat(_chat_task(), _Boom(), runtime=LocalRuntime(chat_env_file))
+        chat = Chat(_chat_task(), _Boom(), runtime=SubprocessRuntime(chat_env_file))
 
         with pytest.raises(RuntimeError, match="agent exploded"):
             await chat.send("hello")

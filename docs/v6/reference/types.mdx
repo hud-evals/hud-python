@@ -84,6 +84,7 @@ unit of training data. Every recorded step also streams to the platform as one s
 |-------|------|-------------|
 | `steps` | `list[Step]` | The ordered trajectory. |
 | `status` | `"completed" \| "error" \| "cancelled" \| None` | How the run ended (`trace.is_error` reads it). |
+| `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped (`trace.is_truncated` reads it: anything but `"done"` means a limit cut it off). |
 | `content` | `str \| None` | The final answer (graded). |
 | `trace_id` | `str \| None` | Keys server-side trajectories. |
 

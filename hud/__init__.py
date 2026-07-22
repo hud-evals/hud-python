@@ -1,4 +1,4 @@
-"""hud-python.
+"""hud.
 
 tools for building, evaluating, and training AI agents.
 """
@@ -24,6 +24,7 @@ from .eval import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    SubprocessRuntime,
     SyncPlan,
     Task,
     Taskset,
@@ -49,6 +50,7 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "SubprocessRuntime",
     "SyncPlan",
     "Task",
     "Taskset",

@@ -4,7 +4,7 @@ description: "Reference for the hud command-line interface: init, dev, run, eval
 icon: "terminal"
 ---
 
-Install the CLI with `uv tool install hud-python --python 3.12`. Authenticate once with `hud set HUD_API_KEY=...`.
+Install the CLI with `uv tool install hud --python 3.12`. Authenticate once with `hud set HUD_API_KEY=...`.
 
 ## Build & iterate
 
@@ -106,7 +106,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
 | `--format` | Task source format: `hud` (default) or `harbor`. |
-| `--runtime` | Placement: `local`, `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
+| `--runtime` | Placement: `local` (a child process per rollout, serving the env source — `SubprocessRuntime`), `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
 | `--remote` | Run the whole rollout remotely on the HUD platform. |
 | `--yes`, `-y` | Skip confirmation prompt. |
 

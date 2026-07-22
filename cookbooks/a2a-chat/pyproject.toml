@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Serve a HUD chat task over the A2A protocol (cookbook)"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "hud-python",
+    "hud",
     # The scripts are written against the 0.3.x server API.
     "a2a-sdk==0.3.26",
 ]
@@ -13,6 +13,6 @@ dependencies = [
 package = false
 
 # Track the SDK from this repo. If you copied this folder out, delete this
-# block to use the released hud-python from PyPI.
+# block to use the released hud from PyPI.
 [tool.uv.sources]
-hud-python = { path = "../..", editable = true }
+hud = { path = "../..", editable = true }

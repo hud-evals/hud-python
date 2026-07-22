@@ -28,3 +28,4 @@ def _isolate_hud_settings(request: pytest.FixtureRequest) -> None:
     request.addfinalizer(mp.undo)
     mp.setattr(settings, "telemetry_enabled", False)
     mp.setattr(settings, "api_key", None)
+    mp.setattr(settings, "telemetry_local_dir", None)

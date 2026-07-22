@@ -32,11 +32,21 @@ def _agent(response: Any, error: Exception | None = None) -> OpenAIChatAgent:
 
 
 def _response(content: str, tool_calls: list[Any]) -> Any:
+    dump: dict[str, Any] = {"role": "assistant", "content": content}
+    if tool_calls:
+        dump["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            }
+            for tc in tool_calls
+        ]
     message = SimpleNamespace(
         content=content,
         tool_calls=tool_calls,
         refusal=None,
-        model_dump=lambda exclude_none=True: {"role": "assistant", "content": content},
+        model_dump=lambda exclude_none=True: dump,
     )
     choice = SimpleNamespace(message=message, finish_reason="stop", logprobs=None)
     return SimpleNamespace(
@@ -81,3 +91,23 @@ async def test_get_response_error_path() -> None:
     result = await agent.get_response(_state(agent))
     assert result.done is True
     assert result.error is not None and "boom" in result.error
+
+
+async def test_get_response_malformed_tool_args() -> None:
+    """Unparseable arguments (e.g. truncated at the token limit) yield a call carrying
+    the raw string, and the recorded message replays "{}" so history stays parseable."""
+    tc = SimpleNamespace(
+        type="function",
+        id="c1",
+        function=SimpleNamespace(name="bash", arguments='{"command": "'),
+    )
+    agent = _agent(_response("", [tc]))
+    state = _state(agent)
+    result = await agent.get_response(state)
+    assert result.error is None
+    assert result.done is False
+    (call,) = result.tool_calls
+    assert call.id == "c1"
+    assert call.arguments == '{"command": "'
+    recorded = state.messages[-1]
+    assert recorded["tool_calls"][0]["function"]["arguments"] == "{}"

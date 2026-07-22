@@ -67,10 +67,10 @@ def test_missing_provider_dependency_points_at_agents_extra(
     if "ClaudeAgent" in vars(hud.agents):  # drop any cached lazy export
         monkeypatch.delitem(hud.agents.__dict__, "ClaudeAgent")
 
-    with pytest.raises(ImportError, match=r"hud-python\[agents\]"):
+    with pytest.raises(ImportError, match=r"hud\[agents\]"):
         _ = hud.agents.ClaudeAgent
 
-    with pytest.raises(ImportError, match=r"hud-python\[agents\]"):
+    with pytest.raises(ImportError, match=r"hud\[agents\]"):
         _ = AgentType.CLAUDE.cls
 
 

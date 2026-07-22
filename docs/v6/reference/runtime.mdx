@@ -18,7 +18,8 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 
 | Runtime | Where the env runs | When to reach for it |
 |---------|--------------------|----------------------|
-| `LocalRuntime("env.py")` | A child process from your source | Fastest iteration; local development |
+| `LocalRuntime("env.py")` | This process, loaded fresh from your source per rollout | Fastest iteration; local development |
+| `SubprocessRuntime("env.py")` | A child process from your source | Local runs isolated from your process |
 | `DockerRuntime("my-env")` | A fresh local container per rollout | Reproducibility and parity with production |
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
@@ -30,10 +31,17 @@ Most runtimes are on the top-level package (`from hud import LocalRuntime, Docke
 HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
 
 <Note>
-**Omit `runtime=` and it's inferred** from each task's `_source`, the file its template was defined
-in. When every task shares one `_source`, that source is served locally as `LocalRuntime(source)`;
-otherwise (mixed sources, or rows loaded from a file or the platform with no source) it falls back to
-`HUDRuntime()`. Pass a runtime explicitly the moment you want something else.
+**You can usually omit `runtime=`.** A run without one uses what HUD already knows:
+
+- a taskset loaded from Python source (`Taskset.from_file` / `from_module`) runs against that source
+- a platform taskset (`Taskset.from_api`) runs on the platform
+- otherwise, if the envs your tasks name are defined in files you've imported, each rollout gets a
+  fresh env served from its file — so `my_task().run(agent)` just works in the project that defines
+  the env
+
+When none of these apply, `run` raises and lists the runtimes you can pass — it never silently picks
+one. If two imported files define an env with the same name, that's also an error; disambiguate by
+passing the instance you mean: `runtime=LocalRuntime(env)`.
 </Note>
 
 To deploy an environment to the platform and run against it, see
@@ -74,7 +82,30 @@ The constructor for each built-in runtime:
 ### `LocalRuntime`
 
 ```python
-LocalRuntime(path, *, env=None, ready_timeout=120.0)
+LocalRuntime(source, *, env=None, ready_timeout=120.0)
+```
+
+Serves a fresh env per rollout, in this process, over the same control channel as every placement.
+`source` is any pointer to the env:
+
+- **a `.py` file or directory** that declares it, imported fresh per rollout (sibling imports
+  resolve). **`env`** pins one name when the source declares several; it defaults to the placed
+  task's env.
+- **a live `Environment`** declared at module level - its declaring module's file is the recipe;
+  the instance itself is never served, so every rollout is still fresh.
+- **a `(task) -> Environment` constructor** for envs built in code (integrations, parameterized
+  envs), called fresh per rollout with the placed row.
+
+`ready_timeout` bounds `@env.initialize` startup. The freshness boundary is the env's own source:
+it is re-imported per rollout, while modules it imports follow normal Python import caching and are
+shared process-wide - state kept in helper modules persists across rollouts. Env hooks run in this
+process and share its event loop - keep envs async, or use `SubprocessRuntime` / `DockerRuntime`
+when rollouts need whole-process isolation.
+
+### `SubprocessRuntime`
+
+```python
+SubprocessRuntime(path, *, env=None, ready_timeout=120.0)
 ```
 
 - **`path`** - `.py` file (or directory) that declares the env. The child's working directory is the source's directory, so sibling imports and relative data paths resolve.
@@ -145,11 +176,15 @@ completion. It requires a gateway agent that can serialize its identity (Claude/
 ### `Runtime`
 
 ```python
-Runtime(url, params=..., config=...)
+Runtime(url, params=..., config=..., agent_timeout_s=None)
 ```
 
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
+- **`agent_timeout_s`** - optional positive agent-phase limit. Its clock starts after provisioning,
+  connection, and task startup. If `Task.run(..., rollout_timeout=...)` or
+  `Taskset.run(..., rollout_timeout=...)` supplies an earlier whole-rollout deadline, that earlier
+  deadline still wins.
 
 ## Run on your own infra
 

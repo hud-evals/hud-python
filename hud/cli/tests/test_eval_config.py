@@ -6,6 +6,7 @@ Pure config logic; no agent is constructed and no network is touched.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -202,14 +203,58 @@ def test_resolve_placement_local_harbor_format_uses_harbor_runtime(tmp_path: Pat
     assert isinstance(placement, HarborRuntime)
 
 
-def test_resolve_placement_local_hud_format_uses_local_runtime(tmp_path: Path) -> None:
-    from hud.eval import LocalRuntime
+def test_resolve_placement_local_hud_format_uses_subprocess_runtime(tmp_path: Path) -> None:
+    from hud.eval import SubprocessRuntime
 
     _write_harbor_task(tmp_path)
 
     placement = eval_mod._resolve_placement(EvalConfig(runtime="local"), tmp_path)
 
-    assert isinstance(placement, LocalRuntime)
+    assert isinstance(placement, SubprocessRuntime)
+
+
+async def test_run_evaluation_local_harbor_reaches_taskset_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import Taskset
+    from integrations.harbor import HarborRuntime
+
+    _write_harbor_task(tmp_path)
+    agent = object()
+    calls: list[tuple[Taskset, object, object, int, int]] = []
+
+    async def fake_run(
+        taskset: Taskset,
+        received_agent: object,
+        *,
+        runtime: object,
+        group: int,
+        max_concurrent: int,
+    ) -> SimpleNamespace:
+        calls.append((taskset, received_agent, runtime, group, max_concurrent))
+        return SimpleNamespace(id="test-job", runs=[])
+
+    monkeypatch.setattr(eval_mod, "_build_agent", lambda _: agent)
+    monkeypatch.setattr(Taskset, "run", fake_run)
+
+    job = await eval_mod._run_evaluation(
+        EvalConfig(
+            source=str(tmp_path),
+            agent_type="openai",
+            format="harbor",
+            runtime="local",
+        )
+    )
+
+    assert job.id == "test-job"
+    assert len(calls) == 1
+    taskset, received_agent, runtime, group, max_concurrent = calls[0]
+    assert len(taskset) == 1
+    assert received_agent is agent
+    assert isinstance(runtime, HarborRuntime)
+    assert group == 1
+    assert max_concurrent == 30
 
 
 def test_harbor_format_rejects_nonlocal_source() -> None:

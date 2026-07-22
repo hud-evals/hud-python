@@ -40,10 +40,10 @@ No - not to build environments, write tasks, or run evals. Inference happens thr
 </Accordion>
 
 <Accordion title="My environment imports a package hud can't find - why?">
-A globally installed CLI (`uv tool install hud-python`) runs in its **own** Python environment, so it can't see packages from your project's venv (e.g. `playwright` in your env's dependencies). Inside a project with its own deps, add `hud-python` to the project and run it from the venv:
+A globally installed CLI (`uv tool install hud`) runs in its **own** Python environment, so it can't see packages from your project's venv (e.g. `playwright` in your env's dependencies). Inside a project with its own deps, add `hud` to the project and run it from the venv:
 
 ```bash
-uv add hud-python
+uv add hud
 uv run hud eval tasks.py claude
 ```
 </Accordion>

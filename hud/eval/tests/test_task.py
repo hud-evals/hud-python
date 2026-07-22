@@ -137,7 +137,7 @@ def test_row_validation_rejects_malformed_entries() -> None:
 # ─── placement ─────────────────────────────────────────────────────────
 
 
-async def test_no_placement_defaults_to_hud_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     import hud.eval.taskset as taskset_mod
 
     seen: dict[str, object] = {}
@@ -150,8 +150,9 @@ async def test_no_placement_defaults_to_hud_runtime(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
 
-    v = Task(env="hosted-env", id="solve", args={"n": 1})
-    job = await v.run(cast("Agent", object()))
+    task = Task(env="hosted-env", id="solve", args={"n": 1})
+    taskset = taskset_mod.Taskset("hosted", [task], origin="api:ts_123")
+    job = await taskset.run(cast("Agent", object()))
 
     (run,) = job.runs
     assert run.trace.status == "completed"

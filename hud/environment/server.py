@@ -6,7 +6,7 @@ declares what exists; this module puts one on the wire. It owns task execution
 (:func:`bind`), and the full serving lifecycle (:func:`serve`) — backing
 daemons up, control channel bound (announcing the port on stdout as
 ``HUD_SERVE_PORT=<port>``), daemons down. Every substrate shape runs it: the
-:class:`~hud.eval.runtime.LocalRuntime` child process, a container CMD, and
+:class:`~hud.eval.runtime.SubprocessRuntime` child process, a container CMD, and
 ``hud serve``.
 """
 

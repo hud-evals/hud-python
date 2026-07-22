@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from hud.settings import settings
 from hud.telemetry.exporter import _do_upload, flush, queue_span
 
 
@@ -34,10 +36,21 @@ class _RecordingUpload:
         self.calls.append((task_run_id, spans, api_key))
 
 
-def _enable(mock_settings: Any) -> None:
-    mock_settings.api_key = "test-key"
-    mock_settings.telemetry_enabled = True
-    mock_settings.hud_telemetry_url = "https://api.hud.ai"
+def _configure(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    api_key: str | None = "test-key",
+    enabled: bool = True,
+) -> None:
+    """Pin the settings fields the exporter reads, on the real object.
+
+    Field patches (not a whole-object MagicMock) keep every other setting
+    real — including the root conftest's isolation pins, which a mock object
+    would replace with truthy auto-attributes.
+    """
+    monkeypatch.setattr(settings, "api_key", api_key)
+    monkeypatch.setattr(settings, "telemetry_enabled", enabled)
+    monkeypatch.setattr(settings, "hud_telemetry_url", "https://api.hud.ai")
 
 
 class TestDoUpload:
@@ -71,28 +84,19 @@ class TestQueueSpan:
             ("test-key", True, {}),
         ],
     )
-    def test_span_is_dropped(self, api_key, enabled, attributes):
+    def test_span_is_dropped(self, monkeypatch, api_key, enabled, attributes):
         upload = _RecordingUpload()
-        with (
-            patch("hud.settings.settings") as mock_settings,
-            patch("hud.telemetry.exporter._do_upload", side_effect=upload),
-        ):
-            mock_settings.api_key = api_key
-            mock_settings.telemetry_enabled = enabled
-            mock_settings.hud_telemetry_url = "https://api.hud.ai"
-
+        _configure(monkeypatch, api_key=api_key, enabled=enabled)
+        with patch("hud.telemetry.exporter._do_upload", side_effect=upload):
             queue_span({"name": "test", "attributes": attributes})
             assert flush(timeout=1.0)
 
         assert upload.calls == []
 
-    def test_spans_upload_in_one_batch_per_trace(self):
+    def test_spans_upload_in_one_batch_per_trace(self, monkeypatch):
         upload = _RecordingUpload()
-        with (
-            patch("hud.settings.settings") as mock_settings,
-            patch("hud.telemetry.exporter._do_upload", side_effect=upload),
-        ):
-            _enable(mock_settings)
+        _configure(monkeypatch)
+        with patch("hud.telemetry.exporter._do_upload", side_effect=upload):
             queue_span({"name": "span-1", "attributes": {"hud.task_run_id": "task-1"}})
             queue_span({"name": "span-2", "attributes": {"hud.task_run_id": "task-1"}})
             queue_span({"name": "span-3", "attributes": {"hud.task_run_id": "task-2"}})
@@ -102,30 +106,42 @@ class TestQueueSpan:
         assert [span["name"] for span in by_task["task-1"]] == ["span-1", "span-2"]
         assert [span["name"] for span in by_task["task-2"]] == ["span-3"]
 
-    def test_upload_uses_settings_api_key(self):
+    def test_upload_uses_settings_api_key(self, monkeypatch):
         upload = _RecordingUpload()
-        with (
-            patch("hud.settings.settings") as mock_settings,
-            patch("hud.telemetry.exporter._do_upload", side_effect=upload),
-        ):
-            _enable(mock_settings)
+        _configure(monkeypatch)
+        with patch("hud.telemetry.exporter._do_upload", side_effect=upload):
             queue_span({"name": "test", "attributes": {"hud.task_run_id": "task-1"}})
             assert flush(timeout=1.0)
 
         assert [api_key for _, _, api_key in upload.calls] == ["test-key"]
 
 
+class TestLocalExport:
+    def test_span_written_to_local_dir(self, monkeypatch, tmp_path):
+        _configure(monkeypatch, api_key=None, enabled=False)
+        monkeypatch.setattr(settings, "telemetry_local_dir", str(tmp_path))
+
+        queue_span({"name": "s", "trace_id": "t-1", "attributes": {"hud.task_run_id": "task-1"}})
+
+        lines = (tmp_path / "t-1.jsonl").read_text(encoding="utf-8").splitlines()
+        assert json.loads(lines[0])["name"] == "s"
+
+    def test_non_str_local_dir_fails_loudly(self, monkeypatch):
+        _configure(monkeypatch, api_key=None, enabled=False)
+        monkeypatch.setattr(settings, "telemetry_local_dir", object())
+
+        with pytest.raises(TypeError, match="telemetry_local_dir"):
+            queue_span({"name": "s", "attributes": {"hud.task_run_id": "task-1"}})
+
+
 class TestFlush:
     def test_flush_is_noop_when_idle(self):
         assert flush(timeout=1.0)
 
-    def test_flush_drains_queued_spans(self):
+    def test_flush_drains_queued_spans(self, monkeypatch):
         upload = _RecordingUpload()
-        with (
-            patch("hud.settings.settings") as mock_settings,
-            patch("hud.telemetry.exporter._do_upload", side_effect=upload),
-        ):
-            _enable(mock_settings)
+        _configure(monkeypatch)
+        with patch("hud.telemetry.exporter._do_upload", side_effect=upload):
             queue_span({"name": "final-span", "attributes": {"hud.task_run_id": "task-1"}})
             assert flush(timeout=1.0)
 

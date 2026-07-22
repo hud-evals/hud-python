@@ -8,7 +8,7 @@ A **capability** is a connection the environment exposes; a harness attaches its
 
 | Protocol | Wire id | What it exposes | Spun up with |
 |----------|---------|-----------------|--------------|
-| `ssh`  | `ssh/2` | Shell + files (bash, SFTP) in a sandboxed workspace | `Workspace` (built in) |
+| `ssh`  | `ssh/2` | Shell commands and file operations in a sandboxed workspace | `Workspace` (built in) |
 | `mcp`  | `mcp/2025-11-25` | Your own tools over the Model Context Protocol | `fastmcp` |
 | `cdp`  | `cdp/1.3` | Browser control over the Chrome DevTools Protocol | Chromium (`playwright`) |
 | `rfb`  | `rfb/3.8` | Full computer-use over VNC: screen + keyboard/mouse | `Xvfb` + `x11vnc` |
@@ -47,7 +47,7 @@ Bind every daemon to `127.0.0.1`: the environment exposes a single control port,
 ### `ssh` - a sandboxed shell
 
 ```text
-Capability.ssh(*, name="shell", url, user="agent", host_pubkey, client_key=None, client_key_path=None, shell=None)
+Capability.ssh(*, name="shell", url, user="agent", host_pubkey, client_key=None, client_key_path=None, shell=None, cwd=None)
 ```
 
 The shell case is built in via [`Workspace`](#workspace), so you rarely call this factory directly. [`env.workspace(root)`](/v6/reference/environment#methods) starts a workspace, publishes its `ssh` capability, and stops it with the env.
@@ -61,6 +61,7 @@ The shell case is built in via [`Workspace`](#workspace), so you rarely call thi
 | `client_key` | `str \| None` | Private key *content*; authenticates across a container boundary. |
 | `client_key_path` | `str \| None` | Path to a key file; only works when client and daemon share a filesystem. |
 | `shell` | `str \| None` | Remote shell type (`bash` / `powershell` / `cmd`); auto-detected from `sys.platform`. |
+| `cwd` | `str \| None` | Absolute path sessions start in (the served workspace). File helpers anchor absolute paths to it. |
 
 ### `mcp` - your own tools
 
@@ -257,7 +258,7 @@ Spinning up a capability is the environment side. The harness side is the mirror
 
 | Client | Protocol |
 |--------|----------|
-| `SSHClient` | `ssh/2` (raw `asyncssh` connection via `.conn`) |
+| `SSHClient` | `ssh/2` (`.conn` for commands/forwarding; `.read_text()`, `.write_text()`, and `.listdir()` for files) |
 | `MCPClient` | `mcp/2025-11-25` |
 | `CDPClient` | `cdp/1.3` |
 | `RFBClient` | `rfb/3.8` |
@@ -269,7 +270,7 @@ The bundled provider agents open these automatically based on which capabilities
 
 A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for agent access and, when enabled, file tracking for rollout telemetry. For `mcp`, `cdp`, and `rfb` you stand up the daemon yourself.
 
-Concretely it's a directory plus a `bwrap`-isolated SSH server (bash + chroot'd SFTP). [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
+Concretely it's a directory plus a `bwrap`-isolated SSH exec server. Shell commands and file operations run through the same exec channel. [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
 
 ```python
 from hud.environment import Environment, Workspace
@@ -302,6 +303,7 @@ Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation
 | `host` | `str` | SSH bind host. Default `"127.0.0.1"`. |
 | `port` | `int` | SSH bind port (`0` binds an ephemeral port). Default `0`. |
 | `user` | `str` | SSH username. Default `"agent"`. |
+| `shell_uid` | `int \| None` | When serving as root, run every agent command as this uid/gid with cleared supplementary groups and `no_new_privs`. Only the workspace directory itself is handed to the uid at start (O(1)); own pre-staged content via `COPY --chown` or task setup. Default `None`. |
 | `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
 | `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
 | `track_files` | `bool` | Serve file-tracking telemetry over the workspace lifecycle. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on). |

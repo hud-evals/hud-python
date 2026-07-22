@@ -1,11 +1,13 @@
 name: Release
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
 jobs:
   deploy:
+    if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     environment: pypi
     steps:
@@ -14,9 +16,59 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Build and publish to PyPi
+      # Only 'hud' is published. The old 'hud-python' name is closed off by a
+      # final release that refuses to install and points at 'hud'; its source
+      # lives in hud-python/ and is published once, by hand.
+      - name: Build and publish 'hud' to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           uv build
           uv publish
+
+  deploy-docs:
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (needs.deploy.result == 'success' && !github.event.release.prerelease)) }}
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MINTLIFY_API_KEY: ${{ secrets.MINTLIFY_API_KEY }}
+      MINTLIFY_PROJECT_ID: ${{ vars.MINTLIFY_PROJECT_ID }}
+    steps:
+      - name: Deploy docs to Mintlify
+        run: |
+          : "${MINTLIFY_API_KEY:?MINTLIFY_API_KEY is not configured}"
+          : "${MINTLIFY_PROJECT_ID:?MINTLIFY_PROJECT_ID is not configured}"
+
+          response=$(curl --silent --show-error --fail-with-body \
+            --request POST \
+            --url "https://api.mintlify.com/v1/project/update/${MINTLIFY_PROJECT_ID}" \
+            --header "Authorization: Bearer ${MINTLIFY_API_KEY}")
+          status_id=$(jq -er '.statusId' <<< "$response")
+
+          for _ in {1..60}; do
+            response=$(curl --silent --show-error --fail-with-body \
+              --url "https://api.mintlify.com/v1/project/update-status/${status_id}" \
+              --header "Authorization: Bearer ${MINTLIFY_API_KEY}")
+            status=$(jq -er '.status' <<< "$response")
+
+            case "$status" in
+              success)
+                exit 0
+                ;;
+              failure)
+                jq -r '.summary, (.logs[]? // empty)' <<< "$response"
+                exit 1
+                ;;
+              queued|in_progress)
+                sleep 10
+                ;;
+              *)
+                echo "Unknown Mintlify deployment status: $status"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "Timed out waiting for Mintlify deployment $status_id."
+          exit 1

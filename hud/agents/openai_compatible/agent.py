@@ -170,6 +170,23 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         choice = response.choices[0]
         message = choice.message
         function_calls = [tc for tc in message.tool_calls or [] if tc.type == "function"]
+        tool_calls: list[MCPToolCall] = []
+        recorded_calls: list[dict[str, Any]] = []
+        for tc in function_calls:
+            name, raw = tc.function.name, tc.function.arguments
+            arguments: dict[str, Any] | str
+            try:
+                parsed = json.loads(raw or "{}")
+                arguments = cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else {}
+                recorded = raw
+            except json.JSONDecodeError as e:
+                logger.warning("Malformed tool-call arguments for %s: %s", name, e)
+                arguments = raw
+                recorded = "{}"  # replayed history must stay parseable
+            tool_calls.append(MCPToolCall(id=tc.id, name=name, arguments=arguments))
+            recorded_calls.append(
+                {"id": tc.id, "type": "function", "function": {"name": name, "arguments": recorded}}
+            )
 
         assistant_message = message.model_dump(exclude_none=True)
         reasoning_content = getattr(message, "reasoning_content", None)
@@ -181,17 +198,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             if value := getattr(message, field_name, None):
                 assistant_message[field_name] = value
         if function_calls:
-            assistant_message["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in function_calls
-            ]
+            assistant_message["tool_calls"] = recorded_calls
         messages.append(cast("ChatCompletionMessageParam", assistant_message))
 
         sample: Sample | None = None
@@ -218,15 +225,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
                 else:
                     chat_state.continuation_token_ids = None
                     chat_state.continuation_message_count = None
-
-        tool_calls: list[MCPToolCall] = []
-        for tc in function_calls:
-            provider_name = tc.function.name
-            raw_args = json.loads(tc.function.arguments or "{}")
-            arguments = cast("dict[str, Any]", raw_args) if isinstance(raw_args, dict) else {}
-            tool_calls.append(
-                MCPToolCall(id=tc.id, name=provider_name, arguments=arguments),
-            )
 
         usage: Usage | None = None
         if response.usage is not None:

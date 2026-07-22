@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from hud.clients import HudProtocolError
 from hud.environment import Answer, Environment
 from hud.eval import Run
-from hud.graders import EvaluationResult
+from hud.graders import EvaluationResult, SubScore
 
 from .conftest import served
 
@@ -70,19 +70,66 @@ async def test_score_dict_passes_through_with_extra_keys() -> None:
         assert run.grade.info == {"detail": "partial credit"}
 
 
-async def test_evaluation_result_forwards_reward_and_metadata() -> None:
+async def test_evaluation_result_info_reaches_evaluate_step() -> None:
     env = Environment("modelgrade")
 
     @env.template()
     async def graded():
         yield "go"
-        yield EvaluationResult(reward=0.75, content="nice", info={"max_tile": 256})
+        yield EvaluationResult(
+            reward=0.75,
+            content="nice",
+            info={"max_tile": 256},
+            subscores=[
+                SubScore(
+                    name="judge",
+                    value=0.75,
+                    children=[
+                        SubScore(
+                            name="criterion",
+                            value=1.0,
+                            info={"reason": "because"},
+                        )
+                    ],
+                    info={"model": "judge-model"},
+                )
+            ],
+        )
 
     async with served(env) as client:
         async with Run(client, "graded", {}) as run:
             run.trace.content = "x"
         assert run.reward == 0.75
         assert run.grade.info == {"max_tile": 256}
+        assert "info" not in run.evaluation["subscores"][0]
+        assert "info" not in run.evaluation["subscores"][0]["children"][0]
+        evaluate_step = run.trace.steps[-1]
+        assert evaluate_step.task_call is not None
+        assert evaluate_step.task_call.phase == "evaluate"
+        assert evaluate_step.task_call.result == {
+            "score": 0.75,
+            "done": True,
+            "content": "nice",
+            "info": {"max_tile": 256},
+            "isError": False,
+            "subscores": [
+                {
+                    "name": "judge",
+                    "weight": 1.0,
+                    "value": 0.75,
+                    "children": [
+                        {
+                            "name": "criterion",
+                            "weight": 1.0,
+                            "value": 1.0,
+                            "children": None,
+                            "info": {"reason": "because"},
+                        }
+                    ],
+                    "info": {"model": "judge-model"},
+                }
+            ],
+        }
 
 
 def test_answer_holds_parsed_content_and_raw_string() -> None:

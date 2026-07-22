@@ -739,7 +739,7 @@ def _python_defines_environment(path: Path) -> bool:
 
 
 def _spawn_target(source: Path) -> Path:
-    """The path the ``LocalRuntime`` provider serves.
+    """The path the ``SubprocessRuntime`` provider serves.
 
     Directories and env-defining ``.py`` files are served as-is. Task-only
     sources (``tasks.py`` importing from ``env.py``) resolve to a sibling
@@ -789,7 +789,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
     ``--remote`` submits every rollout for platform-hosted execution; a
     ``tcp://`` url attaches to an env served elsewhere.
     """
-    from hud.eval import HostedRuntime, HUDRuntime, LocalRuntime, Runtime
+    from hud.eval import HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
@@ -801,7 +801,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
             from integrations.harbor import HarborRuntime
 
             return HarborRuntime(source_path)
-        return LocalRuntime(_spawn_target(source_path))
+        return SubprocessRuntime(_spawn_target(source_path))
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
         return HUDRuntime()
@@ -824,6 +824,8 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
+    from hud.eval import Taskset
+
     source_path = Path(cfg.source)
     is_local = source_path.exists()
     if is_local:
@@ -834,8 +836,6 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
             hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
             raise typer.Exit(1) from e
     else:
-        from hud.eval import Taskset
-
         hud_console.info(f"Loading platform taskset: {cfg.source}")
         try:
             taskset = Taskset.from_api(cfg.source)

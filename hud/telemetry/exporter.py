@@ -69,6 +69,10 @@ def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
     """
     if not local_dir:
         return
+    # Only I/O is best-effort: a config-shape error (e.g. a mock or wrong type
+    # reaching settings) must fail loudly, not write to a repr-named path.
+    if not isinstance(local_dir, str):
+        raise TypeError(f"telemetry_local_dir must be a str path, got {type(local_dir).__name__}")
     try:
         path = Path(local_dir)
         path.mkdir(parents=True, exist_ok=True)

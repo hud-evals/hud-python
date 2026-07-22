@@ -14,9 +14,9 @@ exception: calling an ``@env.template`` declaration constructs the eval ``Task``
 row.)
 
 Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a
-local source, ``DockerRuntime`` an image, ``Runtime(url)`` an env served
-elsewhere, ``HUDRuntime`` a HUD runtime tunnel, or ``HostedRuntime`` to run the
-whole rollout remotely on the platform::
+local source served in-process, ``DockerRuntime`` an image,
+``Runtime(url)`` an env served elsewhere, ``HUDRuntime`` a HUD runtime tunnel,
+or ``HostedRuntime`` to run the whole rollout remotely on the platform::
 
     from hud.eval import LocalRuntime, Taskset
 
@@ -46,6 +46,7 @@ from .runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    SubprocessRuntime,
 )
 from .sync import SyncPlan
 from .task import Task
@@ -68,6 +69,7 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "SubprocessRuntime",
     "SyncPlan",
     "Task",
     "Taskset",

@@ -6,8 +6,12 @@ from this process (:func:`hud.eval.run.rollout`). The channel is location
 transparent, so "co-located" (loopback) and "split" (agent here, env
 elsewhere) are the same code, differing only in the url.
 
-- :class:`LocalRuntime` — runs a subprocess serving the row's env from a ``.py``
-  source (the path is always given, never recovered from a live object).
+- :class:`LocalRuntime` — serve a fresh env per rollout, in this process,
+  from any pointer to it: a ``.py`` source path, a live module-level
+  :class:`Environment` (its declaring file is the recipe), or a
+  ``(task) -> Environment`` constructor.
+- :class:`SubprocessRuntime` — serve the row's env from a ``.py`` source in a
+  child process, when the env should not share the orchestrator's fate.
 - :class:`DockerRuntime` — ``docker run``s an image whose CMD serves the channel.
 - ``Runtime(url)`` — the ``nullcontext`` of providers: yields itself, a
   *borrowed, shared* substrate provisioned elsewhere (env served anywhere —
@@ -29,6 +33,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
+import os
+import shutil
 import sys
 import uuid
 from collections import deque
@@ -49,7 +56,7 @@ from hud.utils.process import ProcessGroup, create_process_group_exec
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 
     from hud.agents.base import Agent
     from hud.environment.env import Environment
@@ -133,14 +140,27 @@ class Runtime:
     local process, ``tcp://sandbox-abc.hud.so:443`` for a hosted box).
     ``params`` carries connection-time data a transport may need (auth token,
     sandbox id). ``config`` is the effective runtime configuration used to
-    construct the runtime. Constructed directly, it is also a provider — the
-    borrowed, shared case: it yields itself with a no-op lifecycle, since
-    whoever provisioned the substrate owns its teardown.
+    construct the runtime. ``agent_timeout_s`` optionally bounds only the
+    agent phase, after provisioning and task startup. Constructed directly,
+    it is also a provider — the borrowed, shared case: it yields itself with a
+    no-op lifecycle, since whoever provisioned the substrate owns its teardown.
     """
 
     url: str
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
+    agent_timeout_s: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.agent_timeout_s is None:
+            return
+        if (
+            isinstance(self.agent_timeout_s, bool)
+            or not isinstance(self.agent_timeout_s, int | float)
+            or not math.isfinite(self.agent_timeout_s)
+            or self.agent_timeout_s <= 0
+        ):
+            raise ValueError("Runtime agent_timeout_s must be a positive finite number")
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
@@ -154,7 +174,204 @@ def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
 
 
 class LocalRuntime:
-    """The local provider: serve the placed row's env from *path* in a child process.
+    """The local provider: serve a fresh env per rollout, in this process.
+
+    *source* points at the env in whatever form you have:
+
+    - a ``.py`` file or directory — imported fresh per acquisition (sibling
+      imports resolve); *env* pins one name when several are declared,
+      defaulting to the placed task's env
+    - a live :class:`~hud.environment.Environment` — shorthand for its
+      declaring file; the instance itself is never served
+    - a ``(task) -> Environment`` callable — called per acquisition with the
+      placed row
+
+    ::
+
+        runtime = LocalRuntime("env.py")
+        runtime = LocalRuntime(env)
+        runtime = LocalRuntime(lambda task: build_env(task.env))
+
+    ``ready_timeout`` bounds ``@env.initialize`` startup. Freshness covers
+    the env's own source; modules it imports are cached as usual and shared
+    across rollouts. Hooks share this process's event loop, so blocking env
+    code stalls concurrent rollouts — use :class:`SubprocessRuntime` or
+    :class:`DockerRuntime` for process isolation, and ``Runtime(url)`` to
+    attach to a substrate served elsewhere.
+    """
+
+    def __init__(
+        self,
+        source: str | Path | Environment | Callable[[Task], Environment],
+        *,
+        env: str | None = None,
+        ready_timeout: float = 120.0,
+    ) -> None:
+        from hud.environment.env import Environment as _Environment
+
+        self.ready_timeout = ready_timeout
+        # A live instance may have been mutated since its module was imported;
+        # verify the fresh copy still declares its templates, so drift fails
+        # at acquisition with the cause named instead of "unknown task" later.
+        expected_templates: frozenset[str] = frozenset()
+        if isinstance(source, _Environment):
+            file = _declaring_file(source, env or source.name)
+            if file is None:
+                raise TypeError(
+                    f"LocalRuntime: env {source.name!r} is not rebuilt by importing "
+                    "any file this process has loaded (constructed in a function or "
+                    "notebook cell, or declared inside a package using relative "
+                    "imports); pass its constructor instead: "
+                    "LocalRuntime(lambda task: <build the env>)"
+                )
+            expected_templates = frozenset(source.tasks)
+            source, env = file, env or source.name
+        self._source_dir: Path | None = None
+        if isinstance(source, (str, Path)):
+            path, pinned = Path(source).resolve(), env
+            self._source_dir = path if path.is_dir() else path.parent
+            from hud.environment import load_environment
+
+            def _load(task: Task) -> _Environment:
+                loaded = load_environment(path, name=pinned or task.env)
+                missing = expected_templates - loaded.tasks.keys()
+                if missing:
+                    raise ValueError(
+                        f"env {loaded.name!r} loaded from {path} lacks template(s) "
+                        f"{sorted(missing)} present on the live instance — it was "
+                        "modified after import; pass a constructor instead: "
+                        "LocalRuntime(lambda task: <build the env>)"
+                    )
+                return loaded
+
+            self._build: Callable[[Task], _Environment] = _load
+        elif callable(source):
+            if env is not None:
+                raise TypeError("LocalRuntime: env= applies only to source paths")
+            self._build = source
+        else:
+            raise TypeError(
+                f"LocalRuntime: expected a source path, a live Environment, or a "
+                f"(task) -> Environment constructor; got {source!r}"
+            )
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        from hud.environment.env import Environment as _Environment
+
+        if task.runtime_config is not None:
+            raise ValueError("LocalRuntime does not support task runtime_config")
+        # The source dir stays importable for the whole acquisition, not just
+        # the initial import, so a template can lazily import a sibling
+        # module at run time (as it could under the child-process runtime).
+        # Always insert-and-remove one entry: balanced under concurrency.
+        if self._source_dir is not None:
+            sys.path.insert(0, str(self._source_dir))
+        try:
+            try:
+                env = self._build(task)
+            except RuntimeError as e:
+                # The source ran an event loop at import — usually an unguarded
+                # top-level run call; name the actual mistake.
+                if "running event loop" not in str(e):
+                    raise
+                raise RuntimeError(
+                    "the env source ran async code while being imported to place a "
+                    'rollout — guard top-level run calls with `if __name__ == "__main__":`'
+                ) from e
+            if not isinstance(env, _Environment):
+                raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
+            async with _local(env, ready_timeout=self.ready_timeout) as runtime:
+                yield runtime
+        finally:
+            if self._source_dir is not None:
+                with contextlib.suppress(ValueError):
+                    sys.path.remove(str(self._source_dir))
+
+
+def _live_envs() -> Iterator[tuple[Environment, str]]:
+    """Envs declared in loaded, file-backed modules' globals, with their files.
+
+    The in-memory counterpart of scanning ``.py`` sources on disk
+    (:func:`~hud.environment.load_environment`): an env found here can be
+    served fresh by re-importing its file. Envs in modules without a file
+    (a notebook ``__main__``) are not yielded — re-import could not
+    reconstruct them.
+    """
+    from hud.environment.env import Environment as _Environment
+
+    for module in list(sys.modules.values()):
+        module_file = getattr(module, "__file__", None)
+        module_vars = getattr(module, "__dict__", None)
+        if not module_file or not isinstance(module_vars, dict):
+            continue
+        for value in list(module_vars.values()):
+            if isinstance(value, _Environment):
+                yield value, module_file
+
+
+def _declaring_file(env: Environment, name: str) -> Path | None:
+    """A file whose fresh import re-declares *env*, else None.
+
+    Candidate files hold the instance in their module globals, but a holder
+    may be a re-exporter (``from .env import env`` in a package
+    ``__init__``, a tasks file re-exporting its env): validate each by
+    loading it fresh — a declarer yields a *new* instance under *name*, a
+    re-exporter yields the same live one (or fails to import standalone).
+    ``__init__.py`` holders are tried last.
+    """
+    from hud.environment import load_environment
+
+    candidates = dict.fromkeys(Path(file) for live, file in _live_envs() if live is env)
+    for file in sorted(candidates, key=lambda f: f.name == "__init__.py"):
+        try:
+            probe = load_environment(file, name=name)
+        except Exception as e:
+            logger.debug("candidate %s does not rebuild env %r: %s", file, name, e)
+            continue
+        if probe is not env:
+            return file
+    return None
+
+
+def _declared_env(name: str) -> Environment | None:
+    """The one live env named *name*, else None; two distinct ones raise.
+
+    The same instance re-exported across modules is one match; distinct envs
+    claiming one name are ambiguous.
+    """
+    matches = {id(env): env for env, _ in _live_envs() if env.name == name}
+    if len(matches) > 1:
+        files = sorted({file for env, file in _live_envs() if env.name == name})
+        raise ValueError(
+            f"env name {name!r} is declared by multiple live environments "
+            f"({', '.join(files)}); pass runtime= explicitly — the exact "
+            "instance disambiguates: runtime=LocalRuntime(env)"
+        )
+    return next(iter(matches.values()), None)
+
+
+def _declared_names(source: Path) -> set[str]:
+    """Env names a ``.py`` source (file or directory) itself declares.
+
+    A fresh execution of the source yields *new* instances for envs it
+    declares; an env it merely imports is the already-live one and does not
+    count — importing the source again could not rebuild it.
+    """
+    from hud.environment.env import Environment as _Environment
+    from hud.utils.modules import iter_modules
+
+    live = {id(env) for env, _ in _live_envs()}
+    return {
+        value.name
+        for module in iter_modules(source)
+        for value in vars(module).values()
+        if isinstance(value, _Environment) and id(value) not in live
+    }
+
+
+class SubprocessRuntime:
+    """The child-process provider: serve the placed row's env from *path*.
 
     Each acquisition runs ``python -m hud.environment.server <path> --env
     name`` — the same serving entry point a container CMD runs — on an
@@ -167,8 +384,8 @@ class LocalRuntime:
     The child's working directory is the source's directory, so sibling
     imports and relative data paths resolve; ``@env.initialize`` daemons start
     in the child and die with it. Because the source is re-imported in the
-    child, a script spawning itself (``LocalRuntime(__file__)``) must keep top-level
-    run calls under ``if __name__ == "__main__":``.
+    child, a script spawning itself (``SubprocessRuntime(__file__)``) must keep
+    top-level run calls under ``if __name__ == "__main__":``.
     """
 
     def __init__(
@@ -185,9 +402,9 @@ class LocalRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         if task.runtime_config is not None:
-            raise ValueError("LocalRuntime does not support task runtime_config")
+            raise ValueError("SubprocessRuntime does not support task runtime_config")
         if not self.source.exists():
-            raise FileNotFoundError(f"LocalRuntime: source not found: {self.source}")
+            raise FileNotFoundError(f"SubprocessRuntime: source not found: {self.source}")
         cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
         cmd += ["--env", self.env or task.env]
         proc = await create_process_group_exec(
@@ -587,46 +804,146 @@ class DaytonaRuntime:
                     await daytona.delete(sandbox)
 
 
-async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
-    """Run a docker CLI command and return decoded ``(stdout, stderr)``."""
-    proc = await asyncio.create_subprocess_exec(
-        "docker",
+async def _docker(
+    *args: str,
+    check: bool = True,
+    env: Mapping[str, str] | None = None,
+    unset_env: Sequence[str] = (),
+) -> tuple[str, str]:
+    """Run a non-interactive Docker CLI command with bounded diagnostic output.
+
+    ``env`` is reserved for trusted host-side overrides. ``unset_env`` removes
+    task-controlled names from the Docker client's process environment without
+    affecting executable lookup, which is resolved before the child is spawned.
+    """
+    docker = shutil.which("docker") or "docker"
+    process_env: dict[str, str] | None = None
+    if env is not None or unset_env:
+        process_env = dict(os.environ)
+        for key in unset_env:
+            process_env.pop(key, None)
+        process_env.update(env or {})
+    group = await create_process_group_exec(
+        docker,
         *args,
+        term_timeout=5.0,
+        kill_timeout=5.0,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=process_env,
     )
-    out, err = await proc.communicate()
+    proc = group.process
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    out_task = asyncio.create_task(_read_bounded_output(proc.stdout))
+    err_task = asyncio.create_task(_read_bounded_output(proc.stderr))
+    try:
+        await proc.wait()
+        out, err = await asyncio.gather(out_task, err_task)
+        await group.terminate()
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await group.terminate()
+        for reader in (out_task, err_task):
+            if not reader.done():
+                reader.cancel()
+        await asyncio.gather(out_task, err_task, return_exceptions=True)
+        raise
     if check and proc.returncode != 0:
         detail = err.decode("utf-8", "replace").strip() or out.decode("utf-8", "replace").strip()
-        raise RuntimeError(f"docker {' '.join(args)} failed ({proc.returncode}): {detail}")
+        for sensitive_value in _sensitive_docker_values(args):
+            detail = detail.replace(sensitive_value, "<redacted>")
+        command = " ".join(_redact_docker_args(args))
+        raise RuntimeError(f"docker {command} failed ({proc.returncode}): {detail}")
     return out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
+_DOCKER_OUTPUT_LIMIT = 1_000_000
+
+
+async def _read_bounded_output(stream: asyncio.StreamReader) -> bytes:
+    """Drain a subprocess stream while retaining only its diagnostic tail."""
+    tail = bytearray()
+    while chunk := await stream.read(64 * 1024):
+        tail.extend(chunk)
+        if len(tail) > _DOCKER_OUTPUT_LIMIT:
+            del tail[: len(tail) - _DOCKER_OUTPUT_LIMIT]
+    return bytes(tail)
+
+
+def _redact_docker_args(args: Sequence[str]) -> list[str]:
+    """Render Docker arguments without exposing inline credentials or env values."""
+    rendered: list[str] = []
+    redact_next = False
+    sensitive = {"--env", "-e", "--env-file", "--password", "--secret"}
+    for arg in args:
+        if redact_next:
+            rendered.append("<redacted>")
+            redact_next = False
+        elif arg in sensitive:
+            rendered.append(arg)
+            redact_next = True
+        elif any(arg.startswith(f"{flag}=") for flag in sensitive):
+            rendered.append(f"{arg.split('=', 1)[0]}=<redacted>")
+        else:
+            rendered.append(arg)
+    return rendered
+
+
+def _sensitive_docker_values(args: Sequence[str]) -> set[str]:
+    """Values to scrub if a failed CLI echoes its own sensitive arguments."""
+    values: set[str] = set()
+    sensitive = {"--env", "-e", "--env-file", "--password", "--secret"}
+    redact_next = False
+    for arg in args:
+        if redact_next:
+            if arg:
+                values.add(arg)
+                if "=" in arg:
+                    value = arg.split("=", 1)[1]
+                    if len(value) >= 4:
+                        values.add(value)
+            redact_next = False
+        elif arg in sensitive:
+            redact_next = True
+        elif any(arg.startswith(f"{flag}=") for flag in sensitive):
+            values.add(arg)
+            value = arg.split("=", 1)[1]
+            if len(value) >= 4:
+                values.add(value)
+    return values
+
+
 @asynccontextmanager
-async def _local(env: Environment) -> AsyncIterator[Runtime]:
+async def _local(env: Environment, *, ready_timeout: float | None = None) -> AsyncIterator[Runtime]:
     """Substrate-side serving: a live env owned by *this* process, as a runtime.
 
-    Not a placement the engine offers (the orchestrator never serves an env
-    in-process), so deliberately not a ``Provider`` — it serves a live object,
-    not a placed row. Code already running *inside* a placed substrate adapts
-    it (``AgentTool`` sub-rollouts: ``runtime=lambda _: _local(env)``); test
-    harnesses enter it directly.
+    One env lifecycle (start → serve → stop) around one bound control
+    channel; ``ready_timeout`` bounds ``env.start()`` (initialize
+    hooks/daemons). ``LocalRuntime`` enters this per acquisition with the
+    fresh env it built; test harnesses enter it directly with a live one.
     """
     from hud.environment.server import bind
 
-    await env.start()
-    server = await bind(env, "127.0.0.1", 0)
-    host, port = server.sockets[0].getsockname()[:2]
-    serve_task = asyncio.create_task(server.serve_forever())
+    # start() inside the try: a failed or timed-out initialize hook still gets
+    # its already-started daemons torn down by stop() (best-effort per hook).
     try:
-        yield Runtime(f"tcp://{host}:{port}")
+        started = env.start()
+        await (asyncio.wait_for(started, ready_timeout) if ready_timeout is not None else started)
+        server = await bind(env, "127.0.0.1", 0)
+        host, port = server.sockets[0].getsockname()[:2]
+        serve_task = asyncio.create_task(server.serve_forever())
+        try:
+            yield Runtime(f"tcp://{host}:{port}")
+        finally:
+            serve_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await serve_task
+            server.close()
+            with contextlib.suppress(Exception):
+                await server.wait_closed()
     finally:
-        serve_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await serve_task
-        server.close()
-        with contextlib.suppress(Exception):
-            await server.wait_closed()
         await env.stop()
 
 
@@ -1011,4 +1328,5 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "SubprocessRuntime",
 ]

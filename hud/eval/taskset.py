@@ -23,7 +23,7 @@ from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HostedRuntime, HUDRuntime, LocalRuntime
+from .runtime import HostedRuntime, HUDRuntime, LocalRuntime, _declared_env, _declared_names
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -208,6 +208,37 @@ class Taskset:
         """Return env names referenced by tasks in this taskset."""
         return {task.env for task in self}
 
+    def _resolve_placement(self) -> Provider | HUDRuntime:
+        if self.origin and self.origin.startswith("module:"):
+            # The origin claims the rows only if it actually declares their
+            # envs (a tasks-only module importing its envs from elsewhere
+            # does not) — and it serves as the exact path, so a same-named
+            # variant in a sibling file is never dragged in.
+            source = Path(self.origin[len("module:") :])
+            if self.environment_names() <= _declared_names(source):
+                return LocalRuntime(source)
+        if self.origin and self.origin.startswith("api:"):
+            return HUDRuntime()
+        declared = {name: _declared_env(name) for name in self.environment_names()}
+        if declared and all(declared.values()):
+            providers = {
+                name: LocalRuntime(env) for name, env in declared.items() if env is not None
+            }
+            logger.info(
+                "no runtime given: serving %s fresh from their declaring modules",
+                ", ".join(sorted(providers)),
+            )
+            return lambda task: providers[task.env](task)
+        missing = sorted(name for name, env in declared.items() if env is None)
+        raise ValueError(
+            f"no placement for env(s) {', '.join(missing) or '<none>'}: pass runtime= — "
+            'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
+            "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
+            "(a served substrate), or HUDRuntime() (your deployed env). A row taken "
+            "from a loaded taskset keeps its placement when run through it: "
+            'taskset.filter(["slug"]).run(...)'
+        )
+
     async def run(
         self,
         agent: Agent,
@@ -224,7 +255,12 @@ class Taskset:
         placement: a :class:`~hud.eval.runtime.Provider` (the env served
         somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
         or :class:`~hud.eval.runtime.HostedRuntime` to run each rollout remotely
-        on the platform (left unset: HUD tunnel by env name). One provider serves a mixed-env
+        on the platform. Left unset, what is already known decides: a
+        taskset loaded from local ``.py`` source serves that source's
+        directory; a platform taskset runs on the platform; rows naming envs
+        declared in imported modules serve each fresh from its file; anything
+        else raises, naming the forms to pass. One provider serves a
+        mixed-env
         taskset and can size each substrate per row. Registers one HUD job as
         the platform receipt and reports each run's trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
@@ -264,17 +300,17 @@ class Taskset:
 
         # Placement is chosen once for the batch: HostedRuntime delegates the
         # whole rollout to the platform, anything else is a Provider driven
-        # locally by rollout().
-        # No runtime: serve the tasks' shared source locally if they were minted
-        # in-process from one file (the common authoring case); otherwise (mixed
-        # or wire-loaded rows with no source) default to the HUD runtime tunnel.
-        if runtime is None:
-            sources = {t._source for t in task_list if t._source is not None}
-            runtime = LocalRuntime(next(iter(sources))) if len(sources) == 1 else None
-        placement = runtime if runtime is not None else HUDRuntime()
+        # locally by rollout(). No runtime: what the taskset or this process
+        # already knows decides (rows never carry placement) — a loaded
+        # taskset runs where it came from; rows naming envs declared in
+        # imported modules serve each fresh from its file; anything else is
+        # an error naming the forms to pass.
+        # An empty taskset schedules nothing, so it needs no placement.
+        placement = runtime if runtime is not None or not task_list else self._resolve_placement()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> Run:
+            assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
                 return await placement.run(task, agent, job_id=job_id, group_id=group_id)
             return await rollout(

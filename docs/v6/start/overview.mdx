@@ -157,7 +157,7 @@ hud eval env.py claude --runtime hud    # same env, executed on HUD's hosted inf
 ```python
 from hud.eval import LocalRuntime, DockerRuntime, ModalRuntime, HUDRuntime
 
-LocalRuntime("env.py")     # local child process - fastest iteration
+LocalRuntime("env.py")     # in this process - fastest iteration
 DockerRuntime("my-env")    # a fresh container per rollout
 ModalRuntime("my-env")     # a Modal cloud sandbox per rollout
 HUDRuntime()               # HUD's hosted infra (after `hud deploy`)

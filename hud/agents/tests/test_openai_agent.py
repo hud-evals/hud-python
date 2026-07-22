@@ -39,9 +39,17 @@ def test_format_message_shapes_user_text() -> None:
     assert msg["role"] == "user"
 
 
-def _api_response(id: str, output: list[Any], usage: Any = None) -> Any:
+def _api_response(
+    id: str, output: list[Any], usage: Any = None, incomplete_details: Any = None
+) -> Any:
     """A fake Responses-API payload: output items plus the response envelope."""
-    return SimpleNamespace(id=id, output=output, model="gpt-test-v1", usage=usage)
+    return SimpleNamespace(
+        id=id,
+        output=output,
+        model="gpt-test-v1",
+        usage=usage,
+        incomplete_details=incomplete_details,
+    )
 
 
 async def test_get_response_parses_text_and_function_call() -> None:
@@ -92,6 +100,19 @@ async def test_get_response_done_when_no_tool_calls() -> None:
     assert result.done is True
     assert result.tool_calls == []
     assert result.usage is None  # provider omitted usage
+    assert result.finish_reason is None
+
+
+async def test_get_response_surfaces_token_cap_truncation() -> None:
+    # Responses has no finish_reason; incomplete_details.reason carries the cap.
+    response = _api_response(
+        "resp_3", [], incomplete_details=SimpleNamespace(reason="max_output_tokens")
+    )
+    agent = _agent(response)
+    state = OpenAIRunState(messages=[agent._format_message("user", "hi")])
+
+    result = await agent.get_response(state)
+    assert result.finish_reason == "max_output_tokens"
 
 
 async def test_get_response_short_circuits_on_consumed_messages() -> None:

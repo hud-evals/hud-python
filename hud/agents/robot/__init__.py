@@ -17,7 +17,7 @@ Per-tick platform tracing is emitted by the loop itself: each step records an
 :class:`~hud.agents.types.ObservationStep`, and each re-inference an
 :class:`~hud.agents.types.InferenceStep`, so runs stream live into the HUD trace viewer.
 
-This subpackage needs the ``robot`` extra (``pip install 'hud-python[robot]'``) for
+This subpackage needs the ``robot`` extra (``pip install 'hud[robot]'``) for
 ``numpy`` + ``msgpack``; importing :mod:`hud.agents` alone never pulls them in.
 """
 
