@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.workspace")
 
+_COMMAND_TIMEOUT = 3600.0
+
 # Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
 _warned_no_bwrap = False
 
@@ -675,44 +677,65 @@ class Workspace:
                 while chunk := await process.stdin.read(65536):
                     stdin.write(chunk)
                     await stdin.drain()
-            except (BrokenPipeError, ConnectionResetError):
+            except (asyncssh.Error, BrokenPipeError, ConnectionResetError):
                 pass
             finally:
                 stdin.close()
 
+        async def drain_output(reader: asyncio.StreamReader, output: bytearray) -> None:
+            while chunk := await reader.read(65536):
+                output.extend(chunk)
+
+        stdout_data = bytearray()
+        stderr_data = bytearray()
         stdin_task = asyncio.create_task(relay_stdin())
-        stdout_task = asyncio.create_task(stdout.read())
-        stderr_task = asyncio.create_task(stderr.read())
+        stdout_task = asyncio.create_task(drain_output(stdout, stdout_data))
+        stderr_task = asyncio.create_task(drain_output(stderr, stderr_data))
+        wait_task = asyncio.create_task(sub.wait())
+        channel_closed_task = asyncio.create_task(process.channel.wait_closed())
+        timed_out = False
         try:
-            async with asyncio.timeout(3600.0):
-                _, stdout_data, stderr_data = await asyncio.gather(
-                    sub.wait(),
-                    stdout_task,
-                    stderr_task,
+            async with asyncio.timeout(_COMMAND_TIMEOUT):
+                done, _ = await asyncio.wait(
+                    (wait_task, channel_closed_task),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-            await sub.terminate()
-            stdin_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stdin_task
+                if channel_closed_task in done and not wait_task.done():
+                    return
+                await wait_task
         except TimeoutError:
+            timed_out = True
+        finally:
             await sub.terminate()
             stdin_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stdin_task
-            process.stderr.write(b"workspace: command timed out after 3600s\n")
+            wait_task.cancel()
+            channel_closed_task.cancel()
+            await asyncio.gather(
+                stdin_task,
+                wait_task,
+                channel_closed_task,
+                return_exceptions=True,
+            )
+            _, output_pending = await asyncio.wait(
+                (stdout_task, stderr_task),
+                timeout=1.0,
+            )
+            for task in output_pending:
+                task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+
+        if process.channel.is_closing():
+            return
+        if timed_out:
+            process.stderr.write(
+                f"workspace: command timed out after {_COMMAND_TIMEOUT:g}s\n".encode()
+            )
             process.exit(1)
             return
-        except BaseException:
-            await sub.terminate()
-            stdin_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stdin_task
-            raise
-
         if stdout_data:
-            process.stdout.write(stdout_data)
+            process.stdout.write(bytes(stdout_data))
         if stderr_data:
-            process.stderr.write(stderr_data)
+            process.stderr.write(bytes(stderr_data))
         process.exit(sub.returncode if sub.returncode is not None else 0)
 
 
