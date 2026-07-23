@@ -132,8 +132,30 @@ def _slugify(name: str) -> str:
     return re.sub(r"-+", "-", normalized).strip("-") or "harbor"
 
 
+def _read_task_config(task_dir: Path) -> dict[str, Any] | None:
+    try:
+        return tomllib.loads((task_dir / "task.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+
+def _task_has_instruction(task_dir: Path, config: dict[str, Any]) -> bool:
+    """A task carries its instruction at the root (single-step) or under each
+    ``steps/<name>/`` directory declared by a ``[[steps]]`` array (multi-step).
+    A multi-step task has no root ``instruction.md``, so both forms count."""
+    return (task_dir / "instruction.md").is_file() or bool(config.get("steps"))
+
+
 def _is_harbor_task(path: Path) -> bool:
-    return path.is_dir() and (path / "task.toml").exists() and (path / "instruction.md").exists()
+    if not path.is_dir() or not (path / "task.toml").exists():
+        return False
+    config = _read_task_config(path)
+    if config is None:
+        # An unparseable task.toml still identifies a single-step task by its
+        # root instruction.md; a multi-step task can only be told apart via the
+        # config, so drop it when the config is unreadable.
+        return (path / "instruction.md").is_file()
+    return _task_has_instruction(path, config)
 
 
 def _hash_directory(path: Path) -> str:
@@ -158,14 +180,18 @@ class _HarborTask:
 
 
 def _parse_task(task_dir: Path) -> _HarborTask | None:
-    if not (task_dir / "instruction.md").is_file():
-        LOGGER.warning("failed to read instruction.md in %s", task_dir)
-        return None
-    try:
-        config: dict[str, Any] = tomllib.loads((task_dir / "task.toml").read_text("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        LOGGER.warning("failed to parse task.toml in %s", task_dir)
+    config = _read_task_config(task_dir)
+    if config is None:
+        # Unparseable config degrades gracefully for a single-step task (kept
+        # with an empty config); a multi-step task needs the config to be read.
+        if not (task_dir / "instruction.md").is_file():
+            LOGGER.warning("failed to parse task.toml in %s", task_dir)
+            return None
+        LOGGER.warning("failed to parse task.toml in %s; using empty config", task_dir)
         config = {}
+    elif not _task_has_instruction(task_dir, config):
+        LOGGER.warning("no instruction.md and no [[steps]] in %s", task_dir)
+        return None
     env_dir = task_dir / "environment"
     return _HarborTask(
         task_id=task_dir.name,
