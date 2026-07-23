@@ -10,6 +10,7 @@ from __future__ import annotations
 import shlex
 from typing import Any, cast
 
+import mcp.types as mcp_types
 import pytest
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
@@ -82,6 +83,7 @@ class _FakeSSH(SSHClient):
         self,
         *,
         stdout: str = "ok",
+        stderr: str = "",
         exit_status: int = 0,
         files: dict[str, bytes] | None = None,
         cwd: str | None = None,
@@ -90,7 +92,13 @@ class _FakeSSH(SSHClient):
         params = {"cwd": cwd} if cwd else {}
         super().__init__(
             Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22", params=params),
-            cast("Any", _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)),
+            cast(
+                "Any",
+                _Conn(
+                    _Completed(stdout=stdout, stderr=stderr, exit_status=exit_status),
+                    self.files,
+                ),
+            ),
         )
 
 
@@ -128,6 +136,118 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
     await tool.execute({"commands": ["echo a", "echo b"]})
 
     assert _commands(tool) == ["echo a", "echo b"]
+
+
+async def test_openai_shell_bounds_large_output_in_every_result_field() -> None:
+    limit = 20_000
+    stderr_prefix = "stderr-start\n"
+    stderr_suffix = "\nstderr-end"
+    stderr = (
+        stderr_prefix + "x" * (10_523_560 - len(stderr_prefix) - len(stderr_suffix)) + stderr_suffix
+    )
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stderr=stderr, exit_status=1),
+    )
+
+    result = await tool.execute({"commands": ["noisy-command"], "max_output_length": limit})
+
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == limit
+    output = result.structuredContent["output"][0]
+    assert len(output["stdout"]) + len(output["stderr"]) == limit
+    assert output["stderr"].startswith(stderr_prefix)
+    assert output["stderr"].endswith(stderr_suffix)
+    assert "[truncated]" in output["stderr"]
+    text_blocks = [
+        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
+    ]
+    assert len(text_blocks) == 1
+    assert len(text_blocks[0]) == limit
+    assert text_blocks[0] == output["stdout"] + output["stderr"]
+    assert "[truncated]" in text_blocks[0]
+
+
+async def test_openai_shell_applies_limit_independently_to_each_command() -> None:
+    limit = 80
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stdout="stdout-start-" + "a" * 100, stderr="b" * 100 + "-stderr-end"),
+    )
+
+    result = await tool.execute(
+        {"commands": ["first-command", "second-command"], "max_output_length": limit}
+    )
+
+    assert result.structuredContent is not None
+    outputs = result.structuredContent["output"]
+    assert len(outputs) == 2
+    assert all(len(output["stdout"]) + len(output["stderr"]) == limit for output in outputs)
+    assert all(output["stdout"].startswith("stdout-start-") for output in outputs)
+    assert all(output["stderr"].endswith("-stderr-end") for output in outputs)
+    assert sum(len(output["stdout"]) + len(output["stderr"]) for output in outputs) == 2 * limit
+    text_blocks = [
+        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
+    ]
+    assert len(text_blocks) == 2
+    assert all(len(text) == limit for text in text_blocks)
+    assert text_blocks == [output["stdout"] + output["stderr"] for output in outputs]
+
+
+@pytest.mark.parametrize(
+    ("max_output_length", "expected_output"),
+    [(1, "["), (10, "[truncated")],
+)
+async def test_openai_shell_honors_small_positive_output_limits(
+    max_output_length: int,
+    expected_output: str,
+) -> None:
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stdout="x" * 100),
+    )
+
+    result = await tool.execute(
+        {"commands": ["noisy-command"], "max_output_length": max_output_length}
+    )
+
+    assert _commands(tool) == ["noisy-command"]
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == max_output_length
+    output = result.structuredContent["output"][0]
+    assert output["stdout"] == expected_output
+    assert output["stderr"] == ""
+    assert result_text(result) == expected_output
+
+
+@pytest.mark.parametrize("max_output_length", [0, -1, "20000", 20_000.0, True])
+async def test_openai_shell_rejects_invalid_output_limits_without_running(
+    max_output_length: Any,
+) -> None:
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+
+    result = await tool.execute(
+        {"commands": ["echo should-not-run"], "max_output_length": max_output_length}
+    )
+
+    assert result.isError is True
+    assert _commands(tool) == []
+    assert result.structuredContent is not None
+    assert "max_output_length" not in result.structuredContent
+    assert result_text(result) == "max_output_length must be a positive integer"
+
+
+@pytest.mark.parametrize("max_output_length", [None, 20 * 1024 * 1024])
+async def test_openai_shell_uses_safe_effective_limit(max_output_length: int | None) -> None:
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    arguments: dict[str, Any] = {"commands": ["echo ok"]}
+    if max_output_length is not None:
+        arguments["max_output_length"] = max_output_length
+
+    result = await tool.execute(arguments)
+
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == 10 * 1024 * 1024
 
 
 async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
