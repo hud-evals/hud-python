@@ -1,0 +1,26 @@
+name: Slack Alerts
+
+# Posts to #alerts-github when a monitored workflow fails. Requires the
+# SLACK_ALERTS_WEBHOOK_URL secret: a Slack incoming webhook bound to the
+# #alerts-github channel (Slack app > Incoming Webhooks).
+on:
+  workflow_run:
+    workflows: [CI, Release]
+    types: [completed]
+
+jobs:
+  notify:
+    # Alert on failed pushes to main, releases, and manual runs; stay quiet
+    # for pull request CI, which is visible on the PR itself.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post failure to Slack
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_ALERTS_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: ":rotating_light: *${{ github.event.workflow_run.name }}* failed in `${{ github.repository }}` on `${{ github.event.workflow_run.head_branch }}` (triggered by ${{ github.event.workflow_run.actor.login }})\n<${{ github.event.workflow_run.html_url }}|View failed run>"
