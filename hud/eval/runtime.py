@@ -47,7 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, list_items
 from hud.utils.process import ProcessGroup, create_process_group_exec
 
 from .run import Grade, Run, rollout
@@ -1158,6 +1158,164 @@ class HostedRuntime:
             await platform.apost("/rollouts/cancel", json={"trace_id": trace_id})
         except Exception as exc:
             logger.warning("hosted rollout %s cancel failed: %s", trace_id, exc)
+
+    async def run_taskset(
+        self,
+        taskset_id: str,
+        model_id: str,
+        *,
+        group: int,
+        expected: int,
+        max_steps: int | None = None,
+        name: str | None = None,
+    ) -> tuple[str, list[Run]]:
+        """Submit a whole platform taskset as one batch via ``/rollouts/run_list``.
+
+        Where :meth:`run` submits one rollout with the task's *content* (env,
+        scenario, args), this submits one request with the taskset's *identity*:
+        the platform resolves the current task versions itself, so every trace
+        is born linked to its named task and the dashboard groups and labels
+        them (``my-task (2)``) instead of falling back to trace UUIDs.
+
+        ``expected`` is the caller's tasks x group count — the completion bar
+        when the submission response under-reports its traces. ``run_timeout``
+        bounds the whole batch here (the platform runs its traces
+        concurrently, so the wall-clock is set by the slowest rollout, not the
+        batch size); on timeout or cancel, every submitted trace is cancelled
+        platform-side before the error propagates.
+
+        Returns the server-minted job id and one folded ``Run`` per submitted
+        trace in submission order, each ``group_id`` carrying the trace's task
+        version id (the ``group`` rollouts of one task share it).
+        """
+        platform = PlatformClient.from_settings()
+        if not platform.api_key:
+            raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
+        payload: dict[str, Any] = {
+            "taskset_id": taskset_id,
+            "model_ids": [model_id],
+            "group_size": group,
+        }
+        if max_steps is not None:
+            payload["max_steps"] = max_steps
+        if name:
+            payload["name"] = name
+        data = await platform.apost("/rollouts/run_list", json=payload)
+        job_id = str(data.get("job_id") or "")
+        if not job_id:
+            raise RuntimeError(f"run_list returned no job_id: {data}")
+        from hud.settings import settings as sdk_settings
+
+        logger.info("job: %s/jobs/%s", sdk_settings.hud_web_url, job_id)
+        submitted = [str(t["trace_id"]) for t in data.get("traces") or [] if t.get("trace_id")]
+        try:
+            states = await self._await_job_terminal(
+                platform, job_id, expected=max(expected, len(submitted))
+            )
+        except (TimeoutError, asyncio.CancelledError):
+            for trace_id in submitted:
+                await self._cancel(platform, trace_id)
+            raise
+        # The poll page's order is arbitrary and may contain strays (retried or
+        # duplicated traces); keep one state per submitted trace, in submission
+        # order. Without a submission list, fall back to first-seen order.
+        by_id: dict[str, dict[str, Any]] = {}
+        for state in states:
+            trace_id = str(state.get("id") or state.get("trace_id") or "")
+            if trace_id and (not submitted or trace_id in set(submitted)):
+                by_id.setdefault(trace_id, state)
+        ordered = [t for t in submitted if t in by_id] if submitted else list(by_id)
+        runs: list[Run] = []
+        for trace_id in ordered:
+            state = by_id[trace_id]
+            run = self._fold(state, trace_id)
+            run.trace.trace_id = trace_id
+            run.job_id = job_id
+            version = state.get("task_version_id")
+            run.group_id = str(version) if version else None
+            runs.append(run)
+        return job_id, runs
+
+    async def _await_job_terminal(
+        self, platform: PlatformClient, job_id: str, *, expected: int
+    ) -> list[dict[str, Any]]:
+        # Assumes the traces endpoint returns the full set in one page (a bare
+        # list today). A trace is over when its status is terminal or, for a
+        # status outside the known vocabulary, when its end_time is stamped —
+        # otherwise one unrecognized terminal status would stall the batch.
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + self.run_timeout
+        while True:
+            data = await platform.aget(f"/jobs/{job_id}/traces")
+            items = list_items(data)
+            if (
+                items
+                and len(items) >= expected
+                and all(
+                    item.get("status") in _TERMINAL_TRACE_STATUSES or item.get("end_time")
+                    for item in items
+                )
+            ):
+                return items
+            if loop.time() >= deadline:
+                raise TimeoutError(
+                    f"hosted batch job {job_id} did not finish within {self.run_timeout:.0f}s"
+                )
+            await asyncio.sleep(self.poll_interval)
+
+
+def _gateway_batch_spec(agent: Agent) -> tuple[str, int | None] | None:
+    """``(platform model id, max_steps)`` when ``agent`` fits the batch shape.
+
+    ``/rollouts/run_list`` carries only a platform model id and a step budget,
+    so it can express exactly a stock gateway agent. Anything richer — a custom
+    ``model_client``, a non-gateway agent type, config diverging from the agent
+    type's defaults, or a model the platform catalog doesn't know — returns
+    None, and the caller keeps the per-rollout ``/rollouts/submit`` path that
+    carries the full agent spec.
+    """
+    spec_of: Callable[[], dict[str, Any]] | None = getattr(agent, "hosted_spec", None)
+    if not callable(spec_of):
+        return None
+    try:
+        spec = spec_of()
+    except ValueError:
+        return None
+    config = dict(spec.get("config") or {})
+    model = config.get("model")
+    if not isinstance(model, str) or not model:
+        return None
+    max_steps = config.get("max_steps")
+    try:
+        agent_config = agent.config  # type: ignore[attr-defined]
+        default = type(agent_config)(model=model).model_dump(
+            mode="json",
+            exclude={"model_client", "api_key", "base_url", "hosted_tools"},
+        )
+    except Exception:
+        return None
+    # ``auto_respond`` is tolerated: it steers the *client* agent loop between
+    # steps, and the batch runner drives the platform's own loop either way —
+    # the same one behind the website's Batch Runs.
+    diverged = {
+        key
+        for key in set(config) | set(default)
+        if key not in ("model", "max_steps", "auto_respond") and config.get(key) != default.get(key)
+    }
+    if diverged:
+        logger.debug("batch submit skipped; custom agent config: %s", sorted(diverged))
+        return None
+    from hud.utils.gateway import resolve_gateway_model
+
+    try:
+        entry = resolve_gateway_model(model)
+    except Exception as exc:
+        logger.debug("batch submit skipped; model catalog unavailable: %s", exc)
+        return None
+    if entry is None or not entry.id:
+        logger.debug("batch submit skipped; model %r not in the platform catalog", model)
+        return None
+    return entry.id, max_steps if isinstance(max_steps, int) else None
 
 
 def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:

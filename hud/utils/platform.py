@@ -60,3 +60,9 @@ class PlatformClient:
 
     async def apost(self, path: str, *, json: Any | None = None) -> Any:
         return await make_request("POST", self.url(path), json=json, api_key=self.api_key)
+
+
+def list_items(data: Any) -> list[dict[str, Any]]:
+    """Rows from a platform list response — a bare list or an ``{"items": [...]}`` envelope."""
+    items = data if isinstance(data, list) else (data.get("items") or [])
+    return [item for item in items if isinstance(item, dict)]

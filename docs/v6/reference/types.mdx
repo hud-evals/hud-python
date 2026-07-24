@@ -60,7 +60,7 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 |--------|------|-------------|
 | `id` | `str` | Platform job id. |
 | `name` | `str` | Display name. |
-| `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). |
+| `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). When a full platform taskset is batch-submitted on `HostedRuntime`, order follows the platform's submission instead; use `results` when alignment matters. |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
 | `reward` | `float` | Property: mean reward across runs (`0.0` for an empty job). |

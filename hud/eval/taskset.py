@@ -23,7 +23,14 @@ from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HostedRuntime, HUDRuntime, LocalRuntime, _declared_env, _declared_names
+from .runtime import (
+    HostedRuntime,
+    HUDRuntime,
+    LocalRuntime,
+    _declared_env,
+    _declared_names,
+    _gateway_batch_spec,
+)
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -266,7 +273,10 @@ class Taskset:
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
         instead, so a longer arc (a training session) spans many calls under
         one id. Returned ``job.runs`` preserves expansion order (task-major,
-        then group).
+        then group) — except on the one-request batch path (a platform
+        taskset run wholesale on ``HostedRuntime`` with a stock gateway
+        model), where runs come back in the platform's submission order,
+        each ``group_id`` carrying its trace's task version id.
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
@@ -287,6 +297,34 @@ class Taskset:
         for task in task_list:
             group_id = uuid.uuid4().hex
             expanded.extend((task, group_id) for _ in range(group))
+
+        # A platform taskset run wholesale on the platform with a stock gateway
+        # model goes up as one batch (``/rollouts/run_list``): the server
+        # resolves the task versions itself, so every trace is born linked to
+        # its named task and the dashboard groups/labels them. Anything the
+        # batch shape cannot express — an open ``job``, a task subset (which
+        # drops ``api_id``), a custom agent config — falls through to the
+        # per-rollout submit below.
+        if (
+            job is None
+            and task_list
+            and self.api_id is not None
+            and isinstance(runtime, HostedRuntime)
+            and (batch := _gateway_batch_spec(agent)) is not None
+        ):
+            model_id, max_steps = batch
+            name = _job_name(self.name, task_list, group)
+            batch_job_id, runs = await runtime.run_taskset(
+                self.api_id,
+                model_id,
+                group=group,
+                expected=len(expanded),
+                max_steps=max_steps,
+                name=name,
+            )
+            batch_job = Job(id=batch_job_id, name=name, group=group, taskset_id=self.api_id)
+            batch_job.runs.extend(runs)
+            return batch_job
 
         if job is None:
             job = Job(

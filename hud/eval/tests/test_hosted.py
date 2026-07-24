@@ -503,3 +503,206 @@ async def test_splice_websocket_propagates_relay_errors() -> None:
             cast("asyncio.StreamWriter", _Writer()),
             _WebSocket(),
         )
+
+
+# ─── batch submission (/rollouts/run_list) ──────────────────────────────────
+
+
+class _FakeBatchPlatform:
+    """Scripted PlatformClient for the run_list path: one POST, then polls of
+    ``/jobs/{id}/traces`` served in order."""
+
+    api_key = "test-key"
+
+    def __init__(
+        self, trace_pages: list[list[dict[str, Any]]], trace_ids: list[str] | None = None
+    ) -> None:
+        self.trace_pages = trace_pages
+        self.trace_ids = trace_ids or ["t-1", "t-2"]
+        self.posts: list[tuple[str, dict[str, Any]]] = []
+        self.polled = 0
+
+    async def apost(self, path: str, *, json: Any | None = None) -> Any:
+        self.posts.append((path, json or {}))
+        return {
+            "job_id": "9a1b2c3d-0000-0000-0000-000000000001",
+            "accepted": len(self.trace_ids),
+            "traces": [{"trace_id": t} for t in self.trace_ids],
+        }
+
+    async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        page = self.trace_pages[min(self.polled, len(self.trace_pages) - 1)]
+        self.polled += 1
+        return page
+
+
+def _catalog_models() -> list[Any]:
+    from hud.utils.gateway import GatewayModelInfo
+
+    return [
+        GatewayModelInfo(id="model-uuid-1", model_name="test-model", name="Test Model"),
+    ]
+
+
+def test_gateway_batch_spec_stock_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.eval.runtime import _gateway_batch_spec
+    from hud.utils import gateway
+
+    monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
+    agent = _agent()
+    agent.config.max_steps = 25
+
+    assert _gateway_batch_spec(agent) == ("model-uuid-1", 25)
+
+
+def test_gateway_batch_spec_rejects_custom_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.eval.runtime import _gateway_batch_spec
+    from hud.utils import gateway
+
+    monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
+    agent = _agent()
+    agent.config.system_prompt = "be brief"  # diverges from the type's defaults
+
+    assert _gateway_batch_spec(agent) is None
+
+
+def test_gateway_batch_spec_rejects_unknown_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.eval.runtime import _gateway_batch_spec
+    from hud.utils import gateway
+
+    monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
+    agent = OpenAIChatAgent(
+        OpenAIChatConfig(model="not-in-catalog", api_key="k", base_url="http://localhost")
+    )
+
+    assert _gateway_batch_spec(agent) is None
+
+
+@pytest.mark.asyncio
+async def test_run_taskset_submits_batch_and_folds_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakeBatchPlatform(
+        [
+            [{"id": "t-1", "status": "running"}, {"id": "t-2", "status": "queued"}],
+            [
+                # Reversed order plus a stray trace: the fold must restore
+                # submission order and keep only the submitted traces.
+                {"id": "t-stray", "status": "completed", "reward": 1.0},
+                {
+                    "id": "t-2",
+                    "status": "error",
+                    "reward": None,
+                    "error": "boom",
+                    "task_version_id": "v-a",
+                },
+                {"id": "t-1", "status": "completed", "reward": 1.0, "task_version_id": "v-a"},
+            ],
+        ]
+    )
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    hosted = HostedRuntime(poll_interval=0.01)
+
+    job_id, runs = await hosted.run_taskset(
+        "ts-123", "model-uuid-1", group=2, expected=2, max_steps=40, name="My Batch"
+    )
+
+    assert job_id == "9a1b2c3d-0000-0000-0000-000000000001"
+    (path, payload) = platform.posts[0]
+    assert path == "/rollouts/run_list"
+    assert payload == {
+        "taskset_id": "ts-123",
+        "model_ids": ["model-uuid-1"],
+        "group_size": 2,
+        "max_steps": 40,
+        "name": "My Batch",
+    }
+    assert platform.polled == 2  # first page non-terminal, second page terminal
+    assert [run.trace.trace_id for run in runs] == ["t-1", "t-2"]  # submission order, stray dropped
+    assert [run.reward for run in runs] == [1.0, 0.0]
+    assert runs[0].trace.status == "completed"
+    assert runs[1].trace.status == "error"
+    assert [run.group_id for run in runs] == ["v-a", "v-a"]  # task version id as the group key
+    assert runs[0].job_id == job_id
+
+
+@pytest.mark.asyncio
+async def test_taskset_run_dispatches_platform_taskset_to_run_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval.taskset import Taskset
+    from hud.utils import gateway
+
+    platform = _FakeBatchPlatform(
+        [
+            [
+                {"id": "t-1", "status": "completed", "reward": 0.5, "task_version_id": "v-a"},
+                {"id": "t-2", "status": "completed", "reward": 0.5, "task_version_id": "v-a"},
+                {"id": "t-3", "status": "completed", "reward": 0.5, "task_version_id": "v-a"},
+            ]
+        ],
+        trace_ids=["t-1", "t-2", "t-3"],
+    )
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
+
+    entered: list[str] = []
+
+    async def _fake_job_enter(job_id: str, **kwargs: Any) -> None:
+        entered.append(job_id)
+
+    monkeypatch.setattr("hud.eval.taskset.job_enter", _fake_job_enter)
+
+    taskset = Taskset(
+        "my-set",
+        [Task(env="coding", id="coding-bug", args={"x": 1}, slug="one")],
+        origin="api:ts-123",
+    )
+    job = await taskset.run(_agent(), runtime=HostedRuntime(poll_interval=0.01), group=3)
+
+    # One batch POST to run_list; the server-minted job comes back, and no
+    # client-side job is registered.
+    assert [p for (p, _) in platform.posts] == ["/rollouts/run_list"]
+    assert platform.posts[0][1]["taskset_id"] == "ts-123"
+    assert platform.posts[0][1]["group_size"] == 3
+    assert job.id == "9a1b2c3d-0000-0000-0000-000000000001"
+    assert job.taskset_id == "ts-123"
+    assert entered == []
+    assert [run.reward for run in job.runs] == [0.5, 0.5, 0.5]
+    assert {run.group_id for run in job.runs} == {"v-a"}
+
+
+@pytest.mark.asyncio
+async def test_taskset_run_falls_back_to_submit_for_custom_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval.taskset import Taskset
+    from hud.utils import gateway
+
+    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    monkeypatch.setattr(gateway, "list_gateway_models", _catalog_models)
+
+    async def _fake_job_enter(job_id: str, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr("hud.eval.taskset.job_enter", _fake_job_enter)
+
+    agent = _agent()
+    agent.config.system_prompt = "be brief"  # not expressible by run_list
+
+    taskset = Taskset(
+        "my-set",
+        [Task(env="coding", id="coding-bug", args={}, slug="one")],
+        origin="api:ts-123",
+    )
+    job = await taskset.run(agent, runtime=HostedRuntime(poll_interval=0.01), group=1)
+
+    assert [p for (p, _) in platform.posts] == ["/rollouts/submit"]
+    assert [run.reward for run in job.runs] == [1.0]
