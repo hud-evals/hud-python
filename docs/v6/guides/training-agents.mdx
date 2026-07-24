@@ -93,7 +93,10 @@ One job spans the session; each step appends a batch and trains on it:
 
 - **Open the job** with `group=8` - 8 rollouts per task, so the rewards are comparable (next).
 - **Roll out** the batch, the same eval as the [previous guide](/v6/guides/running-an-eval). The
-  [runtime](/v6/reference/runtime) sets where it runs; swap `LocalRuntime` for `HUDRuntime()` unchanged.
+  [runtime](/v6/reference/runtime) sets where it runs; swap `LocalRuntime` for
+  `HUDRuntime(run_timeout=600)` unchanged. That `run_timeout` is a hard per-rollout wall clock
+  (agent + grade/cancel) so a disconnected tunnel cannot stall the batch before `trainer.step`.
+  Keep timed-out runs in the batch — GRPO needs full groups.
 - **Nudge** with `trainer.step` - the one line that learns. It scores each rollout against its group,
   shifts the weights, then **promotes** them so the gateway serves the new ones at once.
 

@@ -271,8 +271,10 @@ class Taskset:
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
         as a failed/errored run so one wedged rollout (e.g. a stuck sampling
-        stream) cannot stall the whole batch. ``HUDRuntime`` carries its own
-        ``run_timeout`` instead.
+        stream or a disconnected tunnel during grading) cannot stall the whole
+        batch. When unset and ``runtime`` is a :class:`~hud.eval.runtime.HUDRuntime`,
+        its ``run_timeout`` is used. :class:`~hud.eval.runtime.HostedRuntime`
+        always uses its own ``run_timeout``.
         """
         group = group or (job.group if job else 1)
         if group < 1:
@@ -308,6 +310,9 @@ class Taskset:
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+        effective_timeout = rollout_timeout
+        if effective_timeout is None and isinstance(placement, HUDRuntime):
+            effective_timeout = placement.run_timeout
 
         async def _run(task: Task, group_id: str) -> Run:
             assert placement is not None  # only reached when tasks were expanded
@@ -319,7 +324,7 @@ class Taskset:
                 runtime=placement,
                 job_id=job_id,
                 group_id=group_id,
-                rollout_timeout=rollout_timeout,
+                rollout_timeout=effective_timeout,
             )
 
         async def _one(task: Task, group_id: str) -> Run:

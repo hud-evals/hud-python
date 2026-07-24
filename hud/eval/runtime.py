@@ -900,6 +900,9 @@ class HUDRuntime:
     """
 
     def __init__(self, *, run_timeout: float = 3600.0, runtime_url: str | None = None) -> None:
+        #: Hard wall-clock bound for one rollout (provision + agent + grade/
+        #: cancel with a short teardown grace). Forwarded as
+        #: ``rollout_timeout`` into :func:`~hud.eval.run.rollout`.
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
 
@@ -919,6 +922,7 @@ class HUDRuntime:
             trace_id=trace_id,
             job_id=job_id,
             group_id=group_id,
+            rollout_timeout=self.run_timeout,
         )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
@@ -1058,17 +1062,21 @@ class HostedRuntime:
         The platform owns the trace lifecycle (the instance-side driver reports
         enter/exit and streams telemetry), so this never double-reports.
         Failures isolating one rollout from its batch (submit rejected, the
-        env/model unresolved) surface as :meth:`Run.failed`; a timeout or a
-        local cancel propagate, having first asked the platform to release the
-        lease.
+        env/model unresolved, or ``run_timeout``) surface as :meth:`Run.failed`
+        so ``Taskset.run``'s gather cannot drop the rest of the batch. A local
+        cancel (Ctrl-C) still propagates after requesting a platform cancel.
         """
         trace_id = trace_id or uuid.uuid4().hex
         try:
             state = await self._submit_and_await(
                 task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
             )
-        except (TimeoutError, asyncio.CancelledError):
+        except asyncio.CancelledError:
             raise
+        except TimeoutError as exc:
+            logger.warning("hosted rollout timed out: %s", exc)
+            run = Run.failed(str(exc))
+            run.trace.stop_reason = "timeout"
         except Exception as exc:
             logger.warning("hosted rollout failed to launch: %s", exc)
             run = Run.failed(str(exc))

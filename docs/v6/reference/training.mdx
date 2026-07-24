@@ -76,6 +76,16 @@ policy-gradient objective applied on top, defaulting to `importance_sampling` (n
 batch must divide evenly into groups - `forward_backward` rejects a partial final group before spending
 a forward pass. `num_substeps` splits the batch for gradient accumulation.
 
+### Timed-out and failed rollouts
+
+Keep timed-out / errored runs in the batch. `Taskset.run` always returns a terminal `Run` per slot
+(including HUDRuntime / HostedRuntime timeouts), so group cardinality stays intact for
+`group_size`. A failed member typically contributes reward `0` (or a salvage grade if the agent
+answered before the deadline). Do **not** drop failed members before `trainer.step` — that leaves an
+incomplete GRPO group and raises. Prefer bounding each rollout with
+`HUDRuntime(run_timeout=…)` or `Taskset.run(..., rollout_timeout=…)` so one wedged tunnel cannot
+stall the whole batch.
+
 ## Inputs
 
 A training input is a recorded trajectory by id, or an inline one:
