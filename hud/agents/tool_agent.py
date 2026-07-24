@@ -92,9 +92,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         reconstructed there from this identity (type, model, step budget, system
         prompt, provider kwargs) with the model resolved through the HUD gateway.
         """
-        from hud.utils.gateway import is_gateway_client
-
-        if not is_gateway_client(self.config.model_client):
+        if self.config.model_client is not None:
             raise ValueError(
                 "hosted execution cannot serialize a custom model_client; "
                 "use create_agent(model, ...) so the hosted runner rebuilds the "

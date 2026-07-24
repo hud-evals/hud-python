@@ -92,15 +92,17 @@ def test_hosted_spec_serializes_full_config() -> None:
     assert "hosted_tools" not in config
 
 
-def test_hosted_spec_strips_create_agent_gateway_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_agent attaches a gateway client for local loops; HostedRuntime must
-    still serialize system_prompt + completion_kwargs (HUD-2100)."""
+def test_create_agent_hosted_spec_preserves_training_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The constructor builds the runtime client without putting it in config."""
     from hud.agents import create_agent
-    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo, mark_gateway_client
+    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo
 
     class _GatewayStub:
-        """Attribute-capable stand-in for a provider SDK client."""
+        pass
 
+    client = _GatewayStub()
     model = GatewayModelInfo(
         id="arith-rl",
         model_name="arith-rl",
@@ -108,10 +110,8 @@ def test_hosted_spec_strips_create_agent_gateway_client(monkeypatch: pytest.Monk
         provider=GatewayProviderInfo(name="openai"),
     )
     monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
-    monkeypatch.setattr(
-        "hud.agents.build_gateway_client",
-        lambda _provider: mark_gateway_client(_GatewayStub()),
-    )
+    monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda _provider: client)
 
     agent = create_agent(
         "arith-rl",
@@ -123,7 +123,8 @@ def test_hosted_spec_strips_create_agent_gateway_client(monkeypatch: pytest.Monk
             }
         },
     )
-    assert agent.config.model_client is not None
+    assert agent.config.model_client is None
+    assert agent.oai is client
 
     spec = agent.hosted_spec()
     config = spec["config"]
@@ -144,29 +145,6 @@ def test_hosted_spec_rejects_custom_model_client() -> None:
         agent.hosted_spec()
     with pytest.raises(ValueError, match="HUDRuntime"):
         agent.hosted_spec()
-
-
-def test_mark_gateway_client_round_trip() -> None:
-    from hud.utils.gateway import is_gateway_client, mark_gateway_client
-
-    class _Stub:
-        pass
-
-    tagged = mark_gateway_client(_Stub())
-    assert is_gateway_client(tagged)
-    assert not is_gateway_client(_Stub())
-    assert is_gateway_client(None)
-
-
-def test_mark_gateway_client_works_on_async_openai() -> None:
-    """Provider SDK clients must accept the attribute mark (no id-registry fallback)."""
-    from openai import AsyncOpenAI
-
-    from hud.utils.gateway import is_gateway_client, mark_gateway_client
-
-    client = AsyncOpenAI(api_key="test", base_url="http://localhost")
-    assert is_gateway_client(mark_gateway_client(client))
-    assert not is_gateway_client(AsyncOpenAI(api_key="test", base_url="http://localhost"))
 
 
 @pytest.mark.asyncio

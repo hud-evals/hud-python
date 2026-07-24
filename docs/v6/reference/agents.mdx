@@ -38,11 +38,11 @@ the gateway knows (`claude-...`, `gpt-...`, `gemini-...`); extra kwargs pass thr
 config — including `system_prompt` and `completion_kwargs` (for example
 `extra_body={"return_token_ids": True}` for training).
 
-For local loops (`HUDRuntime` / `LocalRuntime`) the agent keeps a gateway `model_client`. For
-[`HostedRuntime`](/v6/reference/runtime#hostedruntime) that client is stripped and rebuilt on the
-platform from the model name, so the same `create_agent(...)` call works for hosted evals and
-training. A true BYOK / custom `model_client` cannot travel with hosted submission — keep the agent
-loop local with `HUDRuntime` instead.
+`create_agent(...)` leaves `model_client` unset. Provider agent constructors build the gateway client
+for local loops (`HUDRuntime` / `LocalRuntime`), while
+[`HostedRuntime`](/v6/reference/runtime#hostedruntime) serializes that client-free config and rebuilds
+the gateway client on the platform. A true BYOK / custom `model_client` cannot travel with hosted
+submission — keep the agent loop local with `HUDRuntime` instead.
 
 Built-in agents are **catalog-driven**: each run they read the environment's manifest, open the
 capabilities they support, build the matching provider tools, and loop against `run.prompt_messages`.

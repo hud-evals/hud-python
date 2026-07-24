@@ -14,6 +14,7 @@ import pytest
 from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
 from hud.agents.base import Agent
 from hud.types import AgentType
+from hud.utils.exceptions import HudAuthenticationError
 
 
 class _FillingAgent(Agent):
@@ -77,6 +78,11 @@ def test_missing_provider_dependency_points_at_agents_extra(
 # ─── create_agent routing ─────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _gateway_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
+
+
 def test_create_agent_unknown_model_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     # No gateway models available -> a bare unknown model can't be resolved.
     monkeypatch.setattr("hud.agents.list_gateway_models", list)
@@ -84,7 +90,7 @@ def test_create_agent_unknown_model_raises(monkeypatch: pytest.MonkeyPatch) -> N
         create_agent("totally-unknown-model-xyz")
 
 
-def test_create_agent_value_shortcut_builds_provider_agent(
+def test_create_agent_value_shortcut_leaves_client_out_of_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sentinel = object()
@@ -92,13 +98,13 @@ def test_create_agent_value_shortcut_builds_provider_agent(
     def _build_client(_provider: str) -> object:
         return sentinel
 
-    monkeypatch.setattr("hud.agents.build_gateway_client", _build_client)
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", _build_client)
 
     agent = create_agent("openai")  # AgentType.OPENAI shortcut
 
     assert isinstance(agent, OpenAIAgent)
-    # The gateway client is threaded into the agent's config.
-    assert agent.config.model_client is sentinel
+    assert agent.config.model_client is None
+    assert agent.openai_client is sentinel
 
 
 def test_create_agent_resolves_gateway_model_metadata(
@@ -117,12 +123,13 @@ def test_create_agent_resolves_gateway_model_metadata(
     def _build_client(_provider: str) -> object:
         return object()
 
-    monkeypatch.setattr("hud.agents.build_gateway_client", _build_client)
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", _build_client)
 
     agent = create_agent("ft:custom-123")
 
     assert isinstance(agent, OpenAIChatAgent)
     assert agent.config.model == "gpt-5.5"  # resolved to the model's real name
+    assert agent.config.model_client is None
 
 
 @pytest.mark.parametrize(
@@ -153,9 +160,16 @@ def test_create_agent_accepts_gateway_model_aliases(
     def _build_client(_provider: str) -> object:
         return object()
 
-    monkeypatch.setattr("hud.agents.build_gateway_client", _build_client)
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", _build_client)
 
     agent = create_agent(alias)
 
     assert isinstance(agent, OpenAIChatAgent)
     assert agent.config.model == canonical
+
+
+def test_create_agent_requires_hud_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hud.agents.settings.api_key", None)
+
+    with pytest.raises(HudAuthenticationError, match="HUD_API_KEY"):
+        create_agent("openai")

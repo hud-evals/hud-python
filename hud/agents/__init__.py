@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.settings import settings
 from hud.types import AgentType
+from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.gateway import (
-    build_gateway_client,
     gateway_model_aliases,
     list_gateway_models,
     normalize_gateway_model_id,
@@ -30,23 +31,22 @@ if TYPE_CHECKING:
 def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     """Create an agent routed through the HUD gateway.
 
-    Attaches a gateway ``model_client`` for local loops (``HUDRuntime`` /
-    ``LocalRuntime``). For ``HostedRuntime``, that client is stripped by
-    :meth:`~hud.agents.tool_agent.ToolAgent.hosted_spec` and rebuilt on the
-    platform from the model name — ``system_prompt``, ``completion_kwargs``
-    (including ``return_token_ids`` / Tinker kwargs), and other config still
-    travel. True BYOK / custom clients are not serializable; use
-    ``HUDRuntime`` for those TrainingClient workflows.
+    Leaves ``model_client`` unset so provider agent constructors build the HUD
+    gateway client locally, while :class:`~hud.eval.runtime.HostedRuntime` can
+    serialize the config and rebuild the client remotely. Explicitly supplied
+    clients remain custom/BYOK and are not serializable.
 
     For direct API access with provider API keys, instantiate the agent classes
     directly.
     """
+    if not settings.api_key:
+        raise HudAuthenticationError("HUD_API_KEY is required to create a gateway agent")
+
     requested_model = model
     model = normalize_gateway_model_id(model)
     agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
     if agent_type is not None:
         model_id = model
-        provider_name = agent_type.gateway_provider
     else:
         try:
             gateway_models = list_gateway_models()
@@ -78,7 +78,6 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                 except ValueError as exc:
                     raise ValueError(f"Model '{model}' has invalid agent type metadata") from exc
                 model_id = gateway_model.model_name or model
-                provider_name = gateway_model.provider.name or "openai"
                 break
         else:
             import difflib
@@ -104,7 +103,6 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
             raise ValueError(f"Model {requested_model!r} not found in {source}.{hint}")
 
     kwargs.setdefault("model", model_id)
-    kwargs.setdefault("model_client", build_gateway_client(provider_name))
     # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
     return agent_type.cls(cast("Any", config))
