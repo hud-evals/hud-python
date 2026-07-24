@@ -664,7 +664,9 @@ class DaytonaRuntime:
         self.snapshot_name = snapshot_name
         # Default command serves on *port*, so the SSH forward target always
         # matches what's listening; override only for a non-default layout.
-        self.command = command or f"hud serve env.py --host 0.0.0.0 --port {port}"
+        self.command = (
+            command or f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
+        )
         self.workdir = workdir
         self.port = port
         self.ssh_host = ssh_host
@@ -720,6 +722,7 @@ class DaytonaRuntime:
                 kwargs: dict[str, Any] = {
                     "image": Image.base(config.image),
                     "ephemeral": True,
+                    "auto_stop_interval": 0,
                 }
                 if daytona_resources is not None:
                     kwargs["resources"] = daytona_resources
@@ -751,6 +754,7 @@ class DaytonaRuntime:
                 sandbox_params = CreateSandboxFromSnapshotParams(
                     snapshot=self.snapshot_name,
                     ephemeral=True,
+                    auto_stop_interval=0,
                 )
 
             create_timeout = 120

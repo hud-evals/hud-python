@@ -195,6 +195,7 @@ def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 class _CreateSandboxFromSnapshotParams:
     snapshot: str
     ephemeral: bool
+    auto_stop_interval: int
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,7 @@ class _CreateSnapshotParams:
 class _CreateSandboxFromImageParams:
     image: object
     ephemeral: bool
+    auto_stop_interval: int
     resources: object | None = None
 
 
@@ -641,6 +643,7 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert create_params == _CreateSandboxFromImageParams(
         image=_DaytonaImage("img:tag"),
         ephemeral=True,
+        auto_stop_interval=0,
         resources=_DaytonaResources(
             cpu=2,
             memory=4,
@@ -653,7 +656,9 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert calls["execute"] == (
         "hud-serve",
         _SessionExecuteRequest(
-            command="cd /app && hud serve env.py --host 0.0.0.0 --port 8765",
+            command=(
+                'cd /app && PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765'
+            ),
             run_async=True,
         ),
     )
@@ -692,9 +697,29 @@ async def test_daytona_task_runtime_config_overlays_provider_defaults(
     assert create_params == _CreateSandboxFromImageParams(
         image=_DaytonaImage("img:task"),
         ephemeral=True,
+        auto_stop_interval=0,
         resources=_DaytonaResources(cpu=2, memory=4),
     )
     assert create_timeout == 45
+
+
+async def test_daytona_snapshot_sandboxes_disable_auto_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_daytona(monkeypatch)
+
+    async with DaytonaRuntime("snapshot")(_row()):
+        pass
+
+    create_call = calls["create"]
+    assert isinstance(create_call, tuple)
+    create_params, create_timeout = create_call
+    assert create_params == _CreateSandboxFromSnapshotParams(
+        snapshot="snapshot",
+        ephemeral=True,
+        auto_stop_interval=0,
+    )
+    assert create_timeout == 120
 
 
 async def test_daytona_runtime_config_rejects_unsupported_fields(
