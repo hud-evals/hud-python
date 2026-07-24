@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -18,6 +20,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+import hud.environment.workspace as workspace_module
 from hud.capabilities import Capability
 from hud.environment import Environment
 
@@ -146,6 +149,176 @@ async def test_workspace_command_teardown_kills_background_children(tmp_path: Pa
         if pid is not None and _pid_is_running(pid):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_workspace_session_close_kills_running_children(tmp_path: Path) -> None:
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+    pid: int | None = None
+
+    try:
+        async with served(env) as client:
+            ssh = cast("SSHClient", await client.open("shell"))
+            remote = await ssh.conn.create_process(
+                "trap '' TERM; sleep 120 & echo $! > child.pid; wait"
+            )
+            try:
+                result = await asyncio.wait_for(
+                    ssh.conn.run(
+                        "while [ ! -s child.pid ]; do sleep 0.01; done; cat child.pid",
+                        check=True,
+                    ),
+                    5.0,
+                )
+                assert isinstance(result.stdout, str)
+                pid = int(result.stdout)
+                assert _pid_is_running(pid)
+            finally:
+                remote.close()
+                await asyncio.wait_for(remote.wait_closed(), 5.0)
+
+            assert await _wait_for_pid_inactive(pid, max_wait=5.0)
+    finally:
+        if pid is not None and _pid_is_running(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_workspace_channel_close_during_teardown_keeps_connection_usable(
+    tmp_path: Path,
+) -> None:
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+    pid: int | None = None
+
+    try:
+        async with served(env) as client:
+            ssh = cast("SSHClient", await client.open("shell"))
+            remote = await ssh.conn.create_process(
+                "sh -c 'trap \"echo started > teardown-started; "
+                'while :; do sleep 1; done" TERM; '
+                "echo $$ > close-race-child.pid; while :; do sleep 1; done' & "
+                "printf output"
+            )
+            try:
+                result = await asyncio.wait_for(
+                    ssh.conn.run(
+                        "while [ ! -s teardown-started ]; do sleep 0.01; done; "
+                        "cat close-race-child.pid",
+                        check=True,
+                    ),
+                    5.0,
+                )
+                assert isinstance(result.stdout, str)
+                pid = int(result.stdout)
+                assert _pid_is_running(pid)
+
+                remote.close()
+                await asyncio.wait_for(remote.wait_closed(), 5.0)
+                assert await _wait_for_pid_inactive(pid, max_wait=5.0)
+                await ssh.conn.run("true", check=True)
+            finally:
+                remote.close()
+                await asyncio.wait_for(remote.wait_closed(), 5.0)
+    finally:
+        if pid is not None and _pid_is_running(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_workspace_timeout_reports_exit_after_child_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(workspace_module, "_COMMAND_TIMEOUT", 0.5)
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+    pid: int | None = None
+
+    try:
+        async with served(env) as client:
+            ssh = cast("SSHClient", await client.open("shell"))
+            remote = await ssh.conn.create_process(
+                "trap '' TERM; sleep 120 & echo $! > timeout-child.pid; wait"
+            )
+            try:
+                result = await asyncio.wait_for(
+                    ssh.conn.run(
+                        "while [ ! -s timeout-child.pid ]; do sleep 0.01; done; "
+                        "cat timeout-child.pid",
+                        check=True,
+                    ),
+                    5.0,
+                )
+                assert isinstance(result.stdout, str)
+                pid = int(result.stdout)
+                assert _pid_is_running(pid)
+
+                completed = await remote.wait(timeout=5.0)
+                assert completed.exit_status == 1
+                assert not _pid_is_running(pid)
+            finally:
+                remote.close()
+                await asyncio.wait_for(remote.wait_closed(), 5.0)
+    finally:
+        if pid is not None and _pid_is_running(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX setsid")
+async def test_workspace_command_bounds_detached_output_drain(tmp_path: Path) -> None:
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+    pid: int | None = None
+    setsid = shutil.which("setsid")
+    if setsid is not None:
+        detached_command = (
+            f"{shlex.quote(setsid)} sh -c "
+            "'echo $$ > detached.pid; printf ready; kill -KILL $PPID; sleep 120'"
+        )
+    else:
+        code = (
+            "import os,signal,time;"
+            "from pathlib import Path;"
+            "parent=os.getppid();"
+            "os.setsid();"
+            "Path('detached.pid').write_text(str(os.getpid()));"
+            "os.write(1,b'ready');"
+            "os.kill(parent,signal.SIGKILL);"
+            "time.sleep(120)"
+        )
+        detached_command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+    try:
+        async with served(env) as client:
+            ssh = cast("SSHClient", await client.open("shell"))
+            remote = await ssh.conn.create_process(f"{detached_command} & wait")
+            try:
+                result = await asyncio.wait_for(
+                    ssh.conn.run(
+                        "while [ ! -s detached.pid ]; do sleep 0.01; done; cat detached.pid",
+                        check=True,
+                    ),
+                    5.0,
+                )
+                assert isinstance(result.stdout, str)
+                pid = int(result.stdout)
+                assert _pid_is_running(pid)
+
+                completed = await remote.wait(timeout=5.0)
+                assert completed.stdout == "ready"
+                assert _pid_is_running(pid)
+            finally:
+                remote.close()
+                await asyncio.wait_for(remote.wait_closed(), 5.0)
+    finally:
+        if pid is not None and _pid_is_running(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(pid, signal.SIGKILL)
 
 
 async def test_stop_tears_down_the_workspace(tmp_path: Path) -> None:

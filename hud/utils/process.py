@@ -9,6 +9,8 @@ import signal
 from dataclasses import dataclass
 from typing import Any
 
+_PROCESS_EXIT_POLL_INTERVAL = 0.05
+
 
 @dataclass(slots=True)
 class ProcessGroup:
@@ -37,7 +39,26 @@ class ProcessGroup:
         return self.process.returncode
 
     async def wait(self) -> int:
-        return await self.process.wait()
+        """Wait for the process leader without requiring inherited pipes to close."""
+        returncode = self.process.returncode
+        if returncode is not None:
+            return returncode
+
+        wait_task = asyncio.create_task(self.process.wait())
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    (wait_task,),
+                    timeout=_PROCESS_EXIT_POLL_INTERVAL,
+                )
+                if done:
+                    return await wait_task
+                returncode = self.process.returncode
+                if returncode is not None:
+                    return returncode
+        finally:
+            wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
 
     async def communicate(
         self,
@@ -50,10 +71,8 @@ class ProcessGroup:
                 result = await self.process.communicate(input=input)
             else:
                 result = await asyncio.wait_for(self.process.communicate(input=input), max_wait)
-        except BaseException:
+        finally:
             await self.terminate()
-            raise
-        await self.terminate()
         return result
 
     async def terminate(self) -> None:
@@ -105,6 +124,8 @@ async def _terminate_process_group(
                     await asyncio.wait_for(proc.wait(), kill_timeout)
         return
 
+    loop = asyncio.get_running_loop()
+    term_deadline = loop.time() + term_timeout + settle_time
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -114,11 +135,14 @@ async def _terminate_process_group(
         return
 
     if proc.returncode is None:
+        remaining = max(0.0, term_deadline - loop.time())
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(proc.wait(), term_timeout)
+            await asyncio.wait_for(proc.wait(), remaining)
 
-    if settle_time > 0:
-        await asyncio.sleep(settle_time)
+    remaining = max(0.0, term_deadline - loop.time())
+    if await _wait_for_process_group_exit(proc.pid, remaining):
+        return
+
     with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
 
@@ -128,3 +152,16 @@ async def _terminate_process_group(
         else:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(proc.wait(), kill_timeout)
+
+
+async def _wait_for_process_group_exit(process_group: int, max_wait: float) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max_wait
+    while True:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return True
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(min(_PROCESS_EXIT_POLL_INTERVAL, deadline - loop.time()))
