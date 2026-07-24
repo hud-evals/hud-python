@@ -130,9 +130,15 @@ class HudClient:
 
     # ─── handshake ────────────────────────────────────────────────────
 
-    async def hello(self) -> Manifest:
-        """Send ``hello``; cache and return the parsed ``Manifest``."""
-        result = await self._call("hello", {})
+    async def hello(self, session_id: str | None = None) -> Manifest:
+        """Send ``hello``; cache and return the parsed ``Manifest``.
+
+        ``session_id`` resumes that parked session on the env — its suspended
+        task, e.g. one a prior connection started — instead of minting a
+        fresh session.
+        """
+        params: dict[str, Any] = {} if session_id is None else {"session_id": session_id}
+        result = await self._call("hello", params)
         env = result.get("env") or {}
         bindings = [
             await self._reachable(Capability.from_manifest(b))

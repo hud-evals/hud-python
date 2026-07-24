@@ -18,28 +18,29 @@ from .model import Model
 if TYPE_CHECKING:
     from hud.eval.run import Run
 
-    from ._types import ActionArray
+    from .adapter import ActionArray
     from .agent import RobotAgent
 
 
 class BatchedModel(Model):
     """Coalesce concurrent ``ainfer`` calls into one stacked ``inner.infer``.
 
-    A lazily-started worker drains up to ``batch_size`` queued calls (or waits up to
-    ``max_wait_s`` for stragglers — which avoids stalling when fewer rollouts are live,
-    e.g. the tail of a suite), stacks them into one ``[N, ...]`` batch, runs a single
-    forward, and scatters the ``[N, T, A]`` rows back to each caller.
+    Waits up to ``max_wait_s`` for callers, stacks to ``[N, ...]``, one forward,
+    scatters ``[N, T, A]`` rows back. Omit ``batch_size`` to size to in-flight
+    callers (``max_concurrent`` already bounds that); set it only to cap below
+    concurrency (e.g. VRAM) - that also flushes early when full.
 
-    ``inner`` must be an in-process, stateless model whose :meth:`~Model.infer` runs the
-    whole ``[N, ...]`` batch in one forward (e.g. :class:`~hud.agents.robot.model.LeRobotModel`).
-    :class:`~hud.agents.robot.model.RemoteModel` is **not** supported: it does one WebSocket
-    request per env and the OpenPI server protocol has no batched-request shape, so a stacked
-    batch would be mis-sent as a single env. Run one agent per rollout against it instead.
+    ``inner`` must batch the leading ``N`` in one in-process forward
+    (e.g. :class:`~hud.agents.robot.model.LeRobotModel`). Not
+    :class:`~hud.agents.robot.model.RemoteModel` (OpenPI has no batched request;
+    use one agent per rollout).
     """
 
-    def __init__(self, inner: Model, *, batch_size: int, max_wait_s: float = 0.05) -> None:
+    def __init__(
+        self, inner: Model, *, batch_size: int | None = None, max_wait_s: float = 0.05
+    ) -> None:
         self.inner = inner
-        self.batch_size = int(batch_size)
+        self.batch_size = None if batch_size is None else int(batch_size)
         self.max_wait_s = float(max_wait_s)
         # Bound to the running loop on first ainfer (the harness owns the loop).
         self._queue: asyncio.Queue[tuple[Any, asyncio.Future[ActionArray]]] | None = None
@@ -64,7 +65,7 @@ class BatchedModel(Model):
         while True:
             items = [await self._queue.get()]  # block for the first caller
             deadline = loop.time() + self.max_wait_s
-            while len(items) < self.batch_size:
+            while self.batch_size is None or len(items) < self.batch_size:
                 timeout = deadline - loop.time()
                 if timeout <= 0:
                     break
@@ -97,22 +98,18 @@ class BatchedModel(Model):
 class BatchedAgent(Agent):
     """Drive many rollouts concurrently against one shared, batched model.
 
-    Per run: a shallow clone of ``agent`` (its own episode state) sharing a per-run
-    adapter copy and the single :class:`BatchedModel`, so concurrent ``ainfer`` calls
-    coalesce into one forward. Relies on the agent keeping per-run state out of
-    ``__init__`` (assigned in ``on_episode_start``) so the clones stay isolated, and on
-    the model being stateless (no per-episode ``reset``) since it is shared across clones.
+    Per run: shallow-clone ``agent`` with a per-run adapter copy and the shared
+    :class:`BatchedModel` (stateless by contract; adapter copy keeps env bindings
+    isolated). Not for :class:`~hud.agents.robot.model.RemoteModel`.
 
-    Requires an in-process batchable model; :class:`~hud.agents.robot.model.RemoteModel`
-    is not supported (the OpenPI server protocol has no batched-request shape).
-
-    Takes ownership of ``agent``: it swaps ``agent.model`` for a :class:`BatchedModel` wrapper
-    in place (so the wrapper is shared by every per-run clone). The passed-in instance is
-    therefore permanently batched — hand :class:`BatchedAgent` a dedicated agent and don't
-    also use that same instance for direct, unbatched :class:`RobotAgent` rollouts.
+    Takes ownership: wraps ``agent.model`` in place with :class:`BatchedModel`,
+    shared by every clone. Pass a dedicated agent - do not also use that instance
+    for unbatched :class:`RobotAgent` rollouts.
     """
 
-    def __init__(self, agent: RobotAgent, *, batch_size: int, max_wait_s: float = 0.05) -> None:
+    def __init__(
+        self, agent: RobotAgent, *, batch_size: int | None = None, max_wait_s: float = 0.05
+    ) -> None:
         if agent.model is None:
             raise RuntimeError("BatchedAgent needs agent.model set")
         self._template = agent

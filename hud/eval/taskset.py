@@ -23,7 +23,14 @@ from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout
-from .runtime import HostedRuntime, HUDRuntime, LocalRuntime, _declared_env, _declared_names
+from .runtime import (
+    HostedRuntime,
+    HUDRuntime,
+    LocalRuntime,
+    Shared,
+    _declared_env,
+    _declared_names,
+)
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -268,6 +275,11 @@ class Taskset:
         one id. Returned ``job.runs`` preserves expansion order (task-major,
         then group).
 
+        ``group`` is the statistical-repeat multiplier (one GRPO group_id per
+        task's repeats). To land those repeats on one shared substrate (e.g. a
+        vectorized robot sim), pass a :class:`~hud.eval.runtime.Shared` provider
+        with ``width`` equal to both ``group`` and ``max_concurrent``.
+
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
         as a failed/errored run so one wedged rollout (e.g. a stuck sampling
@@ -280,8 +292,8 @@ class Taskset:
         if max_concurrent is not None and max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
 
-        # Tasks are pure rows, shared across rollouts; the ``group`` repeats of
-        # one task share a group_id (the GRPO group).
+        # Tasks are pure rows, shared across rollouts. The ``group`` repeats of one
+        # task share a group_id (the GRPO group).
         expanded: list[tuple[Task, str]] = []
         task_list = list(self)
         for task in task_list:
@@ -307,22 +319,31 @@ class Taskset:
         # an error naming the forms to pass.
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
+        # Shared substrates have exactly ``width`` slots: a smaller cap starves the
+        # barrier; a larger one over-claims and fails mid-batch on reset.
+        if isinstance(placement, Shared) and max_concurrent != placement.width:
+            raise ValueError(
+                f"Shared(width={placement.width}) requires max_concurrent={placement.width} "
+                f"(got {max_concurrent!r})"
+            )
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-        async def _run(task: Task, group_id: str) -> Run:
+        async def _run(task: Task, group_id: str) -> list[Run]:
             assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
-                return await placement.run(task, agent, job_id=job_id, group_id=group_id)
-            return await rollout(
-                task,
-                agent,
-                runtime=placement,
-                job_id=job_id,
-                group_id=group_id,
-                rollout_timeout=rollout_timeout,
-            )
+                return [await placement.run(task, agent, job_id=job_id, group_id=group_id)]
+            return [
+                await rollout(
+                    task,
+                    agent,
+                    runtime=placement,
+                    job_id=job_id,
+                    group_id=group_id,
+                    rollout_timeout=rollout_timeout,
+                )
+            ]
 
-        async def _one(task: Task, group_id: str) -> Run:
+        async def _one(task: Task, group_id: str) -> list[Run]:
             if sem is None:
                 return await _run(task, group_id)
             async with sem:
@@ -335,7 +356,8 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        job.runs.extend(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
+        waves = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
+        job.runs.extend(run for wave in waves for run in wave)
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed
         # sleep), so the timeout is only a safety cap for a wedged network.

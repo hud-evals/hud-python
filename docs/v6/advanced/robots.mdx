@@ -31,8 +31,7 @@ pip install 'hud[robot]'
 </CodeGroup>
 
 ## Overview
-Like with other HUD workflows there's the environment side
-(server - containerized, served on the runtime) and the agent side (client - swappable, model with harness).
+Like with other HUD workflows there's the environment side and the agent side.
 For robotics the **environment side** 
 translates incoming actions into changes in the digital or physical environment and serves observations. 
 The **agent side** owns the policy: it reads those observations, runs
@@ -85,33 +84,185 @@ drives model until env terminates.
 - **`Model`** - the actual stateless checkpoint of the model (includes pre-/post-processing)
 - **`Adapter`** - translates the env's observation space to the model's, and the model's action space to the env's
 
-**The contract** (of the environment) - the one artifact both sides share: a self-describing JSON schema of the
-embodiment's control rate, observation and action spaces, carried in the capability's manifest params. 
+[**The contract**](#contract) (of the environment) - the one artifact both sides share: a self-describing JSON
+schema of the environment including the embodiment's control rate, observation and action spaces, 
+carried in the capability's manifest params. 
 The agent wires observations to policy inputs purely from the manifest; there is no shared config.
+In addition, the contract serves to define useful metadata that you can easily toggle to improve 
+trace visualization on the platform.
 
 ## Environment side
 
-You implement one class - the **bridge**. 
+HUD has two ways to build the environment side: [`env.gym`](#gym-style-envs) for anything
+gym-shaped, which derives the contract, capability, and serving for you, or a
+[custom `RobotBridge`](#custom-bridges) for a sim that isn't.
+
+## Gym-style envs
+
+Calling `env.gym(make_env)` derives the [contract](#contract) from a sample observation, serves
+the env over the `robot` WebSocket, and returns a [`RobotEndpoint`](#custom-bridges) - the handle
+templates drive episodes through:
+
+```python env.py
+from hud import Environment
+
+env = Environment(name="my-sim")
+sim = env.gym(make_env)   # make_env: any callable returning a gym-style env
+
+@env.template()
+async def pick_and_place(task: str = "default", seed: int = 0):
+    ep = await sim.reset(task=task, seed=seed)  # {prompt, token}
+    yield {"prompt": ep["prompt"]}
+    yield await sim.result()
+```
+
+`env.gym` takes one argument, in any of three forms:
+
+- **A factory callable**, like `make_env` above - a module-level function that returns a
+  gym-style env. Its signature splits task args into build args (a change rebuilds the env) and
+  episodic args, which flow to `env.reset(seed=..., options=...)`.
+- **A gymnasium registry id**, a string such as `"CartPole-v1"` - built with `gym.make` (or
+  `gym.make_vec` when `num_envs` is passed).
+- **An already-constructed env** made through the gymnasium registry - `env.gym` reduces it to
+  its spec and rebuilds it in the sim process.
+
+`env.gym` serves either a standard, single-instance env or a vectorized one - one gym env that
+internally holds `num_envs` copies of the environment, stepped together in the same process for
+GPU efficiency. Each copy is a **slot**, and a vectorized sim hands back a slot token on
+`reset` so the rollout that claimed it can step and grade that copy alone, leaving the rest
+untouched.
+
+A single-env sim has only one slot, so the template may omit the token, as above. A vectorized
+sim (`num_envs > 1`) must thread it through so each session grades its own slot - yield
+`{"prompt": ep["prompt"], "robot": {"token": ep["token"]}}` and call `sim.result(token=ep["token"])`;
+see [vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
+
+You can find gym-shaped environments in various places - [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub),
+including Isaac Lab Arena environments, or environments built into LeRobot directly.
+
+<Accordion title="Example: Isaac Lab Arena (EnvHub)">
+Vectorized (`num_envs=4`), with cameras enabled for RTX frames. `make_env` downloads the
+[EnvHub](https://huggingface.co/docs/lerobot/en/envhub_isaaclab_arena) repo's module and calls its
+`make_env` the same way LeRobot's loader does.
+
+```python env.py
+from __future__ import annotations
+import os
+from hud import Environment
+
+HUB = "nvidia/isaaclab-arena-envs"
+
+def make_env(num_envs: int = 4):
+    from lerobot.envs.configs import IsaaclabArenaEnv
+    from lerobot.envs.utils import (
+        _call_make_env,
+        _download_hub_file,
+        _import_hub_module,
+        _normalize_hub_result,
+    )
+
+    cfg = IsaaclabArenaEnv(
+        hub_path=HUB,
+        environment="gr1_microwave",
+        embodiment="gr1_pink",
+        object="mustard_bottle",
+        headless=True,
+        enable_cameras=True,  # required with headless for RTX frames
+        camera_keys="robot_pov_cam_rgb",
+        num_envs=num_envs,
+        episode_length=50,
+        state_keys="robot_joint_pos",
+        state_dim=54,
+        action_dim=36,  # GR1
+        task="Reach out to the microwave and open it.",
+    )
+    repo_id, _, local_file, _ = _download_hub_file(cfg.hub_path, True, None)
+    module = _import_hub_module(local_file, repo_id)
+    suites = _normalize_hub_result(_call_make_env(module, num_envs, False, cfg))
+    return next(iter(next(iter(suites.values())).values()))
+
+
+env = Environment(name="arena")
+sim = env.gym(make_env, num_envs=4, fps=30)
+
+
+@env.template()
+async def episode(seed: int = 0):
+    ep = await sim.reset(seed=seed)
+    # Vectorized: token pins this rollout's slot.
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await sim.result(token=ep["token"])
+```
+</Accordion>
+
+<Accordion title="Example: Meta-World (built into LeRobot)">
+Meta-World ships inside LeRobot itself rather than as an EnvHub repo, so `make_env` calls
+LeRobot's own factory directly. GymBridge keeps the env's `pixels` and `agent_pos` keys as-is.
+
+```python metaworld_sim.py
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("MUJOCO_GL", "egl")
+
+
+def make_env(task: str = "assembly-v3"):
+    from lerobot.envs.configs import MetaworldEnv
+    from lerobot.envs.factory import make_env as lerobot_make_env
+
+    # Unwrap vec-of-one; pixels_agent_pos = camera + 4-D eef/gripper state.
+    suites = lerobot_make_env(MetaworldEnv(task=task, obs_type="pixels_agent_pos"), n_envs=1)
+    suite = next(iter(suites))
+    task_id = next(iter(suites[suite]))
+    return suites[suite][task_id].envs[0]
+```
+
+```python env.py
+from metaworld_sim import make_env
+
+from hud import Environment
+
+env = Environment(name="metaworld")
+# LeRobot hardcodes render_fps=80; Meta-World control is slower - pin playback.
+sim = env.gym(make_env, fps=20)
+
+
+@env.template()
+async def episode(task: str = "assembly-v3", seed: int = 0):
+    """One Meta-World episode; task name is a build arg (e.g. assembly-v3, dial-turn-v3)."""
+    ep = await sim.reset(task=task, seed=seed)
+    yield {"prompt": ep["prompt"]}
+    yield await sim.result()
+```
+
+Needs `metaworld` / `lerobot[metaworld]` installe.
+</Accordion>
+
+## Custom bridges
+
+For a sim that isn't gym-shaped, subclass `RobotBridge` instead:
 
 ```python
 from hud.environment.robot import RobotBridge
 
 class MySimBridge(RobotBridge):
-    async def reset(self, task_id: str, seed: int = 0) -> str:
-        ...                              # build the episode
-        await self._send_observation()   # push the first frame
+    def reset(self, task_id: str, seed: int = 0) -> str:
+        ...                              # build the episode (runs on the sim thread)
         return self.task_description     # becomes the task prompt
 
     def step(self, action) -> None:
         ...  # advance one tick; set success / terminated
 
     def get_observation(self):
-        return {"agentview_image": frame, "state": vec}, self.terminated
+        # Always [N, ...] arrays + [N] terminated (N=1 is fine).
+        return {"agentview_image": frames, "state": vecs}, done_mask
 ```
 
-
-Those three methods are all you write. Under the hood the framework takes care of communication 
-with the agent and  starting/stopping as well as stepping of the simulator at the *control rate*.
+Those three methods are all you write. Under the hood the framework takes care of communication
+with the agent and starting/stopping as well as stepping of the simulator at the *control rate*.
+All three hooks run on the sim thread (main under `serve_bridge`), so thread-affine sims such as
+Isaac are safe without extra hopping in your subclass.
 
 - **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
 - **`step`** applies one action and advances the sim a tick, setting `success` / `terminated` as the
@@ -157,23 +308,22 @@ Actions come back the same way: the agent sends them under openpi's `actions` ke
 </Accordion>
 
 `RobotEndpoint` is the env's control handle on the bridge - the one surface it drives an episode
-through. `start` / `stop` bring the bridge's socket up and down; `capability` publishes the `robot`
-binding once that URL exists (call it after `start`); `reset` begins an episode and returns its
-prompt; `result` returns the episode's score. It's control-plane only - the agent's observe/act loop
-tunnels straight to the bridge's WebSocket - and the same calls work whether the bridge is local
-(shown here) or [in another process](#running-a-sim-in-another-process).
+through. Pass your bridge class (or instance); `start` spawns the sim process and serves it,
+`capability` publishes the `robot` binding (contract comes from the bridge), `reset` /
+`result` run the episode. Control-plane only - the agent's observe/act loop tunnels straight
+to the bridge's WebSocket.
 
 ```python
 from hud import Environment
 from hud.environment.robot import RobotEndpoint
 
 env = Environment(name="my-sim")
-endpoint = RobotEndpoint(MySimBridge())  # the env drives the bridge only through the endpoint
+endpoint = RobotEndpoint(MySimBridge())  # start() spawns + serves the bridge process
 
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
+    env.add_capability(await endpoint.capability())
 
 @env.shutdown
 async def _down():
@@ -181,8 +331,9 @@ async def _down():
 
 @env.template()
 async def pick_and_place(task_id: str, seed: int = 0):
-    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
-    yield await endpoint.result()  # {"score", "success", "total_reward"}
+    ep = await endpoint.reset(task_id=task_id, seed=seed)  # {prompt, token}
+    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield await endpoint.result(token=ep["token"])  # this slot's {score, success, total_reward}
 ```
 
 ## Agent side
@@ -208,7 +359,7 @@ is a complete agent in a few lines. The two bundled seams *are* the LeRobot conv
   pre/post-processors, so the checkpoint behaves exactly as it does upstream. Pass an `Ensembler` to
   reduce overlapping action chunks to one action per step.
 - **`LeRobotAdapter(model_image_keys=...)`** maps the env's cameras and state onto the policy's
-  inputs from the [contract](#the-contract) - HWC `uint8` → CHW float, state and prompt passed
+  inputs from the [contract](#contract) - HWC `uint8` → CHW float, state and prompt passed
   through.
 
 ```python
@@ -275,21 +426,54 @@ into a single stacked forward.
 ```python
 from hud.agents.robot.batching import BatchedAgent
 
-agent = BatchedAgent(MyRobotAgent(), batch_size=8)   # set batch_size to your max_concurrent
+agent = BatchedAgent(MyRobotAgent())   # sizes itself to the live concurrency
 
 job = await taskset.run(agent, runtime=DockerRuntime("hud-libero-env"), max_concurrent=8)
 ```
 
-Each tick, up to `batch_size` concurrent observations are stacked into one `[N, ...]` batch, run
-through a single forward, and scattered back to each rollout; a short `max_wait_s` (default 50 ms)
-flushes early when fewer rollouts are live, so the tail of a suite never stalls. Set `batch_size` to
-match `max_concurrent` so a full batch can form.
+Each tick, the concurrent observations queued within a short window (`max_wait_s`, default 50 ms)
+are stacked into one `[N, ...]` batch, run through a single forward, and scattered back to each
+rollout - so the batch is as wide as whatever is in flight, and the tail of a suite never stalls.
+`max_concurrent` already bounds the width; pass `batch_size=` only to cap the forward below it
+(e.g. VRAM headroom).
 
 `BatchedAgent` needs an **in-process, stateless** model whose `infer` runs the whole `[N, ...]` batch
 in one forward - `LeRobotModel` qualifies. A remote OpenPI policy server is not supported (its protocol
 has no batched-request shape); run one agent per rollout against it instead. `BatchedAgent` also takes
 ownership of the agent you pass (it swaps in the batched model in place), so give it a dedicated
 instance rather than one you also use for unbatched runs.
+
+## Vectorized envs and evals
+
+Grading N rollouts by booting N separate containers wastes a GPU sim's whole advantage - each
+container pays for its own physics from scratch, when a sim like Isaac Sim could instead step all
+N copies together in one [vectorized](#gym-style-envs) instance. Running an eval against a vectorized sim needs no changes to
+the agent or the env's contract, only to how the eval provisions rollouts: wrap the runtime in
+[`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `group` rollouts share that one
+substrate instead of provisioning `N` containers.
+
+```python
+from hud.eval import Shared, DockerRuntime
+
+job = await taskset.run(
+    MyAgent(),
+    runtime=Shared(DockerRuntime("hud-isaac-env"), width=8),
+    group=8,
+    max_concurrent=8,
+)
+```
+
+`group` and `max_concurrent` are the ordinary [`Taskset.run` parameters](/v6/reference/tasks#running).
+A few things to note:
+
+- **The agent doesn't change.** Each rollout still drives one ordinary WebSocket connection and
+  calls `reset` / `result` as usual - the environment resolves each call to that rollout's own
+  [slot](#gym-style-envs).
+- **Slots fill in order, then stop.** The first `reset` claims slot 0; once every slot is taken, a
+  further `reset` errors instead of queuing, so set `max_concurrent` to `width` so every slot fills.
+- **EnvHub sims work unchanged.** A [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub)
+  package's `make_env` often already returns a vectorized sim, so `env.gym(make_env, num_envs=N)`
+  serves it directly.
 
 ## Contract
 
@@ -361,21 +545,6 @@ spec - the closed symbol sets and known traps - lives outside the SDK alongside 
 
 </Accordion>
 
-## Sim threading
-
-The loop is lockstep - the bridge steps the sim once per received action. A simulator is usually
-**thread-affine** (every touch must run on the thread that created its GL/device context), but the
-bridge's asyncio loop can't be stalled by a blocking step. **`SimRunner`** is the one-line injection
-that decides *which thread* runs the sim; the bridge routes every sim touch through it:
-
-- **`InlineSimRunner`** - runs on the event-loop thread. The default; for cheap/CPU sims and tests.
-- **`ThreadSimRunner`** - sim on a dedicated worker thread, leaving the loop free during a blocking
-  step. For render-heavy or thread-bound sims.
-- **`MainThreadSimRunner`** - sim on the main thread, for runtimes that own *both* the main thread
-  and the loop (Isaac/Omniverse); the owner's pump loop drains queued sim touches between ticks.
-
-Pass one to the bridge (`RobotBridge(sim_runner=ThreadSimRunner())`), or subclass `SimRunner` for an
-exotic topology.
 
 ## Recording datasets
 
@@ -383,13 +552,14 @@ Set `agent.save = True` (wire it to a `--save` flag on your runner) to also reco
 `(observation, executed action)` tick into a **LeRobot v3 dataset** - the rollouts you just ran,
 ready to finetune a policy on. Telemetry streams either way; saving is the opt-in extra.
 
-Recording is **agent-side**: it consumes the observations the agent already receives and the actions
-it already produces, so it runs in *your* process - not the environment container. That sidesteps
-sims (e.g. Isaac/RoboLab) whose dependency stack conflicts with `lerobot`; only your machine needs
-`pip install 'lerobot[dataset]'`.
+Recording is **agent-side**: it consumes the observations and actions the agent already sees, so
+it runs in *your* process, never the environment container. Only your machine needs
+`pip install 'lerobot[dataset]'` - the sim's own dependency stack (e.g. Isaac/RoboLab) never
+enters the picture.
 
-One dataset spans the whole run - every episode the shared agent drives appends to it - and is
-finalized at process exit. Destination and Hub push come from the environment:
+All rollouts in a process record into one shared dataset: each buffers its episode and commits it
+whole, so concurrent runs (e.g. `BatchedAgent`) interleave safely, and the dataset finalizes at
+process exit. Destination and Hub push come from the environment:
 
 | Env var | Effect |
 |---------|--------|
@@ -397,92 +567,27 @@ finalized at process exit. Destination and Hub push come from the environment:
 | `HF_REPO` | Also push the finalized dataset to this HF namespace (needs `HF_TOKEN`) |
 | `HF_PRIVATE` | Push the dataset private |
 
-The [contract](#the-contract) drives the schema with no extra wiring: image features become
+The [contract](#contract) drives the schema with no extra wiring: image features become
 `observation.images.<camera>` (encoded to per-episode video), the lone state vector becomes
 `observation.state`, the action becomes `action`, and the task prompt rides along as each frame's
 `task`.
-
-
-## Running a sim in another process
-
-Some simulators must **own the process main thread** - most notably **Isaac Sim / Omniverse**, where
-Kit drives its own main-thread event loop and `env.reset()` loads USD through a nested
-`run_until_complete`. That can't run inside `hud serve`, which already owns the asyncio loop. The fix
-is to move the sim into its own process and keep the env code essentially unchanged.
-
-`RobotEndpoint` is built for exactly this: the same control surface (`start` / `reset` / `result` /
-`stop`) works whether the bridge is local or remote.
-
-- **Env process** - publish a *remote* handle with `RobotEndpoint.remote(host, port)`. It dials the
-  sim process and forwards every control call over JSON-RPC.
-- **Sim process** - wrap the real bridge and expose it with `RobotEndpoint(bridge).serve(host, port)`,
-  using a [`MainThreadSimRunner`](#sim-threading) so every sim touch runs on the main thread.
-
-The two planes split cleanly, which is why the agent never knows the sim is remote:
-
-- **Control plane** (`start` / `reset` / `result`) - JSON-RPC between the remote endpoint and the
-  serving process.
-- **Data plane** (the agent's `observe → act` loop) - tunnels straight to the bridge's `robot`
-  WebSocket; the contract stays env-side.
-
-**Env side** - identical to the local example, but the endpoint is remote and you `connect()` to it
-first:
-
-```python env.py
-from hud import Environment
-from hud.environment.robot import RobotEndpoint
-
-env = Environment(name="isaac-sim")
-endpoint = RobotEndpoint.remote("127.0.0.1", 9100)   # a handle on the bridge in the sim process
-
-@env.initialize
-async def _up():
-    await endpoint.connect()    # retries until the sim process is serving
-    await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
-
-@env.shutdown
-async def _down():
-    await endpoint.close()      # drops the link; does not stop the sim
-
-@env.template()
-async def pick_and_place(task_id: str, seed: int = 0):
-    prompt = yield {"prompt": await endpoint.reset(task_id=task_id, seed=seed)}
-    yield await endpoint.result()
-```
-
-**Sim process** - your Isaac program builds the bridge and serves its control surface, then runs for
-the process's lifetime:
-
-```python sim_main.py
-import asyncio
-from hud.environment.robot import RobotEndpoint, MainThreadSimRunner
-
-async def main():
-    bridge = MySimBridge(sim_runner=MainThreadSimRunner())   # sim touches run on main
-    server = await RobotEndpoint(bridge).serve("127.0.0.1", 9100)
-    await server.wait_closed()
-
-asyncio.run(main())   # launched on the main thread the sim owns
-```
-
-Bring the two up together - the env's `connect()` retries until the sim is listening. Everything
-downstream (`hud eval`, tasksets, the agent) is unchanged; only *where the bridge runs* moved.
 
 
 ## API summary
 
 | Symbol | Where | Role |
 |--------|-------|------|
-| `RobotEndpoint.capability(contract=...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
+| `env.gym(make_env)` / `Gym` | `hud.environment.robot` | Declarative sim: contract, capability, and serving derived from a gym factory |
+| `wrap(env)` | `hud.environment.robot` | One-line trace streaming for any gym-style env you drive yourself |
+| `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
+| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
+| `RobotEndpoint.capability(...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
-| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`spaces`, `get_observation`, `send_action`, `send_chunk`) |
-| `RobotBridge` | `hud.environment.robot` | Env-side serve loop; subclass with your sim |
-| `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (local or `.remote()`) |
-| `SimRunner` (`Inline`/`Thread`/`MainThread`) | `hud.environment.robot` | Which thread runs the sim |
-| `RobotAgent` | `hud.agents.robot` | The episode-loop harness |
+| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
+| `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `BatchedAgent` / `BatchedModel` | `hud.agents.robot.batching` | Many concurrent rollouts against one shared, batched model |
+| `Shared(provider, width=N)` | `hud.eval` | Refcounting provider: N concurrent rollouts share one substrate |
 
 ## See also
 

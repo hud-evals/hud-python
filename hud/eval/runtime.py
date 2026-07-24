@@ -150,6 +150,55 @@ class Runtime:
         return nullcontext(self)
 
 
+class Shared:
+    """Refcounting provider: N concurrent rollouts share one substrate.
+
+    The first ``__call__`` provisions via *inner*; later callers reuse that
+    address until the last exit tears it down. ``width`` is the hard cap on
+    concurrent occupancy (e.g. a robot sim's ``num_envs``) — a further acquire
+    raises. Pair with ``Taskset.run(..., group=width, max_concurrent=width)``.
+    """
+
+    def __init__(self, inner: Provider, *, width: int) -> None:
+        if width < 1:
+            raise ValueError("Shared width must be >= 1")
+        self.inner = inner
+        self.width = width
+        self._addr: Runtime | None = None
+        self._refs = 0
+        self._stack: contextlib.AsyncExitStack | None = None
+        self._lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        async with self._lock:
+            if self._refs >= self.width:
+                raise RuntimeError(
+                    f"Shared(width={self.width}) already has {self._refs} concurrent "
+                    "callers; raise max_concurrent no higher than width"
+                )
+            if self._addr is None:
+                stack = contextlib.AsyncExitStack()
+                await stack.__aenter__()
+                try:
+                    self._addr = await stack.enter_async_context(self.inner(task))
+                except BaseException:
+                    await stack.aclose()  # failed boot — don't orphan a half-open stack
+                    raise
+                self._stack = stack  # publish only after inner succeeds
+            self._refs += 1
+            addr = self._addr
+        try:
+            yield addr
+        finally:
+            async with self._lock:
+                self._refs -= 1
+                if self._refs == 0 and self._stack is not None:
+                    await self._stack.aclose()
+                    self._stack = None
+                    self._addr = None
+
+
 def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
     modal_uri_prefix = "modal://"
     if image_uri.startswith(modal_uri_prefix):
@@ -1216,5 +1265,6 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "Shared",
     "SubprocessRuntime",
 ]

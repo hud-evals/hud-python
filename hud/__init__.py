@@ -60,6 +60,7 @@ __all__ = [
     "instrument",
 ]
 
+
 try:
     from .version import __version__
 except ImportError:

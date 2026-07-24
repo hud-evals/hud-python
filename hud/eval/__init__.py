@@ -46,6 +46,7 @@ from .runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    Shared,
     SubprocessRuntime,
 )
 from .sync import SyncPlan
@@ -69,6 +70,7 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "Shared",
     "SubprocessRuntime",
     "SyncPlan",
     "Task",

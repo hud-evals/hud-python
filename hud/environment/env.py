@@ -305,6 +305,30 @@ class Environment(LegacyEnvMixin):
 
         return ws
 
+    def gym(self, target: Any, *, name: str = "robot", **kwargs: Any) -> Any:
+        """Attach a gym-style sim serving ``name`` over the ``robot`` protocol.
+
+        ``target`` is a factory, gymnasium id (``"CartPole-v1"``), or constructed
+        registry env (reduced to its spec). Registers spawn → publish → teardown
+        on this env's hooks; nothing runs until serve. Returns a
+        :class:`~hud.environment.robot.RobotEndpoint` (``sim.reset`` / ``sim.result``).
+        """
+        from hud.environment.robot import RobotEndpoint
+        from hud.environment.robot.gym import gym_command
+
+        sim = RobotEndpoint.spawn(gym_command(target, **kwargs))
+
+        @self.initialize
+        async def _up() -> None:
+            await sim.start()
+            self.add_capability(await sim.capability(name))
+
+        @self.shutdown
+        async def _down() -> None:
+            await sim.stop()
+
+        return sim
+
     # ─── substrate-run daemon lifecycle ──────────────────────────────────
 
     async def start(self) -> None:

@@ -1,169 +1,171 @@
-"""Base v6 agent for any env that exposes a ``robot`` capability.
+"""``RobotAgent`` — drive one ``robot`` env with an open-loop chunk queue.
 
-Subclass :class:`RobotAgent`, set ``self.model`` and ``self.adapter`` in
-``__init__``, and the base owns the rest.
+Subclass, set ``self.model`` and ``self.adapter`` in ``__init__``, and the base
+owns the rest: connect to the ``robot`` capability (claiming a slot token from
+``run.started`` when present), read the contract, run until the env terminates.
 
-The base calls the adapter and model at the right moments::
+Vectorized sims still look like one scalar connection per rollout; concurrent
+rollouts coalesce GPU forwards through :class:`~.batching.BatchedModel`.
 
-    setup_robot      -> adapter.bind(spaces)       # once after connect
-    on_episode_start -> adapter.reset()            # per episode; model is stateless
-    select_action    -> adapt_observation -> model.ainfer -> pop chunk -> adapt_action
-
-``model.ainfer`` always returns a ``[T, A]`` chunk; :meth:`RobotAgent.select_action`
-executes it open-loop, re-inferring only once the active chunk is spent.
-
-Most policies use :class:`~hud.agents.robot.adapter.LeRobotAdapter`; a policy whose
-spaces match the env natively can set ``adapter = None`` (raw pass-through).
+Most policies use :class:`~.adapter.LeRobotAdapter`; a policy whose spaces
+match the env natively can set ``adapter = None`` (raw pass-through).
 """
 
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 
 from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
-
-from .record import Recorder
+from hud.telemetry.robot import TraceRecorder
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
 
-    from ._types import ActionArray
-    from .adapter import Adapter
+    from .adapter import ActionArray, Adapter
     from .model import Model
 
 ROBOT_PROTOCOL = "openpi/0"
 
 
 class RobotAgent(Agent):
-    """Drive a ``robot`` side-channel for one :class:`~hud.client.Run`.
+    """Drive a ``robot`` env with one open-loop chunk queue.
 
     **Subclass contract:** in ``__init__`` set ``self.model`` (a
-    :class:`~hud.agents.robot.model.Model`) and ``self.adapter`` (an
-    :class:`~hud.agents.robot.adapter.Adapter`, or ``None`` for raw pass-through).
-
-    **Override if needed:**
-
-    - :attr:`robot_protocol` — class attr if not ``openpi/0``
-    - :meth:`on_episode_start` — mostly internal; override (with ``super()``) to
-      add per-episode setup (e.g. reading the env contract).
-    - :meth:`should_stop` — custom early-exit condition beyond ``obs["terminated"]``
-    - :meth:`select_action` — only for a wholly different inference path
-    - :attr:`log_every` — class-level print frequency (0 = off)
+    :class:`~.model.Model`) and ``self.adapter`` (an :class:`~.adapter.Adapter`,
+    or ``None`` for raw pass-through).
     """
 
     robot_protocol: ClassVar[str] = ROBOT_PROTOCOL
+    #: Max control ticks before the episode is cut off. Subclasses may override.
+    max_steps: ClassVar[int] = 520
     #: How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
-    #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair to disk
-    #: (the ``--save`` flag). Telemetry streams regardless; see :mod:`.record`.
+    #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair.
+    #: Telemetry streams regardless; see :mod:`.dataset`.
     save: bool = False
 
-    #: Runs the policy (preprocess → forward → postprocess). Subclasses set this.
+    #: Runs the policy (preprocess -> forward -> postprocess). Subclasses set this.
     model: Model | None = None
     #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
-    _prompt: str = ""
-    #: The env's action / observation contract features (from ``client.spaces()``),
-    #: named ``_env_*`` to mark them as env-side values (not the policy's spaces).
-    _env_action_space: dict[str, Any]
-    _env_obs_space: dict[str, Any]
-    #: Unexecuted tail of the current policy chunk; popped one action per step.
-    _active_chunk: deque[ActionArray]
-    #: Control-tick index, incremented per executed action.
-    _tick: int
-    #: Records all telemetry (observation/inference steps + video) and, when ``save``, a
-    #: LeRobot dataset. Agent-lifetime (the dataset spans every episode); created lazily.
-    _recorder: Recorder | None = None
+    async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
+        """The generic rollout contract: one run, one scalar robot connection.
 
-    def setup_robot(self, client: RobotClient) -> None:
-        """Discover the env's action/observation layout and bind the adapter to it."""
-        self._env_action_space, self._env_obs_space = client.spaces()
-        if self.adapter is not None:
-            self.adapter.bind(self._env_action_space, self._env_obs_space)
-
-    def on_episode_start(self, run: Run, client: RobotClient, *, prompt: str) -> None:
-        """Store the prompt and reset per-episode state before the act loop.
-
-        The model is stateless (per-episode state lives here, not on the shared model), so
-        only the adapter is reset. Override (calling ``super()`` first) for extra setup.
-        """
-        self._prompt = prompt
-        self._active_chunk = deque()
-        self._tick = 0
-        # One recorder for the agent's life so its LeRobot dataset spans every episode;
-        # begin() opens this episode (fresh video stream, prompt) and takes the run it records onto.
-        if self._recorder is None:
-            self._recorder = Recorder(client, save=self.save)
-        self._recorder.begin(run, prompt)
-        if self.adapter is not None:
-            self.adapter.reset()
-
-    def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
-        """Return True to break out of the step loop (before ``select_action``)."""
-        return bool(obs.get("terminated"))
-
-    async def select_action(self, obs: dict[str, Any]) -> ActionArray:
-        """Pop the next action, re-inferring a ``[T, A]`` chunk once the active one is
-        spent, then adapt it to env space. Override only for a different inference path.
+        ``max_steps`` caps control ticks; omit it to use the class ``max_steps`` (520).
         """
         if self.model is None:
             raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
-        if not self._active_chunk:
-            batch = (
-                obs if self.adapter is None else self.adapter.adapt_observation(obs, self._prompt)
-            )
-            chunk = np.atleast_2d(await self.model.ainfer(batch))  # [T, A]
-            self._active_chunk = deque(chunk)
-            assert self._recorder is not None  # set in on_episode_start
-            self._recorder.record_inference(chunk, tick=self._tick)
-        self._tick += 1
-        raw = self._active_chunk.popleft()
-        return raw if self.adapter is None else self.adapter.adapt_action(raw, obs)
+        prompt = run.prompt
+        if not isinstance(prompt, str):
+            raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
 
-    async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
-        step_limit = max_steps if max_steps is not None else int(getattr(self, "max_steps", 520))
-        cap = run.client.binding(self.robot_protocol)
-        client = await RobotClient.connect(cap)
+        # Per-episode slot token from tasks.start (opaque; env put it under "robot").
+        # Single-env templates may omit it — a None claim binds the sole claimed
+        # slot; vectorized bridges reject the ambiguity at connect.
+        robot_info = run.started.get("robot")
+        token: str | None = None
+        if isinstance(robot_info, dict):
+            raw_token = cast("dict[str, Any]", robot_info).get("token")
+            if isinstance(raw_token, str):
+                token = raw_token
+
+        robot = await RobotClient.connect(run.client.binding(self.robot_protocol), token=token)
         try:
-            self.setup_robot(client)
-            prompt = run.prompt
-            if not isinstance(prompt, str):
-                raise TypeError(
-                    f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}"
+            action_space, obs_space = robot.spaces()
+            if self.adapter is not None:
+                self.adapter.bind(action_space, obs_space)
+                self.adapter.reset()
+
+            obs = await robot.get_observation()
+            fps = robot.get_control_rate()
+            # Contract labels: obs_space for state, action names for InferenceStep plots.
+            recorder = TraceRecorder(
+                run=run,
+                fps=fps,
+                obs_space=obs_space,
+                action_names=action_space.get("names"),
+            )
+            writer = None
+            if self.save:
+                from .dataset import DatasetWriter
+
+                writer = DatasetWriter(robot.contract, fps=fps)
+
+            print(f"[agent] episode started: {prompt!r}", flush=True)
+            try:
+                await self._loop(
+                    robot,
+                    obs,
+                    prompt,
+                    recorder,
+                    writer,
+                    max_steps=self.max_steps if max_steps is None else max_steps,
                 )
-            self.on_episode_start(run, client, prompt=prompt)
-            print(f"[agent] episode started: {prompt!r} (max_steps={step_limit})", flush=True)
-
-            assert self._recorder is not None  # set in on_episode_start above
-            for step in range(step_limit):
-                obs = await client.get_observation()
-                self._recorder.record_observation(obs, tick=step)
-
-                if self.should_stop(obs, step=step, max_steps=step_limit):
-                    print(f"[agent] env reported terminated at step {step}", flush=True)
-                    break
-
-                action = await self.select_action(obs)
-                self._recorder.record_action(action)
-                await client.send_action(action)
-
-                if self.log_every and step % self.log_every == 0:
-                    preview = np.array2string(action, precision=3, suppress_small=True)
-                    print(f"[agent] step {step}/{step_limit} action={preview}", flush=True)
-            else:
-                print(f"[agent] reached max_steps={step_limit}", flush=True)
-
-            run.trace.status = "completed"
-            run.trace.content = "done"
+            finally:
+                # Flush video tails / commit the buffered episode even when the
+                # rollout raises mid-loop.
+                recorder.close()
+                if writer is not None:
+                    writer.end_episode()
         finally:
-            if self._recorder is not None:
-                self._recorder.end()  # flush video tails + commit the LeRobot episode
-            await client.close()
+            await robot.close()
+        run.trace.status = "completed"
+        run.trace.content = "done"
+
+    async def _loop(
+        self,
+        robot: RobotClient,
+        obs: dict[str, Any],
+        prompt: str,
+        recorder: TraceRecorder,
+        writer: Any,
+        *,
+        max_steps: int,
+    ) -> None:
+        """Open-loop chunk queue: ainfer refills, then execute one action per tick."""
+        model = self.model
+        assert model is not None
+        adapter = self.adapter
+        chunk: deque[ActionArray] = deque()
+
+        for step in range(max_steps):
+            # Record every frame, including the terminal one.
+            recorder.record_observation(obs["data"], tick=step)
+            # Already done (including a pre-terminated first obs) → don't act.
+            if bool(np.asarray(obs["terminated"]).reshape(-1)[0]):
+                if step:
+                    print(f"[agent] terminated at step {step}", flush=True)
+                break
+
+            if not chunk:  # refill with a fresh forward (BatchedModel coalesces ainfer)
+                batch = adapter.adapt_observation(obs, prompt) if adapter else obs
+                rows = np.atleast_2d(await model.ainfer(batch))
+                if adapter is not None:
+                    # Policy chunk → env space (e.g. relative → absolute at query obs).
+                    rows = adapter.adapt_chunk(rows, obs)
+                    # Open-loop horizon: keep only the first N actions, then replan.
+                    if adapter.chunk_size is not None:
+                        rows = rows[: adapter.chunk_size]
+                chunk.extend(rows)
+                recorder.record_inference(rows, tick=step)
+
+            action = chunk.popleft()
+            if adapter is not None:  # per-step execution-time hook (default identity)
+                action = adapter.adapt_action(action, obs)
+            if writer is not None:
+                writer.add(obs["data"], np.asarray(action), task=prompt)
+            await robot.send_action(action)
+
+            if self.log_every and step % self.log_every == 0:
+                print(f"[agent] step {step}/{max_steps}", flush=True)
+            obs = await robot.get_observation()
+        else:
+            print(f"[agent] reached max_steps={max_steps}", flush=True)
 
 
 __all__ = ["ROBOT_PROTOCOL", "RobotAgent"]

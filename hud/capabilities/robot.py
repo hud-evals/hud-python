@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Self, cast
 
 import numpy as np
 import websockets
@@ -68,36 +68,43 @@ class RobotClient(CapabilityClient):
         return action, observations
 
     @classmethod
-    async def connect(cls, cap: Capability) -> Self:
-        ws = await websockets.connect(cap.url, max_size=None)
-        # Consume the connect-time metadata frame (always first); a string frame
-        # is the env's error convention.
+    async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
+        """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
+
+        A ``None`` token binds the sole claimed slot on a single-env bridge;
+        vectorized bridges (ambiguous slots) reject it — pass the token from
+        ``endpoint.reset()`` there.
+        """
+        ws = await websockets.connect(cap.url, max_size=None, ping_interval=None)
+        # Consume initial metadata; string means env error.
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
+        # Bind this connection to an episode slot (scalar openpi from here). HUD
+        # bridges require the claim frame; plain openpi servers have no slots.
+        meta = _unpackb(raw)
+        if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
+            await ws.send(cast("Any", _packb({"claim": token})))
         return cls(cap, ws)
 
     async def get_observation(self) -> dict[str, Any]:
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
 
-        On the wire the env sends an openpi-style *flat* dict (``{name: ndarray, ...}``)
-        with ``terminated`` (and, for realtime bridges, ``meta``) as sibling keys; we
-        regroup the array fields under ``"data"`` for the agent harness. Arrays — nested
-        anywhere, including inside ``meta`` (e.g. ``unexecuted_chunk``) — are already
-        decoded by the codec.
-
-        Realtime (free-running) bridges attach a ``"meta"`` block carrying the realtime
-        control state used for async/RTC inference (``obs_index``, ``queue_remaining``,
-        ``delay``, ``unexecuted_chunk``); sync bridges omit it.
-
-        Raises if the env reported an error (a string traceback frame).
+        Wire format is a flat openpi dict (``{name: ndarray, ...}``) with ``terminated``
+        as a sibling; array fields are regrouped under ``"data"``. Realtime bridges also
+        attach ``"meta"`` (``obs_index``, ``queue_remaining``, ``delay``,
+        ``unexecuted_chunk``); sync bridges omit it. Raises on an env error frame.
         """
         msg = await self._queue.get()
         if "error" in msg:
             raise RuntimeError(f"robot env error:\n{msg['error']}")
-        terminated = bool(msg.pop("terminated", False))
+        # Scalar openpi: each connection is one slot; terminated is always a bool.
+        terminated = msg.pop("terminated", False)
         meta = msg.pop("meta", None)
+        reward = msg.pop("reward", None)
         out: dict[str, Any] = {"data": msg, "terminated": terminated}
+        if reward is not None:
+            out["reward"] = reward  # per-step reward sibling (RL collection)
         if meta is not None:
             out["meta"] = meta
         return out

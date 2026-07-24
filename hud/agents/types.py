@@ -422,6 +422,9 @@ class InferenceStep(Step):
     # post model inference (a single action is a length-1 chunk)
     chunk: list[list[float]] = Field(default_factory=list[list[float]])
     chunk_length: int = 1
+    #: Per action-dim labels from the env contract (e.g. ["eef.dx", ..., "gripper"]),
+    #: so the viewer can label action plots and match them to state features.
+    names: list[str] = Field(default_factory=list[str])
 
 
 class VideoSegmentStep(Step):

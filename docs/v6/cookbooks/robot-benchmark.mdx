@@ -29,7 +29,7 @@ endpoint = RobotEndpoint(LiberoSimBridge(use_delta=True))  # drive the bridge th
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
+    env.add_capability(await endpoint.capability())
 
 @env.shutdown
 async def _down():
@@ -37,9 +37,9 @@ async def _down():
 
 @env.template(id="libero_spatial")
 async def libero_spatial(libero_task_id: int, init_state_id: int = 0):
-    prompt = await endpoint.reset(task_suite="libero_spatial",
-                                  task_id=libero_task_id, init_state_id=init_state_id)
-    yield {"prompt": prompt}
+    ep = await endpoint.reset(task_suite="libero_spatial",
+                              task_id=libero_task_id, init_state_id=init_state_id)
+    yield {"prompt": ep["prompt"]}
     yield await endpoint.result()
 ```
 
@@ -67,8 +67,6 @@ from hud.eval import DockerRuntime, Task, Taskset
 CHECKPOINT = "lerobot/pi05_libero_finetuned"
 
 class PI05Agent(RobotAgent):
-    max_steps = 400
-
     def __init__(self):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         policy = PI05Policy.from_pretrained(CHECKPOINT).to(device).eval()
