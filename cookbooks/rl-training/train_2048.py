@@ -68,6 +68,8 @@ async def main(
         batch_start = len(session.runs)
 
         t0 = time.perf_counter()
+        if rollout_timeout <= 0:
+            raise ValueError("rollout_timeout must be a positive number")
         await taskset.run(
             agent,
             runtime=runtime,
