@@ -92,10 +92,58 @@ def test_hosted_spec_serializes_full_config() -> None:
     assert "hosted_tools" not in config
 
 
+def test_create_agent_hosted_spec_preserves_training_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The constructor builds the runtime client without putting it in config."""
+    from hud.agents import create_agent
+    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo
+
+    class _GatewayStub:
+        pass
+
+    client = _GatewayStub()
+    model = GatewayModelInfo(
+        id="arith-rl",
+        model_name="arith-rl",
+        sdk_agent_type="openai_compatible",
+        provider=GatewayProviderInfo(name="openai"),
+    )
+    monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda _provider: client)
+
+    agent = create_agent(
+        "arith-rl",
+        system_prompt="/no_think",
+        completion_kwargs={
+            "extra_body": {
+                "return_token_ids": True,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+        },
+    )
+    assert agent.config.model_client is None
+    assert agent.oai is client
+
+    spec = agent.hosted_spec()
+    config = spec["config"]
+    assert spec["type"] == "openai_compatible"
+    assert config["model"] == "arith-rl"
+    assert config["system_prompt"] == "/no_think"
+    assert config["completion_kwargs"]["extra_body"]["return_token_ids"] is True
+    assert config["completion_kwargs"]["extra_body"]["chat_template_kwargs"] == {
+        "enable_thinking": False
+    }
+    assert "model_client" not in config
+
+
 def test_hosted_spec_rejects_custom_model_client() -> None:
     agent = _agent()
     agent.config = OpenAIChatConfig(model="m", model_client=object())
-    with pytest.raises(ValueError, match="model_client"):
+    with pytest.raises(ValueError, match="custom model_client"):
+        agent.hosted_spec()
+    with pytest.raises(ValueError, match="HUDRuntime"):
         agent.hosted_spec()
 
 

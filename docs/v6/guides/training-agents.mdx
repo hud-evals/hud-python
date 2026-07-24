@@ -94,6 +94,11 @@ One job spans the session; each step appends a batch and trains on it:
 - **Open the job** with `group=8` - 8 rollouts per task, so the rewards are comparable (next).
 - **Roll out** the batch, the same eval as the [previous guide](/v6/guides/running-an-eval). The
   [runtime](/v6/reference/runtime) sets where it runs; swap `LocalRuntime` for `HUDRuntime()` unchanged.
+  Prefer **`HUDRuntime`** (or `LocalRuntime`) for TrainingClient loops: the agent stays local so
+  `create_agent(...)` gateway clients, `return_token_ids`, system prompts, and Tinker/Qwen
+  `completion_kwargs` all apply in-process. **`HostedRuntime`** also works with `create_agent`
+  (the gateway client is rebuilt remotely and those kwargs still travel), but a true BYOK /
+  custom `model_client` cannot be serialized — use `HUDRuntime` for that.
 - **Nudge** with `trainer.step` - the one line that learns. It scores each rollout against its group,
   shifts the weights, then **promotes** them so the gateway serves the new ones at once.
 
