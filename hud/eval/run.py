@@ -50,10 +50,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.eval.run")
 
-#: Extra seconds allowed for grade/cancel after the hard ``rollout_timeout``
-#: deadline. Keeps salvage grading usable without letting a wedged tunnel hang
-#: the batch indefinitely.
-_TEARDOWN_GRACE_S = 30.0
+#: Lifecycle budgets owned by :func:`rollout`. Grading gets a short salvage
+#: window after the hard rollout deadline; cancel and provider teardown each
+#: get an independent cleanup window.
+_GRADE_GRACE_S = 30.0
+_CANCEL_TIMEOUT_S = 5.0
+_CLEANUP_TIMEOUT_S = 10.0
 
 
 def _prompt_message(item: Any) -> mcp_types.PromptMessage:
@@ -119,21 +121,10 @@ class Run:
     half-working.
     """
 
-    def __init__(
-        self,
-        client: HudClient | None,
-        task_id: str,
-        args: dict[str, Any],
-        *,
-        deadline: float | None = None,
-    ) -> None:
+    def __init__(self, client: HudClient | None, task_id: str, args: dict[str, Any]) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
-        #: Shared wall-clock end (``loop.time()``) for this rollout, if any.
-        #: Provision/agent honor it strictly; grade/cancel get a short grace
-        #: after it so a wedged JSON-RPC read cannot stall the batch forever.
-        self._deadline = deadline
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -234,18 +225,6 @@ class Run:
             self.record(Step(source="user", messages=self.prompt_messages))
         return self
 
-    async def _await_teardown(self, awaitable: Any) -> Any:
-        """Await teardown RPC (grade/cancel) under the rollout deadline + grace.
-
-        Provision and the agent loop use the hard ``deadline``. Grade and cancel
-        may run briefly past it so a partial trajectory can still be scored, but
-        never unbounded — a wedged tunnel during grade used to stall the batch.
-        """
-        if self._deadline is None:
-            return await awaitable
-        remaining = self._deadline + _TEARDOWN_GRACE_S - asyncio.get_running_loop().time()
-        return await asyncio.wait_for(awaitable, max(remaining, 0.0))
-
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
@@ -256,37 +235,34 @@ class Run:
         if exc_type is not None and issubclass(
             exc_type, asyncio.CancelledError | KeyboardInterrupt
         ):
-            self.trace.status = "cancelled"
-            with contextlib.suppress(Exception, TimeoutError):
-                await self._await_teardown(self.client.cancel())
+            await self.cancel()
             return False
 
+        await self.finish(exc)
+        return False
+
+    async def cancel(self) -> None:
+        """Mark the run cancelled and ask the live task to stop."""
+        self.trace.status = "cancelled"
+        await self.client.cancel()
+
+    async def finish(self, exc: BaseException | None = None) -> None:
+        """Grade and record the final task result, preserving a prior error."""
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
 
         # A mid-run error grades best-effort (capture a salvageable reward, keep
         # status=error), but a grade failure must not mask the original error. A
-        # clean run grades normally — a grader fault propagates. Grade/cancel
-        # are bound by the rollout deadline plus a short teardown grace.
-        try:
-            if exc_type is not None:
-                self.trace.status = "error"
-                try:
-                    evaluation = await self._await_teardown(self.client.grade(answer))
-                except Exception as grade_exc:
-                    logger.warning("grade failed after mid-run error: %s", grade_exc)
-                    return False
-            else:
-                evaluation = await self._await_teardown(self.client.grade(answer))
-        except TimeoutError:
-            logger.warning("rollout grading timed out; leaving run terminal without a grade")
+        # clean run grades normally — a grader fault propagates.
+        if exc is not None:
             self.trace.status = "error"
-            if self.trace.stop_reason is None:
-                self.trace.stop_reason = "timeout"
-            self.record(Step(source="system", error="grading timed out"))
-            with contextlib.suppress(Exception, TimeoutError):
-                await self._await_teardown(self.client.cancel())
-            return False
+            try:
+                evaluation = await self.client.grade(answer)
+            except Exception as grade_exc:
+                logger.warning("grade failed after mid-run error: %s", grade_exc)
+                return
+        else:
+            evaluation = await self.client.grade(answer)
 
         self.grade = Grade.from_dict(evaluation)
         self.record(
@@ -304,7 +280,6 @@ class Run:
         )
         if self.trace.status is None:
             self.trace.status = "completed"
-        return False
 
     @classmethod
     def failed(cls, error: str) -> Run:
@@ -350,12 +325,13 @@ async def rollout(
     start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
     the real run — prompt, placement record, and the partial trace the agent
     built — marked as errored, and still graded best-effort so a salvageable
-    reward is captured. Grade and cancel share the same wall-clock deadline
-    plus a short teardown grace, so a disconnected tunnel during grading
-    cannot leave the batch waiting indefinitely. Either way the logged warning
-    names the lifecycle phase (``provisioning``, ``starting task``,
-    ``agent loop``, ``grading``) so callers can tell where the failure landed
-    without reading the trace.
+    reward is captured. ``rollout()`` owns every timeout: provision, connect,
+    start, and the agent share the hard deadline; grading gets one salvage
+    grace; cancellation and provider cleanup get independent bounded budgets.
+    A disconnected tunnel therefore cannot leave the batch waiting
+    indefinitely. Either way the logged warning names the lifecycle phase
+    (``provisioning``, ``starting task``, ``agent loop``, ``grading``,
+    ``cleanup``) so callers can tell where the failure landed.
     """
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
@@ -379,24 +355,47 @@ async def rollout(
         async def _bounded(awaitable: Any) -> Any:
             """Bound work by the rollout's single wall-clock ``deadline``.
 
-            One shared deadline across provision, connect, and the agent loop —
+            One shared deadline across provision, connect, start, and agent —
             not a fresh budget per phase — so the bounded work cannot exceed
-            ``rollout_timeout`` in total. Grade and cancel get a short grace
-            past that deadline (see :data:`_TEARDOWN_GRACE_S`) so salvage
-            scoring still works, but a wedged JSON-RPC read cannot hang the
-            batch. A client read-timeout is not enough on its own: a wedged
-            upstream that trickles bytes resets the read timer forever, so a
-            single stuck sampling call could otherwise hang the rollout — and
-            the batch waits on it — indefinitely. A breach surfaces as
+            ``rollout_timeout`` in total. Grade, cancel, and provider cleanup
+            use their own explicit budgets below. A breach surfaces as
             ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
             """
             if deadline is None:
                 return await awaitable
             return await asyncio.wait_for(awaitable, max(deadline - loop.time(), 0.0))
 
+        async def _cleanup_bounded(awaitable: Any, budget_s: float) -> Any:
+            """Apply cleanup budgets only when this rollout has a hard deadline."""
+            if deadline is None:
+                return await awaitable
+            return await asyncio.wait_for(awaitable, budget_s)
+
+        async def _cancel(live: Run) -> None:
+            """Best-effort task cancellation under its own cleanup budget."""
+            try:
+                await _cleanup_bounded(live.client.cancel(), _CANCEL_TIMEOUT_S)
+            except TimeoutError:
+                logger.warning("rollout cancel did not finish within %.0fs", _CANCEL_TIMEOUT_S)
+            except Exception as exc:
+                logger.warning("rollout cancel failed: %s", exc)
+
+        async def _grade(live: Run, exc: BaseException | None) -> None:
+            """Finalize the Run under one bounded salvage-grading window."""
+            try:
+                await _cleanup_bounded(live.finish(exc), _GRADE_GRACE_S)
+            except TimeoutError:
+                logger.warning("rollout grading did not finish within %.0fs", _GRADE_GRACE_S)
+                live.trace.status = "error"
+                if live.trace.stop_reason is None:
+                    live.trace.stop_reason = "timeout"
+                live.record(Step(source="system", error="grading timed out"))
+                await _cancel(live)
+
         async def _drive() -> None:
             nonlocal run, _phase
-            async with contextlib.AsyncExitStack() as stack:
+            stack = contextlib.AsyncExitStack()
+            try:
                 # Setup (provision + connect) is bounded but not gradable: a
                 # timeout fires before the run is live, so it surfaces as a
                 # pre-launch failure. A cancelled enter still tears the
@@ -404,35 +403,62 @@ async def rollout(
                 addr = cast("Runtime", await _bounded(stack.enter_async_context(runtime(task))))
                 _phase = "starting task"
                 client = cast("HudClient", await _bounded(stack.enter_async_context(connect(addr))))
-                live = Run(client, task.id, task.args, deadline=deadline)
+                live = Run(client, task.id, task.args)
                 live._runtime = addr.url  # the placement record for the receipt
-                async with live:  # start on enter; grade on exit
-                    run = live  # bound only once live: an earlier failure synthesizes
-                    _phase = "agent loop"
-                    # File tracking (when enabled) emits setup separately, then
-                    # streams workspace diffs for the duration of the agent loop.
+                await _bounded(live.__aenter__())
+                run = live  # bound only once live: an earlier failure synthesizes
+                _phase = "agent loop"
+
+                async def _agent_loop() -> None:
                     async with file_tracking_observer(client):
-                        try:
-                            await _bounded(agent(run))
-                        except TimeoutError:
-                            # The run is live with a partial trajectory worth
-                            # grading, so record the truncation and fall through
-                            # to the normal grade-on-exit path. A bare cancel
-                            # (Ctrl-C) does not land here — it is a CancelledError,
-                            # which this does not catch, so it keeps the non-graded
-                            # cancel path in ``__aexit__``.
-                            logger.warning(
-                                "rollout agent loop timed out after %.0fs; grading partial",
-                                rollout_timeout,
-                            )
-                            run.trace.stop_reason = "timeout"
-                            run.record(
-                                Step(
-                                    source="system",
-                                    error=f"agent loop timed out after {rollout_timeout:.0f}s",
-                                )
-                            )
-                    _phase = "grading"
+                        await agent(live)
+
+                agent_error: Exception | None = None
+                try:
+                    await _bounded(_agent_loop())
+                except TimeoutError:
+                    # Preserve the partial trajectory and spend one independent
+                    # grace window grading it.
+                    logger.warning(
+                        "rollout agent loop timed out after %.0fs; grading partial",
+                        rollout_timeout,
+                    )
+                    live.trace.stop_reason = "timeout"
+                    live.record(
+                        Step(
+                            source="system",
+                            error=f"agent loop timed out after {rollout_timeout:.0f}s",
+                        )
+                    )
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    live.trace.status = "cancelled"
+                    await _cancel(live)
+                    raise
+                except Exception as exc:
+                    agent_error = exc
+
+                _phase = "grading"
+                await _grade(live, agent_error)
+                if agent_error is not None:
+                    raise agent_error
+            finally:
+                try:
+                    await _cleanup_bounded(stack.aclose(), _CLEANUP_TIMEOUT_S)
+                except TimeoutError:
+                    _phase = "cleanup"
+                    logger.warning(
+                        "rollout provider cleanup did not finish within %.0fs",
+                        _CLEANUP_TIMEOUT_S,
+                    )
+                    if run is not None:
+                        run.trace.status = "error"
+                        run.record(Step(source="system", error="provider cleanup timed out"))
+                except Exception as exc:
+                    _phase = "cleanup"
+                    logger.warning("rollout provider cleanup failed: %s", exc)
+                    if run is not None:
+                        run.trace.status = "error"
+                        run.record(Step(source="system", error=f"provider cleanup failed: {exc}"))
 
         try:
             await _drive()

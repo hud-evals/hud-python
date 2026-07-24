@@ -354,6 +354,7 @@ async def test_wedged_grade_cannot_stall_the_rollout() -> None:
 
         def __init__(self, inner: Any) -> None:
             self._inner = inner
+            self.cancelled = False
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self._inner, name)
@@ -363,18 +364,22 @@ async def test_wedged_grade_cannot_stall_the_rollout() -> None:
             return {}
 
         async def cancel(self) -> None:
-            return None
+            self.cancelled = True
 
     real_connect = run_mod.connect
+    hanging_client: _HangOnGrade | None = None
 
     @asynccontextmanager
     async def _connect_hanging(addr: Any) -> AsyncIterator[Any]:
+        nonlocal hanging_client
         async with real_connect(addr) as client:
-            yield _HangOnGrade(client)
+            hanging_client = _HangOnGrade(client)
+            yield hanging_client
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(run_mod, "connect", _connect_hanging)
-    monkeypatch.setattr(run_mod, "_TEARDOWN_GRACE_S", 0.2)
+    monkeypatch.setattr(run_mod, "_GRADE_GRACE_S", 0.2)
+    monkeypatch.setattr(run_mod, "_CANCEL_TIMEOUT_S", 0.2)
     try:
         started = asyncio.get_running_loop().time()
         run = await rollout(
@@ -391,6 +396,43 @@ async def test_wedged_grade_cannot_stall_the_rollout() -> None:
     assert run.trace.is_error
     assert run.trace.stop_reason == "timeout"
     assert "grading timed out" in (run.trace.error or "")
+    assert hanging_client is not None and hanging_client.cancelled
+
+
+async def test_wedged_provider_cleanup_cannot_stall_the_rollout() -> None:
+    """Provider teardown gets its own budget after grading completes."""
+    from hud.eval import run as run_mod
+
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    @asynccontextmanager
+    async def _wedged_cleanup(_task: TaskRow) -> AsyncIterator[Runtime]:
+        async with _local(env) as runtime:
+            yield runtime
+            await asyncio.sleep(3600)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(run_mod, "_CLEANUP_TIMEOUT_S", 0.2)
+    try:
+        started = asyncio.get_running_loop().time()
+        run = await rollout(
+            _add_task(2, 3),
+            _FnAgent(_solve_add),
+            runtime=_wedged_cleanup,
+            rollout_timeout=1.0,
+        )
+        elapsed = asyncio.get_running_loop().time() - started
+    finally:
+        monkeypatch.undo()
+
+    assert elapsed < 5.0
+    assert run.trace.is_error
+    assert "provider cleanup timed out" in (run.trace.error or "")
 
 
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
