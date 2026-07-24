@@ -33,6 +33,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
+import os
+import shutil
 import sys
 import uuid
 from collections import deque
@@ -137,14 +140,27 @@ class Runtime:
     local process, ``tcp://sandbox-abc.hud.so:443`` for a hosted box).
     ``params`` carries connection-time data a transport may need (auth token,
     sandbox id). ``config`` is the effective runtime configuration used to
-    construct the runtime. Constructed directly, it is also a provider — the
-    borrowed, shared case: it yields itself with a no-op lifecycle, since
-    whoever provisioned the substrate owns its teardown.
+    construct the runtime. ``agent_timeout_s`` optionally bounds only the
+    agent phase, after provisioning and task startup. Constructed directly,
+    it is also a provider — the borrowed, shared case: it yields itself with a
+    no-op lifecycle, since whoever provisioned the substrate owns its teardown.
     """
 
     url: str
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
+    agent_timeout_s: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.agent_timeout_s is None:
+            return
+        if (
+            isinstance(self.agent_timeout_s, bool)
+            or not isinstance(self.agent_timeout_s, int | float)
+            or not math.isfinite(self.agent_timeout_s)
+            or self.agent_timeout_s <= 0
+        ):
+            raise ValueError("Runtime agent_timeout_s must be a positive finite number")
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
@@ -788,19 +804,115 @@ class DaytonaRuntime:
                     await daytona.delete(sandbox)
 
 
-async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
-    """Run a docker CLI command and return decoded ``(stdout, stderr)``."""
-    proc = await asyncio.create_subprocess_exec(
-        "docker",
+async def _docker(
+    *args: str,
+    check: bool = True,
+    env: Mapping[str, str] | None = None,
+    unset_env: Sequence[str] = (),
+) -> tuple[str, str]:
+    """Run a non-interactive Docker CLI command with bounded diagnostic output.
+
+    ``env`` is reserved for trusted host-side overrides. ``unset_env`` removes
+    task-controlled names from the Docker client's process environment without
+    affecting executable lookup, which is resolved before the child is spawned.
+    """
+    docker = shutil.which("docker") or "docker"
+    process_env: dict[str, str] | None = None
+    if env is not None or unset_env:
+        process_env = dict(os.environ)
+        for key in unset_env:
+            process_env.pop(key, None)
+        process_env.update(env or {})
+    group = await create_process_group_exec(
+        docker,
         *args,
+        term_timeout=5.0,
+        kill_timeout=5.0,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=process_env,
     )
-    out, err = await proc.communicate()
+    proc = group.process
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    out_task = asyncio.create_task(_read_bounded_output(proc.stdout))
+    err_task = asyncio.create_task(_read_bounded_output(proc.stderr))
+    try:
+        await proc.wait()
+        out, err = await asyncio.gather(out_task, err_task)
+        await group.terminate()
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await group.terminate()
+        for reader in (out_task, err_task):
+            if not reader.done():
+                reader.cancel()
+        await asyncio.gather(out_task, err_task, return_exceptions=True)
+        raise
     if check and proc.returncode != 0:
         detail = err.decode("utf-8", "replace").strip() or out.decode("utf-8", "replace").strip()
-        raise RuntimeError(f"docker {' '.join(args)} failed ({proc.returncode}): {detail}")
+        for sensitive_value in _sensitive_docker_values(args):
+            detail = detail.replace(sensitive_value, "<redacted>")
+        command = " ".join(_redact_docker_args(args))
+        raise RuntimeError(f"docker {command} failed ({proc.returncode}): {detail}")
     return out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
+_DOCKER_OUTPUT_LIMIT = 1_000_000
+
+
+async def _read_bounded_output(stream: asyncio.StreamReader) -> bytes:
+    """Drain a subprocess stream while retaining only its diagnostic tail."""
+    tail = bytearray()
+    while chunk := await stream.read(64 * 1024):
+        tail.extend(chunk)
+        if len(tail) > _DOCKER_OUTPUT_LIMIT:
+            del tail[: len(tail) - _DOCKER_OUTPUT_LIMIT]
+    return bytes(tail)
+
+
+def _redact_docker_args(args: Sequence[str]) -> list[str]:
+    """Render Docker arguments without exposing inline credentials or env values."""
+    rendered: list[str] = []
+    redact_next = False
+    sensitive = {"--env", "-e", "--env-file", "--password", "--secret"}
+    for arg in args:
+        if redact_next:
+            rendered.append("<redacted>")
+            redact_next = False
+        elif arg in sensitive:
+            rendered.append(arg)
+            redact_next = True
+        elif any(arg.startswith(f"{flag}=") for flag in sensitive):
+            rendered.append(f"{arg.split('=', 1)[0]}=<redacted>")
+        else:
+            rendered.append(arg)
+    return rendered
+
+
+def _sensitive_docker_values(args: Sequence[str]) -> set[str]:
+    """Values to scrub if a failed CLI echoes its own sensitive arguments."""
+    values: set[str] = set()
+    sensitive = {"--env", "-e", "--env-file", "--password", "--secret"}
+    redact_next = False
+    for arg in args:
+        if redact_next:
+            if arg:
+                values.add(arg)
+                if "=" in arg:
+                    value = arg.split("=", 1)[1]
+                    if len(value) >= 4:
+                        values.add(value)
+            redact_next = False
+        elif arg in sensitive:
+            redact_next = True
+        elif any(arg.startswith(f"{flag}=") for flag in sensitive):
+            values.add(arg)
+            value = arg.split("=", 1)[1]
+            if len(value) >= 4:
+                values.add(value)
+    return values
 
 
 @asynccontextmanager

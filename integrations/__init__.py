@@ -5,11 +5,12 @@ dirs, Verifiers/Inspect datasets — is a *frontend* loading into the same
 primitives. Integrations are **loaders, not converters**: no codegen roundtrip
 to run foreign tasks.
 
-This package lives outside ``hud`` on purpose: each module is a recipe built
-**only on the public SDK surface** (``Environment``, ``Task``,
-``Taskset``, ``Runtime``) — that constraint is the proof the core is
-flexible. Copy a module into your project or run it from a checkout; nothing
-in the SDK or CLI imports it.
+This package lives outside ``hud`` on purpose: loaders are recipes built on the
+public SDK surface (``Environment``, ``Task``, ``Taskset``, ``Runtime``). Copy a
+loader into your project or run it from a checkout. The CLI may call selected
+integrations explicitly for polished interop paths. A repo-maintained
+integration may also expose a local provider for that explicit CLI path; that
+provider is SDK implementation code, not the portable loader contract.
 
 The contract: an integration module exposes ``detect(path) -> bool`` and
 ``load(path) -> Taskset``. Placement stays an execution-time concern — loaders

@@ -9,13 +9,27 @@ task dirs - is a *frontend* that loads into the same primitives (`Environment`,
 `Task`, `Taskset`). Integrations are **loaders, not converters**: no codegen
 roundtrip to run foreign tasks. The Harbor integration lives in the SDK repo at
 [`integrations/harbor.py`](https://github.com/hud-evals/hud-python/blob/main/integrations/harbor.py)
-- a recipe built only on the public SDK surface; copy it into your project or
-run it from a checkout.
+- a public-surface loader that maps Harbor folders into SDK primitives. The
+included `HarborRuntime` is maintained with the SDK for local Docker execution;
+copy the loader into your project or run it from a checkout.
 
 ## Prerequisites
 
 - A Harbor task directory - each task has `task.toml` + `instruction.md`, and
   usually an `environment/` (with a `Dockerfile`) and `tests/`.
+- For local execution, a running Docker Engine or Docker Desktop daemon that
+  your user can access, plus the Docker Compose v2 plugin (`docker compose`).
+
+Loading and exporting task metadata does not require Docker. `HarborRuntime`
+does: it builds and starts each task through the local Docker daemon.
+
+<Warning>
+**Run only trusted Harbor tasks.** `HarborRuntime` executes task-supplied
+Dockerfiles, Compose definitions, and `tests/test.sh` against your local Docker
+daemon. Review them first, especially bind mounts, devices, privileged settings,
+build inputs, and scripts; Docker task definitions are not a security boundary
+from the host running the daemon.
+</Warning>
 
 ## Load Harbor tasks
 
@@ -26,23 +40,74 @@ directly - one row per task dir (`id` = the dir name), sharing one declarative
 ```python
 from integrations.harbor import detect, load
 
-assert detect("./terminal-bench")
-taskset = load("./terminal-bench")
+assert detect("./harbor_tasks")
+taskset = load("./harbor_tasks")
 
 for task in taskset:
     print(task.env, task.id)
 ```
 
-Like every task row, the result carries no placement. Run it by supplying one -
-today that means a substrate already serving the control channel
-(`runtime=Runtime(url)`); a docker provider that builds and runs each task's
-`environment/` image is the planned follow-up:
+Like every task row, the result carries no placement. Run it by supplying one.
+For local Docker-backed Harbor execution, use `HarborRuntime`; it builds the
+task's `environment/` image, runs a fresh container, exposes the workspace
+through HUD's normal shell capability, and grades by running `tests/test.sh`:
 
 ```python
-from hud import Runtime
+from integrations.harbor import HarborRuntime
 
-job = await taskset.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
+job = await taskset.run(agent, runtime=HarborRuntime("./harbor_tasks"))
 ```
+
+The eval CLI can run local Harbor task directories and datasets when you opt
+into the Harbor source format:
+
+```bash
+hud eval ./harbor_tasks claude --format harbor --task-ids cancel-async-tasks --max-steps 30
+```
+
+Each concurrent Harbor rollout starts its own Compose project and may build an
+image. Set `--max-concurrent` to a value your Docker host can sustain; start
+with `1` to `3` for unfamiliar tasks, then increase it after observing CPU,
+memory, disk, and build-cache pressure.
+
+### Supported Harbor subset
+
+`HarborRuntime` validates `task.toml` before starting Docker and fails closed on
+features it does not implement:
+
+| Area | Supported | Rejected |
+|------|-----------|----------|
+| Task shape | Linux, single-step tasks with `instruction.md` | Windows, `steps`, multi-step reward strategies, artifact collection |
+| Environment | `Dockerfile`, a prebuilt `docker_image`, or Compose with a `main` service and sidecars | GPU/TPU resources, task-config healthchecks, MCP servers, `skills_dir` |
+| Placement | Public/default networking, environment variables, users, absolute workdirs, CPU and memory limits | Restricted network policies, host allowlists, agent/verifier network overrides |
+| Verification | Shared-container `tests/test.sh`, verifier user/env, verifier timeout, `reward.json` or `reward.txt` | Separate verifier environments and verifier collect hooks |
+
+`[environment].storage_mb` is accepted for Harbor schema compatibility but is
+not currently enforced by the Docker/Compose runtime. `[agent].timeout_sec`
+bounds only the agent phase, after provisioning and task startup. An explicit
+`Taskset.run(..., rollout_timeout=...)` still imposes an earlier whole-rollout
+limit when configured.
+
+Verification uses Harbor's shared-container mode. Hidden tests are staged only
+after the agent phase, but the agent and verifier still share one container;
+this is parity with Harbor's shared mode, not a security boundary against a
+root agent that leaves background processes behind.
+
+### Choose the primary reward
+
+`reward.txt` supplies one numeric reward. A `reward.json` object may contain
+multiple numeric rewards; `HarborRuntime` selects `reward`, or the only key when
+the object has exactly one entry. If neither rule is unambiguous, select the
+primary metric explicitly:
+
+```python
+runtime = HarborRuntime("./harbor_tasks", reward_key="security")
+job = await taskset.run(agent, runtime=runtime)
+```
+
+The configured key must exist and contain a numeric reward. An invalid or
+ambiguous reward is reported as a grading error rather than silently choosing a
+metric.
 
 ## Export HUD tasks to Harbor
 

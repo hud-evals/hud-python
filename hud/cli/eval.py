@@ -63,6 +63,7 @@ hud_console = HUDConsole()
 
 _CONFIG_PATH = ".hud_eval.toml"
 _PLACEMENT_CONFLICT_ERROR = "--runtime and --remote are mutually exclusive placement options"
+_SOURCE_FORMATS = ("hud", "harbor")
 
 
 def _resolve_env_vars(obj: Any) -> Any:
@@ -167,6 +168,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # very_verbose = true
 # auto_respond = true
 # gateway = false  # Route LLM API calls through HUD Gateway
+# format = "hud"  # hud or harbor
 # runtime = "local"  # local, hud, or tcp://host:port
 # remote = false  # Run the whole rollout remotely on HUD
 
@@ -264,6 +266,7 @@ class EvalConfig(BaseModel):
         "group_size",
         "auto_respond",
         "gateway",
+        "format",
         "runtime",
         "remote",
     }
@@ -279,6 +282,9 @@ class EvalConfig(BaseModel):
     auto_respond: bool | None = None
     group_size: int = 1
     gateway: bool = False
+    #: Source format. ``None``/``hud`` means normal HUD task source loading;
+    #: ``harbor`` opts into the Harbor integration loader/runtime.
+    format: str | None = None
     #: Placement: "local" (spawn each row's env from the source), "hud"
     #: (HUD runtime tunnel), or a tcp:// url of an already-served env.
     #: ``None`` means "infer from the source": a local file runs locally, a
@@ -306,6 +312,20 @@ class EvalConfig(BaseModel):
                 ) from None
         return v
 
+    @field_validator("format", mode="before")
+    @classmethod
+    def _parse_format(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            return v
+        normalized = v.strip().lower()
+        if normalized in ("", "hud"):
+            return None
+        if normalized in _SOURCE_FORMATS:
+            return normalized
+        raise ValueError(f"Invalid format: {v}. Must be one of: {', '.join(_SOURCE_FORMATS)}")
+
     def source_is_local_file(self) -> bool:
         """Whether ``source`` points at an on-disk taskset (vs. a platform slug/id)."""
         return self.source is not None and Path(self.source).exists()
@@ -319,6 +339,13 @@ class EvalConfig(BaseModel):
         ``--runtime`` is always honored, except ``local`` against a platform
         taskset, which has no env to spawn.
         """
+        if self.format == "harbor":
+            if not self.source_is_local_file():
+                hud_console.error("--format harbor requires a local Harbor task directory")
+                raise typer.Exit(1)
+            if self.remote or (self.runtime is not None and self.runtime != "local"):
+                hud_console.error("--format harbor currently supports only local runtime placement")
+                raise typer.Exit(1)
         if self.runtime is None:
             if self.source_is_local_file():
                 return self.model_copy(update={"runtime": "local"})
@@ -502,6 +529,7 @@ class EvalConfig(BaseModel):
         gateway: bool = False,
         config: list[str] | None = None,
         task_ids: str | None = None,
+        format: str | None = None,
         runtime: str | None = None,
         remote: bool = False,
     ) -> EvalConfig:
@@ -517,6 +545,7 @@ class EvalConfig(BaseModel):
                 "max_concurrent": max_concurrent,
                 "max_steps": max_steps,
                 "group_size": group_size,
+                "format": format,
                 "runtime": runtime,
             }.items()
             if value is not None
@@ -604,6 +633,8 @@ class EvalConfig(BaseModel):
         table.add_column("Value", style="green")
 
         table.add_row("source", str(self.source or "-"))
+        if self.format:
+            table.add_row("format", self.format)
         table.add_row("runtime", str(self.runtime or "-"))
         table.add_row("agent", self.agent_type.value if self.agent_type else "-")
         if self.task_ids:
@@ -728,6 +759,28 @@ def _spawn_target(source: Path) -> Path:
     return resolved.parent
 
 
+def _load_local_taskset(source_path: Path, source_format: str | None) -> Any:
+    from hud.eval import Taskset
+
+    format_name = source_format or "hud"
+    if format_name == "hud":
+        taskset = Taskset.from_file(source_path)
+        if len(taskset) == 0:
+            from integrations.harbor import detect
+
+            if detect(source_path):
+                hud_console.hint(
+                    f"{source_path} looks like a Harbor task directory; "
+                    "rerun with --format harbor to load it."
+                )
+        return taskset
+    if format_name == "harbor":
+        from integrations.harbor import load
+
+        return load(source_path)
+    raise ValueError(f"unsupported task source format: {format_name}")
+
+
 def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
@@ -744,6 +797,10 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
+        if cfg.format == "harbor":
+            from integrations.harbor import HarborRuntime
+
+            return HarborRuntime(source_path)
         return SubprocessRuntime(_spawn_target(source_path))
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
@@ -774,7 +831,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     if is_local:
         hud_console.info(f"Loading tasks from: {cfg.source}")
         try:
-            taskset = Taskset.from_file(source_path)
+            taskset = _load_local_taskset(source_path, cfg.format)
         except Exception as e:
             hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
             raise typer.Exit(1) from e
@@ -888,6 +945,11 @@ def eval_command(
     gateway: bool = typer.Option(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
+    format: str | None = typer.Option(
+        None,
+        "--format",
+        help="Task source format: hud (default) or harbor.",
+    ),
     runtime: str | None = typer.Option(
         None,
         "--runtime",
@@ -908,6 +970,7 @@ def eval_command(
         hud eval "My Tasks" claude-sonnet-4-6 --full   # Platform taskset, run on the platform
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
+        hud eval ./harbor_tasks claude --format harbor # Run Harbor task dirs locally
         hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use HUD runtime tunnel
         hud eval tasks.json claude-sonnet-4-6 --remote       # Execute rollout remotely
     """
@@ -938,6 +1001,7 @@ def eval_command(
             group_size=group_size,
             config=config,
             gateway=gateway,
+            format=format,
             runtime=runtime,
             remote=remote,
         )

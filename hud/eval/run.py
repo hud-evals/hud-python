@@ -51,6 +51,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.run")
 
 
+class _RolloutDeadlineExceeded(Exception):
+    """The driver's wall-clock deadline expired around a bounded phase."""
+
+
 def _prompt_message(item: Any) -> mcp_types.PromptMessage:
     """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
 
@@ -314,6 +318,12 @@ async def rollout(
     reward is captured. Either way the logged warning names the lifecycle
     phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``) so
     callers can tell where the failure landed without reading the trace.
+
+    A provider may set :attr:`Runtime.agent_timeout_s` for a task-specific
+    agent-phase budget. That clock starts immediately before ``agent(run)``;
+    provisioning, connection, and task startup do not consume it. When both
+    limits are present, the earlier of that phase deadline and the explicit
+    whole-rollout ``rollout_timeout`` deadline wins.
     """
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
@@ -342,12 +352,20 @@ async def rollout(
             ``rollout_timeout`` in total. A client read-timeout is not enough on
             its own: a wedged upstream that trickles bytes resets the read timer
             forever, so a single stuck sampling call could otherwise hang the
-            rollout — and the batch waits on it — indefinitely. A breach surfaces
-            as ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
+            rollout — and the batch waits on it — indefinitely. The private
+            deadline exception distinguishes a real breach from a ``TimeoutError``
+            raised by provider code.
             """
             if deadline is None:
                 return await awaitable
-            return await asyncio.wait_for(awaitable, max(deadline - loop.time(), 0.0))
+            timeout = asyncio.timeout_at(deadline)
+            try:
+                async with timeout:
+                    return await awaitable
+            except TimeoutError:
+                if not timeout.expired():
+                    raise
+                raise _RolloutDeadlineExceeded from None
 
         async def _drive() -> None:
             nonlocal run, _phase
@@ -367,31 +385,53 @@ async def rollout(
                     # File tracking (when enabled) emits setup separately, then
                     # streams workspace diffs for the duration of the agent loop.
                     async with file_tracking_observer(client):
-                        try:
-                            await _bounded(agent(run))
-                        except TimeoutError:
-                            # The run is live with a partial trajectory worth
-                            # grading, so record the truncation and fall through
-                            # to the normal grade-on-exit path. A bare cancel
-                            # (Ctrl-C) does not land here — it is a CancelledError,
-                            # which this does not catch, so it keeps the non-graded
-                            # cancel path in ``__aexit__``.
-                            logger.warning(
-                                "rollout agent loop timed out after %.0fs; grading partial",
-                                rollout_timeout,
-                            )
-                            run.trace.stop_reason = "timeout"
-                            run.record(
-                                Step(
-                                    source="system",
-                                    error=f"agent loop timed out after {rollout_timeout:.0f}s",
-                                )
-                            )
+                        agent_deadline = deadline
+                        timeout_source = "rollout" if deadline is not None else None
+                        timeout_value = rollout_timeout
+                        if addr.agent_timeout_s is not None:
+                            runtime_deadline = loop.time() + addr.agent_timeout_s
+                            if agent_deadline is None or runtime_deadline < agent_deadline:
+                                agent_deadline = runtime_deadline
+                                timeout_source = "runtime"
+                                timeout_value = addr.agent_timeout_s
+
+                        if agent_deadline is None:
+                            await agent(run)
+                        else:
+                            timeout = asyncio.timeout_at(agent_deadline)
+                            try:
+                                async with timeout:
+                                    await agent(run)
+                            except TimeoutError:
+                                # Do not misclassify a TimeoutError raised by the
+                                # agent itself as a deadline breach.
+                                if not timeout.expired():
+                                    raise
+                                assert timeout_source is not None
+                                assert timeout_value is not None
+                                if timeout_source == "runtime":
+                                    detail = (
+                                        "agent loop timed out after "
+                                        f"{timeout_value:g}s (runtime agent limit)"
+                                    )
+                                else:
+                                    detail = (
+                                        "agent loop reached rollout timeout after "
+                                        f"{timeout_value:g}s"
+                                    )
+                                # The run is live with a partial trajectory worth
+                                # grading, so record the truncation and fall through
+                                # to the normal grade-on-exit path. A bare cancel
+                                # (Ctrl-C) remains a CancelledError and keeps the
+                                # non-graded cancel path in ``__aexit__``.
+                                logger.warning("%s; grading partial", detail)
+                                run.trace.stop_reason = "timeout"
+                                run.record(Step(source="system", error=detail))
                     _phase = "grading"
 
         try:
             await _drive()
-        except TimeoutError:
+        except _RolloutDeadlineExceeded:
             # A setup-phase deadline (provision/connect) fired — the agent-loop
             # timeout is handled inside _drive. Isolate it so one wedged rollout
             # never collapses the batch, keeping any partial trace.

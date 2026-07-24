@@ -31,7 +31,7 @@ from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.environment import Environment
-from hud.eval import Job, SubprocessRuntime, Task, Taskset
+from hud.eval import Job, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
 from hud.eval.runtime import _local
 
@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from hud.eval.runtime import Runtime
     from hud.eval.task import Task as TaskRow
 
 _SUMS_ENV = """\
@@ -118,6 +117,12 @@ def _add_task(a: int, b: int) -> Task:
 def _solve_add(prompt: str) -> str:
     _, a, b = prompt.split(":")
     return str(int(a) + int(b))
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("inf"), float("nan"), True])
+def test_runtime_rejects_invalid_agent_timeout(timeout: float) -> None:
+    with pytest.raises(ValueError, match="positive finite"):
+        Runtime("tcp://127.0.0.1:1", agent_timeout_s=timeout)
 
 
 def _pid_status(pid: int) -> str | None:
@@ -313,6 +318,11 @@ class _SlowAgent(Agent):
         await asyncio.sleep(30)
 
 
+class _AgentRaisedTimeout(Agent):
+    async def __call__(self, run: Any) -> None:
+        raise TimeoutError("agent's internal timeout")
+
+
 async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
     # In-process env (no subprocess spawn) so only the agent loop, not setup,
     # races the short deadline.
@@ -336,6 +346,87 @@ async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
     assert run.trace.status == "completed"
     assert run.trace.stop_reason == "timeout"
     assert run.trace_id is not None
+
+
+async def test_runtime_agent_timeout_only_bounds_the_agent_phase() -> None:
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    @asynccontextmanager
+    async def delayed_provider(task: TaskRow) -> AsyncIterator[Runtime]:
+        await asyncio.sleep(0.05)
+        async with _local(env) as runtime:
+            yield Runtime(runtime.url, runtime.params, agent_timeout_s=0.01)
+
+    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=delayed_provider)
+
+    assert run.reward == 1.0
+    assert run.trace.stop_reason is None
+
+
+async def test_runtime_agent_timeout_grades_the_partial_trajectory() -> None:
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    @asynccontextmanager
+    async def provider(task: TaskRow) -> AsyncIterator[Runtime]:
+        async with _local(env) as runtime:
+            yield Runtime(runtime.url, runtime.params, agent_timeout_s=0.05)
+
+    run = await rollout(_add_task(2, 3), _SlowAgent(_solve_add), runtime=provider)
+
+    assert run.reward == 1.0
+    assert run.trace.status == "completed"
+    assert run.trace.stop_reason == "timeout"
+    assert any(step.error and "runtime agent limit" in step.error for step in run.trace.steps)
+
+
+async def test_rollout_timeout_remains_the_dominant_agent_deadline() -> None:
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    @asynccontextmanager
+    async def provider(task: TaskRow) -> AsyncIterator[Runtime]:
+        async with _local(env) as runtime:
+            yield Runtime(runtime.url, runtime.params, agent_timeout_s=30.0)
+
+    run = await rollout(
+        _add_task(2, 3),
+        _SlowAgent(_solve_add),
+        runtime=provider,
+        rollout_timeout=0.2,
+    )
+
+    assert run.reward == 1.0
+    assert run.trace.stop_reason == "timeout"
+    assert any(step.error and "rollout timeout" in step.error for step in run.trace.steps)
+
+
+async def test_agent_raised_timeout_is_not_reported_as_a_deadline(env_file: Path) -> None:
+    base = SubprocessRuntime(env_file)
+
+    @asynccontextmanager
+    async def provider(task: TaskRow) -> AsyncIterator[Runtime]:
+        async with base(task) as runtime:
+            yield Runtime(runtime.url, runtime.params, agent_timeout_s=30.0)
+
+    run = await rollout(_add_task(2, 3), _AgentRaisedTimeout(), runtime=provider)
+
+    assert run.trace.is_error
+    assert run.trace.stop_reason is None
+    assert "agent's internal timeout" in (run.trace.error or "")
 
 
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:

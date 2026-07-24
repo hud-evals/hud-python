@@ -176,11 +176,15 @@ completion. It requires a gateway agent that can serialize its identity (Claude/
 ### `Runtime`
 
 ```python
-Runtime(url, params=..., config=...)
+Runtime(url, params=..., config=..., agent_timeout_s=None)
 ```
 
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
+- **`agent_timeout_s`** - optional positive agent-phase limit. Its clock starts after provisioning,
+  connection, and task startup. If `Task.run(..., rollout_timeout=...)` or
+  `Taskset.run(..., rollout_timeout=...)` supplies an earlier whole-rollout deadline, that earlier
+  deadline still wins.
 
 ## Run on your own infra
 
