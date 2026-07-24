@@ -9,7 +9,7 @@ import pytest
 
 from integrations.harbor import detect, export, load
 
-from .conftest import make_harbor_task
+from .conftest import make_harbor_task, make_multi_step_task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -59,6 +59,36 @@ def test_load_rejects_dirs_without_harbor_tasks(tmp_path: Path) -> None:
     empty.mkdir()
     with pytest.raises(ValueError, match="no Harbor tasks"):
         load(empty)
+
+
+def test_detect_and_load_recognize_multi_step_tasks(tmp_path: Path) -> None:
+    # A multi-step task has no root instruction.md; its instructions live under
+    # steps/<name>/, declared by a [[steps]] array in task.toml.
+    task = make_multi_step_task(tmp_path, "multi")
+
+    assert detect(task)
+    assert {row.id for row in load(task)} == {"multi"}
+
+
+def test_load_keeps_multi_step_tasks_alongside_single_step(tmp_path: Path) -> None:
+    dataset = tmp_path / "bench"
+    dataset.mkdir()
+    make_harbor_task(dataset, "single")
+    make_multi_step_task(dataset, "multi")
+
+    assert {row.id for row in load(dataset)} == {"single", "multi"}
+
+
+def test_detect_rejects_task_toml_without_instruction_or_steps(tmp_path: Path) -> None:
+    # task.toml alone is not a task: it needs a root instruction.md (single-step)
+    # or a [[steps]] array (multi-step).
+    task = tmp_path / "bare"
+    task.mkdir()
+    (task / "task.toml").write_text('[metadata]\ncategory = "x"\n', encoding="utf-8")
+
+    assert not detect(task)
+    with pytest.raises(ValueError, match="no Harbor tasks"):
+        load(task)
 
 
 def test_load_skips_unparseable_toml_but_keeps_the_rest(tmp_path: Path) -> None:
