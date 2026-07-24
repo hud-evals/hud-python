@@ -664,7 +664,9 @@ class DaytonaRuntime:
         self.snapshot_name = snapshot_name
         # Default command serves on *port*, so the SSH forward target always
         # matches what's listening; override only for a non-default layout.
-        self.command = command or f"uv run hud serve env.py --host 0.0.0.0 --port {port}"
+        self.command = (
+            command or f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
+        )
         self.workdir = workdir
         self.port = port
         self.ssh_host = ssh_host

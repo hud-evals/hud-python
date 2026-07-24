@@ -656,7 +656,9 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert calls["execute"] == (
         "hud-serve",
         _SessionExecuteRequest(
-            command="cd /app && uv run hud serve env.py --host 0.0.0.0 --port 8765",
+            command=(
+                'cd /app && PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765'
+            ),
             run_async=True,
         ),
     )
