@@ -593,6 +593,7 @@ def gym_command(
     *,
     fps: int | None = None,
     contract: str | None = "contract.json",
+    bridge: type[GymBridge] | None = None,
     **defaults: Any,
 ) -> list[str]:
     """Build the command line that spawns *target* as a sim process (what ``env.gym`` runs).
@@ -604,7 +605,8 @@ def gym_command(
     constructed env's spec (id + kwargs) — closed here since only the spec
     crosses over; the child calls ``gym.make`` again for its own instance.
     ``fps`` / ``contract`` / build defaults (e.g. ``num_envs=``) flow through
-    to the :class:`GymBridge` the CLI builds.
+    to the :class:`GymBridge` the CLI builds. ``bridge`` swaps in a subclass
+    (same way: by source path), for a sim process that serves more than the wire.
     """
     if callable(target):
         name = getattr(target, "__qualname__", "")
@@ -625,6 +627,8 @@ def gym_command(
         cmd += ["--fps", str(fps)]
     if contract is not None:
         cmd += ["--contract", str(contract)]
+    if bridge is not None:
+        cmd += ["--bridge", f"{inspect.getfile(bridge)}:{bridge.__qualname__}"]
     # Build defaults (num_envs, etc.) as --key value pairs the CLI re-applies.
     # JSON-encoded so the child gets real bools/ints/strings back (see main()).
     for key, value in defaults.items():
@@ -641,6 +645,7 @@ def main() -> None:
     parser.add_argument("target", help="'path/to/module.py:factory', a registry id, or spec JSON.")
     parser.add_argument("--fps", type=int, default=None, help="Control-rate override.")
     parser.add_argument("--contract", default=None, help="contract.json round-trip path.")
+    parser.add_argument("--bridge", default=None, help="'path/to/module.py:GymBridgeSubclass'.")
     parser.add_argument("--host", default="127.0.0.1", help="Control-channel interface.")
     parser.add_argument("--port", type=int, default=0, help="Control-channel port (0 = ephemeral).")
     parser.add_argument("--num-envs", type=int, default=None, help="Vectorized slot count.")
@@ -661,8 +666,15 @@ def main() -> None:
                 defaults[flag[2:].replace("-", "_")] = json.loads(value)
             except json.JSONDecodeError:
                 defaults[flag[2:].replace("-", "_")] = value
-    bridge = GymBridge(target, fps=args.fps, contract=args.contract, **defaults)
-    serve_bridge(bridge, host=args.host, port=args.port)
+    bridge_cls: Any = GymBridge
+    if args.bridge is not None:  # a sim process that serves more than the wire
+        path, _, attr = args.bridge.rpartition(":")
+        bridge_cls = getattr(load_module(path), attr)
+    serve_bridge(
+        bridge_cls(target, fps=args.fps, contract=args.contract, **defaults),
+        host=args.host,
+        port=args.port,
+    )
 
 
 if __name__ == "__main__":

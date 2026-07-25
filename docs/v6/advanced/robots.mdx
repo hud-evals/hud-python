@@ -323,7 +323,8 @@ endpoint = RobotEndpoint(MySimBridge()).attach(env)  # release slot on cancel/by
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(await endpoint.capability())
+    for cap in await endpoint.capabilities():
+        env.add_capability(cap)
 
 @env.shutdown
 async def _down():
@@ -582,8 +583,8 @@ The [contract](#contract) drives the schema with no extra wiring: image features
 | `wrap(env)` | `hud.environment.robot` | One-line trace streaming for any gym-style env you drive yourself |
 | `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
-| `RobotEndpoint.capability(...)` | `hud.environment.robot` | Build the `openpi/0` capability after `start()` |
-| `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capability`) |
+| `RobotEndpoint.capabilities(...)` | `hud.environment.robot` | Everything the bridge serves after `start()` (the `openpi/0` wire, plus any extras) |
+| `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |

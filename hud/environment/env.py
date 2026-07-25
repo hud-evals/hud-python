@@ -314,6 +314,10 @@ class Environment(LegacyEnvMixin):
         registry env (reduced to its spec). Registers spawn → publish → teardown
         on this env's hooks; nothing runs until serve. Returns a
         :class:`~hud.environment.robot.RobotEndpoint` (``sim.reset`` / ``sim.result``).
+
+        Every capability the bridge declares is published, not just the wire —
+        a ``bridge=`` subclass serving its own tools from the sim process shows
+        up in the manifest alongside ``name``.
         """
         from hud.environment.robot import RobotEndpoint
         from hud.environment.robot.gym import gym_command
@@ -323,7 +327,8 @@ class Environment(LegacyEnvMixin):
         @self.initialize
         async def _up() -> None:
             await sim.start()
-            self.add_capability(await sim.capability(name))
+            for cap in await sim.capabilities(name):
+                self.add_capability(cap)
 
         @self.shutdown
         async def _down() -> None:

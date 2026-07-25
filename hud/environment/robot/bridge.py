@@ -28,6 +28,7 @@ import websockets.exceptions
 
 # The openpi/0 wire codec is defined alongside the agent-side client; reuse it so both
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
+from hud.capabilities import Capability
 from hud.capabilities.robot import _packb, _unpackb
 from hud.environment.utils import error, read_frame, reply, send_frame
 
@@ -414,7 +415,8 @@ class RobotBridge(ABC):
     # ── the control side channel (driven by a RobotEndpoint) ────────────────────
 
     async def serve_control(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
-        """Serve the JSON-RPC side channel: ``url`` / ``contract`` / ``reset`` / ``result``."""
+        """Serve the JSON-RPC side channel: ``capabilities`` / ``url`` / ``contract`` /
+        ``reset`` / ``result``."""
         return await asyncio.start_server(self._handle_control, host, port)
 
     async def _handle_control(
@@ -437,11 +439,22 @@ class RobotBridge(ABC):
         Default is the already-set ``self.contract``. Lazy-spawn bridges
         (:class:`~.gym.GymBridge`) override to build the env and derive when
         no pre-written ``contract.json`` was loaded at start — so
-        ``endpoint.capability()`` publishes a real manifest, not ``{}``.
+        ``endpoint.capabilities()`` publishes a real manifest, not ``{}``.
         """
         return self.contract
 
+    async def capabilities(self, name: str = "robot") -> list[Capability]:
+        """Everything this bridge serves, ``name`` naming the ``robot`` wire.
+
+        The sim process may serve more than the openpi wire — a bridge that
+        also runs its own MCP tool server appends that capability here, and
+        the endpoint publishes whatever comes back. Default is the wire alone.
+        """
+        return [Capability.robot(name=name, url=self.url, contract=await self.ensure_contract())]
+
     async def _dispatch_control(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "capabilities":
+            return {"capabilities": [c.to_manifest() for c in await self.capabilities(**params)]}
         if method == "url":
             return {"url": self.url}
         if method == "contract":

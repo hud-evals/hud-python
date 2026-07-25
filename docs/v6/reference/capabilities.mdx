@@ -238,7 +238,8 @@ endpoint = RobotEndpoint(MySimBridge()).attach(env)
 @env.initialize
 async def _up():
     await endpoint.start()
-    env.add_capability(await endpoint.capability(contract=CONTRACT))
+    for cap in await endpoint.capabilities():
+        env.add_capability(cap)
 ```
 
 See [Robots](/v6/advanced/robots) for the bridge, the endpoint, the harness, and the contract spec.

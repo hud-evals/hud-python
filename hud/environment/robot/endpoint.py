@@ -217,11 +217,16 @@ class RobotEndpoint:
         """
         return (await self._call("contract"))["contract"]
 
-    async def capability(self, name: str = "robot") -> Capability:
-        """The concrete ``robot`` capability — publish it from an ``@env.initialize`` hook."""
+    async def capabilities(self, name: str = "robot") -> list[Capability]:
+        """Everything the bridge serves — the ``robot`` wire named *name*, plus any
+        extras it adds itself (e.g. MCP tools from the sim process).
+
+        Publish from an ``@env.initialize`` hook (``env.gym`` does this).
+        """
         from hud.capabilities import Capability
 
-        return Capability.robot(name=name, url=await self.url(), contract=await self.contract())
+        published = await self._call("capabilities", {"name": name})
+        return [Capability.from_manifest(c) for c in published["capabilities"]]
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
