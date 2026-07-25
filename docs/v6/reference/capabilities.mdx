@@ -233,7 +233,7 @@ Capability.robot(*, name="robot", url, contract)
 The robot control loop *(beta)* runs over the `openpi/0` protocol. It is **openpi-like**: it reuses openpi's msgpack-numpy wire format and flat observation/action naming, but the **environment is the server** (it owns the world and pushes observations) and the **agent is the client** (it acts, replying with actions). The environment drives its simulator through a [`RobotEndpoint`](/v6/advanced/robots), which builds the capability once started:
 
 ```python
-endpoint = RobotEndpoint(MySimBridge())   # drive the sim only through the endpoint
+endpoint = RobotEndpoint(MySimBridge()).attach(env)
 
 @env.initialize
 async def _up():

@@ -318,7 +318,7 @@ from hud import Environment
 from hud.environment.robot import RobotEndpoint
 
 env = Environment(name="my-sim")
-endpoint = RobotEndpoint(MySimBridge())  # start() spawns + serves the bridge process
+endpoint = RobotEndpoint(MySimBridge()).attach(env)  # release slot on cancel/bye
 
 @env.initialize
 async def _up():
@@ -449,7 +449,7 @@ Grading N rollouts by booting N separate containers wastes a GPU sim's whole adv
 container pays for its own physics from scratch, when a sim like Isaac Sim could instead step all
 N copies together in one [vectorized](#gym-style-envs) instance. Running an eval against a vectorized sim needs no changes to
 the agent or the env's contract, only to how the eval provisions rollouts: wrap the runtime in
-[`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `group` rollouts share that one
+[`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `width` rollouts share that one
 substrate instead of provisioning `N` containers.
 
 ```python
@@ -458,7 +458,7 @@ from hud.eval import Shared, DockerRuntime
 job = await taskset.run(
     MyAgent(),
     runtime=Shared(DockerRuntime("hud-isaac-env"), width=8),
-    group=8,
+    group=1,  # waves; each wave fills width slots
     max_concurrent=8,
 )
 ```
@@ -471,6 +471,7 @@ A few things to note:
   [slot](#gym-style-envs).
 - **Slots fill in order, then stop.** The first `reset` claims slot 0; once every slot is taken, a
   further `reset` errors instead of queuing, so set `max_concurrent` to `width` so every slot fills.
+- **`width` is one wave; `group` is how many.** Each wave drains before the next connects.
 - **EnvHub sims work unchanged.** A [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub)
   package's `make_env` often already returns a vectorized sim, so `env.gym(make_env, num_envs=N)`
   serves it directly.

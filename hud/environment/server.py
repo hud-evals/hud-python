@@ -175,6 +175,10 @@ class TaskRunner:
             with contextlib.suppress(Exception):
                 await self._gen.aclose()
             self._gen = None
+        # Session ended (cancel / bye / post-grade) — run teardown hooks.
+        for hook in self.task.env._on_task_teardown:
+            with contextlib.suppress(Exception):
+                await hook()
 
 
 # ─── wire protocol ───────────────────────────────────────────────────────

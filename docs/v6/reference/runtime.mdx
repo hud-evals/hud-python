@@ -208,9 +208,9 @@ The first rollout to acquire it provisions through `provider`; every later rollo
 that same address instead of provisioning its own, so up to `width` rollouts end up connected to
 one live substrate - agents that need to share, compete, or coordinate in the same environment
 (a vectorized sim's `num_envs` slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals),
-are one case). Pair it with `taskset.run(..., group=width, max_concurrent=width)` so exactly
-`width` rollouts connect at once. `Runtime(url)` needs no wrapping since every caller already
-dials the same address.
+are one case). Pair it with `taskset.run(..., max_concurrent=width)`; `width` is the wave size
+and `group` is how many waves. `Runtime(url)` needs no wrapping since every caller already dials
+the same address.
 
 ## Run on your own infra
 

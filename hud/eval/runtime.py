@@ -157,7 +157,7 @@ class Shared:
     The first ``__call__`` provisions via *inner*; later callers reuse that
     address until the last exit tears it down. ``width`` is the hard cap on
     concurrent occupancy (e.g. a robot sim's ``num_envs``) — a further acquire
-    raises. Pair with ``Taskset.run(..., group=width, max_concurrent=width)``.
+    raises. Pair with ``Taskset.run(..., max_concurrent=width)``; ``group`` is the wave count.
     """
 
     def __init__(self, inner: Provider, *, width: int) -> None:

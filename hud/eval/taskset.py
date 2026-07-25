@@ -276,9 +276,9 @@ class Taskset:
         then group).
 
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
-        task's repeats). To land those repeats on one shared substrate (e.g. a
-        vectorized robot sim), pass a :class:`~hud.eval.runtime.Shared` provider
-        with ``width`` equal to both ``group`` and ``max_concurrent``.
+        task's repeats). With :class:`~hud.eval.runtime.Shared`, ``width`` is
+        the cohort size (one wave / GRPO group) and ``group`` is the wave count
+        (``max_concurrent`` must equal ``width``).
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
@@ -286,30 +286,10 @@ class Taskset:
         stream) cannot stall the whole batch. ``HUDRuntime`` carries its own
         ``run_timeout`` instead.
         """
-        group = group or (job.group if job else 1)
-        if group < 1:
-            raise ValueError("group must be >= 1")
         if max_concurrent is not None and max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
 
-        # Tasks are pure rows, shared across rollouts. The ``group`` repeats of one
-        # task share a group_id (the GRPO group).
-        expanded: list[tuple[Task, str]] = []
         task_list = list(self)
-        for task in task_list:
-            group_id = uuid.uuid4().hex
-            expanded.extend((task, group_id) for _ in range(group))
-
-        if job is None:
-            job = Job(
-                id=uuid.uuid4().hex,
-                name=_job_name(self.name, task_list, group),
-                group=group,
-                taskset_id=self.api_id,
-            )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.api_id)
-        job_id = job.id
-
         # Placement is chosen once for the batch: HostedRuntime delegates the
         # whole rollout to the platform, anything else is a Provider driven
         # locally by rollout(). No runtime: what the taskset or this process
@@ -326,6 +306,30 @@ class Taskset:
                 f"Shared(width={placement.width}) requires max_concurrent={placement.width} "
                 f"(got {max_concurrent!r})"
             )
+        # Shared: group = waves (default 1), width = cohort; else group = repeats.
+        if isinstance(placement, Shared):
+            group = 1 if group is None else group
+            cohort, waves = placement.width, group
+        else:
+            group = group or (job.group if job else 1)
+            cohort, waves = group, 1
+        if group < 1:
+            raise ValueError("group must be >= 1")
+        expanded: list[tuple[Task, str]] = []
+        for task in task_list:
+            for _ in range(waves):
+                group_id = uuid.uuid4().hex
+                expanded.extend((task, group_id) for _ in range(cohort))
+
+        if job is None:
+            job = Job(
+                id=uuid.uuid4().hex,
+                name=_job_name(self.name, task_list, group),
+                group=cohort,
+                taskset_id=self.api_id,
+            )
+            await job_enter(job.id, name=job.name, group=cohort, taskset_id=self.api_id)
+        job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
         timeout = (
             placement.run_timeout
@@ -361,8 +365,14 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        waves = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.runs.extend(run for wave in waves for run in wave)
+        if isinstance(placement, Shared):
+            # Drain each width-sized wave before the next connects.
+            for i in range(0, len(expanded), cohort):
+                parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded[i : i + cohort]))
+                job.runs.extend(run for part in parts for run in part)
+        else:
+            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
+            job.runs.extend(run for part in parts for run in part)
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed
         # sleep), so the timeout is only a safety cap for a wedged network.

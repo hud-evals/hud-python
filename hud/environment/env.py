@@ -167,6 +167,8 @@ class Environment(LegacyEnvMixin):
         # stands up). Run once by the serving substrate around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
+        # Per task-session end (cancel / bye / post-grade cleanup).
+        self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
         self._init_legacy()
 
     # ─── task registration ───────────────────────────────────────────
@@ -316,7 +318,7 @@ class Environment(LegacyEnvMixin):
         from hud.environment.robot import RobotEndpoint
         from hud.environment.robot.gym import gym_command
 
-        sim = RobotEndpoint.spawn(gym_command(target, **kwargs))
+        sim = RobotEndpoint.spawn(gym_command(target, **kwargs)).attach(self)
 
         @self.initialize
         async def _up() -> None:

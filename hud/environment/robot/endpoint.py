@@ -113,6 +113,8 @@ class RobotEndpoint:
         self._writer: asyncio.StreamWriter | None = None
         # N sessions share this one TCP link; serialize send+read so replies don't cross.
         self._lock = asyncio.Lock()
+        # Open slot token per control-session task (reset → result / teardown).
+        self._claim_by_task: dict[asyncio.Task[Any], str] = {}
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
@@ -124,25 +126,34 @@ class RobotEndpoint:
         """An endpoint attached to a sim process something else runs."""
         return cls(host=host, port=port, connect_timeout_s=connect_timeout_s)
 
+    def attach(self, env: Any) -> RobotEndpoint:
+        """Hook slot release into *env* task teardown (``env.gym`` does this)."""
+        env._on_task_teardown.append(self.release_claim)
+        return self
+
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Bring the link up: fork the sim program (spawned mode) and connect."""
-        if self._cmd is not None and self._proc is None:
-            self._proc = await create_process_group_exec(
-                *self._cmd,
-                term_timeout=10.0,
-                stdout=asyncio.subprocess.PIPE,  # for the port announcement; stderr inherits
-            )
-            self._host = "127.0.0.1"
-            self._port = await asyncio.wait_for(
-                self._read_announced_port(), self._connect_timeout_s
-            )
-            # Keep passing the sim's stdout through so its logs stay visible
-            # (and the pipe never fills and blocks the child).
-            assert self._proc.stdout is not None
-            self._forward = asyncio.create_task(_forward_lines(self._proc.stdout))
-        await self._connect()
+        try:
+            if self._cmd is not None and self._proc is None:
+                self._proc = await create_process_group_exec(
+                    *self._cmd,
+                    term_timeout=10.0,
+                    stdout=asyncio.subprocess.PIPE,  # for the port announcement; stderr inherits
+                )
+                self._host = "127.0.0.1"
+                self._port = await asyncio.wait_for(
+                    self._read_announced_port(), self._connect_timeout_s
+                )
+                # Keep passing the sim's stdout through so its logs stay visible
+                # (and the pipe never fills and blocks the child).
+                assert self._proc.stdout is not None
+                self._forward = asyncio.create_task(_forward_lines(self._proc.stdout))
+            await self._connect()
+        except BaseException:
+            await self.stop()  # don't orphan a spawned child after a failed boot
+            raise
 
     async def stop(self) -> None:
         """Drop the link; tear the sim process down when this endpoint spawned it."""
@@ -214,7 +225,11 @@ class RobotEndpoint:
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
-        return await self._call("reset", task_args)
+        ep = await self._call("reset", task_args)
+        task, token = asyncio.current_task(), ep.get("token")
+        if task is not None and isinstance(token, str):
+            self._claim_by_task[task] = token
+        return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
         """This slot's score dict (frees the slot), merged with any caller ``extra``.
@@ -223,12 +238,22 @@ class RobotEndpoint:
         vectorized envs must pass the token from :meth:`reset`.
         """
         res = {**(await self._call("result", {"token": token})), **extra}
+        if (task := asyncio.current_task()) is not None:
+            self._claim_by_task.pop(task, None)
         print(
             f"[env] result: success={res.get('success')} "
             f"total_reward={res.get('total_reward', 0.0):.3f}",
             flush=True,
         )
         return res
+
+    async def release_claim(self) -> None:
+        """Free this session's slot if ``result`` never ran (cancel / bye / teardown)."""
+        task = asyncio.current_task()
+        if task is None or (token := self._claim_by_task.pop(task, None)) is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._call("result", {"token": token})
 
     async def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         # One in-flight RPC: N sessions share this link; constant id is enough under the lock.
