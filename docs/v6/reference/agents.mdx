@@ -82,9 +82,10 @@ create_agent(model: str, **kwargs) -> GatewayAgent
 
 The `create_agent` function resolves `model` to a gateway agent type and returns that provider agent
 wired to the gateway. Extra `kwargs` forward to the matched provider config (the `*Config` for the
-resolved type), with `model` and a gateway `model_client` filled in. Passing `completion_kwargs` only
-works when `model` resolves to `OpenAIChatAgent`, since `completion_kwargs` lives only on
-`OpenAIChatConfig`.
+resolved type), with `model` filled in and `model_client` left unset for the provider constructor.
+`api_key` and `base_url` are rejected here; instantiate the provider agent directly for custom/BYOK
+credentials. Passing `completion_kwargs` only works when `model` resolves to `OpenAIChatAgent`, since
+`completion_kwargs` lives only on `OpenAIChatConfig`.
 
 A model id maps to one of four gateway agent types (`AgentType`), each a provider agent:
 

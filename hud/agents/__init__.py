@@ -39,6 +39,13 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     For direct API access with provider API keys, instantiate the agent classes
     directly.
     """
+    direct_credentials = [name for name in ("api_key", "base_url") if name in kwargs]
+    if direct_credentials:
+        names = ", ".join(direct_credentials)
+        raise ValueError(
+            f"create_agent routes through the HUD gateway and does not accept {names}; "
+            "instantiate the provider agent directly for custom/BYOK credentials"
+        )
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required to create a gateway agent")
 

@@ -173,3 +173,25 @@ def test_create_agent_requires_hud_api_key(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(HudAuthenticationError, match="HUD_API_KEY"):
         create_agent("openai")
+
+
+@pytest.mark.parametrize(
+    ("credential", "value"),
+    [
+        ("api_key", "provider-key"),
+        ("api_key", None),
+        ("base_url", "https://provider.example"),
+        ("base_url", None),
+    ],
+)
+@pytest.mark.parametrize("hud_api_key", ["hud-key", None])
+def test_create_agent_rejects_direct_provider_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    credential: str,
+    value: str | None,
+    hud_api_key: str | None,
+) -> None:
+    monkeypatch.setattr("hud.agents.settings.api_key", hud_api_key)
+
+    with pytest.raises(ValueError, match="provider agent directly"):
+        create_agent("openai_compatible", **{credential: value})
