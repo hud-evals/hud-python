@@ -342,9 +342,7 @@ class RobotBridge(ABC):
                 await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
             self._action_event.clear()
             claimed = self._registry.claimed()
-            # Wait for every slot to claim + connect — never hold-step a peer's env early.
-            if any(s.token is None and not s.used for s in self._registry.slots):
-                continue
+            # Claimed but still dialing (no WS, not idle) — wait; free slots get hold below.
             if not claimed or any(s.ws is None and not s.idle for s in claimed):
                 continue
             while True:
