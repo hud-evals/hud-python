@@ -90,12 +90,15 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     def hosted_spec(self) -> dict[str, Any]:
         """HUD-hosted execution runs the agent remotely, so it is
         reconstructed there from this identity (type, model, step budget, system
-        prompt) with the model resolved through the HUD gateway.
+        prompt, provider kwargs) with the model resolved through the HUD gateway.
         """
         if self.config.model_client is not None:
             raise ValueError(
                 "hosted execution cannot serialize a custom model_client; "
-                "set the model by name and let the hosted runner build the gateway client"
+                "use create_agent(model, ...) so the hosted runner rebuilds the "
+                "gateway client, or run the agent loop locally with HUDRuntime() "
+                "/ LocalRuntime (recommended for TrainingClient workflows that "
+                "attach a BYOK client)"
             )
         agent_type = AgentType.of(self)
         if agent_type is None:

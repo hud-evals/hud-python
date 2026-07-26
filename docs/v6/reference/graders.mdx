@@ -96,6 +96,11 @@ result = await LLMJudgeGrader.grade(
 `criteria` items are strings, or `(requirement, weight)` tuples. A negative weight marks an error to
 avoid: the criterion scores as a penalty, MET when the answer actually makes the mistake.
 
+The returned `SubScore` has one child per criterion: `name` is the requirement, `value` is
+`1.0`/`0.0` for the verdict (on a negative-weight criterion, `1.0` means the error is present),
+and `info["reason"]` is the judge's justification. The rubric value is the weighted
+pass-fraction: `sum(value * weight)` over the positive weights, clamped to 0-1.
+
 ## `combine` - compose multiple graders
 
 `combine` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
@@ -117,11 +122,11 @@ async def composed(answer: str = ""):
 | `combine_any(weight, subscores)` | Boolean OR: a `SubScore` that passes if any input passes (max). |
 | `combine_all(weight, subscores)` | Boolean AND: a `SubScore` that passes only if all inputs pass (min). |
 
-The subscores appear in the trace, so a partial reward is legible. `combine_any`/`combine_all` collapse alternatives into a single component you can feed to `combine` - e.g. "tests pass via `pytest` OR via `make test`" as one 0/1 subscore.
+The subscores appear in the trace, so a partial reward is legible. `combine_any`/`combine_all` fold alternatives into a single component you can feed to `combine` - e.g. "tests pass via `pytest` OR via `make test`" as one 0/1 subscore. The combined `SubScore` keeps its inputs on `children`, so the full grading tree survives into the trace. Combinators nest: a `combine_all` over `combine_any` nodes produces a deeper tree.
 
 ## Custom graders
 
-Subclass `Grader` and implement async `compute_score` (return a float, or `(float, metadata)`):
+Subclass `Grader` and implement async `compute_score`, returning a `SubScore`:
 
 ```python
 class LengthGrader(Grader):
@@ -129,14 +134,28 @@ class LengthGrader(Grader):
 
     @classmethod
     async def compute_score(cls, answer: str = "", target: int = 100, **kwargs):
-        return 1.0 if len(answer) >= target else 0.0
+        return SubScore(name=cls.name, value=1.0 if len(answer) >= target else 0.0)
 
 result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 ```
 
+Use `info` for grader-specific details and `children` for nested results such as rubric
+verdicts. `grade` applies the caller's weight and optional name override, then records the call
+parameters under `_parameters`. Legacy float and `(float, info)` returns are still coerced to
+`SubScore` for backwards compatibility.
+
 ## `SubScore` and `EvaluationResult`
 
-A `SubScore` is one component of a grade: `name`, `value` (0-1), `weight` (default `1.0`; negative = penalty), optional `metadata`.
+A `SubScore` is one node in the grade breakdown tree. A leaf is a single measurement; a parent
+preserves the measurements used to derive its value in `children`:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `name` | - | Name of this component (for a rubric verdict: the requirement checked). |
+| `value` | - | Measurement, 0-1. |
+| `weight` | `1.0` | Weight in the parent's combination; negative = penalty. |
+| `children` | `None` | Input subscores this node was combined from. |
+| `info` | `None` | Grader-specific details recorded on the evaluation span. |
 
 An `EvaluationResult` is the combined grade payload you can yield from a task:
 

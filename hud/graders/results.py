@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
+
+_SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
 
 
 class SubScore(BaseModel):
-    """Individual subscore for debugging and transparency.
+    """One node in the grade breakdown tree.
 
-    SubScores allow breaking down the final reward into component parts,
-    making it easier to understand what contributed to the evaluation.
+    A leaf subscore is a single measurement. A parent preserves the subscores
+    used to derive its value in ``children``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -24,7 +35,42 @@ class SubScore(BaseModel):
         "Negative weights represent penalties.",
     )
     value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
-    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
+    children: list[SubScore] | None = Field(
+        default=None,
+        description="Input subscores this node was combined from",
+    )
+    info: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("info", "metadata"),
+        description="Grader-specific details recorded on the evaluation span",
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        serialization_info: SerializationInfo,
+    ) -> dict[str, Any]:
+        data = cast("dict[str, Any]", handler(self))
+        if (serialization_info.context or {}).get(_SUMMARY_SERIALIZATION_CONTEXT):
+            data.pop("info", None)
+        return data
+
+    def to_summary(self) -> dict[str, Any]:
+        """Serialize the score breakdown without span-only info."""
+        return self.model_dump(
+            mode="json",
+            context={_SUMMARY_SERIALIZATION_CONTEXT: True},
+        )
+
+    @property
+    def metadata(self) -> dict[str, Any] | None:
+        """Compatibility alias for ``info``."""
+        return self.info
+
+    @metadata.setter
+    def metadata(self, value: dict[str, Any] | None) -> None:
+        self.info = value
 
     @property
     def score(self) -> float:

@@ -161,8 +161,8 @@ class Settings(BaseSettings):
 
     file_tracking_enabled: bool = Field(
         default=True,
-        description="Publish a workspace's filetracking/1 capability and stream file-change "
-        "diffs plus artifacts to telemetry during a rollout. "
+        description="Publish a workspace's filetracking/1 capability and stream setup changes, "
+        "agent file-change diffs, and final artifacts to telemetry. "
         "Enabled by default; set HUD_FILE_TRACKING_ENABLED=false to opt out.",
         validation_alias="HUD_FILE_TRACKING_ENABLED",
     )

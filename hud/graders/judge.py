@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from .base import Grader
+from .results import SubScore
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -50,13 +51,6 @@ class _Criterion:
     weight: float
 
 
-@dataclass(slots=True)
-class _Verdict:
-    criterion: _Criterion
-    met: bool
-    reason: str
-
-
 class LLMJudgeGrader(Grader):
     """Grade an answer against weighted criteria using an LLM judge.
 
@@ -85,19 +79,19 @@ class LLMJudgeGrader(Grader):
         question: str = "",
         model: str = "claude-haiku-4-5",
         **kwargs: Any,
-    ) -> tuple[float, dict[str, Any]]:
+    ) -> SubScore:
         """Evaluate ``answer`` against ``criteria`` via parallel LLM judgments."""
         del kwargs
         parsed = _parse_criteria(criteria)
         if not parsed:
-            return (0.0, {"error": "no criteria provided"})
+            return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})
 
         from hud.utils.gateway import build_gateway_client
 
         client = cast("AsyncOpenAI", build_gateway_client("openai"))
         answer_text = str(answer)
 
-        async def _judge(criterion: _Criterion) -> _Verdict:
+        async def _judge(criterion: _Criterion) -> SubScore:
             response = await client.chat.completions.create(
                 model=model,
                 max_tokens=1024,
@@ -107,19 +101,20 @@ class LLMJudgeGrader(Grader):
                 ],
             )
             met, reason = _parse_verdict(response.choices[0].message.content or "")
-            return _Verdict(criterion, met, reason)
+            return SubScore(
+                name=criterion.requirement,
+                value=1.0 if met else 0.0,
+                weight=criterion.weight,
+                info={"reason": reason},
+            )
 
         verdicts = list(await asyncio.gather(*(_judge(c) for c in parsed)))
-        score = _aggregate(verdicts)
-        report = {
-            v.criterion.requirement[:80]: {
-                "verdict": "MET" if v.met else "UNMET",
-                "reason": v.reason,
-                "weight": v.criterion.weight,
-            }
-            for v in verdicts
-        }
-        return (score, {"criteria": report, "model": model})
+        return SubScore(
+            name=cls.name,
+            value=_rubric_value(verdicts),
+            children=verdicts,
+            info={"model": model},
+        )
 
 
 def _parse_criteria(criteria: list[str | tuple[str, float]] | None) -> list[_Criterion]:
@@ -160,15 +155,14 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
     return ("UNMET" not in upper and "MET" in upper), text[:200]
 
 
-def _aggregate(verdicts: list[_Verdict]) -> float:
-    """Weighted MET-sum normalized by positive (or all-negative) weight, clamped 0-1."""
-    total_positive = sum(max(0.0, v.criterion.weight) for v in verdicts)
-    total_negative = sum(abs(v.criterion.weight) for v in verdicts if v.criterion.weight < 0)
-    weighted_sum = sum((1.0 if v.met else 0.0) * v.criterion.weight for v in verdicts)
+def _rubric_value(subscores: list[SubScore]) -> float:
+    """Aggregate criterion verdicts into a rubric score."""
+    total_positive = sum(max(0.0, subscore.weight) for subscore in subscores)
+    total_negative = sum(abs(subscore.weight) for subscore in subscores if subscore.weight < 0)
+    weighted_sum = sum(subscore.value * subscore.weight for subscore in subscores)
     if total_positive > 0:
         return max(0.0, min(1.0, weighted_sum / total_positive))
     if total_negative > 0:
-        # All-negative rubric: start at 1.0, each error (MET) subtracts.
         return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
     return 0.0
 

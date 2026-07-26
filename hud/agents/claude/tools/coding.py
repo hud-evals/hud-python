@@ -67,7 +67,7 @@ class ClaudeBashTool(SSHTool):
 
 
 class ClaudeTextEditorTool(SSHTool):
-    """Claude's native ``text_editor_20250728`` schema, executed over SFTP."""
+    """Claude's native ``text_editor_20250728`` schema, executed over SSH."""
 
     name = "str_replace_based_edit_tool"
 

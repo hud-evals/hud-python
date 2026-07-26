@@ -76,6 +76,33 @@ def make_harbor_task(
     return task_dir
 
 
+def make_multi_step_task(
+    parent: Path,
+    name: str,
+    steps: tuple[str, ...] = ("plan", "implement"),
+    dockerfile: str | None = _SIMPLE_DOCKERFILE,
+) -> Path:
+    """Create a synthetic multi-step Harbor task: no root instruction.md; each
+    step under steps/<name>/ carries its own instruction, declared by a
+    [[steps]] array in task.toml."""
+    task_dir = parent / name
+    task_dir.mkdir(parents=True, exist_ok=True)
+    steps_toml = "".join(f'\n[[steps]]\nname = "{step}"\n' for step in steps)
+    (task_dir / "task.toml").write_text(_DEFAULT_TASK_TOML + steps_toml, encoding="utf-8")
+    if dockerfile is not None:
+        env_dir = task_dir / "environment"
+        env_dir.mkdir(exist_ok=True)
+        (env_dir / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    for step in steps:
+        step_dir = task_dir / "steps" / step
+        (step_dir / "tests").mkdir(parents=True, exist_ok=True)
+        (step_dir / "instruction.md").write_text(f"# {step}\n", encoding="utf-8")
+        (step_dir / "tests" / "test.sh").write_text(
+            '#!/bin/bash\necho "1.0" > /logs/verifier/reward.txt\n', encoding="utf-8"
+        )
+    return task_dir
+
+
 @pytest.fixture()
 def single_task(tmp_path: Path) -> Path:
     """A single standalone Harbor task directory."""

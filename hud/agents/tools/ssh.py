@@ -7,8 +7,6 @@ differs between providers.
 
 from __future__ import annotations
 
-from typing import cast
-
 import mcp.types as mcp_types
 
 from hud.agents.tools.base import AgentTool
@@ -38,26 +36,17 @@ class SSHTool(AgentTool[SSHClient]):
         )
 
     async def file_read(self, path: str) -> MCPToolResult:
-        """Read a file via SFTP."""
-        async with self.client.conn.start_sftp_client() as sftp, sftp.open(path, "rb") as f:
-            raw = cast("bytes | str", await f.read())
-        data = raw.encode("utf-8", errors="replace") if isinstance(raw, str) else raw
-        return tool_ok(data.decode("utf-8", errors="replace"))
+        """Read a text file through SSH exec."""
+        return tool_ok(await self.client.read_text(path))
 
     async def file_write(self, path: str, content: str) -> MCPToolResult:
-        """Write a file via SFTP (overwrites)."""
-        async with self.client.conn.start_sftp_client() as sftp, sftp.open(path, "wb") as f:
-            await f.write(content.encode("utf-8"))
+        """Write a text file through SSH exec."""
+        await self.client.write_text(path, content)
         return tool_ok(f"wrote {len(content)} bytes to {path}")
 
     async def file_list(self, path: str = "/") -> MCPToolResult:
-        """List directory entries via SFTP."""
-        async with self.client.conn.start_sftp_client() as sftp:
-            entries = cast("list[bytes | str]", await sftp.listdir(path))
-        names = sorted(
-            (e if isinstance(e, str) else e.decode("utf-8", errors="replace")) for e in entries
-        )
-        names = [n for n in names if n not in (".", "..")]
+        """List directory entries through SSH exec."""
+        names = await self.client.listdir(path)
         return tool_ok("\n".join(names) if names else "(empty)")
 
 

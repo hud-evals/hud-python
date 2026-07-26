@@ -10,6 +10,7 @@ from __future__ import annotations
 import shlex
 from typing import Any, cast
 
+import mcp.types as mcp_types
 import pytest
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
@@ -29,66 +30,37 @@ class _Completed:
         self.exit_status = exit_status
 
 
-class _FakeOpenFile:
-    def __init__(self, store: dict[str, bytes], path: str, mode: str) -> None:
-        self._store = store
-        self._path = path
-        self._mode = mode
-        self._written = b""
-
-    async def __aenter__(self) -> _FakeOpenFile:
-        return self
-
-    async def __aexit__(self, *_: object) -> bool:
-        if "w" in self._mode:
-            self._store[self._path] = self._written
-        return False
-
-    async def read(self) -> bytes:
-        return self._store.get(self._path, b"")
-
-    async def write(self, data: bytes) -> None:
-        self._written += data
-
-
-class _FakeSFTP:
-    def __init__(self, store: dict[str, bytes]) -> None:
-        self._store = store
-
-    async def __aenter__(self) -> _FakeSFTP:
-        return self
-
-    async def __aexit__(self, *_: object) -> bool:
-        return False
-
-    def open(self, path: str, mode: str) -> _FakeOpenFile:
-        return _FakeOpenFile(self._store, path, mode)
-
-    async def listdir(self, path: str) -> list[str]:
-        prefix = path.rstrip("/")
-        if not prefix:
-            prefix = "/"
-        if prefix != "/":
-            prefix += "/"
-        names: set[str] = set()
-        for file_path in self._store:
-            if not file_path.startswith(prefix):
-                continue
-            rest = file_path[len(prefix) :]
-            if rest:
-                names.add(rest.split("/", 1)[0])
-        return sorted(names)
-
-
 class _Conn:
     def __init__(self, completed: _Completed, store: dict[str, bytes]) -> None:
         self._completed = completed
         self._store = store
         self.commands: list[str] = []
 
-    async def run(self, command: str, check: bool = False) -> _Completed:
+    async def run(
+        self,
+        command: str,
+        *,
+        input: str | None = None,
+        check: bool = False,
+        encoding: str | None = "utf-8",
+    ) -> _Completed:
         self.commands.append(command)
         parts = shlex.split(command)
+        if len(parts) == 3 and parts[:2] == ["cat", "--"]:
+            return _Completed(stdout=self._store.get(parts[2], b"").decode())
+        if len(parts) == 3 and parts[:2] == ["cat", ">"]:
+            assert input is not None
+            self._store[parts[2]] = input.encode()
+            return _Completed()
+        if len(parts) == 4 and parts[:3] == ["ls", "-1A", "--"]:
+            prefix = parts[3].rstrip("/")
+            prefix = "/" if not prefix else prefix + "/"
+            names = {
+                rest.split("/", 1)[0]
+                for file_path in self._store
+                if file_path.startswith(prefix) and (rest := file_path[len(prefix) :])
+            }
+            return _Completed(stdout="\n".join(sorted(names)))
         if len(parts) == 3 and parts[:2] in (["test", "-d"], ["test", "-e"]):
             path = parts[2]
             exists = path in self._store or any(
@@ -103,24 +75,30 @@ class _Conn:
             return _Completed(exit_status=0)
         return self._completed
 
-    def start_sftp_client(self) -> _FakeSFTP:
-        return _FakeSFTP(self._store)
-
 
 class _FakeSSH(SSHClient):
-    """Duck-typed ``SSHClient``: ``conn.run`` (bash) + ``conn.start_sftp_client`` (files)."""
+    """SSH client with an in-memory exec-channel filesystem."""
 
     def __init__(
         self,
         *,
         stdout: str = "ok",
+        stderr: str = "",
         exit_status: int = 0,
         files: dict[str, bytes] | None = None,
+        cwd: str | None = None,
     ) -> None:
         self.files: dict[str, bytes] = files or {}
+        params = {"cwd": cwd} if cwd else {}
         super().__init__(
-            Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22"),
-            cast("Any", _Conn(_Completed(stdout=stdout, exit_status=exit_status), self.files)),
+            Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22", params=params),
+            cast(
+                "Any",
+                _Conn(
+                    _Completed(stdout=stdout, stderr=stderr, exit_status=exit_status),
+                    self.files,
+                ),
+            ),
         )
 
 
@@ -158,6 +136,118 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
     await tool.execute({"commands": ["echo a", "echo b"]})
 
     assert _commands(tool) == ["echo a", "echo b"]
+
+
+async def test_openai_shell_bounds_large_output_in_every_result_field() -> None:
+    limit = 20_000
+    stderr_prefix = "stderr-start\n"
+    stderr_suffix = "\nstderr-end"
+    stderr = (
+        stderr_prefix + "x" * (10_523_560 - len(stderr_prefix) - len(stderr_suffix)) + stderr_suffix
+    )
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stderr=stderr, exit_status=1),
+    )
+
+    result = await tool.execute({"commands": ["noisy-command"], "max_output_length": limit})
+
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == limit
+    output = result.structuredContent["output"][0]
+    assert len(output["stdout"]) + len(output["stderr"]) == limit
+    assert output["stderr"].startswith(stderr_prefix)
+    assert output["stderr"].endswith(stderr_suffix)
+    assert "[truncated]" in output["stderr"]
+    text_blocks = [
+        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
+    ]
+    assert len(text_blocks) == 1
+    assert len(text_blocks[0]) == limit
+    assert text_blocks[0] == output["stdout"] + output["stderr"]
+    assert "[truncated]" in text_blocks[0]
+
+
+async def test_openai_shell_applies_limit_independently_to_each_command() -> None:
+    limit = 80
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stdout="stdout-start-" + "a" * 100, stderr="b" * 100 + "-stderr-end"),
+    )
+
+    result = await tool.execute(
+        {"commands": ["first-command", "second-command"], "max_output_length": limit}
+    )
+
+    assert result.structuredContent is not None
+    outputs = result.structuredContent["output"]
+    assert len(outputs) == 2
+    assert all(len(output["stdout"]) + len(output["stderr"]) == limit for output in outputs)
+    assert all(output["stdout"].startswith("stdout-start-") for output in outputs)
+    assert all(output["stderr"].endswith("-stderr-end") for output in outputs)
+    assert sum(len(output["stdout"]) + len(output["stderr"]) for output in outputs) == 2 * limit
+    text_blocks = [
+        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
+    ]
+    assert len(text_blocks) == 2
+    assert all(len(text) == limit for text in text_blocks)
+    assert text_blocks == [output["stdout"] + output["stderr"] for output in outputs]
+
+
+@pytest.mark.parametrize(
+    ("max_output_length", "expected_output"),
+    [(1, "["), (10, "[truncated")],
+)
+async def test_openai_shell_honors_small_positive_output_limits(
+    max_output_length: int,
+    expected_output: str,
+) -> None:
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stdout="x" * 100),
+    )
+
+    result = await tool.execute(
+        {"commands": ["noisy-command"], "max_output_length": max_output_length}
+    )
+
+    assert _commands(tool) == ["noisy-command"]
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == max_output_length
+    output = result.structuredContent["output"][0]
+    assert output["stdout"] == expected_output
+    assert output["stderr"] == ""
+    assert result_text(result) == expected_output
+
+
+@pytest.mark.parametrize("max_output_length", [0, -1, "20000", 20_000.0, True])
+async def test_openai_shell_rejects_invalid_output_limits_without_running(
+    max_output_length: Any,
+) -> None:
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+
+    result = await tool.execute(
+        {"commands": ["echo should-not-run"], "max_output_length": max_output_length}
+    )
+
+    assert result.isError is True
+    assert _commands(tool) == []
+    assert result.structuredContent is not None
+    assert "max_output_length" not in result.structuredContent
+    assert result_text(result) == "max_output_length must be a positive integer"
+
+
+@pytest.mark.parametrize("max_output_length", [None, 20 * 1024 * 1024])
+async def test_openai_shell_uses_safe_effective_limit(max_output_length: int | None) -> None:
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    arguments: dict[str, Any] = {"commands": ["echo ok"]}
+    if max_output_length is not None:
+        arguments["max_output_length"] = max_output_length
+
+    result = await tool.execute(arguments)
+
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == 10 * 1024 * 1024
 
 
 async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
@@ -203,7 +293,7 @@ async def test_openai_compatible_bash_uses_workdir_and_timeout() -> None:
     assert _commands(tool) == ["cd '/tmp/my dir' && timeout 3s bash -lc 'echo hi'"]
 
 
-async def test_openai_compatible_write_stores_file_via_workspace_sftp() -> None:
+async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
     ssh = _FakeSSH()
     tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
 
@@ -211,6 +301,61 @@ async def test_openai_compatible_write_stores_file_via_workspace_sftp() -> None:
 
     assert result.isError is False
     assert ssh.files["/REPORT.md"] == b"done"
+
+
+async def test_absolute_paths_anchor_to_the_capability_cwd() -> None:
+    """The old SFTP chroot resolved ``/REPORT.md`` against the workspace root;
+    exec-channel file helpers must keep that contract via the capability cwd."""
+    ssh = _FakeSSH(cwd="/workspace", files={"/workspace/f.txt": b"inside"})
+    tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    await tool.execute({"filePath": "/REPORT.md", "content": "done"})
+
+    assert ssh.files["/workspace/REPORT.md"] == b"done"
+    # Paths already inside the workspace are untouched.
+    assert await cast("SSHClient", ssh).read_text("/workspace/f.txt") == "inside"
+
+
+def test_map_path_clamps_traversal_like_a_chroot() -> None:
+    ssh = cast("SSHClient", _FakeSSH(cwd="/workspace"))
+    assert ssh.map_path("/workspace/../etc/passwd") == "/workspace/etc/passwd"
+    assert ssh.map_path("/../etc/passwd") == "/workspace/etc/passwd"
+    assert ssh.map_path("../../etc/passwd") == "/workspace/etc/passwd"
+    assert ssh.map_path("a/../b.txt") == "/workspace/b.txt"
+    assert ssh.map_path("/") == "/workspace"
+    assert ssh.map_path(".") == "/workspace"
+
+
+def test_map_path_handles_windows_native_paths() -> None:
+    """The workspace publishes cwd via as_posix(); callers pass native
+    backslash paths, and NTFS compares case-insensitively."""
+    cap = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"shell": "powershell", "cwd": "C:/work"},
+    )
+    ssh = SSHClient(cap, cast("Any", None))
+    assert ssh.map_path("C:\\work\\file.txt") == "C:/work/file.txt"
+    assert ssh.map_path("C:\\Work\\sub\\f.txt") == "C:/work/sub/f.txt"
+    assert ssh.map_path("D:\\other\\f.txt") == "C:/work/other/f.txt"
+    assert ssh.map_path("\\temp\\f.txt") == "C:/work/temp/f.txt"
+    assert ssh.map_path("sub\\f.txt") == "C:/work/sub/f.txt"
+    assert ssh.map_path("C:\\work\\..\\secrets.txt") == "C:/work/secrets.txt"
+
+
+async def test_read_maps_the_directory_predicate_and_listing_together() -> None:
+    """`test -d`, listing, and reads must agree on the anchored path, or
+    absolute workspace dirs are misclassified as files."""
+    ssh = _FakeSSH(cwd="/workspace", files={"/workspace/pkg/mod.py": b"x = 1\n"})
+    tool = ReadTool(spec=ReadTool.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    result = await tool.execute({"filePath": "/pkg"})
+
+    text = result_text(result)
+    assert "<type>directory</type>" in text
+    assert "mod.py" in text
+    assert "test -d /workspace/pkg" in cast("Any", ssh).conn.commands
 
 
 async def test_openai_compatible_edit_rewrites_unique_match() -> None:
@@ -325,7 +470,7 @@ def test_claude_bash_to_params_carries_native_schema() -> None:
     assert params == {"type": "bash_20250124", "name": "bash"}
 
 
-# ─── editor tools over SFTP ───────────────────────────────────────────
+# ─── editor tools over SSH exec ───────────────────────────────────────
 
 
 async def test_claude_text_editor_creates_file() -> None:

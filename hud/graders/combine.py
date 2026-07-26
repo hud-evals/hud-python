@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .results import EvaluationResult, SubScore
 
@@ -71,20 +71,12 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
         )
 
     normalized_subscores: list[SubScore] = []
-    metadata: dict[str, Any] = {}
 
     for item, final_name in zip(subscores, _dedupe_subscore_names(subscores), strict=True):
         normalized_weight = item.weight / positive_weight_sum if item.weight > 0 else item.weight
         normalized_subscores.append(
-            SubScore(
-                name=final_name,
-                weight=normalized_weight,
-                value=item.value,
-                metadata=item.metadata,
-            )
+            item.model_copy(update={"name": final_name, "weight": normalized_weight})
         )
-        if item.metadata is not None:
-            metadata[final_name] = item.metadata
 
     reward = float(sum(item.value * item.weight for item in normalized_subscores))
 
@@ -92,7 +84,6 @@ def _combine_subscores(subscores: list[SubScore]) -> EvaluationResult:
         reward=reward,
         done=True,
         subscores=normalized_subscores,
-        info=metadata,
     )
 
 
@@ -137,33 +128,32 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
 
 
 def _boolean_subscore(
-    name: str, weight: float, subscores: list[SubScore], value: float
+    name: str,
+    weight: float,
+    subscores: list[SubScore],
+    value: float,
 ) -> SubScore:
-    unique_names = _dedupe_subscore_names(subscores)
+    children = [
+        subscore.model_copy(update={"name": unique_name})
+        for unique_name, subscore in zip(_dedupe_subscore_names(subscores), subscores, strict=True)
+    ]
     return SubScore(
         name=name,
         value=value,
         weight=weight,
-        metadata={
-            "subscores": unique_names,
-            "subscore_metadata": {
-                unique_name: subscore.metadata
-                for unique_name, subscore in zip(unique_names, subscores, strict=True)
-                if subscore.metadata is not None
-            },
-        },
+        children=children,
     )
 
 
 def combine_any(weight: float, subscores: list[SubScore], *, name: str = "any") -> SubScore:
-    """Subscore that passes if any input passes (max)."""
+    """Subscore that passes if any input passes (max); inputs kept as children."""
     if not subscores:
         raise ValueError("subscores must not be empty")
     return _boolean_subscore(name, weight, subscores, max(s.value for s in subscores))
 
 
 def combine_all(weight: float, subscores: list[SubScore], *, name: str = "all") -> SubScore:
-    """Subscore that passes only if all inputs pass (min)."""
+    """Subscore that passes only if all inputs pass (min); inputs kept as children."""
     if not subscores:
         raise ValueError("subscores must not be empty")
     return _boolean_subscore(name, weight, subscores, min(s.value for s in subscores))
