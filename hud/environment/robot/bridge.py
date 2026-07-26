@@ -203,6 +203,9 @@ class RobotBridge(ABC):
         slot = self._registry.resolve(token)
         grade = (await self._run_on_sim(self.result_slots))[slot.index]
         self._registry.release(slot)
+        # Wake the barrier: release clears slot.ws, so _handle_client's finally
+        # won't (slot.ws is no longer this connection).
+        self._action_event.set()
         return grade
 
     @abstractmethod
