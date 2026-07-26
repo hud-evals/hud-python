@@ -113,7 +113,7 @@ class RobotEndpoint:
         self._writer: asyncio.StreamWriter | None = None
         # N sessions share this one TCP link; serialize send+read so replies don't cross.
         self._lock = asyncio.Lock()
-        # Open slot token per control-session task (reset → result / teardown).
+        # Open slot token per control-session task; "" = already freed via result().
         self._claim_by_task: dict[asyncio.Task[Any], str] = {}
 
     @classmethod
@@ -244,7 +244,7 @@ class RobotEndpoint:
         """
         res = {**(await self._call("result", {"token": token})), **extra}
         if (task := asyncio.current_task()) is not None:
-            self._claim_by_task.pop(task, None)
+            self._claim_by_task[task] = ""  # already freed; teardown must not adopt peers
         print(
             f"[env] result: success={res.get('success')} "
             f"total_reward={res.get('total_reward', 0.0):.3f}",
@@ -255,10 +255,13 @@ class RobotEndpoint:
     async def release_claim(self) -> None:
         """Free this session's slot if ``result`` never ran (cancel / bye / teardown)."""
         task = asyncio.current_task()
-        token = self._claim_by_task.pop(task, None) if task is not None else None
-        if token is None:
+        if task is not None and task in self._claim_by_task:
+            token = self._claim_by_task.pop(task)
+            if not token:  # already freed via result()
+                return
+        else:
             # Resume teardown runs on a new task — adopt the sole parked claim.
-            parked = [t for t in self._claim_by_task if t.done()]
+            parked = [t for t, tok in self._claim_by_task.items() if t.done() and tok]
             if len(parked) != 1:
                 return
             token = self._claim_by_task.pop(parked[0])
