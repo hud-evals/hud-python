@@ -595,3 +595,184 @@ div:has(> ul.sidebar-group > li[data-group-tag]) > .sidebar-group-header {
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   font-size: 0.92em;
 }
+
+/* ── Endpoint list (REST API reference) ────────────────────────────────────
+   Accordions used as an endpoint index: the summary line is a method and a
+   path, so it reads as code, not prose. Scoped to `.api-endpoints` because
+   accordions elsewhere carry ordinary sentence titles. */
+#content .api-endpoints .accordion summary p:first-of-type {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace;
+  font-size: 0.85rem;
+  letter-spacing: -0.01em;
+}
+
+/* Signature: a fixed-width method label, the path, then the one-line note, all
+   on one baseline. The label keeps a minimum width so paths line up in a column
+   down the list however long the method is (see snippets/endpoint.jsx). */
+#content .api-sig {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+}
+/* The column, not the tint, holds the paths in line, so the tint can hug its
+   letters instead of being padded out to the width of DELETE. */
+#content .api-method-col {
+  flex: none;
+  min-width: 3.1rem;
+}
+/* Flat tint rather than a bordered pill: the method reads as part of the path,
+   not as a button sitting next to one. */
+#content .api-method {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.15;
+  padding: 0.18rem 0.22rem;
+  border-radius: 4px;
+  color: var(--api-fg);
+  background-color: var(--api-bg);
+}
+#content .api-path {
+  color: var(--tw-prose-headings);
+  font-weight: 500;
+}
+/* The note drops back to the body font so it reads as prose beside the code. */
+#content .api-note {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  margin-left: 0.25rem;
+  color: #8a8a8a;
+}
+.dark #content .api-note {
+  color: #9a9a9a;
+}
+/* Path placeholders read as slots to fill, not as literal path segments. */
+#content .api-param {
+  color: #a3a3a3;
+  font-weight: 400;
+}
+.dark #content .api-param {
+  color: #7d7d85;
+}
+
+/* One hue per method, at a shared saturation so no single row shouts. Reads
+   as: green retrieves, gold creates, violet edits, blue replaces, red removes. */
+#content .api-get {
+  --api-fg: #227a5f;
+  --api-bg: rgba(34, 122, 95, 0.1);
+}
+#content .api-post {
+  --api-fg: #a8780a;
+  --api-bg: rgba(202, 138, 4, 0.12);
+}
+#content .api-patch {
+  --api-fg: #7b52c4;
+  --api-bg: rgba(123, 82, 196, 0.11);
+}
+#content .api-put {
+  --api-fg: #2568a8;
+  --api-bg: rgba(37, 104, 168, 0.11);
+}
+#content .api-delete {
+  --api-fg: #b04231;
+  --api-bg: rgba(176, 66, 49, 0.11);
+}
+.dark #content .api-get {
+  --api-fg: #5ecfa6;
+  --api-bg: rgba(94, 207, 166, 0.13);
+}
+.dark #content .api-post {
+  --api-fg: #e8b93f;
+  --api-bg: rgba(232, 185, 63, 0.14);
+}
+.dark #content .api-patch {
+  --api-fg: #b79df0;
+  --api-bg: rgba(183, 157, 240, 0.14);
+}
+.dark #content .api-put {
+  --api-fg: #7db4e6;
+  --api-bg: rgba(125, 180, 230, 0.14);
+}
+.dark #content .api-delete {
+  --api-fg: #ef8b78;
+  --api-bg: rgba(239, 139, 120, 0.14);
+}
+
+/* ── On-this-page directory ────────────────────────────────────────────────
+   A two-line section index where each line is labeled, so a long page can say
+   which stretch explains and which stretch lists. The bold lead-in is the
+   label; the links stay ordinary prose links. */
+#content .page-nav span[data-as="p"] {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+#content .page-nav {
+  margin: 1.5rem 0;
+  font-size: 0.93em;
+}
+#content .page-nav strong {
+  display: inline-block;
+  min-width: 9.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #8a8a8a;
+}
+.dark #content .page-nav strong {
+  color: #9a9a9a;
+}
+
+/* Section eyebrow: a gold label over a hairline, marking where a page changes
+   register (the point the REST page stops explaining and starts listing). */
+#content .section-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #a8780a;
+  border-top: 1px solid #e5e5e5;
+  padding-top: 1.4rem;
+  margin-top: 3rem;
+  margin-bottom: -1.2rem;
+}
+.dark #content .section-eyebrow {
+  color: #e8b93f;
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+/* Tighter stack: an index of 5+ endpoints should read as one list. Each closed
+   row is a single line, so it needs less height than a default accordion. */
+#content .api-endpoints .accordion {
+  margin-bottom: 0.4rem !important;
+}
+#content .api-endpoints .accordion > summary {
+  padding-top: 0.62rem;
+  padding-bottom: 0.62rem;
+}
+/* AccordionGroup applies `divide-y!`, which zeroes the top border of every row
+   but the last one so a flush stack shows single hairlines between rows. These
+   rows are spaced cards, so the last one ended up outlined while the rest were
+   open at the top. Give them all four sides. The override has to sit in the
+   utilities layer: an important declaration inside a layer outranks an
+   important declaration outside one, whatever the specificity. */
+/* `divide-inherit!` then paints those same rows in the group's border color
+   rather than their own, which is why the last row read darker in light mode.
+   Pin every row to the standard card hairline. */
+@layer utilities {
+  #content .api-endpoints .accordion {
+    border-width: 1px !important;
+    border-color: color-mix(in oklab, rgb(var(--gray-200)) 70%, transparent) !important;
+  }
+  .dark #content .api-endpoints .accordion {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+}
+/* Parameter tables sit inside a narrower column than page tables. */
+#content .api-endpoints table {
+  font-size: 0.85em;
+}
+
