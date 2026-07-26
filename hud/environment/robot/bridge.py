@@ -48,7 +48,7 @@ class _Slot:
     token: str | None = None
     ws: Any = None
     action: np.ndarray | None = None
-    idle: bool = False  # hold next step (dialing timed out, or WS dropped)
+    idle: bool = False  # hold next step (dialing timed out, WS dropped, or terminated)
     # Touched this episode; after release stays unreclaimable until the next global reset.
     used: bool = False
 
@@ -123,9 +123,7 @@ class RobotBridge(ABC):
     - :meth:`result_slots` returns one score dict per slot.
     """
 
-    #: Seconds to wait for a *still-dialing* claimed slot before stepping with a
-    #: hold. Connected slots never hit this — slow inference must not advance the
-    #: sim with zeros.
+    #: Timeout for the post-connect claim frame (and the tick-loop idle poll).
     step_timeout: float = 30.0
 
     def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
@@ -312,6 +310,7 @@ class RobotBridge(ABC):
             slot.ws = ws
             slot.action = None
             slot.idle = False
+            self._action_event.set()  # wake tick loop waiting for dialing to finish
             # First frame after claim: one sim read, then this slot's scalar row.
             await self._send_slot_observation(slot, await self._run_on_sim(self.get_observation))
             async for frame in ws:
@@ -337,48 +336,32 @@ class RobotBridge(ABC):
                 self._action_event.set()  # wake the barrier so it doesn't wait on us
 
     async def _tick_loop(self) -> None:
-        """Gather claimed slots' actions (or dialing-timeout → hold), step once, fan out."""
+        """Gather claimed slots' actions, step once, fan out."""
         while True:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
             self._action_event.clear()
             claimed = self._registry.claimed()
-            # No live connection at all → don't step; episodes must not advance unseen.
-            if not any(s.ws is not None for s in claimed):
+            # Wait for every slot to claim + connect — never hold-step a peer's env early.
+            if any(s.token is None and not s.used for s in self._registry.slots):
                 continue
-            # Barrier over every *claimed* slot: dialing (no WS yet) blocks too, so
-            # its episode can't advance before the first observation. step_timeout
-            # only holds still-dialing slots — a connected agent mid-inference waits.
-            deadline = asyncio.get_running_loop().time() + self.step_timeout
+            if not claimed or any(s.ws is None and not s.idle for s in claimed):
+                continue
             while True:
                 pending = [s for s in claimed if s.action is None and not s.idle]
                 if not pending:
                     break
-                dialing = [s for s in pending if s.ws is None]
-                connected_pending = [s for s in pending if s.ws is not None]
-                if dialing:
-                    remaining = deadline - asyncio.get_running_loop().time()
-                    if remaining <= 0:
-                        for s in dialing:
-                            s.idle = True  # never connected → hold so the batch can move
-                        if not connected_pending:
-                            break
-                        # Connected agents still deciding — keep waiting without a deadline.
-                        continue
-                    self._action_event.clear()
-                    with contextlib.suppress(TimeoutError):
-                        await asyncio.wait_for(self._action_event.wait(), timeout=remaining)
-                else:
-                    # Only live agents pending: wait for an action (or a disconnect).
-                    self._action_event.clear()
-                    await self._action_event.wait()
+                self._action_event.clear()
+                await self._action_event.wait()
                 claimed = self._registry.claimed()
-                if not any(s.ws is not None for s in claimed):
+                if not claimed or any(s.ws is None and not s.idle for s in claimed):
                     break
+            if not claimed or any(s.ws is None and not s.idle for s in claimed):
+                continue
             if not any(s.ws is not None for s in claimed):
                 continue
             hold = self.hold_action()
-            # Stack one row per sim slot (idle/unconnected claimed → hold; free → hold).
+            # Stack one row per sim slot (idle claimed → hold; free/used → hold).
             rows = []
             for s in self._registry.slots:
                 row = s.action if s in claimed and s.action is not None else hold
@@ -401,16 +384,22 @@ class RobotBridge(ABC):
             return
         data, terminated = batch
         i = slot.index
+        slot_terminated = bool(np.asarray(terminated).reshape(-1)[i])
         # Slice the [N, ...] batch down to this slot's scalar row.
         msg = {
             **{
                 k: (v[i] if getattr(v, "ndim", 0) >= 1 and len(v) == self.num_envs else v)
                 for k, v in data.items()
             },
-            "terminated": bool(np.asarray(terminated).reshape(-1)[i]),
+            "terminated": slot_terminated,
         }
         with contextlib.suppress(websockets.exceptions.ConnectionClosed):
             await slot.ws.send(_packb(msg))
+        if slot_terminated:
+            # No further action expected — don't stall co-located slots at the barrier.
+            slot.idle = True
+            slot.action = None
+            self._action_event.set()
 
     # ── the control side channel (driven by a RobotEndpoint) ────────────────────
 
