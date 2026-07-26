@@ -35,14 +35,7 @@ The HUD gateway is an OpenAI-compatible endpoint (`settings.hud_gateway_url`, de
 `https://inference.beta.hud.ai`) that fronts every provider behind your single `HUD_API_KEY`, so you
 switch between Claude, GPT, and Gemini by name alone, with unified tracing. `create_agent` accepts any id
 the gateway knows (`claude-...`, `gpt-...`, `gemini-...`); extra kwargs pass through to the agent's
-config — including `system_prompt` and `completion_kwargs` (for example
-`extra_body={"return_token_ids": True}` for training).
-
-`create_agent(...)` leaves `model_client` unset. Provider agent constructors build the gateway client
-for local loops (`HUDRuntime` / `LocalRuntime`), while
-[`HostedRuntime`](/v6/reference/runtime#hostedruntime) serializes that client-free config and rebuilds
-the gateway client on the platform. A true BYOK / custom `model_client` cannot travel with hosted
-submission — keep the agent loop local with `HUDRuntime` instead.
+config.
 
 Built-in agents are **catalog-driven**: each run they read the environment's manifest, open the
 capabilities they support, build the matching provider tools, and loop against `run.prompt_messages`.
@@ -82,10 +75,12 @@ create_agent(model: str, **kwargs) -> GatewayAgent
 
 The `create_agent` function resolves `model` to a gateway agent type and returns that provider agent
 wired to the gateway. Extra `kwargs` forward to the matched provider config (the `*Config` for the
-resolved type), with `model` filled in and `model_client` left unset for the provider constructor.
-`api_key` and `base_url` are rejected here; instantiate the provider agent directly for custom/BYOK
-credentials. Passing `completion_kwargs` only works when `model` resolves to `OpenAIChatAgent`, since
-`completion_kwargs` lives only on `OpenAIChatConfig`.
+resolved type), with `model` filled in and `model_client` left unset; the provider constructor builds
+the gateway client at runtime. This keeps the config serializable for
+[`HostedRuntime`](/v6/reference/runtime#hostedruntime). `api_key` and `base_url` are rejected here;
+instantiate the provider agent directly for custom/BYOK credentials. Passing `completion_kwargs` only
+works when `model` resolves to `OpenAIChatAgent`, since `completion_kwargs` lives only on
+`OpenAIChatConfig`.
 
 A model id maps to one of four gateway agent types (`AgentType`), each a provider agent:
 
