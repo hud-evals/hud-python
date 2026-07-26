@@ -4,10 +4,10 @@ Each rollout holds a :class:`DatasetWriter` that buffers its ``(observation,
 executed action)`` frames and commits whole episodes into one process-shared
 dataset — so concurrent rollouts (e.g. :class:`~hud.agents.robot.batching.BatchedAgent`
 clones) record into a single dataset instead of one shard each. The shared
-dataset (and an ``atexit`` finalizer that flushes open buffers) is created on
-the first frame. A class lock serializes commits so episodes stay contiguous.
-Finalized at process exit (or an explicit :meth:`finalize`), optionally pushed
-to the HF Hub.
+dataset is created on the first frame; ``atexit`` flushes every open writer's
+buffer before closing it. A class lock serializes commits so episodes stay
+contiguous. Finalized at process exit (or an explicit :meth:`finalize`),
+optionally pushed to the HF Hub.
 The contract drives the schema with no extra wiring. Destination + push come
 from the environment:
 
@@ -103,6 +103,7 @@ class DatasetWriter:
     _repo_id: ClassVar[str] = ""
     # Serialize create / add_frame / save_episode / finalize across rollouts.
     _lock: ClassVar[threading.RLock] = threading.RLock()
+    _open: ClassVar[set[DatasetWriter]] = set()  # uncommitted buffers for atexit
 
     def __init__(self, contract: dict[str, Any], *, fps: int) -> None:
         self._contract = contract
@@ -146,6 +147,7 @@ class DatasetWriter:
         with DatasetWriter._lock:
             self._ensure_dataset()
             self._frames.append(row)
+            DatasetWriter._open.add(self)
 
     def end_episode(self) -> None:
         """Commit this rollout's buffered episode to the shared dataset.
@@ -161,16 +163,18 @@ class DatasetWriter:
                 ds.add_frame(row)
             ds.save_episode()
             self._frames.clear()
+            DatasetWriter._open.discard(self)
 
-    def finalize(self) -> None:
-        """Flush, write the parquet footer + optionally push to the Hub. Idempotent."""
-        with DatasetWriter._lock:
-            # Re-entrant: end_episode takes the same lock when frames remain.
-            self.end_episode()
-            ds, DatasetWriter._ds = DatasetWriter._ds, None
+    @classmethod
+    def finalize(cls) -> None:
+        """Flush every open writer, write the parquet footer, optionally push. Idempotent."""
+        with cls._lock:
+            for writer in list(cls._open):
+                writer.end_episode()  # re-entrant: end_episode takes the same lock
+            ds, cls._ds = cls._ds, None
             if ds is None:
                 return
-            root, repo_id = DatasetWriter._root, DatasetWriter._repo_id
+            root, repo_id = cls._root, cls._repo_id
             ds.finalize()
             print(f"[agent] saved LeRobot dataset -> {root}", flush=True)
             if not os.environ.get("HF_REPO"):
@@ -210,7 +214,7 @@ class DatasetWriter:
             robot_type=self._contract.get("robot_type"),
             use_videos=True,
         )
-        atexit.register(self.finalize)  # keep the dataset loadable on abrupt exits
+        atexit.register(DatasetWriter.finalize)  # flush all open writers, not only this one
         print(f"[agent] recording LeRobot dataset -> {DatasetWriter._root}", flush=True)
         return DatasetWriter._ds
 
