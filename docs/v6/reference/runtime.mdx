@@ -171,7 +171,9 @@ HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
 Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
 **whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and
 runs the agent right next to it. This process only submits the rollout and polls its trace to
-completion. It requires a gateway agent that can serialize its identity (Claude/OpenAI/Gemini).
+completion. It supports gateway agents from
+[`create_agent`](/v6/reference/agents#create-agent); agents with a custom `model_client` must use
+`HUDRuntime` or `LocalRuntime`.
 
 ### `Runtime`
 
