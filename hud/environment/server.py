@@ -255,6 +255,11 @@ class _ControlChannel:
         if runner is not None:
             await runner.cancel()
 
+    async def cancel_all(self) -> None:
+        """Tear down every suspended/live task (server shutdown)."""
+        for session_id in list(self._runners):
+            await self.cancel(session_id)
+
     async def session(
         self,
         first: dict[str, Any],
@@ -447,7 +452,7 @@ async def _shutdown(server: asyncio.Server) -> None:
     for task in handlers:
         task.cancel()
     await asyncio.gather(*handlers, return_exceptions=True)
-    await server._hud_channel.cancel()  # type: ignore[attr-defined]
+    await server._hud_channel.cancel_all()  # type: ignore[attr-defined]
     await server.wait_closed()
 
 
