@@ -1,15 +1,34 @@
 ---
 title: "Introduction"
-description: "The HUD platform: the hosted control plane for environments, evals, and graded runs."
+description: "The HUD platform: the hosted service that runs your evals, stores every graded trace, and exposes all of it as one HTTP API."
 icon: "compass"
 mode: "wide"
 ---
 
-The **platform** is the hosted control plane behind [hud.ai](https://hud.ai). The [SDK](/v6/start/index)
-tab covers the local Python package; this tab covers how clients reach the server side over HTTP.
+## Motivation
 
-A **taskset** holds tasks. A **job** is one evaluation batch; each graded attempt is a **trace**.
-Hosted environments live in the **registry**. The [REST API](/platform/rest-api) page maps the HTTP
-surface: base URL `https://api.beta.hud.ai`, every public route under `/v2`, authenticated with a
-project `HUD_API_KEY`. Full schemas are in the
-[interactive docs](https://api.beta.hud.ai/docs).
+Evals have to run somewhere. A real suite means hundreds of sandboxes starting at once, agents
+acting inside them for minutes at a time, and a graded record of every attempt that still makes
+sense a month later.
+
+The **platform** is the hosted service that does this. You point the [SDK](/v6/start/index) or the
+`hud` CLI at it, it places each attempt on its own infrastructure, and it keeps the result as a
+trace you can reopen, share, and compare.
+
+## One API behind everything
+
+The SDK, the CLI, and [hud.ai](https://hud.ai) are all clients of the same HTTP API, and nothing is
+reserved for the UI. Anything the platform can show you, your own code can fetch: a dashboard of
+your team's scores, a bot that posts last night's results, a CI check that fails a build when a
+score drops. The platform works as a backend you build on, not just a site you visit.
+
+Base URL `https://api.beta.hud.ai`, every public route under `/v2`, authenticated with a project
+`HUD_API_KEY`.
+
+## Reading the docs
+
+- [**REST API**](/platform/rest-api) - the whole HTTP surface, grouped by what each part is for, with a request and response example for every endpoint.
+
+For exact schemas and field-level detail, the [generated reference](https://api.beta.hud.ai/docs)
+is always in sync with the server. For an agent-readable version, point your agent at
+`https://api.beta.hud.ai/openapi.json`, the OpenAPI document both are built from.
