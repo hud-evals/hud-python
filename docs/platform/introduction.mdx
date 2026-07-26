@@ -1,0 +1,15 @@
+---
+title: "Introduction"
+description: "The HUD platform: the hosted control plane for environments, evals, and graded runs."
+icon: "compass"
+mode: "wide"
+---
+
+The **platform** is the hosted control plane behind [hud.ai](https://hud.ai). The [SDK](/v6/start/index)
+tab covers the local Python package; this tab covers how clients reach the server side over HTTP.
+
+A **taskset** holds tasks. A **job** is one evaluation batch; each graded attempt is a **trace**.
+Hosted environments live in the **registry**. The [REST API](/platform/rest-api) page maps the HTTP
+surface: base URL `https://api.beta.hud.ai`, every public route under `/v2`, authenticated with a
+project `HUD_API_KEY`. Full schemas are in the
+[interactive docs](https://api.beta.hud.ai/docs).

@@ -79,6 +79,20 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Platform",
+        "icon": "cloud",
+        "groups": [
+          {
+            "group": "Start here",
+            "pages": ["platform/introduction"]
+          },
+          {
+            "group": "API",
+            "pages": ["platform/rest-api"]
+          }
+        ]
       }
     ]
   },
