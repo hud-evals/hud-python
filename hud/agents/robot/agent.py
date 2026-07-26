@@ -67,14 +67,15 @@ class RobotAgent(Agent):
         # Per-episode slot token from the tasks.start reply (on the setup step).
         # Single-env templates may omit it — a None claim binds the sole claimed
         # slot; vectorized bridges reject the ambiguity at connect.
-        started = next(
+        setup = next(
             (
-                step.task_call.result
+                step.task_call
                 for step in run.trace.steps
                 if step.task_call is not None and step.task_call.phase == "setup"
             ),
-            {},
+            None,
         )
+        started = setup.result if setup is not None else None
         robot_info = started.get("robot") if isinstance(started, dict) else None
         token: str | None = None
         if isinstance(robot_info, dict):
