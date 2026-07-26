@@ -88,6 +88,8 @@ The methods accept `str | Run | TrajectoryPayload`, mixed freely. A `Run` is con
 inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id`
 (remote rollout). Build a `TrajectoryPayload` yourself when the tokens didn't come from a `Run` at all -
 e.g. an opponent move sampled inside the environment during self-play, trained with its own reward.
+Timed-out runs are rejected unless you provide an explicit `TrajectoryPayload` reward. With GRPO,
+exclude the entire `group_id`, not only the failed rollout, so the group baseline remains valid.
 
 | Type | Fields |
 |------|--------|

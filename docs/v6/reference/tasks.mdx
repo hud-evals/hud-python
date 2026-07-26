@@ -157,7 +157,7 @@ job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurren
 | `group` | `int \| None` | Repeats each task N times for the reward spread GRPO trains on. |
 | `max_concurrent` | `int \| None` | Caps how many rollouts run in parallel. |
 | `job` | `Job \| None` | An open [`Job`](/v6/reference/types#job) to accumulate into; defaults to a fresh job per call. |
-| `rollout_timeout` | `float \| None` | Per-rollout wall-clock cap (seconds) on the local path; a breach is recorded as a failed run. |
+| `rollout_timeout` | `float \| None` | Hard deadline (seconds) for the full local rollout lifecycle; a breach returns a failed run. |
 
 A crashed rollout comes back as a failed [`Run`](/v6/reference/types#run) inside the job rather than
 raising, so one bad rollout never collapses a batch. For the end-to-end workflow see

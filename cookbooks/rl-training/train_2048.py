@@ -79,6 +79,9 @@ async def main(
         batch = session.runs[batch_start:]
         tokens = _output_tokens(batch)
         failed = sum(1 for run in batch if run.trace.status == "error")
+        if failed:
+            print(f"step {step:2d} | skipped training: {failed} rollout(s) failed", flush=True)
+            continue
 
         t1 = time.perf_counter()
         fb = await trainer.forward_backward(

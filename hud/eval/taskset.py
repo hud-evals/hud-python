@@ -308,6 +308,11 @@ class Taskset:
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+        timeout = (
+            placement.run_timeout
+            if rollout_timeout is None and isinstance(placement, HUDRuntime)
+            else rollout_timeout
+        )
 
         async def _run(task: Task, group_id: str) -> Run:
             assert placement is not None  # only reached when tasks were expanded
@@ -319,7 +324,7 @@ class Taskset:
                 runtime=placement,
                 job_id=job_id,
                 group_id=group_id,
-                rollout_timeout=rollout_timeout,
+                rollout_timeout=timeout,
             )
 
         async def _one(task: Task, group_id: str) -> Run:

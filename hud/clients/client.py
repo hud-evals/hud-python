@@ -112,21 +112,27 @@ class HudClient:
         if self._closed:
             return
         self._closed = True
-        for cap_client in self._opened.values():
+        opened = list(self._opened.values())
+        tunnels = list(self._tunnels)
+        for cap_client in opened:
             with contextlib.suppress(Exception):
                 await cap_client.close()
-        self._opened.clear()
-        for forwarder in self._forwarders:
-            forwarder.close()
-        for tunnel in self._tunnels:
-            tunnel.cancel()
-        if self._tunnels:
-            await asyncio.gather(*self._tunnels, return_exceptions=True)
+        self.abort()
+        if tunnels:
+            await asyncio.gather(*tunnels, return_exceptions=True)
         # No `bye`: a plain disconnect leaves the env's held session for a later
         # connection to grade; `grade` itself clears the session when it completes.
         self._writer.close()
         with contextlib.suppress(Exception):
             await self._writer.wait_closed()
+
+    def abort(self) -> None:
+        """Close the transport immediately without waiting for the peer."""
+        for forwarder in self._forwarders:
+            forwarder.close()
+        for tunnel in list(self._tunnels):
+            tunnel.cancel()
+        self._writer.close()
 
     # ─── handshake ────────────────────────────────────────────────────
 
@@ -339,6 +345,9 @@ async def _connect_ready(
         client = HudClient(reader, writer, endpoint=(host, port))
         try:
             await client.hello()
+        except asyncio.CancelledError:
+            client.abort()
+            raise
         except (EOFError, OSError):
             # The accepted connection had no live env behind it: EOF on the
             # reply, or a reset racing our hello write. Still not-ready.

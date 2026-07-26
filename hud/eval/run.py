@@ -228,8 +228,9 @@ class Run:
         if exc_type is not None and issubclass(
             exc_type, asyncio.CancelledError | KeyboardInterrupt
         ):
-            self.trace.status = "cancelled"
-            await self.client.cancel()
+            self.trace.status = "error" if self.trace.stop_reason == "timeout" else "cancelled"
+            with contextlib.suppress(Exception):
+                await self.client.cancel()
             return False
 
         answer: dict[str, Any] = {"answer": self.trace.content}
@@ -237,8 +238,7 @@ class Run:
 
         # A mid-run error grades best-effort (capture a salvageable reward, keep
         # status=error), but a grade failure must not mask the original error. A
-        # clean run grades normally — a grader fault propagates. grade() also
-        # blocks on an unbounded JSON-RPC read (not bound by rollout_timeout).
+        # clean run grades normally — a grader fault propagates.
         if exc_type is not None:
             self.trace.status = "error"
             try:
@@ -312,8 +312,13 @@ async def rollout(
     the real run — prompt, placement record, and the partial trace the agent
     built — marked as errored, and still graded best-effort so a salvageable
     reward is captured. Either way the logged warning names the lifecycle
-    phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``) so
+    phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``,
+    ``cleanup``) so
     callers can tell where the failure landed without reading the trace.
+
+    ``rollout_timeout`` bounds the entire lifecycle, including grading and
+    provider cleanup. A timeout aborts the control transport, lets provider
+    teardown finish in the background, and returns an errored run immediately.
     """
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
@@ -331,78 +336,57 @@ async def rollout(
         run: Run | None = None
         _phase = "provisioning"
 
-        loop = asyncio.get_running_loop()
-        deadline = None if rollout_timeout is None else loop.time() + rollout_timeout
-
-        async def _bounded(awaitable: Any) -> Any:
-            """Bound work by the rollout's single wall-clock ``deadline``.
-
-            One shared deadline across provision, connect, and the agent loop —
-            not a fresh budget per phase — so the bounded work cannot exceed
-            ``rollout_timeout`` in total. A client read-timeout is not enough on
-            its own: a wedged upstream that trickles bytes resets the read timer
-            forever, so a single stuck sampling call could otherwise hang the
-            rollout — and the batch waits on it — indefinitely. A breach surfaces
-            as ``TimeoutError`` (distinct from a Ctrl-C ``CancelledError``).
-            """
-            if deadline is None:
-                return await awaitable
-            return await asyncio.wait_for(awaitable, max(deadline - loop.time(), 0.0))
+        client: HudClient | None = None
 
         async def _drive() -> None:
-            nonlocal run, _phase
+            nonlocal client, run, _phase
             async with contextlib.AsyncExitStack() as stack:
-                # Setup (provision + connect) is bounded but not gradable: a
-                # timeout fires before the run is live, so it surfaces as a
-                # pre-launch failure. A cancelled enter still tears the
-                # half-acquired substrate down via the provider's own cleanup.
-                addr = cast("Runtime", await _bounded(stack.enter_async_context(runtime(task))))
+                addr = cast("Runtime", await stack.enter_async_context(runtime(task)))
                 _phase = "starting task"
-                client = cast("HudClient", await _bounded(stack.enter_async_context(connect(addr))))
+                client = cast("HudClient", await stack.enter_async_context(connect(addr)))
                 live = Run(client, task.id, task.args)
                 live._runtime = addr.url  # the placement record for the receipt
-                async with live:  # start on enter; grade on exit
-                    run = live  # bound only once live: an earlier failure synthesizes
-                    _phase = "agent loop"
-                    # File tracking (when enabled) emits setup separately, then
-                    # streams workspace diffs for the duration of the agent loop.
-                    async with file_tracking_observer(client):
-                        try:
-                            await _bounded(agent(run))
-                        except TimeoutError:
-                            # The run is live with a partial trajectory worth
-                            # grading, so record the truncation and fall through
-                            # to the normal grade-on-exit path. A bare cancel
-                            # (Ctrl-C) does not land here — it is a CancelledError,
-                            # which this does not catch, so it keeps the non-graded
-                            # cancel path in ``__aexit__``.
-                            logger.warning(
-                                "rollout agent loop timed out after %.0fs; grading partial",
-                                rollout_timeout,
-                            )
-                            run.trace.stop_reason = "timeout"
-                            run.record(
-                                Step(
-                                    source="system",
-                                    error=f"agent loop timed out after {rollout_timeout:.0f}s",
-                                )
-                            )
-                    _phase = "grading"
+                try:
+                    async with live:  # start on enter; grade on exit
+                        run = live  # bound only once live: an earlier failure synthesizes
+                        _phase = "agent loop"
+                        async with file_tracking_observer(client):
+                            await agent(run)
+                        _phase = "grading"
+                finally:
+                    _phase = "cleanup"
 
+        driver = asyncio.create_task(_drive())
         try:
-            await _drive()
-        except TimeoutError:
-            # A setup-phase deadline (provision/connect) fired — the agent-loop
-            # timeout is handled inside _drive. Isolate it so one wedged rollout
-            # never collapses the batch, keeping any partial trace.
-            detail = f"timed out after {rollout_timeout:.0f}s" if rollout_timeout else "timed out"
-            if run is None:
-                logger.warning("rollout failed before launch (%s): %s", _phase, detail)
-                run = Run.failed(f"[{_phase}] {detail}")
+            if rollout_timeout is None:
+                await driver
             else:
-                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
-                run.trace.status = "error"
-                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                done, _ = await asyncio.wait({driver}, timeout=rollout_timeout)
+                if done:
+                    await driver
+                else:
+                    phase = _phase
+                    if run is not None:
+                        run.trace.stop_reason = "timeout"
+                    if client is not None:
+                        client.abort()
+                    if phase != "cleanup":
+                        driver.cancel()
+                    driver.add_done_callback(_consume_task_result)
+                    detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
+                    logger.warning(detail)
+                    if run is None:
+                        run = Run.failed(detail)
+                    else:
+                        run.trace.status = "error"
+                        run.record(Step(source="system", error=detail))
+                    run.trace.stop_reason = "timeout"
+        except asyncio.CancelledError:
+            if client is not None:
+                client.abort()
+            driver.cancel()
+            driver.add_done_callback(_consume_task_result)
+            raise
         except Exception as exc:
             if run is None:
                 logger.warning("rollout failed before launch (%s): %s", _phase, exc)
@@ -418,6 +402,11 @@ async def rollout(
         run.slug = task.slug or task.default_slug()
         await trace_exit(run)
     return run
+
+
+def _consume_task_result(task: asyncio.Future[Any]) -> None:
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        task.result()
 
 
 __all__ = ["Grade", "Run", "rollout"]
