@@ -255,8 +255,13 @@ class RobotEndpoint:
     async def release_claim(self) -> None:
         """Free this session's slot if ``result`` never ran (cancel / bye / teardown)."""
         task = asyncio.current_task()
-        if task is None or (token := self._claim_by_task.pop(task, None)) is None:
-            return
+        token = self._claim_by_task.pop(task, None) if task is not None else None
+        if token is None:
+            # Resume teardown runs on a new task — adopt the sole parked claim.
+            parked = [t for t in self._claim_by_task if t.done()]
+            if len(parked) != 1:
+                return
+            token = self._claim_by_task.pop(parked[0])
         with contextlib.suppress(Exception):
             await self._call("result", {"token": token})
 
