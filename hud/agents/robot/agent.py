@@ -107,8 +107,9 @@ class RobotAgent(Agent):
                     max_steps=self.max_steps if max_steps is None else max_steps,
                 )
             finally:
-                # Flush video tails / commit the buffered episode even when the
-                # rollout raises mid-loop.
+                # Drop the wire before telemetry flush so a claimed slot with no
+                # further actions doesn't stall co-located peers at the barrier.
+                await robot.close()
                 recorder.close()
                 if writer is not None:
                     writer.end_episode()
