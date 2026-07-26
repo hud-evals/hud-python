@@ -2,7 +2,7 @@
 
 Subclass, set ``self.model`` and ``self.adapter`` in ``__init__``, and the base
 owns the rest: connect to the ``robot`` capability (claiming a slot token from
-``run.started`` when present), read the contract, run until the env terminates.
+the setup step when present), read the contract, run until the env terminates.
 
 Vectorized sims still look like one scalar connection per rollout; concurrent
 rollouts coalesce GPU forwards through :class:`~.batching.BatchedModel`.
@@ -64,10 +64,18 @@ class RobotAgent(Agent):
         if not isinstance(prompt, str):
             raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
 
-        # Per-episode slot token from tasks.start (opaque; env put it under "robot").
+        # Per-episode slot token from the tasks.start reply (on the setup step).
         # Single-env templates may omit it — a None claim binds the sole claimed
         # slot; vectorized bridges reject the ambiguity at connect.
-        robot_info = run.started.get("robot")
+        started = next(
+            (
+                step.task_call.result
+                for step in run.trace.steps
+                if step.task_call is not None and step.task_call.phase == "setup"
+            ),
+            {},
+        )
+        robot_info = started.get("robot") if isinstance(started, dict) else None
         token: str | None = None
         if isinstance(robot_info, dict):
             raw_token = cast("dict[str, Any]", robot_info).get("token")
