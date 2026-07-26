@@ -816,7 +816,7 @@ async def _local(env: Environment, *, ready_timeout: float | None = None) -> Asy
     hooks/daemons). ``LocalRuntime`` enters this per acquisition with the
     fresh env it built; test harnesses enter it directly with a live one.
     """
-    from hud.environment.server import bind
+    from hud.environment.server import _shutdown, bind
 
     # start() inside the try: a failed or timed-out initialize hook still gets
     # its already-started daemons torn down by stop() (best-effort per hook).
@@ -830,11 +830,9 @@ async def _local(env: Environment, *, ready_timeout: float | None = None) -> Asy
             yield Runtime(f"tcp://{host}:{port}")
         finally:
             serve_task.cancel()
+            await _shutdown(server)
             with contextlib.suppress(asyncio.CancelledError):
                 await serve_task
-            server.close()
-            with contextlib.suppress(Exception):
-                await server.wait_closed()
     finally:
         await env.stop()
 
@@ -919,6 +917,7 @@ class HUDRuntime:
             trace_id=trace_id,
             job_id=job_id,
             group_id=group_id,
+            rollout_timeout=self.run_timeout,
         )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
@@ -1043,6 +1042,7 @@ class HostedRuntime:
     ) -> None:
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
+        self._cancellations: set[asyncio.Task[None]] = set()
 
     async def run(
         self,
@@ -1064,11 +1064,19 @@ class HostedRuntime:
         """
         trace_id = trace_id or uuid.uuid4().hex
         try:
-            state = await self._submit_and_await(
-                task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
-            )
-        except (TimeoutError, asyncio.CancelledError):
+            async with asyncio.timeout(self.run_timeout):
+                state = await self._submit_and_await(
+                    task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
+                )
+        except asyncio.CancelledError:
+            self._cancel_later(trace_id)
             raise
+        except TimeoutError:
+            self._cancel_later(trace_id)
+            detail = f"hosted rollout {trace_id} did not finish within {self.run_timeout:g}s"
+            logger.warning(detail)
+            run = Run.failed(detail)
+            run.trace.stop_reason = "timeout"
         except Exception as exc:
             logger.warning("hosted rollout failed to launch: %s", exc)
             run = Run.failed(str(exc))
@@ -1114,11 +1122,7 @@ class HostedRuntime:
             if runtime_config:
                 payload["runtime_config"] = runtime_config
         await platform.apost("/rollouts/submit", json=payload)
-        try:
-            return await self._await_terminal(platform, payload["trace_id"])
-        except asyncio.CancelledError:
-            await self._cancel(platform, payload["trace_id"])
-            raise
+        return await self._await_terminal(platform, payload["trace_id"])
 
     @staticmethod
     def _fold(state: dict[str, Any], trace_id: str) -> Run:
@@ -1141,18 +1145,10 @@ class HostedRuntime:
         return run
 
     async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> dict[str, Any]:
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + self.run_timeout
         while True:
             state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
             if state.get("status") in _TERMINAL_TRACE_STATUSES:
                 return state
-            if loop.time() >= deadline:
-                await self._cancel(platform, trace_id)
-                raise TimeoutError(
-                    f"hosted rollout {trace_id} did not finish within "
-                    f"{self.run_timeout:.0f}s (status: {state.get('status')})"
-                )
             await asyncio.sleep(self.poll_interval)
 
     async def _cancel(self, platform: PlatformClient, trace_id: str) -> None:
@@ -1162,6 +1158,13 @@ class HostedRuntime:
             await platform.apost("/rollouts/cancel", json={"trace_id": trace_id})
         except Exception as exc:
             logger.warning("hosted rollout %s cancel failed: %s", trace_id, exc)
+
+    def _cancel_later(self, trace_id: str) -> None:
+        task = asyncio.create_task(
+            self._cancel(PlatformClient.from_settings(), str(uuid.UUID(trace_id)))
+        )
+        self._cancellations.add(task)
+        task.add_done_callback(self._cancellations.discard)
 
 
 def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:

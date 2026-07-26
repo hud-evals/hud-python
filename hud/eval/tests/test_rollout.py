@@ -307,35 +307,107 @@ class _SlowAgent(Agent):
 
     def __init__(self, fn: Any) -> None:
         self._fn = fn
+        self.cancelled = asyncio.Event()
 
     async def __call__(self, run: Any) -> None:
         run.trace.content = self._fn(run.prompt)
-        await asyncio.sleep(30)
+        try:
+            await asyncio.sleep(30)
+        finally:
+            self.cancelled.set()
 
 
-async def test_agent_loop_timeout_grades_the_partial_trajectory() -> None:
-    # In-process env (no subprocess spawn) so only the agent loop, not setup,
-    # races the short deadline.
+async def test_agent_loop_timeout_is_an_explicit_failure() -> None:
     env = Environment("sums")
+    task_cancelled = asyncio.Event()
 
     @env.template()
     async def add(a: int, b: int):
-        answer = yield f"add:{a}:{b}"
-        yield 1.0 if answer == str(a + b) else 0.0
+        try:
+            yield f"add:{a}:{b}"
+            yield 1.0
+        finally:
+            task_cancelled.set()
+
+    agent = _SlowAgent(_solve_add)
+    run = await rollout(
+        _add_task(2, 3),
+        agent,
+        runtime=lambda _row: _local(env),
+        rollout_timeout=0.2,
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert run.grade.raw == {}
+    await asyncio.wait_for(agent.cancelled.wait(), 1.0)
+    await asyncio.wait_for(task_cancelled.wait(), 1.0)
+    assert run.trace_id is not None
+
+
+async def test_timeout_includes_grading() -> None:
+    env = Environment("sums")
+    grading_cancelled = asyncio.Event()
+    never = asyncio.Event()
+
+    @env.template()
+    async def add(a: int, b: int):
+        yield f"add:{a}:{b}"
+        try:
+            await never.wait()
+        finally:
+            grading_cancelled.set()
+        yield 1.0
 
     run = await rollout(
         _add_task(2, 3),
-        _SlowAgent(_solve_add),
+        _FnAgent(_solve_add),
         runtime=lambda _row: _local(env),
-        rollout_timeout=0.5,
+        rollout_timeout=0.2,
     )
 
-    # The deadline fired mid-loop, but the run was live with an answer already
-    # recorded, so it is graded rather than discarded as a zero-reward cancel.
-    assert run.reward == 1.0
-    assert run.trace.status == "completed"
+    assert run.trace.status == "error"
     assert run.trace.stop_reason == "timeout"
-    assert run.trace_id is not None
+    assert run.grade.raw == {}
+    await asyncio.wait_for(grading_cancelled.wait(), 1.0)
+
+
+async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
+    env = Environment("sums")
+    cleanup_started = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    @env.template()
+    async def add(a: int, b: int):
+        yield f"add:{a}:{b}"
+        yield 1.0
+
+    @asynccontextmanager
+    async def provider(_task: TaskRow) -> AsyncIterator[Runtime]:
+        try:
+            async with _local(env) as runtime:
+                yield runtime
+        finally:
+            cleanup_started.set()
+            await release_cleanup.wait()
+            cleanup_finished.set()
+
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(_solve_add),
+        runtime=provider,
+        rollout_timeout=0.2,
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert run.reward == 1.0
+    assert cleanup_started.is_set()
+    assert not cleanup_finished.is_set()
+
+    release_cleanup.set()
+    await asyncio.wait_for(cleanup_finished.wait(), 1.0)
 
 
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:

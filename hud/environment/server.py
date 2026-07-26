@@ -214,8 +214,13 @@ class _ControlChannel:
 
     async def start(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         await self.cancel()
-        self._runner = TaskRunner(self.env.tasks[task_id], args)
-        return await self._runner.start()
+        runner = self._runner = TaskRunner(self.env.tasks[task_id], args)
+        try:
+            return await runner.start()
+        except BaseException:
+            self._runner = None
+            await runner.cancel()
+            raise
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         runner, self._runner = self._runner, None
@@ -385,9 +390,20 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
 
     server = await asyncio.start_server(accept, host=host, port=port)
     server._hud_handlers = active  # type: ignore[attr-defined]
+    server._hud_channel = channel  # type: ignore[attr-defined]
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])
     return server
+
+
+async def _shutdown(server: asyncio.Server) -> None:
+    server.close()
+    handlers = list(getattr(server, "_hud_handlers", ()))
+    for task in handlers:
+        task.cancel()
+    await asyncio.gather(*handlers, return_exceptions=True)
+    await server._hud_channel.cancel()  # type: ignore[attr-defined]
+    await server.wait_closed()
 
 
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
@@ -402,8 +418,7 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
             await server.serve_forever()
     finally:
         if server is not None:
-            for task in list(getattr(server, "_hud_handlers", ())):
-                task.cancel()
+            await _shutdown(server)
         await env.stop()
 
 

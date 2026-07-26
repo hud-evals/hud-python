@@ -154,7 +154,8 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 HUDRuntime(*, run_timeout=3600.0, runtime_url=None)
 ```
 
-- **`run_timeout`** - bound on one rollout end to end, including instance startup.
+- **`run_timeout`** - hard deadline for the full rollout lifecycle. A timeout
+  returns an errored `Run` with `stop_reason="timeout"` while teardown completes.
 - **`runtime_url`** - override the runtime endpoint the tunnel connects to.
 
 The SDK leases your deployed env by name and tunnels to its control channel; the agent loop runs local.
@@ -166,7 +167,8 @@ HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
 ```
 
 - **`poll_interval`** - seconds between trace-status polls while the rollout runs remotely.
-- **`run_timeout`** - bound on one rollout end to end, including instance provisioning and queueing.
+- **`run_timeout`** - hard deadline including submission, provisioning, queueing,
+  and execution. A timeout requests cancellation and returns an errored `Run`.
 
 Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
 **whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and

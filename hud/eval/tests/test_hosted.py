@@ -190,14 +190,43 @@ async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPa
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HostedRuntime(poll_interval=0.0, run_timeout=0.0)
+    hosted = HostedRuntime(poll_interval=0.0, run_timeout=0.001)
     task = Task(env="sums", id="add", args={})
 
-    with pytest.raises(TimeoutError, match="hosted rollout"):
-        await hosted.run(task, _agent(), job_id=uuid.uuid4().hex)
+    run = await hosted.run(task, _agent(), job_id=uuid.uuid4().hex)
+    await asyncio.sleep(0)
 
     cancel_posts = [(p, b) for p, b in platform.posts if p == "/rollouts/cancel"]
     assert len(cancel_posts) == 1
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    never = asyncio.Event()
+
+    class _StuckSubmitPlatform(_FakePlatform):
+        async def apost(self, path: str, *, json: Any | None = None) -> Any:
+            self.posts.append((path, json or {}))
+            if path == "/rollouts/submit":
+                await never.wait()
+            return {"status": "queued"}
+
+    platform = _StuckSubmitPlatform([])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    run = await HostedRuntime(run_timeout=0.001).run(
+        Task(env="sums", id="add"),
+        _agent(),
+        job_id=uuid.uuid4().hex,
+    )
+    await asyncio.sleep(0)
+
+    assert run.trace.stop_reason == "timeout"
+    assert any(path == "/rollouts/cancel" for path, _ in platform.posts)
 
 
 @pytest.mark.asyncio
@@ -293,7 +322,7 @@ async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr("hud.eval.runtime.rollout", fake_rollout)
 
-    runtime = HUDRuntime()
+    runtime = HUDRuntime(run_timeout=90.0)
     job_id = uuid.uuid4().hex
     trace_id = uuid.uuid4().hex
     run = await runtime.run(
@@ -309,6 +338,7 @@ async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch)
     assert seen["job_id"] == job_id
     assert seen["group_id"] == "g1"
     assert seen["trace_id"] == trace_id
+    assert seen["rollout_timeout"] == 90.0
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ string (the service resolves recorded tokens + reward) or a :class:`hud.Run`
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from hud.agents.types import AgentStep
@@ -48,6 +49,8 @@ def _run_to_input(run: Run) -> TrainInput:
     """Turn a graded :class:`hud.Run` into a training input: inline payload when
     the run carries token-level samples (local rollout), else its ``trace_id``
     (remote rollout, resolved server-side)."""
+    if run.trace.stop_reason == "timeout":
+        raise ValueError("timed-out runs require an explicit training reward")
     samples = run.trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
     turns = [
         TrajectorySample(
@@ -78,15 +81,29 @@ def _to_inputs(trajectories: Sequence[str | Run | TrajectoryPayload]) -> list[Tr
     ]
 
 
-def _check_groups(n: int, group_size: int | None) -> None:
+def _check_groups(
+    trajectories: Sequence[str | Run | TrajectoryPayload],
+    group_size: int | None,
+) -> None:
     """Fail before a forward pass if the batch can't form full GRPO groups: an
     incomplete final group gets a skewed advantage baseline. Cheap, client-side,
     no round-trip — unlike per-group reward spread, which only the service sees."""
-    if group_size is not None and n % group_size != 0:
+    if group_size is None:
+        return
+    n = len(trajectories)
+    if n % group_size != 0:
         raise ValueError(
             f"{n} trajectories do not divide evenly into groups of {group_size}; "
             "GRPO normalizes advantages within each group, so every group must be full"
         )
+    run_groups = [
+        item.group_id for item in trajectories if not isinstance(item, str | TrajectoryPayload)
+    ]
+    if len(run_groups) != n or any(group_id is None for group_id in run_groups):
+        return
+    groups = Counter(run_groups)
+    if incomplete := [group_id for group_id, count in groups.items() if count != group_size]:
+        raise ValueError(f"incomplete GRPO groups: {incomplete}")
 
 
 class TrainingClient(BaseTrainingClient):
@@ -120,7 +137,7 @@ class TrainingClient(BaseTrainingClient):
         defaults (the supported keys are provider-defined, so prefer defaults).
         """
         inputs = _to_inputs(trajectories)
-        _check_groups(len(inputs), group_size)
+        _check_groups(trajectories, group_size)
         request = ForwardBackwardRequest(
             inputs=inputs,
             loss_fn=loss_fn,
@@ -149,7 +166,7 @@ class TrainingClient(BaseTrainingClient):
         :meth:`forward_backward_custom`, which wires both halves together.
         """
         inputs = _to_inputs(trajectories)
-        _check_groups(len(inputs), group_size)
+        _check_groups(trajectories, group_size)
         request = ForwardRequest(
             inputs=inputs,
             group_size=group_size,
