@@ -39,7 +39,7 @@ from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Self
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -152,12 +152,21 @@ class Runtime:
 
 
 class Shared:
-    """Refcounting provider: N concurrent rollouts share one substrate.
+    """Lease provider: at most ``width`` concurrent rollouts share one substrate.
 
-    The first ``__call__`` provisions via *inner*; later callers reuse that
-    address until the last exit tears it down. ``width`` is the hard cap on
-    concurrent occupancy (e.g. a robot sim's ``num_envs``) — a further acquire
-    raises. Pair with ``Taskset.run(..., max_concurrent=width)``; ``group`` is the wave count.
+    The substrate boots lazily on the first lease and lives for the enclosing
+    ``async with`` scope — one boot however many rollouts flow through, torn
+    down deterministically at scope exit. ``width`` is the substrate's real
+    capacity (e.g. a vectorized sim's slot count): lease ``width + 1`` waits
+    for a slot instead of erroring, so the scheduler needs no pairing —
+    ``group`` and ``max_concurrent`` keep their ordinary meanings.
+
+    ``Taskset.run`` scopes a context-manager placement to the call, so
+    ``runtime=Shared(DockerRuntime(...), width=8)`` works bare; open the scope
+    yourself to keep the substrate warm across several calls::
+
+        async with Shared(DockerRuntime("hud-isaac-env"), width=8) as rt:
+            await taskset.run(agent, runtime=rt, group=8)
     """
 
     def __init__(self, inner: Provider, *, width: int) -> None:
@@ -165,39 +174,39 @@ class Shared:
             raise ValueError("Shared width must be >= 1")
         self.inner = inner
         self.width = width
+        self._sem = asyncio.Semaphore(width)
+        self._boot = asyncio.Lock()
         self._addr: Runtime | None = None
-        self._refs = 0
         self._stack: contextlib.AsyncExitStack | None = None
-        self._lock = asyncio.Lock()
+        self._opens = 0
+
+    async def __aenter__(self) -> Self:
+        self._opens += 1
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._opens -= 1
+        if self._opens == 0 and self._stack is not None:
+            stack, self._stack, self._addr = self._stack, None, None
+            await stack.aclose()
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        async with self._lock:
-            if self._refs >= self.width:
-                raise RuntimeError(
-                    f"Shared(width={self.width}) already has {self._refs} concurrent "
-                    "callers; raise max_concurrent no higher than width"
-                )
-            if self._addr is None:
-                stack = contextlib.AsyncExitStack()
-                await stack.__aenter__()
-                try:
+        if self._opens == 0:
+            raise RuntimeError(
+                "Shared substrates outlive single rollouts; lease inside the scope "
+                "(Taskset.run opens it for you, or wrap calls in `async with Shared(...)`)"
+            )
+        async with self._sem:
+            async with self._boot:
+                if self._addr is None:
+                    # First leaseholder boots. A failed boot fails only its own
+                    # rollout (nothing entered the stack); the next lease retries.
+                    stack = contextlib.AsyncExitStack()
                     self._addr = await stack.enter_async_context(self.inner(task))
-                except BaseException:
-                    await stack.aclose()  # failed boot — don't orphan a half-open stack
-                    raise
-                self._stack = stack  # publish only after inner succeeds
-            self._refs += 1
-            addr = self._addr
-        try:
+                    self._stack = stack
+                addr = self._addr
             yield addr
-        finally:
-            async with self._lock:
-                self._refs -= 1
-                if self._refs == 0 and self._stack is not None:
-                    await self._stack.aclose()
-                    self._stack = None
-                    self._addr = None
 
 
 def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:

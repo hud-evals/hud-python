@@ -460,20 +460,20 @@ from hud.eval import Shared, DockerRuntime
 job = await taskset.run(
     MyAgent(),
     runtime=Shared(DockerRuntime("hud-isaac-env"), width=8),
-    group=1,  # waves; each wave fills width slots
-    max_concurrent=8,
+    group=8,  # ordinary statistical repeats; Shared bounds occupancy itself
 )
 ```
 
-`group` and `max_concurrent` are the ordinary [`Taskset.run` parameters](/v6/reference/tasks#running).
-A few things to note:
+`group` and `max_concurrent` keep their ordinary
+[`Taskset.run` meanings](/v6/reference/tasks#running). A few things to note:
 
 - **The agent doesn't change.** Each rollout still drives one ordinary WebSocket connection and
   calls `reset` / `result` as usual - the environment resolves each call to that rollout's own
   [slot](#gym-style-envs).
-- **Slots fill in order, then stop.** The first `reset` claims slot 0; once every slot is taken, a
-  further `reset` errors instead of queuing, so set `max_concurrent` to `width` so every slot fills.
-- **`width` is one wave; `group` is how many.** Each wave drains before the next connects.
+- **One boot per run.** The substrate boots on the first rollout and is torn down when `run(...)`
+  returns; rollout `width + 1` waits for a freed slot instead of provisioning (or erroring). To
+  keep the sim warm across several calls, open the scope yourself:
+  `async with Shared(...) as rt: await taskset.run(..., runtime=rt)`.
 - **EnvHub sims work unchanged.** A [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub)
   package's `make_env` often already returns a vectorized sim, so `env.gym(make_env, num_envs=N)`
   serves it directly.

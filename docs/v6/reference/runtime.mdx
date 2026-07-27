@@ -204,13 +204,22 @@ Shared(provider, *, width)
 - **`provider`** - the `Provider` to provision once, e.g. `DockerRuntime("my-env")`.
 - **`width`** - how many concurrent connections that one substrate accepts.
 
-The first rollout to acquire it provisions through `provider`; every later rollout is just handed
-that same address instead of provisioning its own, so up to `width` rollouts end up connected to
-one live substrate - agents that need to share, compete, or coordinate in the same environment
-(a vectorized sim's `num_envs` slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals),
-are one case). Pair it with `taskset.run(..., max_concurrent=width)`; `width` is the wave size
-and `group` is how many waves. `Runtime(url)` needs no wrapping since every caller already dials
-the same address.
+A lease pool over one substrate: it boots through `provider` on the first lease and lives for the
+enclosing `async with` scope, so every rollout in that scope is handed the same address - agents
+that need to share, compete, or coordinate in the same environment (a vectorized sim's `num_envs`
+slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals), are one case). Lease
+`width + 1` waits for a slot to free instead of erroring, so `group` and `max_concurrent` keep
+their ordinary meanings. `Taskset.run` scopes a context-manager placement to the call, so a bare
+`runtime=Shared(...)` boots once per `run(...)`; open the scope yourself to keep the substrate
+warm across several calls:
+
+```python
+async with Shared(DockerRuntime("hud-isaac-env"), width=8) as rt:
+    await taskset.run(agent, runtime=rt, group=8)
+    await taskset.run(agent, runtime=rt, group=8)  # same live sim
+```
+
+`Runtime(url)` needs no wrapping since every caller already dials the same address.
 
 ## Run on your own infra
 

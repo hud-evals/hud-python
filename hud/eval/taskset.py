@@ -12,6 +12,7 @@ schedules the rollout engine over them. HUD job/trace reporting lives in
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
@@ -27,7 +28,6 @@ from .runtime import (
     HostedRuntime,
     HUDRuntime,
     LocalRuntime,
-    Shared,
     _declared_env,
     _declared_names,
 )
@@ -276,9 +276,9 @@ class Taskset:
         then group).
 
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
-        task's repeats). With :class:`~hud.eval.runtime.Shared`, ``width`` is
-        the cohort size (one wave / GRPO group) and ``group`` is the wave count
-        (``max_concurrent`` must equal ``width``).
+        task's repeats), whatever the placement — a placement that pools a
+        substrate (:class:`~hud.eval.runtime.Shared`) bounds its own occupancy
+        and is scoped to this call when not already open.
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
         local (Provider) path: a rollout that exceeds it is cancelled and recorded
@@ -299,36 +299,25 @@ class Taskset:
         # an error naming the forms to pass.
         # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
-        # Shared substrates have exactly ``width`` slots: a smaller cap starves the
-        # barrier; a larger one over-claims and fails mid-batch on reset.
-        if isinstance(placement, Shared) and max_concurrent != placement.width:
-            raise ValueError(
-                f"Shared(width={placement.width}) requires max_concurrent={placement.width} "
-                f"(got {max_concurrent!r})"
-            )
-        # Shared: group = waves (default 1), width = cohort; else group = repeats.
-        if isinstance(placement, Shared):
-            group = 1 if group is None else group
-            cohort, waves = placement.width, group
-        else:
-            group = group or (job.group if job else 1)
-            cohort, waves = group, 1
+        group = group or (job.group if job else 1)
         if group < 1:
             raise ValueError("group must be >= 1")
+
+        # Tasks are pure rows, shared across rollouts; the ``group`` repeats of
+        # one task share a group_id (the GRPO group).
         expanded: list[tuple[Task, str]] = []
         for task in task_list:
-            for _ in range(waves):
-                group_id = uuid.uuid4().hex
-                expanded.extend((task, group_id) for _ in range(cohort))
+            group_id = uuid.uuid4().hex
+            expanded.extend((task, group_id) for _ in range(group))
 
         if job is None:
             job = Job(
                 id=uuid.uuid4().hex,
                 name=_job_name(self.name, task_list, group),
-                group=cohort,
+                group=group,
                 taskset_id=self.api_id,
             )
-            await job_enter(job.id, name=job.name, group=cohort, taskset_id=self.api_id)
+            await job_enter(job.id, name=job.name, group=group, taskset_id=self.api_id)
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
         timeout = (
@@ -365,14 +354,14 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        if isinstance(placement, Shared):
-            # Drain each width-sized wave before the next connects.
-            for i in range(0, len(expanded), cohort):
-                parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded[i : i + cohort]))
-                job.runs.extend(run for part in parts for run in part)
-        else:
+        async with contextlib.AsyncExitStack() as stack:
+            # A placement may own pooled resources across rollouts (e.g.
+            # Shared's one substrate for many leases); a context-manager
+            # placement is scoped to this call unless already open.
+            if isinstance(placement, contextlib.AbstractAsyncContextManager):
+                await stack.enter_async_context(placement)
             parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-            job.runs.extend(run for part in parts for run in part)
+        job.runs.extend(run for part in parts for run in part)
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed
         # sleep), so the timeout is only a safety cap for a wedged network.
