@@ -12,7 +12,6 @@ from openai.types.responses import (
     ResponseInputFileContentParam,
     ResponseInputImageContentParam,
     ResponseInputTextContentParam,
-    ResponseInputTextParam,
 )
 from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputItemParam
 
@@ -76,7 +75,7 @@ def format_openai_result(call: MCPToolCall, result: MCPToolResult) -> ResponseIn
                 logger.warning("Unknown content block type: %s", type(block))
 
     if not output_items:
-        output_items.append(ResponseInputTextParam(type="input_text", text=""))
+        output_items.append(ResponseInputTextContentParam(type="input_text", text=""))
 
     return cast(
         "ResponseInputItemParam",

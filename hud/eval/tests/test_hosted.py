@@ -123,6 +123,7 @@ def test_create_agent_hosted_spec_preserves_training_config(
             }
         },
     )
+    assert isinstance(agent, OpenAIChatAgent)
     assert agent.config.model_client is None
     assert agent.oai is client
 

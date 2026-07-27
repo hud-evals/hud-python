@@ -79,7 +79,7 @@ def test_missing_provider_dependency_points_at_agents_extra(
 
 
 @pytest.fixture(autouse=True)
-def _gateway_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def gateway_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
 
 

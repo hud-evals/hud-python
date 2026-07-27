@@ -119,6 +119,7 @@ class AgentPreset:
 _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
     AgentPreset("Claude Opus 4.8", AgentType.CLAUDE, "claude-opus-4-8"),
+    AgentPreset("GPT-5.6", AgentType.OPENAI, "gpt-5.6"),
     AgentPreset("GPT-5.5", AgentType.OPENAI, "gpt-5.5"),
     AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3.1-pro-preview"),
     AgentPreset(
@@ -176,7 +177,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # use_computer_beta = true
 
 [openai]
-# model = "gpt-5.5"
+# model = "gpt-5.6"
 # temperature = 0.7
 # max_output_tokens = 4096
 
