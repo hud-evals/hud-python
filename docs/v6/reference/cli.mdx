@@ -10,19 +10,19 @@ Install the CLI with `uv tool install hud --python 3.12`. Authenticate once with
 
 ### `hud init`
 
-Scaffold a new environment package in a fresh `<name>` directory. The `blank` template (the default with no preset, and the first option in the interactive picker) writes a minimal local scaffold - `env.py` (environment, templates, capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` - no network, no API key. Every other preset downloads a starter environment from GitHub instead.
+Scaffold a new environment package in a fresh `<name>` directory. The `blank` template (the default with no preset, and the first option in the interactive picker) writes a minimal scaffold - `env.py` (environment, templates, capabilities), `tasks.py` (concrete task rows), `Dockerfile.hud`, and `pyproject.toml` - no network, no API key. `coding` and `cua` are bundled with the SDK too, so they always match your installed version; every other preset downloads a starter environment from GitHub.
 
 ```bash
 hud init                          # pick a template → ./<template>
 hud init my-env                   # pick a template (or minimal scaffold) → ./my-env
 hud init my-env --preset browser  # download the "browser" starter into ./my-env
-hud init --preset cua             # download the "cua" starter into ./cua-template
+hud init --preset cua             # the bundled "cua" starter into ./cua-template
 hud init my-env --dir envs        # create ./envs/my-env
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--preset`, `-p` | Starter to use: `blank` (minimal local scaffold), `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench` (all downloaded from GitHub). Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the blank local scaffold. |
+| `--preset`, `-p` | Starter to use: `blank` (minimal scaffold), `coding` and `cua` (bundled with the SDK), or `browser`, `deepresearch`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench` (downloaded from GitHub). Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the blank scaffold. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 

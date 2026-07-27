@@ -1,9 +1,11 @@
 """Starter presets for ``hud init`` — the same set offered by the platform's
 *environments/new* flow.
 
-Each preset is a standalone public GitHub repo under ``hud-evals``. ``hud init``
-downloads the repo tarball (no ``git`` required) and extracts it into the target
-directory. Keep this list in sync with the frontend's ``ENVIRONMENT_TEMPLATES``
+Vendored presets ship inside the wheel, so the starter a user scaffolds always
+matches the SDK version they installed. The rest are standalone public GitHub
+repos under ``hud-evals``: ``hud init`` downloads the repo tarball (no ``git``
+required) and extracts it into the target directory. Keep this list in sync with
+the frontend's ``ENVIRONMENT_TEMPLATES``
 (``app/(auth)/environments/components/EnvironmentTemplates.tsx``).
 """
 
@@ -11,23 +13,21 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import tarfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import httpx
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
 class EnvironmentPreset:
     """A starter environment.
 
-    Most presets are sourced from a public GitHub repo. When ``local`` is set the
-    starter is the bundled minimal scaffold instead (see :mod:`hud.cli.templates`);
-    ``owner``/``repo`` are then only used to name the target directory.
+    ``vendored`` presets are copied from the tree bundled with this package;
+    the rest are downloaded from ``owner``/``repo``. ``repo`` also names the
+    target directory when ``hud init`` is run without a name.
     """
 
     id: str
@@ -36,7 +36,7 @@ class EnvironmentPreset:
     description: str
     owner: str
     repo: str
-    local: bool = False
+    vendored: bool = False
 
 
 ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
@@ -44,10 +44,10 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "blank",
         "🧱",
         "Blank",
-        "Minimal local scaffold (no download): a single letter-counting task.",
+        "Minimal bundled scaffold (no download): a single letter-counting task.",
         "hud-evals",
         "hud-blank",
-        local=True,
+        vendored=True,
     ),
     EnvironmentPreset(
         "browser",
@@ -64,6 +64,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "Computer-use agents: a virtual Linux desktop (XFCE + Chromium) over rfb/VNC.",
         "hud-evals",
         "cua-template",
+        vendored=True,
     ),
     EnvironmentPreset(
         "deepresearch",
@@ -80,6 +81,7 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "Fix a bug in a Python web app, graded by a hidden pytest suite.",
         "hud-evals",
         "coding-template",
+        vendored=True,
     ),
     EnvironmentPreset(
         "ml",
@@ -159,6 +161,12 @@ PRESETS_BY_ID: dict[str, EnvironmentPreset] = {p.id: p for p in ENVIRONMENT_PRES
 
 _TARBALL_TIMEOUT = 60.0
 
+# Installed layout: the wheel force-includes each vendored tree here (see the
+# build config in pyproject.toml).
+_STARTERS_DIR = Path(__file__).parent / "starters"
+# Source-checkout layout: the same trees, where they are authored and tested.
+_CHECKOUT_STARTERS_DIR = Path(__file__).resolve().parents[2] / "environments"
+
 
 def _is_within(root: Path, path: Path) -> bool:
     try:
@@ -182,14 +190,54 @@ def _download_tarball(preset: EnvironmentPreset) -> bytes:
         return resp.content
 
 
-def materialize_preset(preset: EnvironmentPreset, target: Path) -> None:
-    """Download ``preset``'s repo archive and extract it into ``target``.
+def _vendored_root(preset: EnvironmentPreset) -> Path:
+    """Locate ``preset``'s bundled starter tree.
 
-    Uses ``codeload.github.com`` (not the rate-limited API) for the repo's
-    ``main`` branch — no ``git`` required. Strips the archive's top-level
-    ``<repo>-main/`` component and refuses any entry that would escape ``target``
-    (path-traversal guard). Honors ``GITHUB_TOKEN`` if set.
+    Installs get it from the package. A source checkout has no ``starters/``
+    directory — the build force-includes it from ``environments/`` — so fall
+    back there to keep ``uv run hud init`` working from the repo.
     """
+    for root in (_STARTERS_DIR, _CHECKOUT_STARTERS_DIR):
+        candidate = root / preset.id
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(f"bundled starter {preset.id!r} is missing from this installation")
+
+
+# Present only in a source checkout where the starter's own test flow ran;
+# wheel content is already filtered by the build.
+_COPY_SKIP_DIRS = frozenset({".venv", "__pycache__", ".pytest_cache", ".ruff_cache"})
+
+
+def _copy_vendored(preset: EnvironmentPreset, target: Path) -> None:
+    """Copy the bundled starter tree into ``target``, preserving file modes."""
+    root = _vendored_root(preset)
+    target.mkdir(parents=True, exist_ok=True)
+    for source in sorted(root.rglob("*")):
+        if not source.is_file():
+            continue
+        rel = source.relative_to(root)
+        if _COPY_SKIP_DIRS.intersection(rel.parts):
+            continue
+        dest = target / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+
+
+def materialize_preset(preset: EnvironmentPreset, target: Path) -> None:
+    """Write ``preset``'s starter tree into ``target``.
+
+    Vendored presets are copied from the tree bundled with this package, so they
+    always match the installed SDK. The rest download the repo's ``main`` archive
+    from ``codeload.github.com`` (not the rate-limited API) — no ``git`` required.
+    The archive's top-level ``<repo>-main/`` component is stripped and any entry
+    that would escape ``target`` is refused (path-traversal guard). Honors
+    ``GITHUB_TOKEN`` if set.
+    """
+    if preset.vendored:
+        _copy_vendored(preset, target)
+        return
+
     payload = _download_tarball(preset)
 
     target.mkdir(parents=True, exist_ok=True)
