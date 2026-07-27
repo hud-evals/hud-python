@@ -6,8 +6,17 @@ on:
     types: [published]
 
 jobs:
+  # Release gate: every vendored template must pass its suite against the
+  # built wheel (and its image must build) before the wheel is published.
+  template-gate:
+    if: ${{ github.event_name == 'release' }}
+    uses: ./.github/workflows/templates-integrity.yml
+    with:
+      source: wheel
+
   deploy:
     if: ${{ github.event_name == 'release' }}
+    needs: template-gate
     runs-on: ubuntu-latest
     environment: pypi
     steps:

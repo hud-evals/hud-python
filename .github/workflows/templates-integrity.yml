@@ -1,0 +1,54 @@
+name: Template integrity
+
+# Runs each vendored environments/ template against the SDK: install the
+# template's pinned dependencies, override hud with this checkout (or with
+# the built wheel when called as a release gate), run the template's test
+# suite, and build its Docker image. The nightly run catches drift between
+# releases; the release gate blocks publishing a wheel that breaks them.
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      source:
+        description: "Install hud from 'checkout' (editable) or the built 'wheel'"
+        type: string
+        default: checkout
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [coding, cua]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel
+        if: ${{ inputs.source == 'wheel' }}
+        run: uv build
+
+      - name: Install template
+        working-directory: environments/${{ matrix.template }}
+        run: |
+          uv sync --all-extras
+          if [ "${{ inputs.source || 'checkout' }}" = "wheel" ]; then
+            uv pip install ../../dist/hud-*.whl
+          else
+            uv pip install -e ../..
+          fi
+
+      - name: Run template tests
+        working-directory: environments/${{ matrix.template }}
+        run: uv run --no-sync pytest -q
+
+      - name: Build Docker image
+        working-directory: environments/${{ matrix.template }}
+        run: docker build -f Dockerfile.hud -t hud-template-${{ matrix.template }} .
