@@ -26,6 +26,33 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --with=".[dev]" pytest --cov --cov-report=''
 
+  templates:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [coding, cua]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install template with the SDK from this checkout
+        working-directory: environments/${{ matrix.template }}
+        run: |
+          uv sync --all-extras
+          uv pip install -e ../..
+
+      - name: Run template checks
+        working-directory: environments/${{ matrix.template }}
+        run: |
+          uv run --no-sync ruff format . --check
+          uv run --no-sync ruff check .
+          uv run --no-sync pytest -q
+
   lint-ruff:
     runs-on: ubuntu-latest
     steps:
