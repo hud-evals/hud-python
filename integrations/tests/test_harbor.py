@@ -36,6 +36,34 @@ def test_load_single_task_dir_maps_rows(single_task: Path) -> None:
     assert row.env == taskset.name
 
 
+def test_load_surfaces_task_toml_metadata_as_columns(single_task: Path) -> None:
+    row = load(single_task)["cancel-async-tasks"]
+
+    assert row.columns == {"category": "systems", "difficulty": "medium", "tags": ["bash", "linux"]}
+
+
+def test_load_leaves_columns_unset_without_metadata(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "bare", task_toml='version = "1.0"\n')
+
+    assert load(task)["bare"].columns is None
+
+
+def test_load_dataset_carries_per_task_metadata(dataset_multi_env: Path) -> None:
+    """Grouping rows by build context must not blur one task's metadata into another's."""
+    taskset = load(dataset_multi_env)
+
+    assert taskset["cancel-async-tasks"].columns == {
+        "category": "systems",
+        "difficulty": "medium",
+        "tags": ["bash", "linux"],
+    }
+    assert taskset["caffe-cifar-10"].columns == {
+        "category": "machine-learning",
+        "difficulty": "hard",
+        "tags": ["python", "ml"],
+    }
+
+
 def test_load_dataset_shares_one_env_per_build_context(dataset_same_env: Path) -> None:
     taskset = load(dataset_same_env)
 

@@ -122,8 +122,22 @@ def load(path: str | Path) -> Taskset:
     tasks: list[Task] = []
     for idx, group in enumerate(sorted_groups, start=1):
         env_name = base_name if len(sorted_groups) == 1 else f"{base_name}-g{idx}"
-        tasks.extend(Task(env=env_name, id=harbor_task.task_id) for harbor_task in group)
+        tasks.extend(
+            Task(env=env_name, id=harbor_task.task_id, columns=_columns(harbor_task.config))
+            for harbor_task in group
+        )
     return Taskset(base_name, tasks)
+
+
+def _columns(config: dict[str, Any]) -> dict[str, Any] | None:
+    """``task.toml``'s ``[metadata]`` table, surfaced as filterable task columns.
+
+    Harbor datasets carry their per-task ``category``/``difficulty``/``tags`` here, which is
+    what makes a converted dataset sliceable on the dashboard. ``None`` when absent, so a task
+    without metadata stays unset rather than gaining an empty column set.
+    """
+    metadata = config.get("metadata")
+    return dict(metadata) if isinstance(metadata, dict) and metadata else None
 
 
 def _slugify(name: str) -> str:
