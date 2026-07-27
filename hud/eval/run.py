@@ -76,6 +76,24 @@ def _prompt_message(item: Any) -> mcp_types.PromptMessage:
     return mcp_types.PromptMessage.model_validate({**item, "role": role})
 
 
+def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Read the start frame's per-episode ``bindings`` (capability name -> data).
+
+    Episode-scoped connection data the template published alongside the
+    prompt, keyed like the manifest's bindings so an agent looks its
+    capability's entry up by name. A malformed frame raises rather than
+    silently handing the agent an empty mapping.
+    """
+    raw = started.get("bindings")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or not all(isinstance(v, dict) for v in raw.values()):
+        raise TypeError(
+            f"task start frame 'bindings' must map capability name -> object, got {raw!r}"
+        )
+    return cast("dict[str, dict[str, Any]]", raw)
+
+
 @dataclass(slots=True)
 class Grade:
     """Structured result from grading one run."""
@@ -123,6 +141,11 @@ class Run:
         #: chat-style / multi-turn prompts. Agents consume the normalized
         #: views: :attr:`prompt_messages` / :attr:`prompt_text`.
         self.prompt: str | list[Any] | None = None
+        #: Per-episode binding data by capability name, from the start frame's
+        #: ``bindings``: connection details that exist only for this episode —
+        #: a robot slot token, a per-episode url — refining the manifest's
+        #: env-lifetime bindings. Empty when the env published none.
+        self.bindings: dict[str, dict[str, Any]] = {}
         #: The structured grading result (all-default until graded on exit).
         self.grade = Grade()
         self.trace = Trace()
@@ -202,6 +225,7 @@ class Run:
         started_at = now_iso()
         started = await self.client.start_task(self._task_id, self._args)
         self.prompt = started.get("prompt")
+        self.bindings = _episode_bindings(started)
         self.record(
             Step(
                 source="task",

@@ -133,9 +133,10 @@ GPU efficiency. Each copy is a **slot**, and a vectorized sim hands back a slot 
 untouched.
 
 A single-env sim has only one slot, so the template may omit the token, as above. A vectorized
-sim (`num_envs > 1`) must thread it through so each session grades its own slot - yield
-`{"prompt": ep["prompt"], "robot": {"token": ep["token"]}}` and call `sim.result(token=ep["token"])`;
-see [vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
+sim (`num_envs > 1`) must thread it through so each session grades its own slot - publish it as
+this capability's per-episode binding, `{"prompt": ep["prompt"], "bindings": {"robot": {"token":
+ep["token"]}}}`, and call `sim.result(token=ep["token"])`; see
+[vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
 
 You can find gym-shaped environments in various places - [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub),
 including Isaac Lab Arena environments, or environments built into LeRobot directly.
@@ -190,7 +191,7 @@ sim = env.gym(make_env, num_envs=4, fps=30)
 async def episode(seed: int = 0):
     ep = await sim.reset(seed=seed)
     # Vectorized: token pins this rollout's slot.
-    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield {"prompt": ep["prompt"], "bindings": {"robot": {"token": ep["token"]}}}
     yield await sim.result(token=ep["token"])
 ```
 </Accordion>
@@ -333,7 +334,7 @@ async def _down():
 @env.template()
 async def pick_and_place(task_id: str, seed: int = 0):
     ep = await endpoint.reset(task_id=task_id, seed=seed)  # {prompt, token}
-    yield {"prompt": ep["prompt"], "robot": {"token": ep["token"]}}
+    yield {"prompt": ep["prompt"], "bindings": {"robot": {"token": ep["token"]}}}
     yield await endpoint.result(token=ep["token"])  # this slot's {score, success, total_reward}
 ```
 

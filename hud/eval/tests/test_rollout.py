@@ -167,6 +167,46 @@ async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     assert run.runtime.startswith("tcp://127.0.0.1:")
 
 
+def _bindings_env(published: Any) -> Environment:
+    """An env whose task publishes per-episode binding data alongside the prompt."""
+    env = Environment("slots")
+
+    @env.template()
+    async def claim():
+        yield {"prompt": "go", "bindings": published}
+        yield 1.0
+
+    return env
+
+
+async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
+    seen: dict[str, dict[str, Any]] = {}
+
+    class _Claiming(Agent):
+        async def __call__(self, run: Any) -> None:
+            seen.update(run.bindings)
+
+    env = _bindings_env({"robot": {"token": "slot-2"}})
+    run = await rollout(
+        Task(env="slots", id="claim"), _Claiming(), runtime=lambda _task: _local(env)
+    )
+
+    # Episode-scoped connection data reaches the agent by capability name,
+    # without reading it back off the recorded setup step.
+    assert seen == {"robot": {"token": "slot-2"}}
+    assert run.bindings == {"robot": {"token": "slot-2"}}
+
+
+async def test_a_malformed_bindings_frame_fails_the_rollout_loudly() -> None:
+    env = _bindings_env({"robot": "slot-2"})  # capability data must be an object
+    run = await rollout(
+        Task(env="slots", id="claim"), _FnAgent(lambda _p: ""), runtime=lambda _task: _local(env)
+    )
+
+    assert run.trace.status == "error"
+    assert "bindings" in str(run.trace.steps[-1].error)
+
+
 async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     report = workspace / "REPORT.md"

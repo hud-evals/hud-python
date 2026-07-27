@@ -14,7 +14,7 @@ match the env natively can set ``adapter = None`` (raw pass-through).
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -64,26 +64,12 @@ class RobotAgent(Agent):
         if not isinstance(prompt, str):
             raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
 
-        # Per-episode slot token from the tasks.start reply (on the setup step).
+        cap = run.client.binding(self.robot_protocol)
+        # Per-episode slot token the template published for this capability.
         # Single-env templates may omit it — a None claim binds the sole claimed
         # slot; vectorized bridges reject the ambiguity at connect.
-        setup = next(
-            (
-                step.task_call
-                for step in run.trace.steps
-                if step.task_call is not None and step.task_call.phase == "setup"
-            ),
-            None,
-        )
-        started = setup.result if setup is not None else None
-        robot_info = started.get("robot") if isinstance(started, dict) else None
-        token: str | None = None
-        if isinstance(robot_info, dict):
-            raw_token = cast("dict[str, Any]", robot_info).get("token")
-            if isinstance(raw_token, str):
-                token = raw_token
-
-        robot = await RobotClient.connect(run.client.binding(self.robot_protocol), token=token)
+        token = run.bindings.get(cap.name, {}).get("token")
+        robot = await RobotClient.connect(cap, token=token)
         try:
             action_space, obs_space = robot.spaces()
             if self.adapter is not None:

@@ -26,8 +26,9 @@ bridge's ``robot`` WebSocket, and templates drive episodes through the handle::
 
 A single-env sim has one slot, so the template may omit the token as above. A
 vectorized sim (``num_envs > 1``) must thread it through so each session grades
-its own slot: ``yield {"prompt": ..., "robot": {"token": ep["token"]}}`` and
-``sim.result(token=ep["token"])``.
+its own slot: publish it as this capability's per-episode binding,
+``yield {"prompt": ..., "bindings": {"robot": {"token": ep["token"]}}}`` (the
+agent reads it off ``run.bindings``), and ``sim.result(token=ep["token"])``.
 """
 
 from __future__ import annotations
