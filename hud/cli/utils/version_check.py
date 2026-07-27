@@ -15,7 +15,6 @@ but is skipped for help and version commands to keep them fast.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
@@ -28,6 +27,7 @@ import httpx
 from packaging import version
 from rich.markup import escape
 
+from hud import __version__
 from hud.utils.hud_console import HUDConsole
 
 # Logger for version checking
@@ -59,16 +59,6 @@ def _is_in_virtualenv() -> bool:
     if sys.prefix != sys.base_prefix:
         return True
     return os.environ.get("VIRTUAL_ENV") is not None
-
-
-def _get_current_version() -> str:
-    """Get the currently installed version of hud."""
-    try:
-        from hud import __version__
-
-        return __version__
-    except ImportError:
-        return "unknown"
 
 
 def _fetch_latest_version() -> str | None:
@@ -153,9 +143,6 @@ def _compare_versions(current: str, latest: str) -> bool:
     Returns:
         True if latest is newer than current, False otherwise.
     """
-    if current == "unknown":
-        return False
-
     try:
         current_v = version.parse(current)
         latest_v = version.parse(latest)
@@ -178,10 +165,7 @@ def check_for_updates() -> VersionInfo | None:
     if os.environ.get("CI") or os.environ.get("HUD_SKIP_VERSION_CHECK"):
         return None
 
-    # Get current version first
-    current = _get_current_version()
-    if current == "unknown":
-        return None
+    current = __version__
 
     # Try to load from cache
     cached_info = _load_cache()
@@ -251,19 +235,3 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
     except Exception:  # noqa: S110
         # Never let version checking disrupt the user's workflow
         pass
-
-
-def force_version_check() -> VersionInfo | None:
-    """Force a version check, bypassing the cache.
-
-    This is useful for explicit version checks or testing.
-
-    Returns:
-        VersionInfo if check succeeds, None otherwise.
-    """
-    # Clear the cache to force a fresh check
-    if VERSION_CACHE_FILE.exists():
-        with contextlib.suppress(Exception):
-            VERSION_CACHE_FILE.unlink()
-
-    return check_for_updates()

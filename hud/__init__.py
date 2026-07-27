@@ -32,6 +32,7 @@ from .eval import (
 from .telemetry.instrument import instrument
 from .train import TrainingClient
 from .types import Trace
+from .version import __version__
 
 _install_v5_compat()
 
@@ -56,11 +57,7 @@ __all__ = [
     "Taskset",
     "Trace",
     "TrainingClient",
+    "__version__",
     "connect",
     "instrument",
 ]
-
-try:
-    from .version import __version__
-except ImportError:
-    __version__ = "unknown"

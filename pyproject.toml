@@ -1,6 +1,6 @@
 [project]
 name = "hud"
-version = "0.6.12"
+dynamic = ["version"]
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -52,6 +52,9 @@ hud = "hud.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "hud/version.py"
 
 [tool.hatch.build]
 exclude = [

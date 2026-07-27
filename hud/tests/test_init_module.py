@@ -6,13 +6,10 @@ from __future__ import annotations
 class TestInitModule:
     """Test the hud module initialization."""
 
-    def test_version_import_error(self):
-        """Test version fallback when import fails."""
-        # This test is complex because we need to test ImportError handling
-        # Let's simplify by checking the __all__ export instead
+    def test_version_exposed(self):
+        """Test that the package exposes its version."""
         import hud
 
-        # Check that __version__ is defined (either from version.py or as "unknown")
         assert hasattr(hud, "__version__")
         assert isinstance(hud.__version__, str)
 
@@ -41,6 +38,7 @@ class TestInitModule:
             "Taskset",
             "Trace",
             "TrainingClient",
+            "__version__",
             "connect",
             "instrument",
         ]

@@ -20,11 +20,10 @@ if TYPE_CHECKING:
 def test_compare_versions() -> None:
     assert vc._compare_versions("1.0.0", "1.0.1") is True
     assert vc._compare_versions("1.0.1", "1.0.0") is False
-    assert vc._compare_versions("unknown", "2.0.0") is False
+    assert vc._compare_versions("not-a-version", "2.0.0") is False
 
 
-def test_current_version_and_virtualenv_are_typed() -> None:
-    assert isinstance(vc._get_current_version(), str)
+def test_virtualenv_detection_is_typed() -> None:
     assert isinstance(vc._is_in_virtualenv(), bool)
 
 
@@ -83,7 +82,7 @@ def test_check_for_updates_fresh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     _point_cache(monkeypatch, tmp_path)
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("HUD_SKIP_VERSION_CHECK", raising=False)
-    monkeypatch.setattr(vc, "_get_current_version", lambda: "1.0.0")
+    monkeypatch.setattr(vc, "__version__", "1.0.0")
     monkeypatch.setattr(vc, "_fetch_latest_version", lambda: "2.0.0")
 
     info = vc.check_for_updates()
@@ -108,14 +107,3 @@ def test_display_update_prompt_outdated(monkeypatch: pytest.MonkeyPatch) -> None
     )
     # Should render without raising.
     vc.display_update_prompt(HUDConsole())
-
-
-def test_force_version_check_clears_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _point_cache(monkeypatch, tmp_path)
-    vc._save_cache(VersionInfo("1.1.0", "1.0.0", True, time.time()))
-    assert vc.VERSION_CACHE_FILE.exists()
-    monkeypatch.setattr(vc, "check_for_updates", lambda: None)
-
-    vc.force_version_check()
-
-    assert not vc.VERSION_CACHE_FILE.exists()

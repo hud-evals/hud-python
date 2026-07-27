@@ -92,12 +92,9 @@ def set_command(
 @app.command()
 def version() -> None:
     """Show HUD CLI version."""
-    try:
-        from hud import __version__
+    from hud import __version__  # lazy: keeps CLI startup off the full package import
 
-        console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
-    except ImportError:
-        console.print("HUD CLI version: [cyan]unknown[/cyan]")
+    console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
 
 
 # Client subcommand group (drive a running env control channel from the shell)
@@ -136,12 +133,9 @@ def main() -> None:
         display_update_prompt()
 
     if "--version" in sys.argv:
-        try:
-            from hud import __version__
+        from hud import __version__  # lazy: keeps CLI startup off the full package import
 
-            console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
-        except ImportError:
-            console.print("HUD CLI version: [cyan]unknown[/cyan]")
+        console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
         return
 
     try:
