@@ -8,7 +8,6 @@ MCP-server hot-reload / Docker / inspector mode is no longer supported.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 import typer
@@ -19,28 +18,15 @@ from hud.utils.hud_console import HUDConsole
 hud_console = HUDConsole()
 
 
-def _load_environment(module: str | None) -> Any:
-    """Load a v6 :class:`~hud.environment.Environment` from a dev target.
-
-    Accepts ``None`` (defaults to ``env.py``), ``module``, ``module:attr``, a
-    ``path/to/env.py``, or a directory. Returns the ``Environment`` instance,
-    or ``None`` if the target isn't a v6 environment.
-    """
+def _load_environment(module: str | None, factory_args: dict[str, str]) -> Any:
+    """Resolve the serve target (``target[:name]``), printing failures."""
     from hud.environment import load_environment
 
-    target, _, attr = (module or "env").partition(":")
-    path = Path(target)
-    if path.suffix != ".py" and not path.is_dir():
-        path = Path(f"{target}.py")
-    if not path.exists():
-        return None
+    target, _, name = (module or "env").partition(":")
     try:
-        return load_environment(path, name=attr or None)
-    except ValueError as exc:
-        hud_console.error(f"{exc} (select one with 'module:attr')")
-        return None
+        return load_environment(target, name=name or None, args=factory_args or None)
     except Exception as exc:
-        hud_console.error(f"Failed to import {path}: {exc}")
+        hud_console.error(str(exc))
         return None
 
 
@@ -71,13 +57,17 @@ def _serve_environment(env: Any, host: str, port: int) -> None:
 def serve_command(
     module: str | None = typer.Argument(
         None,
-        help="Module exposing an Environment (e.g. 'env:env', 'env', or 'env.py').",
+        help="An env source ('env:env', 'env', 'env.py') or a factory "
+        "('pkg.mod:make_env' with --arg).",
     ),
     port: int = typer.Option(
         8765, "--port", "-p", help="Port to serve the environment control channel on."
     ),
     host: str = typer.Option(
         "127.0.0.1", "--host", help="Interface to bind (use 0.0.0.0 inside containers)."
+    ),
+    arg: list[str] | None = typer.Option(  # noqa: B008
+        None, "--arg", help="key=value passed to a factory target (repeatable)."
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs."),
 ) -> None:
@@ -87,6 +77,7 @@ def serve_command(
         hud serve                # auto-detect env.py
         hud serve env:env        # explicit module:attribute
         hud serve env.py -p 9000 # serve on a specific port
+        hud serve pkg.mod:make_env --arg name=demo  # call a factory
 
     In v6, ``hud serve`` serves a :class:`hud.environment.Environment`. The old
     MCP-server hot-reload / Docker dev mode is no longer supported.[/not dim]
@@ -96,7 +87,11 @@ def serve_command(
 
         logging.basicConfig(level=logging.INFO)
 
-    env = _load_environment(module)
+    factory_args: dict[str, str] = {}
+    for pair in arg or []:
+        key, _, value = pair.partition("=")
+        factory_args[key] = value
+    env = _load_environment(module, factory_args)
     if env is None:
         hud_console.error(
             f"No HUD Environment found for {module or 'env.py'}.",
