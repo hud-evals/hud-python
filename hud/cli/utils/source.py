@@ -7,26 +7,18 @@ import hashlib
 import json
 import logging
 import os
-import re
 import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
+from hud.utils.naming import normalize_environment_name
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 LOGGER = logging.getLogger(__name__)
-
-
-def normalize_environment_name(name: str, *, default: str = "environment") -> str:
-    """Slugify *name* into a valid environment name (lowercase, ``[a-z0-9-]``)."""
-    normalized = name.strip().lower()
-    normalized = normalized.replace(" ", "-").replace("_", "-")
-    normalized = re.sub(r"[^a-z0-9-]", "", normalized)
-    normalized = re.sub(r"-+", "-", normalized)
-    return normalized.strip("-") or default
 
 
 @dataclass(frozen=True)
