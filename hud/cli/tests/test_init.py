@@ -8,6 +8,7 @@ import pytest
 import typer
 
 from hud.cli import init as init_module
+from hud.cli import presets as presets_module
 from hud.cli.init import init_command
 from hud.cli.presets import EnvironmentPreset
 
@@ -39,10 +40,8 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
         "Dockerfile.hud",
     }
 
-    env_py = (target / "env.py").read_text()
-    assert 'Environment(name="my_cool_env")' in env_py
+    assert 'Environment(name="blank")' in (target / "env.py").read_text()
     assert (target / "tasks.py").read_text().startswith('"""')
-    assert 'name = "my-cool-env"' in (target / "pyproject.toml").read_text()
 
     pyproject = (target / "pyproject.toml").read_text()
     assert "package = false" in pyproject
@@ -53,14 +52,14 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
     assert '"dev"' not in dockerfile
 
 
-def test_init_blank_preset_writes_local_scaffold_without_network(
+def test_init_blank_preset_scaffolds_without_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 'blank' is the bundled local scaffold: it must never hit the network.
-    def _boom(*args: object, **kwargs: object) -> None:
-        raise AssertionError("materialize_preset should not be called for blank")
+    # 'blank' is bundled with the SDK: it must never hit the network.
+    def _no_network(preset: object) -> bytes:
+        raise AssertionError("the blank starter must not be downloaded")
 
-    monkeypatch.setattr(init_module, "materialize_preset", _boom)
+    monkeypatch.setattr(presets_module, "_download_tarball", _no_network)
 
     init_command(name="berry", directory=str(tmp_path), force=False, preset="blank")
 
@@ -71,7 +70,23 @@ def test_init_blank_preset_writes_local_scaffold_without_network(
         "tasks.py",
         "Dockerfile.hud",
     }
-    assert 'Environment(name="berry")' in (target / "env.py").read_text()
+
+
+def test_init_bundled_preset_scaffolds_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _no_network(preset: object) -> bytes:
+        raise AssertionError("a bundled starter must not be downloaded")
+
+    monkeypatch.setattr(presets_module, "_download_tarball", _no_network)
+
+    init_command(name=None, directory=str(tmp_path), force=False, preset="cua")
+
+    target = tmp_path / "cua-template"
+    assert (target / "env.py").exists()
+    assert (target / "tasks.py").exists()
+    assert (target / "Dockerfile.hud").exists()
+    assert (target / "README.md").exists()
 
 
 def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
