@@ -61,7 +61,9 @@ hud/rl/checkpoints_test/
 
 docs/internal
 
-environments/
+environments/*
+!environments/coding/
+!environments/cua/
 
 experiments/
 .memories/

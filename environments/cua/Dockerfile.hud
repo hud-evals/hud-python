@@ -1,0 +1,133 @@
+# syntax=docker/dockerfile:1
+
+# =============================================================================
+# Stage 1: Desktop environment setup
+# =============================================================================
+FROM ubuntu:24.04 AS setup
+
+ENV LANG='en_US.UTF-8'
+ENV LANGUAGE='en_US.UTF-8'
+ENV LC_ALL='en_US.UTF-8'
+
+# Update and install core dependencies (desktop stack + development tools)
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends \
+  bash \
+  build-essential \
+  ca-certificates \
+  curl \
+  dbus-x11 \
+  ffmpeg \
+  git \
+  imagemagick \
+  libpq5 \
+  locales \
+  net-tools \
+  novnc \
+  openssl \
+  pm-utils \
+  psmisc \
+  python-is-python3 \
+  python3 \
+  python3-dev \
+  python3-pip \
+  python3-tk \
+  python3-venv \
+  python3-wheel \
+  scrot \
+  software-properties-common \
+  sqlite3 \
+  sudo \
+  unzip \
+  vim \
+  wget \
+  x11vnc \
+  xauth \
+  xdotool \
+  xfce4 \
+  xfce4-terminal \
+  xfonts-base \
+  xvfb \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN update-ca-certificates
+
+# Install real Chromium from PPA (Ubuntu 24.04 only ships snap stubs that don't work in Docker)
+RUN add-apt-repository ppa:xtradeb/apps -y \
+  && apt-get update -y \
+  && apt-get install -y chromium \
+  && rm -rf /var/lib/apt/lists/*
+
+# Remove snap stubs that don't work in Docker
+RUN apt-get purge -y firefox chromium-browser 2>/dev/null; true
+
+# Configure Chromium for Docker: disable sandbox, set policies
+RUN echo "export CHROMIUM_FLAGS=--no-sandbox" >> /etc/chromium.d/default-flags
+RUN mkdir -p /etc/chromium/policies/managed && \
+    echo '{"DnsOverHttpsMode":"off","DefaultPopupsSetting":1,"SafeBrowsingProtectionLevel":1}' \
+    > /etc/chromium/policies/managed/policy.json
+
+# Set Chromium as default browser for XFCE and XDG
+RUN mkdir -p /etc/xdg/xfce4 && \
+    printf 'WebBrowser=chromium\n' > /etc/xdg/xfce4/helpers.rc && \
+    mkdir -p /etc/xdg && \
+    printf '[Default Applications]\ntext/html=chromium.desktop\nx-scheme-handler/http=chromium.desktop\nx-scheme-handler/https=chromium.desktop\n' \
+    > /etc/xdg/mimeapps.list
+
+ENV HOME=/home/ubuntu \
+    DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:1.0 \
+    COMPUTER_WIDTH_PX=1280 \
+    COMPUTER_HEIGHT_PX=800
+
+EXPOSE 6080
+
+# Suppress AT-SPI errors in Xfce
+ENV NO_AT_BRIDGE=1
+
+# Remove XFCE plugins that crash in Docker and cause popup dialogs
+RUN apt-get purge -y xfce4-notifyd xfce4-statusnotifier-plugin 2>/dev/null; \
+    rm -f /usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libsystray.so \
+          /usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libstatusnotifier.so \
+          /usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libnotification-plugin.so \
+    2>/dev/null; true
+
+# Create .cache and .config directories owned by ubuntu
+RUN mkdir -p /home/ubuntu/.cache && chown -R ubuntu:ubuntu /home/ubuntu/.cache
+RUN mkdir -p /home/ubuntu/.config && chown -R ubuntu:ubuntu /home/ubuntu/.config
+
+WORKDIR /
+
+# =============================================================================
+# Stage 2: HUD Environment Setup
+# =============================================================================
+FROM setup AS runtime
+
+# Install uv, then install exactly what uv.lock pins (deps + this env, editable), no dev/test.
+RUN pip install uv --break-system-packages
+WORKDIR /mcp_server
+ENV RUST_LOG=warn
+COPY ./pyproject.toml ./uv.lock ./env.py ./tasks.py /mcp_server/
+RUN uv sync --frozen --no-dev || uv sync --no-dev
+
+# Resolution environment variables — must be consistent across all settings
+ENV COMPUTER_WIDTH_PX=1280
+ENV COMPUTER_HEIGHT_PX=800
+ENV DISPLAY_WIDTH=1280
+ENV DISPLAY_HEIGHT=800
+ENV DISPLAY_NUM=1
+
+# Screenshot and downloads directories
+RUN mkdir -p /home/ubuntu/screenshots && chmod 777 /home/ubuntu/screenshots
+ENV SCREENSHOT_DIR=/home/ubuntu/screenshots
+RUN mkdir -p /home/ubuntu/Downloads && chmod 777 /home/ubuntu/Downloads
+
+# Security (uid wall): the agent drives the desktop as uid 1000 - the on-screen xfce terminal
+# runs as ubuntu - so hide the grading logic from it. The control-channel server runs as root
+# and reads these via the editable install; uid 1000 cannot read the 0700 source.
+RUN chmod 700 /mcp_server/env.py /mcp_server/tasks.py
+
+# Serve the v6 control channel; @env.initialize launches the desktop (as ubuntu) + publishes the
+# rfb (VNC) screen capability. No init system - one launch path for local `hud eval` and the image.
+EXPOSE 8765
+CMD ["uv", "run", "--no-sync", "hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
