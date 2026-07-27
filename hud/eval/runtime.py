@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
+from hud.utils.docker import docker as _docker
 from hud.utils.platform import PlatformClient
 from hud.utils.process import ProcessGroup, create_process_group_exec
 
@@ -155,6 +156,18 @@ def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
     if image_uri.startswith(modal_uri_prefix):
         return modal.Image.from_id(image_uri.removeprefix(modal_uri_prefix))
     return modal.Image.from_registry(image_uri)
+
+
+#: What a container needs to sandbox *inside itself*: bubblewrap's nested
+#: user/mount/proc namespaces are blocked by Docker's default seccomp profile
+#: and masked ``/proc``. Off by default — an env that does not sandbox
+#: internally keeps full container isolation.
+NESTED_SANDBOX_SECURITY_ARGS = (
+    "--security-opt",
+    "seccomp=unconfined",
+    "--security-opt",
+    "systempaths=unconfined",
+)
 
 
 class LocalRuntime:
@@ -448,9 +461,15 @@ class DockerRuntime:
         port: int = 8765,
         run_args: Sequence[str] = (),
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+        nested_sandbox: bool = False,
     ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
+        #: Whether the image sandboxes *inside* the container (a workspace
+        #: using bubblewrap). Relaxing seccomp and unmasking /proc is what
+        #: nested namespaces need, and what an image that never sandboxes
+        #: internally should not be given.
+        self.nested_sandbox = nested_sandbox
         config = RuntimeConfig(image=image) if image is not None else RuntimeConfig()
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
@@ -480,6 +499,7 @@ class DockerRuntime:
         out, _ = await _docker(
             "run",
             "--detach",
+            *(NESTED_SANDBOX_SECURITY_ARGS if self.nested_sandbox else ()),
             *self.run_args,
             *resource_args,
             "--publish",
@@ -792,21 +812,6 @@ class DaytonaRuntime:
                     await daytona.delete(sandbox)
 
 
-async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
-    """Run a docker CLI command and return decoded ``(stdout, stderr)``."""
-    proc = await asyncio.create_subprocess_exec(
-        "docker",
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, err = await proc.communicate()
-    if check and proc.returncode != 0:
-        detail = err.decode("utf-8", "replace").strip() or out.decode("utf-8", "replace").strip()
-        raise RuntimeError(f"docker {' '.join(args)} failed ({proc.returncode}): {detail}")
-    return out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
-
-
 @asynccontextmanager
 async def _local(env: Environment, *, ready_timeout: float | None = None) -> AsyncIterator[Runtime]:
     """Substrate-side serving: a live env owned by *this* process, as a runtime.
@@ -900,6 +905,7 @@ class HUDRuntime:
     def __init__(self, *, run_timeout: float = 3600.0, runtime_url: str | None = None) -> None:
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
+        self._warned_unsupported_config = False
 
     async def run(
         self,
@@ -928,7 +934,30 @@ class HUDRuntime:
         from hud.settings import settings as sdk_settings
 
         if task.runtime_config is not None:
-            raise ValueError("HUDRuntime does not support task runtime_config yet")
+            # The lease resolves the env by name: a stamped image is
+            # provenance and rides along. Declared cpu/memory are best-effort
+            # on the platform's substrate (warned once, not fatal — loaders
+            # stamp them on every row), but a GPU or explicit limits change
+            # what the task *is*; running without them would grade a
+            # different environment than declared.
+            resources = task.runtime_config.resources
+            if (resources is not None and resources.gpu is not None) or (
+                task.runtime_config.limits is not None
+                and task.runtime_config.limits.model_dump(exclude_none=True)
+            ):
+                raise ValueError(
+                    "HUDRuntime cannot honor this task's declared GPU/limits on an "
+                    "already-deployed env; run it on a placement that provisions them"
+                )
+            softly_ignored = task.runtime_config.model_dump(exclude_none=True, exclude={"image"})
+            if softly_ignored and not self._warned_unsupported_config:
+                self._warned_unsupported_config = True
+                logger.warning(
+                    "HUDRuntime cannot honor task runtime_config %s on an "
+                    "already-deployed env; rollouts proceed on the platform's "
+                    "defaults",
+                    sorted(softly_ignored),
+                )
         api_key = sdk_settings.api_key
         if not api_key:
             raise RuntimeError("HUD runtime tunnel requires HUD_API_KEY")

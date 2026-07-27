@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -30,6 +31,58 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 _COMMAND_TIMEOUT = 3600.0
 
 # Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
+#: bwrap's usability is a property of the host/container, so probe once per
+#: process: an installed bwrap that cannot create namespaces (a container
+#: whose seccomp profile blocks unprivileged userns) would otherwise fail
+#: every session instead of falling back.
+_bwrap_usable: bool | None = None
+
+
+def usable_bwrap() -> str | None:
+    """``bwrap``'s path if it can actually create namespaces here, else None."""
+    global _bwrap_usable
+    path = shutil.which("bwrap")
+    if path is None:
+        return None
+    probe_binary = shutil.which("true")
+    if probe_binary is None:
+        return None
+    if _bwrap_usable is None:
+        try:
+            probe = subprocess.run(
+                # Mirrors a real session's namespace setup — mounting proc is
+                # what an unprivileged container blocks first. The whole root
+                # is bound so the probed binary keeps its loader; a narrower
+                # mount set fails for the wrong reason.
+                [
+                    path,
+                    "--unshare-user-try",
+                    "--unshare-pid",
+                    "--ro-bind",
+                    "/",
+                    "/",
+                    "--proc",
+                    "/proc",
+                    "--",
+                    probe_binary,
+                ],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+            _bwrap_usable = probe.returncode == 0
+            if not _bwrap_usable:
+                LOGGER.warning(
+                    "bwrap is installed but cannot create namespaces (%s); sessions will "
+                    "run WITHOUT isolation. Allow unprivileged user namespaces (e.g. "
+                    "docker --security-opt seccomp=unconfined) to enable it.",
+                    probe.stderr.decode("utf-8", "replace").strip()[:120],
+                )
+        except (OSError, subprocess.SubprocessError):
+            _bwrap_usable = False
+    return path if _bwrap_usable else None
+
+
 _warned_no_bwrap = False
 
 
@@ -125,6 +178,7 @@ class Workspace:
         authorized_client_keys: list[Path] | None = None,
         track_files: bool = False,
         shell_uid: int | None = None,
+        require_isolation: bool = False,
     ) -> None:
         self.root: Path = Path(root).resolve()
         # Per-instance credential dir, materialized lazily (see _credentials_dir).
@@ -142,7 +196,7 @@ class Workspace:
         self._system_mounts: tuple[Mount, ...] = tuple(
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
         )
-        self._bwrap = shutil.which("bwrap")
+        self._bwrap = usable_bwrap()
         # Without bwrap there is no `/workspace` mount — the sandbox *is* the real
         # directory, so address it by its real path. Otherwise `cd /workspace`
         # lands in a phantom dir and the editor/bash disagree on where files are.
@@ -154,6 +208,13 @@ class Workspace:
         self._ssh_port = port
         self._ssh_user = user
         self._shell_uid = shell_uid
+        if require_isolation and self._bwrap is None:
+            raise RuntimeError(
+                "isolation was required but bwrap cannot sandbox here: install "
+                "bubblewrap and allow unprivileged user namespaces (e.g. run the "
+                "container with --security-opt seccomp=unconfined). Refusing to "
+                "serve sessions that would silently run unisolated."
+            )
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
@@ -207,9 +268,10 @@ class Workspace:
                 "shell_uid is set and the server is root, but privileges cannot be dropped "
                 "(setpriv is required on Linux). Refusing to serve agent shells as root."
             )
-        if self._bwrap is None and sys.platform != "win32":
+        if self._bwrap is None and sys.platform != "win32" and shutil.which("bwrap") is None:
             # Once per process: repeating this for every Workspace is noise, and
-            # on macOS (no bubblewrap exists) it is an expected state.
+            # on macOS (no bubblewrap exists) it is an expected state. The
+            # present-but-unusable case is diagnosed by usable_bwrap itself.
             global _warned_no_bwrap
             if not _warned_no_bwrap:
                 _warned_no_bwrap = True

@@ -242,3 +242,29 @@ def test_credentials_dir_is_private_and_unpredictable(tmp_path: Path) -> None:
     # mkdtemp yields 0700 and a fresh name each call (no shared parent to hijack).
     assert (creds.stat().st_mode & 0o777) == 0o700
     assert ws._credentials_dir() == creds  # cached per instance
+
+
+def test_usable_bwrap_reports_unusable_installs(monkeypatch) -> None:
+    """An installed bwrap that cannot create namespaces must not be used."""
+    import subprocess
+
+    from hud.environment import workspace as ws
+
+    monkeypatch.setattr(ws, "_bwrap_usable", None)
+    monkeypatch.setattr(ws.shutil, "which", lambda _name: "/usr/bin/bwrap")
+    monkeypatch.setattr(
+        ws.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 1, b"", b"No permissions"),
+    )
+
+    assert ws.usable_bwrap() is None
+
+
+def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> None:
+    from hud.environment import workspace as ws
+
+    monkeypatch.setattr(ws, "usable_bwrap", lambda: None)
+
+    with pytest.raises(RuntimeError, match="isolation was required"):
+        ws.Workspace(tmp_path, require_isolation=True)

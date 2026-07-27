@@ -765,3 +765,18 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
     calls = await _docker_calls(docker_log)
     assert "logs --tail 40 cid-42" in calls
     assert calls[-1] == "rm --force cid-42"  # cleanup still runs on failure
+
+
+async def test_nested_sandbox_relaxes_only_when_asked(
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Images that sandbox inside themselves need nested namespaces; images
+    that do not keep Docker's full containment."""
+    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
+
+    async with DockerRuntime("img:tag", nested_sandbox=True)(_row()):
+        pass
+
+    calls = await _docker_calls(docker_log)
+    assert "seccomp=unconfined" in calls[0]
+    assert "systempaths=unconfined" in calls[0]
