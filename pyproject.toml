@@ -57,6 +57,7 @@ build-backend = "hatchling.build"
 exclude = [
     "docs/",
     "cookbooks/",
+    "environments/",
     "integrations/",
     "hud-python/",
     "**/checkpoints/",

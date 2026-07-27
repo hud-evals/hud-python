@@ -1,0 +1,8 @@
+# The build context is this directory; keep it to what the images COPY, plus
+# the Dockerfile itself (remote builders read it from the context).
+*
+!Dockerfile.hud
+!env.py
+!coding
+!instances
+**/__pycache__
