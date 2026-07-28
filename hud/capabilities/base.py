@@ -79,6 +79,7 @@ class Capability:
         client_key_path: str | os.PathLike[str] | None = None,
         shell: str | None = None,
         cwd: str | None = None,
+        cwd_alias: str | None = None,
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
@@ -90,6 +91,9 @@ class Capability:
         from ``sys.platform`` at construction time. Agents read this to
         format commands correctly. ``cwd`` is the absolute path sessions
         start in (the served workspace); clients anchor file paths to it.
+        ``cwd_alias`` is a second spelling of that same directory (a path
+        that reaches it through a symlink), which clients treat as already
+        anchored rather than as a workspace-relative address.
         """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
@@ -101,6 +105,8 @@ class Capability:
             params["client_key_path"] = os.fspath(client_key_path)
         if cwd is not None:
             params["cwd"] = cwd
+        if cwd_alias is not None:
+            params["cwd_alias"] = cwd_alias
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
 
     @classmethod
