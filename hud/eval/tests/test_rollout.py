@@ -425,6 +425,21 @@ async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
     assert run.runtime is None
 
 
+async def test_pre_launch_failure_keeps_the_notes_the_provider_attached() -> None:
+    # A provider attaches what only it can see — the env's output inside a remote
+    # sandbox — as a note, and str(exc) drops those on the way to the receipt.
+    @asynccontextmanager
+    async def broken_provider(task: TaskRow) -> AsyncIterator[Runtime]:
+        exc = EOFError("env closed connection during 'hello'")
+        exc.add_note("env output in sandbox ae964e25:\nModuleNotFoundError: No module named 'bugs'")
+        raise exc
+        yield  # pragma: no cover
+
+    run = await rollout(_add_task(1, 1), _FnAgent(_solve_add), runtime=broken_provider)
+
+    assert "No module named 'bugs'" in (run.trace.error or "")
+
+
 async def test_provider_is_called_with_the_task_row_being_placed(env_file: Path) -> None:
     placed: list[str] = []
 

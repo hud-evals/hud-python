@@ -388,13 +388,14 @@ async def rollout(
             driver.add_done_callback(_consume_task_result)
             raise
         except Exception as exc:
+            detail = _detail(exc)
             if run is None:
-                logger.warning("rollout failed before launch (%s): %s", _phase, exc)
-                run = Run.failed(f"[{_phase}] {exc}")
+                logger.warning("rollout failed before launch (%s): %s", _phase, detail)
+                run = Run.failed(f"[{_phase}] {detail}")
             else:
-                logger.warning("rollout failed mid-run (%s): %s", _phase, exc)
+                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
-                run.record(Step(source="system", error=f"[{_phase}] {exc}"))
+                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
         assert run is not None  # the body bound it, or the handler synthesized it
         run.trace.trace_id = trace_id
         run.job_id = job_id
@@ -402,6 +403,16 @@ async def rollout(
         run.slug = task.slug or task.default_slug()
         await trace_exit(run)
     return run
+
+
+def _detail(exc: BaseException) -> str:
+    """The failure text plus any notes attached to it.
+
+    Providers attach what only they can see — a sandbox's env output on a failed
+    handshake — as notes. ``str(exc)`` drops them, so a rollout that died at
+    import would report ``closed connection during 'hello'`` and nothing else.
+    """
+    return "\n".join([str(exc), *getattr(exc, "__notes__", [])])
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

@@ -11,6 +11,7 @@ string (the service resolves recorded tokens + reward) or a :class:`hud.Run`
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
         [list[DatumTensors], list["torch.Tensor"]],
         tuple["torch.Tensor", dict[str, float]],
     ]
+
+logger = logging.getLogger("hud.train")
 
 
 def _run_to_input(run: Run) -> TrainInput:
@@ -106,6 +109,27 @@ def _check_groups(
         raise ValueError(f"incomplete GRPO groups: {incomplete}")
 
 
+def _check_reward_spread(
+    trajectories: Sequence[str | Run | TrajectoryPayload],
+    group_size: int | None,
+) -> None:
+    """Warn when no group has any reward spread: GRPO normalizes advantages within a
+    group, so identical rewards zero every one of them and the pass accumulates
+    nothing — which surfaces much later as a 409 from ``optim_step`` blaming the
+    wrong call. Only inline rewards are visible here; ``trace_id``s are skipped."""
+    rewards = [t.reward for t in trajectories if not isinstance(t, str)]
+    if len(rewards) != len(trajectories) or len(rewards) < 2:
+        return
+    size = group_size or len(rewards)
+    if all(len(set(rewards[start : start + size])) == 1 for start in range(0, len(rewards), size)):
+        logger.warning(
+            "every reward is identical within its GRPO group (%s), so all advantages are "
+            "zero and this pass accumulates no gradient — the next optim_step will fail. "
+            "Vary task difficulty until rollouts disagree.",
+            rewards[0],
+        )
+
+
 class TrainingClient(BaseTrainingClient):
     """Train an LLM model through the HUD training service.
 
@@ -138,6 +162,7 @@ class TrainingClient(BaseTrainingClient):
         """
         inputs = _to_inputs(trajectories)
         _check_groups(trajectories, group_size)
+        _check_reward_spread(trajectories, group_size)
         request = ForwardBackwardRequest(
             inputs=inputs,
             loss_fn=loss_fn,
