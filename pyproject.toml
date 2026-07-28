@@ -60,7 +60,6 @@ path = "hud/version.py"
 exclude = [
     "docs/",
     "cookbooks/",
-    "integrations/",
     "hud-python/",
     "**/checkpoints/",
     "**/*.safetensors",
@@ -222,7 +221,7 @@ docstring-code-format = true
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.pyright]
-include = ["hud", "integrations"]
+include = ["hud"]
 exclude = [
     "**/node_modules",
     "**/__pycache__",
@@ -262,7 +261,7 @@ omit = [
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud", "integrations"]
+testpaths = ["hud"]
 addopts = ""
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access)",

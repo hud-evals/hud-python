@@ -1,16 +1,21 @@
 ---
 title: "Harbor interop"
-description: "Load Harbor tasks into the HUD runtime or export HUD tasks to Harbor folders, with the converter CLI and a field-by-field mapping between formats."
+description: "Load Harbor tasks into the HUD runtime or export HUD tasks to Harbor folders, with a field-by-field mapping between formats."
 icon: "ship"
 ---
 
 Everything that authors tasks - HUD's own `env.py`, platform rows, **Harbor**
 task dirs - is a *frontend* that loads into the same primitives (`Environment`,
 `Task`, `Taskset`). Integrations are **loaders, not converters**: no codegen
-roundtrip to run foreign tasks. The Harbor integration lives in the SDK repo at
-[`integrations/harbor.py`](https://github.com/hud-evals/hud-python/blob/main/integrations/harbor.py)
-- a recipe built only on the public SDK surface; copy it into your project or
-run it from a checkout.
+roundtrip to run foreign tasks. Each one implements
+[`hud.environment.Integration`](https://github.com/hud-evals/hud-python/blob/main/hud/environment/integration.py)
+- `load(ref) -> Taskset` and `environment(ref) -> Environment` - and ships as
+`hud.integrations.<format>`.
+
+Harbor's agent works *inside* its container, so its environment constructor is
+only meaningful in there. `adapt()` packages it: one HUD-speaking image per
+distinct build context, whose CMD serves `hud.integrations.harbor:environment`.
+The same rows then run on any container placement.
 
 ## Prerequisites
 
@@ -24,25 +29,55 @@ directly - one row per task dir (`id` = the dir name), sharing one declarative
 `Environment` per distinct `environment/` build context:
 
 ```python
-from integrations.harbor import detect, load
+from hud.integrations import harbor
 
-assert detect("./terminal-bench")
-taskset = load("./terminal-bench")
+assert harbor.detect("./terminal-bench")
+taskset = harbor.load("./terminal-bench")
 
 for task in taskset:
-    print(task.env, task.id)
+    print(task.env, task.id, task.columns["difficulty"])
 ```
 
-Like every task row, the result carries no placement. Run it by supplying one -
-today that means a substrate already serving the control channel
-(`runtime=Runtime(url)`); a docker provider that builds and runs each task's
-`environment/` image is the planned follow-up:
+Each row carries what the task declared: `[metadata]` as `columns` (difficulty,
+category, tags - the platform's filter/leaderboard facets) and
+`[environment]` cpu/memory/gpu as `runtime_config`. Time budgets stay off the
+row, since they bound the *rollout* rather than the substrate - read one with
+`harbor.agent_timeout(task_dir)` and pass it as `rollout_timeout`.
+
+## Run Harbor tasks
+
+Build the images once, then place the rows anywhere:
 
 ```python
-from hud import Runtime
-
-job = await taskset.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
+images = await harbor.adapt("./terminal-bench")          # {env name: image ref}
+taskset = harbor.load("./terminal-bench", images=images) # rows carry the image
+job = await taskset.run(agent, runtime=harbor.docker_runtime())
 ```
+
+`harbor.docker_runtime()` is a `DockerRuntime` that permits nested
+namespaces: an adapted image sandboxes *inside itself* to keep the baked
+tests and the verdict away from the agent, which plain images neither need
+nor should be given.
+
+The mapping is a value you hold - nothing is written into the dataset - so
+there is no cache to go stale. `adapt(path, push="registry.io/acme")` pushes
+instead; `hud deploy` of the generated contexts under `.hud-adapt/` works the
+same way, since both run the image's own CMD.
+
+The image also carries what the task declared about its environment:
+`[environment.env]`, `workdir` and `user` become `ENV`, `WORKDIR` and `USER`
+directives, so Docker applies them to every process - the agent's shells, the
+verifier, the serving process alike.
+
+Tasks whose declared behaviour cannot be reproduced faithfully are refused
+rather than silently downgraded. Adaptation replaces the container's own boot
+process with the serving command, so anything depending on that boot process is
+refused: a Dockerfile `ENTRYPOINT`, `healthcheck` (nothing would start the
+services it awaits), and `mcp_servers` (nothing would start the servers they
+point at) - alongside compose environments, `network_mode = "allowlist"`, a
+verifier with its own environment, prebuilt `docker_image` environments,
+non-linux `os`, TPUs, multi-step `[[steps]]` tasks, and an agent and verifier
+that must run as *different* users (one image, one `USER`).
 
 ## Export HUD tasks to Harbor
 
@@ -51,7 +86,7 @@ job = await taskset.run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
 `env.py`) into self-contained Harbor task folders:
 
 ```python
-from integrations.harbor import export
+from hud.integrations.harbor import export
 
 created = await export("tasks.py", "harbor_tasks")
 ```
@@ -79,6 +114,12 @@ Only environments whose capabilities are `ssh`/`mcp` are exportable (Harbor is
 shell-centric; `rfb`/`cdp` don't map). The exported task grades over the HUD
 control channel, so it needs Harbor's default same-container verifier - don't
 set `[verifier.environment]` in `task.toml`.
+
+**Determinism**: the task's setup runs twice - once at export to capture
+`instruction.md`, and again inside the exported container at boot, where the
+graded run is parked. Setup that isn't deterministic for its args (randomized
+challenges, per-run state) grades a different run than the captured prompt;
+move such randomness into `args` before exporting.
 
 ## Review, then rely
 
