@@ -8,6 +8,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
@@ -161,6 +162,7 @@ def _load_remote(trace_id: str) -> list[dict[str, Any]]:
 
 
 def _render_events(events: list[dict[str, Any]]) -> None:
+    # Payloads are escaped: rich reads `[len(s) // 2]` as a style tag and drops it
     turn = 0
     for ev in events:
         kind = ev.get("kind")
@@ -175,7 +177,7 @@ def _render_events(events: list[dict[str, Any]]) -> None:
 
             text = ev.get("text")
             if text:
-                console.print(text)
+                console.print(escape(str(text)))
 
             for tc in ev.get("tool_calls") or []:
                 name = tc.get("name") or tc.get("function", {}).get("name", "?")
@@ -184,29 +186,30 @@ def _render_events(events: list[dict[str, Any]]) -> None:
                     with contextlib.suppress(Exception):
                         args = json.loads(args)
                 console.print(
-                    f"  [green]→[/green] [bold]{name}[/bold]({_fmt_args(args)})",
+                    f"  [green]→[/green] [bold]{escape(str(name))}[/bold]"
+                    f"({escape(_fmt_args(args))})",
                     highlight=False,
                 )
 
             if ev.get("error"):
-                console.print(f"  [red]error: {ev['error']}[/red]")
+                console.print(f"  [red]error: {escape(str(ev['error']))}[/red]")
 
         elif kind in ("tool_call", "tool_result"):
             name = ev.get("tool_name") or ev.get("name") or "?"
             result = ev.get("result_text") or ev.get("result") or ""
             error = ev.get("error")
             if error:
-                console.print(f"  [red]✗ {name}: {error}[/red]")
+                console.print(f"  [red]✗ {escape(str(name))}: {escape(str(error))}[/red]")
             else:
-                console.print(f"  [dim]{name} →[/dim]")
+                console.print(f"  [dim]{escape(str(name))} →[/dim]")
                 for line in str(result).splitlines():
-                    console.print(f"    {line}")
+                    console.print(f"    {escape(line)}")
 
         elif kind == "environment":
             msg = ev.get("text") or ev.get("content") or ""
             if msg:
                 console.print(Rule("[yellow]env[/yellow]", style="yellow"))
-                console.print(msg)
+                console.print(escape(str(msg)))
 
 
 def _fmt_args(args: Any) -> str:

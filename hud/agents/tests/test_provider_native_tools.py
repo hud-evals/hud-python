@@ -10,6 +10,7 @@ from __future__ import annotations
 import shlex
 from typing import Any, cast
 
+import asyncssh
 import mcp.types as mcp_types
 import pytest
 
@@ -47,7 +48,13 @@ class _Conn:
         self.commands.append(command)
         parts = shlex.split(command)
         if len(parts) == 3 and parts[:2] == ["cat", "--"]:
-            return _Completed(stdout=self._store.get(parts[2], b"").decode())
+            if parts[2] not in self._store:
+                return self._finish(
+                    command,
+                    check,
+                    _Completed(stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1),
+                )
+            return _Completed(stdout=self._store[parts[2]].decode())
         if len(parts) == 3 and parts[:2] == ["cat", ">"]:
             assert input is not None
             self._store[parts[2]] = input.encode()
@@ -74,6 +81,21 @@ class _Conn:
         if len(parts) >= 3 and parts[:2] == ["mkdir", "-p"]:
             return _Completed(exit_status=0)
         return self._completed
+
+    @staticmethod
+    def _finish(command: str, check: bool, completed: _Completed) -> _Completed:
+        if check and completed.exit_status:
+            raise asyncssh.ProcessError(
+                env=None,
+                command=command,
+                subsystem=None,
+                exit_status=completed.exit_status,
+                exit_signal=None,
+                returncode=completed.exit_status,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+            )
+        return completed
 
 
 class _FakeSSH(SSHClient):
@@ -520,3 +542,37 @@ async def test_gemini_edit_creates_file_when_old_string_empty() -> None:
     await tool.execute({"file_path": "/n.txt", "old_string": "", "new_string": "fresh"})
 
     assert ssh.files["/n.txt"] == b"fresh"
+
+
+def test_map_path_leaves_a_symlinked_spelling_of_the_workspace_alone() -> None:
+    """A workspace made at /tmp/w is served as /private/tmp/w on macOS; re-anchoring
+    the caller's spelling instead of stripping it nests the path under itself."""
+    cap = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"cwd": "/private/tmp/w", "cwd_alias": "/tmp/w"},
+    )
+    ssh = SSHClient(cap, cast("Any", None))
+
+    assert ssh.map_path("/tmp/w/calc.py") == "/private/tmp/w/calc.py"
+    assert ssh.map_path("/private/tmp/w/calc.py") == "/private/tmp/w/calc.py"
+    assert ssh.map_path("/tmp/w") == "/private/tmp/w"
+    # Workspace-relative addressing still anchors, and an unrelated absolute
+    # path is still clamped into the workspace like a chroot.
+    assert ssh.map_path("/REPORT.md") == "/private/tmp/w/REPORT.md"
+    assert ssh.map_path("/tmp/elsewhere/f.txt") == "/private/tmp/w/tmp/elsewhere/f.txt"
+
+
+async def test_reading_a_missing_file_is_a_tool_error_not_a_raised_traceback() -> None:
+    """Reading before creating is the first thing an editor tool does; that failure
+    must come back as a tool result carrying the shell's message."""
+    ssh = _FakeSSH()
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"), client=cast("SSHClient", ssh)
+    )
+
+    result = await tool.execute({"command": "view", "path": "/nope.txt"})
+
+    assert result.isError is True
+    assert "No such file or directory" in result_text(result)
