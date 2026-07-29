@@ -135,6 +135,36 @@ command -v bwrap >/dev/null 2>&1 \
 uv python install __PYTHON__
 uv venv /hud/venv --python __PYTHON__
 uv pip install --python /hud/venv/bin/python __HUD_REQUIREMENT__
+
+# ─── the agent's toolchain ───
+# Harbor installs the agent *into* the container, and that step provisions what
+# the agent needs (BaseInstalledAgent.SYSTEM_PACKAGES: python3, pip, git, curl)
+# before the agent phase. HUD's agent is external and installs nothing, so
+# without this an adapted image hands the agent a barer machine than Harbor
+# would for the same task — a difference in the harness, scored as if it were a
+# difference in the model.
+#
+# Build time, not per rollout: baked into the content-addressed layer once and
+# reused by every rollout. Only what the image actually lacks is installed, so
+# an image shipping its own Python keeps exactly that Python.
+apt_pkgs=""
+apk_pkgs=""
+for spec in \\
+  "python3|python3 python3-venv|python3" \\
+  "pip3|python3-pip|py3-pip" \\
+  "git|git|git" \\
+  "curl|curl ca-certificates|curl ca-certificates"
+do
+  if command -v "${spec%%|*}" >/dev/null 2>&1; then continue; fi
+  rest=${spec#*|}
+  apt_pkgs="$apt_pkgs ${rest%%|*}"
+  apk_pkgs="$apk_pkgs ${rest##*|}"
+done
+if [ -n "$apt_pkgs" ]; then
+  { apt-get update -qq && apt-get install -y -qq $apt_pkgs; } \\
+    || apk add --no-cache $apk_pkgs \\
+    || echo "warning: could not provision the agent toolchain:$apt_pkgs"
+fi
 """
 
 _LAYER = """
@@ -405,11 +435,13 @@ def environment(ref: str | Path = "/hud/tasks", *, name: str | None = None) -> E
         # bind — as system mounts they would be re-covered when the guest
         # path is ``/`` (an image with no WORKDIR). The graded party's
         # namespace must not contain the grading material or the verdict:
-        # the baked tests and serving venv (/hud) and the verifier's output
+        # the baked tests and serving venv (/hud), the verifier Harbor only
+        # uploads once the agent is done (/tests), and the verifier's output
         # dir are throwaway tmpfs here, while grading runs outside this
         # namespace and sees the real ones.
         mounts=(
             Mount("tmpfs", dst="/hud"),
+            Mount("tmpfs", dst=str(TESTS)),
             Mount("tmpfs", dst=str(VERIFIER_LOGS)),
         ),
         track_files=False if rooted_at_filesystem else None,
@@ -435,11 +467,11 @@ def _register(env: Environment, task_dir: Path, workdir: Path) -> None:
         description=config.task.description or f"Harbor task {task_dir.name}",
     )
     async def _run_harbor_task() -> AsyncGenerator[Any, Any]:
-        # Harbor's harness provides /tests during the agent phase, holding
-        # *this* task's verifier. One adapted image serves a whole group and
-        # may serve many rollouts, so the directory is laid down per rollout
-        # and emptied afterwards: no agent ever sees another task's tests.
-        _sync_tests(task_dir)
+        # Harbor uploads /tests when it runs the verifier, so the agent phase
+        # never contains the assertions it is graded on; :func:`_grade` lays
+        # the baked copy down at that same point. One adapted image serves a
+        # whole group and may serve many rollouts, so the directory is emptied
+        # afterwards: no agent ever sees another task's tests.
         try:
             answer = yield (task_dir / "instruction.md").read_text(encoding="utf-8")
             yield await _grade(task_dir, workdir, answer)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -92,6 +93,46 @@ async def test_the_layer_keeps_its_own_state_under_the_mask(tmp_path) -> None:
     # rollout since a fresh container never has a warm cache.
     dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
     assert "ENV HUD_SKIP_VERSION_CHECK=1" in dockerfile
+
+
+async def test_the_agent_toolchain_installs_only_what_the_image_lacks(tmp_path) -> None:
+    # Harbor's agent install provisions python3/pip/git/curl into the task
+    # container before the agent phase; an adapted image bakes the same set at
+    # build time instead. An image shipping its own interpreter must keep it,
+    # so every tool is presence-checked rather than installed outright.
+    _write_harbor_task(tmp_path, "task-a")
+    await harbor.adapt(tmp_path, build=False)
+    (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
+    script = (context / "_hud" / "install.sh").read_text(encoding="utf-8")
+    decision = script[script.index('apt_pkgs=""') : script.index("\ndone") + len("\ndone")]
+
+    def queued(path: str) -> set[str]:
+        # Runs under ``set -eu`` as the image does: a tool already present must
+        # not abort the script mid-build.
+        result = subprocess.run(
+            ["/bin/sh", "-c", f'set -eu\nPATH={path}\n{decision}\nprintf "%s" "$apt_pkgs"'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return set(result.stdout.split())
+
+    assert queued("/nonexistent") == {
+        "python3",
+        "python3-venv",
+        "python3-pip",
+        "git",
+        "curl",
+        "ca-certificates",
+    }
+
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    for tool in ("python3", "pip3"):
+        (stub / tool).write_text("#!/bin/sh\n", encoding="utf-8")
+        (stub / tool).chmod(0o755)
+
+    assert queued(str(stub)) == {"git", "curl", "ca-certificates"}
 
 
 def test_adapt_images_stamp_rows_when_the_caller_passes_them(tmp_path) -> None:
@@ -433,6 +474,9 @@ async def test_masks_are_applied_after_the_workspace_bind(tmp_path, monkeypatch)
     masked = [m.dst for m in workspace.mounts]
     assert "/hud" in masked
     assert "/logs/verifier" in masked
+    # Harbor uploads the verifier only once the agent is done, so the graded
+    # party never has the assertions it is graded on.
+    assert "/tests" in masked
     assert [m.dst for m in workspace._system_mounts] == ["/", "/proc", "/dev"]
 
 
