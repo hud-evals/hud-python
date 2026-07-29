@@ -393,6 +393,10 @@ async def rollout(
                     if run is not None:
                         run.trace.stop_reason = "timeout"
                     if client is not None:
+                        # Cancel before abort so env teardown frees robot slots;
+                        # a bare abort parks the session and would leak claims.
+                        with contextlib.suppress(Exception):
+                            await client.cancel()
                         client.abort()
                     if phase != "cleanup":
                         driver.cancel()
@@ -407,6 +411,8 @@ async def rollout(
                     run.trace.stop_reason = "timeout"
         except asyncio.CancelledError:
             if client is not None:
+                with contextlib.suppress(Exception):
+                    await client.cancel()
                 client.abort()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)

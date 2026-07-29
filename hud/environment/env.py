@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
@@ -27,6 +28,9 @@ if TYPE_CHECKING:
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+#: Control-session id for the running accept/cancel task (robot slot claims key on it).
+current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
 
 
 class Answer(BaseModel, Generic[T]):

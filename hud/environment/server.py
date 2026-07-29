@@ -26,7 +26,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.graders.results import EvaluationResult
 
-from .env import Answer
+from .env import Answer, current_session_id
 from .utils import error, read_frame, reply, send_frame, splice
 
 if TYPE_CHECKING:
@@ -234,11 +234,17 @@ class _ControlChannel:
 
     async def grade(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         runner = self._runners.pop(session_id, None)
+        claim_sid = session_id
         if runner is None:
-            runner = self._adopt_parked()
-        return await runner.grade(payload)
+            # Blind adopt: free the parked session's robot claim, not this connection's.
+            claim_sid, runner = self._adopt_parked()
+        token = current_session_id.set(claim_sid)
+        try:
+            return await runner.grade(payload)
+        finally:
+            current_session_id.reset(token)
 
-    def _adopt_parked(self) -> TaskRunner:
+    def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
         parked = sorted(sid for sid in self._runners if sid not in self._live)
         if not parked:
@@ -248,12 +254,19 @@ class _ControlChannel:
                 f"{len(parked)} parked sessions ({', '.join(parked)}); "
                 "resume one by sending hello with its session_id"
             )
-        return self._runners.pop(parked[0])
+        sid = parked[0]
+        return sid, self._runners.pop(sid)
 
     async def cancel(self, session_id: str) -> None:
         runner = self._runners.pop(session_id, None)
-        if runner is not None:
+        if runner is None:
+            return
+        # Bind session id so teardown hooks (robot slot release) free the right claim.
+        token = current_session_id.set(session_id)
+        try:
             await runner.cancel()
+        finally:
+            current_session_id.reset(token)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
@@ -270,6 +283,7 @@ class _ControlChannel:
         env = self.env
         session_id = "sess-" + secrets.token_hex(4)
         self._live.add(session_id)
+        session_token = current_session_id.set(session_id)
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
@@ -306,6 +320,8 @@ class _ControlChannel:
                             self._live.discard(session_id)
                             session_id = requested
                             self._live.add(session_id)
+                            current_session_id.reset(session_token)
+                            session_token = current_session_id.set(session_id)
                         # env.start() ran before serving, so hook-published
                         # capabilities (e.g. a workspace's ssh address) are
                         # already concrete here.
@@ -366,6 +382,9 @@ class _ControlChannel:
                     await error_to(msg_id, -32000, str(exc))
         finally:
             self._live.discard(session_id)
+            # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
+            # teardown (callers that abort must cancel first — see rollout timeout).
+            current_session_id.reset(session_token)
 
 
 async def _stream(

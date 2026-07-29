@@ -40,6 +40,7 @@ import json
 import sys
 from typing import TYPE_CHECKING, Any
 
+from hud.environment.env import current_session_id
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
@@ -114,8 +115,8 @@ class RobotEndpoint:
         self._writer: asyncio.StreamWriter | None = None
         # N sessions share this one TCP link; serialize send+read so replies don't cross.
         self._lock = asyncio.Lock()
-        # Open slot token per control-session task; "" = already freed via result().
-        self._claim_by_task: dict[asyncio.Task[Any], str] = {}
+        # Open slot token per control session; "" = already freed via result().
+        self._claims: dict[str, str] = {}
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
@@ -232,9 +233,9 @@ class RobotEndpoint:
     async def reset(self, **task_args: Any) -> dict[str, Any]:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
         ep = await self._call("reset", task_args)
-        task, token = asyncio.current_task(), ep.get("token")
-        if task is not None and isinstance(token, str):
-            self._claim_by_task[task] = token
+        session_id, token = current_session_id.get(), ep.get("token")
+        if session_id is not None and isinstance(token, str):
+            self._claims[session_id] = token
         return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
@@ -244,8 +245,8 @@ class RobotEndpoint:
         vectorized envs must pass the token from :meth:`reset`.
         """
         res = {**(await self._call("result", {"token": token})), **extra}
-        if (task := asyncio.current_task()) is not None:
-            self._claim_by_task[task] = ""  # already freed; teardown must not adopt peers
+        if (session_id := current_session_id.get()) is not None:
+            self._claims[session_id] = ""  # freed; disconnect/cancel must not re-result
         print(
             f"[env] result: success={res.get('success')} "
             f"total_reward={res.get('total_reward', 0.0):.3f}",
@@ -254,20 +255,21 @@ class RobotEndpoint:
         return res
 
     async def release_claim(self) -> None:
-        """Free this session's slot if ``result`` never ran (cancel / bye / teardown)."""
-        task = asyncio.current_task()
-        if task is not None and task in self._claim_by_task:
-            token = self._claim_by_task.pop(task)
-            if not token:  # already freed via result()
-                return
-        else:
-            # Resume teardown runs on a new task — adopt the sole parked claim.
-            parked = [t for t, tok in self._claim_by_task.items() if t.done() and tok]
-            if len(parked) != 1:
-                return
-            token = self._claim_by_task.pop(parked[0])
-        with contextlib.suppress(Exception):
+        """Free this session's slot if ``result`` never ran (cancel / bye / drop)."""
+        session_id = current_session_id.get()
+        if session_id is None:
+            return
+        token = self._claims.get(session_id)
+        if token is None:
+            return
+        if not token:  # already freed via result()
+            self._claims.pop(session_id, None)
+            return
+        try:
             await self._call("result", {"token": token})
+        except Exception:
+            return  # keep the claim so a later teardown can retry
+        self._claims.pop(session_id, None)
 
     async def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         # One in-flight RPC: N sessions share this link; constant id is enough under the lock.
