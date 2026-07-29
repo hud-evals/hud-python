@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 import sys
 import tempfile
@@ -12,7 +13,7 @@ import asyncssh
 import pytest
 
 from hud.capabilities import SSHClient
-from hud.environment.workspace import Workspace
+from hud.environment.workspace import Mount, Workspace
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
 
@@ -104,9 +105,15 @@ async def test_dropped_session_env_excludes_server_secrets(
     assert session_env["HOME"] == ws._guest_path
 
 
+def _sandbox_env(argv: list[str]) -> dict[str, str]:
+    """The environment the sandboxed payload starts from (its ``env -i`` set)."""
+    assignments = argv[argv.index("-i") + 1 :]
+    return dict(item.split("=", 1) for item in itertools.takewhile(lambda a: "=" in a, assignments))
+
+
 def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The bwrap path must not re-inject host secrets via --setenv, while
-    per-call env overrides still reach the sandbox."""
+    """The bwrap path must not re-inject host secrets, while per-call env
+    overrides still reach the sandbox."""
     monkeypatch.setenv("HUD_API_KEY", "super-secret")
     _wall(monkeypatch)
 
@@ -114,10 +121,11 @@ def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
     argv = ws.shell_argv("echo hi", env={"PER_CALL": "1"})
 
-    setenv_keys = {argv[i + 1] for i, tok in enumerate(argv) if tok == "--setenv"}
-    assert "HUD_API_KEY" not in setenv_keys
-    assert "CUSTOM" in setenv_keys and "PATH" in setenv_keys
-    assert "PER_CALL" in setenv_keys
+    sandbox_env = _sandbox_env(argv)
+    assert "HUD_API_KEY" not in sandbox_env
+    assert sandbox_env["CUSTOM"] == "1"
+    assert "PATH" in sandbox_env
+    assert sandbox_env["PER_CALL"] == "1"
 
 
 def test_bwrap_inherits_host_env_when_not_walled(
@@ -127,8 +135,42 @@ def test_bwrap_inherits_host_env_when_not_walled(
     ws = Workspace(tmp_path / "root")
     monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
     argv = ws.bwrap_argv(["bash", "-lc", "true"])
-    setenv_keys = {argv[i + 1] for i, tok in enumerate(argv) if tok == "--setenv"}
-    assert "HUD_SENTINEL" in setenv_keys
+    assert _sandbox_env(argv)["HUD_SENTINEL"] == "visible"
+
+
+#: Options bubblewrap gained after 0.4, the newest release on distros still in
+#: use (debian bullseye ships 0.4.1). One of these in a session's argv aborts
+#: every command on such a host with "Unknown option", which grades as a
+#: legitimate zero rather than a broken environment.
+_POST_0_4_BWRAP_OPTIONS = frozenset(
+    {
+        "--clearenv",  # 0.5.0
+        "--assert-userns-disabled",  # 0.5.0
+        "--overlay",  # 0.8.0
+        "--tmp-overlay",  # 0.8.0
+        "--ro-overlay",  # 0.8.0
+        "--overlay-src",  # 0.8.0
+        "--size",  # 0.9.0
+        "--chmod",  # 0.9.0
+    }
+)
+
+
+def test_session_argv_runs_on_bubblewrap_0_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sessions must not pass an option an old-but-usable bwrap will reject."""
+    ws = Workspace(
+        tmp_path / "root",
+        shell_uid=1000,
+        env={"CUSTOM": "1"},
+        mounts=(Mount("tmpfs", dst="/tests"),),
+    )
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    _wall(monkeypatch)
+
+    for argv in (ws.shell_argv("echo hi"), ws.shell_argv(), ws.bwrap_argv(["true"])):
+        assert not _POST_0_4_BWRAP_OPTIONS.intersection(argv)
 
 
 def test_shell_uid_wraps_sessions_in_setpriv(

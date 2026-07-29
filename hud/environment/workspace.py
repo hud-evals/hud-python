@@ -50,10 +50,12 @@ def usable_bwrap() -> str | None:
     if _bwrap_usable is None:
         try:
             probe = subprocess.run(
-                # Mirrors a real session's namespace setup — mounting proc is
+                # Mirrors a real session's *namespace* setup — mounting proc is
                 # what an unprivileged container blocks first. The whole root
                 # is bound so the probed binary keeps its loader; a narrower
-                # mount set fails for the wrong reason.
+                # mount set fails for the wrong reason. It does not prove the
+                # installed bwrap parses every option a session passes, so
+                # bwrap_argv stays within what bubblewrap 0.4 understands.
                 [
                     path,
                     "--unshare-user-try",
@@ -474,9 +476,12 @@ class Workspace:
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
 
-        bwrap ``--clearenv`` then re-injects ``full_env`` via ``--setenv``, so
-        with ``inherit_host_env=False`` the host environment (server secrets)
-        is left out and only ``self.env`` + ``env`` reach the sandbox.
+        The payload runs under ``env -i``, so it starts from exactly
+        ``full_env``: with ``inherit_host_env=False`` the host environment
+        (server secrets) is left out and only ``self.env`` + ``env`` reach the
+        sandbox. Every option here is one bubblewrap 0.4 understands —
+        ``--clearenv`` (0.5+) would abort each session on an older bwrap that
+        :func:`usable_bwrap` cannot tell apart from a current one.
         """
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
@@ -500,10 +505,9 @@ class Workspace:
         for m in self.mounts:
             argv.extend(m.to_bwrap_args())
         argv.extend(["--chdir", target_cwd])
-        argv.append("--clearenv")
-        for k, v in full_env.items():
-            argv.extend(["--setenv", k, v])
         argv.append("--")
+        env_bin = shutil.which("env") or "/usr/bin/env"
+        argv.extend([env_bin, "-i", *(f"{k}={v}" for k, v in full_env.items())])
         if isinstance(command, str):
             argv.extend(["bash", "-lc", command])
         else:
