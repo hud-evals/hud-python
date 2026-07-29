@@ -44,7 +44,7 @@ from hud.environment.env import current_session_id
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
-from .bridge import PORT_ANNOUNCEMENT, RobotBridge
+from .bridge import _HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,11 +54,18 @@ if TYPE_CHECKING:
 
 
 def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
-    """JSON-safe subclass ``__init__`` kwargs from a declaration instance (skip base host/port)."""
+    """JSON-safe kwargs for the spawned child from a declaration instance.
+
+    Subclass ``__init__`` params ride through as ctor kwargs (host/port skipped —
+    the child binds its own address). Declaration-time attrs set *after* init
+    (``bridge.contract = ...``, ``num_envs``, ``metadata``) are packed under
+    ``__hud_state__`` so the child can apply them without every subclass
+    accepting those names as kwargs.
+    """
     base = set(inspect.signature(RobotBridge.__init__).parameters) - {"self"}
     out: dict[str, Any] = {}
     for name, param in inspect.signature(type(bridge).__init__).parameters.items():
-        if name == "self" or name in base:
+        if name == "self" or name in base or name == _HUD_STATE:
             continue
         if param.kind not in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY):
             continue
@@ -71,6 +78,16 @@ def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
         except TypeError:
             continue
         out[name] = value
+    # Attrs often assigned on the declaration instance, not as ctor params.
+    state: dict[str, Any] = {}
+    if bridge.contract:
+        state["contract"] = bridge.contract
+    if bridge.metadata:
+        state["metadata"] = bridge.metadata
+    if bridge.num_envs != 1:
+        state["num_envs"] = bridge.num_envs
+    if state:
+        out[_HUD_STATE] = state
     return out
 
 

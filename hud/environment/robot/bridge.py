@@ -39,6 +39,10 @@ if TYPE_CHECKING:
 #: RobotEndpoint reads it from this process's stdout.
 PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
 
+#: Reserved ``--init`` key for declaration-time attrs (contract / metadata / num_envs)
+#: applied after the child ctor — keeps them out of subclass ``__init__`` signatures.
+_HUD_STATE = "__hud_state__"
+
 
 @dataclass
 class _Slot:
@@ -545,6 +549,17 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
     thread.join(timeout=30)
 
 
+def _apply_declaration_state(bridge: RobotBridge, state: dict[str, Any]) -> None:
+    """Apply declaration-time attrs the parent packed into ``--init`` (after ctor)."""
+    if "contract" in state:
+        bridge.contract = state["contract"]
+    if "metadata" in state:
+        bridge.metadata = state["metadata"]
+    if "num_envs" in state:
+        bridge.num_envs = int(state["num_envs"])
+        bridge._registry.configure(bridge.num_envs)
+
+
 def main() -> None:
     """Child entry: ``python -m hud.environment.robot.bridge path.py:Class [--init JSON]``."""
     import json
@@ -555,7 +570,12 @@ def main() -> None:
     kwargs: dict[str, Any] = {}
     if len(sys.argv) >= 4 and sys.argv[2] == "--init":
         kwargs = json.loads(sys.argv[3])
-    serve_bridge(getattr(load_module(path), name)(**kwargs))
+    # Pop portable declaration state before the ctor — subclasses rarely accept it.
+    state = kwargs.pop(_HUD_STATE, {}) or {}
+    bridge = getattr(load_module(path), name)(**kwargs)
+    if state:
+        _apply_declaration_state(bridge, state)
+    serve_bridge(bridge)
 
 
 if __name__ == "__main__":
