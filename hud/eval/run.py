@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
@@ -388,7 +389,10 @@ async def rollout(
             driver.add_done_callback(_consume_task_result)
             raise
         except Exception as exc:
-            detail = _detail(exc)
+            # format_exception_only keeps __notes__ — a provider attaches what
+            # only it can see there, like the sandbox's env output on a failed
+            # handshake — where str(exc) would drop them.
+            detail = "".join(traceback.format_exception_only(exc)).strip()
             if run is None:
                 logger.warning("rollout failed before launch (%s): %s", _phase, detail)
                 run = Run.failed(f"[{_phase}] {detail}")
@@ -403,16 +407,6 @@ async def rollout(
         run.slug = task.slug or task.default_slug()
         await trace_exit(run)
     return run
-
-
-def _detail(exc: BaseException) -> str:
-    """The failure text plus any notes attached to it.
-
-    Providers attach what only they can see — a sandbox's env output on a failed
-    handshake — as notes. ``str(exc)`` drops them, so a rollout that died at
-    import would report ``closed connection during 'hello'`` and nothing else.
-    """
-    return "\n".join([str(exc), *getattr(exc, "__notes__", [])])
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

@@ -32,16 +32,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import logging
-import re
 import sys
 import uuid
 from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -653,52 +651,33 @@ class ModalRuntime:
                 await sb.terminate.aio()
 
 
-# Build noise that must not perturb the snapshot digest: these are uploaded with
-# the context (Daytona's archiver has no .dockerignore) but never define the env,
-# so hashing them would rebuild the snapshot every time the host venv is touched.
-_DIGEST_PATTERN = re.compile(r"[0-9a-f]{12}")
+async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
+    """Whether *snapshot* was built from *image* as it exists right now.
 
-_DIGEST_SKIP = frozenset(
-    {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
-)
-
-
-def _snapshot_digest(context_digest: str, resources: Any) -> str:
-    """Name suffix for a snapshot: its content plus the sizing baked into it."""
-    return hashlib.sha256(f"{context_digest}{resources!r}".encode()).hexdigest()[:12]
-
-
-def _image_digest(image: Any) -> str:
-    """Content hash of a Daytona ``Image``: its Dockerfile plus every byte it copies in.
-
-    A Daytona snapshot is identified by name alone, so the name has to carry the
-    content — otherwise an edited env resolves to the snapshot built before the
-    edit and every rollout after it silently measures the old code. ``_context_list``
-    is the same private attribute ``snapshot.create`` reads to decide what to upload.
+    Daytona records what a snapshot was built from — the registry ref, or for a
+    built ``Image`` its Dockerfile text plus the hashes of the context it
+    uploads (``build_info``). The hashes are recomputed here with the SDK's own
+    hasher so they are comparable to what ``snapshot.create`` would upload.
+    ``_context_list`` is the same private attribute ``snapshot.create`` reads.
     """
-    digest = hashlib.sha256()
-    digest.update(image.dockerfile().encode())
-    for entry in image._context_list:
-        source = Path(entry.source_path)
-        is_dir = source.is_dir()
-        for file in sorted(source.rglob("*")) if is_dir else [source]:
-            # as_posix so the same tree digests identically on every host OS.
-            rel = file.relative_to(source).as_posix() if is_dir else file.name
-            if not file.is_file() or _DIGEST_SKIP & set(rel.split("/")):
-                continue
-            digest.update(rel.encode())
-            digest.update(file.read_bytes())
-    return digest.hexdigest()[:12]
+    if isinstance(image, str):
+        return bool(snapshot.image_name == image)
+    build = snapshot.build_info
+    if build is None:
+        return False
+    from daytona._async.object_storage import AsyncObjectStorage
 
-
-async def _daytona_serve_output(sandbox: Any, session: str, cmd_id: str) -> str:
-    """What the env process printed inside the sandbox, for a failed handshake."""
-    try:
-        logs = await sandbox.process.get_session_command_logs(session, cmd_id)
-    except Exception as e:  # the sandbox may already be gone
-        return f"env output unavailable: {e}"
-    output = (logs.stderr or logs.output or logs.stdout or "").strip()
-    return f"env output in sandbox {sandbox.id}:\n{output}" if output else "env printed nothing"
+    # The hasher is an instance method only for code organization; credentials
+    # are needed to upload, not to hash, so skip the credentialed __init__.
+    storage = cast("Any", AsyncObjectStorage.__new__(AsyncObjectStorage))
+    hashes = [
+        await storage._compute_hash_for_path_md5(entry.source_path, entry.archive_path)
+        for entry in image._context_list
+    ]
+    return bool(
+        build.dockerfile_content == image.dockerfile()
+        and list(build.context_hashes or []) == hashes
+    )
 
 
 class DaytonaRuntime:
@@ -712,13 +691,11 @@ class DaytonaRuntime:
     port. Yields its :class:`Runtime`, deletes the sandbox on exit.
 
     Pass a snapshot name — ``DaytonaRuntime("hud-libero-env")`` — optionally with an
-    ``image`` (Dockerfile/registry ref) to build that snapshot once if it is missing.
-    A built snapshot is content-addressed: its name carries a digest of the image
-    and everything the image copies in (``hud-libero-env-9f2c1d0ab3e4``), so editing
-    the env boots a rebuilt snapshot instead of silently reusing the stale one. That
-    digest is the name Daytona stores, so booting it later by name alone needs the
-    full ``hud-libero-env-9f2c1d0ab3e4`` — keep passing ``image`` instead, which
-    re-resolves to the same snapshot for free when nothing changed.
+    ``image`` (Dockerfile/registry ref) to build that snapshot if it is missing.
+    With *image*, an existing snapshot is compared against the image's recorded
+    build (Dockerfile plus context hashes) and rebuilt under the same name when
+    they differ, so editing the env never silently reuses the snapshot built
+    before the edit.
     Resources (cpu/memory/gpu) live on the snapshot, not here. *workdir* defaults to
     ``/app`` (the scaffolded ``Dockerfile.hud`` WORKDIR) since a Daytona session
     starts in ``~``, not the image's WORKDIR; override only for a non-standard layout.
@@ -751,42 +728,11 @@ class DaytonaRuntime:
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
         self.runtime_config = config
+        # Resolve each snapshot name against the image once; lock so concurrent
+        # first acquisitions resolve exactly once.
         self._image = image
-        # The context is walked once; resources come from the row, so they fold
-        # into the name per acquisition.
-        self._context_digest: str | None = None
-        self._ensured: set[str] = set()
+        self._resolved: set[str] = set()
         self._snapshot_lock = asyncio.Lock()
-
-    async def prune_snapshots(self) -> list[str]:
-        """Delete snapshots under this *snapshot_name* that this runtime has not booted.
-
-        Content-addressed names cost one snapshot per edit and nothing reaps them.
-        Every digest this instance booted is kept — a taskset with per-row resources
-        uses several at once — so reaping across edits means pruning from a fresh
-        runtime, not from one that already booted the old digest.
-
-        Only names this runtime could have minted are touched: the prefix plus a
-        digest, never a hand-named snapshot that shares it.
-        """
-        from daytona import AsyncDaytona
-
-        if not self._ensured:
-            raise RuntimeError("prune_snapshots needs a resolved snapshot: run a rollout first")
-
-        prefix = f"{self.snapshot_name}-"
-        deleted: list[str] = []
-        async with AsyncDaytona() as daytona:
-            page = await daytona.snapshot.list()
-            for snapshot in page.items:
-                name = str(snapshot.name)
-                if name in self._ensured or not name.startswith(prefix):
-                    continue
-                if _DIGEST_PATTERN.fullmatch(name[len(prefix) :]):
-                    await daytona.snapshot.delete(snapshot)
-                    deleted.append(name)
-        logger.info("pruned %d Daytona snapshot(s), kept %s", len(deleted), sorted(self._ensured))
-        return deleted
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
@@ -852,18 +798,45 @@ class DaytonaRuntime:
                     )
                 snapshot_name = self.snapshot_name
                 if self._image is not None:
+                    if daytona_resources is not None:
+                        # Sizing is baked in at build time, so each sizing is its
+                        # own snapshot under a readable suffix (env-4cpu-8gb).
+                        sizing = []
+                        if daytona_resources.cpu:
+                            sizing.append(f"{daytona_resources.cpu}cpu")
+                        if daytona_resources.memory:
+                            sizing.append(f"{daytona_resources.memory}gb")
+                        if daytona_resources.gpu:
+                            sizing.append(f"{daytona_resources.gpu}gpu")
+                            sizing.extend(
+                                (t.value if isinstance(t, GpuType) else t).lower()
+                                for t in daytona_resources.gpu_type or []
+                            )
+                        snapshot_name = "-".join([snapshot_name, *sizing])
                     async with self._snapshot_lock:
-                        if self._context_digest is None:
-                            self._context_digest = _image_digest(self._image)
-                        snapshot_name = (
-                            f"{self.snapshot_name}-"
-                            f"{_snapshot_digest(self._context_digest, daytona_resources)}"
-                        )
-                        if snapshot_name not in self._ensured:
+                        if snapshot_name not in self._resolved:
                             try:
-                                await daytona.snapshot.get(snapshot_name)
-                                logger.info("reusing Daytona snapshot %s", snapshot_name)
+                                existing = await daytona.snapshot.get(snapshot_name)
                             except DaytonaNotFoundError:
+                                existing = None
+                            if existing is not None and not await _snapshot_is_current(
+                                existing, self._image
+                            ):
+                                logger.info(
+                                    "Daytona snapshot %s is stale; rebuilding", snapshot_name
+                                )
+                                await daytona.snapshot.delete(existing)
+                                # Deletion frees the name asynchronously (~10s
+                                # observed); creating before it lands conflicts.
+                                async with asyncio.timeout(120):
+                                    while True:
+                                        try:
+                                            await daytona.snapshot.get(snapshot_name)
+                                        except DaytonaNotFoundError:
+                                            break
+                                        await asyncio.sleep(0.5)
+                                existing = None
+                            if existing is None:
                                 logger.info("building Daytona snapshot %s", snapshot_name)
                                 await daytona.snapshot.create(
                                     CreateSnapshotParams(
@@ -872,7 +845,7 @@ class DaytonaRuntime:
                                         resources=daytona_resources,
                                     )
                                 )
-                            self._ensured.add(snapshot_name)
+                            self._resolved.add(snapshot_name)
                 sandbox_params = CreateSandboxFromSnapshotParams(
                     snapshot=snapshot_name,
                     ephemeral=True,
@@ -910,8 +883,21 @@ class DaytonaRuntime:
                             config=config if config.model_dump(exclude_none=True) else None,
                         )
                     except (EOFError, OSError) as exc:
-                        # Why it died only exists inside the sandbox.
-                        exc.add_note(await _daytona_serve_output(sandbox, session, started.cmd_id))
+                        # Why it died only exists inside the sandbox, and the
+                        # sandbox may already be gone.
+                        try:
+                            logs = await sandbox.process.get_session_command_logs(
+                                session, started.cmd_id
+                            )
+                        except Exception as log_exc:
+                            exc.add_note(f"env output unavailable: {log_exc}")
+                        else:
+                            output = (logs.stderr or logs.output or logs.stdout or "").strip()
+                            exc.add_note(
+                                f"env output in sandbox {sandbox.id}:\n{output}"
+                                if output
+                                else "env printed nothing"
+                            )
                         raise
             finally:
                 try:

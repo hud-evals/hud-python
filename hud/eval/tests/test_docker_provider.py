@@ -9,12 +9,14 @@ boundary.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # runtime use in _install_fake_docker
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -229,7 +231,7 @@ class _DaytonaResources:
 
 @dataclass(frozen=True)
 class _DaytonaGpuType:
-    name: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -269,41 +271,89 @@ class _FakeDaytonaSandbox:
         return SimpleNamespace(token="ssh-token")
 
 
+async def _tree_hash(path_str: str) -> str:
+    """Deterministic fingerprint of a context tree: same tree, same hash."""
+    digest = hashlib.md5(usedforsecurity=False)
+    root = Path(path_str)
+    for file in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(file.relative_to(root).as_posix().encode())
+        digest.update(file.read_bytes())
+    return digest.hexdigest()
+
+
+class _FakeObjectStorage:
+    """The SDK hasher the provider borrows to predict a context's upload hash."""
+
+    async def _compute_hash_for_path_md5(
+        self, path_str: str, archive_base_path: str | None = None
+    ) -> str:
+        return await _tree_hash(path_str)
+
+
 class _FakeSnapshotApi:
     """The registry a Daytona snapshot name resolves against: ``get`` 404s until
-    something with that exact name has been built."""
+    something with that exact name has been built, and each snapshot records what
+    it was built from (``image_name`` or ``build_info``), as the server does.
+    A deleted name stays taken for a couple more ``get``s — the live API frees
+    it asynchronously (~10s), and creating before then conflicts."""
 
-    def __init__(self, calls: dict[str, object]) -> None:
-        self.built: list[str] = []
-        calls["snapshot_create"] = self.built
+    def __init__(self) -> None:
+        self.snapshots: dict[str, SimpleNamespace] = {}
+        self.builds: list[str] = []
+        self._deleting: dict[str, SimpleNamespace] = {}
+        self._deleting_gets: dict[str, int] = {}
 
     async def get(self, name: str) -> SimpleNamespace:
-        if name not in self.built:
+        if name in self._deleting:
+            self._deleting_gets[name] -= 1
+            if self._deleting_gets[name] >= 0:
+                return self._deleting[name]
+            del self._deleting[name], self._deleting_gets[name]
+        if name not in self.snapshots:
             raise RuntimeError(f"snapshot {name} not found")
-        return SimpleNamespace(name=name)
+        return self.snapshots[name]
 
     async def create(self, params: _CreateSnapshotParams) -> None:
-        self.built.append(params.name)
-
-    async def list(self) -> SimpleNamespace:
-        return SimpleNamespace(items=[SimpleNamespace(name=name) for name in self.built])
+        if params.name in self.snapshots or params.name in self._deleting:
+            raise ValueError(f"snapshot with name {params.name} already exists")
+        image: Any = params.image
+        if isinstance(image, str):
+            record = SimpleNamespace(name=params.name, image_name=image, build_info=None)
+        else:
+            record = SimpleNamespace(
+                name=params.name,
+                image_name=None,
+                build_info=SimpleNamespace(
+                    dockerfile_content=image.dockerfile(),
+                    context_hashes=[
+                        await _tree_hash(entry.source_path) for entry in image._context_list
+                    ],
+                ),
+            )
+        self.snapshots[params.name] = record
+        self.builds.append(params.name)
 
     async def delete(self, snapshot: SimpleNamespace) -> None:
-        self.built.remove(snapshot.name)
+        self._deleting[snapshot.name] = self.snapshots.pop(snapshot.name)
+        self._deleting_gets[snapshot.name] = 1
 
 
 class _FakeDaytonaClient:
     def __init__(self, calls: dict[str, object]) -> None:
         self.calls = calls
         self.sandbox = _FakeDaytonaSandbox(calls)
-        self.snapshot = _FakeSnapshotApi(calls)
+        self.snapshot = _FakeSnapshotApi()
+        #: sandbox-create params in order; the last entry is the booted sandbox.
+        self.created: list[Any] = []
+        self.delete_fails = False
 
     async def create(self, params: object, **kwargs: object) -> _FakeDaytonaSandbox:
         self.calls["create"] = (params, kwargs["timeout"])
+        self.created.append(params)
         return self.sandbox
 
     async def delete(self, sandbox: _FakeDaytonaSandbox) -> None:
-        if self.calls.get("delete_fails"):
+        if self.delete_fails:
             raise RuntimeError("daytona API unreachable")
         self.calls["delete"] = sandbox.id
 
@@ -342,10 +392,12 @@ class _FakeSSHConnect:
         self._calls["ssh_closed"] = True
 
 
-def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> _FakeDaytonaClient:
     calls: dict[str, object] = {}
     client = _FakeDaytonaClient(calls)
     daytona = ModuleType("daytona")
+    daytona_async = ModuleType("daytona._async")
+    object_storage = ModuleType("daytona._async.object_storage")
     asyncssh = ModuleType("asyncssh")
 
     class AsyncDaytona:
@@ -367,10 +419,15 @@ def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     setattr(daytona, "Resources", _DaytonaResources)
     setattr(daytona, "GpuType", _DaytonaGpuType)
     setattr(daytona, "SessionExecuteRequest", _SessionExecuteRequest)
+    setattr(daytona, "_async", daytona_async)
+    setattr(daytona_async, "object_storage", object_storage)
+    setattr(object_storage, "AsyncObjectStorage", _FakeObjectStorage)
     setattr(asyncssh, "connect", connect)
     monkeypatch.setitem(sys.modules, "daytona", daytona)
+    monkeypatch.setitem(sys.modules, "daytona._async", daytona_async)
+    monkeypatch.setitem(sys.modules, "daytona._async.object_storage", object_storage)
     monkeypatch.setitem(sys.modules, "asyncssh", asyncssh)
-    return calls
+    return client
 
 
 async def test_acquisition_publishes_ephemeral_port_and_removes_container(
@@ -656,7 +713,7 @@ async def test_modal_runtime_applies_env_vars_to_image(
 async def test_daytona_runtime_config_flows_into_daytona_sdk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = _install_fake_daytona(monkeypatch)
+    calls = _install_fake_daytona(monkeypatch).calls
     config = RuntimeConfig(
         image="img:tag",
         resources=RuntimeResources(
@@ -711,7 +768,7 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
 async def test_daytona_task_runtime_config_overlays_provider_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = _install_fake_daytona(monkeypatch)
+    calls = _install_fake_daytona(monkeypatch).calls
     provider = DaytonaRuntime(
         runtime_config=RuntimeConfig(
             resources=RuntimeResources(cpu=2, memory_mb=4096),
@@ -742,7 +799,7 @@ async def test_daytona_task_runtime_config_overlays_provider_defaults(
 async def test_daytona_snapshot_sandboxes_disable_auto_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = _install_fake_daytona(monkeypatch)
+    calls = _install_fake_daytona(monkeypatch).calls
 
     async with DaytonaRuntime("snapshot")(_row()):
         pass
@@ -767,64 +824,57 @@ def _build_image(context: Path) -> SimpleNamespace:
     )
 
 
-async def _boot_snapshot(context: Path, calls: dict[str, object]) -> str:
+async def _boot_snapshot(context: Path, daytona: _FakeDaytonaClient) -> str:
     """Acquire once through a fresh provider; return the snapshot it booted."""
     async with DaytonaRuntime("env", image=_build_image(context))(_row()):
         pass
-    create_call = calls["create"]
-    assert isinstance(create_call, tuple)
-    snapshot = create_call[0].snapshot
-    assert isinstance(snapshot, str)
-    return snapshot
+    return daytona.created[-1].snapshot
 
 
-async def test_daytona_rebuilds_the_snapshot_when_the_env_changes(
+async def test_daytona_rebuilds_the_snapshot_in_place_when_the_env_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A name that doesn't track content resolves to whatever was built first.
-    calls = _install_fake_daytona(monkeypatch)
+    # The name is the durable handle; content drift rebuilds it, never renames it —
+    # otherwise every rollout after an edit silently measures the old code.
+    daytona = _install_fake_daytona(monkeypatch)
     (tmp_path / "env.py").write_text("REWARD = 1.0\n")
 
-    first = await _boot_snapshot(tmp_path, calls)
-    unchanged = await _boot_snapshot(tmp_path, calls)
+    first = await _boot_snapshot(tmp_path, daytona)
+    unchanged = await _boot_snapshot(tmp_path, daytona)
     (tmp_path / "env.py").write_text("REWARD = 0.0\n")
-    edited = await _boot_snapshot(tmp_path, calls)
+    edited = await _boot_snapshot(tmp_path, daytona)
 
-    assert unchanged == first
-    assert edited != first
-    assert first.startswith("env-")
-    # Built once per distinct content; the unchanged re-acquisition reused it.
-    assert calls["snapshot_create"] == [first, edited]
+    assert first == unchanged == edited == "env"
+    # Built once per distinct content; the unchanged re-acquisition reused it,
+    # and the stale build was replaced, not left behind.
+    assert daytona.snapshot.builds == ["env", "env"]
+    assert list(daytona.snapshot.snapshots) == ["env"]
 
 
-async def test_daytona_snapshot_name_ignores_build_noise(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_daytona_registry_ref_image_builds_and_reuses_by_name(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Daytona's archiver has no .dockerignore, so the host venv rides along in
-    # the context; digesting it would rebuild on every local `uv sync`.
-    calls = _install_fake_daytona(monkeypatch)
-    (tmp_path / "env.py").write_text("REWARD = 1.0\n")
-    before = await _boot_snapshot(tmp_path, calls)
+    # image= is documented as "Dockerfile/registry ref"; a plain ref string must
+    # build once, reuse while unchanged, and rebuild when repointed.
+    daytona = _install_fake_daytona(monkeypatch)
 
-    (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    (tmp_path / ".venv" / "bin" / "python").write_text("#!/host/python\n")
-    (tmp_path / "__pycache__").mkdir()
-    (tmp_path / "__pycache__" / "env.cpython-311.pyc").write_bytes(b"\x00\x01")
+    for ref in ("registry/env:1", "registry/env:1", "registry/env:2"):
+        async with DaytonaRuntime("env", image=ref)(_row()):
+            pass
 
-    assert await _boot_snapshot(tmp_path, calls) == before
+    assert daytona.snapshot.builds == ["env", "env"]
+    assert daytona.snapshot.snapshots["env"].image_name == "registry/env:2"
 
 
 async def test_daytona_sends_cpu_as_a_whole_number(monkeypatch: pytest.MonkeyPatch) -> None:
     # Daytona's API rejects 2.0, and no equality assertion can catch it: 2.0 == 2.
-    calls = _install_fake_daytona(monkeypatch)
+    daytona = _install_fake_daytona(monkeypatch)
     config = RuntimeConfig(image="img:tag", resources=RuntimeResources(cpu=2))
 
     async with DaytonaRuntime(runtime_config=config)(_row()):
         pass
 
-    create_call = calls["create"]
-    assert isinstance(create_call, tuple)
-    assert isinstance(create_call[0].resources.cpu, int)
+    assert isinstance(daytona.created[-1].resources.cpu, int)
 
 
 async def test_daytona_rejects_a_fractional_cpu_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -840,8 +890,8 @@ async def test_daytona_names_a_sandbox_it_could_not_delete(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     # Teardown must report the leak without shadowing the run's own error.
-    calls = _install_fake_daytona(monkeypatch)
-    calls["delete_fails"] = True
+    daytona = _install_fake_daytona(monkeypatch)
+    daytona.delete_fails = True
 
     with caplog.at_level(logging.WARNING, logger="hud.eval.runtime"):
         async with DaytonaRuntime("snapshot")(_row()):
@@ -853,12 +903,12 @@ async def test_daytona_names_a_sandbox_it_could_not_delete(
 async def test_daytona_sizes_each_row_from_its_own_runtime_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Resolving the name once would boot every row on the first row's cores.
-    calls = _install_fake_daytona(monkeypatch)
+    # Resources are baked into a snapshot at build time, so rows that request
+    # different sizes must boot distinct snapshots, not the first row's.
+    daytona = _install_fake_daytona(monkeypatch)
     (tmp_path / "env.py").write_text("REWARD = 1.0\n")
     provider = DaytonaRuntime("env", image=_build_image(tmp_path))
 
-    booted = []
     for cpu in (2, 4):
         task = Task(
             env="any-env",
@@ -867,58 +917,9 @@ async def test_daytona_sizes_each_row_from_its_own_runtime_config(
         )
         async with provider(task):
             pass
-        create_call = calls["create"]
-        assert isinstance(create_call, tuple)
-        booted.append(create_call[0].snapshot)
 
-    assert booted[0] != booted[1]
-    assert calls["snapshot_create"] == booted
-
-
-async def test_daytona_prune_leaves_hand_named_snapshots_alone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # "env-baseline" shares the prefix but is nothing this runtime minted.
-    calls = _install_fake_daytona(monkeypatch)
-    (tmp_path / "env.py").write_text("REWARD = 1.0\n")
-    stale = await _boot_snapshot(tmp_path, calls)
-    created = calls["snapshot_create"]
-    assert isinstance(created, list)
-    created.append("env-baseline")
-
-    (tmp_path / "env.py").write_text("REWARD = 0.0\n")
-    provider = DaytonaRuntime("env", image=_build_image(tmp_path))
-    async with provider(_row()):
-        pass
-
-    assert await provider.prune_snapshots() == [stale]
-    assert "env-baseline" in created
-
-
-async def test_daytona_prune_keeps_only_the_snapshot_in_use(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls = _install_fake_daytona(monkeypatch)
-    (tmp_path / "env.py").write_text("REWARD = 1.0\n")
-    stale = await _boot_snapshot(tmp_path, calls)
-    (tmp_path / "env.py").write_text("REWARD = 0.0\n")
-
-    provider = DaytonaRuntime("env", image=_build_image(tmp_path))
-    async with provider(_row()):
-        pass
-    current = await _boot_snapshot(tmp_path, calls)
-
-    assert await provider.prune_snapshots() == [stale]
-    assert calls["snapshot_create"] == [current]
-
-
-async def test_daytona_prune_refuses_before_a_snapshot_is_resolved(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Nothing to keep means every digest looks prunable, including a live one.
-    _install_fake_daytona(monkeypatch)
-    with pytest.raises(RuntimeError, match="resolved snapshot"):
-        await DaytonaRuntime("env").prune_snapshots()
+    assert daytona.snapshot.builds == ["env-2cpu", "env-4cpu"]
+    assert [params.snapshot for params in daytona.created] == ["env-2cpu", "env-4cpu"]
 
 
 async def test_daytona_attaches_the_env_output_to_a_failed_handshake(

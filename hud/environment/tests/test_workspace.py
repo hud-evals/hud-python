@@ -285,7 +285,7 @@ async def test_a_symlinked_root_publishes_both_spellings(tmp_path: Path) -> None
     try:
         cap = ws.capability()
         assert cap.params["cwd"] == real.as_posix()
-        assert cap.params["cwd_alias"] == link.as_posix()
+        assert cap.params["cwd_aliases"] == [link.as_posix()]
 
         client = SSHClient(cap, cast("Any", None))
         assert client.map_path(f"{link}/calc.py") == f"{real}/calc.py"
@@ -298,6 +298,6 @@ async def test_a_plain_root_publishes_no_alias(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "root")
     await ws.start()
     try:
-        assert "cwd_alias" not in ws.capability().params
+        assert "cwd_aliases" not in ws.capability().params
     finally:
         await ws.stop()

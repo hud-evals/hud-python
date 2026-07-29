@@ -152,13 +152,11 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 ```
 
 - **`snapshot_name`** - Daytona snapshot to boot from (the durable handle).
-- **`image`** - Dockerfile/registry ref to build the snapshot once if it's missing. Resources (cpu/memory/gpu) live on the snapshot. A snapshot built from `image` is content-addressed — its name carries a digest of the Dockerfile and everything it copies in (`my-env-9f2c1d0ab3e4`), so editing the env boots a rebuilt snapshot instead of silently reusing the one from before the edit. The digest is part of the stored name, so `DaytonaRuntime("my-env")` with no `image` will not find what `DaytonaRuntime("my-env", image=…)` built: keep passing `image` (it re-resolves to the same snapshot for free when nothing changed), or pass the full digested name.
+- **`image`** - Dockerfile/registry ref to build the snapshot if it's missing. Daytona records what a snapshot was built from, so when the image content changes (an edited Dockerfile or context file, a repointed registry ref) the snapshot is rebuilt in place under the same name instead of silently reusing the build from before the edit.
 - **`workdir`** / **`port`** - guest working directory and in-sandbox serving port.
 - **`ssh_host`** / **`ssh_expires_minutes`** - SSH tunnel settings (Daytona exposes services over an SSH local-forward).
 
-`runtime_config.resources` (cpu/memory/gpu) is applied when the snapshot is built from `image`, and is part of the digest — same image at a different size is a different snapshot. Booting a snapshot you did not build (`snapshot_name` with no `image`) cannot resize it, since resources are fixed at build time.
-
-`await runtime.prune_snapshots()` deletes snapshots under this `snapshot_name` that this runtime has not booted — content-addressing costs one snapshot per edit, and nothing else reaps them. Every digest the instance booted is kept (a taskset with per-row `resources` uses several at once), so reaping across env edits means pruning from a fresh runtime.
+Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`, a task's `runtime_config.resources` builds a sized variant under a suffixed name (`my-env-4cpu`); without `image`, an already-built snapshot cannot be resized.
 
 ### `HUDRuntime`
 

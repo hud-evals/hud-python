@@ -209,7 +209,7 @@ class Workspace:
         # workspace-relative address and re-anchors it somewhere that does not exist.
         given = Path(root).absolute().as_posix()
         real = self.root.as_posix()
-        self._cwd_alias = given if given != real and self._guest_path == real else None
+        self._cwd_aliases = [given] if given != real and self._guest_path == real else []
         # ssh config
         self._ssh_host = host
         self._ssh_port = port
@@ -437,7 +437,7 @@ class Workspace:
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
             cwd=self._guest_path,
-            cwd_alias=self._cwd_alias,
+            cwd_aliases=self._cwd_aliases or None,
         )
 
     @property

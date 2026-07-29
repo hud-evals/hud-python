@@ -10,9 +10,17 @@ from __future__ import annotations
 import asyncssh
 import mcp.types as mcp_types
 
-from hud.agents.tools.base import AgentTool
+from hud.agents.tools.base import AgentTool, tool_err, tool_ok
 from hud.capabilities import SSHClient
 from hud.types import MCPToolResult
+
+
+def _remote_error(exc: asyncssh.ProcessError) -> str:
+    """What the remote command printed to stderr — a failed file op is an
+    ordinary tool outcome, so the agent gets the shell's message, not the
+    exception's repr."""
+    stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else exc.stderr
+    return (stderr or "").strip() or f"exit {exc.exit_status}"
 
 
 class SSHTool(AgentTool[SSHClient]):
@@ -59,18 +67,5 @@ class SSHTool(AgentTool[SSHClient]):
             return tool_err(_remote_error(e))
         return tool_ok("\n".join(names) if names else "(empty)")
 
-
-def _remote_error(exc: asyncssh.ProcessError) -> str:
-    """The line the remote command printed, not asyncssh's whole connection repr.
-
-    A failed file command is an ordinary tool outcome — reading a file that does
-    not exist yet is the first thing an editor tool does — so the agent gets what
-    the shell said, not a ~30-line traceback.
-    """
-    stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else exc.stderr
-    return stderr.strip() or f"exit {exc.exit_status}"
-
-
-from hud.agents.tools.base import tool_err, tool_ok  # noqa: E402
 
 __all__ = ["SSHTool"]

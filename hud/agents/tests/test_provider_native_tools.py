@@ -49,10 +49,19 @@ class _Conn:
         parts = shlex.split(command)
         if len(parts) == 3 and parts[:2] == ["cat", "--"]:
             if parts[2] not in self._store:
-                return self._finish(
-                    command,
-                    check,
-                    _Completed(stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1),
+                if check:
+                    raise asyncssh.ProcessError(
+                        env=None,
+                        command=command,
+                        subsystem=None,
+                        exit_status=1,
+                        exit_signal=None,
+                        returncode=1,
+                        stdout="",
+                        stderr=f"cat: {parts[2]}: No such file or directory",
+                    )
+                return _Completed(
+                    stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1
                 )
             return _Completed(stdout=self._store[parts[2]].decode())
         if len(parts) == 3 and parts[:2] == ["cat", ">"]:
@@ -81,21 +90,6 @@ class _Conn:
         if len(parts) >= 3 and parts[:2] == ["mkdir", "-p"]:
             return _Completed(exit_status=0)
         return self._completed
-
-    @staticmethod
-    def _finish(command: str, check: bool, completed: _Completed) -> _Completed:
-        if check and completed.exit_status:
-            raise asyncssh.ProcessError(
-                env=None,
-                command=command,
-                subsystem=None,
-                exit_status=completed.exit_status,
-                exit_signal=None,
-                returncode=completed.exit_status,
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-            )
-        return completed
 
 
 class _FakeSSH(SSHClient):
@@ -551,7 +545,7 @@ def test_map_path_leaves_a_symlinked_spelling_of_the_workspace_alone() -> None:
         name="shell",
         protocol="ssh/2",
         url="ssh://localhost:22",
-        params={"cwd": "/private/tmp/w", "cwd_alias": "/tmp/w"},
+        params={"cwd": "/private/tmp/w", "cwd_aliases": ["/tmp/w"]},
     )
     ssh = SSHClient(cap, cast("Any", None))
 

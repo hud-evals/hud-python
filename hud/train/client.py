@@ -45,7 +45,7 @@ if TYPE_CHECKING:
         tuple["torch.Tensor", dict[str, float]],
     ]
 
-logger = logging.getLogger("hud.train")
+logger = logging.getLogger("hud.train.client")
 
 
 def _run_to_input(run: Run) -> TrainInput:
@@ -88,45 +88,47 @@ def _check_groups(
     trajectories: Sequence[str | Run | TrajectoryPayload],
     group_size: int | None,
 ) -> None:
-    """Fail before a forward pass if the batch can't form full GRPO groups: an
-    incomplete final group gets a skewed advantage baseline. Cheap, client-side,
-    no round-trip — unlike per-group reward spread, which only the service sees."""
-    if group_size is None:
-        return
+    """Validate the batch's GRPO group structure client-side, before the round
+    trip. Groups are keyed by ``group_id`` when every item is a ``Run`` carrying
+    one, positional slices of ``group_size`` otherwise. An incomplete group is an
+    error: its advantage baseline is skewed. A batch where no group has any
+    reward spread only warns: every advantage normalizes to zero, which is a
+    legitimate sampling outcome for one batch but makes a later ``optim_step``
+    fail confusingly when it is the whole accumulation. Rewards are only visible
+    inline, so the spread check skips batches carrying ``trace_id`` strings."""
     n = len(trajectories)
-    if n % group_size != 0:
+    if group_size is not None and n % group_size != 0:
         raise ValueError(
             f"{n} trajectories do not divide evenly into groups of {group_size}; "
             "GRPO normalizes advantages within each group, so every group must be full"
         )
-    run_groups = [
+    run_group_ids = [
         item.group_id for item in trajectories if not isinstance(item, str | TrajectoryPayload)
     ]
-    if len(run_groups) != n or any(group_id is None for group_id in run_groups):
-        return
-    groups = Counter(run_groups)
-    if incomplete := [group_id for group_id, count in groups.items() if count != group_size]:
-        raise ValueError(f"incomplete GRPO groups: {incomplete}")
+    keyed = len(run_group_ids) == n and all(g is not None for g in run_group_ids)
+    if keyed and group_size is not None:
+        counts = Counter(run_group_ids)
+        if incomplete := [group_id for group_id, count in counts.items() if count != group_size]:
+            raise ValueError(f"incomplete GRPO groups: {incomplete}")
 
-
-def _check_reward_spread(
-    trajectories: Sequence[str | Run | TrajectoryPayload],
-    group_size: int | None,
-) -> None:
-    """Warn when no group has any reward spread: GRPO normalizes advantages within a
-    group, so identical rewards zero every one of them and the pass accumulates
-    nothing — which surfaces much later as a 409 from ``optim_step`` blaming the
-    wrong call. Only inline rewards are visible here; ``trace_id``s are skipped."""
-    rewards = [t.reward for t in trajectories if not isinstance(t, str)]
-    if len(rewards) != len(trajectories) or len(rewards) < 2:
+    inline = [item for item in trajectories if not isinstance(item, str)]
+    if len(inline) != n or n < 2:
         return
-    size = group_size or len(rewards)
-    if all(len(set(rewards[start : start + size])) == 1 for start in range(0, len(rewards), size)):
+    if keyed:
+        buckets: dict[object, list[float]] = {}
+        for group_id, item in zip(run_group_ids, inline, strict=True):
+            buckets.setdefault(group_id, []).append(item.reward)
+        reward_groups = list(buckets.values())
+    else:
+        size = group_size or n
+        reward_groups = [
+            [item.reward for item in inline[start : start + size]] for start in range(0, n, size)
+        ]
+    if all(len(set(group)) == 1 for group in reward_groups):
         logger.warning(
-            "every reward is identical within its GRPO group (%s), so all advantages are "
-            "zero and this pass accumulates no gradient — the next optim_step will fail. "
-            "Vary task difficulty until rollouts disagree.",
-            rewards[0],
+            "no GRPO group has any reward spread, so every advantage normalizes to "
+            "zero and this pass accumulates no gradient. Vary task difficulty "
+            "until rollouts within a group disagree."
         )
 
 
@@ -162,7 +164,6 @@ class TrainingClient(BaseTrainingClient):
         """
         inputs = _to_inputs(trajectories)
         _check_groups(trajectories, group_size)
-        _check_reward_spread(trajectories, group_size)
         request = ForwardBackwardRequest(
             inputs=inputs,
             loss_fn=loss_fn,

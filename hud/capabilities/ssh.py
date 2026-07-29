@@ -57,14 +57,16 @@ class SSHClient(CapabilityClient):
         normalize the remainder against ``/`` (clamping ``..`` at the root,
         exactly as a chroot does), and re-anchor under the cwd. Idempotent.
 
-        ``cwd_alias`` is the same directory reached through a symlink, and is
-        stripped like the cwd: re-anchoring it instead would turn an already
-        correct absolute path into a nested one that does not exist.
+        ``cwd_aliases`` are the same directory reached through symlinks, and are
+        stripped like the cwd: re-anchoring one would turn an already correct
+        absolute path into a nested one that does not exist.
         """
         cwd = str(self.capability.params.get("cwd", "")).rstrip("/")
         if not cwd:
             return path
-        alias = str(self.capability.params.get("cwd_alias", "")).rstrip("/")
+        aliases = [
+            str(alias).rstrip("/") for alias in self.capability.params.get("cwd_aliases") or []
+        ]
         if self._is_windows:
             # The workspace publishes cwd via as_posix() (e.g. "C:/work") but
             # callers pass native paths ("C:\work\file.txt"); NTFS paths are
@@ -76,7 +78,7 @@ class SSHClient(CapabilityClient):
                 # Drive-absolute outside the workspace: anchor like the chroot.
                 path = path[2:]
         else:
-            for prefix in (cwd, alias):
+            for prefix in (cwd, *aliases):
                 if prefix and (path == prefix or path.startswith(prefix + "/")):
                     path = path[len(prefix) :]
                     break
