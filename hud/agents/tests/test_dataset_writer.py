@@ -13,7 +13,9 @@ from hud.agents.robot import dataset as dataset_mod
 from hud.agents.robot.dataset import DatasetWriter
 
 
-def _contract(*, state_shape: tuple[int, ...], action_shape: tuple[int, ...], robot: str) -> dict:
+def _contract(
+    *, state_shape: tuple[int, ...], action_shape: tuple[int, ...], robot: str
+) -> dict[str, Any]:
     return {
         "robot_type": robot,
         "features": {
@@ -24,10 +26,10 @@ def _contract(*, state_shape: tuple[int, ...], action_shape: tuple[int, ...], ro
 
 
 @pytest.fixture(autouse=True)
-def _reset_dataset_writer_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    DatasetWriter._datasets.clear()
-    DatasetWriter._open.clear()
-    DatasetWriter._atexit_registered = False
+def reset_dataset_writer_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    DatasetWriter._datasets.clear()  # pyright: ignore[reportPrivateUsage]
+    DatasetWriter._open.clear()  # pyright: ignore[reportPrivateUsage]
+    DatasetWriter._atexit_registered = False  # pyright: ignore[reportPrivateUsage]
     monkeypatch.setenv("RECORD_DIR", str(tmp_path))
     monkeypatch.delenv("HF_REPO", raising=False)
 
@@ -46,7 +48,11 @@ def _install_fake_lerobot(monkeypatch: pytest.MonkeyPatch) -> list[MagicMock]:
         "lerobot.datasets.lerobot_dataset",
         SimpleNamespace(LeRobotDataset=SimpleNamespace(create=create)),
     )
-    monkeypatch.setattr(dataset_mod.importlib.util, "find_spec", lambda _name: object())
+
+    def _found(_name: str) -> object:
+        return object()
+
+    monkeypatch.setattr(dataset_mod.importlib.util, "find_spec", _found)
     return created
 
 
@@ -57,7 +63,7 @@ def test_matching_writers_share_one_dataset(monkeypatch: pytest.MonkeyPatch) -> 
     DatasetWriter(contract, fps=10).add(obs, act, task="t")
     DatasetWriter(contract, fps=10).add(obs, act, task="t")
     assert len(created) == 1
-    assert len(DatasetWriter._datasets) == 1
+    assert len(DatasetWriter._datasets) == 1  # pyright: ignore[reportPrivateUsage]
 
 
 def test_different_fps_or_features_get_separate_datasets(
@@ -86,6 +92,6 @@ def test_finalize_clears_all_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     a.end_episode()
     b.end_episode()
     DatasetWriter.finalize()
-    assert DatasetWriter._datasets == {}
+    assert DatasetWriter._datasets == {}  # pyright: ignore[reportPrivateUsage]
     for ds in created:
         ds.finalize.assert_called_once()
