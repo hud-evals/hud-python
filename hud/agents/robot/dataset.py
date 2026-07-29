@@ -1,13 +1,12 @@
 """Opt-in LeRobot v3 dataset writing for robot rollouts.
 
 Each rollout holds a :class:`DatasetWriter` that buffers its ``(observation,
-executed action)`` frames and commits whole episodes into one process-shared
-dataset — so concurrent rollouts (e.g. :class:`~hud.agents.robot.batching.BatchedAgent`
-clones) record into a single dataset instead of one shard each. The shared
-dataset is created on the first frame; ``atexit`` flushes every open writer's
-buffer before closing it. A class lock serializes commits so episodes stay
-contiguous. Finalized at process exit (or an explicit :meth:`finalize`),
-optionally pushed to the HF Hub.
+executed action)`` frames and commits whole episodes into a process-shared
+dataset keyed by schema/FPS — concurrent same-contract rollouts (e.g.
+:class:`~hud.agents.robot.batching.BatchedAgent` clones) share one root;
+heterogeneous contracts get separate datasets. Created on the first frame;
+``atexit`` flushes every open writer. A class lock keeps episodes contiguous.
+Finalized at process exit (or :meth:`finalize`), optionally pushed to the HF Hub.
 The contract drives the schema with no extra wiring. Destination + push come
 from the environment:
 
@@ -92,18 +91,16 @@ def _names(feature: dict[str, Any], base: str) -> list[str]:
 
 
 class DatasetWriter:
-    """Buffers one rollout's frames; commits whole episodes to a process-shared
+    """Buffers one rollout's frames; commits whole episodes to a schema/FPS-keyed
     LeRobot v3 dataset. A no-op shell when lerobot is missing (warned once) so
     telemetry-only runs never break."""
 
-    # One dataset per process: concurrent rollouts (e.g. BatchedAgent clones) each
-    # buffer their own episode but commit into the same root under ``_lock``.
-    _ds: ClassVar[Any | None] = None
-    _root: ClassVar[Path | None] = None
-    _repo_id: ClassVar[str] = ""
+    # key -> (dataset, root, repo_id). Same schema/FPS shares; else a new root.
+    _datasets: ClassVar[dict[tuple[Any, ...], tuple[Any, Path, str]]] = {}
     # Serialize create / add_frame / save_episode / finalize across rollouts.
     _lock: ClassVar[threading.RLock] = threading.RLock()
     _open: ClassVar[set[DatasetWriter]] = set()  # uncommitted buffers for atexit
+    _atexit_registered: ClassVar[bool] = False
 
     def __init__(self, contract: dict[str, Any], *, fps: int) -> None:
         self._contract = contract
@@ -171,52 +168,67 @@ class DatasetWriter:
         with cls._lock:
             for writer in list(cls._open):
                 writer.end_episode()  # re-entrant: end_episode takes the same lock
-            ds, cls._ds = cls._ds, None
-            if ds is None:
-                return
-            root, repo_id = cls._root, cls._repo_id
-            ds.finalize()
-            print(f"[agent] saved LeRobot dataset -> {root}", flush=True)
-            if not os.environ.get("HF_REPO"):
-                return
+            datasets, cls._datasets = cls._datasets, {}
             private = os.environ.get("HF_PRIVATE", "0") not in ("0", "", "false", "False")
-            try:  # best-effort: the on-disk dataset is the source of truth
-                ds.push_to_hub(private=private)
-                print(f"[agent] pushed -> https://huggingface.co/datasets/{repo_id}", flush=True)
-            except Exception as exc:
-                logger.exception("HF push failed for %s", repo_id)
-                print(
-                    f"[agent] WARNING: HF push failed: {exc!r} (dataset still on disk)", flush=True
-                )
+            push = bool(os.environ.get("HF_REPO"))
+            for ds, root, repo_id in datasets.values():
+                ds.finalize()
+                print(f"[agent] saved LeRobot dataset -> {root}", flush=True)
+                if not push:
+                    continue
+                try:  # best-effort: the on-disk dataset is the source of truth
+                    ds.push_to_hub(private=private)
+                    print(
+                        f"[agent] pushed -> https://huggingface.co/datasets/{repo_id}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    logger.exception("HF push failed for %s", repo_id)
+                    print(
+                        f"[agent] WARNING: HF push failed: {exc!r} (dataset still on disk)",
+                        flush=True,
+                    )
 
     def _ensure_dataset(self) -> Any:
-        """Return the process-shared dataset, creating it on first frame.
+        """Return the schema/FPS-keyed shared dataset, creating it on first use.
 
-        Caller must hold ``_lock`` (create is check-then-act on ``_ds``).
+        Caller must hold ``_lock``.
         """
-        if DatasetWriter._ds is not None:
-            return DatasetWriter._ds
+        # Share only when fps + robot_type + feature schema match.
+        key = (
+            self._fps,
+            self._contract.get("robot_type") or "robot",
+            tuple(
+                (n, f.get("dtype"), tuple(f.get("shape") or ()))
+                for n, f in sorted(self._features.items())
+            ),
+        )
+        if key in DatasetWriter._datasets:
+            return DatasetWriter._datasets[key][0]
         lerobot_dataset: Any = importlib.import_module("lerobot.datasets.lerobot_dataset")
 
         name = self._contract.get("robot_type") or "robot"
-        # Stamp + random tag: unique root per process even across simultaneous launches.
+        # Stamp + random tag: unique root even across simultaneous launches.
         tag = f"{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         record_dir = Path(os.environ.get("RECORD_DIR", "data"))
         record_dir.mkdir(parents=True, exist_ok=True)
-        DatasetWriter._root = record_dir / f"{name}_{tag}"
-        DatasetWriter._repo_id = f"{os.environ.get('HF_REPO') or 'hud'}/{name}_{tag}"
+        root = record_dir / f"{name}_{tag}"
+        repo_id = f"{os.environ.get('HF_REPO') or 'hud'}/{name}_{tag}"
         # LeRobotDataset.create requires a fresh root; images encode to per-episode video.
-        DatasetWriter._ds = lerobot_dataset.LeRobotDataset.create(
-            repo_id=DatasetWriter._repo_id,
+        ds = lerobot_dataset.LeRobotDataset.create(
+            repo_id=repo_id,
             fps=self._fps,
             features=self._features,
-            root=DatasetWriter._root,
+            root=root,
             robot_type=self._contract.get("robot_type"),
             use_videos=True,
         )
-        atexit.register(DatasetWriter.finalize)  # flush all open writers, not only this one
-        print(f"[agent] recording LeRobot dataset -> {DatasetWriter._root}", flush=True)
-        return DatasetWriter._ds
+        DatasetWriter._datasets[key] = (ds, root, repo_id)
+        if not DatasetWriter._atexit_registered:
+            atexit.register(DatasetWriter.finalize)
+            DatasetWriter._atexit_registered = True
+        print(f"[agent] recording LeRobot dataset -> {root}", flush=True)
+        return ds
 
 
 __all__ = ["DatasetWriter"]
