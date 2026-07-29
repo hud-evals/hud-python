@@ -48,7 +48,7 @@ class _Slot:
     token: str | None = None
     ws: Any = None
     action: np.ndarray | None = None
-    idle: bool = False  # hold next step (dialing timed out, WS dropped, or terminated)
+    idle: bool = False  # not a barrier participant (disconnected / terminated)
     # Touched this episode; after release stays unreclaimable until the next global reset.
     used: bool = False
 
@@ -123,7 +123,8 @@ class RobotBridge(ABC):
     - :meth:`result_slots` returns one score dict per slot.
     """
 
-    #: Timeout for the post-connect claim frame (and the tick-loop idle poll).
+    #: Claim-frame timeout, and how long the barrier waits on a silent live slot
+    #: before marking it idle so peers can keep stepping.
     step_timeout: float = 30.0
 
     def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
@@ -145,6 +146,8 @@ class RobotBridge(ABC):
         self._registry.configure(1)
         self._tick_task: asyncio.Task[None] | None = None
         self._action_event = asyncio.Event()
+        # Wakes claim waiters when a slot is released (Shared width+1 waits here).
+        self._slots_changed = asyncio.Event()
         # Episode scoring read by ``result_slots``; single-env subclasses update these
         # in ``reset``/``step`` (batched bridges override result_slots instead).
         self.task_description: str = ""
@@ -168,29 +171,34 @@ class RobotBridge(ABC):
 
     async def _claim_episode(self, **kwargs: Any) -> dict[str, Any]:
         """Control-plane reset: global sim reset when all free, else claim a free slot."""
-        if self._registry.all_free:
-            self.total_reward = 0.0
-            self.success = False
-            self.terminated = False
-            # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
-            # on the background serve loop.
-            self.task_description = await self._run_on_sim(self.reset, **kwargs)
-            self._episode_kwargs = kwargs
-            self._registry.configure(self.num_envs)
-            slot = self._registry.slots[0]
-        else:
+        while True:
+            if self._registry.all_free:
+                self.total_reward = 0.0
+                self.success = False
+                self.terminated = False
+                # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
+                # on the background serve loop.
+                self.task_description = await self._run_on_sim(self.reset, **kwargs)
+                self._episode_kwargs = kwargs
+                self._registry.configure(self.num_envs)
+                slot = self._registry.slots[0]
+                break
             # Lockstep sim: one global reset serves the whole batch, so a later claim
             # cannot get its own task/seed — reject differing kwargs instead of
             # silently running the first claim's task.
-            if kwargs and kwargs != self._episode_kwargs:
+            if kwargs != self._episode_kwargs:
                 raise ValueError(
                     f"slots share one batch reset ({self._episode_kwargs}); a concurrent "
                     f"claim cannot use different task kwargs ({kwargs}) — group tasks with "
                     "identical args, or use one sim per distinct task/seed"
                 )
             slot = self._registry.free_slot()
-            if slot is None:
-                raise RuntimeError(f"all {self.num_envs} slots are claimed")
+            if slot is not None:
+                break
+            # Batch full — wait for peers to finish (Shared width+1 lands here).
+            # Wait then clear so a release between free_slot and wait is not lost.
+            await self._slots_changed.wait()
+            self._slots_changed.clear()
         token = self._registry.claim(slot)
         return {"prompt": self.task_description, "token": token}
 
@@ -203,9 +211,9 @@ class RobotBridge(ABC):
         slot = self._registry.resolve(token)
         grade = (await self._run_on_sim(self.result_slots))[slot.index]
         self._registry.release(slot)
-        # Wake the barrier: release clears slot.ws, so _handle_client's finally
-        # won't (slot.ws is no longer this connection).
+        # Wake barrier + claim waiters (release clears slot.ws before WS finally).
         self._action_event.set()
+        self._slots_changed.set()
         return grade
 
     @abstractmethod
@@ -339,40 +347,45 @@ class RobotBridge(ABC):
                 self._action_event.set()  # wake the barrier so it doesn't wait on us
 
     async def _tick_loop(self) -> None:
-        """Gather claimed slots' actions, step once, fan out."""
+        """Barrier: wait for live claimed actions, step once, fan out."""
         while True:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
             self._action_event.clear()
+
             claimed = self._registry.claimed()
-            # Claimed but still dialing (no WS, not idle) — wait; free slots get hold below.
-            if not claimed or any(s.ws is None and not s.idle for s in claimed):
-                continue
-            while True:
-                pending = [s for s in claimed if s.action is None and not s.idle]
-                if not pending:
-                    break
+            live = [s for s in claimed if not s.idle]  # dialing counts (no action yet)
+            if not live:
+                continue  # all terminated/disconnected — do not hold-spin
+
+            while any(s.action is None for s in live):
                 self._action_event.clear()
-                await self._action_event.wait()
+                try:
+                    await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
+                except TimeoutError:
+                    # Silent too long (hung agent / never dialed) — drop out for peers.
+                    for s in live:
+                        if s.action is None:
+                            s.idle = True
                 claimed = self._registry.claimed()
-                if not claimed or any(s.ws is None and not s.idle for s in claimed):
+                live = [s for s in claimed if not s.idle]
+                if not live:
                     break
-            if not claimed or any(s.ws is None and not s.idle for s in claimed):
+            # Need a real action: all-idle / all-timed-out must not hold-spin.
+            acting = [s for s in live if s.action is not None]
+            if not acting:
                 continue
-            if not any(s.ws is not None for s in claimed):
-                continue
+
             hold = self.hold_action()
-            # Stack one row per sim slot (idle claimed → hold; free/used → hold).
+            # Acting → action; idle claimed + free → hold (lockstep peers still need a row).
             rows = []
             for s in self._registry.slots:
-                row = s.action if s in claimed and s.action is not None else hold
+                row = s.action if s in acting else hold
                 rows.append(np.asarray(row, dtype=np.float32).reshape(-1))
                 s.action = None
-            actions = np.stack(rows)
-            # One step + one batched obs on the sim thread, then fan-out (not N reads).
-            await self._run_on_sim(self.step, actions)
+            await self._run_on_sim(self.step, np.stack(rows))
             batch = await self._run_on_sim(self.get_observation)
-            for s in claimed:
+            for s in acting:
                 await self._send_slot_observation(s, batch)
 
     async def _send_slot_observation(
@@ -397,7 +410,7 @@ class RobotBridge(ABC):
         with contextlib.suppress(websockets.exceptions.ConnectionClosed):
             await slot.ws.send(_packb(msg))
         if slot_terminated:
-            # No further action expected — don't stall co-located slots at the barrier.
+            # Drop out of the barrier so live peers can keep stepping.
             slot.idle = True
             slot.action = None
             self._action_event.set()
