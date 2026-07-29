@@ -141,10 +141,15 @@ def capture_task_params(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 def action_dim_of(env: Any, *, batched: bool) -> int:
     """Per-env action size from the env's (possibly batched) action space."""
-    space = getattr(env, "single_action_space", None) or getattr(env, "action_space", None)
-    shape = tuple(getattr(space, "shape", None) or ())
-    if batched and len(shape) > 1:
-        shape = shape[1:]  # batched Isaac spaces carry the [N] dim
+    single = getattr(env, "single_action_space", None)
+    if single is not None:
+        # Already per-env — do not strip a leading dim (e.g. Box(shape=(2, 2))).
+        shape = tuple(getattr(single, "shape", None) or ())
+    else:
+        space = getattr(env, "action_space", None)
+        shape = tuple(getattr(space, "shape", None) or ())
+        if batched and len(shape) > 1:
+            shape = shape[1:]  # batched Isaac spaces carry the [N] dim
     return int(np.prod(shape)) if shape else 1
 
 
@@ -219,11 +224,13 @@ class GymBridge(RobotBridge):
         self._defaults = defaults  # e.g. num_envs from env.gym(..., num_envs=8)
         # Task args that define the env build (everything else is episodic).
         if callable(target):
+            params = inspect.signature(target).parameters
             self._build_params = {
-                n
-                for n, p in inspect.signature(target).parameters.items()
-                if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+                n for n, p in params.items() if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
             }
+            # **kwargs factories: env.gym(..., num_envs=8) defaults are build args.
+            if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+                self._build_params |= set(defaults)
         else:
             self._build_params = {"num_envs"}  # registry targets: vectorization only
         self.env: Any = None
@@ -372,11 +379,13 @@ class GymBridge(RobotBridge):
             act = act[0] if act.ndim > 1 else act  # single plain env: drop the batch dim
         elif act.ndim == 1:
             act = act[None]
-        # The wire carries floats; discrete/int action spaces need their dtype + shape back.
+        # Wire is flat floats; reshape to the env space, then cast ints.
         space = getattr(self.env, "action_space", None)
+        if shape := getattr(space, "shape", None):
+            act = act.reshape(shape)
         dtype = getattr(space, "dtype", None)
         if dtype is not None and np.issubdtype(dtype, np.integer):
-            act = act.astype(dtype).reshape(getattr(space, "shape", act.shape) or ())
+            act = act.astype(dtype)
         if self._is_torch:
             import torch
 
@@ -420,13 +429,10 @@ class GymBridge(RobotBridge):
         # out of "data" to a top-level sibling, like "terminated").
         data["reward"] = self._step_reward
         if not self.batched:
-            # Plain single env: lift scalars to a batch of one for uniform slicing.
-            data = {
-                k: (
-                    v if getattr(v, "ndim", 0) >= 1 and v.shape[:1] == (1,) else np.asarray(v)[None]
-                )
-                for k, v in data.items()
-            }
+            # Plain env: always add a batch axis for obs; reward is already [1].
+            reward = data.pop("reward")
+            data = {k: np.asarray(v)[None] for k, v in data.items()}
+            data["reward"] = np.atleast_1d(reward)
         return data, np.asarray(self._done, dtype=bool).reshape(self.num_envs)
 
     def result_slots(self) -> list[dict[str, Any]]:
