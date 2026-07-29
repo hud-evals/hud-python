@@ -39,10 +39,14 @@ class RobotClient(CapabilityClient):
 
     protocol: ClassVar[str] = "openpi"
 
-    def __init__(self, capability: Capability, ws: Any) -> None:
+    def __init__(
+        self, capability: Capability, ws: Any, *, seed: dict[str, Any] | None = None
+    ) -> None:
         self.capability = capability
         self._ws = ws
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1)
+        if seed is not None:
+            self._queue.put_nowait(seed)  # first obs from connect's claim handshake
         self._mailman = asyncio.create_task(self._recv_loop())
 
     @property
@@ -73,7 +77,8 @@ class RobotClient(CapabilityClient):
 
         A ``None`` token binds the sole claimed slot on a single-env bridge;
         vectorized bridges (ambiguous slots) reject it — pass the token from
-        ``endpoint.reset()`` there.
+        ``endpoint.reset()`` there. Waits for the first observation so a rejected
+        claim fails here instead of hanging the first ``get_observation``.
         """
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None)
         # Consume initial metadata; string means env error.
@@ -83,9 +88,21 @@ class RobotClient(CapabilityClient):
         # Bind this connection to an episode slot (scalar openpi from here). HUD
         # bridges require the claim frame; plain openpi servers have no slots.
         meta = _unpackb(raw)
+        seed: dict[str, Any] | None = None
         if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
             await ws.send(cast("Any", _packb({"claim": token})))
-        return cls(cap, ws)
+            try:
+                first = await asyncio.wait_for(ws.recv(), timeout=30.0)
+            except TimeoutError as exc:
+                with contextlib.suppress(Exception):
+                    await ws.close()
+                raise RuntimeError("robot env timed out after slot claim") from exc
+            if isinstance(first, str):
+                with contextlib.suppress(Exception):
+                    await ws.close()
+                raise RuntimeError(f"robot env error on claim:\n{first}")
+            seed = _unpackb(first)
+        return cls(cap, ws, seed=seed)
 
     async def get_observation(self) -> dict[str, Any]:
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
