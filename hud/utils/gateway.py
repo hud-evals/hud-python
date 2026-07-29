@@ -10,10 +10,12 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from openai import AsyncOpenAI
+import httpx
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, Field
 
 from hud.settings import settings
+from hud.telemetry.context import get_current_trace_id
 from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.platform import PlatformClient
 
@@ -58,6 +60,16 @@ _MODEL_ALIASES: dict[str, str] = {
 }
 
 
+def _inject_trace_id(request: httpx.Request) -> None:
+    trace_id = get_current_trace_id()
+    if trace_id is not None:
+        request.headers["Trace-Id"] = trace_id
+
+
+async def _inject_trace_id_async(request: httpx.Request) -> None:
+    _inject_trace_id(request)
+
+
 def normalize_gateway_model_id(model: str) -> str:
     """Return the canonical HUD gateway model slug for known short aliases."""
     return _MODEL_ALIASES.get(model.lower(), model)
@@ -87,8 +99,15 @@ def build_gateway_client(provider: str) -> GatewayClient:
     # provider branch so importing gateway utilities does not require both.
     if provider == "anthropic":
         from anthropic import AsyncAnthropic
+        from anthropic import DefaultAsyncHttpxClient as AnthropicHttpClient
 
-        return AsyncAnthropic(api_key=settings.api_key, base_url=settings.hud_gateway_url)
+        return AsyncAnthropic(
+            api_key=settings.api_key,
+            base_url=settings.hud_gateway_url,
+            http_client=AnthropicHttpClient(
+                event_hooks={"request": [_inject_trace_id_async]},
+            ),
+        )
 
     if provider == "gemini":
         from google import genai
@@ -99,11 +118,22 @@ def build_gateway_client(provider: str) -> GatewayClient:
             http_options=HttpOptions(
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
+                client_args={"event_hooks": {"request": [_inject_trace_id]}},
+                async_client_args={
+                    "transport": httpx.AsyncHTTPTransport(),
+                    "event_hooks": {"request": [_inject_trace_id_async]},
+                },
             ),
         )
 
     # OpenAI-compatible (openai, azure, together, groq, fireworks, etc.)
-    return AsyncOpenAI(api_key=settings.api_key, base_url=settings.hud_gateway_url)
+    return AsyncOpenAI(
+        api_key=settings.api_key,
+        base_url=settings.hud_gateway_url,
+        http_client=DefaultAsyncHttpxClient(
+            event_hooks={"request": [_inject_trace_id_async]},
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

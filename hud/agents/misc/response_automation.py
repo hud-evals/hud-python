@@ -85,7 +85,6 @@ async def _determine_response(
         ],
         reasoning={"effort": "low"},
         max_output_tokens=256,
-        extra_headers={"Trace-Id": ""},
     )
 
     text_parts: list[str] = []
