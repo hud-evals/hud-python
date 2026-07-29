@@ -182,3 +182,28 @@ async def test_tick_loop_times_out_silent_live_slot() -> None:
         await task
     assert len(bridge.steps) == 1
     assert b.idle  # timed out
+
+
+@pytest.mark.asyncio
+async def test_tick_loop_does_not_hold_step_undialed_claimed_slot() -> None:
+    """A peer that has claimed but not WS-connected must not be hold-advanced."""
+    bridge = _StubBridge()
+    bridge.step_timeout = 0.05
+    bridge.num_envs = 2
+    bridge._registry.configure(2)
+    a, b = bridge._registry.slots
+    bridge._registry.claim(a)
+    bridge._registry.claim(b)
+    a.ws = _FakeWS()
+    a.idle = b.idle = False
+    a.action = np.array([1.0], dtype=np.float32)
+    # b: claimed, still dialing (ws is None)
+
+    task = asyncio.create_task(bridge._tick_loop())
+    bridge._action_event.set()
+    await asyncio.sleep(0.15)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert bridge.steps == []
+    assert not b.idle  # still waiting to dial — not timed out into hold

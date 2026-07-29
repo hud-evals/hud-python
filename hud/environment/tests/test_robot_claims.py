@@ -75,16 +75,37 @@ async def test_release_without_session_context_is_noop(endpoint: RobotEndpoint) 
 
 
 @pytest.mark.asyncio
-async def test_failed_release_rpc_keeps_claim_for_retry(endpoint: RobotEndpoint) -> None:
+async def test_failed_release_rpc_retries_then_succeeds(endpoint: RobotEndpoint) -> None:
     token = current_session_id.set("sess-a")
     try:
         endpoint._claims["sess-a"] = "tok-a"
-        endpoint._call.side_effect = ConnectionError("sim down")  # type: ignore[attr-defined]
-        await endpoint.release_claim()
-        assert endpoint._claims["sess-a"] == "tok-a"
-        endpoint._call.side_effect = None  # type: ignore[attr-defined]
-        endpoint._call.return_value = {"score": 0.0}  # type: ignore[attr-defined]
+        endpoint._call.side_effect = [  # type: ignore[attr-defined]
+            ConnectionError("sim down"),
+            {"score": 0.0},
+        ]
         await endpoint.release_claim()
         assert "sess-a" not in endpoint._claims
+        assert endpoint._call.call_count == 2  # type: ignore[attr-defined]
     finally:
         current_session_id.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_stop_drains_claims_that_cancel_failed_to_free(endpoint: RobotEndpoint) -> None:
+    endpoint._claims["sess-a"] = "tok-a"
+    endpoint._call.side_effect = [  # type: ignore[attr-defined]
+        ConnectionError("sim down"),
+        ConnectionError("sim down"),
+        ConnectionError("sim down"),
+    ]
+    token = current_session_id.set("sess-a")
+    try:
+        await endpoint.release_claim()  # retries exhausted — claim kept
+        assert endpoint._claims["sess-a"] == "tok-a"
+    finally:
+        current_session_id.reset(token)
+
+    endpoint._call.side_effect = None  # type: ignore[attr-defined]
+    endpoint._call.return_value = {"score": 0.0}  # type: ignore[attr-defined]
+    await endpoint.stop()  # last chance while the control link is up
+    assert endpoint._claims == {}

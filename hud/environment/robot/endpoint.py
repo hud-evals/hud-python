@@ -176,6 +176,8 @@ class RobotEndpoint:
 
     async def stop(self) -> None:
         """Drop the link; tear the sim process down when this endpoint spawned it."""
+        # Free slots cancel/bye failed to release — while the control link is up.
+        await self._release_outstanding_claims()
         if self._forward is not None:
             self._forward.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -282,11 +284,29 @@ class RobotEndpoint:
         if not token:  # already freed via result()
             self._claims.pop(session_id, None)
             return
-        try:
-            await self._call("result", {"token": token})
-        except Exception:
-            return  # keep the claim so a later teardown can retry
-        self._claims.pop(session_id, None)
+        if await self._result_with_retry(token):
+            self._claims.pop(session_id, None)
+            # else keep the claim — stop() drains leftovers while the link is up
+
+    async def _release_outstanding_claims(self) -> None:
+        """Best-effort free of every tracked slot (last chance before the link drops)."""
+        for session_id, token in list(self._claims.items()):
+            if not token:
+                self._claims.pop(session_id, None)
+                continue
+            if await self._result_with_retry(token):
+                self._claims.pop(session_id, None)
+
+    async def _result_with_retry(self, token: str, *, attempts: int = 3) -> bool:
+        """``result`` RPC with short retries; teardown only runs once per cancel path."""
+        for attempt in range(attempts):
+            try:
+                await self._call("result", {"token": token})
+                return True
+            except Exception:
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(0.05)
+        return False
 
     async def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         # One in-flight RPC: N sessions share this link; constant id is enough under the lock.

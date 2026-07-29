@@ -358,7 +358,11 @@ class RobotBridge(ABC):
             self._action_event.clear()
 
             claimed = self._registry.claimed()
-            live = [s for s in claimed if not s.idle]  # dialing counts (no action yet)
+            # Still dialing — wait. Never hold-step a slot before its WS claims;
+            # that would advance its env copy and corrupt a late join.
+            if not claimed or any(s.ws is None and not s.idle for s in claimed):
+                continue
+            live = [s for s in claimed if not s.idle]
             if not live:
                 continue  # all terminated/disconnected — do not hold-spin
 
@@ -367,11 +371,14 @@ class RobotBridge(ABC):
                 try:
                     await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
                 except TimeoutError:
-                    # Silent too long (hung agent / never dialed) — drop out for peers.
+                    # Connected but silent too long — drop out so peers can proceed.
                     for s in live:
-                        if s.action is None:
+                        if s.action is None and s.ws is not None:
                             s.idle = True
                 claimed = self._registry.claimed()
+                if any(s.ws is None and not s.idle for s in claimed):
+                    live = []
+                    break
                 live = [s for s in claimed if not s.idle]
                 if not live:
                     break
