@@ -9,6 +9,7 @@ eval/taskset wiring).
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -67,6 +68,30 @@ async def test_adapt_contexts_bake_the_serving_layer(tmp_path) -> None:
     (task_dir,) = list(baked.iterdir())
     assert (task_dir / "instruction.md").is_file()
     assert (task_dir / "tests" / "test.sh").is_file()
+
+
+async def test_the_layer_keeps_its_own_state_under_the_mask(tmp_path) -> None:
+    # /hud is the path the workspace masks from the graded party, so everything
+    # the layer installs belongs there: uv's binary, its managed interpreter and
+    # that interpreter's shims, its cache and config. At uv's defaults these
+    # land in the invoking user's home — inside the task's own filesystem, where
+    # the agent finds a HUD runtime the task never declared, and shims into the
+    # mask that resolve to nothing.
+    _write_harbor_task(tmp_path, "task-a")
+    await harbor.adapt(tmp_path, build=False)
+    (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
+    script = (context / "_hud" / "install.sh").read_text(encoding="utf-8")
+
+    directories = dict(re.findall(r"\b(UV_\w*(?:DIR|HOME)|XDG_CONFIG_HOME)=(\S+)", script))
+    assert directories, "the layer pins no uv directories"
+    assert all(path.startswith("/hud/") for path in directories.values()), directories
+    # Nothing is written relative to the image's home, so there is no scattered
+    # state to clean up afterwards.
+    assert "$HOME" not in script
+    # The CLI's update check writes into that home too, and calls PyPI on every
+    # rollout since a fresh container never has a warm cache.
+    dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
+    assert "ENV HUD_SKIP_VERSION_CHECK=1" in dockerfile
 
 
 def test_adapt_images_stamp_rows_when_the_caller_passes_them(tmp_path) -> None:

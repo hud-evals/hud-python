@@ -100,7 +100,21 @@ _INSTALL_SH = """\
 # Needs network and one of: uv / curl / wget / pip (+ apt-get/apk for bare
 # images with no downloader).
 set -eu
-export PATH="$HOME/.local/bin:$PATH" UV_INSTALL_DIR="$HOME/.local/bin"
+# Everything HUD installs goes under /hud — the uv binary, its managed
+# interpreter, that interpreter's shims — because /hud is the one path the
+# workspace masks from the graded party. Left at uv's defaults this state lands
+# in the invoking user's home, which is *inside* the task's filesystem: the
+# agent then finds a HUD runtime the task never declared, and shims pointing
+# into the mask that resolve to nothing. Containing it is what makes the single
+# /hud mask sufficient, rather than something to be cleaned up after the fact.
+# The cache is the same argument, minus the keeping: nothing reads it after this
+# script, so it is never written.
+export UV_INSTALL_DIR=/hud/bin \\
+       UV_PYTHON_INSTALL_DIR=/hud/python \\
+       UV_PYTHON_BIN_DIR=/hud/bin \\
+       UV_NO_CACHE=1 \\
+       XDG_CONFIG_HOME=/hud/config
+export PATH="/hud/bin:$PATH"
 command -v uv >/dev/null 2>&1 || {
   { command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; } \\
     || { apt-get update -qq && apt-get install -y -qq curl ca-certificates; } \\
@@ -118,9 +132,6 @@ command -v bwrap >/dev/null 2>&1 \
   || { apt-get update -qq && apt-get install -y -qq bubblewrap; } \
   || apk add --no-cache bubblewrap \
   || echo "warning: bubblewrap unavailable; tasks declaring isolation will refuse to serve"
-# The interpreter must live under /hud: uv's default install dir is the
-# invoking user's home (root here), unreachable once the image's USER applies.
-export UV_PYTHON_INSTALL_DIR=/hud/python
 uv python install __PYTHON__
 uv venv /hud/venv --python __PYTHON__
 uv pip install --python /hud/venv/bin/python __HUD_REQUIREMENT__
@@ -139,6 +150,11 @@ RUN sh /hud/install.sh
 # build context rather than the index — which also means the code serving the
 # image is the revision that adapted it, not whatever the index resolves to.
 COPY _hud_harbor /hud/venv/lib/python__PYTHON__/site-packages/harbor
+# The CLI's update check has no user to prompt here, and its cache lives in the
+# invoking user's home — inside the task's filesystem. A container is fresh
+# every rollout, so the cache is never warm: left on, it calls PyPI on the
+# rollout's critical path and leaves HUD state in the graded filesystem.
+ENV HUD_SKIP_VERSION_CHECK=1
 EXPOSE 8765
 __DECLARED__ENTRYPOINT []
 CMD ["/hud/venv/bin/hud", "serve", \
