@@ -67,6 +67,56 @@ async def test_tick_loop_does_not_hold_spin_when_all_claimed_idle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tick_loop_stops_after_terminal_obs_while_ws_still_open() -> None:
+    """Terminate wakes the barrier; idle+open WS must not cascade hold-steps.
+
+    The e2e gate ``sim.tick == EPISODE_TICKS`` fails if each terminal fan-out
+    re-arms the loop into a hold-spin before the agent closes the socket.
+    """
+
+    class _Terminating(_StubBridge):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tick = 0
+
+        def step(self, action: np.ndarray) -> None:
+            self.tick += 1
+            super().step(action)
+
+        def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+            data = {"x": np.zeros((self.num_envs, 1), dtype=np.float32)}
+            return data, np.array([self.tick >= 3])
+
+    bridge = _Terminating()
+    bridge.num_envs = 1
+    bridge._registry.configure(1)
+    slot = bridge._registry.slots[0]
+    bridge._registry.claim(slot)
+    slot.ws = _FakeWS()
+    task = asyncio.create_task(bridge._tick_loop())
+    try:
+        for expected in (1, 2, 3):
+            slot.idle = False
+            slot.action = np.array([1.0], dtype=np.float32)
+            bridge._action_event.set()
+            for _ in range(50):
+                if bridge.tick >= expected:
+                    break
+                await asyncio.sleep(0.01)
+            assert bridge.tick == expected
+        assert slot.idle  # terminal obs dropped the slot out of the barrier
+        for _ in range(20):  # spam the wake that terminal fan-out itself sets
+            bridge._action_event.set()
+            await asyncio.sleep(0.005)
+        assert bridge.tick == 3
+        assert len(bridge.steps) == 3
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_tick_loop_steps_when_live_slot_has_action() -> None:
     bridge = _StubBridge()
     bridge.num_envs = 1
