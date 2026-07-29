@@ -483,16 +483,6 @@ async def _serve_until_terminated(env: Environment, host: str, port: int) -> Non
         await serve(env, host, port)
 
 
-def serve_blocking(env: Environment, host: str, port: int) -> None:
-    """Serve *env*, blocking until terminated — the one entry every CLI path uses.
-
-    Sims never run here: an env with attached sims (``env.gym(...)``) spawns
-    each one as its own process from an ``@env.initialize`` hook (see
-    :mod:`hud.environment.robot.gym`), so every env serves the same way.
-    """
-    asyncio.run(_serve_until_terminated(env, host, port))
-
-
 def main() -> None:
     from hud.environment import load_environment
 
@@ -504,7 +494,9 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
-    serve_blocking(load_environment(args.path, name=args.env), args.host, args.port)
+    asyncio.run(
+        _serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
+    )
 
 
 if __name__ == "__main__":
