@@ -151,7 +151,7 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
     manifest and validates `args` against the task's schema.
     """
     payload: dict[str, Any] = {
-        "name": task.slug or task.default_slug(),
+        "name": task.slug,
         "env": {"name": task.env},
         "task_id": task.id,
         "args": task.args,

@@ -1240,7 +1240,7 @@ class HostedRuntime:
             "job_id": str(uuid.UUID(job_id)),
             "env": task.env,
             "task": task.id,
-            "slug": task.slug or task.default_slug(),
+            "slug": task.slug,
             "args": task.args,
             "agent": spec,
         }

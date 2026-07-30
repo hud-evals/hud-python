@@ -35,6 +35,19 @@ if TYPE_CHECKING:
     from .runtime import HostedRuntime, Provider
 
 
+def _default_slug(data: dict[str, Any]) -> str:
+    task_id = data.get("id")
+    if not isinstance(task_id, str):
+        return ""
+    args = data.get("args")
+    if not isinstance(args, dict) or not args:
+        return task_id
+    digest = hashlib.sha1(  # noqa: S324 - non-crypto, stable disambiguator
+        json.dumps(args, sort_keys=True, default=str).encode("utf-8"),
+    ).hexdigest()[:8]
+    return f"{task_id}-{digest}"
+
+
 class Task(BaseModel):
     """One concrete task: an env name plus data (id, args, metadata).
 
@@ -47,7 +60,7 @@ class Task(BaseModel):
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)
     args: dict[str, Any] = Field(default_factory=dict)
-    slug: str | None = None
+    slug: str = Field(default_factory=_default_slug)
     validation: list[dict[str, Any]] | None = None
     agent_config: dict[str, Any] | None = None
     #: Arbitrary metadata fields surfaced as filterable columns / leaderboard
@@ -56,15 +69,6 @@ class Task(BaseModel):
     #: Optional row-level runtime construction input. Runtime adapters apply the
     #: supported subset into their native launch shape or reject it.
     runtime_config: RuntimeConfig | None = None
-
-    def default_slug(self) -> str:
-        """A stable slug from the task id, disambiguated by an args hash when present."""
-        if not self.args:
-            return self.id
-        digest = hashlib.sha1(  # noqa: S324 - non-crypto, stable disambiguator
-            json.dumps(self.args, sort_keys=True, default=str).encode("utf-8"),
-        ).hexdigest()[:8]
-        return f"{self.id}-{digest}"
 
     # ─── execution ────────────────────────────────────────────────────
 
@@ -89,7 +93,7 @@ class Task(BaseModel):
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 
-        taskset = Taskset(self.default_slug(), [self])
+        taskset = Taskset(self.slug, [self])
         return await taskset.run(
             agent,
             runtime=runtime,
