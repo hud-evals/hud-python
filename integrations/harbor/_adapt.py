@@ -73,6 +73,12 @@ LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 TESTS = Path("/tests")
 
+#: Where the adaptation layer keeps itself, and the one path agent sessions
+#: never see. The session's own key material belongs here rather than in a
+#: temp dir: /tmp is the task's, so keys left there are both readable by the
+#: graded party and a signpost saying what is running it.
+HUD_ROOT = Path("/hud")
+
 #: Task config is untrusted: these bound what may reach a generated directive.
 _DOCKER_ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DOCKER_USER = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
@@ -440,10 +446,11 @@ def environment(ref: str | Path = "/hud/tasks", *, name: str | None = None) -> E
         # dir are throwaway tmpfs here, while grading runs outside this
         # namespace and sees the real ones.
         mounts=(
-            Mount("tmpfs", dst="/hud"),
+            Mount("tmpfs", dst=str(HUD_ROOT)),
             Mount("tmpfs", dst=str(TESTS)),
             Mount("tmpfs", dst=str(VERIFIER_LOGS)),
         ),
+        credentials_dir=HUD_ROOT / "session-keys",
         track_files=False if rooted_at_filesystem else None,
         # The agent phase's own variables, scoped to its sessions.
         env=policy["agent_env"],

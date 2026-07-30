@@ -223,11 +223,32 @@ def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.Mo
 def test_bwrap_inherits_host_env_when_not_walled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("HUD_SENTINEL", "visible")
+    monkeypatch.setenv("SENTINEL", "visible")
     ws = Workspace(tmp_path / "root")
     monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
     argv = ws.bwrap_argv(["bash", "-lc", "true"])
-    assert _sandbox_env(argv)["HUD_SENTINEL"] == "visible"
+    assert _sandbox_env(argv)["SENTINEL"] == "visible"
+
+
+def test_the_harness_own_configuration_never_reaches_a_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HUD's variables in the serving process are a credential leak where they
+    hold a key, and a tell everywhere else — an agent that finds HUD_ anything
+    knows what is running it."""
+    monkeypatch.setenv("HUD_API_KEY", "super-secret")
+    monkeypatch.setenv("HUD_SKIP_VERSION_CHECK", "1")
+    monkeypatch.setenv("ORDINARY", "kept")
+    # What the task itself declares is the task's, HUD-shaped name or not.
+    ws = Workspace(tmp_path / "root", env={"HUD_TASK_DECLARED": "mine"})
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+
+    for argv in (ws.shell_argv("echo hi"), ws.bwrap_argv(["true"]), ws.enter_argv(7, "echo hi")):
+        session_env = _sandbox_env(argv)
+        assert "HUD_API_KEY" not in session_env
+        assert "HUD_SKIP_VERSION_CHECK" not in session_env
+        assert session_env["ORDINARY"] == "kept"
+        assert session_env["HUD_TASK_DECLARED"] == "mine"
 
 
 #: Options bubblewrap gained after 0.4, the newest release on distros still in

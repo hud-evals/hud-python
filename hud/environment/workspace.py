@@ -165,6 +165,19 @@ _SANDBOX_HOLDER = ["sh", "-c", "echo ready; exec sleep 2147483647"]
 _SANDBOX_READY = b"ready\n"
 
 
+def _without_harness_config(environ: Mapping[str, str]) -> dict[str, str]:
+    """The serving process's environment, minus HUD's own configuration.
+
+    A session runs in the *task's* environment, not the harness's. HUD's
+    variables reaching it are a credential leak where they hold an API key,
+    and a tell everywhere else: an agent that finds ``HUD_`` anything in its
+    environment knows exactly what is running it. Variables the task or the
+    caller declare are layered on afterwards and are unaffected — this drops
+    only what the serving process happened to be configured with.
+    """
+    return {key: value for key, value in environ.items() if not key.startswith("HUD_")}
+
+
 def _env_argv(env: Mapping[str, str]) -> list[str]:
     """``env -i`` and its assignments: an exact environment for what follows.
 
@@ -275,10 +288,12 @@ class Workspace:
         track_files: bool = False,
         shell_uid: int | None = None,
         require_isolation: bool = False,
+        credentials_dir: Path | str | None = None,
     ) -> None:
         self.root: Path = Path(root).resolve()
         # Per-instance credential dir, materialized lazily (see _credentials_dir).
         self._cred_dir: Path | None = None
+        self._configured_cred_dir = Path(credentials_dir) if credentials_dir else None
 
         # Path the root is mounted at inside the sandbox (and the default cwd).
         # Defaults to /workspace; set to the root's real path for callers that
@@ -591,7 +606,7 @@ class Workspace:
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
         target_cwd = cwd if cwd is not None else self._guest_path
-        base_env = dict(os.environ) if inherit_host_env else {}
+        base_env = _without_harness_config(os.environ) if inherit_host_env else {}
         full_env = {**base_env, **self.env, **(env or {})}
         argv: list[str] = [
             self._bwrap,
@@ -662,11 +677,11 @@ class Workspace:
         """The environment a session starts from.
 
         Dropped sessions get the minimal one built for the wall; otherwise the
-        serving process's environment carries through, as it always has.
+        serving process's environment carries through, less HUD's own.
         """
         if self._drops_privileges():
             return {**(self._session_env() or {}), **(env or {})}
-        return {**os.environ, **self.env, **(env or {})}
+        return {**_without_harness_config(os.environ), **self.env, **(env or {})}
 
     def _drop_argv(self) -> list[str]:
         """The ``setpriv`` prefix that drops to ``shell_uid``, if it applies."""
@@ -823,10 +838,19 @@ class Workspace:
 
         ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
         atomically, so a local user can't pre-place a symlink at the path to
-        redirect the private keys the server writes here.
+        redirect the private keys the server writes here. A caller that masks
+        part of the filesystem from sessions should pass ``credentials_dir``
+        pointing inside it: outside the served root is not the same as out of
+        the session's reach, and these are the keys to the session itself.
         """
         if self._cred_dir is None:
-            self._cred_dir = Path(tempfile.mkdtemp(prefix="hud-workspace-creds-"))
+            if self._configured_cred_dir is not None:
+                self._configured_cred_dir.mkdir(parents=True, exist_ok=True)
+                self._configured_cred_dir.chmod(0o700)
+                self._cred_dir = self._configured_cred_dir
+            else:
+                # Named for what it holds, not for what put it there.
+                self._cred_dir = Path(tempfile.mkdtemp(prefix="ssh-"))
         return self._cred_dir
 
     def _load_or_generate_host_key(self) -> tuple[asyncssh.SSHKey, str]:
