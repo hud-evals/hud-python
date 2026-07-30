@@ -190,6 +190,22 @@ def _env_argv(env: Mapping[str, str]) -> list[str]:
     return [env_bin, "-i", *(f"{k}={v}" for k, v in env.items())]
 
 
+async def install_identity_map(info_read: int, block_write: int) -> int:
+    """Map ids into a bwrap held at ``--userns-block-fd``, and release it.
+
+    The counterpart to spawning with ``--info-fd``/``--userns-block-fd``:
+    bwrap reports the pid of the namespace it made and waits, this side says
+    who its ids are, and only then does anything run in it. Returns that pid.
+    """
+    loop = asyncio.get_running_loop()
+    raw = await asyncio.wait_for(loop.run_in_executor(None, os.read, info_read, 4096), 30.0)
+    pid = int(json.loads(raw)["child-pid"]) if raw else 0
+    if pid:
+        _map_identities(pid)
+    os.write(block_write, b"\n")
+    return pid
+
+
 def _map_identities(pid: int) -> None:
     """Give the sandbox the whole id space, not just the id that created it.
 
@@ -785,23 +801,17 @@ class Workspace:
             os.close(write_fd)
             os.close(block_read)
             write_fd = block_read = -1
-            loop = asyncio.get_running_loop()
-            raw = await asyncio.wait_for(loop.run_in_executor(None, os.read, read_fd, 4096), 30.0)
-            if raw:
-                # The sandbox is held at its own creation until this is
-                # written: nothing runs in it, and nothing can join it, before
-                # it knows who its ids are.
-                _map_identities(int(json.loads(raw)["child-pid"]))
-            os.write(block_write, b"\n")
+            # The sandbox is held at its own creation until its ids are
+            # mapped: nothing runs in it, and nothing joins it, before then.
+            pid = await install_identity_map(read_fd, block_write)
         finally:
             os.close(read_fd)
             os.close(block_write)
             for stray in (write_fd, block_read):
                 if stray != -1:
                     os.close(stray)
-        if not raw:
+        if not pid:
             raise RuntimeError(f"the sandbox holder did not start: {await self._sandbox_error()}")
-        pid = int(json.loads(raw)["child-pid"])
         assert self._sandbox is not None and self._sandbox.stdout is not None
         try:
             signal = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)

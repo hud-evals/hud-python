@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from hud.environment import Environment, Mount
-from hud.environment.workspace import Workspace, usable_bwrap
+from hud.environment.workspace import Workspace, install_identity_map, usable_bwrap
 from hud.eval import DockerRuntime
 from hud.utils.docker import docker as _docker
 from hud.utils.process import ProcessGroup, create_process_group_exec
@@ -661,41 +661,73 @@ async def _grade(task_dir: Path, workdir: Path, answer: Any) -> dict[str, Any]:
             "--clear-groups",
             *argv,
         ]
-    if not config.network("verifier"):
-        # The verifier runs outside the agent sandbox, so its declared
-        # isolation needs its own network namespace.
-        bwrap = usable_bwrap()
-        if bwrap is None:
-            raise RuntimeError(
-                "the verifier declares no-network but bwrap cannot sandbox here; "
-                "refusing to grade with network access the task ruled out"
-            )
-        # Mirror a session's namespace shape: binding the real root inside a
-        # user namespace leaves device nodes unwritable (test.sh redirecting
-        # to /dev/null would fail), so /dev and /proc are fresh.
-        argv = [
-            bwrap,
-            "--unshare-user-try",
-            "--bind",
-            "/",
-            "/",
-            "--dev",
-            "/dev",
-            "--proc",
-            "/proc",
-            "--unshare-net",
-            "--",
-            *argv,
-        ]
+    severed = not config.network("verifier")
+    if severed and (bwrap := usable_bwrap()) is None:
+        raise RuntimeError(
+            "the verifier declares no-network but bwrap cannot sandbox here; "
+            "refusing to grade with network access the task ruled out"
+        )
 
     async def run_tests() -> ProcessGroup:
-        return await create_process_group_exec(
-            *argv,
-            cwd=workdir,
-            env={**os.environ, **verifier_env, **config.verifier.env},
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        spawn = argv
+        environ = {**os.environ, **verifier_env, **config.verifier.env}
+        if not severed:
+            return await create_process_group_exec(
+                *spawn,
+                cwd=workdir,
+                env=environ,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        # A network namespace of its own is the only reason the verifier is
+        # sandboxed at all, and bwrap can only make one inside a user
+        # namespace. That namespace maps a single id unless this side says
+        # otherwise — and a verifier that cannot chown is one that cannot
+        # untar, or run apt, which is most of what Harbor's verifiers do
+        # before they assert anything. So it is held at creation and mapped,
+        # exactly as an agent session's sandbox is.
+        info_read, info_write = os.pipe()
+        block_read, block_write = os.pipe()
+        try:
+            os.set_inheritable(info_write, True)
+            os.set_inheritable(block_read, True)
+            # /dev and /proc are fresh: binding the real root inside a user
+            # namespace leaves device nodes unwritable, and a test.sh
+            # redirecting to /dev/null would fail on that alone.
+            group = await create_process_group_exec(
+                bwrap,
+                "--unshare-user",
+                "--info-fd",
+                str(info_write),
+                "--userns-block-fd",
+                str(block_read),
+                "--bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                "--unshare-net",
+                "--",
+                *spawn,
+                cwd=workdir,
+                env=environ,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                pass_fds=(info_write, block_read),
+            )
+            os.close(info_write)
+            os.close(block_read)
+            info_write = block_read = -1
+            await install_identity_map(info_read, block_write)
+            return group
+        finally:
+            os.close(info_read)
+            os.close(block_write)
+            for stray in (info_write, block_read):
+                if stray != -1:
+                    os.close(stray)
 
     return await _grade_with_verifier(config, logs, answer, run_tests)
 
