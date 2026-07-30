@@ -32,10 +32,12 @@ network when a task declares no-network::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
 import os
+import pwd
 import re
 import shlex
 import shutil
@@ -199,6 +201,69 @@ CMD ["/hud/venv/bin/hud", "serve", \
 """
 
 
+def _validated_user(declared: str | int | None, source_user: str | None) -> str | None:
+    """A phase's identity: what it declared, else the image's own ``USER``."""
+    user = str(declared) if declared is not None else source_user
+    if user is None:
+        return None
+    # Untrusted input: the task config and the image's own Dockerfile.
+    if not all(_DOCKER_USER.fullmatch(part) for part in user.split(":", 1)):
+        raise ValueError(f"declared user {user!r} is not a usable user[:group]")
+    return user
+
+
+def phase_uid(task_dir: Path, role: str) -> int | None:
+    """The id *role* runs as in this image, or None to run as the harness does.
+
+    Harbor runs the agent and the verifier as the identity the task declares
+    for each, and its own harness is not subject to either. Serving from
+    inside the image, a ``USER`` directive would demote the harness too —
+    leaving it unable to create ``/tests`` at the filesystem root, or its own
+    state under ``/hud``. So the identity is applied where the phase runs.
+
+    A name the image does not have is an error rather than a fall back to
+    root: running a phase with more privilege than the task granted is the
+    thing this exists to prevent.
+    """
+    user = _validated_user(workspace_policy(task_dir)[f"{role}_user"], _image_user(task_dir))
+    if user is None:
+        return None
+    name = user.split(":", 1)[0]
+    if name.isdigit():
+        return int(name)
+    try:
+        return pwd.getpwnam(name).pw_uid
+    except KeyError as error:
+        raise ValueError(f"declared user {user!r} does not exist in this image") from error
+
+
+def phase_home(uid: int | None) -> str | None:
+    """*uid*'s home, for a phase that is about to drop to it.
+
+    Dropping ids without one leaves the phase pointed at the harness's home,
+    which it cannot write — and a verifier that installs its own tooling
+    (Harbor's commonly do) fails on that alone.
+    """
+    if uid is None:
+        return None
+    with contextlib.suppress(KeyError):
+        return pwd.getpwuid(uid).pw_dir
+    return None
+
+
+def _image_user(task_dir: Path) -> str | None:
+    """The ``USER`` the adapted image recorded for itself, if any.
+
+    Read from the layer rather than the Dockerfile: by serve time the build
+    context is gone, and the image's own declaration still has to be honoured
+    for a task whose ``task.toml`` names no user of its own.
+    """
+    recorded = HUD_ROOT / "image-user"
+    with contextlib.suppress(OSError):
+        return recorded.read_text(encoding="utf-8").strip() or None
+    return None
+
+
 def _declared_directives(task_dir: Path, source_user: str | None) -> str:
     """The task's declared environment, working dir and user as Dockerfile
     directives.
@@ -228,18 +293,10 @@ def _declared_directives(task_dir: Path, source_user: str | None) -> str:
         lines.append(f"ENV {key}={literal}")
     if policy["workdir"]:
         lines.append(f"WORKDIR {json.dumps(policy['workdir'])}")
-    user = policy["user"] if policy["user"] is not None else source_user
-    lines.append("RUN mkdir -p /tests /logs/verifier")
-    if user is not None:
-        user = str(user)
-        # Docker's operand is ``user[:group]``; both parts are validated —
-        # the task config and Dockerfile are untrusted input.
-        if not all(_DOCKER_USER.fullmatch(part) for part in user.split(":", 1)):
-            raise ValueError(f"declared user {user!r} is not a usable user[:group]")
-        # Grading writes /tests and /logs, which the runtime user must own —
-        # handed over here, as root, before the identity switches back.
-        lines.append(f"RUN chown -R {user} /tests /logs")
-        lines.append(f"USER {user}")
+    # Validated at build, where a bad task config should fail, but applied per
+    # phase at runtime rather than as a USER directive — see :func:`phase_uid`.
+    for role in ("agent", "verifier"):
+        _validated_user(policy[f"{role}_user"], source_user)
     return "".join(f"{line}\n" for line in lines)
 
 
@@ -344,6 +401,11 @@ def _write_context(
             "__PYTHON__", SERVING_PYTHON
         ),
     )
+    # The image's own USER, kept for serve time: the build context is gone by
+    # then, and a task that declares no user of its own still runs its phases
+    # as whatever the image said.
+    if (image_user := final_stage(dockerfile).user) is not None:
+        _write(hud_dir / "image-user", f"{image_user}\n")
     layer = (
         _LAYER.replace("__ENV_NAME__", env_name)
         .replace("__PYTHON__", SERVING_PYTHON)
@@ -446,9 +508,17 @@ def environment(ref: str | Path = "/hud/tasks", *, name: str | None = None) -> E
         # which is what Harbor does — it uploads the verifier when it runs it.
         mounts=(Mount("tmpfs", dst=str(HUD_ROOT)),),
         credentials_dir=HUD_ROOT / "session-keys",
+        # The agent's declared identity, not the harness's: the serving
+        # process stays root so it can place and remove the grading
+        # directories and keep its own state under /hud.
+        shell_uid=(agent_uid := phase_uid(task_dirs[0], "agent")),
+        # Whose the workspace is, is the image's statement — Harbor does not
+        # re-own it for the agent, so neither does this.
+        hand_over_root=False,
         track_files=False if rooted_at_filesystem else None,
-        # The agent phase's own variables, scoped to its sessions.
-        env=policy["agent_env"],
+        # The agent phase's own variables, scoped to its sessions. A dropped
+        # session would otherwise be pointed at the harness's home.
+        env={**({"HOME": home} if (home := phase_home(agent_uid)) else {}), **policy["agent_env"]},
         network=policy["network"],
         # Always: the sandbox is what keeps the baked tests and the serving
         # venv out of the graded party's reach — an unsandboxed fallback
@@ -546,6 +616,29 @@ async def _grade(task_dir: Path, workdir: Path, answer: Any) -> dict[str, Any]:
     argv = [str(test_sh)]
 
     config = TaskConfig.read(task_dir)
+    verifier_env: dict[str, str] = {}
+    verifier_uid = phase_uid(task_dir, "verifier")
+    setpriv = shutil.which("setpriv")
+    if verifier_uid is not None and setpriv is not None and os.geteuid() == 0:
+        # Root laid the grading directories down, so hand them over before
+        # dropping: a verifier that cannot write /logs/verifier cannot produce
+        # the verdict it is being run to produce. The verdict directory is made
+        # here rather than by the grading helper, since it must exist first.
+        _reset_dir(VERIFIER_LOGS)
+        for root_path in (TESTS, VERIFIER_LOGS):
+            for target in (root_path, *root_path.rglob("*")):
+                os.lchown(target, verifier_uid, verifier_uid)
+        if home := phase_home(verifier_uid):
+            verifier_env["HOME"] = home
+        argv = [
+            setpriv,
+            "--reuid",
+            str(verifier_uid),
+            "--regid",
+            str(verifier_uid),
+            "--clear-groups",
+            *argv,
+        ]
     if not config.network("verifier"):
         # The verifier runs outside the agent sandbox, so its declared
         # isolation needs its own network namespace.
@@ -577,7 +670,7 @@ async def _grade(task_dir: Path, workdir: Path, answer: Any) -> dict[str, Any]:
         return await create_process_group_exec(
             *argv,
             cwd=workdir,
-            env={**os.environ, **config.verifier.env},
+            env={**os.environ, **verifier_env, **config.verifier.env},
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

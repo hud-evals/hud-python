@@ -118,9 +118,19 @@ class TaskConfig(BaseModel):
         """
         return "no-network" not in (self.environment.network_mode, self.phase(role).network_mode)
 
+    def phase_user(self, role: str) -> str | int | None:
+        """The identity *role* runs as, if the task names one for it.
+
+        Per phase, because Harbor's are: a task may hand the agent a
+        restricted account and still verify as root. They collapsed into one
+        value while the identity was a ``USER`` directive, which an image has
+        only one of; applied per phase, each keeps what it declared.
+        """
+        return self.phase(role).user
+
     @property
     def user(self) -> str | int | None:
-        """The identity the task's phases run as, if it names one."""
+        """The identity the task's phases run as, if either names one."""
         return self.agent.user if self.agent.user is not None else self.verifier.user
 
 
@@ -191,6 +201,8 @@ def workspace_policy(task_dir: Path) -> dict[str, Any]:
         "agent_env": dict(config.agent.env),
         "workdir": config.environment.workdir or None,
         "user": config.user,
+        "agent_user": config.phase_user("agent"),
+        "verifier_user": config.phase_user("verifier"),
     }
 
 

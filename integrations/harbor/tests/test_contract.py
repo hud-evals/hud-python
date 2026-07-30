@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -272,6 +273,10 @@ def test_declared_workspace_policy_is_translated(tmp_path) -> None:
         "agent_env": {},
         "workdir": "/srv/app",
         "user": None,
+        # Per phase, because Harbor's are: a task may restrict the agent and
+        # still verify as root.
+        "agent_user": None,
+        "verifier_user": None,
     }
 
 
@@ -352,23 +357,41 @@ async def test_planted_reward_files_are_discarded_before_grading(tmp_path) -> No
     assert grade["score"] == 0.0
 
 
-async def test_source_dockerfile_user_is_restored_after_the_layer(tmp_path) -> None:
-    # The layer installs as root; an image whose own Dockerfile ends on a
-    # non-root USER must get that identity back, or adaptation would grant
-    # root where Harbor withheld it.
+async def test_a_declared_identity_governs_the_phases_not_the_harness(tmp_path) -> None:
+    # Harbor runs the agent and the verifier as the identity the task declares
+    # for each; its harness is not subject to either. Serving from inside the
+    # image, a USER directive would demote the harness too, leaving it unable
+    # to create /tests at the filesystem root or its own state under /hud.
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "environment" / "Dockerfile").write_text(
         "FROM python:3.12-slim\nRUN useradd -m agent\nUSER agent\n", encoding="utf-8"
     )
     await harbor.adapt(tmp_path, build=False)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
+    layer = (context / "Dockerfile").read_text(encoding="utf-8").split("adaptation layer", 1)[1]
 
-    dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
+    assert "USER root" in layer  # installs, and goes on serving, as root
+    assert "USER agent" not in layer
+    assert "mkdir -p /tests" not in layer  # root makes them when grading needs them
+    # The image's own declaration is not lost: it is kept for serve time,
+    # where the build context no longer exists.
+    assert (context / "_hud" / "image-user").read_text(encoding="utf-8").strip() == "agent"
 
-    tail = dockerfile[dockerfile.index("HUD adaptation layer") :]
-    assert "USER root" in tail
-    assert "RUN chown -R agent /tests /logs" in tail
-    assert tail.rindex("USER agent") > tail.index("USER root")
+
+def test_each_phase_takes_the_identity_declared_for_it(tmp_path, monkeypatch) -> None:
+    # A task may hand the agent a restricted account and still verify as root.
+    from integrations.harbor import _adapt
+
+    task = _write_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        'schema_version = "1.3"\n\n[task]\nname = "demo/task-a"\n\n[agent]\nuser = "agent"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(_adapt, "_image_user", lambda _task: None)
+    monkeypatch.setattr(_adapt.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=1000))
+
+    assert _adapt.phase_uid(task, "agent") == 1000
+    assert _adapt.phase_uid(task, "verifier") is None  # root, as declared by omission
 
 
 def test_build_stage_entrypoint_does_not_refuse(tmp_path) -> None:
