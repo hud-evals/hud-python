@@ -7,6 +7,7 @@ import itertools
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -15,6 +16,7 @@ import asyncssh
 import pytest
 
 from hud.capabilities import SSHClient
+from hud.environment import workspace as workspace_mod
 from hud.environment.workspace import Mount, Workspace
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
@@ -82,6 +84,47 @@ async def test_file_operations_use_the_exec_channel(tmp_path: Path) -> None:
             assert "REPORT.md" in await client.listdir("/")
     finally:
         await ws.stop()
+
+
+@pytest.mark.asyncio
+async def test_output_arrives_while_the_command_is_still_running(tmp_path: Path) -> None:
+    """Held until exit, a long build tells the agent nothing while it runs and
+    a session that never exits says nothing at all."""
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            started = time.monotonic()
+            process = await conn.create_process("echo first; sleep 5; echo second")
+            first = await asyncio.wait_for(process.stdout.readline(), 10)
+            elapsed = time.monotonic() - started
+            process.channel.close()
+    finally:
+        await ws.stop()
+
+    assert first.strip() == "first"
+    # Held until exit it would take the full sleep; the point is that it does not.
+    assert elapsed < 2.0, f"first line took {elapsed:.1f}s — output is not streaming"
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_command_keeps_what_it_printed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The output is the evidence of how far it got — reporting only that the
+    deadline passed throws that away."""
+    monkeypatch.setattr(workspace_mod, "_COMMAND_TIMEOUT", 1.0)
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            result = await conn.run("echo progress-so-far; sleep 30", check=False)
+    finally:
+        await ws.stop()
+
+    assert "progress-so-far" in str(result.stdout)
+    assert "timed out" in str(result.stderr)
+    assert result.exit_status == 1
 
 
 def _wall(monkeypatch: pytest.MonkeyPatch) -> None:

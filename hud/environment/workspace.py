@@ -937,15 +937,26 @@ class Workspace:
             finally:
                 stdin.close()
 
-        async def drain_output(reader: asyncio.StreamReader, output: bytearray) -> None:
-            while chunk := await reader.read(65536):
-                output.extend(chunk)
+        async def relay_output(
+            reader: asyncio.StreamReader, writer: asyncssh.SSHWriter[bytes]
+        ) -> None:
+            """Forward the child's output as it is produced.
 
-        stdout_data = bytearray()
-        stderr_data = bytearray()
+            Streamed, not accumulated: an agent watching a build wants the
+            lines while it runs, a session that never exits would otherwise
+            say nothing at all, and a command killed at the timeout still
+            keeps whatever it managed to print.
+            """
+            try:
+                while chunk := await reader.read(65536):
+                    writer.write(chunk)
+                    await writer.drain()
+            except (asyncssh.Error, BrokenPipeError, ConnectionResetError):
+                pass
+
         stdin_task = asyncio.create_task(relay_stdin())
-        stdout_task = asyncio.create_task(drain_output(stdout, stdout_data))
-        stderr_task = asyncio.create_task(drain_output(stderr, stderr_data))
+        stdout_task = asyncio.create_task(relay_output(stdout, process.stdout))
+        stderr_task = asyncio.create_task(relay_output(stderr, process.stderr))
         wait_task = asyncio.create_task(sub.wait())
         channel_closed_task = asyncio.create_task(process.channel.wait_closed())
         timed_out = False
@@ -993,15 +1004,13 @@ class Workspace:
         if process.channel.is_closing():
             return
         if timed_out:
+            # Whatever ran before the deadline has already been relayed; this
+            # only says why it stopped.
             process.stderr.write(
                 f"workspace: command timed out after {_COMMAND_TIMEOUT:g}s\n".encode()
             )
             process.exit(1)
             return
-        if stdout_data:
-            process.stdout.write(bytes(stdout_data))
-        if stderr_data:
-            process.stderr.write(bytes(stderr_data))
         process.exit(sub.returncode if sub.returncode is not None else 0)
 
 
