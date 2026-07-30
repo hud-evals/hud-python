@@ -179,6 +179,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     task = Task(
         env="sums",
         id="add",
+        slug="sums-add",
         args={"a": 1, "b": 2},
         runtime_config=RuntimeConfig(
             image="registry.example/sums:latest",
@@ -202,6 +203,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["job_id"] == str(uuid.UUID(job_id))
     assert payload["env"] == "sums"
     assert payload["task"] == "add"
+    assert payload["slug"] == "sums-add"
     assert payload["args"] == {"a": 1, "b": 2}
     assert payload["runtime_config"] == {
         "image": "registry.example/sums:latest",

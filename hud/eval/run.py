@@ -333,7 +333,13 @@ async def rollout(
 
     agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
     with set_trace_context(trace_id):
-        await trace_enter(trace_id, job_id=job_id, group_id=group_id, model=agent_model)
+        await trace_enter(
+            trace_id,
+            job_id=job_id,
+            group_id=group_id,
+            task_slug=task.slug,
+            model=agent_model,
+        )
         run: Run | None = None
         _phase = "provisioning"
 
@@ -404,7 +410,7 @@ async def rollout(
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id
-        run.slug = task.slug or task.default_slug()
+        run.slug = task.slug
         await trace_exit(run)
     return run
 

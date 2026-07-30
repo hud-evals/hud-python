@@ -395,7 +395,7 @@ async def _export_tasks(
         # A slug is user data that becomes a directory name: namespaced ids
         # ("suite/fix") would nest out of harbor.load()'s reach and ".." would
         # escape the output directory entirely.
-        declared = task.slug or task.default_slug()
+        declared = task.slug
         slug = _safe_component(declared)
         if slug in claimed:
             raise ValueError(
