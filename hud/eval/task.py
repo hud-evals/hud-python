@@ -60,7 +60,7 @@ class Task(BaseModel):
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)
     args: dict[str, Any] = Field(default_factory=dict)
-    slug: str = Field(default_factory=_default_slug)
+    slug: str = Field(default_factory=_default_slug, min_length=1)
     validation: list[dict[str, Any]] | None = None
     agent_config: dict[str, Any] | None = None
     #: Arbitrary metadata fields surfaced as filterable columns / leaderboard

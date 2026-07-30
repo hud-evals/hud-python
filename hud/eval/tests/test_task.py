@@ -62,6 +62,11 @@ def test_slug_rejects_none() -> None:
         Task.model_validate({"env": "e", "id": "solve", "slug": None})
 
 
+def test_slug_rejects_empty_string() -> None:
+    with pytest.raises(ValueError, match="slug"):
+        Task(env="e", id="solve", slug="")
+
+
 # ─── the portable row shape ────────────────────────────────────────────
 
 
