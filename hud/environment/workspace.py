@@ -782,6 +782,11 @@ class Workspace:
 
         With ``shell_uid`` set and the serving process running as root, the
         whole session is wrapped in ``setpriv`` to drop to that uid.
+
+        ``cwd`` is the one argument the unsandboxed form cannot honour: there
+        is no mount namespace to ``--chdir`` into, so the session runs wherever
+        the caller starts the process — which for a :class:`Workspace` is its
+        root, the same path ``_guest_path`` takes when bwrap is unavailable.
         """
         if sys.platform == "win32":
             if command is not None:
@@ -799,16 +804,14 @@ class Workspace:
                 )
             else:
                 argv = self.bwrap_argv(inner, cwd=cwd, env=env, tty=tty)
-        elif command is not None:
-            argv = ["bash", "-lc", command]
         else:
-            argv = ["bash", "-l"]
+            # The same payload the sandboxed forms run. Built here too rather
+            # than left as a bare shell, so that ``env`` and ``tty`` mean the
+            # same thing however the session is placed — and so the session
+            # env reaches the shell only *after* any drop: an LD_PRELOAD in it
+            # must never be in the environment of the root-run setpriv.
+            argv = _payload_argv(command, self._full_env(env), ctty=tty)
         if self._drops_privileges():
-            if self._bwrap is None:
-                # The session env (self.env + per-call overrides) is injected
-                # only *after* the drop: vars like LD_PRELOAD in it must never
-                # be in the environment of the root-run setpriv itself.
-                argv = [*_env_argv(self._full_env(env)), *argv]
             argv = [*self._drop_argv(), *argv]
         return argv
 
@@ -903,10 +906,6 @@ class Workspace:
             }
         else:
             proc_env = self._session_env()
-        if session_env:
-            # The sandboxed paths carry TERM in the argv's own `env -i`; a
-            # session running directly inherits this environment instead.
-            proc_env = {**(proc_env if proc_env is not None else os.environ), **session_env}
 
         if sys.platform == "win32":
             # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
