@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import shutil
@@ -143,6 +144,39 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
 
 _DEFAULT_USER = "agent"
 
+#: What the sandbox runs so it stays alive between sessions. It must outlast
+#: every rollout without waking (a sandbox is discarded, never expired) and
+#: come from the task's own image, since the serving venv is masked inside.
+#: bwrap's reaper is pid 1 above it, so processes the agent orphans are reaped
+#: rather than accumulating for the life of the sandbox.
+#:
+#: The line it prints first is the readiness signal, and it has to come from
+#: in here: bwrap reports the child pid before that child has finished
+#: building its mount namespace, so a session joining on the strength of the
+#: pid alone can land in a root that is still half-assembled. The payload runs
+#: only once setup is done, so its own output is the proof.
+_SANDBOX_HOLDER = ["sh", "-c", "echo ready; exec sleep 2147483647"]
+_SANDBOX_READY = b"ready\n"
+
+
+def _env_argv(env: Mapping[str, str]) -> list[str]:
+    """``env -i`` and its assignments: an exact environment for what follows.
+
+    Understood by every bubblewrap, unlike ``--clearenv``, which 0.4 lacks.
+    """
+    env_bin = shutil.which("env") or "/usr/bin/env"
+    return [env_bin, "-i", *(f"{k}={v}" for k, v in env.items())]
+
+
+def _payload_argv(command: str | list[str] | None, env: Mapping[str, str]) -> list[str]:
+    """The session itself: a login shell (or an exact argv) under ``env``."""
+    argv = _env_argv(env)
+    if isinstance(command, str):
+        return [*argv, "bash", "-lc", command]
+    if command is None:
+        return [*argv, "bash", "-l"]
+    return argv + command
+
 
 class Workspace:
     """Directory + bwrap-isolated SSH.
@@ -242,6 +276,14 @@ class Workspace:
         self._ft_server: asyncio.Server | None = None
         self._ft_host: str | None = None
         self._ft_port: int | None = None
+        # The sandbox sessions run in, spawned on first use and held until
+        # discard_sandbox(). Its namespaces are what makes a process the agent
+        # backgrounds outlive the command that started it.
+        self._sandbox: asyncio.subprocess.Process | None = None
+        self._sandbox_init: int | None = None
+        # Sessions start concurrently (an agent can issue parallel tool calls),
+        # and two that each started a sandbox would not share one.
+        self._sandbox_lock = asyncio.Lock()
 
     def _setpriv(self) -> str | None:
         """Absolute path to ``setpriv``, resolved via the *server's* PATH.
@@ -365,6 +407,7 @@ class Workspace:
         Credentials stay on disk; a later :meth:`start` re-binds (fresh port
         unless one was pinned) and reuses them.
         """
+        await self.discard_sandbox()
         if self._ft_server is not None:
             self._ft_server.close()
             with contextlib.suppress(Exception):
@@ -473,6 +516,7 @@ class Workspace:
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
         inherit_host_env: bool = True,
+        info_fd: int | None = None,
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
 
@@ -499,6 +543,8 @@ class Workspace:
         ]
         if not self.network:
             argv.append("--unshare-net")
+        if info_fd is not None:
+            argv.extend(["--info-fd", str(info_fd)])
         for m in self._system_mounts:
             argv.extend(m.to_bwrap_args())
         argv.extend(["--bind", str(self.root), self._guest_path])
@@ -506,13 +552,161 @@ class Workspace:
             argv.extend(m.to_bwrap_args())
         argv.extend(["--chdir", target_cwd])
         argv.append("--")
-        env_bin = shutil.which("env") or "/usr/bin/env"
-        argv.extend([env_bin, "-i", *(f"{k}={v}" for k, v in full_env.items())])
-        if isinstance(command, str):
-            argv.extend(["bash", "-lc", command])
-        else:
-            argv.extend(command)
+        argv.extend(_payload_argv(command, full_env))
         return argv
+
+    def enter_argv(
+        self,
+        pid: int,
+        command: str | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> list[str]:
+        """Argv that runs ``command`` inside the sandbox *pid* belongs to.
+
+        The counterpart to :meth:`bwrap_argv`, which *creates* a sandbox: this
+        joins one that already exists, so successive commands share it. The
+        user namespace is joined first — that is what grants the privileges to
+        join the rest without any capability the container was not given.
+
+        The network namespace is joined only when the sandbox has one of its
+        own, which is exactly when the workspace severed the network. A
+        sharing sandbox is already in this process's netns, and that netns
+        belongs to an outer user namespace: once joined to bwrap's, we hold no
+        authority there and rejoining fails outright.
+        """
+        nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
+        argv = [
+            nsenter,
+            "--target",
+            str(pid),
+            "--user",
+            "--mount",
+            "--pid",
+            "--uts",
+            "--ipc",
+            *(() if self.network else ("--net",)),
+            f"--wd={cwd if cwd is not None else self._guest_path}",
+            "--",
+        ]
+        # Unlike the bwrap path, the drop goes *inside*: joining namespaces
+        # needs the privileges the dropped uid does not have.
+        argv.extend(self._drop_argv())
+        argv.extend(_payload_argv(command, self._full_env(env)))
+        return argv
+
+    def _full_env(self, env: Mapping[str, str] | None = None) -> dict[str, str]:
+        """The environment a session starts from.
+
+        Dropped sessions get the minimal one built for the wall; otherwise the
+        serving process's environment carries through, as it always has.
+        """
+        if self._drops_privileges():
+            return {**(self._session_env() or {}), **(env or {})}
+        return {**os.environ, **self.env, **(env or {})}
+
+    def _drop_argv(self) -> list[str]:
+        """The ``setpriv`` prefix that drops to ``shell_uid``, if it applies."""
+        if not self._drops_privileges():
+            return []
+        setpriv = self._setpriv()
+        assert setpriv is not None  # guaranteed by _drops_privileges
+        uid = str(self._shell_uid)
+        # --no-new-privs: without it a setuid binary (or passwordless sudo)
+        # inside the workspace would let the dropped shell regain root and
+        # read the secrets the wall protects.
+        return [setpriv, "--reuid", uid, "--regid", uid, "--clear-groups", "--no-new-privs", "--"]
+
+    # ─── the sandbox sessions share ───────────────────────────────────────
+
+    async def sandbox_pid(self) -> int | None:
+        """The live sandbox's init pid, starting one if none is running.
+
+        ``None`` where bwrap cannot sandbox: sessions then run directly, as
+        they always have, and nothing persists between them beyond the files.
+        """
+        if self._bwrap is None:
+            return None
+        if (live := self._live_sandbox_pid()) is not None:
+            return live
+        async with self._sandbox_lock:
+            # Another session may have started it while this one waited.
+            if (live := self._live_sandbox_pid()) is not None:
+                return live
+            return await self._start_sandbox()
+
+    def _live_sandbox_pid(self) -> int | None:
+        if self._sandbox is None or self._sandbox.returncode is not None:
+            return None
+        assert self._sandbox_init is not None
+        return self._sandbox_init
+
+    async def _start_sandbox(self) -> int:
+        """Spawn the holder whose namespaces sessions join, and learn its pid.
+
+        The pid comes from bwrap's ``--info-fd`` rather than by searching for
+        the holder: the pid that matters is the one *this* process can name,
+        and bwrap is the only party that knows which of its forks that is.
+        """
+        read_fd, write_fd = os.pipe()
+        try:
+            os.set_inheritable(write_fd, True)
+            argv = self.bwrap_argv(_SANDBOX_HOLDER, info_fd=write_fd)
+            self._sandbox = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                pass_fds=(write_fd,),
+            )
+            os.close(write_fd)
+            write_fd = -1
+            loop = asyncio.get_running_loop()
+            raw = await asyncio.wait_for(loop.run_in_executor(None, os.read, read_fd, 4096), 30.0)
+        finally:
+            os.close(read_fd)
+            if write_fd != -1:
+                os.close(write_fd)
+        if not raw:
+            raise RuntimeError(f"the sandbox holder did not start: {await self._sandbox_error()}")
+        pid = int(json.loads(raw)["child-pid"])
+        assert self._sandbox is not None and self._sandbox.stdout is not None
+        try:
+            signal = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)
+        except TimeoutError:
+            signal = b""
+        if signal != _SANDBOX_READY:
+            reason = await self._sandbox_error()
+            await self.discard_sandbox()
+            raise RuntimeError(f"the sandbox never became ready: {reason}")
+        self._sandbox_init = pid
+        return pid
+
+    async def _sandbox_error(self) -> str:
+        """Whatever the sandbox said on the way down, for a failure message."""
+        if self._sandbox is None or self._sandbox.stderr is None:
+            return "no output"
+        with contextlib.suppress(Exception):
+            stderr = await asyncio.wait_for(self._sandbox.stderr.read(2048), 5.0)
+            return stderr.decode(errors="replace").strip() or "no output"
+        return "no output"
+
+    async def discard_sandbox(self) -> None:
+        """Tear the sandbox down, killing everything still running in it.
+
+        The rollout boundary: one adapted image serves many rollouts, and a
+        sandbox that outlives its own would hand the next agent the previous
+        one's daemons. Killing the holder collapses the pid namespace, so
+        every process the agent left behind goes with it — including ones it
+        detached. A later session starts a fresh sandbox.
+        """
+        sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
+        if sandbox is None or sandbox.returncode is not None:
+            return
+        sandbox.kill()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(sandbox.wait(), 10.0)
 
     def shell_argv(
         self,
@@ -549,26 +743,8 @@ class Workspace:
                 # The session env (self.env + per-call overrides) is injected
                 # only *after* the drop: vars like LD_PRELOAD in it must never
                 # be in the environment of the root-run setpriv itself.
-                session = {**(self._session_env() or {}), **(env or {})}
-                env_bin = shutil.which("env") or "/usr/bin/env"
-                argv = [env_bin, "-i", *[f"{k}={v}" for k, v in session.items()], *argv]
-            setpriv = self._setpriv()
-            assert setpriv is not None  # guaranteed by _drops_privileges
-            uid = str(self._shell_uid)
-            # --no-new-privs: without it a setuid binary (or passwordless
-            # sudo) inside the workspace would let the dropped shell regain
-            # root and read the secrets the wall protects.
-            argv = [
-                setpriv,
-                "--reuid",
-                uid,
-                "--regid",
-                uid,
-                "--clear-groups",
-                "--no-new-privs",
-                "--",
-                *argv,
-            ]
+                argv = [*_env_argv(self._full_env(env)), *argv]
+            argv = [*self._drop_argv(), *argv]
         return argv
 
     # ─── ssh server internals ─────────────────────────────────────────
@@ -641,7 +817,12 @@ class Workspace:
         return {**os.environ, **self.env} if self.env else None
 
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
-        argv = self.shell_argv(process.command)
+        pid = await self.sandbox_pid()
+        argv = (
+            self.shell_argv(process.command)
+            if pid is None
+            else self.enter_argv(pid, process.command)
+        )
         if self._drops_privileges():
             # The pre-drop processes (setpriv, bwrap) run as root; caller env
             # like an LD_PRELOAD in self.env must not load into them. The
@@ -780,7 +961,18 @@ class Workspace:
         except TimeoutError:
             timed_out = True
         finally:
-            await sub.terminate()
+            # A command that ran to completion inside the sandbox keeps its
+            # process group: `some-server &` is how an agent starts something
+            # it means to use in the *next* command, and killing the group
+            # here would take it down with the shell that launched it. The
+            # sandbox is the lifetime boundary instead — discarding it at the
+            # end of the rollout collapses the pid namespace and everything
+            # left in it. Nothing bounds a command that timed out, was
+            # abandoned mid-flight, or ran with no sandbox at all, so those
+            # are still torn down as a group.
+            completed = wait_task.done() and not wait_task.cancelled()
+            if pid is None or timed_out or not completed:
+                await sub.terminate()
             stdin_task.cancel()
             wait_task.cancel()
             channel_closed_task.cancel()

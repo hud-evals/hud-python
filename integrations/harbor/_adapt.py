@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from hud.environment import Environment, Mount
-from hud.environment.workspace import usable_bwrap
+from hud.environment.workspace import Workspace, usable_bwrap
 from hud.eval import DockerRuntime
 from hud.utils.docker import docker as _docker
 from hud.utils.process import ProcessGroup, create_process_group_exec
@@ -423,7 +423,7 @@ def environment(ref: str | Path = "/hud/tasks", *, name: str | None = None) -> E
     # its real paths — the sandbox is here to control the network namespace
     # and to keep the graded material (baked tests, the serving venv) out of
     # the graded party's reach, not to narrow the filesystem.
-    env.workspace(
+    workspace = env.workspace(
         workdir,
         guest_path=workdir.as_posix(),
         system_mounts=(
@@ -455,11 +455,11 @@ def environment(ref: str | Path = "/hud/tasks", *, name: str | None = None) -> E
     )
 
     for task_dir in task_dirs:
-        _register(env, task_dir, workdir)
+        _register(env, task_dir, workdir, workspace)
     return env
 
 
-def _register(env: Environment, task_dir: Path, workdir: Path) -> None:
+def _register(env: Environment, task_dir: Path, workdir: Path, workspace: Workspace) -> None:
     config = TaskConfig.read(task_dir)
 
     @env.template(
@@ -477,6 +477,11 @@ def _register(env: Environment, task_dir: Path, workdir: Path) -> None:
             yield await _grade(task_dir, workdir, answer)
         finally:
             _reset_dir(TESTS)
+            # Harbor's agent phase is one continuous session, so a service the
+            # agent starts is still running when the verifier looks for it —
+            # and is gone before the next rollout, which this container may
+            # well serve too.
+            await workspace.discard_sandbox()
 
 
 def _sync_tests(task_dir: Path) -> None:

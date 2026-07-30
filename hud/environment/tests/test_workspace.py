@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import os
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import asyncssh
@@ -171,6 +173,83 @@ def test_session_argv_runs_on_bubblewrap_0_4(
 
     for argv in (ws.shell_argv("echo hi"), ws.shell_argv(), ws.bwrap_argv(["true"])):
         assert not _POST_0_4_BWRAP_OPTIONS.intersection(argv)
+
+
+def test_sessions_join_one_sandbox_rather_than_each_making_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two commands must land in the same namespaces, or a process the first
+    backgrounds is gone by the second."""
+    ws = Workspace(tmp_path / "root", guest_path="/app", network=True)
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+
+    first = ws.enter_argv(4321, "start-a-server &")
+    second = ws.enter_argv(4321, "curl localhost")
+
+    assert first[0].endswith("/nsenter") and second[0].endswith("/nsenter")
+    # Same target, so the same live namespaces — not a fresh sandbox per command.
+    assert first[first.index("--target") + 1] == "4321"
+    assert second[second.index("--target") + 1] == "4321"
+    assert "--pid" in first and "--mount" in first and "--user" in first
+    # The user namespace has to be joined first: it is what confers the
+    # privilege to join the others in a container given no extra capability.
+    assert first.index("--user") < min(first.index("--mount"), first.index("--pid"))
+    assert "--wd=/app" in first
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sessions_share_one_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent issues parallel tool calls; if each started its own sandbox,
+    what one backgrounds would be invisible to the next."""
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    spawned = 0
+
+    async def fake_spawn() -> int:
+        nonlocal spawned
+        spawned += 1
+        await asyncio.sleep(0.01)  # the real spawn awaits bwrap's readiness
+        ws._sandbox = cast("Any", SimpleNamespace(returncode=None))
+        ws._sandbox_init = 4000 + spawned
+        return ws._sandbox_init
+
+    monkeypatch.setattr(ws, "_start_sandbox", fake_spawn)
+
+    pids = await asyncio.gather(*(ws.sandbox_pid() for _ in range(4)))
+
+    assert spawned == 1
+    assert set(pids) == {4001}
+
+
+def test_a_sharing_sandbox_is_not_rejoined_by_network_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Joining bwrap's user namespace forfeits authority over the container's
+    netns, so asking for it fails the session outright; a severed sandbox owns
+    its netns and must be joined or the network comes back."""
+    shared = Workspace(tmp_path / "shared", network=True)
+    severed = Workspace(tmp_path / "severed", network=False)
+    for ws in (shared, severed):
+        monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+
+    assert "--net" not in shared.enter_argv(11, "true")
+    assert "--net" in severed.enter_argv(11, "true")
+
+
+def test_the_sandbox_reports_readiness_before_sessions_join_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bwrap names the child pid before that child has built its mount
+    namespace, so the pid alone is not proof the sandbox can run anything."""
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    argv = ws.bwrap_argv(["sh", "-c", "echo ready"], info_fd=7)
+
+    assert argv[argv.index("--info-fd") + 1] == "7"
+    # The signal comes from the payload, which bwrap runs only after setup.
+    assert argv[-1] == "echo ready"
 
 
 def test_shell_uid_wraps_sessions_in_setpriv(
