@@ -46,6 +46,28 @@ def _run_with(trace_id: str, *, extra: dict[str, Any]) -> Run:
     return run
 
 
+async def test_trace_enter_reports_task_and_group_identity(recorder: _Recorder) -> None:
+    await job_mod.trace_enter(
+        "abc",
+        job_id="job-1",
+        group_id="group-1",
+        task_slug="fix-bug-3",
+        model="test-model",
+    )
+
+    assert recorder.calls == [
+        (
+            "/trace/abc/enter",
+            {
+                "job_id": "job-1",
+                "group_id": "group-1",
+                "task_slug": "fix-bug-3",
+                "model": "test-model",
+            },
+        )
+    ]
+
+
 async def test_trace_exit_propagates_stop_reason(recorder: _Recorder) -> None:
     run = _run_with("abc", extra={})
     run.trace.stop_reason = "max_steps"
