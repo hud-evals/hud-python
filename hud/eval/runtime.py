@@ -39,7 +39,7 @@ from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -651,6 +651,35 @@ class ModalRuntime:
                 await sb.terminate.aio()
 
 
+async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
+    """Whether *snapshot* was built from *image* as it exists right now.
+
+    Daytona records what a snapshot was built from — the registry ref, or for a
+    built ``Image`` its Dockerfile text plus the hashes of the context it
+    uploads (``build_info``). The hashes are recomputed here with the SDK's own
+    hasher so they are comparable to what ``snapshot.create`` would upload.
+    ``_context_list`` is the same private attribute ``snapshot.create`` reads.
+    """
+    if isinstance(image, str):
+        return bool(snapshot.image_name == image)
+    build = snapshot.build_info
+    if build is None:
+        return False
+    from daytona._async.object_storage import AsyncObjectStorage
+
+    # The hasher is an instance method only for code organization; credentials
+    # are needed to upload, not to hash, so skip the credentialed __init__.
+    storage = cast("Any", AsyncObjectStorage.__new__(AsyncObjectStorage))
+    hashes = [
+        await storage._compute_hash_for_path_md5(entry.source_path, entry.archive_path)
+        for entry in image._context_list
+    ]
+    return bool(
+        build.dockerfile_content == image.dockerfile()
+        and list(build.context_hashes or []) == hashes
+    )
+
+
 class DaytonaRuntime:
     """The Daytona provider: each acquisition creates a fresh sandbox from a snapshot.
 
@@ -662,7 +691,11 @@ class DaytonaRuntime:
     port. Yields its :class:`Runtime`, deletes the sandbox on exit.
 
     Pass a snapshot name — ``DaytonaRuntime("hud-libero-env")`` — optionally with an
-    ``image`` (Dockerfile/registry ref) to build that snapshot once if it is missing.
+    ``image`` (Dockerfile/registry ref) to build that snapshot if it is missing.
+    With *image*, an existing snapshot is compared against the image's recorded
+    build (Dockerfile plus context hashes) and rebuilt under the same name when
+    they differ, so editing the env never silently reuses the snapshot built
+    before the edit.
     Resources (cpu/memory/gpu) live on the snapshot, not here. *workdir* defaults to
     ``/app`` (the scaffolded ``Dockerfile.hud`` WORKDIR) since a Daytona session
     starts in ``~``, not the image's WORKDIR; override only for a non-standard layout.
@@ -695,10 +728,10 @@ class DaytonaRuntime:
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
         self.runtime_config = config
-        # Build the snapshot from *image* once if it's missing; lock so concurrent
+        # Resolve each snapshot name against the image once; lock so concurrent
         # first acquisitions resolve exactly once.
         self._image = image
-        self._resolved = False
+        self._resolved: set[str] = set()
         self._snapshot_lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -725,7 +758,13 @@ class DaytonaRuntime:
             if config.resources is not None:
                 resource_kwargs: dict[str, Any] = {}
                 if config.resources.cpu is not None:
-                    resource_kwargs["cpu"] = config.resources.cpu
+                    # Daytona allocates whole cores; truncating resizes silently.
+                    if not config.resources.cpu.is_integer():
+                        raise ValueError(
+                            "DaytonaRuntime needs a whole number of CPUs, got "
+                            f"{config.resources.cpu}"
+                        )
+                    resource_kwargs["cpu"] = int(config.resources.cpu)
                 if config.resources.memory_mb is not None:
                     resource_kwargs["memory"] = max(
                         1,
@@ -748,31 +787,67 @@ class DaytonaRuntime:
                     kwargs["resources"] = daytona_resources
                 sandbox_params = CreateSandboxFromImageParams(**kwargs)
             else:
-                if daytona_resources is not None:
-                    raise ValueError(
-                        "DaytonaRuntime cannot override resources for snapshot_name; "
-                        "use runtime_config.image"
-                    )
                 if self.snapshot_name is None:
                     raise ValueError(
                         "DaytonaRuntime requires snapshot_name or runtime_config.image"
                     )
-                if not self._resolved:
+                if daytona_resources is not None and self._image is None:
+                    raise ValueError(
+                        "DaytonaRuntime cannot resize an already-built snapshot: resources "
+                        "are fixed when it is built, so pass image= to build one"
+                    )
+                snapshot_name = self.snapshot_name
+                if self._image is not None:
+                    if daytona_resources is not None:
+                        # Sizing is baked in at build time, so each sizing is its
+                        # own snapshot under a readable suffix (env-4cpu-8gb).
+                        sizing = []
+                        if daytona_resources.cpu:
+                            sizing.append(f"{daytona_resources.cpu}cpu")
+                        if daytona_resources.memory:
+                            sizing.append(f"{daytona_resources.memory}gb")
+                        if daytona_resources.gpu:
+                            sizing.append(f"{daytona_resources.gpu}gpu")
+                            sizing.extend(
+                                (t.value if isinstance(t, GpuType) else t).lower()
+                                for t in daytona_resources.gpu_type or []
+                            )
+                        snapshot_name = "-".join([snapshot_name, *sizing])
                     async with self._snapshot_lock:
-                        if not self._resolved:
-                            if self._image is not None:
-                                try:
-                                    await daytona.snapshot.get(self.snapshot_name)
-                                except DaytonaNotFoundError:
-                                    await daytona.snapshot.create(
-                                        CreateSnapshotParams(
-                                            name=self.snapshot_name,
-                                            image=self._image,
-                                        )
+                        if snapshot_name not in self._resolved:
+                            try:
+                                existing = await daytona.snapshot.get(snapshot_name)
+                            except DaytonaNotFoundError:
+                                existing = None
+                            if existing is not None and not await _snapshot_is_current(
+                                existing, self._image
+                            ):
+                                logger.info(
+                                    "Daytona snapshot %s is stale; rebuilding", snapshot_name
+                                )
+                                await daytona.snapshot.delete(existing)
+                                # Deletion frees the name asynchronously (~10s
+                                # observed); creating before it lands conflicts.
+                                async with asyncio.timeout(120):
+                                    while True:
+                                        try:
+                                            await daytona.snapshot.get(snapshot_name)
+                                        except DaytonaNotFoundError:
+                                            break
+                                        await asyncio.sleep(0.5)
+                                existing = None
+                            if existing is None:
+                                logger.info("building Daytona snapshot %s", snapshot_name)
+                                await daytona.snapshot.create(
+                                    CreateSnapshotParams(
+                                        name=snapshot_name,
+                                        image=self._image,
+                                        resources=daytona_resources,
                                     )
-                            self._resolved = True
+                                )
+                            self._resolved.add(snapshot_name)
                 sandbox_params = CreateSandboxFromSnapshotParams(
-                    snapshot=self.snapshot_name,
+                    snapshot=snapshot_name,
                     ephemeral=True,
                     auto_stop_interval=0,
                 )
@@ -793,7 +868,7 @@ class DaytonaRuntime:
                 session: str = "hud-serve"
                 await sandbox.process.create_session(session)
                 cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
-                await sandbox.process.execute_session_command(
+                started = await sandbox.process.execute_session_command(
                     session, SessionExecuteRequest(command=cmd, run_async=True)
                 )
                 ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
@@ -801,15 +876,39 @@ class DaytonaRuntime:
                     self.ssh_host, username=ssh.token, known_hosts=None
                 ) as conn:
                     listener = await conn.forward_local_port("127.0.0.1", 0, "127.0.0.1", self.port)
-                    yield Runtime(
-                        f"tcp://127.0.0.1:{listener.get_port()}",
-                        params={"provider": "daytona", "instance_id": sandbox.id},
-                        config=config if config.model_dump(exclude_none=True) else None,
-                    )
+                    try:
+                        yield Runtime(
+                            f"tcp://127.0.0.1:{listener.get_port()}",
+                            params={"provider": "daytona", "instance_id": sandbox.id},
+                            config=config if config.model_dump(exclude_none=True) else None,
+                        )
+                    except (EOFError, OSError) as exc:
+                        # Why it died only exists inside the sandbox, and the
+                        # sandbox may already be gone.
+                        try:
+                            logs = await sandbox.process.get_session_command_logs(
+                                session, started.cmd_id
+                            )
+                        except Exception as log_exc:
+                            exc.add_note(f"env output unavailable: {log_exc}")
+                        else:
+                            output = (logs.stderr or logs.output or logs.stdout or "").strip()
+                            exc.add_note(
+                                f"env output in sandbox {sandbox.id}:\n{output}"
+                                if output
+                                else "env printed nothing"
+                            )
+                        raise
             finally:
-                # check-free teardown: never shadow the run's own error.
-                with contextlib.suppress(Exception):
+                try:
                     await daytona.delete(sandbox)
+                except Exception:
+                    # Swallowing this is how a billable sandbox outlives its process.
+                    logger.warning(
+                        "failed to delete Daytona sandbox %s; it may still be running",
+                        sandbox.id,
+                        exc_info=True,
+                    )
 
 
 @asynccontextmanager

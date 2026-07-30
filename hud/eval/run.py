@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
@@ -388,13 +389,17 @@ async def rollout(
             driver.add_done_callback(_consume_task_result)
             raise
         except Exception as exc:
+            # format_exception_only keeps __notes__ — a provider attaches what
+            # only it can see there, like the sandbox's env output on a failed
+            # handshake — where str(exc) would drop them.
+            detail = "".join(traceback.format_exception_only(exc)).strip()
             if run is None:
-                logger.warning("rollout failed before launch (%s): %s", _phase, exc)
-                run = Run.failed(f"[{_phase}] {exc}")
+                logger.warning("rollout failed before launch (%s): %s", _phase, detail)
+                run = Run.failed(f"[{_phase}] {detail}")
             else:
-                logger.warning("rollout failed mid-run (%s): %s", _phase, exc)
+                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
-                run.record(Step(source="system", error=f"[{_phase}] {exc}"))
+                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
         assert run is not None  # the body bound it, or the handler synthesized it
         run.trace.trace_id = trace_id
         run.job_id = job_id

@@ -11,6 +11,7 @@ string (the service resolves recorded tokens + reward) or a :class:`hud.Run`
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
         [list[DatumTensors], list["torch.Tensor"]],
         tuple["torch.Tensor", dict[str, float]],
     ]
+
+logger = logging.getLogger("hud.train.client")
 
 
 def _run_to_input(run: Run) -> TrainInput:
@@ -85,25 +88,48 @@ def _check_groups(
     trajectories: Sequence[str | Run | TrajectoryPayload],
     group_size: int | None,
 ) -> None:
-    """Fail before a forward pass if the batch can't form full GRPO groups: an
-    incomplete final group gets a skewed advantage baseline. Cheap, client-side,
-    no round-trip — unlike per-group reward spread, which only the service sees."""
-    if group_size is None:
-        return
+    """Validate the batch's GRPO group structure client-side, before the round
+    trip. Groups are keyed by ``group_id`` when every item is a ``Run`` carrying
+    one, positional slices of ``group_size`` otherwise. An incomplete group is an
+    error: its advantage baseline is skewed. A batch where no group has any
+    reward spread only warns: every advantage normalizes to zero, which is a
+    legitimate sampling outcome for one batch but makes a later ``optim_step``
+    fail confusingly when it is the whole accumulation. Rewards are only visible
+    inline, so the spread check skips batches carrying ``trace_id`` strings."""
     n = len(trajectories)
-    if n % group_size != 0:
+    if group_size is not None and n % group_size != 0:
         raise ValueError(
             f"{n} trajectories do not divide evenly into groups of {group_size}; "
             "GRPO normalizes advantages within each group, so every group must be full"
         )
-    run_groups = [
+    run_group_ids = [
         item.group_id for item in trajectories if not isinstance(item, str | TrajectoryPayload)
     ]
-    if len(run_groups) != n or any(group_id is None for group_id in run_groups):
+    keyed = len(run_group_ids) == n and all(g is not None for g in run_group_ids)
+    if keyed and group_size is not None:
+        counts = Counter(run_group_ids)
+        if incomplete := [group_id for group_id, count in counts.items() if count != group_size]:
+            raise ValueError(f"incomplete GRPO groups: {incomplete}")
+
+    inline = [item for item in trajectories if not isinstance(item, str)]
+    if len(inline) != n or n < 2:
         return
-    groups = Counter(run_groups)
-    if incomplete := [group_id for group_id, count in groups.items() if count != group_size]:
-        raise ValueError(f"incomplete GRPO groups: {incomplete}")
+    if keyed:
+        buckets: dict[object, list[float]] = {}
+        for group_id, item in zip(run_group_ids, inline, strict=True):
+            buckets.setdefault(group_id, []).append(item.reward)
+        reward_groups = list(buckets.values())
+    else:
+        size = group_size or n
+        reward_groups = [
+            [item.reward for item in inline[start : start + size]] for start in range(0, n, size)
+        ]
+    if all(len(set(group)) == 1 for group in reward_groups):
+        logger.warning(
+            "no GRPO group has any reward spread, so every advantage normalizes to "
+            "zero and this pass accumulates no gradient. Vary task difficulty "
+            "until rollouts within a group disagree."
+        )
 
 
 class TrainingClient(BaseTrainingClient):

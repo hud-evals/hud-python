@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 
 import asyncssh
 import pytest
@@ -268,3 +269,35 @@ def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> N
 
     with pytest.raises(RuntimeError, match="isolation was required"):
         ws.Workspace(tmp_path, require_isolation=True)
+
+
+@pytest.mark.asyncio
+async def test_a_symlinked_root_publishes_both_spellings(tmp_path: Path) -> None:
+    """A workspace addressed through a symlink (macOS /tmp -> /private/tmp) serves the
+    real path, so it must publish the caller's spelling too or clients re-anchor it."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    ws = Workspace(link)
+    await ws.start()
+    try:
+        cap = ws.capability()
+        assert cap.params["cwd"] == real.as_posix()
+        assert cap.params["cwd_aliases"] == [link.as_posix()]
+
+        client = SSHClient(cap, cast("Any", None))
+        assert client.map_path(f"{link}/calc.py") == f"{real}/calc.py"
+    finally:
+        await ws.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_plain_root_publishes_no_alias(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        assert "cwd_aliases" not in ws.capability().params
+    finally:
+        await ws.stop()
