@@ -164,6 +164,9 @@ _DEFAULT_USER = "agent"
 _SANDBOX_HOLDER = ["sh", "-c", "echo ready; exec sleep 2147483647"]
 _SANDBOX_READY = b"ready\n"
 
+#: What the sandbox's user namespace maps: the container's ids, unchanged.
+_FULL_ID_RANGE = "0 0 65536"
+
 
 def _without_harness_config(environ: Mapping[str, str]) -> dict[str, str]:
     """The serving process's environment, minus HUD's own configuration.
@@ -185,6 +188,36 @@ def _env_argv(env: Mapping[str, str]) -> list[str]:
     """
     env_bin = shutil.which("env") or "/usr/bin/env"
     return [env_bin, "-i", *(f"{k}={v}" for k, v in env.items())]
+
+
+def _map_identities(pid: int) -> None:
+    """Give the sandbox the whole id space, not just the id that created it.
+
+    Left to itself bwrap maps one id, so every file owned by anyone else is
+    ``nobody`` inside — unreadable, unwritable, not even chownable by the
+    sandbox's own root. That is most of an image whose task runs as a non-root
+    user: the agent cannot write its own working directory, and no session can
+    drop to an id the map does not contain. Writing the map from out here
+    needs CAP_SETUID/CAP_SETGID in *this* namespace, which a container's root
+    holds by default. Where the kernel refuses, fall back to the single id
+    bwrap would have mapped: a narrow map is workable, an absent one is not.
+    """
+    proc = Path(f"/proc/{pid}")
+    with contextlib.suppress(OSError):
+        (proc / "setgroups").write_text("allow")
+    for name, own in (("uid_map", os.geteuid()), ("gid_map", os.getegid())):
+        try:
+            (proc / name).write_text(_FULL_ID_RANGE)
+        except OSError:
+            if name == "gid_map":
+                # Giving up supplementary groups is the kernel's price for
+                # writing gid_map without the capability.
+                with contextlib.suppress(OSError):
+                    (proc / "setgroups").write_text("deny")
+            try:
+                (proc / name).write_text(f"{own} {own} 1")
+            except OSError:
+                LOGGER.warning("could not map ids into the sandbox (%s)", name)
 
 
 def _open_pty(process: asyncssh.SSHServerProcess[bytes]) -> tuple[int, int]:
@@ -289,6 +322,7 @@ class Workspace:
         shell_uid: int | None = None,
         require_isolation: bool = False,
         credentials_dir: Path | str | None = None,
+        hand_over_root: bool = True,
     ) -> None:
         self.root: Path = Path(root).resolve()
         # Per-instance credential dir, materialized lazily (see _credentials_dir).
@@ -326,6 +360,9 @@ class Workspace:
         self._ssh_port = port
         self._ssh_user = user
         self._shell_uid = shell_uid
+        # Whether the root is chowned to shell_uid at start. Off where the
+        # image staged it already: whose it is, is the image's statement.
+        self._hand_over_root = hand_over_root
         if require_isolation and self._bwrap is None:
             raise RuntimeError(
                 "isolation was required but bwrap cannot sandbox here: install "
@@ -418,7 +455,8 @@ class Workspace:
             # author's job, done where it's cheap and scoped: at build time
             # (`COPY --chown`) or in task setup over just what was staged.
             assert self._shell_uid is not None
-            os.lchown(self.root, self._shell_uid, self._shell_uid)
+            if self._hand_over_root:
+                os.lchown(self.root, self._shell_uid, self._shell_uid)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -592,6 +630,7 @@ class Workspace:
         env: Mapping[str, str] | None = None,
         inherit_host_env: bool = True,
         info_fd: int | None = None,
+        userns_block_fd: int | None = None,
         tty: bool = False,
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
@@ -611,7 +650,9 @@ class Workspace:
         argv: list[str] = [
             self._bwrap,
             "--die-with-parent",
-            "--unshare-user-try",
+            # Blocking means this side installs the map, so the namespace has
+            # to be ours to map: --unshare-user, not the best-effort form.
+            "--unshare-user" if userns_block_fd is not None else "--unshare-user-try",
             "--unshare-pid",
             "--unshare-ipc",
             "--unshare-uts",
@@ -621,6 +662,8 @@ class Workspace:
             argv.append("--unshare-net")
         if info_fd is not None:
             argv.extend(["--info-fd", str(info_fd)])
+        if userns_block_fd is not None:
+            argv.extend(["--userns-block-fd", str(userns_block_fd)])
         for m in self._system_mounts:
             argv.extend(m.to_bwrap_args())
         argv.extend(["--bind", str(self.root), self._guest_path])
@@ -727,24 +770,35 @@ class Workspace:
         and bwrap is the only party that knows which of its forks that is.
         """
         read_fd, write_fd = os.pipe()
+        block_read, block_write = os.pipe()
         try:
             os.set_inheritable(write_fd, True)
-            argv = self.bwrap_argv(_SANDBOX_HOLDER, info_fd=write_fd)
+            os.set_inheritable(block_read, True)
+            argv = self.bwrap_argv(_SANDBOX_HOLDER, info_fd=write_fd, userns_block_fd=block_read)
             self._sandbox = await asyncio.create_subprocess_exec(
                 *argv,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                pass_fds=(write_fd,),
+                pass_fds=(write_fd, block_read),
             )
             os.close(write_fd)
-            write_fd = -1
+            os.close(block_read)
+            write_fd = block_read = -1
             loop = asyncio.get_running_loop()
             raw = await asyncio.wait_for(loop.run_in_executor(None, os.read, read_fd, 4096), 30.0)
+            if raw:
+                # The sandbox is held at its own creation until this is
+                # written: nothing runs in it, and nothing can join it, before
+                # it knows who its ids are.
+                _map_identities(int(json.loads(raw)["child-pid"]))
+            os.write(block_write, b"\n")
         finally:
             os.close(read_fd)
-            if write_fd != -1:
-                os.close(write_fd)
+            os.close(block_write)
+            for stray in (write_fd, block_read):
+                if stray != -1:
+                    os.close(stray)
         if not raw:
             raise RuntimeError(f"the sandbox holder did not start: {await self._sandbox_error()}")
         pid = int(json.loads(raw)["child-pid"])
