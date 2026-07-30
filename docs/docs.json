@@ -90,7 +90,7 @@
           },
           {
             "group": "API",
-            "pages": ["platform/rest-api"]
+            "pages": ["platform/rest-api", "platform/mcp"]
           }
         ]
       }

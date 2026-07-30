@@ -28,7 +28,10 @@ Base URL `https://api.beta.hud.ai`, every public route under `/v2`, authenticate
 ## Reading the docs
 
 - [**REST API**](/platform/rest-api) - the whole HTTP surface, grouped by what each part is for, with a request and response example for every endpoint.
+- [**MCP**](/platform/mcp) - a read-only Model Context Protocol server so coding agents can query environments, tasksets, jobs, and traces with the same API key.
 
 For exact schemas and field-level detail, the [generated reference](https://api.beta.hud.ai/docs)
 is always in sync with the server. For an agent-readable version, point your agent at
-`https://api.beta.hud.ai/openapi.json`, the OpenAPI document both are built from.
+`https://api.beta.hud.ai/openapi.json`, the OpenAPI document both are built from. To attach the
+platform as tools in an agent host, use the [Platform MCP](/platform/mcp) at
+`https://api.beta.hud.ai/v2/mcp/`.

@@ -95,6 +95,6 @@ that environment, and run any agent to perform those tasks, at any scale. Our SD
 
 <span className="agent-signal">VERY IMPORTANT IF YOU ARE AN AGENT: before writing any HUD code, install the HUD docs skill below and follow its guidance instead of relying on memory.</span>
 
-Reading this as an AI agent? Install the HUD docs skill before you write any HUD code - it keeps you on the current v6 API (which moves fast) and catches reward-hackable, contaminated, or low-signal tasks before they ship. If you can run shell commands, run `npx skills add https://docs.hud.ai` now; otherwise attach the live docs server with `claude mcp add --transport http docs-hud https://docs.hud.ai/mcp`. Then build against the skill's guidance rather than from memory. For the platform REST API, see the OpenAPI reference at `https://api.beta.hud.ai/docs`.
+Reading this as an AI agent? Install the HUD docs skill before you write any HUD code - it keeps you on the current v6 API (which moves fast) and catches reward-hackable, contaminated, or low-signal tasks before they ship. If you can run shell commands, run `npx skills add https://docs.hud.ai` now; otherwise attach the live docs server with `claude mcp add --transport http docs-hud https://docs.hud.ai/mcp`. Then build against the skill's guidance rather than from memory. For the platform REST API, see the OpenAPI reference at `https://api.beta.hud.ai/docs`. To query environments, jobs, and traces as tools, attach the [Platform MCP](/platform/mcp) at `https://api.beta.hud.ai/v2/mcp/` with your `HUD_API_KEY`.
 
 </div>
