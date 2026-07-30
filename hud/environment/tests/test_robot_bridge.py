@@ -36,6 +36,17 @@ class _FakeWS:
 
 
 @pytest.mark.asyncio
+async def test_claim_awaits_legacy_async_reset() -> None:
+    class _AsyncReset(_StubBridge):
+        async def reset(self, **kwargs: Any) -> str:
+            await asyncio.sleep(0)
+            return "async-prompt"
+
+    ep = await _AsyncReset()._claim_episode()
+    assert ep["prompt"] == "async-prompt"
+
+
+@pytest.mark.asyncio
 async def test_claim_rejects_empty_kwargs_after_nonempty_batch() -> None:
     bridge = _StubBridge()
     bridge.num_envs = 2
@@ -141,19 +152,41 @@ async def test_tick_loop_steps_when_live_slot_has_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_claim_waits_when_batch_full_then_succeeds_after_release() -> None:
+async def test_claim_raises_when_batch_full() -> None:
     bridge = _StubBridge()
     bridge.num_envs = 1
     bridge._registry.configure(1)
     first = await bridge._claim_episode(goal="a")
-    assert first["token"]
-
-    claim = asyncio.create_task(bridge._claim_episode(goal="a"))
-    await asyncio.sleep(0.05)
-    assert not claim.done()  # waiting, not erroring
+    with pytest.raises(RuntimeError, match="slots are claimed"):
+        await bridge._claim_episode(goal="a")
     await bridge._release_episode(first["token"])
-    second = await asyncio.wait_for(claim, timeout=1.0)
+    second = await bridge._claim_episode(goal="a")
     assert second["token"]
+
+
+@pytest.mark.asyncio
+async def test_endpoint_reset_retries_until_peer_result_frees_slot() -> None:
+    """Shared width+1: reset retries outside the RPC lock so result is not deadlocked."""
+    from hud.environment.robot.endpoint import RobotEndpoint
+
+    bridge = _StubBridge()
+    bridge.num_envs = 1
+    server = await bridge.serve_control("127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    ep = RobotEndpoint.remote("127.0.0.1", port)
+    await ep.start()
+    try:
+        first = await ep.reset(goal="a")
+        waiting = asyncio.create_task(ep.reset(goal="a"))
+        await asyncio.sleep(0.05)
+        assert not waiting.done()
+        await asyncio.wait_for(ep.result(token=first["token"]), timeout=1.0)
+        second = await asyncio.wait_for(waiting, timeout=1.0)
+        assert second["token"] != first["token"]
+    finally:
+        await ep.stop()
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio

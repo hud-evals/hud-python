@@ -24,7 +24,9 @@ from libero_sim_bridge import LiberoSimBridge
 CONTRACT = build_contract({"use_delta": True})  # the env's self-describing obs/action schema
 
 env = Environment(name="libero")
-endpoint = RobotEndpoint(LiberoSimBridge(use_delta=True)).attach(env)
+bridge = LiberoSimBridge(use_delta=True)
+bridge.contract = CONTRACT  # capabilities() publishes this on the wire
+endpoint = RobotEndpoint(bridge).attach(env)
 
 @env.initialize
 async def _up():

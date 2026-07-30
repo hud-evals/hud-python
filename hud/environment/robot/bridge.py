@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import queue
 import secrets
 import signal
@@ -150,8 +151,6 @@ class RobotBridge(ABC):
         self._registry.configure(1)
         self._tick_task: asyncio.Task[None] | None = None
         self._action_event = asyncio.Event()
-        # Wakes claim waiters when a slot is released (Shared width+1 waits here).
-        self._slots_changed = asyncio.Event()
         # Episode scoring read by ``result_slots``; single-env subclasses update these
         # in ``reset``/``step`` (batched bridges override result_slots instead).
         self.task_description: str = ""
@@ -168,25 +167,26 @@ class RobotBridge(ABC):
         execute inline on the caller — the degenerate single-thread case.
         """
         if self._sim_ident is None or threading.get_ident() == self._sim_ident:
-            return fn(*args, **kwargs)  # not serving yet, or already on the sim thread
+            result = fn(*args, **kwargs)
+            # In-loop path can await a legacy ``async def`` hook; sim-thread path cannot.
+            return await result if inspect.isawaitable(result) else result
         fut: Future[Any] = Future()
         self._sim_q.put((lambda: fn(*args, **kwargs), fut))
         return await asyncio.wrap_future(fut)
 
     async def _claim_episode(self, **kwargs: Any) -> dict[str, Any]:
         """Control-plane reset: global sim reset when all free, else claim a free slot."""
-        while True:
-            if self._registry.all_free:
-                self.total_reward = 0.0
-                self.success = False
-                self.terminated = False
-                # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
-                # on the background serve loop.
-                self.task_description = await self._run_on_sim(self.reset, **kwargs)
-                self._episode_kwargs = kwargs
-                self._registry.configure(self.num_envs)
-                slot = self._registry.slots[0]
-                break
+        if self._registry.all_free:
+            self.total_reward = 0.0
+            self.success = False
+            self.terminated = False
+            # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
+            # on the background serve loop.
+            self.task_description = await self._run_on_sim(self.reset, **kwargs)
+            self._episode_kwargs = kwargs
+            self._registry.configure(self.num_envs)
+            slot = self._registry.slots[0]
+        else:
             # Lockstep sim: one global reset serves the whole batch, so a later claim
             # cannot get its own task/seed — reject differing kwargs instead of
             # silently running the first claim's task.
@@ -197,12 +197,9 @@ class RobotBridge(ABC):
                     "identical args, or use one sim per distinct task/seed"
                 )
             slot = self._registry.free_slot()
-            if slot is not None:
-                break
-            # Batch full — wait for peers to finish (Shared width+1 lands here).
-            # Wait then clear so a release between free_slot and wait is not lost.
-            await self._slots_changed.wait()
-            self._slots_changed.clear()
+            # Fail fast — endpoint.reset retries outside its lock so peers can still result.
+            if slot is None:
+                raise RuntimeError(f"all {self.num_envs} slots are claimed")
         token = self._registry.claim(slot)
         return {"prompt": self.task_description, "token": token}
 
@@ -215,9 +212,7 @@ class RobotBridge(ABC):
         slot = self._registry.resolve(token)
         grade = (await self._run_on_sim(self.result_slots))[slot.index]
         self._registry.release(slot)
-        # Wake barrier + claim waiters (release clears slot.ws before WS finally).
-        self._action_event.set()
-        self._slots_changed.set()
+        self._action_event.set()  # wake barrier (release clears slot.ws before WS finally)
         return grade
 
     @abstractmethod

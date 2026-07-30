@@ -251,11 +251,19 @@ class RobotEndpoint:
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
-        ep = await self._call("reset", task_args)
-        session_id, token = current_session_id.get(), ep.get("token")
-        if session_id is not None and isinstance(token, str):
-            self._claims[session_id] = token
-        return ep
+        while True:
+            try:
+                ep = await self._call("reset", task_args)
+            except RuntimeError as exc:
+                # Batch full: drop the lock between tries so a peer can result.
+                if "slots are claimed" not in str(exc):
+                    raise
+                await asyncio.sleep(0.05)
+                continue
+            session_id, token = current_session_id.get(), ep.get("token")
+            if session_id is not None and isinstance(token, str):
+                self._claims[session_id] = token
+            return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
         """This slot's score dict (frees the slot), merged with any caller ``extra``.
