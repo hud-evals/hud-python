@@ -132,6 +132,29 @@ async def test_a_session_that_asks_for_a_terminal_gets_one(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_a_resize_does_not_cost_the_session_its_keyboard(tmp_path: Path) -> None:
+    """asyncssh delivers a resize as an exception on the stdin read, and it is
+    not an asyncssh.Error — unhandled it escapes the relay and input stops."""
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            process = await conn.create_process(
+                "cat", term_type="xterm-256color", term_size=(80, 24)
+            )
+            process.channel.change_terminal_size(132, 43)
+            await asyncio.sleep(0.2)
+            # Input still reaches the shell after the resize.
+            process.stdin.write("still-listening\n")
+            echoed = await asyncio.wait_for(process.stdout.readline(), 5)
+            process.channel.close()
+    finally:
+        await ws.stop()
+
+    assert "still-listening" in echoed
+
+
+@pytest.mark.asyncio
 async def test_a_timed_out_command_keeps_what_it_printed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

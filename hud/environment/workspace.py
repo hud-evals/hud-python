@@ -177,12 +177,32 @@ def _env_argv(env: Mapping[str, str]) -> list[str]:
 def _open_pty(process: asyncssh.SSHServerProcess[bytes]) -> tuple[int, int]:
     """A terminal pair sized to what the client asked for: (master, slave)."""
     master_fd, slave_fd = pty.openpty()
-    width, height, pixwidth, pixheight = process.get_terminal_size()
-    with contextlib.suppress(OSError):
-        fcntl.ioctl(
-            slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, pixwidth, pixheight)
-        )
+    _set_winsize(slave_fd, *process.get_terminal_size())
     return master_fd, slave_fd
+
+
+def _set_winsize(fd: int, width: int, height: int, pixwidth: int, pixheight: int) -> None:
+    """Tell the terminal how big it is.
+
+    Full-screen programs lay out against this and never re-measure, so a stale
+    size leaves them drawing to the wrong shape for the rest of the session.
+    """
+    with contextlib.suppress(OSError):
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, pixwidth, pixheight))
+
+
+def _ctty_argv() -> list[str]:
+    """Claim the session's terminal as its *controlling* terminal.
+
+    tty file descriptors alone are not a terminal session: ``/dev/tty`` cannot
+    be opened, and job control has no foreground process group to signal. Run
+    inside the sandbox, ``setsid`` is not a process-group leader there and so
+    execs in place rather than forking, which keeps the pid and exit status
+    the caller is waiting on. Where the binary is absent (macOS ships none)
+    the session still gets a working tty, only without a ctty.
+    """
+    setsid = shutil.which("setsid")
+    return [setsid, "-c"] if setsid else []
 
 
 async def _pty_streams(master_fd: int) -> tuple[Any, asyncio.StreamReader]:
@@ -206,9 +226,11 @@ async def _pty_streams(master_fd: int) -> tuple[Any, asyncio.StreamReader]:
     return asyncio.StreamWriter(transport, protocol, None, loop), reader
 
 
-def _payload_argv(command: str | list[str] | None, env: Mapping[str, str]) -> list[str]:
+def _payload_argv(
+    command: str | list[str] | None, env: Mapping[str, str], *, ctty: bool = False
+) -> list[str]:
     """The session itself: a login shell (or an exact argv) under ``env``."""
-    argv = _env_argv(env)
+    argv = [*(_ctty_argv() if ctty else []), *_env_argv(env)]
     if isinstance(command, str):
         return [*argv, "bash", "-lc", command]
     if command is None:
@@ -555,6 +577,7 @@ class Workspace:
         env: Mapping[str, str] | None = None,
         inherit_host_env: bool = True,
         info_fd: int | None = None,
+        tty: bool = False,
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
 
@@ -590,7 +613,7 @@ class Workspace:
             argv.extend(m.to_bwrap_args())
         argv.extend(["--chdir", target_cwd])
         argv.append("--")
-        argv.extend(_payload_argv(command, full_env))
+        argv.extend(_payload_argv(command, full_env, ctty=tty))
         return argv
 
     def enter_argv(
@@ -600,6 +623,7 @@ class Workspace:
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
+        tty: bool = False,
     ) -> list[str]:
         """Argv that runs ``command`` inside the sandbox *pid* belongs to.
 
@@ -631,7 +655,7 @@ class Workspace:
         # Unlike the bwrap path, the drop goes *inside*: joining namespaces
         # needs the privileges the dropped uid does not have.
         argv.extend(self._drop_argv())
-        argv.extend(_payload_argv(command, self._full_env(env)))
+        argv.extend(_payload_argv(command, self._full_env(env), ctty=tty))
         return argv
 
     def _full_env(self, env: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -752,6 +776,7 @@ class Workspace:
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
+        tty: bool = False,
     ) -> list[str]:
         """Per-session shell argv (bwrap'd if available, else host shell).
 
@@ -769,9 +794,11 @@ class Workspace:
                 # the same minimal environment as the non-bwrap dropped shell,
                 # keeping explicit per-call overrides.
                 walled_env = {**(self._session_env() or {}), **(env or {})}
-                argv = self.bwrap_argv(inner, cwd=cwd, env=walled_env, inherit_host_env=False)
+                argv = self.bwrap_argv(
+                    inner, cwd=cwd, env=walled_env, inherit_host_env=False, tty=tty
+                )
             else:
-                argv = self.bwrap_argv(inner, cwd=cwd, env=env)
+                argv = self.bwrap_argv(inner, cwd=cwd, env=env, tty=tty)
         elif command is not None:
             argv = ["bash", "-lc", command]
         else:
@@ -859,11 +886,13 @@ class Workspace:
         # Sessions start from an exact environment, so a terminal's TERM has to
         # be put there deliberately: without it curses and tput have no
         # terminal description and fall back or fail outright.
-        session_env = {"TERM": process.term_type} if process.term_type else None
+        term_type = process.term_type
+        wants_tty = bool(term_type)
+        session_env = {"TERM": term_type} if term_type else None
         argv = (
-            self.shell_argv(process.command, env=session_env)
+            self.shell_argv(process.command, env=session_env, tty=wants_tty)
             if pid is None
-            else self.enter_argv(pid, process.command, env=session_env)
+            else self.enter_argv(pid, process.command, env=session_env, tty=wants_tty)
         )
         if self._drops_privileges():
             # The pre-drop processes (setpriv, bwrap) run as root; caller env
@@ -955,7 +984,7 @@ class Workspace:
         # A client that asked for a pty gets one: the child's std fds are the
         # terminal, so isatty() holds and curses/readline programs behave as
         # they would in a terminal. stderr merges into stdout, as on any tty.
-        pty_pair = _open_pty(process) if process.term_type else None
+        pty_pair = _open_pty(process) if wants_tty else None
         child_fds: dict[str, Any] = (
             {
                 "stdin": asyncio.subprocess.PIPE,
@@ -991,7 +1020,25 @@ class Workspace:
 
         async def relay_stdin() -> None:
             try:
-                while chunk := await process.stdin.read(65536):
+                while True:
+                    try:
+                        chunk = await process.stdin.read(65536)
+                    except asyncssh.TerminalSizeChanged as resized:
+                        # A resize arrives as an exception on the read rather
+                        # than as data. It is not an asyncssh.Error, so left
+                        # alone it would escape this coroutine and take the
+                        # session's keyboard with it.
+                        if pty_pair is not None:
+                            _set_winsize(
+                                pty_pair[0],
+                                resized.width,
+                                resized.height,
+                                resized.pixwidth,
+                                resized.pixheight,
+                            )
+                        continue
+                    if not chunk:
+                        break
                     stdin_writer.write(chunk)
                     await stdin_writer.drain()
             except (asyncssh.Error, BrokenPipeError, ConnectionResetError, OSError):
