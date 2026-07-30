@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-
-from hud.environment.robot.bridge import _HUD_STATE, _apply_declaration_state, RobotBridge
+from hud.environment.robot.bridge import _HUD_STATE, RobotBridge, _apply_declaration_state
 from hud.environment.robot.endpoint import _bridge_init_kwargs
 
 
@@ -20,10 +18,10 @@ class _CustomBridge(RobotBridge):
     def reset(self, **kwargs: Any) -> str:
         return "p"
 
-    def step(self, action: np.ndarray) -> None:
+    def step(self, action: Any) -> None:
         return None
 
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+    def get_observation(self) -> tuple[dict[str, Any], Any] | None:
         return None
 
 
