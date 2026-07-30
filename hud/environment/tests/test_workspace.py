@@ -108,6 +108,30 @@ async def test_output_arrives_while_the_command_is_still_running(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_a_session_that_asks_for_a_terminal_gets_one(tmp_path: Path) -> None:
+    """Programs branch on isatty: without a pty they take their batch path, so
+    a terminal task is graded on behaviour a terminal would never produce."""
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            with_pty = await conn.run(
+                "test -t 0 && test -t 1 && echo TTY || echo NOT_TTY; tput cols 2>/dev/null",
+                term_type="xterm-256color",
+                term_size=(120, 40),
+                check=False,
+            )
+            without = await conn.run("test -t 1 && echo TTY || echo NOT_TTY", check=False)
+    finally:
+        await ws.stop()
+
+    assert "TTY" in str(with_pty.stdout) and "NOT_TTY" not in str(with_pty.stdout)
+    # The size the client asked for reaches the terminal, not a default.
+    assert "120" in str(with_pty.stdout)
+    assert "NOT_TTY" in str(without.stdout)
+
+
+@pytest.mark.asyncio
 async def test_a_timed_out_command_keeps_what_it_printed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

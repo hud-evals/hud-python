@@ -9,16 +9,22 @@ import logging
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
 from hud.utils.process import create_process_group_exec
+
+if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
+    import fcntl
+    import pty
+    import termios
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -166,6 +172,38 @@ def _env_argv(env: Mapping[str, str]) -> list[str]:
     """
     env_bin = shutil.which("env") or "/usr/bin/env"
     return [env_bin, "-i", *(f"{k}={v}" for k, v in env.items())]
+
+
+def _open_pty(process: asyncssh.SSHServerProcess[bytes]) -> tuple[int, int]:
+    """A terminal pair sized to what the client asked for: (master, slave)."""
+    master_fd, slave_fd = pty.openpty()
+    width, height, pixwidth, pixheight = process.get_terminal_size()
+    with contextlib.suppress(OSError):
+        fcntl.ioctl(
+            slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, pixwidth, pixheight)
+        )
+    return master_fd, slave_fd
+
+
+async def _pty_streams(master_fd: int) -> tuple[Any, asyncio.StreamReader]:
+    """Async ends of the terminal: something to write keystrokes to, and the
+    screen output to read.
+
+    Both sides go through the event loop rather than blocking reads, so one
+    talkative program cannot stall the server, and ``drain`` gives the same
+    backpressure the pipe path has.
+    """
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    await loop.connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(master_fd, "rb", 0)
+    )
+    # A dup so the read and write ends own their own file objects; closing one
+    # must not pull the terminal out from under the other.
+    transport, protocol = await loop.connect_write_pipe(
+        asyncio.streams.FlowControlMixin, os.fdopen(os.dup(master_fd), "wb", 0)
+    )
+    return asyncio.StreamWriter(transport, protocol, None, loop), reader
 
 
 def _payload_argv(command: str | list[str] | None, env: Mapping[str, str]) -> list[str]:
@@ -818,10 +856,14 @@ class Workspace:
 
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         pid = await self.sandbox_pid()
+        # Sessions start from an exact environment, so a terminal's TERM has to
+        # be put there deliberately: without it curses and tput have no
+        # terminal description and fall back or fail outright.
+        session_env = {"TERM": process.term_type} if process.term_type else None
         argv = (
-            self.shell_argv(process.command)
+            self.shell_argv(process.command, env=session_env)
             if pid is None
-            else self.enter_argv(pid, process.command)
+            else self.enter_argv(pid, process.command, env=session_env)
         )
         if self._drops_privileges():
             # The pre-drop processes (setpriv, bwrap) run as root; caller env
@@ -832,6 +874,10 @@ class Workspace:
             }
         else:
             proc_env = self._session_env()
+        if session_env:
+            # The sandboxed paths carry TERM in the argv's own `env -i`; a
+            # session running directly inherits this environment instead.
+            proc_env = {**(proc_env if proc_env is not None else os.environ), **session_env}
 
         if sys.platform == "win32":
             # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
@@ -906,36 +952,53 @@ class Workspace:
             process.exit(result.returncode)
             return
 
+        # A client that asked for a pty gets one: the child's std fds are the
+        # terminal, so isatty() holds and curses/readline programs behave as
+        # they would in a terminal. stderr merges into stdout, as on any tty.
+        pty_pair = _open_pty(process) if process.term_type else None
+        child_fds: dict[str, Any] = (
+            {
+                "stdin": asyncio.subprocess.PIPE,
+                "stdout": asyncio.subprocess.PIPE,
+                "stderr": asyncio.subprocess.PIPE,
+            }
+            if pty_pair is None
+            else {"stdin": pty_pair[1], "stdout": pty_pair[1], "stderr": pty_pair[1]}
+        )
         try:
             sub = await create_process_group_exec(
-                *argv,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.root),
-                env=proc_env,
+                *argv, **child_fds, cwd=str(self.root), env=proc_env
             )
         except FileNotFoundError as exc:
+            if pty_pair is not None:
+                os.close(pty_pair[0])
+                os.close(pty_pair[1])
             process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
             process.exit(127)
             return
 
-        stdin = sub.process.stdin
-        stdout = sub.stdout
-        stderr = sub.stderr
-        assert stdin is not None
-        assert stdout is not None
-        assert stderr is not None
+        if pty_pair is not None:
+            # The child holds the terminal now; this side keeps only the master.
+            os.close(pty_pair[1])
+            stdin_writer, stdout_reader = await _pty_streams(pty_pair[0])
+            stderr_reader = None
+        else:
+            stdin_writer = sub.process.stdin
+            stdout_reader = sub.stdout
+            stderr_reader = sub.stderr
+        assert stdin_writer is not None
+        assert stdout_reader is not None
 
         async def relay_stdin() -> None:
             try:
                 while chunk := await process.stdin.read(65536):
-                    stdin.write(chunk)
-                    await stdin.drain()
-            except (asyncssh.Error, BrokenPipeError, ConnectionResetError):
+                    stdin_writer.write(chunk)
+                    await stdin_writer.drain()
+            except (asyncssh.Error, BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
-                stdin.close()
+                with contextlib.suppress(Exception):
+                    stdin_writer.close()
 
         async def relay_output(
             reader: asyncio.StreamReader, writer: asyncssh.SSHWriter[bytes]
@@ -951,12 +1014,16 @@ class Workspace:
                 while chunk := await reader.read(65536):
                     writer.write(chunk)
                     await writer.drain()
-            except (asyncssh.Error, BrokenPipeError, ConnectionResetError):
+            except (asyncssh.Error, BrokenPipeError, ConnectionResetError, OSError):
+                # A pty master reads EIO once the child is gone: end of output,
+                # not a failure.
                 pass
 
         stdin_task = asyncio.create_task(relay_stdin())
-        stdout_task = asyncio.create_task(relay_output(stdout, process.stdout))
-        stderr_task = asyncio.create_task(relay_output(stderr, process.stderr))
+        # One stream on a terminal, where stderr shares the tty, two otherwise.
+        output_tasks = [asyncio.create_task(relay_output(stdout_reader, process.stdout))]
+        if stderr_reader is not None:
+            output_tasks.append(asyncio.create_task(relay_output(stderr_reader, process.stderr)))
         wait_task = asyncio.create_task(sub.wait())
         channel_closed_task = asyncio.create_task(process.channel.wait_closed())
         timed_out = False
@@ -993,13 +1060,10 @@ class Workspace:
                 channel_closed_task,
                 return_exceptions=True,
             )
-            _, output_pending = await asyncio.wait(
-                (stdout_task, stderr_task),
-                timeout=1.0,
-            )
+            _, output_pending = await asyncio.wait(output_tasks, timeout=1.0)
             for task in output_pending:
                 task.cancel()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            await asyncio.gather(*output_tasks, return_exceptions=True)
 
         if process.channel.is_closing():
             return
