@@ -20,6 +20,13 @@ from hud.utils.naming import normalize_environment_name
 
 LOGGER = logging.getLogger(__name__)
 
+#: Where an adapted image keeps the harness: its venv, the baked tasks, the
+#: session keys, the grading material. Nested rather than at the root, and
+#: rebuilt out of the agent's namespace by :func:`~harbor.environment`,
+#: so what the graded party sees is the empty ``/media`` any container has —
+#: not a directory named after the thing evaluating it.
+HUD_ROOT = Path("/media/hud")
+
 DEFAULT_VERIFIER_TIMEOUT = 600.0
 
 
@@ -266,10 +273,10 @@ def unsupported_features(task_dir: Path) -> list[str]:
         # both phases run as it; two *different* identities are not.
         reasons.append("agent.user and verifier.user differ (the image has one USER)")
     workdir = environment.workdir or _final_stage_workdir(task_dir)
-    if workdir and (workdir == "/hud" or workdir.startswith("/hud/")):
-        # The adaptation layer owns /hud inside the image and hides it from
+    if workdir and Path(workdir).is_relative_to(HUD_ROOT):
+        # The adaptation layer owns that tree inside the image and hides it from
         # agent sessions; a task working there would find it empty.
-        reasons.append(f"working directory {workdir!r} is inside /hud (reserved by adaptation)")
+        reasons.append(f"working directory {workdir!r} is inside {HUD_ROOT} (reserved)")
     if environment.docker_image and not (task_dir / "environment" / "Dockerfile").is_file():
         reasons.append(
             "prebuilt docker_image environments (adapt builds from environment/Dockerfile)"

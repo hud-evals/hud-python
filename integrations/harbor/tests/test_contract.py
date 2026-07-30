@@ -72,13 +72,12 @@ async def test_adapt_contexts_bake_the_serving_layer(tmp_path) -> None:
     assert (task_dir / "tests" / "test.sh").is_file()
 
 
-async def test_the_layer_keeps_its_own_state_under_the_mask(tmp_path) -> None:
-    # /hud is the path the workspace masks from the graded party, so everything
-    # the layer installs belongs there: uv's binary, its managed interpreter and
-    # that interpreter's shims, its cache and config. At uv's defaults these
-    # land in the invoking user's home — inside the task's own filesystem, where
-    # the agent finds a HUD runtime the task never declared, and shims into the
-    # mask that resolve to nothing.
+async def test_the_layer_keeps_its_own_state_out_of_the_task(tmp_path) -> None:
+    # Everything the layer installs belongs under the harness's own tree: uv's
+    # binary, its managed interpreter and that interpreter's shims, its cache
+    # and config. At uv's defaults these land in the invoking user's home —
+    # inside the task's own filesystem, where the agent finds a HUD runtime the
+    # task never declared, and shims into a hidden tree resolving to nothing.
     _write_harbor_task(tmp_path, "task-a")
     await harbor.adapt(tmp_path, build=False)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
@@ -86,7 +85,9 @@ async def test_the_layer_keeps_its_own_state_under_the_mask(tmp_path) -> None:
 
     directories = dict(re.findall(r"\b(UV_\w*(?:DIR|HOME)|XDG_CONFIG_HOME)=(\S+)", script))
     assert directories, "the layer pins no uv directories"
-    assert all(path.startswith("/hud/") for path in directories.values()), directories
+    assert all(path.startswith(f"{harbor_load.HUD_ROOT}/") for path in directories.values()), (
+        directories
+    )
     # Nothing is written relative to the image's home, so there is no scattered
     # state to clean up afterwards.
     assert "$HOME" not in script
@@ -153,8 +154,9 @@ def test_adapt_images_stamp_rows_when_the_caller_passes_them(tmp_path) -> None:
 
 
 async def test_environment_serves_the_baked_tasks(tmp_path, monkeypatch) -> None:
-    # The constructor refuses to build an unsandboxed env (the /hud mask is
-    # an integrity property); tests run outside a container, so stub bwrap.
+    # The constructor refuses to build an unsandboxed env (hiding the
+    # harness's tree is an integrity property); tests run outside a
+    # container, so stub bwrap.
     monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: "/usr/bin/true")
     _write_harbor_task(tmp_path, "task-a")
     _write_harbor_task(tmp_path, "task-b")
@@ -226,8 +228,9 @@ def test_load_carries_metadata_as_columns(tmp_path) -> None:
 
 
 async def test_served_templates_use_the_declared_description(tmp_path, monkeypatch) -> None:
-    # The constructor refuses to build an unsandboxed env (the /hud mask is
-    # an integrity property); tests run outside a container, so stub bwrap.
+    # The constructor refuses to build an unsandboxed env (hiding the
+    # harness's tree is an integrity property); tests run outside a
+    # container, so stub bwrap.
     monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: "/usr/bin/true")
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text(
@@ -361,7 +364,8 @@ async def test_a_declared_identity_governs_the_phases_not_the_harness(tmp_path) 
     # Harbor runs the agent and the verifier as the identity the task declares
     # for each; its harness is not subject to either. Serving from inside the
     # image, a USER directive would demote the harness too, leaving it unable
-    # to create /tests at the filesystem root or its own state under /hud.
+    # to create /tests at the filesystem root or its own state under the
+    # harness tree.
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "environment" / "Dockerfile").write_text(
         "FROM python:3.12-slim\nRUN useradd -m agent\nUSER agent\n", encoding="utf-8"
@@ -515,7 +519,11 @@ async def test_masks_are_applied_after_the_workspace_bind(tmp_path, monkeypatch)
 
     (workspace,) = built
     masked = [m.dst for m in workspace.mounts]
-    assert "/hud" in masked
+    # The harness's tree is hidden by rebuilding its parent, so the entry is
+    # absent rather than present-and-empty: a directory named after the
+    # harness is the tell, not what is inside it.
+    assert str(harbor_load.HUD_ROOT.parent) in masked
+    assert str(harbor_load.HUD_ROOT) not in masked
     # The assertions and the verdict are kept from the agent phase by not
     # existing during it, not by masking: an empty directory the base image
     # does not have is itself a signal.
@@ -773,11 +781,11 @@ def test_image_tags_do_not_depend_on_host_state(tmp_path) -> None:
 
 
 def test_a_workdir_inside_the_reserved_path_is_refused(tmp_path) -> None:
-    # /hud belongs to the adaptation layer and is hidden from agent sessions;
+    # That tree belongs to the adaptation layer and is hidden from sessions;
     # a task working there would find it empty.
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "environment" / "Dockerfile").write_text(
-        "FROM python:3.12-slim\nWORKDIR /hud/app\n", encoding="utf-8"
+        f"FROM python:3.12-slim\nWORKDIR {harbor_load.HUD_ROOT}/app\n", encoding="utf-8"
     )
 
-    assert "reserved by adaptation" in " ".join(harbor_load.unsupported_features(task))
+    assert "reserved" in " ".join(harbor_load.unsupported_features(task))
