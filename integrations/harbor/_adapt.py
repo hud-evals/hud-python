@@ -439,17 +439,12 @@ def environment(ref: str | Path = "/hud/tasks", *, name: str | None = None) -> E
         ),
         # Masks go in ``mounts``, which bwrap applies *after* the workspace
         # bind — as system mounts they would be re-covered when the guest
-        # path is ``/`` (an image with no WORKDIR). The graded party's
-        # namespace must not contain the grading material or the verdict:
-        # the baked tests and serving venv (/hud), the verifier Harbor only
-        # uploads once the agent is done (/tests), and the verifier's output
-        # dir are throwaway tmpfs here, while grading runs outside this
-        # namespace and sees the real ones.
-        mounts=(
-            Mount("tmpfs", dst=str(HUD_ROOT)),
-            Mount("tmpfs", dst=str(TESTS)),
-            Mount("tmpfs", dst=str(VERIFIER_LOGS)),
-        ),
+        # path is ``/`` (an image with no WORKDIR). Only the harness's own
+        # tree is masked: it has to exist for the whole rollout, since it is
+        # what is serving. ``/tests`` and the verdict are handled by not
+        # existing during the agent phase at all (:func:`_hide_grading_dirs`),
+        # which is what Harbor does — it uploads the verifier when it runs it.
+        mounts=(Mount("tmpfs", dst=str(HUD_ROOT)),),
         credentials_dir=HUD_ROOT / "session-keys",
         track_files=False if rooted_at_filesystem else None,
         # The agent phase's own variables, scoped to its sessions.
@@ -474,16 +469,18 @@ def _register(env: Environment, task_dir: Path, workdir: Path, workspace: Worksp
         description=config.task.description or f"Harbor task {task_dir.name}",
     )
     async def _run_harbor_task() -> AsyncGenerator[Any, Any]:
-        # Harbor uploads /tests when it runs the verifier, so the agent phase
-        # never contains the assertions it is graded on; :func:`_grade` lays
-        # the baked copy down at that same point. One adapted image serves a
-        # whole group and may serve many rollouts, so the directory is emptied
-        # afterwards: no agent ever sees another task's tests.
+        # Harbor uploads /tests when it runs the verifier, so its agent phase
+        # never contains the assertions it is graded on — nor the verdict dir.
+        # Adapted images ship both (empty), and an earlier rollout in this
+        # container leaves them behind, so the agent phase starts by removing
+        # them and ends the same way: :func:`_grade` lays them down in between,
+        # for as long as the verifier needs them.
+        _hide_grading_dirs()
         try:
             answer = yield (task_dir / "instruction.md").read_text(encoding="utf-8")
             yield await _grade(task_dir, workdir, answer)
         finally:
-            _reset_dir(TESTS)
+            _hide_grading_dirs()
             # Harbor's agent phase is one continuous session, so a service the
             # agent starts is still running when the verifier looks for it —
             # and is gone before the next rollout, which this container may
@@ -496,6 +493,25 @@ def _sync_tests(task_dir: Path) -> None:
     _reset_dir(TESTS)
     for child in (task_dir / "tests").iterdir():
         _copy_task_content(child, TESTS / child.name)
+
+
+def _hide_grading_dirs() -> None:
+    """Leave no ``/tests`` or verdict directory for the agent phase to find.
+
+    Removed rather than emptied: an empty directory the base image does not
+    have is itself a signal, and these two are the harness's whole visible
+    footprint outside its own tree. Where the serve process cannot remove them
+    — not root, and they sit at the filesystem root — emptying is the fallback,
+    which is what the mask used to achieve.
+    """
+    for path in (TESTS, VERIFIER_LOGS):
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            LOGGER.debug("could not remove %s; emptying it instead", path)
+            _reset_dir(path)
 
 
 def _reset_dir(path: Path) -> None:

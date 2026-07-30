@@ -449,6 +449,26 @@ def test_an_invalid_task_toml_is_an_error_not_a_default(tmp_path) -> None:
         harbor.load(tmp_path)
 
 
+def test_grading_directories_do_not_exist_during_the_agent_phase(tmp_path, monkeypatch) -> None:
+    """The image ships /tests and the verdict dir empty, and a previous rollout
+    leaves them behind — either way the agent phase must not find them."""
+    from integrations.harbor import _adapt
+
+    tests, verdict = tmp_path / "tests", tmp_path / "logs" / "verifier"
+    for stale in (tests, verdict):
+        stale.mkdir(parents=True)
+    (tests / "test.sh").write_text("the assertions", encoding="utf-8")
+    monkeypatch.setattr(_adapt, "TESTS", tests)
+    monkeypatch.setattr(_adapt, "VERIFIER_LOGS", verdict)
+
+    _adapt._hide_grading_dirs()
+
+    assert not tests.exists()
+    assert not verdict.exists()
+    # /logs itself is Harbor's and stays: the agent's own answer is written there.
+    assert verdict.parent.exists()
+
+
 async def test_masks_are_applied_after_the_workspace_bind(tmp_path, monkeypatch) -> None:
     # bwrap applies ``mounts`` after the workspace bind; as system mounts the
     # masks would be re-covered when the guest path is "/" (no WORKDIR).
@@ -473,10 +493,11 @@ async def test_masks_are_applied_after_the_workspace_bind(tmp_path, monkeypatch)
     (workspace,) = built
     masked = [m.dst for m in workspace.mounts]
     assert "/hud" in masked
-    assert "/logs/verifier" in masked
-    # Harbor uploads the verifier only once the agent is done, so the graded
-    # party never has the assertions it is graded on.
-    assert "/tests" in masked
+    # The assertions and the verdict are kept from the agent phase by not
+    # existing during it, not by masking: an empty directory the base image
+    # does not have is itself a signal.
+    assert "/tests" not in masked
+    assert "/logs/verifier" not in masked
     assert [m.dst for m in workspace._system_mounts] == ["/", "/proc", "/dev"]
 
 
