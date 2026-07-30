@@ -9,13 +9,14 @@ from typing import Any
 import numpy as np
 import pytest
 
-from hud.environment.robot.bridge import RobotBridge
+from hud.environment.robot.bridge import RobotBridge, _SlotPhase
 
 
 class _StubBridge(RobotBridge):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.steps: list[np.ndarray] = []
+        self.stepped = asyncio.Event()
         self.contract = {"features": {"action": {"role": "action", "names": ["a"]}}}
 
     def reset(self, **kwargs: Any) -> str:
@@ -23,6 +24,7 @@ class _StubBridge(RobotBridge):
 
     def step(self, action: np.ndarray) -> None:
         self.steps.append(np.asarray(action))
+        self.stepped.set()
 
     def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
         return {"x": np.zeros((self.num_envs, 1), dtype=np.float32)}, np.zeros(
@@ -63,9 +65,9 @@ async def test_tick_loop_does_not_hold_spin_when_all_claimed_idle() -> None:
     bridge.num_envs = 1
     bridge._registry.configure(1)
     slot = bridge._registry.slots[0]
-    bridge._registry.claim(slot)
+    bridge._registry.claim(slot, dial_deadline=float("inf"))
     slot.ws = _FakeWS()  # still connected
-    slot.idle = True  # terminated
+    slot.phase = _SlotPhase.IDLE
     slot.action = None
 
     task = asyncio.create_task(bridge._tick_loop())
@@ -102,12 +104,13 @@ async def test_tick_loop_stops_after_terminal_obs_while_ws_still_open() -> None:
     bridge.num_envs = 1
     bridge._registry.configure(1)
     slot = bridge._registry.slots[0]
-    bridge._registry.claim(slot)
+    bridge._registry.claim(slot, dial_deadline=float("inf"))
     slot.ws = _FakeWS()
+    slot.phase = _SlotPhase.ACTIVE
     task = asyncio.create_task(bridge._tick_loop())
     try:
         for expected in (1, 2, 3):
-            slot.idle = False
+            slot.phase = _SlotPhase.ACTIVE
             slot.action = np.array([1.0], dtype=np.float32)
             bridge._action_event.set()
             for _ in range(50):
@@ -115,7 +118,7 @@ async def test_tick_loop_stops_after_terminal_obs_while_ws_still_open() -> None:
                     break
                 await asyncio.sleep(0.01)
             assert bridge.tick == expected
-        assert slot.idle  # terminal obs dropped the slot out of the barrier
+        assert slot.phase is _SlotPhase.TERMINATED
         for _ in range(20):  # spam the wake that terminal fan-out itself sets
             bridge._action_event.set()
             await asyncio.sleep(0.005)
@@ -133,9 +136,9 @@ async def test_tick_loop_steps_when_live_slot_has_action() -> None:
     bridge.num_envs = 1
     bridge._registry.configure(1)
     slot = bridge._registry.slots[0]
-    bridge._registry.claim(slot)
+    bridge._registry.claim(slot, dial_deadline=float("inf"))
     slot.ws = _FakeWS()
-    slot.idle = False
+    slot.phase = _SlotPhase.ACTIVE
     slot.action = np.array([1.0], dtype=np.float32)
 
     task = asyncio.create_task(bridge._tick_loop())
@@ -190,53 +193,65 @@ async def test_endpoint_reset_retries_until_peer_result_frees_slot() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tick_loop_times_out_silent_live_slot() -> None:
-    """A connected agent that never sends must not stall the barrier forever."""
+async def test_tick_loop_waits_for_silent_live_slot() -> None:
+    """A connected policy may take longer than the initial dial timeout."""
     bridge = _StubBridge()
     bridge.step_timeout = 0.05
     bridge.num_envs = 2
     bridge._registry.configure(2)
     a, b = bridge._registry.slots
-    bridge._registry.claim(a)
-    bridge._registry.claim(b)
+    bridge._registry.claim(a, dial_deadline=float("inf"))
+    bridge._registry.claim(b, dial_deadline=float("inf"))
     a.ws, b.ws = _FakeWS(), _FakeWS()
-    a.idle = b.idle = False
+    a.phase = b.phase = _SlotPhase.ACTIVE
     a.action = np.array([1.0], dtype=np.float32)  # ready
     b.action = None  # silent
 
     task = asyncio.create_task(bridge._tick_loop())
     bridge._action_event.set()
-    for _ in range(50):
-        if bridge.steps:
-            break
-        await asyncio.sleep(0.02)
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
-    assert len(bridge.steps) == 1
-    assert b.idle  # timed out
+    try:
+        await asyncio.sleep(bridge.step_timeout * 3)
+        assert bridge.steps == []
+        assert a.phase is _SlotPhase.ACTIVE
+        assert b.phase is _SlotPhase.ACTIVE
+
+        b.action = np.array([2.0], dtype=np.float32)
+        bridge._action_event.set()
+        for _ in range(50):
+            if bridge.steps:
+                break
+            await asyncio.sleep(0.01)
+        assert len(bridge.steps) == 1
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 @pytest.mark.asyncio
-async def test_tick_loop_does_not_hold_step_undialed_claimed_slot() -> None:
-    """A peer that has claimed but not WS-connected must not be hold-advanced."""
+async def test_tick_loop_expires_undialed_claim_and_steps_live_peer() -> None:
+    """A never-connected claim stops blocking peers at its initial dial deadline."""
     bridge = _StubBridge()
     bridge.step_timeout = 0.05
     bridge.num_envs = 2
     bridge._registry.configure(2)
     a, b = bridge._registry.slots
-    bridge._registry.claim(a)
-    bridge._registry.claim(b)
+    loop = asyncio.get_running_loop()
+    bridge._registry.claim(a, dial_deadline=float("inf"))
+    dial_deadline = loop.time() + bridge.step_timeout
+    bridge._registry.claim(b, dial_deadline=dial_deadline)
     a.ws = _FakeWS()
-    a.idle = b.idle = False
+    a.phase = _SlotPhase.ACTIVE
     a.action = np.array([1.0], dtype=np.float32)
-    # b: claimed, still dialing (ws is None)
 
     task = asyncio.create_task(bridge._tick_loop())
     bridge._action_event.set()
-    await asyncio.sleep(0.15)
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
-    assert bridge.steps == []
-    assert not b.idle  # still waiting to dial — not timed out into hold
+    try:
+        await asyncio.wait_for(bridge.stepped.wait(), timeout=1.0)
+        assert len(bridge.steps) == 1
+        assert b.phase is _SlotPhase.EXPIRED
+        np.testing.assert_allclose(bridge.steps[0], [[1.0], [0.0]])
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

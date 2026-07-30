@@ -129,8 +129,13 @@ async def pick_and_place(task: str = "default", seed: int = 0):
 `env.gym` serves either a standard, single-instance env or a vectorized one - one gym env that
 internally holds `num_envs` copies of the environment, stepped together in the same process for
 GPU efficiency. Each copy is a **slot**, and a vectorized sim hands back a slot token on
-`reset` so the rollout that claimed it can step and grade that copy alone, leaving the rest
-untouched.
+`reset` so the rollout that claimed it controls and grades that row. The simulator still steps
+every copy in lockstep; unclaimed, disconnected, and finished rows receive hold actions.
+
+All slots participating in one global reset must be claimed before its first simulator step.
+Once the batch advances, admission closes until the current claims call `result`; accepting a
+late claim would start that rollout after an unrecorded trajectory prefix, so its `reset` waits
+for the next global reset instead.
 
 A single-env sim has only one slot, so the template may omit the token, as above. A vectorized
 sim (`num_envs > 1`) must thread it through so each session grades its own slot - publish it as
@@ -474,6 +479,10 @@ job = await taskset.run(
   returns; rollout `width + 1` waits for a freed slot instead of provisioning (or erroring). To
   keep the sim warm across several calls, open the scope yourself:
   `async with Shared(...) as rt: await taskset.run(..., runtime=rt)`.
+- **`width` is an upper bound, not a start barrier.** A rollout must claim its simulator slot
+  before that reset's first step. Under startup skew, a late rollout waits for a fresh reset
+  instead of joining an already-advanced trajectory; every slot reopens after the admitted
+  claims finish.
 - **EnvHub sims work unchanged.** A [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub)
   package's `make_env` often already returns a vectorized sim, so `env.gym(make_env, num_envs=N)`
   serves it directly.

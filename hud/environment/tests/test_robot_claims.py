@@ -27,7 +27,9 @@ async def test_release_claim_frees_current_session_slot(endpoint: RobotEndpoint)
         endpoint._call.return_value = {"score": 0.0}  # type: ignore[attr-defined]
         await endpoint.release_claim()
         assert "sess-a" not in endpoint._claims
-        endpoint._call.assert_called_with("result", {"token": "slot-0-abcd"})  # type: ignore[attr-defined]
+        call = endpoint._call.call_args  # type: ignore[attr-defined]
+        assert call.args == ("result", {"token": "slot-0-abcd"})
+        assert callable(call.kwargs["on_success"])
     finally:
         current_session_id.reset(token)
 

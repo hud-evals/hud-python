@@ -38,6 +38,7 @@ import contextlib
 import inspect
 import json
 import sys
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from hud.environment.env import current_session_id
@@ -47,10 +48,13 @@ from hud.utils.process import create_process_group_exec
 from .bridge import _HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from hud.capabilities import Capability
     from hud.utils.process import ProcessGroup
+
+
+_CANCEL_DRAIN_TIMEOUT = 1.0
 
 
 def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
@@ -134,6 +138,8 @@ class RobotEndpoint:
         self._lock = asyncio.Lock()
         # Open slot token per control session; "" = already freed via result().
         self._claims: dict[str, str] = {}
+        # Direct callers have no task-session teardown hook; retain their tokens for stop().
+        self._unowned_claims: set[str] = set()
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
@@ -251,18 +257,48 @@ class RobotEndpoint:
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
+        session_id = current_session_id.get()
+        returned_token: str | None = None
+
+        def record_claim(ep: dict[str, Any]) -> None:
+            nonlocal returned_token
+            token = ep.get("token")
+            if not isinstance(token, str):
+                return
+            returned_token = token
+            if session_id is None:
+                self._unowned_claims.add(token)
+            else:
+                self._claims[session_id] = token
+
         while True:
             try:
-                ep = await self._call("reset", task_args)
+                ep = await self._call("reset", task_args, on_success=record_claim)
+            except asyncio.CancelledError:
+                # The shielded exchange has already drained its reply. Compensate a
+                # successful reset so cancellation cannot strand an unowned slot.
+                if returned_token is not None:
+                    token_to_release = returned_token
+                    record_release = partial(
+                        self._record_claim_release,
+                        token_to_release,
+                        session_id,
+                    )
+
+                    if await self._result_with_retry(
+                        token_to_release,
+                        on_success=record_release,
+                    ):
+                        record_release({})
+                raise
             except RuntimeError as exc:
                 # Batch full: drop the lock between tries so a peer can result.
                 if "slots are claimed" not in str(exc):
                     raise
                 await asyncio.sleep(0.05)
                 continue
-            session_id, token = current_session_id.get(), ep.get("token")
-            if session_id is not None and isinstance(token, str):
-                self._claims[session_id] = token
+            # Tests and custom transports may replace _call without invoking its hook.
+            record_claim(ep)
             return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
@@ -271,9 +307,26 @@ class RobotEndpoint:
         ``token`` may be omitted on a single-env bridge (one claimed slot);
         vectorized envs must pass the token from :meth:`reset`.
         """
-        res = {**(await self._call("result", {"token": token})), **extra}
-        if (session_id := current_session_id.get()) is not None:
-            self._claims[session_id] = ""  # freed; disconnect/cancel must not re-result
+        session_id = current_session_id.get()
+        owned_token = self._claims.get(session_id) or None if session_id is not None else None
+        if token is not None and owned_token is not None and token != owned_token:
+            raise ValueError(
+                f"result token {token!r} does not match this session's claim {owned_token!r}"
+            )
+        released_token = token or owned_token
+        if released_token is None and len(self._unowned_claims) == 1:
+            released_token = next(iter(self._unowned_claims))
+
+        def record_result(_result: dict[str, Any]) -> None:
+            if released_token is not None:
+                self._unowned_claims.discard(released_token)
+            if session_id is not None and owned_token is not None and released_token == owned_token:
+                self._claims[session_id] = ""  # teardown must not issue a duplicate result
+
+        payload = await self._call("result", {"token": token}, on_success=record_result)
+        # Tests and custom transports may replace _call without invoking its hook.
+        record_result(payload)
+        res = {**payload, **extra}
         print(
             f"[env] result: success={res.get('success')} "
             f"total_reward={res.get('total_reward', 0.0):.3f}",
@@ -292,9 +345,20 @@ class RobotEndpoint:
         if not token:  # already freed via result()
             self._claims.pop(session_id, None)
             return
-        if await self._result_with_retry(token):
-            self._claims.pop(session_id, None)
+        record_release = partial(self._record_claim_release, token, session_id)
+        if await self._result_with_retry(token, on_success=record_release):
+            record_release({})
             # else keep the claim — stop() drains leftovers while the link is up
+
+    def _record_claim_release(
+        self,
+        token: str,
+        session_id: str | None,
+        _result: dict[str, Any],
+    ) -> None:
+        self._unowned_claims.discard(token)
+        if session_id is not None and self._claims.get(session_id) == token:
+            self._claims.pop(session_id, None)
 
     async def _release_outstanding_claims(self) -> None:
         """Best-effort free of every tracked slot (last chance before the link drops)."""
@@ -302,34 +366,95 @@ class RobotEndpoint:
             if not token:
                 self._claims.pop(session_id, None)
                 continue
-            if await self._result_with_retry(token):
-                self._claims.pop(session_id, None)
 
-    async def _result_with_retry(self, token: str, *, attempts: int = 3) -> bool:
+            record_release = partial(self._record_claim_release, token, session_id)
+            if await self._result_with_retry(token, on_success=record_release):
+                record_release({})
+        for token in list(self._unowned_claims):
+            record_release = partial(self._record_claim_release, token, None)
+            if await self._result_with_retry(token, on_success=record_release):
+                record_release({})
+
+    async def _result_with_retry(
+        self,
+        token: str,
+        *,
+        attempts: int = 3,
+        on_success: Callable[[dict[str, Any]], None] | None = None,
+    ) -> bool:
         """``result`` RPC with short retries; teardown only runs once per cancel path."""
         for attempt in range(attempts):
             try:
-                await self._call("result", {"token": token})
+                await self._call("result", {"token": token}, on_success=on_success)
                 return True
             except Exception:
                 if attempt + 1 < attempts:
                     await asyncio.sleep(0.05)
         return False
 
-    async def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        on_success: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         # One in-flight RPC: N sessions share this link; constant id is enough under the lock.
-        if self._writer is None or self._reader is None:
-            raise RuntimeError("not connected; call start() first")
         async with self._lock:
-            await send_frame(
-                self._writer, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
-            )
-            msg = await read_frame(self._reader)
-            if msg is None:
-                raise ConnectionError(f"connection closed awaiting {method!r} reply")
-            if "error" in msg:
-                raise RuntimeError(f"{method} failed: {msg['error']['message']}")
-            return msg["result"]
+            if self._writer is None or self._reader is None:
+                raise RuntimeError("not connected; call start() first")
+            writer, reader = self._writer, self._reader
+
+            async def exchange() -> dict[str, Any]:
+                await send_frame(
+                    writer,
+                    {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}},
+                )
+                msg = await read_frame(reader)
+                if msg is None:
+                    raise ConnectionError(f"connection closed awaiting {method!r} reply")
+                if "error" in msg:
+                    raise RuntimeError(f"{method} failed: {msg['error']['message']}")
+                result = msg["result"]
+                if on_success is not None:
+                    on_success(result)
+                return result
+
+            request = asyncio.create_task(exchange())
+            try:
+                return await asyncio.shield(request)
+            except asyncio.CancelledError as cancelled:
+                # Never release the shared-stream lock with this request's reply unread.
+                # A hung server is bounded: poison the connection rather than let one
+                # canceled RPC monopolize every caller and stop() forever.
+                deadline = asyncio.get_running_loop().time() + _CANCEL_DRAIN_TIMEOUT
+                while not request.done():
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        await asyncio.wait_for(asyncio.shield(request), timeout=remaining)
+                    except TimeoutError:
+                        break
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not request.done():
+                    if self._writer is writer:
+                        self._reader = self._writer = None
+                        self._claims.clear()
+                        self._unowned_claims.clear()
+                    writer.close()
+                    request.cancel()
+                    while not request.done():
+                        try:
+                            await asyncio.shield(request)
+                        except asyncio.CancelledError:
+                            continue
+                with contextlib.suppress(BaseException):
+                    request.result()
+                raise cancelled
 
 
 async def _forward_lines(stream: asyncio.StreamReader) -> None:

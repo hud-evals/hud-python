@@ -21,6 +21,7 @@ import threading
 from abc import ABC, abstractmethod
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -45,6 +46,19 @@ PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
 _HUD_STATE = "__hud_state__"
 
 
+class _SlotPhase(StrEnum):
+    """Lifecycle of one slot within a global simulator reset."""
+
+    AVAILABLE = "available"
+    DIALING = "dialing"
+    ACTIVE = "active"
+    IDLE = "idle"
+    EXPIRED = "expired"
+    TERMINATED = "terminated"
+    SPENT = "spent"
+    SEALED = "sealed"
+
+
 @dataclass
 class _Slot:
     """One sim slot: claimed by a control-plane token, driven by one WS connection."""
@@ -53,9 +67,8 @@ class _Slot:
     token: str | None = None
     ws: Any = None
     action: np.ndarray | None = None
-    idle: bool = False  # not a barrier participant (disconnected / terminated)
-    # Touched this episode; after release stays unreclaimable until the next global reset.
-    used: bool = False
+    phase: _SlotPhase = _SlotPhase.AVAILABLE
+    dial_deadline: float | None = None
 
 
 @dataclass
@@ -73,7 +86,7 @@ class _SlotRegistry:
 
     def free_slot(self) -> _Slot | None:
         # v1: a freed slot is only reclaimable after all slots free (whole-batch episodes).
-        return next((s for s in self.slots if s.token is None and not s.used), None)
+        return next((s for s in self.slots if s.phase is _SlotPhase.AVAILABLE), None)
 
     def resolve(self, token: str | None) -> _Slot:
         """Token → its claimed slot; ``None`` binds the sole claimed slot (single-env)."""
@@ -93,21 +106,22 @@ class _SlotRegistry:
     def claimed(self) -> list[_Slot]:
         return [s for s in self.slots if s.token is not None]
 
-    def claim(self, slot: _Slot) -> str:
+    def claim(self, slot: _Slot, *, dial_deadline: float) -> str:
         token = f"slot-{slot.index}-{secrets.token_hex(4)}"
         slot.token = token
-        slot.used = True
         slot.action = None
-        slot.idle = False
         slot.ws = None
+        slot.phase = _SlotPhase.DIALING
+        slot.dial_deadline = dial_deadline
         return token
 
     def release(self, slot: _Slot) -> None:
         slot.token = None
         slot.ws = None
         slot.action = None
-        slot.idle = False
-        # keep used=True until configure() on the next global reset
+        slot.phase = _SlotPhase.SPENT
+        slot.dial_deadline = None
+        # SPENT stays unreclaimable until configure() on the next global reset.
 
 
 class RobotBridge(ABC):
@@ -128,8 +142,7 @@ class RobotBridge(ABC):
     - :meth:`result_slots` returns one score dict per slot.
     """
 
-    #: Claim-frame timeout, and how long the barrier waits on a silent live slot
-    #: before marking it idle so peers can keep stepping.
+    #: Timeout for the initial WebSocket claim frame and reset-to-WebSocket dial.
     step_timeout: float = 30.0
 
     def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
@@ -151,6 +164,7 @@ class RobotBridge(ABC):
         self._registry.configure(1)
         self._tick_task: asyncio.Task[None] | None = None
         self._action_event = asyncio.Event()
+        self._lifecycle_lock = asyncio.Lock()
         # Episode scoring read by ``result_slots``; single-env subclasses update these
         # in ``reset``/``step`` (batched bridges override result_slots instead).
         self.task_description: str = ""
@@ -176,32 +190,38 @@ class RobotBridge(ABC):
 
     async def _claim_episode(self, **kwargs: Any) -> dict[str, Any]:
         """Control-plane reset: global sim reset when all free, else claim a free slot."""
-        if self._registry.all_free:
-            self.total_reward = 0.0
-            self.success = False
-            self.terminated = False
-            # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
-            # on the background serve loop.
-            self.task_description = await self._run_on_sim(self.reset, **kwargs)
-            self._episode_kwargs = kwargs
-            self._registry.configure(self.num_envs)
-            slot = self._registry.slots[0]
-        else:
-            # Lockstep sim: one global reset serves the whole batch, so a later claim
-            # cannot get its own task/seed — reject differing kwargs instead of
-            # silently running the first claim's task.
-            if kwargs != self._episode_kwargs:
-                raise ValueError(
-                    f"slots share one batch reset ({self._episode_kwargs}); a concurrent "
-                    f"claim cannot use different task kwargs ({kwargs}) — group tasks with "
-                    "identical args, or use one sim per distinct task/seed"
-                )
-            slot = self._registry.free_slot()
-            # Fail fast — endpoint.reset retries outside its lock so peers can still result.
-            if slot is None:
-                raise RuntimeError(f"all {self.num_envs} slots are claimed")
-        token = self._registry.claim(slot)
-        return {"prompt": self.task_description, "token": token}
+        async with self._lifecycle_lock:
+            if self._registry.all_free:
+                self.total_reward = 0.0
+                self.success = False
+                self.terminated = False
+                # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
+                # on the background serve loop.
+                self.task_description = await self._run_on_sim(self.reset, **kwargs)
+                self._episode_kwargs = kwargs
+                self._registry.configure(self.num_envs)
+                slot = self._registry.slots[0]
+            else:
+                # Lockstep sim: one global reset serves the whole batch, so a later claim
+                # cannot get its own task/seed — reject differing kwargs instead of
+                # silently running the first claim's task.
+                slot = self._registry.free_slot()
+                # Retry outside the endpoint lock until this generation fully releases.
+                # SEALED and SPENT slots are deliberately unavailable to late joiners.
+                if slot is None:
+                    raise RuntimeError(f"all {self.num_envs} slots are claimed")
+                if kwargs != self._episode_kwargs:
+                    raise ValueError(
+                        f"slots share one batch reset ({self._episode_kwargs}); a concurrent "
+                        f"claim cannot use different task kwargs ({kwargs}) — group tasks with "
+                        "identical args, or use one sim per distinct task/seed"
+                    )
+            token = self._registry.claim(
+                slot,
+                dial_deadline=asyncio.get_running_loop().time() + self.step_timeout,
+            )
+            self._action_event.set()
+            return {"prompt": self.task_description, "token": token}
 
     async def _release_episode(self, token: str | None) -> dict[str, Any]:
         """Control-plane result: this slot's score, then free it.
@@ -209,11 +229,12 @@ class RobotBridge(ABC):
         Scores are written in ``step`` on the sim thread — read them there too
         so grading never races a mid-step update on the serve loop.
         """
-        slot = self._registry.resolve(token)
-        grade = (await self._run_on_sim(self.result_slots))[slot.index]
-        self._registry.release(slot)
-        self._action_event.set()  # wake barrier (release clears slot.ws before WS finally)
-        return grade
+        async with self._lifecycle_lock:
+            slot = self._registry.resolve(token)
+            grade = (await self._run_on_sim(self.result_slots))[slot.index]
+            self._registry.release(slot)
+            self._action_event.set()  # wake barrier (release clears slot.ws before WS finally)
+            return grade
 
     @abstractmethod
     def reset(self, **kwargs: Any) -> str:
@@ -315,18 +336,27 @@ class RobotBridge(ABC):
             # A None claim binds the sole claimed slot — single-env agents skip
             # the token plumbing; ambiguous (vectorized) claims error instead.
             slot = self._registry.resolve(claim["claim"])
+            if slot.phase is _SlotPhase.EXPIRED:
+                raise RuntimeError(f"slot {slot.index} initial connection deadline expired")
+            if slot.phase is _SlotPhase.TERMINATED:
+                raise RuntimeError(f"slot {slot.index} has already terminated")
             if slot.ws is not None:
                 raise RuntimeError(f"slot {slot.index} already has a live connection")
             slot.ws = ws
             slot.action = None
-            slot.idle = False
+            slot.phase = _SlotPhase.ACTIVE
+            slot.dial_deadline = None
             self._action_event.set()  # wake tick loop waiting for dialing to finish
             # First frame after claim: one sim read, then this slot's scalar row.
             await self._send_slot_observation(slot, await self._run_on_sim(self.get_observation))
             async for frame in ws:
+                if slot.token is None or slot.phase is _SlotPhase.SPENT:
+                    raise RuntimeError(f"slot {slot.index} is no longer claimed")
+                if slot.phase is _SlotPhase.TERMINATED:
+                    raise RuntimeError(f"slot {slot.index} has already terminated")
                 action = _unpackb(frame)["actions"]  # codec already returns an ndarray
                 slot.action = np.asarray(action, dtype=np.float32)
-                slot.idle = False
+                slot.phase = _SlotPhase.ACTIVE
                 self._action_event.set()
         except websockets.exceptions.ConnectionClosed:
             pass
@@ -340,67 +370,100 @@ class RobotBridge(ABC):
             if slot is not None and slot.ws is ws:
                 slot.ws = None
                 slot.action = None
-                # Idle, not pending: a dropped connection must not stall the barrier
-                # for the other slots (a reconnect clears idle again).
-                slot.idle = True
+                # A dropped live connection contributes holds until it reconnects.
+                # A terminal slot remains terminal and can never be reactivated.
+                if slot.phase is _SlotPhase.ACTIVE:
+                    slot.phase = _SlotPhase.IDLE
                 self._action_event.set()  # wake the barrier so it doesn't wait on us
 
+    async def _wait_for_slot_change(self, wait_seconds: float | None) -> None:
+        """Wait for a slot transition, bounded by the next initial-dial deadline."""
+        self._action_event.clear()
+        if wait_seconds is None:
+            await self._action_event.wait()
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(
+                self._action_event.wait(),
+                timeout=max(0.0, wait_seconds),
+            )
+
     async def _tick_loop(self) -> None:
-        """Barrier: wait for live claimed actions, step once, fan out."""
+        """Gather claimed slots' actions, step once, fan out."""
+        loop = asyncio.get_running_loop()
         while True:
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
-            self._action_event.clear()
-
-            claimed = self._registry.claimed()
-            # Still dialing — wait. Never hold-step a slot before its WS claims;
-            # that would advance its env copy and corrupt a late join.
-            if not claimed or any(s.ws is None and not s.idle for s in claimed):
-                continue
-            live = [s for s in claimed if not s.idle]
-            if not live:
-                continue  # all terminated/disconnected — do not hold-spin
-
-            while any(s.action is None for s in live):
-                self._action_event.clear()
-                try:
-                    await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
-                except TimeoutError:
-                    # Connected but silent too long — drop out so peers can proceed.
-                    for s in live:
-                        if s.action is None and s.ws is not None:
-                            s.idle = True
+            async with self._lifecycle_lock:
+                # Recompute readiness under the same lock as result/reset. Whichever
+                # transaction wins determines whether this action is graded or discarded.
                 claimed = self._registry.claimed()
-                if any(s.ws is None and not s.idle for s in claimed):
-                    live = []
-                    break
-                live = [s for s in claimed if not s.idle]
-                if not live:
-                    break
-            # Need a real action: all-idle / all-timed-out must not hold-spin.
-            acting = [s for s in live if s.action is not None]
-            if not acting:
+                now = loop.time()
+                for slot in claimed:
+                    if (
+                        slot.phase is _SlotPhase.DIALING
+                        and slot.dial_deadline is not None
+                        and slot.dial_deadline <= now
+                    ):
+                        # This slot never began a trajectory. Reject a late connection
+                        # instead of silently recording an episode from advanced state.
+                        slot.phase = _SlotPhase.EXPIRED
+                        slot.dial_deadline = None
+
+                dialing = [s for s in claimed if s.phase is _SlotPhase.DIALING]
+                active = [s for s in claimed if s.phase is _SlotPhase.ACTIVE]
+                deadline = min(
+                    (s.dial_deadline for s in dialing if s.dial_deadline is not None),
+                    default=None,
+                )
+                wait_timeout = None if deadline is None else deadline - now
+                ready = bool(active) and not dialing and all(s.action is not None for s in active)
+
+                if ready:
+                    # No rollout may join after the world advances: its missing prefix would
+                    # silently corrupt trajectory/action/grade identity. A later batch reset
+                    # makes these slots AVAILABLE again once every current token is released.
+                    for slot in self._registry.slots:
+                        if slot.phase is _SlotPhase.AVAILABLE:
+                            slot.phase = _SlotPhase.SEALED
+
+                    hold = self.hold_action()
+                    participants = [(slot, slot.ws) for slot in active]
+                    # ACTIVE slots contribute actions; every other phase contributes a hold row.
+                    rows = []
+                    for slot in self._registry.slots:
+                        row = (
+                            slot.action
+                            if slot.phase is _SlotPhase.ACTIVE and slot.action is not None
+                            else hold
+                        )
+                        rows.append(np.asarray(row, dtype=np.float32).reshape(-1))
+                        slot.action = None
+                    await self._run_on_sim(self.step, np.stack(rows))
+                    batch = await self._run_on_sim(self.get_observation)
+
+            # Initial dials block only until their own deadlines. Once connected,
+            # slow policies wait indefinitely for a real action rather than getting holds.
+            if not ready:
+                await self._wait_for_slot_change(wait_timeout)
                 continue
 
-            hold = self.hold_action()
-            # Acting → action; idle claimed + free → hold (lockstep peers still need a row).
-            rows = []
-            for s in self._registry.slots:
-                row = s.action if s in acting else hold
-                rows.append(np.asarray(row, dtype=np.float32).reshape(-1))
-                s.action = None
-            await self._run_on_sim(self.step, np.stack(rows))
-            batch = await self._run_on_sim(self.get_observation)
-            for s in acting:
-                await self._send_slot_observation(s, batch)
+            for slot, ws in participants:
+                await self._send_slot_observation(slot, batch, expected_ws=ws)
 
     async def _send_slot_observation(
         self,
         slot: _Slot,
         batch: tuple[dict[str, np.ndarray], np.ndarray] | None,
+        *,
+        expected_ws: Any = None,
     ) -> None:
         """Fan one scalar obs frame to a claimed connection from a batched read."""
-        if slot.ws is None or batch is None:
+        ws = slot.ws
+        if (
+            ws is None
+            or (expected_ws is not None and ws is not expected_ws)
+            or slot.phase is not _SlotPhase.ACTIVE
+            or batch is None
+        ):
             return
         data, terminated = batch
         i = slot.index
@@ -413,13 +476,15 @@ class RobotBridge(ABC):
             },
             "terminated": slot_terminated,
         }
-        with contextlib.suppress(websockets.exceptions.ConnectionClosed):
-            await slot.ws.send(_packb(msg))
         if slot_terminated:
-            # Drop out of the barrier so live peers can keep stepping.
-            slot.idle = True
+            # Commit termination before the network await so a concurrent disconnect
+            # cannot demote a physically terminal slot back to reconnectable IDLE.
+            slot.phase = _SlotPhase.TERMINATED
             slot.action = None
+            slot.dial_deadline = None
             self._action_event.set()
+        with contextlib.suppress(websockets.exceptions.ConnectionClosed):
+            await ws.send(_packb(msg))
 
     # ── the control side channel (driven by a RobotEndpoint) ────────────────────
 
@@ -431,16 +496,48 @@ class RobotBridge(ABC):
     async def _handle_control(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        with contextlib.suppress(ConnectionResetError, asyncio.IncompleteReadError):
-            while (msg := await read_frame(reader)) is not None:
-                try:
-                    result = await self._dispatch_control(msg["method"], msg.get("params") or {})
-                    await send_frame(writer, reply(msg["id"], result))
-                except Exception as exc:  # surface to the caller, keep serving the link
-                    await send_frame(writer, error(msg["id"], -32000, str(exc)))
-        writer.close()
-        with contextlib.suppress(Exception):
-            await writer.wait_closed()
+        owned_tokens: set[str] = set()
+        try:
+            with contextlib.suppress(
+                ConnectionError,
+                OSError,
+                asyncio.IncompleteReadError,
+            ):
+                while (msg := await read_frame(reader)) is not None:
+                    method = msg["method"]
+                    params = msg.get("params") or {}
+                    try:
+                        released_token: str | None = None
+                        if method == "result":
+                            released_token = params.get("token")
+                            if released_token is None and len(owned_tokens) == 1:
+                                released_token = next(iter(owned_tokens))
+                            if released_token is None and not owned_tokens:
+                                raise ValueError(
+                                    "result token is not owned by this control connection"
+                                )
+                            if released_token is not None and released_token not in owned_tokens:
+                                raise ValueError(
+                                    "result token is not owned by this control connection"
+                                )
+
+                        result = await self._dispatch_control(method, params)
+                        if method == "reset" and isinstance(result.get("token"), str):
+                            owned_tokens.add(result["token"])
+                        elif method == "result" and released_token is not None:
+                            owned_tokens.discard(released_token)
+                        await send_frame(writer, reply(msg["id"], result))
+                    except Exception as exc:  # surface to the caller, keep serving the link
+                        await send_frame(writer, error(msg["id"], -32000, str(exc)))
+        finally:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            # A poisoned or dropped control connection has no caller left to result().
+            # Release every token it created so the simulator generation cannot wedge.
+            for token in owned_tokens:
+                with contextlib.suppress(Exception):
+                    await self._release_episode(token)
 
     async def ensure_contract(self) -> dict[str, Any]:
         """Return the wire contract, deriving it when a subclass can.
