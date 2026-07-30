@@ -308,11 +308,14 @@ class RobotEndpoint:
         vectorized envs must pass the token from :meth:`reset`.
         """
         session_id = current_session_id.get()
-        owned_token = self._claims.get(session_id) or None if session_id is not None else None
-        if token is not None and owned_token is not None and token != owned_token:
-            raise ValueError(
-                f"result token {token!r} does not match this session's claim {owned_token!r}"
-            )
+        owned_token = self._claims.get(session_id) if session_id is not None else None
+        if session_id is not None:
+            if not owned_token:
+                raise ValueError("current session has no live robot claim")
+            if token is not None and token != owned_token:
+                raise ValueError(
+                    f"result token {token!r} does not match this session's claim {owned_token!r}"
+                )
         released_token = token or owned_token
         if released_token is None and len(self._unowned_claims) == 1:
             released_token = next(iter(self._unowned_claims))
@@ -323,7 +326,7 @@ class RobotEndpoint:
             if session_id is not None and owned_token is not None and released_token == owned_token:
                 self._claims[session_id] = ""  # teardown must not issue a duplicate result
 
-        payload = await self._call("result", {"token": token}, on_success=record_result)
+        payload = await self._call("result", {"token": released_token}, on_success=record_result)
         # Tests and custom transports may replace _call without invoking its hook.
         record_result(payload)
         res = {**payload, **extra}

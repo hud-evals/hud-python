@@ -124,6 +124,37 @@ class _BlockedStepBridge(_ProbeBridge):
         return result
 
 
+class _FailingResultBridge(_ProbeBridge):
+    def result_slots(self) -> list[dict[str, Any]]:
+        self.result_calls += 1
+        self.result_called.set()
+        raise RuntimeError("grading failed")
+
+
+class _TrackedDiscardBridge(_ProbeBridge):
+    def __init__(self) -> None:
+        super().__init__(num_envs=2)
+        self.discard_started = asyncio.Event()
+        self.finish_discard = asyncio.Event()
+        self.control_handler_task: asyncio.Task[Any] | None = None
+        self._block_first_discard = True
+
+    async def _handle_control(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        self.control_handler_task = asyncio.current_task()
+        await super()._handle_control(reader, writer)
+
+    async def _discard_episode(self, token: str) -> None:
+        if self._block_first_discard:
+            self._block_first_discard = False
+            self.discard_started.set()
+            await self.finish_discard.wait()
+        await super()._discard_episode(token)
+
+
 @asynccontextmanager
 async def _running_bridge(bridge: RobotBridge) -> AsyncIterator[RobotEndpoint]:
     await bridge.start()
@@ -153,6 +184,23 @@ async def _close_client(client: RobotClient) -> None:
     with suppress(TimeoutError):
         async with asyncio.timeout(0.5):
             await client.close()
+
+
+async def _control_call(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    request_id: int,
+    method: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    await bridge_module.send_frame(
+        writer,
+        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
+    )
+    response = await bridge_module.read_frame(reader)
+    assert response is not None
+    assert "error" not in response
+    return response["result"]
 
 
 async def test_concurrent_control_clients_claim_distinct_slots_from_one_reset() -> None:
@@ -441,12 +489,10 @@ async def test_cancelled_hung_rpc_poisoning_releases_server_owned_claim(
             await queued_call
 
         release_reply.set()
-        await asyncio.wait_for(bridge.result_called.wait(), timeout=1)
-        assert bridge.result_calls == 1
-
         await replacement.start()
         next_episode = await asyncio.wait_for(replacement.reset(task="after"), timeout=1)
         assert next_episode["prompt"] == "after"
+        assert bridge.result_calls == 0
         await replacement.result(token=next_episode["token"])
     finally:
         release_reply.set()
@@ -463,6 +509,123 @@ async def test_cancelled_hung_rpc_poisoning_releases_server_owned_claim(
             await control.wait_closed()
         async with asyncio.timeout(1):
             await bridge.stop()
+
+
+async def test_control_disconnect_discards_claims_when_grading_fails() -> None:
+    bridge = _FailingResultBridge(num_envs=2)
+    await bridge.start()
+    control = await bridge.serve_control()
+    sockets = control.sockets
+    assert sockets
+    port = sockets[0].getsockname()[1]
+    endpoint = RobotEndpoint.remote("127.0.0.1", port)
+    replacement = RobotEndpoint.remote("127.0.0.1", port)
+    endpoint_stopped = False
+    try:
+        await endpoint.start()
+        for session_id in ("first-session", "second-session"):
+            context = current_session_id.set(session_id)
+            try:
+                await endpoint.reset(task="same")
+            finally:
+                current_session_id.reset(context)
+
+        await endpoint.stop()
+        endpoint_stopped = True
+
+        await replacement.start()
+        next_episode = await asyncio.wait_for(replacement.reset(task="after"), timeout=1)
+        assert next_episode["prompt"] == "after"
+        assert bridge.reset_calls == [{"task": "same"}, {"task": "after"}]
+    finally:
+        if not endpoint_stopped:
+            await endpoint.stop()
+        await replacement.stop()
+        control.close()
+        async with asyncio.timeout(1):
+            await control.wait_closed()
+        async with asyncio.timeout(1):
+            await bridge.stop()
+
+
+async def test_control_disconnect_cleanup_survives_repeated_cancellation() -> None:
+    bridge = _TrackedDiscardBridge()
+    await bridge.start()
+    control = await bridge.serve_control()
+    sockets = control.sockets
+    assert sockets
+    port = sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    replacement = RobotEndpoint.remote("127.0.0.1", port)
+    try:
+        first = await _control_call(reader, writer, 1, "reset", {"task": "same"})
+        second = await _control_call(reader, writer, 2, "reset", {"task": "same"})
+        assert first["token"] != second["token"]
+
+        writer.close()
+        await writer.wait_closed()
+        await asyncio.wait_for(bridge.discard_started.wait(), timeout=1)
+        handler = bridge.control_handler_task
+        assert handler is not None
+
+        handler.cancel()
+        await asyncio.sleep(0)
+        handler.cancel()
+        bridge.finish_discard.set()
+        await asyncio.wait_for(asyncio.gather(handler, return_exceptions=True), timeout=1)
+
+        await replacement.start()
+        next_episode = await asyncio.wait_for(replacement.reset(task="after"), timeout=1)
+        assert next_episode["prompt"] == "after"
+        assert bridge.reset_calls == [{"task": "same"}, {"task": "after"}]
+        await replacement.result(token=next_episode["token"])
+    finally:
+        bridge.finish_discard.set()
+        writer.close()
+        with suppress(Exception):
+            await writer.wait_closed()
+        handler = bridge.control_handler_task
+        if handler is not None and not handler.done():
+            handler.cancel()
+            await asyncio.gather(handler, return_exceptions=True)
+        await replacement.stop()
+        control.close()
+        async with asyncio.timeout(1):
+            await control.wait_closed()
+        async with asyncio.timeout(1):
+            await bridge.stop()
+
+
+@pytest.mark.parametrize("explicit_token", [False, True])
+async def test_session_without_live_claim_cannot_result_another_sessions_slot(
+    explicit_token: bool,
+) -> None:
+    bridge = _ProbeBridge()
+
+    async with _running_bridge(bridge) as endpoint:
+        owner = current_session_id.set("owner")
+        try:
+            episode = await endpoint.reset()
+        finally:
+            current_session_id.reset(owner)
+
+        intruder = current_session_id.set("intruder")
+        try:
+            with pytest.raises(ValueError, match="no live robot claim"):
+                if explicit_token:
+                    await endpoint.result(token=episode["token"])
+                else:
+                    await endpoint.result()
+        finally:
+            current_session_id.reset(intruder)
+
+        owner = current_session_id.set("owner")
+        try:
+            await endpoint.result(token=episode["token"])
+        finally:
+            current_session_id.reset(owner)
+
+    assert bridge.result_calls == 1
 
 
 async def test_result_rejects_a_token_owned_by_another_session() -> None:
@@ -486,6 +649,8 @@ async def test_result_rejects_a_token_owned_by_another_session() -> None:
             with pytest.raises(ValueError, match="does not match"):
                 await endpoint.result(token=second["token"])
             await endpoint.result(token=first["token"])
+            with pytest.raises(ValueError, match="no live robot claim"):
+                await endpoint.result(token=second["token"])
         finally:
             current_session_id.reset(first_context)
 

@@ -232,9 +232,17 @@ class RobotBridge(ABC):
         async with self._lifecycle_lock:
             slot = self._registry.resolve(token)
             grade = (await self._run_on_sim(self.result_slots))[slot.index]
-            self._registry.release(slot)
-            self._action_event.set()  # wake barrier (release clears slot.ws before WS finally)
+            self._release_slot(slot)
             return grade
+
+    def _release_slot(self, slot: _Slot) -> None:
+        self._registry.release(slot)
+        self._action_event.set()  # release clears slot.ws before the WebSocket finally runs
+
+    async def _discard_episode(self, token: str) -> None:
+        """Release an abandoned control claim without invoking user grading code."""
+        async with self._lifecycle_lock:
+            self._release_slot(self._registry.resolve(token))
 
     @abstractmethod
     def reset(self, **kwargs: Any) -> str:
@@ -493,6 +501,20 @@ class RobotBridge(ABC):
         ``reset`` / ``result``."""
         return await asyncio.start_server(self._handle_control, host, port)
 
+    async def _discard_control_claims(self, tokens: tuple[str, ...]) -> None:
+        for token in tokens:
+            while True:
+                try:
+                    await self._discard_episode(token)
+                    break
+                except asyncio.CancelledError:
+                    # Teardown owns these claims now. Repeated handler cancellation
+                    # must not strand this token or skip the rest of the connection.
+                    continue
+                except Exception:
+                    # A duplicate/already-released token must not block later claims.
+                    break
+
     async def _handle_control(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -531,13 +553,25 @@ class RobotBridge(ABC):
                         await send_frame(writer, error(msg["id"], -32000, str(exc)))
         finally:
             writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
             # A poisoned or dropped control connection has no caller left to result().
-            # Release every token it created so the simulator generation cannot wedge.
-            for token in owned_tokens:
-                with contextlib.suppress(Exception):
-                    await self._release_episode(token)
+            # Discard every token it created without calling user grading code. Run the
+            # cleanup in its own task so cancellation of this handler cannot wedge a batch.
+            cleanup = asyncio.create_task(self._discard_control_claims(tuple(owned_tokens)))
+            cancelled_during_cleanup = False
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    cancelled_during_cleanup = True
+            cleanup.result()
+
+            try:
+                with contextlib.suppress(ConnectionError, OSError, TimeoutError):
+                    await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
+            except asyncio.CancelledError:
+                cancelled_during_cleanup = True
+            if cancelled_during_cleanup:
+                raise asyncio.CancelledError
 
     async def ensure_contract(self) -> dict[str, Any]:
         """Return the wire contract, deriving it when a subclass can.
