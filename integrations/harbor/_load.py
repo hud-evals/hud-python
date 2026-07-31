@@ -117,7 +117,11 @@ class TaskConfig(BaseModel):
             ) from error
 
     def phase(self, role: str) -> _Phase:
-        return self.agent if role == "agent" else self.verifier
+        if role == "agent":
+            return self.agent
+        if role == "verifier":
+            return self.verifier
+        raise ValueError(f"unknown Harbor phase {role!r}")
 
     def network(self, role: str) -> bool:
         """Whether *role*'s processes may reach the network at all.
@@ -160,179 +164,44 @@ class TaskConfig(BaseModel):
         """
         return self.phase(role).user
 
-    @property
-    def user(self) -> str | int | None:
-        """The identity the task's phases run as, if either names one."""
-        return self.agent.user if self.agent.user is not None else self.verifier.user
-
 
 def detect(path: str | Path) -> bool:
     """True when *path* is a Harbor task dir or a dataset of them."""
     return bool(task_dirs(path))
 
 
-def load(path: str | Path, *, images: dict[str, str] | None = None) -> Taskset:
+def load(path: str | Path) -> Taskset:
     """Load a Harbor task dir (or dataset dir) into a :class:`Taskset`.
 
     One row per task dir (``id`` = the dir name); rows share one env name per
-    distinct environment (see :func:`grouped` for what distinguishes them and
-    how the name is derived). Each row carries the task's declared launch
-    requirements (:func:`runtime_config`: cpu/memory/gpu and time budgets),
-    plus the adapted image ref once
-    :func:`~harbor.adapt` has produced it, so it runs on any
-    container placement::
+    distinct environment. Each row carries the task's declared launch
+    requirements (cpu/memory/gpu). Adapted images are bound by :func:`adapt`
+    before the returned taskset is run::
 
-        await harbor.adapt(path)
-        job = await harbor.load(path).run(agent, runtime=DockerRuntime())
+        taskset = await harbor.adapt(path)
+        job = await taskset.run(agent, runtime=DockerRuntime())
     """
+    return _load(path)
+
+
+def _load(path: str | Path, *, images: dict[str, str] | None = None) -> Taskset:
+    """Load rows, optionally binding image refs produced by :func:`adapt`."""
     root = Path(path).resolve()
     dataset_name = root.parent.name if is_harbor_task(root) else root.name
-    if not task_dirs(root):
-        raise ValueError(f"no Harbor tasks found in {path}")
 
     tasks: list[Task] = []
-    for env_name, group_dirs in grouped(root):
+    for env_name, group in _task_groups(root):
         image = (images or {}).get(env_name)
         tasks.extend(
             Task(
                 env=env_name,
-                id=task_dir.name,
-                columns=columns(task_dir),
-                runtime_config=runtime_config(task_dir, image=image),
+                id=task.path.name,
+                columns=task.columns,
+                runtime_config=task.runtime_config(image=image),
             )
-            for task_dir in group_dirs
+            for task in group
         )
     return Taskset(slugify(dataset_name), tasks, origin=f"harbor:{root}")
-
-
-def columns(task_dir: Path) -> dict[str, Any] | None:
-    """The task's ``[metadata]`` (plus keywords) as filterable columns."""
-    config = TaskConfig.read(task_dir)
-    fields = dict(config.metadata)
-    if config.task.keywords:
-        fields.setdefault("keywords", config.task.keywords)
-    return fields or None
-
-
-def workspace_policy(task_dir: Path) -> dict[str, Any]:
-    """What the task declares about the workspace its agent works in.
-
-    Grouping keys on this, so tasks that mean different things never share
-    an environment. Only settings this integration can honor appear here —
-    see :func:`unsupported_features` for the rest.
-    """
-    config = TaskConfig.read(task_dir)
-    return {
-        "network": config.network("agent"),
-        # Container-wide variables reach every process (baked as image ENV);
-        # the agent phase's reach only its sessions, and the verifier's are
-        # applied where the verifier runs. Each phase sees what Harbor scoped
-        # to it, and all three are in this key so tasks that differ never
-        # share an environment.
-        "env": dict(config.environment.env),
-        "agent_env": dict(config.agent.env),
-        "workdir": config.environment.workdir or None,
-        "user": config.user,
-        # Sorted rather than a set: the policy is hashed to key environments,
-        # so it has to serialize, and two tasks naming the same hosts in a
-        # different order declare the same thing.
-        "allowed_hosts": sorted(config.allowed_hosts("agent")),
-        # The verifier's are its own. Grouped on as well, since a task whose
-        # grader may reach different hosts is a different environment.
-        "verifier_allowed_hosts": sorted(config.allowed_hosts("verifier")),
-        "agent_user": config.phase_user("agent"),
-        "verifier_user": config.phase_user("verifier"),
-    }
-
-
-def runtime_config(task_dir: Path, *, image: str | None = None) -> RuntimeConfig | None:
-    """The task's declared launch requirements as HUD's portable config.
-
-    ``storage_mb`` has no portable counterpart and is dropped; time budgets
-    bound the *rollout*, not the substrate, so they stay out of here (see
-    :func:`agent_timeout`).
-    """
-    environment = TaskConfig.read(task_dir).environment
-    resources = RuntimeResources(
-        cpu=environment.cpus or None,
-        memory_mb=environment.memory_mb or None,
-        gpu=RuntimeGPU(
-            count=environment.gpus,
-            type=next((t for t in environment.gpu_types if t), None),
-        )
-        if environment.gpus
-        else None,
-    )
-    declared = RuntimeConfig(
-        image=image,
-        resources=resources if resources.model_dump(exclude_none=True) else None,
-    )
-    return declared if declared.model_dump(exclude_none=True) else None
-
-
-def agent_timeout(task_dir: Path) -> float | None:
-    """How long the task allows the agent to work (``[agent] timeout_sec``).
-
-    A rollout budget, not a launch requirement: pass it as ``rollout_timeout``
-    when running the row.
-    """
-    return TaskConfig.read(task_dir).agent.timeout_sec or None
-
-
-def unsupported_features(task_dir: Path) -> list[str]:
-    """Declarations this integration cannot reproduce faithfully.
-
-    A wrong score is worse than a refused task, so each of these names itself
-    rather than being silently dropped.
-    """
-    config = TaskConfig.read(task_dir)
-    environment, agent, verifier = config.environment, config.agent, config.verifier
-    reasons: list[str] = []
-
-    if environment.os not in (None, "linux"):
-        reasons.append(f"environment.os={environment.os!r}")
-    if environment.tpu:
-        reasons.append("environment.tpu (no TPU resource model)")
-    if agent.user is not None and verifier.user is not None and agent.user != verifier.user:
-        # One image, one USER. Only one phase naming an identity is fine —
-        # both phases run as it; two *different* identities are not.
-        reasons.append("agent.user and verifier.user differ (the image has one USER)")
-    workdir = environment.workdir or _final_stage_workdir(task_dir)
-    if workdir and Path(workdir).is_relative_to(HUD_ROOT):
-        # The adaptation layer owns that tree inside the image and hides it from
-        # agent sessions; a task working there would find it empty.
-        reasons.append(f"working directory {workdir!r} is inside {HUD_ROOT} (reserved)")
-    if environment.docker_image and not (task_dir / "environment" / "Dockerfile").is_file():
-        reasons.append(
-            "prebuilt docker_image environments (adapt builds from environment/Dockerfile)"
-        )
-
-    # Everything below describes the container's own boot process, which
-    # adaptation replaces with the serving CMD: services an ENTRYPOINT would
-    # start never start, so healthchecks would await nothing and MCP server
-    # URLs would point at nothing.
-    dockerfile = task_dir / "environment" / "Dockerfile"
-    directives = (
-        final_stage(dockerfile.read_text("utf-8", errors="replace")).directives
-        if dockerfile.is_file()
-        else frozenset()
-    )
-    if "ENTRYPOINT" in directives:
-        reasons.append("environment/Dockerfile ENTRYPOINT (adaptation replaces container startup)")
-    if any(
-        (task_dir / "environment" / name).is_file()
-        for name in ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
-    ):
-        reasons.append("compose environments (sidecar services would never start)")
-    if environment.healthcheck:
-        reasons.append("environment.healthcheck (nothing starts the services it would await)")
-    if environment.mcp_servers:
-        reasons.append("environment.mcp_servers (nothing starts the servers they point at)")
-    if verifier.environment_mode or verifier.environment:
-        reasons.append("verifier runs in its own environment")
-    if config.steps:
-        reasons.append("multi-step tasks ([[steps]])")
-    return reasons
 
 
 @dataclass(frozen=True)
@@ -348,6 +217,7 @@ class FinalStage:
 
     directives: frozenset[str] = frozenset()
     user: str | None = None
+    workdir: str | None = None
 
 
 def dockerfile_instructions(dockerfile_text: str) -> list[tuple[str, str, list[int]]]:
@@ -399,77 +269,168 @@ def dockerfile_instructions(dockerfile_text: str) -> list[tuple[str, str, list[i
     return instructions
 
 
-def _final_stage_workdir(task_dir: Path) -> str | None:
-    """The ``WORKDIR`` the image's final stage ends in, if it sets one."""
-    dockerfile = task_dir / "environment" / "Dockerfile"
-    if not dockerfile.is_file():
-        return None
-    workdir = None
-    for word, operand, _ in dockerfile_instructions(
-        dockerfile.read_text("utf-8", errors="replace")
-    ):
-        if word == "FROM":
-            workdir = None
-        elif word == "WORKDIR":
-            workdir = operand.strip().strip('"') or None
-    return workdir
-
-
 def final_stage(dockerfile_text: str) -> FinalStage:
     """Parse *dockerfile_text* into its :class:`FinalStage`."""
     directives: set[str] = set()
     user: str | None = None
+    workdir: str | None = None
     for word, operand, _ in dockerfile_instructions(dockerfile_text):
         if word == "FROM":
-            directives, user = set(), None
+            directives, user, workdir = set(), None, None
         elif word == "USER":
             user = operand or None
+        elif word == "WORKDIR":
+            workdir = operand.strip().strip('"') or None
         directives.add(word)
     return FinalStage(
-        frozenset(directives), None if user in ("root", "0", "root:root", "0:0") else user
+        frozenset(directives),
+        None if user in ("root", "0", "root:root", "0:0") else user,
+        workdir,
     )
 
 
-def grouped(root: str | Path) -> list[tuple[str, list[Path]]]:
-    """Task dirs grouped by the env they need, under content-derived names.
+@dataclass(frozen=True, slots=True)
+class HarborTask:
+    """The parsed, immutable view of one Harbor task directory.
 
-    One env name per group — ``<dataset>-<digest>`` over everything that
-    decides what the group's image is — and that name is the join key
-    between :func:`load`'s rows and :func:`~harbor.adapt`'s images. Deriving
-    it from content rather than position is what makes the join safe: a name
-    denotes one image forever, so editing, adding or removing a task can
-    never leave a row pointing at an environment that has since come to mean
-    something else.
+    Loading, grouping, image adaptation, and runtime setup all consume this
+    same record. That keeps task.toml and Dockerfile parsing at one boundary
+    instead of making each phase rediscover the task from its path.
     """
+
+    path: Path
+    config: TaskConfig
+    dockerfile: str
+    final_stage: FinalStage
+    environment_hash: str
+
+    @classmethod
+    def read(cls, task_dir: Path) -> HarborTask:
+        path = Path(task_dir).resolve()
+        dockerfile_path = path / "environment" / "Dockerfile"
+        dockerfile = (
+            dockerfile_path.read_text("utf-8", errors="replace")
+            if dockerfile_path.is_file()
+            else ""
+        )
+        environment = path / "environment"
+        return cls(
+            path=path,
+            config=TaskConfig.read(path),
+            dockerfile=dockerfile,
+            final_stage=final_stage(dockerfile),
+            environment_hash=hash_directory(environment) if environment.exists() else "no-env",
+        )
+
+    @property
+    def columns(self) -> dict[str, Any] | None:
+        fields = dict(self.config.metadata)
+        if self.config.task.keywords:
+            fields.setdefault("keywords", self.config.task.keywords)
+        return fields or None
+
+    def runtime_config(self, *, image: str | None = None) -> RuntimeConfig | None:
+        """Map portable launch requirements into the SDK's runtime config."""
+        environment = self.config.environment
+        resources = RuntimeResources(
+            cpu=environment.cpus or None,
+            memory_mb=environment.memory_mb or None,
+            gpu=RuntimeGPU(
+                count=environment.gpus,
+                type=next((gpu_type for gpu_type in environment.gpu_types if gpu_type), None),
+            )
+            if environment.gpus
+            else None,
+        )
+        declared = RuntimeConfig(
+            image=image,
+            resources=resources if resources.model_dump(exclude_none=True) else None,
+        )
+        return declared if declared.model_dump(exclude_none=True) else None
+
+    @property
+    def workspace_key(self) -> str:
+        """Stable serialization of the workspace contract used for grouping."""
+        config = self.config
+        return json.dumps(
+            {
+                "network": config.network("agent"),
+                "env": dict(config.environment.env),
+                "agent_env": dict(config.agent.env),
+                "workdir": config.environment.workdir or None,
+                "user": (
+                    config.agent.user if config.agent.user is not None else config.verifier.user
+                ),
+                "allowed_hosts": sorted(config.allowed_hosts("agent")),
+                "verifier_allowed_hosts": sorted(config.allowed_hosts("verifier")),
+                "agent_user": config.phase_user("agent"),
+                "verifier_user": config.phase_user("verifier"),
+            },
+            sort_keys=True,
+        )
+
+    def unsupported_features(self) -> list[str]:
+        """Declarations this integration cannot reproduce faithfully."""
+        config = self.config
+        environment, agent, verifier = config.environment, config.agent, config.verifier
+        reasons: list[str] = []
+
+        if environment.os not in (None, "linux"):
+            reasons.append(f"environment.os={environment.os!r}")
+        if environment.tpu:
+            reasons.append("environment.tpu (no TPU resource model)")
+        if agent.user is not None and verifier.user is not None and agent.user != verifier.user:
+            reasons.append("agent.user and verifier.user differ (the image has one USER)")
+        workdir = environment.workdir or self.final_stage.workdir
+        if workdir and Path(workdir).is_relative_to(HUD_ROOT):
+            reasons.append(f"working directory {workdir!r} is inside {HUD_ROOT} (reserved)")
+        if environment.docker_image and not (self.path / "environment" / "Dockerfile").is_file():
+            reasons.append(
+                "prebuilt docker_image environments (adapt builds from environment/Dockerfile)"
+            )
+        if "ENTRYPOINT" in self.final_stage.directives:
+            reasons.append(
+                "environment/Dockerfile ENTRYPOINT (adaptation replaces container startup)"
+            )
+        if any(
+            (self.path / "environment" / name).is_file()
+            for name in ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
+        ):
+            reasons.append("compose environments (sidecar services would never start)")
+        if environment.healthcheck:
+            reasons.append("environment.healthcheck (nothing starts the services it would await)")
+        if environment.mcp_servers:
+            reasons.append("environment.mcp_servers (nothing starts the servers they point at)")
+        if verifier.environment_mode or verifier.environment:
+            reasons.append("verifier runs in its own environment")
+        if config.steps:
+            reasons.append("multi-step tasks ([[steps]])")
+        return reasons
+
+
+def _task_groups(root: str | Path) -> list[tuple[str, list[HarborTask]]]:
     resolved = Path(root).resolve()
     dataset_name = resolved.parent.name if is_harbor_task(resolved) else resolved.name
     dirs = task_dirs(resolved)
     if not dirs:
         raise ValueError(f"no Harbor tasks found in {root}")
 
-    groups: dict[tuple[str, str], list[Path]] = {}
-    for task_dir in dirs:
-        env_dir = task_dir / "environment"
-        env_hash = hash_directory(env_dir) if env_dir.exists() else "no-env"
-        # Tasks sharing a build context still need separate envs when their
-        # declared workspace behaviour differs: one env serves one policy.
-        # Invariant: everything environment() consumes per group is either in
-        # this key (workspace_policy) or refused (unsupported_features) — a
-        # declaration outside both would silently take the first task's value
-        # for the whole group.
-        policy = json.dumps(workspace_policy(task_dir), sort_keys=True)
-        groups.setdefault((env_hash, policy), []).append(task_dir)
+    groups: dict[tuple[str, str], list[HarborTask]] = {}
+    for task in (HarborTask.read(task_dir) for task_dir in dirs):
+        groups.setdefault((task.environment_hash, task.workspace_key), []).append(task)
     base_name = slugify(dataset_name)
     return sorted(
-        (f"{base_name}-{_group_digest(env_hash, policy)}", group)
-        for (env_hash, policy), group in groups.items()
+        (
+            f"{base_name}-{_group_digest(environment_hash, workspace_key)}",
+            group,
+        )
+        for (environment_hash, workspace_key), group in groups.items()
     )
 
 
-def _group_digest(env_hash: str, policy: str) -> str:
-    """Short stable digest of one group's key — its build context and the
-    workspace policy its image bakes in, which together are the image."""
-    return hashlib.sha256(f"{env_hash}\0{policy}".encode()).hexdigest()[:12]
+def _group_digest(environment_hash: str, workspace_key: str) -> str:
+    """Short stable digest of one group's build and workspace contract."""
+    return hashlib.sha256(f"{environment_hash}\0{workspace_key}".encode()).hexdigest()[:12]
 
 
 # ─── task-dir primitives ────────────────────────────────────────────────

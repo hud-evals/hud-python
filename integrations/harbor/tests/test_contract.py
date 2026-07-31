@@ -1,4 +1,4 @@
-"""The Harbor integration as data: load, provenance, grouping, adapt contexts.
+"""The Harbor integration as data: load, provenance, adaptation, and runtime.
 
 Docker-side serving needs a daemon and is covered by the e2e integration
 scripts; here ``load``'s rows/provenance/stamping and ``adapt``'s build
@@ -39,6 +39,14 @@ def _write_harbor_task(root: Path, name: str, marker: str = "FROM python:3.12-sl
     return task
 
 
+@pytest.fixture(autouse=True)
+def stub_docker(monkeypatch) -> None:
+    async def fake_docker(*args, **kwargs):
+        return b"", b""
+
+    monkeypatch.setattr("integrations.harbor._adapt._docker", fake_docker)
+
+
 def test_load_stamps_rows_with_provenance(tmp_path) -> None:
     _write_harbor_task(tmp_path, "task-a")
     _write_harbor_task(tmp_path, "task-b")
@@ -54,9 +62,10 @@ async def test_adapt_contexts_bake_the_serving_layer(tmp_path) -> None:
     _write_harbor_task(tmp_path, "task-a")
     _write_harbor_task(tmp_path, "task-b", marker="FROM python:3.11-slim\n")
 
-    images = await harbor.adapt(tmp_path, build=False)
+    taskset = await harbor.adapt(tmp_path)
 
-    assert images == {}
+    assert len(taskset) == 2
+    assert all(task.runtime_config and task.runtime_config.image for task in taskset)
     contexts = sorted(p.name for p in (tmp_path / ".hud-adapt").iterdir())
     assert len(contexts) == 2  # two env groups (distinct Dockerfiles)
     context = tmp_path / ".hud-adapt" / contexts[0]
@@ -79,7 +88,7 @@ async def test_the_layer_keeps_its_own_state_out_of_the_task(tmp_path) -> None:
     # inside the task's own filesystem, where the agent finds a HUD runtime the
     # task never declared, and shims into a hidden tree resolving to nothing.
     _write_harbor_task(tmp_path, "task-a")
-    await harbor.adapt(tmp_path, build=False)
+    await harbor.adapt(tmp_path)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
     script = (context / "_hud" / "install.sh").read_text(encoding="utf-8")
 
@@ -103,7 +112,7 @@ async def test_the_agent_toolchain_installs_only_what_the_image_lacks(tmp_path) 
     # build time instead. An image shipping its own interpreter must keep it,
     # so every tool is presence-checked rather than installed outright.
     _write_harbor_task(tmp_path, "task-a")
-    await harbor.adapt(tmp_path, build=False)
+    await harbor.adapt(tmp_path)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
     script = (context / "_hud" / "install.sh").read_text(encoding="utf-8")
     decision = script[script.index('apt_pkgs=""') : script.index("\ndone") + len("\ndone")]
@@ -137,18 +146,13 @@ async def test_the_agent_toolchain_installs_only_what_the_image_lacks(tmp_path) 
     assert queued(str(stub)) == {"git", "curl", "ca-certificates"}
 
 
-def test_adapt_images_stamp_rows_when_the_caller_passes_them(tmp_path) -> None:
-    # The mapping is a value the caller holds — nothing is written into the
-    # dataset, so there is no cache to go stale.
+async def test_adapt_binds_built_images_to_rows(tmp_path) -> None:
     _write_harbor_task(tmp_path, "task-a")
-    ((env_name, _),) = harbor.grouped(tmp_path)
-    image = f"registry.io/acme/{env_name}:abc123"
-
-    (task,) = list(harbor.load(tmp_path, images={env_name: image}))
+    (task,) = list(await harbor.adapt(tmp_path))
 
     assert task.runtime_config is not None
-    assert task.runtime_config.image == image
-    # ...and without the mapping the rows carry only what the task declared.
+    assert task.runtime_config.image.startswith("hud-harbor-adapted:")
+
     (bare,) = list(harbor.load(tmp_path))
     assert bare.runtime_config is None or bare.runtime_config.image is None
 
@@ -160,7 +164,7 @@ async def test_environment_serves_the_baked_tasks(tmp_path, monkeypatch) -> None
     monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: "/usr/bin/true")
     _write_harbor_task(tmp_path, "task-a")
     _write_harbor_task(tmp_path, "task-b")
-    await harbor.adapt(tmp_path, build=False)
+    await harbor.adapt(tmp_path)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
 
     env = harbor.environment(context / "_hud" / "tasks", name=context.name)
@@ -177,6 +181,20 @@ def test_harbor_implements_the_integration_contract() -> None:
 
     assert isinstance(harbor.integration, Integration)
     assert harbor.integration.name == "harbor"
+
+
+def test_public_surface_stays_at_the_integration_boundary() -> None:
+    assert set(harbor.__all__) == {
+        "adapt",
+        "detect",
+        "environment",
+        "export",
+        "integration",
+        "load",
+    }
+    assert not hasattr(harbor, "grouped")
+    assert not hasattr(harbor, "docker_runtime")
+    assert not hasattr(harbor, "agent_timeout")
 
 
 def test_load_translates_declared_requirements(tmp_path) -> None:
@@ -199,7 +217,6 @@ def test_load_translates_declared_requirements(tmp_path) -> None:
     assert row.runtime_config.resources.gpu.count == 2
     # Time budgets are the engine's, not the substrate's.
     assert row.runtime_config.limits is None
-    assert harbor_load.agent_timeout(task) == 2400.0
 
 
 def test_load_omits_requirements_a_task_does_not_declare(tmp_path) -> None:
@@ -238,7 +255,7 @@ async def test_served_templates_use_the_declared_description(tmp_path, monkeypat
         'description = "Fix the thing properly."\n',
         encoding="utf-8",
     )
-    await harbor.adapt(tmp_path, build=False)
+    await harbor.adapt(tmp_path)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
 
     env = harbor.environment(context / "_hud" / "tasks", name=context.name)
@@ -256,10 +273,10 @@ async def test_multi_step_tasks_load_but_cannot_be_adapted_yet(tmp_path) -> None
 
     assert [row.id for row in harbor.load(tmp_path)] == ["task-a"]
     with pytest.raises(NotImplementedError, match="multi-step"):
-        await harbor.adapt(tmp_path, build=False)
+        await harbor.adapt(tmp_path)
 
 
-def test_declared_workspace_policy_is_translated(tmp_path) -> None:
+def test_declared_workspace_contract_is_parsed_once(tmp_path) -> None:
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text(
         'schema_version = "1.3"\n\n[task]\nname = "demo/task-a"\n\n'
@@ -268,24 +285,16 @@ def test_declared_workspace_policy_is_translated(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    policy = harbor_load.workspace_policy(task)
+    config = harbor_load.HarborTask.read(task).config
 
-    assert policy == {
-        "network": True,
-        "env": {"TOKEN": "abc"},
-        "agent_env": {},
-        "workdir": "/srv/app",
-        # Public, but reached through the workspace's own way out rather than
-        # by sharing the substrate's network.
-        "allowed_hosts": ["*"],
-        # And the verifier's are its own, not a copy of the agent's.
-        "verifier_allowed_hosts": ["*"],
-        "user": None,
-        # Per phase, because Harbor's are: a task may restrict the agent and
-        # still verify as root.
-        "agent_user": None,
-        "verifier_user": None,
-    }
+    assert config.network("agent") is True
+    assert config.environment.env == {"TOKEN": "abc"}
+    assert config.agent.env == {}
+    assert config.environment.workdir == "/srv/app"
+    assert config.allowed_hosts("agent") == frozenset({"*"})
+    assert config.allowed_hosts("verifier") == frozenset({"*"})
+    assert config.phase_user("agent") is None
+    assert config.phase_user("verifier") is None
 
 
 def test_each_phase_is_held_to_the_hosts_it_declared(tmp_path) -> None:
@@ -298,10 +307,12 @@ def test_each_phase_is_held_to_the_hosts_it_declared(tmp_path) -> None:
         '[environment]\nnetwork_mode = "no-network"\n',
         encoding="utf-8",
     )
-    assert harbor_load.unsupported_features(isolated) == []
-    assert harbor_load.workspace_policy(isolated)["network"] is False
-    assert harbor_load.workspace_policy(isolated)["allowed_hosts"] == []
-    assert harbor_load.workspace_policy(isolated)["verifier_allowed_hosts"] == []
+    isolated_task = harbor_load.HarborTask.read(isolated)
+    isolated_config = isolated_task.config
+    assert isolated_task.unsupported_features() == []
+    assert isolated_config.network("agent") is False
+    assert isolated_config.allowed_hosts("agent") == frozenset()
+    assert isolated_config.allowed_hosts("verifier") == frozenset()
 
     # Declared for the whole environment: both phases named those hosts.
     shared = _write_harbor_task(tmp_path, "shared")
@@ -310,9 +321,11 @@ def test_each_phase_is_held_to_the_hosts_it_declared(tmp_path) -> None:
         '[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n',
         encoding="utf-8",
     )
-    assert harbor_load.unsupported_features(shared) == []
-    assert harbor_load.workspace_policy(shared)["allowed_hosts"] == ["pypi.org"]
-    assert harbor_load.workspace_policy(shared)["verifier_allowed_hosts"] == ["pypi.org"]
+    shared_task = harbor_load.HarborTask.read(shared)
+    shared_config = shared_task.config
+    assert shared_task.unsupported_features() == []
+    assert shared_config.allowed_hosts("agent") == frozenset({"pypi.org"})
+    assert shared_config.allowed_hosts("verifier") == frozenset({"pypi.org"})
 
     # Declared for the agent alone: the verifier said nothing, so it is public.
     agent_only = _write_harbor_task(tmp_path, "agent-only")
@@ -321,9 +334,11 @@ def test_each_phase_is_held_to_the_hosts_it_declared(tmp_path) -> None:
         '[agent]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n',
         encoding="utf-8",
     )
-    assert harbor_load.unsupported_features(agent_only) == []
-    assert harbor_load.workspace_policy(agent_only)["allowed_hosts"] == ["pypi.org"]
-    assert harbor_load.workspace_policy(agent_only)["verifier_allowed_hosts"] == ["*"]
+    agent_task = harbor_load.HarborTask.read(agent_only)
+    agent_config = agent_task.config
+    assert agent_task.unsupported_features() == []
+    assert agent_config.allowed_hosts("agent") == frozenset({"pypi.org"})
+    assert agent_config.allowed_hosts("verifier") == frozenset({"*"})
 
 
 def test_tasks_with_different_policies_get_separate_envs(tmp_path) -> None:
@@ -347,7 +362,7 @@ def test_adapted_cmd_serves_the_contract_constructor(tmp_path) -> None:
 
     _write_harbor_task(tmp_path, "task-a")
     asyncio.get_event_loop_policy()
-    asyncio.run(harbor.adapt(tmp_path, build=False))
+    asyncio.run(harbor.adapt(tmp_path))
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
     dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
 
@@ -360,7 +375,7 @@ async def test_planted_reward_files_are_discarded_before_grading(tmp_path) -> No
     import asyncio
     import json
 
-    from integrations.harbor._adapt import _grade_with_verifier
+    from integrations.harbor._runtime import _grade_with_verifier
 
     task = _write_harbor_task(tmp_path, "task-a")
     logs = tmp_path / "logs"
@@ -393,7 +408,7 @@ async def test_a_declared_identity_governs_the_phases_not_the_harness(tmp_path) 
     (task / "environment" / "Dockerfile").write_text(
         "FROM python:3.12-slim\nRUN useradd -m agent\nUSER agent\n", encoding="utf-8"
     )
-    await harbor.adapt(tmp_path, build=False)
+    await harbor.adapt(tmp_path)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
     layer = (context / "Dockerfile").read_text(encoding="utf-8").split("adaptation layer", 1)[1]
 
@@ -407,18 +422,18 @@ async def test_a_declared_identity_governs_the_phases_not_the_harness(tmp_path) 
 
 def test_each_phase_takes_the_identity_declared_for_it(tmp_path, monkeypatch) -> None:
     # A task may hand the agent a restricted account and still verify as root.
-    from integrations.harbor import _adapt
+    from integrations.harbor import _runtime
 
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text(
         'schema_version = "1.3"\n\n[task]\nname = "demo/task-a"\n\n[agent]\nuser = "agent"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(_adapt, "_image_user", lambda _task: None)
-    monkeypatch.setattr(_adapt.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=1000))
+    monkeypatch.setattr(_runtime, "_image_user", lambda: None)
+    monkeypatch.setattr(_runtime.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=1000))
 
-    assert _adapt.phase_uid(task, "agent") == 1000
-    assert _adapt.phase_uid(task, "verifier") is None  # root, as declared by omission
+    assert _runtime.phase_uid(task, "agent") == 1000
+    assert _runtime.phase_uid(task, "verifier") is None  # root, as declared by omission
 
 
 def test_build_stage_entrypoint_does_not_refuse(tmp_path) -> None:
@@ -431,7 +446,7 @@ def test_build_stage_entrypoint_does_not_refuse(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    assert harbor_load.unsupported_features(task) == []
+    assert harbor_load.HarborTask.read(task).unsupported_features() == []
 
 
 def test_declared_uid_zero_beats_the_source_user(tmp_path) -> None:
@@ -444,13 +459,13 @@ def test_declared_uid_zero_beats_the_source_user(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    assert harbor_load.workspace_policy(task)["user"] == 0
+    assert harbor_load.HarborTask.read(task).config.agent.user == 0
 
 
 def test_rewards_are_finite_numbers_not_booleans(tmp_path) -> None:
     import json as jsonlib
 
-    from integrations.harbor._adapt import _read_reward
+    from integrations.harbor._runtime import _read_reward
 
     logs = tmp_path / "verifier"
     logs.mkdir()
@@ -502,16 +517,16 @@ def test_an_invalid_task_toml_is_an_error_not_a_default(tmp_path) -> None:
 def test_grading_directories_do_not_exist_during_the_agent_phase(tmp_path, monkeypatch) -> None:
     """The image ships /tests and the verdict dir empty, and a previous rollout
     leaves them behind — either way the agent phase must not find them."""
-    from integrations.harbor import _adapt
+    from integrations.harbor import _runtime
 
     tests, verdict = tmp_path / "tests", tmp_path / "logs" / "verifier"
     for stale in (tests, verdict):
         stale.mkdir(parents=True)
     (tests / "test.sh").write_text("the assertions", encoding="utf-8")
-    monkeypatch.setattr(_adapt, "TESTS", tests)
-    monkeypatch.setattr(_adapt, "VERIFIER_LOGS", verdict)
+    monkeypatch.setattr(_runtime, "TESTS", tests)
+    monkeypatch.setattr(_runtime, "VERIFIER_LOGS", verdict)
 
-    _adapt._hide_grading_dirs()
+    _runtime._hide_grading_dirs()
 
     assert not tests.exists()
     assert not verdict.exists()
@@ -535,7 +550,7 @@ async def test_masks_are_applied_after_the_workspace_bind(tmp_path, monkeypatch)
 
     monkeypatch.setattr("hud.environment.env.Workspace", record)
     _write_harbor_task(tmp_path, "task-a")
-    await harbor.adapt(tmp_path, build=False)
+    await harbor.adapt(tmp_path)
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
 
     harbor.environment(context / "_hud" / "tasks", name=context.name)
@@ -564,7 +579,7 @@ async def test_dataset_symlinks_are_never_dereferenced(tmp_path) -> None:
     task = _write_harbor_task(tmp_path / "ds", "task-a")
     (task / "tests" / "leak.txt").symlink_to(secret)
 
-    await harbor.adapt(tmp_path / "ds", build=False)
+    await harbor.adapt(tmp_path / "ds")
     (context,) = sorted((tmp_path / "ds" / ".hud-adapt").iterdir())
 
     # The link is copied as a link: its target was never read, so no host
@@ -657,7 +672,7 @@ def test_declarations_this_integration_cannot_reproduce_are_refused(
         encoding="utf-8",
     )
 
-    assert expected in " ".join(harbor_load.unsupported_features(task))
+    assert expected in " ".join(harbor_load.HarborTask.read(task).unsupported_features())
 
 
 async def test_a_refused_task_never_reaches_a_build_context(tmp_path) -> None:
@@ -669,7 +684,7 @@ async def test_a_refused_task_never_reaches_a_build_context(tmp_path) -> None:
     )
 
     with pytest.raises(NotImplementedError, match="healthcheck"):
-        await harbor.adapt(tmp_path, build=False)
+        await harbor.adapt(tmp_path)
 
 
 async def test_a_chatty_verifier_does_not_deadlock(tmp_path) -> None:
@@ -678,7 +693,7 @@ async def test_a_chatty_verifier_does_not_deadlock(tmp_path) -> None:
     import asyncio
 
     from hud.utils.process import create_process_group_exec
-    from integrations.harbor._adapt import _grade_with_verifier
+    from integrations.harbor._runtime import _grade_with_verifier
 
     task = _write_harbor_task(tmp_path, "task-a")
     logs = tmp_path / "logs"
@@ -714,13 +729,13 @@ def test_phase_env_reaches_the_phase_that_declared_it(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    policy = harbor_load.workspace_policy(task)
-    config = harbor_load.TaskConfig.read(task)
+    parsed = harbor_load.HarborTask.read(task)
+    config = parsed.config
 
     # Container-wide reaches every process; the agent's reaches its sessions
     # only; the verifier's is applied where the verifier runs.
-    assert policy["env"] == {"SHARED": "both"}
-    assert policy["agent_env"] == {"AGENT_ONLY": "yes"}
+    assert config.environment.env == {"SHARED": "both"}
+    assert config.agent.env == {"AGENT_ONLY": "yes"}
     assert config.verifier.env == {"VERIFIER_ONLY": "yes"}
 
 
@@ -732,8 +747,9 @@ def test_only_a_real_user_conflict_is_refused(tmp_path) -> None:
     )
 
     # One phase naming an identity is fine: the image's single USER is it.
-    assert harbor_load.unsupported_features(task) == []
-    assert harbor_load.TaskConfig.read(task).user == "app"
+    parsed = harbor_load.HarborTask.read(task)
+    assert parsed.unsupported_features() == []
+    assert parsed.config.agent.user == "app"
 
 
 def test_an_explicit_zero_timeout_is_not_silently_extended(tmp_path) -> None:
@@ -753,7 +769,7 @@ async def test_a_cancelled_grade_leaves_nothing_running(tmp_path) -> None:
     import asyncio
 
     from hud.utils.process import create_process_group_exec
-    from integrations.harbor._adapt import _grade_with_verifier
+    from integrations.harbor._runtime import _grade_with_verifier
 
     task = _write_harbor_task(tmp_path, "task-a")
     logs = tmp_path / "logs"
@@ -810,4 +826,4 @@ def test_a_workdir_inside_the_reserved_path_is_refused(tmp_path) -> None:
         f"FROM python:3.12-slim\nWORKDIR {harbor_load.HUD_ROOT}/app\n", encoding="utf-8"
     )
 
-    assert "reserved" in " ".join(harbor_load.unsupported_features(task))
+    assert "reserved" in " ".join(harbor_load.HarborTask.read(task).unsupported_features())

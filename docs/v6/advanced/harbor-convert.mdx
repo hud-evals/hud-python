@@ -30,6 +30,7 @@ directly - one row per task dir (`id` = the dir name), sharing one declarative
 
 ```python
 from integrations import harbor
+from hud.eval import DockerRuntime
 
 assert harbor.detect("./terminal-bench")
 taskset = harbor.load("./terminal-bench")
@@ -41,28 +42,24 @@ for task in taskset:
 Each row carries what the task declared: `[metadata]` as `columns` (difficulty,
 category, tags - the platform's filter/leaderboard facets) and
 `[environment]` cpu/memory/gpu as `runtime_config`. Time budgets stay off the
-row, since they bound the *rollout* rather than the substrate - read one with
-`harbor.agent_timeout(task_dir)` and pass it as `rollout_timeout`.
+row, since they bound the *rollout* rather than the substrate; pass the desired
+budget as `rollout_timeout` when running.
 
 ## Run Harbor tasks
 
 Build the images once, then place the rows anywhere:
 
 ```python
-images = await harbor.adapt("./terminal-bench")          # {env name: image ref}
-taskset = harbor.load("./terminal-bench", images=images) # rows carry the image
-job = await taskset.run(agent, runtime=harbor.docker_runtime())
+taskset = await harbor.adapt("./terminal-bench")
+job = await taskset.run(agent, runtime=DockerRuntime())
 ```
 
-`harbor.docker_runtime()` is a `DockerRuntime` that permits nested
-namespaces: an adapted image sandboxes *inside itself* to keep the baked
-tests and the verdict away from the agent, which plain images neither need
-nor should be given.
+`DockerRuntime` supplies the inner workspace sandbox needed by adapted images;
+the setting is automatic for all HUD Docker environments.
 
-The mapping is a value you hold - nothing is written into the dataset - so
-there is no cache to go stale. `adapt(path, push="registry.io/acme")` pushes
-instead; `hud deploy` of the generated contexts under `.hud-adapt/` works the
-same way, since both run the image's own CMD.
+`adapt(path, push="registry.io/acme")` pushes instead and returns rows bound to
+the pushed images. It also writes the generated contexts under `.hud-adapt/`,
+which `hud deploy` can use directly.
 
 The image also carries what the task declared about its environment:
 `[environment.env]`, `workdir` and `user` become `ENV`, `WORKDIR` and `USER`

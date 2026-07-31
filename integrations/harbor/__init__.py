@@ -11,15 +11,14 @@ Harbor task structure::
 
 Harbor's agent works *inside* its container, so :func:`environment` (the
 :class:`~hud.environment.Integration` constructor) is meaningful only in
-there — :func:`adapt` packages it: one HUD-speaking image per env group
-whose CMD serves ``harbor.environment``, and the same rows then run on any
-container placement::
+there. :func:`adapt` builds the images and returns the loaded rows with those
+images bound to them::
 
-    await harbor.adapt("./tasks")  # local images
-    job = await harbor.load("./tasks").run(agent, runtime=DockerRuntime())
+    taskset = await harbor.adapt("./tasks")
+    job = await taskset.run(agent, runtime=DockerRuntime())
 
-    await harbor.adapt("./tasks", push="registry.io/x")  # or hud deploy the
-    job = await harbor.load("./tasks").run(agent, runtime=HUDRuntime())  # contexts
+    taskset = await harbor.adapt("./tasks", push="registry.io/x")
+    job = await taskset.run(agent, runtime=HUDRuntime())
 
 Plus :func:`export`, the reverse direction (HUD tasks -> Harbor folders).
 Compose-based and prebuilt-``docker_image`` tasks are not supported yet.
@@ -37,12 +36,13 @@ if TYPE_CHECKING:
     from hud.environment import Environment
     from hud.eval import Taskset
 
-from ._adapt import adapt, docker_runtime, environment
-from ._export import ALLOWED_PROTOCOLS, CONTROL_PORT, DEFAULT_ANSWER_FILE, export
-from ._load import agent_timeout, detect, grouped, load
+from ._adapt import adapt
+from ._export import export
+from ._load import detect, load
+from ._runtime import environment
 
 
-class Harbor(Integration):
+class _Harbor(Integration):
     """The :class:`~hud.environment.Integration` contract for Harbor."""
 
     name = "harbor"
@@ -54,20 +54,13 @@ class Harbor(Integration):
         return environment(ref, name=name)
 
 
-integration = Harbor()
+integration = _Harbor()
 
 __all__ = [
-    "ALLOWED_PROTOCOLS",
-    "CONTROL_PORT",
-    "DEFAULT_ANSWER_FILE",
-    "Harbor",
     "adapt",
-    "agent_timeout",
     "detect",
-    "docker_runtime",
     "environment",
     "export",
-    "grouped",
     "integration",
     "load",
 ]

@@ -390,6 +390,36 @@ def test_making_a_network_and_joining_it_are_the_same_question(
         assert ("--net" in ws.enter_argv(7, "true")) is owns
 
 
+def test_process_builders_can_apply_a_phase_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root", network=True, env={"AGENT_ONLY": "yes"})
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+
+    verifier = ws.bwrap_argv(
+        ["true"],
+        env={"VERIFIER_ONLY": "yes"},
+        inherit_workspace_env=False,
+        network=False,
+        mount_hosts=False,
+    )
+    entered = ws.enter_argv(
+        7,
+        ["true"],
+        env={"VERIFIER_ONLY": "yes"},
+        identity=None,
+        inherit_workspace_env=False,
+        preserve_credentials=True,
+    )
+
+    assert "--unshare-net" in verifier
+    assert "AGENT_ONLY=yes" not in verifier
+    assert "VERIFIER_ONLY=yes" in verifier
+    assert "--preserve-credentials" in entered
+    assert "AGENT_ONLY=yes" not in entered
+    assert "VERIFIER_ONLY=yes" in entered
+
+
 def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     """A task that names a service says where it expects to find it. Placed
     anywhere else, the task's own client configuration points at nothing."""

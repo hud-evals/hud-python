@@ -121,24 +121,7 @@ set -u
 
 hud serve {serve_target} --port {port} &
 
-# Wait for the control channel to accept connections (python is always present).
-# A container that never serves, or a task that will not start, is broken
-# infrastructure — failing here is honest, where continuing would let the
-# verifier score the run 0 as though the agent had simply failed.
-python3 -c 'import socket, sys, time
-port = int(sys.argv[1])
-for _ in range(120):
-    try:
-        socket.create_connection(("127.0.0.1", port), 0.5).close()
-        sys.exit(0)
-    except OSError:
-        time.sleep(0.5)
-sys.exit(1)' {port} || {{
-    echo "hud: control channel never came up on port {port}" >&2
-    exit 1
-}}
-
-# Run the task setup phase and park the run for grading.
+# The SDK connection performs protocol-level readiness retries before setup.
 hud task start {task} --args {args_json} --url tcp://127.0.0.1:{port} || {{
     echo "hud: task setup failed; refusing to run the agent against an unset task" >&2
     exit 1

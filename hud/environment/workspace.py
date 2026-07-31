@@ -40,9 +40,8 @@ _COMMAND_TIMEOUT = 3600.0
 
 # Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
 #: bwrap's usability is a property of the host/container, so probe once per
-#: process: an installed bwrap that cannot create namespaces (a container
-#: whose seccomp profile blocks unprivileged userns) would otherwise fail
-#: every session instead of falling back.
+#: process: an installed bwrap that cannot create namespaces would otherwise
+#: fail every session instead of falling back.
 _bwrap_usable: bool | None = None
 
 
@@ -84,8 +83,8 @@ def usable_bwrap() -> str | None:
             if not _bwrap_usable:
                 LOGGER.warning(
                     "bwrap is installed but cannot create namespaces (%s); sessions will "
-                    "run WITHOUT isolation. Allow unprivileged user namespaces (e.g. "
-                    "docker --security-opt seccomp=unconfined) to enable it.",
+                    "run WITHOUT isolation. The container runtime must allow "
+                    "unprivileged user namespaces to enable it.",
                     probe.stderr.decode("utf-8", "replace").strip()[:120],
                 )
         except (OSError, subprocess.SubprocessError):
@@ -404,9 +403,9 @@ class Workspace:
         if require_isolation and self._bwrap is None:
             raise RuntimeError(
                 "isolation was required but bwrap cannot sandbox here: install "
-                "bubblewrap and allow unprivileged user namespaces (e.g. run the "
-                "container with --security-opt seccomp=unconfined). Refusing to "
-                "serve sessions that would silently run unisolated."
+                "bubblewrap and use a container runtime that allows unprivileged "
+                "user namespaces. Refusing to serve sessions that would silently "
+                "run unisolated."
             )
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
@@ -710,8 +709,12 @@ class Workspace:
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
         inherit_host_env: bool = True,
+        inherit_workspace_env: bool = True,
         info_fd: int | None = None,
         userns_block_fd: int | None = None,
+        network: bool | None = None,
+        mount_hosts: bool = True,
+        isolate_processes: bool = True,
         tty: bool = False,
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
@@ -727,19 +730,26 @@ class Workspace:
             raise RuntimeError("bwrap not available on this host")
         target_cwd = cwd if cwd is not None else self._guest_path
         base_env = _without_harness_config(os.environ) if inherit_host_env else {}
-        full_env = {**base_env, **self.env, **(env or {})}
+        workspace_env = self.env if inherit_workspace_env else {}
+        full_env = {**base_env, **workspace_env, **(env or {})}
+        owns_netns = self.owns_netns if network is None else not network
         argv: list[str] = [
             self._bwrap,
             "--die-with-parent",
             # Blocking means this side installs the map, so the namespace has
             # to be ours to map: --unshare-user, not the best-effort form.
             "--unshare-user" if userns_block_fd is not None else "--unshare-user-try",
-            "--unshare-pid",
-            "--unshare-ipc",
-            "--unshare-uts",
-            "--unshare-cgroup-try",
         ]
-        if self.owns_netns:
+        if isolate_processes:
+            argv.extend(
+                [
+                    "--unshare-pid",
+                    "--unshare-ipc",
+                    "--unshare-uts",
+                    "--unshare-cgroup-try",
+                ]
+            )
+        if owns_netns:
             argv.append("--unshare-net")
         if info_fd is not None:
             argv.extend(["--info-fd", str(info_fd)])
@@ -750,7 +760,7 @@ class Workspace:
         argv.extend(["--bind", str(self.root), self._guest_path])
         for m in self.mounts:
             argv.extend(m.to_bwrap_args())
-        if self._hosts_path is not None:
+        if mount_hosts and self._hosts_path is not None:
             # Last, so it survives whatever the caller mounted over /etc: a
             # peer the task can address by port but not by name is not at the
             # address the task expects.
@@ -766,6 +776,10 @@ class Workspace:
         command: str | None = None,
         *,
         env: Mapping[str, str] | None = None,
+        identity: int | None | Literal["workspace"] = "workspace",
+        inherit_workspace_env: bool = True,
+        preserve_credentials: bool = False,
+        no_new_privs: bool = True,
         tty: bool = False,
     ) -> list[str]:
         """Argv that runs ``command`` inside the sandbox *pid* belongs to.
@@ -801,36 +815,65 @@ class Workspace:
             # network the workspace was given a policy to keep it off.
             *(("--net",) if self.owns_netns else ()),
             "--wd",
+            *(("--preserve-credentials",) if preserve_credentials else ()),
             "--",
         ]
         # Unlike the bwrap path, the drop goes *inside*: joining namespaces
         # needs the privileges the dropped uid does not have.
-        argv.extend(self._drop_argv())
-        argv.extend(_payload_argv(command, self._full_env(env), ctty=tty))
+        if identity == "workspace":
+            argv.extend(self._drop_argv(no_new_privs=no_new_privs))
+        elif identity is not None:
+            argv.extend(self._drop_argv(identity, no_new_privs=no_new_privs))
+        argv.extend(
+            _payload_argv(
+                command,
+                self._full_env(env, include_workspace_env=inherit_workspace_env),
+                ctty=tty,
+            )
+        )
         return argv
 
-    def _full_env(self, env: Mapping[str, str] | None = None) -> dict[str, str]:
+    def _full_env(
+        self,
+        env: Mapping[str, str] | None = None,
+        *,
+        include_workspace_env: bool = True,
+    ) -> dict[str, str]:
         """The environment a session starts from.
 
         Dropped sessions get the minimal one built for the wall; otherwise the
         serving process's environment carries through, less HUD's own.
         """
         proxy = self._egress.environment() if self._egress is not None else {}
-        if self._drops_privileges():
+        if include_workspace_env and self._drops_privileges():
             return {**(self._session_env() or {}), **proxy, **(env or {})}
-        return {**_without_harness_config(os.environ), **proxy, **self.env, **(env or {})}
+        workspace_env = self.env if include_workspace_env else {}
+        return {**_without_harness_config(os.environ), **proxy, **workspace_env, **(env or {})}
 
-    def _drop_argv(self) -> list[str]:
+    def _drop_argv(self, uid: int | None = None, *, no_new_privs: bool = True) -> list[str]:
         """The ``setpriv`` prefix that drops to ``shell_uid``, if it applies."""
-        if not self._drops_privileges():
+        if uid is None:
+            if not self._drops_privileges():
+                return []
+            uid = self._shell_uid
+        elif not (_is_root() and sys.platform == "linux" and self._setpriv() is not None):
             return []
         setpriv = self._setpriv()
-        assert setpriv is not None  # guaranteed by _drops_privileges
-        uid = str(self._shell_uid)
-        # --no-new-privs: without it a setuid binary (or passwordless sudo)
-        # inside the workspace would let the dropped shell regain root and
-        # read the secrets the wall protects.
-        return [setpriv, "--reuid", uid, "--regid", uid, "--clear-groups", "--no-new-privs", "--"]
+        assert setpriv is not None
+        uid_text = str(uid)
+        # Without this, a setuid binary (or passwordless sudo) inside the
+        # workspace could let the dropped shell regain root.
+        no_new_privs_argv = ["--no-new-privs"] if no_new_privs else []
+        return [
+            setpriv,
+            "--reuid",
+            uid_text,
+            "--regid",
+            uid_text,
+            "--clear-groups",
+            *no_new_privs_argv,
+            "--",
+        ]
 
     # ─── the sandbox sessions share ───────────────────────────────────────
 

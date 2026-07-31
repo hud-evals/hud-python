@@ -226,6 +226,7 @@ async def test_scripts_drive_hud_task_lifecycle(tmp_path: Path) -> None:
     # Boot serves the channel, parks the run via setup, then hands off.
     assert "hud serve env:env" in boot
     assert "hud task start solve" in boot
+    assert "python3 -c" not in boot
     assert 'exec "$@"' in boot
     # Verifier grades the parked run and writes the Harbor reward.
     assert "hud task grade solve" in test_sh
