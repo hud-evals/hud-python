@@ -100,7 +100,7 @@ async def test_scripts_drive_hud_task_lifecycle(tmp_path: Path) -> None:
     test_sh = (created[0] / "tests" / "test.sh").read_text(encoding="utf-8")
 
     # Boot serves the channel, parks the run via setup, then hands off.
-    assert "hud serve env:env" in boot
+    assert "hud serve env.py:demo" in boot
     assert "hud task start solve" in boot
     assert "python3 -c" not in boot
     assert 'exec "$@"' in boot
@@ -205,8 +205,8 @@ async def test_export_preserves_a_non_root_runtime_user(tmp_path: Path) -> None:
 
 
 async def test_export_serves_the_resolved_environment(tmp_path: Path) -> None:
-    # The env lives in tasks.py under the name ``bench`` — the container must
-    # serve that, not a guessed ``env:env``.
+    # The environment is bound to ``bench`` in tasks.py, while its public name
+    # remains ``demo``. The generated target uses the canonical loader syntax.
     (tmp_path / "tasks.py").write_text(
         textwrap.dedent(_ENV_PY)
         .replace("env = Environment", "bench = Environment")
@@ -218,7 +218,7 @@ async def test_export_serves_the_resolved_environment(tmp_path: Path) -> None:
     created = await export(str(tmp_path / "tasks.py"), tmp_path / "out")
 
     boot = (created[0] / "environment" / "hud_entrypoint.sh").read_text(encoding="utf-8")
-    assert "hud serve tasks:bench" in boot
+    assert "hud serve tasks.py:demo" in boot
 
 
 async def test_export_slugs_stay_inside_the_output_directory(tmp_path: Path) -> None:

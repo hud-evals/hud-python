@@ -92,6 +92,7 @@ class HarborTask:
     path: Path
     config: TaskConfig
     environment_hash: str
+    runtime: dict[str, Any]
 
 
 async def adapt(
@@ -156,43 +157,41 @@ async def adapt(
                 + ", ".join(unsupported)
             )
 
+        environment = config.environment
         tasks.append(
             HarborTask(
                 path=task_dir,
                 config=config,
                 environment_hash=_tree_hash(task_dir / "environment"),
+                runtime={
+                    "image": environment.docker_image,
+                    "workdir": environment.workdir,
+                    "environment_env": environment.env,
+                    "environment_network": environment.network_mode,
+                    "environment_hosts": environment.allowed_hosts,
+                    "agent": config.agent.model_dump(
+                        include={"user", "network_mode", "allowed_hosts", "env"}
+                    ),
+                    "verifier": config.verifier.model_dump(
+                        include={"user", "network_mode", "allowed_hosts", "env"}
+                    ),
+                },
             )
         )
 
     grouped: dict[tuple[str, str], list[HarborTask]] = {}
     for task in tasks:
-        config = task.config
-        runtime = json.dumps(
-            {
-                "image": config.environment.docker_image,
-                "workdir": config.environment.workdir,
-                "environment_env": config.environment.env,
-                "environment_network": config.environment.network_mode,
-                "environment_hosts": config.environment.allowed_hosts,
-                "agent": config.agent.model_dump(
-                    include={"user", "network_mode", "allowed_hosts", "env"}
-                ),
-                "verifier": config.verifier.model_dump(
-                    include={"user", "network_mode", "allowed_hosts", "env"}
-                ),
-            },
-            sort_keys=True,
-        )
-        grouped.setdefault((task.environment_hash, runtime), []).append(task)
+        runtime_json = json.dumps(task.runtime, sort_keys=True)
+        grouped.setdefault((task.environment_hash, runtime_json), []).append(task)
 
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
-    for (environment_hash, runtime), group in sorted(grouped.items()):
-        digest = hashlib.sha256((environment_hash + "\0" + runtime).encode()).hexdigest()[:12]
+    for (environment_hash, runtime_json), group in sorted(grouped.items()):
+        digest = hashlib.sha256((environment_hash + "\0" + runtime_json).encode()).hexdigest()[:12]
         name = f"{base_name}-{digest}"
         source = group[0]
         dockerfile = source.path / "environment" / "Dockerfile"
-        base_image = source.config.environment.docker_image
+        base_image = source.runtime["image"]
         if base_image and not dockerfile.is_file():
             await docker("pull", base_image)
         elif dockerfile.is_file():
@@ -223,8 +222,7 @@ async def adapt(
         for asset in ("Dockerfile", "env.py", "install.sh"):
             shutil.copy2(ASSETS / asset, context / asset)
 
-        environment = source.config.environment
-        workdir = environment.workdir or image_config.get("WorkingDir") or "/"
+        workdir = source.runtime["workdir"] or image_config.get("WorkingDir") or "/"
         if Path(workdir).is_relative_to(HUD_ROOT):
             raise ValueError(f"Harbor workdir {workdir!r} is inside reserved path {HUD_ROOT}")
         manifest = {
@@ -232,16 +230,12 @@ async def adapt(
             "workdir": workdir,
             "image_user": image_config.get("User") or None,
             "environment": {
-                "env": environment.env,
-                "network_mode": environment.network_mode,
-                "allowed_hosts": environment.allowed_hosts,
+                "env": source.runtime["environment_env"],
+                "network_mode": source.runtime["environment_network"],
+                "allowed_hosts": source.runtime["environment_hosts"],
             },
-            "agent": source.config.agent.model_dump(
-                include={"user", "network_mode", "allowed_hosts", "env"}
-            ),
-            "verifier": source.config.verifier.model_dump(
-                include={"user", "network_mode", "allowed_hosts", "env"}
-            ),
+            "agent": source.runtime["agent"],
+            "verifier": source.runtime["verifier"],
             "tasks": [],
         }
         for task in group:

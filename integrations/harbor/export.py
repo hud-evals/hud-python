@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from hud.environment import Environment
+from hud.environment import Environment, load_environment
 from hud.environment.server import TaskRunner
 from hud.eval import Taskset
 from hud.utils.naming import normalize_environment_name
@@ -64,8 +64,6 @@ async def export(
     authored environment and Dockerfile. Each task becomes one self-contained
     Harbor task folder.
     """
-    from hud.utils.modules import iter_modules
-
     src = Path(source).resolve()
     source_dir = src.parent if src.is_file() else src
     out = Path(out_dir).resolve()
@@ -73,14 +71,11 @@ async def export(
     tasks = list(Taskset.from_file(src))
 
     scan = source_dir if src.suffix in (".json", ".jsonl") else src
-    authored: dict[str, Environment] = {}
-    serve_targets: dict[str, str] = {}
-    for module in iter_modules(scan):
-        module_file = Path(getattr(module, "__file__", "") or "")
-        for attribute, value in vars(module).items():
-            if isinstance(value, Environment):
-                authored[value.name] = value
-                serve_targets[value.name] = f"{module_file.stem or 'env'}:{attribute}"
+    authored = {
+        name: load_environment(scan, name=name)
+        for name in dict.fromkeys(task.env for task in tasks)
+    }
+    serve_source = src.name if src.suffix == ".py" else "."
 
     dockerfile = next(
         (
@@ -106,19 +101,11 @@ async def export(
 
     created: list[Path] = []
     claimed: dict[str, str] = {}
-    started: set[str] = set()
+    started: list[Environment] = []
     try:
-        for task in tasks:
-            env = authored.get(task.env)
-            if env is None or task.id not in env.tasks:
-                raise TypeError(
-                    f"harbor export needs a local env defining task {task.id!r} "
-                    f"(an env.py named {task.env!r} next to the tasks); none was found.",
-                )
-            if env.name not in started:
-                started.add(env.name)
-                await env.start()
-
+        for env in authored.values():
+            started.append(env)
+            await env.start()
             unsupported = [
                 capability.protocol
                 for capability in env.capabilities
@@ -128,6 +115,14 @@ async def export(
                 raise ValueError(
                     f"env {env.name!r} declares non-Harbor capabilities {unsupported}; "
                     f"only {'/'.join(ALLOWED_PROTOCOLS)} are convertible.",
+                )
+
+        for task in tasks:
+            env = authored[task.env]
+            if task.id not in env.tasks:
+                raise TypeError(
+                    f"harbor export needs a local env defining task {task.id!r} "
+                    f"(an env.py named {task.env!r} next to the tasks); none was found.",
                 )
 
             declared = task.slug
@@ -199,11 +194,10 @@ async def export(
                 if alternate.exists():
                     alternate.unlink()
 
-            serve_target = serve_targets[env.name]
             (env_out / "hud_entrypoint.sh").write_text(
                 ENTRYPOINT_SH.format(
                     port=CONTROL_PORT,
-                    serve_target=shlex.quote(serve_target),
+                    serve_target=shlex.quote(f"{serve_source}:{env.name}"),
                     task=shlex.quote(task.id),
                     args_json=shlex.quote(args_json),
                 ),
@@ -232,7 +226,7 @@ async def export(
             )
             created.append(task_dir)
     finally:
-        for name in started:
-            await authored[name].stop()
+        for env in reversed(started):
+            await env.stop()
 
     return created

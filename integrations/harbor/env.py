@@ -63,24 +63,19 @@ def home(user_id: int | None) -> str | None:
     return None
 
 
-def harness_mounts() -> tuple[Mount, ...]:
-    parent = ROOT.parent
-    siblings = (
-        [
-            Mount("rw", src=str(path), dst=str(path))
-            for path in sorted(parent.iterdir())
-            if path != ROOT
-        ]
-        if parent.is_dir()
-        else []
-    )
-    return (Mount("tmpfs", dst=str(parent)), *siblings)
-
-
 agent = CONFIG["agent"]
 agent_uid = uid(agent)
 agent_network, agent_hosts = network(agent)
 rooted_at_filesystem = len(WORKDIR.parts) == 1
+harness_parent = ROOT.parent
+harness_mounts = (
+    Mount("tmpfs", dst=str(harness_parent)),
+    *(
+        Mount("rw", src=str(path), dst=str(path))
+        for path in sorted(harness_parent.iterdir())
+        if path != ROOT
+    ),
+)
 
 env = Environment(CONFIG["name"])
 workspace = env.workspace(
@@ -91,7 +86,7 @@ workspace = env.workspace(
         Mount("proc", dst="/proc"),
         Mount("dev", dst="/dev"),
     ),
-    mounts=harness_mounts(),
+    mounts=harness_mounts,
     credentials_dir=ROOT / "session-keys",
     shell_uid=agent_uid,
     hand_over_root=False,
@@ -154,7 +149,10 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     test_script.chmod(test_script.stat().st_mode | 0o111)
 
     clear(VERIFIER_LOGS)
-    write(LOGS / "agent_answer.txt", "" if answer is None else str(answer))
+    answer_file = LOGS / "agent_answer.txt"
+    if answer_file.is_symlink():
+        answer_file.unlink()
+    answer_file.write_text("" if answer is None else str(answer), encoding="utf-8")
 
     verifier = CONFIG["verifier"]
     verifier_uid = uid(verifier)
@@ -299,9 +297,3 @@ def reward() -> tuple[float | None, dict[str, Any]]:
             return score, {"reward_file": str(reward_text)}
         return None, {"reward_parse_error": text}
     return None, {}
-
-
-def write(path: Path, text: str) -> None:
-    if path.is_symlink():
-        path.unlink()
-    path.write_text(text, encoding="utf-8")
