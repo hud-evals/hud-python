@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.integrations.harbor import detect, export, load
+from integrations.harbor import detect, export, load
 
 from .conftest import make_harbor_task, make_multi_step_task
 
@@ -317,7 +317,7 @@ async def test_export_serves_the_resolved_environment(tmp_path: Path) -> None:
 
 
 async def test_export_slugs_stay_inside_the_output_directory(tmp_path: Path) -> None:
-    from hud.integrations.harbor._export import _safe_component
+    from integrations.harbor._export import _safe_component
 
     assert "/" not in _safe_component("suite/fix")
     assert _safe_component("../escape") == "escape"

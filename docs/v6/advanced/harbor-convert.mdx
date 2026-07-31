@@ -10,11 +10,11 @@ task dirs - is a *frontend* that loads into the same primitives (`Environment`,
 roundtrip to run foreign tasks. Each one implements
 [`hud.environment.Integration`](https://github.com/hud-evals/hud-python/blob/main/hud/environment/integration.py)
 - `load(ref) -> Taskset` and `environment(ref) -> Environment` - and ships as
-`hud.integrations.<format>`.
+the repository's `integrations/<format>`.
 
 Harbor's agent works *inside* its container, so its environment constructor is
 only meaningful in there. `adapt()` packages it: one HUD-speaking image per
-distinct build context, whose CMD serves `hud.integrations.harbor:environment`.
+distinct build context, whose CMD serves `harbor:environment`.
 The same rows then run on any container placement.
 
 ## Prerequisites
@@ -29,7 +29,7 @@ directly - one row per task dir (`id` = the dir name), sharing one declarative
 `Environment` per distinct `environment/` build context:
 
 ```python
-from hud.integrations import harbor
+from integrations import harbor
 
 assert harbor.detect("./terminal-bench")
 taskset = harbor.load("./terminal-bench")
@@ -86,7 +86,7 @@ that must run as *different* users (one image, one `USER`).
 `env.py`) into self-contained Harbor task folders:
 
 ```python
-from hud.integrations.harbor import export
+from integrations.harbor import export
 
 created = await export("tasks.py", "harbor_tasks")
 ```

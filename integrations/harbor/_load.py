@@ -137,7 +137,7 @@ def load(path: str | Path, *, images: dict[str, str] | None = None) -> Taskset:
     the dataset name. Each row carries the task's declared launch
     requirements (:func:`runtime_config`: cpu/memory/gpu and time budgets),
     plus the adapted image ref once
-    :func:`~hud.integrations.harbor.adapt` has produced it, so it runs on any
+    :func:`~harbor.adapt` has produced it, so it runs on any
     container placement::
 
         await harbor.adapt(path)
@@ -391,7 +391,7 @@ def grouped(root: str | Path) -> list[tuple[str, list[Path]]]:
 
     One env name per group (the dataset slug, ``-gN``-suffixed when there are
     several): the join key between :func:`load`'s rows and
-    :func:`~hud.integrations.harbor.adapt`'s images.
+    :func:`~harbor.adapt`'s images.
     """
     resolved = Path(root).resolve()
     dataset_name = resolved.parent.name if is_harbor_task(resolved) else resolved.name
