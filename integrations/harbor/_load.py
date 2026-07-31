@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from hud.environment.egress import ANY_HOST
 from hud.eval import Task, Taskset
 from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeResources
 from hud.utils.naming import normalize_environment_name
@@ -139,7 +140,11 @@ class TaskConfig(BaseModel):
         if mode == "no-network":
             return frozenset()
         if mode != "allowlist":
-            return None
+            # Public still means every host, but reached the same way as any
+            # other policy: through the workspace's own way out. Sharing the
+            # substrate's network would make "public" mean the substrate's
+            # services too — the channel that grades the rollout among them.
+            return frozenset({ANY_HOST})
         declared = [*self.environment.allowed_hosts, *self.phase(role).allowed_hosts]
         return frozenset(declared)
 

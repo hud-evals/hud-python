@@ -20,6 +20,7 @@ obvious error.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import http.client
 import logging
@@ -75,6 +76,7 @@ async def bridged(reader, writer):
 
 async def main():
     server = await asyncio.start_server(bridged, "127.0.0.1", int(sys.argv[2]))
+    print("ready", flush=True)
     async with server:
         await server.serve_forever()
 
@@ -200,7 +202,7 @@ class Egress:
         self.allowed = frozenset(allowed)
         self._server: _UnixProxyServer | None = None
         self._thread: threading.Thread | None = None
-        self._bridge: subprocess.Popen[bytes] | None = None
+        self._bridge: asyncio.subprocess.Process | None = None
 
     def start(self) -> None:
         """Serve the policy on the unix socket. Idempotent."""
@@ -215,15 +217,19 @@ class Egress:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
-    def attach(self, pid: int, port: int = BRIDGE_PORT) -> None:
+    async def attach(self, pid: int, port: int = BRIDGE_PORT) -> None:
         """Offer the proxy on the loopback of *pid*'s network namespace.
 
         The bridge joins that namespace and nothing else, so it keeps this
         filesystem — which is how it reaches a socket the workspace cannot.
+
+        Returns once it is accepting rather than once it is spawned: a session
+        starting in between finds the port refused, which a task opening with
+        a package install reads as a network that does not work.
         """
         nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
-        self._bridge = subprocess.Popen(
-            [
+        self._bridge = await asyncio.create_subprocess_exec(
+            *[
                 nsenter,
                 "--target",
                 str(pid),
@@ -237,9 +243,14 @@ class Egress:
                 self.socket_path,
                 str(port),
             ],
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
+        assert self._bridge.stdout is not None
+        try:
+            await asyncio.wait_for(self._bridge.stdout.readline(), 30.0)
+        except TimeoutError:
+            LOGGER.warning("the workspace's way out did not come up in time")
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
         """Proxy variables for a session, in the spellings clients read."""
@@ -256,7 +267,8 @@ class Egress:
     def stop(self) -> None:
         """Take the route away."""
         if self._bridge is not None:
-            self._bridge.kill()
+            with contextlib.suppress(ProcessLookupError):
+                self._bridge.kill()
             self._bridge = None
         if self._server is not None:
             self._server.shutdown()

@@ -575,7 +575,7 @@ def _register(env: Environment, task_dir: Path, workdir: Path, workspace: Worksp
         _hide_grading_dirs()
         try:
             answer = yield (task_dir / "instruction.md").read_text(encoding="utf-8")
-            yield await _grade(task_dir, workdir, answer)
+            yield await _grade(task_dir, workdir, answer, workspace)
         finally:
             _hide_grading_dirs()
             # Harbor's agent phase is one continuous session, so a service the
@@ -630,7 +630,9 @@ def _reset_dir(path: Path) -> None:
             shutil.rmtree(child)
 
 
-async def _grade(task_dir: Path, workdir: Path, answer: Any) -> dict[str, Any]:
+async def _grade(
+    task_dir: Path, workdir: Path, answer: Any, workspace: Workspace | None = None
+) -> dict[str, Any]:
     logs = LOGS
     # The agent shares the container, so restore the verifier from the baked
     # (masked) copy before running it.
@@ -666,6 +668,32 @@ async def _grade(task_dir: Path, workdir: Path, answer: Any) -> dict[str, Any]:
             "--clear-groups",
             *argv,
         ]
+    joins_workspace_net = (
+        workspace is not None and workspace.owns_netns and config.network("verifier")
+    )
+    if joins_workspace_net and (sandbox := await workspace.sandbox_pid()) is not None:  # type: ignore[union-attr]
+        # Harbor grades a service by talking to it — telnet to the VM the agent
+        # booted, git clone from the server it configured. Those listen in the
+        # workspace's network now, so the verifier is run there: its user and
+        # network namespaces, and nothing else. Keeping this mount namespace is
+        # the point — /tests and the verdict are here, where the workspace
+        # cannot reach them — and the ids map through, so it stays able to
+        # chown what it untars.
+        # Behind the workspace's boundary now, so it takes the workspace's way
+        # out: Harbor's verifiers commonly install their own tooling first.
+        verifier_env.update(workspace.egress_environment())  # type: ignore[union-attr]
+        nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
+        argv = [
+            nsenter,
+            "--target",
+            str(sandbox),
+            "--user",
+            "--net",
+            "--preserve-credentials",
+            "--",
+            *argv,
+        ]
+
     severed = not config.network("verifier")
     if severed and (bwrap := usable_bwrap()) is None:
         raise RuntimeError(

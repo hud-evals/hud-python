@@ -424,6 +424,16 @@ class Workspace:
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
 
+    def egress_environment(self) -> dict[str, str]:
+        """Proxy variables for a process joining this workspace's network.
+
+        Anything entering it is behind the same boundary as a session and has
+        the same one way out — including the verifier, which reaches a service
+        the agent started by joining, and would otherwise find a network that
+        refuses everything it tries to install.
+        """
+        return self._egress.environment() if self._egress is not None else {}
+
     @property
     def owns_netns(self) -> bool:
         """Whether the workspace has a network of its own.
@@ -851,7 +861,7 @@ class Workspace:
         if self.allowed_hosts:
             self._egress = Egress(self._credentials_dir() / "egress.sock", self.allowed_hosts)
             self._egress.start()
-            self._egress.attach(pid)
+            await self._egress.attach(pid)
         return pid
 
     async def _sandbox_error(self) -> str:

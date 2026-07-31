@@ -275,7 +275,9 @@ def test_declared_workspace_policy_is_translated(tmp_path) -> None:
         "env": {"TOKEN": "abc"},
         "agent_env": {},
         "workdir": "/srv/app",
-        "allowed_hosts": None,
+        # Public, but reached through the workspace's own way out rather than
+        # by sharing the substrate's network.
+        "allowed_hosts": ["*"],
         "user": None,
         # Per phase, because Harbor's are: a task may restrict the agent and
         # still verify as root.
