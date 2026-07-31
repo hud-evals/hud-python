@@ -668,32 +668,6 @@ async def _grade(
             "--clear-groups",
             *argv,
         ]
-    joins_workspace_net = (
-        workspace is not None and workspace.owns_netns and config.network("verifier")
-    )
-    if joins_workspace_net and (sandbox := await workspace.sandbox_pid()) is not None:  # type: ignore[union-attr]
-        # Harbor grades a service by talking to it — telnet to the VM the agent
-        # booted, git clone from the server it configured. Those listen in the
-        # workspace's network now, so the verifier is run there: its user and
-        # network namespaces, and nothing else. Keeping this mount namespace is
-        # the point — /tests and the verdict are here, where the workspace
-        # cannot reach them — and the ids map through, so it stays able to
-        # chown what it untars.
-        # Behind the workspace's boundary now, so it takes the workspace's way
-        # out: Harbor's verifiers commonly install their own tooling first.
-        verifier_env.update(workspace.egress_environment())  # type: ignore[union-attr]
-        nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
-        argv = [
-            nsenter,
-            "--target",
-            str(sandbox),
-            "--user",
-            "--net",
-            "--preserve-credentials",
-            "--",
-            *argv,
-        ]
-
     severed = not config.network("verifier")
     if severed and (bwrap := usable_bwrap()) is None:
         raise RuntimeError(
@@ -762,7 +736,36 @@ async def _grade(
                 if stray != -1:
                     os.close(stray)
 
-    return await _grade_with_verifier(config, logs, answer, run_tests)
+    if workspace is None or severed or not workspace.owns_netns:
+        return await _grade_with_verifier(config, logs, answer, run_tests)
+    sandbox = await workspace.sandbox_pid()
+    if sandbox is None:
+        return await _grade_with_verifier(config, logs, answer, run_tests)
+
+    # Harbor grades a service by talking to it — telnet to the VM the agent
+    # booted, git clone from the server it configured. Those listen in the
+    # workspace's network now, so the verifier is run there: its user and
+    # network namespaces, and nothing else. Keeping this mount namespace is the
+    # point — /tests and the verdict are here, where the workspace cannot reach
+    # them — and the ids map through, so it stays able to chown what it untars.
+    async with workspace.visiting(config.allowed_hosts("verifier")) as visitor_env:
+        # Behind the workspace's boundary now, so it needs a way out — one of
+        # its own, since Harbor's verifiers commonly install their own tooling
+        # first and the hosts they may reach are the ones the *verifier*
+        # declared, not the ones the agent was held to.
+        verifier_env.update(visitor_env)
+        nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
+        argv = [
+            nsenter,
+            "--target",
+            str(sandbox),
+            "--user",
+            "--net",
+            "--preserve-credentials",
+            "--",
+            *argv,
+        ]
+        return await _grade_with_verifier(config, logs, answer, run_tests)
 
 
 # ─── verifier grading and docker plumbing ───────────────────────────────

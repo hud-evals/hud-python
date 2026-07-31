@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
-from hud.environment.egress import Egress, Peer, hosts_text
+from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
 from hud.utils.process import create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -28,7 +28,7 @@ if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import termios
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping, Sequence
+    from collections.abc import AsyncIterator, Collection, Mapping, Sequence
 
     from hud.capabilities import Capability
 
@@ -435,15 +435,35 @@ class Workspace:
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
 
-    def egress_environment(self) -> dict[str, str]:
-        """Proxy variables for a process joining this workspace's network.
+    @contextlib.asynccontextmanager
+    async def visiting(self, allowed: Collection[str]) -> AsyncIterator[dict[str, str]]:
+        """A way out for a process joining this network without being a session.
 
-        Anything entering it is behind the same boundary as a session and has
-        the same one way out — including the verifier, which reaches a service
-        the agent started by joining, and would otherwise find a network that
-        refuses everything it tries to install.
+        Yields the proxy variables it should run under. A visitor is behind the
+        same boundary as a session — it is in the same namespace — but it is
+        not the party the sessions' policy was written about: a grader reaching
+        a service the agent started answers to what *it* was allowed, not to
+        what the agent was. Sharing the sessions' way out instead holds it to
+        the agent's allowlist, which for a grader that installs its own tooling
+        first means it fails before it asserts anything.
+
+        Open only for as long as the visitor runs, and on a port of its own.
+        The agent's sessions share this network, so a second and more permissive
+        way out that stood open would be one the agent could simply take.
         """
-        return self._egress.environment() if self._egress is not None else {}
+        pid = await self.sandbox_pid()
+        if pid is None or not self.owns_netns or not allowed:
+            yield {}
+            return
+        egress = Egress(self._credentials_dir() / "visit", allowed)
+        egress.start()
+        try:
+            await egress.attach(pid, VISITOR_PORT)
+            # The peers are the workspace's, bound by its own bridge: a visitor
+            # reaches them at those addresses, so they stay out of its proxy.
+            yield proxy_environment(VISITOR_PORT, self.peers)
+        finally:
+            egress.stop()
 
     @property
     def owns_netns(self) -> bool:

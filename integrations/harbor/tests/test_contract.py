@@ -278,6 +278,8 @@ def test_declared_workspace_policy_is_translated(tmp_path) -> None:
         # Public, but reached through the workspace's own way out rather than
         # by sharing the substrate's network.
         "allowed_hosts": ["*"],
+        # And the verifier's are its own, not a copy of the agent's.
+        "verifier_allowed_hosts": ["*"],
         "user": None,
         # Per phase, because Harbor's are: a task may restrict the agent and
         # still verify as root.
@@ -286,29 +288,33 @@ def test_declared_workspace_policy_is_translated(tmp_path) -> None:
     }
 
 
-def test_no_network_is_honored_and_allowlist_refused(tmp_path) -> None:
+def test_each_phase_is_held_to_the_hosts_it_declared(tmp_path) -> None:
+    """An allowlist written for one phase must not become the other's. The
+    agent's applied to the verifier is a grader that cannot install its own
+    tooling — a zero the task's author never wrote."""
     isolated = _write_harbor_task(tmp_path, "isolated")
     (isolated / "task.toml").write_text(
         'schema_version = "1.3"\n\n[task]\nname = "demo/isolated"\n\n'
         '[environment]\nnetwork_mode = "no-network"\n',
         encoding="utf-8",
     )
-    filtered = _write_harbor_task(tmp_path, "filtered")
-    (filtered / "task.toml").write_text(
-        'schema_version = "1.3"\n\n[task]\nname = "demo/filtered"\n\n'
-        '[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n',
-        encoding="utf-8",
-    )
-
-    # no-network is deliverable (a sandboxed workspace). An allowlist is too,
-    # but only for the agent: its workspace has an egress to apply it to. The
-    # verifier runs on the substrate's own network, and an allowlist declared
-    # for the environment is one the verifier inherits.
     assert harbor_load.unsupported_features(isolated) == []
     assert harbor_load.workspace_policy(isolated)["network"] is False
     assert harbor_load.workspace_policy(isolated)["allowed_hosts"] == []
-    assert "allowlist" in " ".join(harbor_load.unsupported_features(filtered))
+    assert harbor_load.workspace_policy(isolated)["verifier_allowed_hosts"] == []
 
+    # Declared for the whole environment: both phases named those hosts.
+    shared = _write_harbor_task(tmp_path, "shared")
+    (shared / "task.toml").write_text(
+        'schema_version = "1.3"\n\n[task]\nname = "demo/shared"\n\n'
+        '[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n',
+        encoding="utf-8",
+    )
+    assert harbor_load.unsupported_features(shared) == []
+    assert harbor_load.workspace_policy(shared)["allowed_hosts"] == ["pypi.org"]
+    assert harbor_load.workspace_policy(shared)["verifier_allowed_hosts"] == ["pypi.org"]
+
+    # Declared for the agent alone: the verifier said nothing, so it is public.
     agent_only = _write_harbor_task(tmp_path, "agent-only")
     (agent_only / "task.toml").write_text(
         'schema_version = "1.3"\n\n[task]\nname = "demo/agent-only"\n\n'
@@ -317,6 +323,7 @@ def test_no_network_is_honored_and_allowlist_refused(tmp_path) -> None:
     )
     assert harbor_load.unsupported_features(agent_only) == []
     assert harbor_load.workspace_policy(agent_only)["allowed_hosts"] == ["pypi.org"]
+    assert harbor_load.workspace_policy(agent_only)["verifier_allowed_hosts"] == ["*"]
 
 
 def test_tasks_with_different_policies_get_separate_envs(tmp_path) -> None:
@@ -627,7 +634,6 @@ def test_final_stage_reads_only_what_the_shipped_image_declares() -> None:
 @pytest.mark.parametrize(
     ("declaration", "expected"),
     [
-        ('[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n', "allowlist"),
         ('[environment.healthcheck]\ncommand = "curl -sf localhost/health"\n', "healthcheck"),
         (
             '[[environment.mcp_servers]]\nname = "db"\nurl = "http://localhost:9000/sse"\n',
@@ -658,11 +664,11 @@ async def test_a_refused_task_never_reaches_a_build_context(tmp_path) -> None:
     task = _write_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text(
         'schema_version = "1.3"\n\n[task]\nname = "demo/task-a"\n\n'
-        '[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n',
+        '[environment.healthcheck]\ncommand = "curl -sf localhost/health"\n',
         encoding="utf-8",
     )
 
-    with pytest.raises(NotImplementedError, match="allowlist"):
+    with pytest.raises(NotImplementedError, match="healthcheck"):
         await harbor.adapt(tmp_path, build=False)
 
 

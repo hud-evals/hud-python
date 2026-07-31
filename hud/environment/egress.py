@@ -69,6 +69,13 @@ _HOP_BY_HOP = frozenset(
 #: an egress proxy is ordinary infrastructure, unlike a control channel.
 BRIDGE_PORT = 3128
 
+#: Where a visitor's way out is offered instead. A visitor joins the
+#: workspace's network without being one of its sessions, and is held to its
+#: own policy rather than the sessions' — so this is a second proxy, on a
+#: second port, and it exists only while the visitor is there. Standing open
+#: it would be a route the agent could take in place of the one it was given.
+VISITOR_PORT = 3129
+
 #: Run inside the workspace's network namespace, one listener per route out.
 #: Its argument is ``[[host, port, socket], ...]``; every listener is bound
 #: before it says it is ready, since a session that starts in between finds
@@ -169,6 +176,29 @@ def hosts_text(peers: Sequence[Peer], base: str) -> str:
     addresses = bind_addresses(peers)
     lines = "".join(f"{addresses[peer.name]}\t{peer.name}\n" for peer in peers)
     return f"{base.rstrip(chr(10))}\n{lines}" if base.strip() else lines
+
+
+def proxy_environment(port: int, peers: Sequence[Peer] = ()) -> dict[str, str]:
+    """Proxy variables for a process on a workspace's loopback.
+
+    In the spellings clients read, and with the peers left out of them: a peer
+    is reached directly, on the loopback the bridge binds it to, because sent
+    through the proxy it would be resolved on the substrate, where the name
+    means nothing and the address is something else. Listed one by one rather
+    than as 127.0.0.0/8, which most clients (curl among them) match literally
+    instead of as a network.
+    """
+    url = f"http://127.0.0.1:{port}"
+    addresses = bind_addresses(peers)
+    bypass = ",".join(dict.fromkeys(["127.0.0.1", "localhost", *addresses, *addresses.values()]))
+    return {
+        "http_proxy": url,
+        "https_proxy": url,
+        "HTTP_PROXY": url,
+        "HTTPS_PROXY": url,
+        "no_proxy": bypass,
+        "NO_PROXY": bypass,
+    }
 
 
 def permitted(host: str | None, allowed: Collection[str]) -> bool:
@@ -402,32 +432,13 @@ class Egress:
             LOGGER.warning("the workspace's ways out did not come up in time")
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
-        """Proxy variables for a session, in the spellings clients read.
+        """Proxy variables for what this serves.
 
         Empty where no host is permitted: pointing a client at a proxy that
         is not there turns "this task has no network" into a connection error
         on the first hop, which reads as a broken one instead.
         """
-        if not self.allowed:
-            return {}
-        url = f"http://127.0.0.1:{port}"
-        # Peers are reached directly, on the loopback the bridge binds them
-        # to; sent through the proxy instead, they would be resolved out here,
-        # where the name means nothing and the address is something else.
-        # Listed one by one rather than as 127.0.0.0/8, which most clients
-        # (curl among them) match literally instead of as a network.
-        addresses = bind_addresses(self.peers)
-        bypass = ",".join(
-            dict.fromkeys(["127.0.0.1", "localhost", *addresses, *addresses.values()])
-        )
-        return {
-            "http_proxy": url,
-            "https_proxy": url,
-            "HTTP_PROXY": url,
-            "HTTPS_PROXY": url,
-            "no_proxy": bypass,
-            "NO_PROXY": bypass,
-        }
+        return proxy_environment(port, self.peers) if self.allowed else {}
 
     def stop(self) -> None:
         """Take the routes away."""
@@ -446,9 +457,11 @@ class Egress:
 __all__ = [
     "ANY_HOST",
     "BRIDGE_PORT",
+    "VISITOR_PORT",
     "Egress",
     "Peer",
     "bind_addresses",
     "hosts_text",
     "permitted",
+    "proxy_environment",
 ]
