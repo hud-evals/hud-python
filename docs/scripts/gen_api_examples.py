@@ -60,7 +60,7 @@ def load_spec(refresh: bool = False) -> dict[str, Any]:
         url = f"{BASE_URL}/openapi.json"
         print(f"fetching {url}")
         try:
-            with urllib.request.urlopen(url, timeout=30) as response:
+            with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310
                 SPEC_PATH.write_bytes(response.read())
         except OSError as exc:
             raise SpecError(f"could not fetch {url}: {exc}") from None
@@ -138,9 +138,7 @@ def sample(spec: dict[str, Any], schema: dict[str, Any], depth: int = 0) -> Any:
         properties: dict[str, Any] = resolved.get("properties", {})
         required = [k for k in resolved.get("required", []) if k in properties]
         ordered = required + [k for k in properties if k not in required]
-        return {
-            key: sample(spec, properties[key], depth + 1) for key in ordered[:MAX_PROPERTIES]
-        }
+        return {key: sample(spec, properties[key], depth + 1) for key in ordered[:MAX_PROPERTIES]}
     if kind == "array":
         if depth >= MAX_DEPTH:
             return []
@@ -189,9 +187,8 @@ def parameter_rows(spec: dict[str, Any], op: dict[str, Any]) -> list[str]:
         if default is not None and "default" not in notes.lower():
             notes = f"{notes} Defaults to `{default}`." if notes else f"Defaults to `{default}`."
         flag = "yes" if param.get("required") else ""
-        rows.append(
-            f"| `{param['name']}` | {param['in']} | `{type_name(spec, schema)}` | {flag} | {notes} |"
-        )
+        type_col = type_name(spec, schema)
+        rows.append(f"| `{param['name']}` | {param['in']} | `{type_col}` | {flag} | {notes} |")
     return rows
 
 
@@ -258,10 +255,10 @@ def render(spec: dict[str, Any], method: str, path: str) -> str:
         parts.append(
             "\n".join(
                 [
-                "| Parameter | In | Type | Required | Description |",
-                "| --- | --- | --- | --- | --- |",
-            ]
-                + rows
+                    "| Parameter | In | Type | Required | Description |",
+                    "| --- | --- | --- | --- | --- |",
+                    *rows,
+                ]
             )
         )
 
@@ -273,9 +270,7 @@ def render(spec: dict[str, Any], method: str, path: str) -> str:
         if payload is None:
             parts.append(f"Returns `{code}` with an empty body.")
         else:
-            parts.append(
-                f"```json Response {code}\n" + json.dumps(payload, indent=2) + "\n```"
-            )
+            parts.append(f"```json Response {code}\n" + json.dumps(payload, indent=2) + "\n```")
     return "\n\n".join(parts)
 
 
@@ -297,9 +292,12 @@ def main() -> int:
         covered = set(documented(page))
         for path, methods in spec["paths"].items():
             for method in methods:
-                if method.upper() in ("GET", "POST", "PATCH", "PUT", "DELETE"):
-                    if (method.upper(), path) not in covered:
-                        print(f"{method.upper()} {path}")
+                verb = method.upper()
+                if (
+                    verb in ("GET", "POST", "PATCH", "PUT", "DELETE")
+                    and (verb, path) not in covered
+                ):
+                    print(f"{verb} {path}")
         return 0
 
     def replace(match: re.Match[str]) -> str:
