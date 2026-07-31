@@ -12,6 +12,16 @@ from typing import Any
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
 
 
+@dataclass(frozen=True, slots=True)
+class ProcessResult:
+    """Captured outcome of a managed process group."""
+
+    returncode: int | None
+    stdout: bytes
+    stderr: bytes
+    timed_out: bool = False
+
+
 @dataclass(slots=True)
 class ProcessGroup:
     """Subprocess whose descendants share a teardown boundary.
@@ -74,6 +84,19 @@ class ProcessGroup:
         finally:
             await self.terminate()
         return result
+
+    async def complete(
+        self,
+        input: bytes | None = None,
+        *,
+        max_wait: float | None = None,
+    ) -> ProcessResult:
+        """Capture output and teardown, reporting timeout as process data."""
+        try:
+            stdout, stderr = await self.communicate(input, max_wait=max_wait)
+        except TimeoutError:
+            return ProcessResult(self.returncode, b"", b"", timed_out=True)
+        return ProcessResult(self.returncode, stdout, stderr)
 
     async def terminate(self) -> None:
         await _terminate_process_group(

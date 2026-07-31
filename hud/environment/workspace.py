@@ -773,7 +773,7 @@ class Workspace:
     def enter_argv(
         self,
         pid: int,
-        command: str | None = None,
+        command: str | list[str] | None = None,
         *,
         env: Mapping[str, str] | None = None,
         identity: int | None | Literal["workspace"] = "workspace",

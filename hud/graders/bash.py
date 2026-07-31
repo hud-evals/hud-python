@@ -26,7 +26,7 @@ class BashGrader(Grader):
         cls,
         command: str,
         cwd: str | None = None,
-        timeout_seconds: int | None = None,
+        timeout_seconds: float | None = None,
         **kwargs: Any,
     ) -> SubScore:
         """Run ``command`` via ``bash -lc`` and score by exit code."""
@@ -37,29 +37,13 @@ class BashGrader(Grader):
             "Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout_seconds
         )
         try:
-            proc = await create_process_group_exec(
+            process = await create_process_group_exec(
                 "/bin/bash",
                 "-lc",
                 command,
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_bytes, stderr_bytes = await proc.communicate(max_wait=timeout_seconds)
-            stdout = stdout_bytes.decode(errors="replace")
-            stderr = stderr_bytes.decode(errors="replace")
-            returncode = proc.returncode if proc.returncode is not None else 1
-        except TimeoutError:
-            return SubScore(
-                name=cls.name,
-                value=0.0,
-                info={
-                    "exit_code": None,
-                    "stdout": "",
-                    "stderr": "",
-                    "timed_out": True,
-                    "timeout": timeout_seconds,
-                },
             )
         except FileNotFoundError:
             return SubScore(
@@ -72,7 +56,23 @@ class BashGrader(Grader):
                     "timed_out": False,
                 },
             )
+        result = await process.complete(max_wait=timeout_seconds)
+        if result.timed_out:
+            return SubScore(
+                name=cls.name,
+                value=0.0,
+                info={
+                    "exit_code": None,
+                    "stdout": "",
+                    "stderr": "",
+                    "timed_out": True,
+                    "timeout": timeout_seconds,
+                },
+            )
 
+        stdout = result.stdout.decode(errors="replace")
+        stderr = result.stderr.decode(errors="replace")
+        returncode = result.returncode if result.returncode is not None else 1
         return SubScore(
             name=cls.name,
             value=1.0 if returncode == 0 else 0.0,
