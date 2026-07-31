@@ -70,33 +70,45 @@ class ProcessGroup:
             wait_task.cancel()
             await asyncio.gather(wait_task, return_exceptions=True)
 
-    async def communicate(
-        self,
-        input: bytes | None = None,
-        *,
-        max_wait: float | None = None,
-    ) -> tuple[bytes, bytes]:
-        try:
-            if max_wait is None:
-                result = await self.process.communicate(input=input)
-            else:
-                result = await asyncio.wait_for(self.process.communicate(input=input), max_wait)
-        finally:
-            await self.terminate()
-        return result
-
     async def complete(
         self,
-        input: bytes | None = None,
         *,
         max_wait: float | None = None,
     ) -> ProcessResult:
-        """Capture output and teardown, reporting timeout as process data."""
+        """Capture output and teardown, reporting timeout as process data.
+
+        The deadline follows the process leader rather than pipe EOF: a
+        background child may inherit the pipes after the leader has finished.
+        """
+        stdout_read = (
+            asyncio.create_task(self.process.stdout.read())
+            if self.process.stdout is not None
+            else None
+        )
+        stderr_read = (
+            asyncio.create_task(self.process.stderr.read())
+            if self.process.stderr is not None
+            else None
+        )
+        readers = tuple(reader for reader in (stdout_read, stderr_read) if reader is not None)
+        timed_out = False
         try:
-            stdout, stderr = await self.communicate(input, max_wait=max_wait)
-        except TimeoutError:
-            return ProcessResult(self.returncode, b"", b"", timed_out=True)
-        return ProcessResult(self.returncode, stdout, stderr)
+            try:
+                await asyncio.wait_for(self.wait(), max_wait)
+            except TimeoutError:
+                timed_out = True
+            returncode = self.returncode
+        finally:
+            try:
+                await self.terminate()
+            finally:
+                await asyncio.gather(*readers)
+        return ProcessResult(
+            returncode,
+            stdout_read.result() if stdout_read is not None else b"",
+            stderr_read.result() if stderr_read is not None else b"",
+            timed_out,
+        )
 
     async def terminate(self) -> None:
         await _terminate_process_group(

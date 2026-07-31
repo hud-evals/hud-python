@@ -420,6 +420,7 @@ async def test_run_uses_the_shared_sandbox_and_visitor_egress(
 
     assert result.stdout == b"passed"
     complete.assert_awaited_once_with(max_wait=12)
+    assert spawn.await_args is not None
     argv, kwargs = spawn.await_args
     assert argv[argv.index("--target") + 1] == "7"
     assert "HTTPS_PROXY=http://visitor" in argv
@@ -449,6 +450,7 @@ async def test_run_can_use_a_fresh_no_network_sandbox(
     assert result.stdout == b"isolated"
     complete.assert_awaited_once_with(max_wait=5)
     install_identity_map.assert_awaited_once()
+    assert spawn.await_args is not None
     argv, kwargs = spawn.await_args
     assert "--unshare-net" in argv
     assert len(kwargs["pass_fds"]) == 2
