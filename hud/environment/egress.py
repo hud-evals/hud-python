@@ -1,16 +1,18 @@
-"""The one way out of a bounded workspace, and the policy on it.
+"""The ways out of a bounded workspace, and the policy on them.
 
 A workspace with its own network namespace has no route anywhere — not to the
 internet, and not to whatever else the substrate is running, including the
-control channel that grades it. Egress is given back deliberately, through a
-proxy that sees every connection and applies the task's declared policy.
+control channel that grades it. Two kinds of route are given back
+deliberately: hosts on the internet, through a proxy that sees every
+connection and applies the task's declared policy, and :class:`Peer` services
+the environment itself runs, each forwarded to the address the task expects.
 
-The proxy listens on a unix socket, so reaching it is a question of the
-filesystem rather than the network: a bridge runs in the workspace's *network*
-namespace while keeping the substrate's *mount* namespace, so it can see the
-socket the workspace itself cannot, and offers it as an ordinary proxy port on
-the workspace's loopback. Nothing is bound into the workspace, and nothing in
-it can address the substrate.
+Both listen on unix sockets, so reaching them is a question of the filesystem
+rather than the network: a bridge runs in the workspace's *network* namespace
+while keeping the substrate's *mount* namespace, so it can see sockets the
+workspace itself cannot, and offers them as ordinary ports on the workspace's
+loopback. Nothing is bound into the workspace, and nothing in it can address
+the substrate except through one of these.
 
 Request parsing is the standard library's. A hand-rolled request-line parser
 gets keep-alive, chunked bodies and header framing wrong in ways that surface
@@ -23,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import http.client
+import json
 import logging
 import os
 import select
@@ -33,12 +36,13 @@ import subprocess
 import sys
 import threading
 import urllib.parse
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
-    from pathlib import Path
+    from collections.abc import Collection, Sequence
 
 LOGGER = logging.getLogger("hud.environment.egress")
 
@@ -54,8 +58,12 @@ _HOP_BY_HOP = frozenset(
 #: an egress proxy is ordinary infrastructure, unlike a control channel.
 BRIDGE_PORT = 3128
 
+#: Run inside the workspace's network namespace, one listener per route out.
+#: Its argument is ``[[host, port, socket], ...]``; every listener is bound
+#: before it says it is ready, since a session that starts in between finds
+#: the port refused.
 _BRIDGE = """
-import asyncio, sys
+import asyncio, json, sys
 
 async def splice(reader, writer):
     try:
@@ -70,18 +78,86 @@ async def splice(reader, writer):
         except Exception:
             pass
 
-async def bridged(reader, writer):
-    up_reader, up_writer = await asyncio.open_unix_connection(sys.argv[1])
-    await asyncio.gather(splice(reader, up_writer), splice(up_reader, writer))
+def bridged(path):
+    async def handle(reader, writer):
+        try:
+            up_reader, up_writer = await asyncio.open_unix_connection(path)
+        except OSError:
+            writer.close()
+            return
+        await asyncio.gather(splice(reader, up_writer), splice(up_reader, writer))
+    return handle
 
 async def main():
-    server = await asyncio.start_server(bridged, "127.0.0.1", int(sys.argv[2]))
+    servers = [
+        await asyncio.start_server(bridged(path), host, port)
+        for host, port, path in json.loads(sys.argv[1])
+    ]
     print("ready", flush=True)
-    async with server:
-        await server.serve_forever()
+    await asyncio.gather(*(server.serve_forever() for server in servers))
 
 asyncio.run(main())
 """
+
+
+@dataclass(frozen=True, slots=True)
+class Peer:
+    """A substrate service a bounded workspace is allowed to reach.
+
+    A workspace with its own network cannot address the substrate at all —
+    that is what makes it bounded — so a service the environment runs is as
+    unreachable from it as the control channel. A peer hands one of them back,
+    at the address the task expects rather than wherever it happens to listen:
+    ``name`` and ``port`` are what the workspace calls it, ``target`` where it
+    actually answers outside (its own port on the substrate's loopback, unless
+    something else is said).
+    """
+
+    name: str
+    port: int
+    target: tuple[str, int] | None = None
+
+    @property
+    def address(self) -> tuple[str, int]:
+        """Where the service actually listens, on the substrate."""
+        return self.target or ("127.0.0.1", self.port)
+
+
+def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
+    """Which loopback address each peer answers on inside the workspace.
+
+    ``127.0.0.1`` wherever the port is free, because a task that says
+    ``localhost:6379`` means that one. Two peers cannot both hold a port
+    there, so the second moves down 127.0.0.0/8 and is reached by its name —
+    which is how a task naming several services addresses them anyway.
+    """
+    taken: set[tuple[str, int]] = set()
+    addresses: dict[str, str] = {}
+    for peer in peers:
+        if peer.name in addresses:
+            raise ValueError(f"two peers are called {peer.name!r}")
+        for index in range(1, 256):
+            host = f"127.0.0.{index}"
+            if (host, peer.port) not in taken:
+                break
+        else:
+            raise ValueError(f"too many peers on port {peer.port}")
+        taken.add((host, peer.port))
+        addresses[peer.name] = host
+    return addresses
+
+
+def hosts_text(peers: Sequence[Peer], base: str) -> str:
+    """*base* — the substrate's ``/etc/hosts`` — plus a line per peer.
+
+    Names resolve for what runs in the workspace's *mount* namespace, which
+    is its sessions. Anything joining only the network namespace (the Harbor
+    verifier does, to reach a service the agent started) still reaches a peer
+    at its address, but not by its name.
+    """
+    addresses = bind_addresses(peers)
+    lines = "".join(f"{addresses[peer.name]}\t{peer.name}\n" for peer in peers)
+    return f"{base.rstrip(chr(10))}\n{lines}" if base.strip() else lines
 
 
 def permitted(host: str | None, allowed: Collection[str]) -> bool:
@@ -91,6 +167,23 @@ def permitted(host: str | None, allowed: Collection[str]) -> bool:
     if ANY_HOST in allowed:
         return True
     return any(host == entry or host.endswith(f".{entry}") for entry in allowed)
+
+
+def _relay(one: socket.socket, other: socket.socket, timeout: float = 300.0) -> None:
+    """Copy bytes between two connected sockets until either end is done."""
+    while True:
+        ready, _, _ = select.select([one, other], [], [], timeout)
+        if not ready:
+            return
+        for source in ready:
+            target = other if source is one else one
+            try:
+                data = source.recv(65536)
+                if not data:
+                    return
+                target.sendall(data)
+            except OSError:
+                return
 
 
 class _Proxy(BaseHTTPRequestHandler):
@@ -120,21 +213,8 @@ class _Proxy(BaseHTTPRequestHandler):
             return
         self.send_response(200, "Connection established")
         self.end_headers()
-        client = self.connection
         with upstream:
-            while True:
-                ready, _, _ = select.select([client, upstream], [], [], 300)
-                if not ready:
-                    return
-                for source in ready:
-                    target = upstream if source is client else client
-                    try:
-                        data = source.recv(65536)
-                        if not data:
-                            return
-                        target.sendall(data)
-                    except OSError:
-                        return
+            _relay(self.connection, upstream)
 
     def _forward(self) -> None:
         parts = urllib.parse.urlsplit(self.path)
@@ -180,7 +260,21 @@ class _Proxy(BaseHTTPRequestHandler):
     do_OPTIONS = _forward
 
 
-class _UnixProxyServer(socketserver.ThreadingUnixStreamServer):
+class _Forward(socketserver.BaseRequestHandler):
+    """One peer's socket: everything on it goes to that service, unread."""
+
+    target: tuple[str, int] = ("127.0.0.1", 0)
+
+    def handle(self) -> None:
+        try:
+            upstream = socket.create_connection(self.target, timeout=15)
+        except OSError:
+            return
+        with upstream:
+            _relay(self.request, upstream)
+
+
+class _UnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
     def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
@@ -190,43 +284,88 @@ class _UnixProxyServer(socketserver.ThreadingUnixStreamServer):
 
 
 class Egress:
-    """A workspace's route out, and the policy applied to it.
+    """A workspace's routes out, and the policy applied to them.
 
-    ``allowed`` is the set of hosts a session may reach — ``{ANY_HOST}`` for
-    all of them. An empty set is a workspace that can reach nothing, which is
-    also what not starting one at all means.
+    ``allowed`` is the set of internet hosts a session may reach —
+    ``{ANY_HOST}`` for all of them, and an empty set for a workspace that may
+    reach none. ``peers`` are substrate services it may reach whatever the
+    host policy says: they are named by the task rather than dialed by the
+    agent, so reaching one is not a question the allowlist answers.
+
+    Every socket lives in ``socket_dir``, which must be somewhere the
+    workspace cannot see: a socket it could connect to directly would be a
+    route out that skips all of this.
     """
 
-    def __init__(self, socket_path: Path | str, allowed: Collection[str]) -> None:
-        self.socket_path = str(socket_path)
+    def __init__(
+        self,
+        socket_dir: Path | str,
+        allowed: Collection[str],
+        peers: Sequence[Peer] = (),
+    ) -> None:
+        self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
-        self._server: _UnixProxyServer | None = None
-        self._thread: threading.Thread | None = None
+        self.peers = tuple(peers)
+        self._servers: list[tuple[_UnixServer, Path]] = []
         self._bridge: asyncio.subprocess.Process | None = None
 
+    @property
+    def socket_path(self) -> Path:
+        """The proxy's socket — the way out to the hosts policy allows."""
+        return self.socket_dir / "egress.sock"
+
+    def _peer_socket(self, index: int) -> Path:
+        # By position rather than by name: a peer's name comes from the task,
+        # and a task does not get to choose paths in here.
+        return self.socket_dir / f"peer-{index}.sock"
+
     def start(self) -> None:
-        """Serve the policy on the unix socket. Idempotent."""
-        if self._server is not None:
+        """Serve the policy, and each declared peer, on a socket. Idempotent."""
+        if self._servers:
             return
+        self.socket_dir.mkdir(parents=True, exist_ok=True)
+        if self.allowed:
+            self._serve(
+                self.socket_path, type("_ScopedProxy", (_Proxy,), {"allowed": self.allowed})
+            )
+        for index, peer in enumerate(self.peers):
+            self._serve(
+                self._peer_socket(index),
+                type("_PeerForward", (_Forward,), {"target": peer.address}),
+            )
+
+    def _serve(self, path: Path, handler: type[socketserver.BaseRequestHandler]) -> None:
         with contextlib.suppress(FileNotFoundError):
-            os.unlink(self.socket_path)
-        os.makedirs(os.path.dirname(self.socket_path) or ".", exist_ok=True)
-        handler = type("_ScopedProxy", (_Proxy,), {"allowed": self.allowed})
-        self._server = _UnixProxyServer(self.socket_path, handler)
-        os.chmod(self.socket_path, 0o600)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
+            os.unlink(path)
+        server = _UnixServer(str(path), handler)
+        os.chmod(path, 0o600)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self._servers.append((server, path))
+
+    def _bridge_spec(self, port: int) -> list[tuple[str, int, str]]:
+        """Where each route out is offered inside the workspace."""
+        addresses = bind_addresses(self.peers)
+        return [
+            *([("127.0.0.1", port, str(self.socket_path))] if self.allowed else []),
+            *(
+                (addresses[peer.name], peer.port, str(self._peer_socket(index)))
+                for index, peer in enumerate(self.peers)
+            ),
+        ]
 
     async def attach(self, pid: int, port: int = BRIDGE_PORT) -> None:
-        """Offer the proxy on the loopback of *pid*'s network namespace.
+        """Offer every route on the loopback of *pid*'s network namespace.
 
         The bridge joins that namespace and nothing else, so it keeps this
-        filesystem — which is how it reaches a socket the workspace cannot.
+        filesystem — which is how it reaches sockets the workspace cannot.
 
         Returns once it is accepting rather than once it is spawned: a session
         starting in between finds the port refused, which a task opening with
         a package install reads as a network that does not work.
         """
+        spec = self._bridge_spec(port)
+        if not spec:
+            return
         nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
         self._bridge = await asyncio.create_subprocess_exec(
             *[
@@ -240,8 +379,7 @@ class Egress:
                 sys.executable,
                 "-c",
                 _BRIDGE,
-                self.socket_path,
-                str(port),
+                json.dumps(spec),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -250,33 +388,56 @@ class Egress:
         try:
             await asyncio.wait_for(self._bridge.stdout.readline(), 30.0)
         except TimeoutError:
-            LOGGER.warning("the workspace's way out did not come up in time")
+            LOGGER.warning("the workspace's ways out did not come up in time")
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
-        """Proxy variables for a session, in the spellings clients read."""
+        """Proxy variables for a session, in the spellings clients read.
+
+        Empty where no host is permitted: pointing a client at a proxy that
+        is not there turns "this task has no network" into a connection error
+        on the first hop, which reads as a broken one instead.
+        """
+        if not self.allowed:
+            return {}
         url = f"http://127.0.0.1:{port}"
+        # Peers are reached directly, on the loopback the bridge binds them
+        # to; sent through the proxy instead, they would be resolved out here,
+        # where the name means nothing and the address is something else.
+        # Listed one by one rather than as 127.0.0.0/8, which most clients
+        # (curl among them) match literally instead of as a network.
+        addresses = bind_addresses(self.peers)
+        bypass = ",".join(
+            dict.fromkeys(["127.0.0.1", "localhost", *addresses, *addresses.values()])
+        )
         return {
             "http_proxy": url,
             "https_proxy": url,
             "HTTP_PROXY": url,
             "HTTPS_PROXY": url,
-            "no_proxy": "127.0.0.1,localhost",
-            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": bypass,
+            "NO_PROXY": bypass,
         }
 
     def stop(self) -> None:
-        """Take the route away."""
+        """Take the routes away."""
         if self._bridge is not None:
             with contextlib.suppress(ProcessLookupError):
                 self._bridge.kill()
             self._bridge = None
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
-        self._thread = None
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(self.socket_path)
+        for server, path in self._servers:
+            server.shutdown()
+            server.server_close()
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(path)
+        self._servers = []
 
 
-__all__ = ["ANY_HOST", "BRIDGE_PORT", "Egress", "permitted"]
+__all__ = [
+    "ANY_HOST",
+    "BRIDGE_PORT",
+    "Egress",
+    "Peer",
+    "bind_addresses",
+    "hosts_text",
+    "permitted",
+]

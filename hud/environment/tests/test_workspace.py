@@ -389,6 +389,86 @@ def test_making_a_network_and_joining_it_are_the_same_question(
         assert ("--net" in ws.enter_argv(7, "true")) is owns
 
 
+def test_a_peer_answers_at_the_address_the_task_expects() -> None:
+    """A task that names a service says where it expects to find it. Placed
+    anywhere else, the task's own client configuration points at nothing."""
+    from hud.environment.egress import Peer, bind_addresses
+
+    # One peer per port is the ordinary case: it is at localhost, which is
+    # what a task saying "localhost:5432" or "http://localhost:8080" means.
+    single = bind_addresses([Peer("db", 5432), Peer("api", 8080)])
+    assert single == {"db": "127.0.0.1", "api": "127.0.0.1"}
+
+    # Two services cannot both hold one port there, so the second moves — and
+    # is still reached by its name, which is how a task addresses two anyway.
+    both = bind_addresses([Peer("primary", 5432), Peer("replica", 5432)])
+    assert both == {"primary": "127.0.0.1", "replica": "127.0.0.2"}
+
+    with pytest.raises(ValueError, match="two peers are called"):
+        bind_addresses([Peer("db", 5432), Peer("db", 6379)])
+
+
+def test_a_peers_name_is_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
+    """Dropping the substrate's entries would cost the workspace localhost."""
+    from hud.environment.egress import Peer, hosts_text
+
+    text = hosts_text([Peer("db", 5432)], "127.0.0.1\tlocalhost\n::1\tip6-localhost\n")
+
+    assert "127.0.0.1\tlocalhost" in text
+    assert "::1\tip6-localhost" in text
+    assert text.endswith("127.0.0.1\tdb\n")
+
+
+@pytest.mark.asyncio
+async def test_a_declared_peer_is_a_name_sessions_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A peer reached only by port is not at the address the task expects, so
+    the workspace carries its own hosts file — and only when it has a network
+    of its own, since otherwise the service is already at its real address."""
+    from hud.environment.egress import Peer
+
+    ws = Workspace(tmp_path / "root", peers=[Peer("db", 5432)], allowed_hosts={"pypi.org"})
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    ws._prepare_runtime()
+
+    argv = ws.bwrap_argv(["true"])
+    hosts = Path(argv[argv.index("/etc/hosts") - 1])
+    assert argv[argv.index("/etc/hosts") - 2] == "--ro-bind"
+    assert "127.0.0.1\tdb\n" in hosts.read_text()
+    # Bound over /etc/hosts, so every session reads it whatever its identity.
+    assert hosts.stat().st_mode & 0o044
+
+    sharing = Workspace(tmp_path / "shared", peers=[Peer("db", 5432)], network=True)
+    monkeypatch.setattr(sharing, "_bwrap", "/usr/bin/bwrap")
+    sharing._prepare_runtime()
+    assert "/etc/hosts" not in sharing.bwrap_argv(["true"])
+
+    await ws.stop()
+    await sharing.stop()
+
+
+def test_a_peer_is_reached_directly_rather_than_through_the_proxy() -> None:
+    """The proxy resolves names out on the substrate, where a peer's name
+    means nothing and its address is something else entirely."""
+    from hud.environment.egress import Egress, Peer
+
+    egress = Egress("/tmp/unused", {"pypi.org"}, [Peer("db", 5432), Peer("replica", 5432)])
+    bypass = egress.environment()["no_proxy"].split(",")
+
+    assert "db" in bypass and "replica" in bypass
+    assert "127.0.0.1" in bypass and "127.0.0.2" in bypass
+
+
+def test_a_workspace_that_reaches_no_host_is_told_of_no_proxy() -> None:
+    """Pointing a client at a proxy that was never started turns "this task
+    has no network" into a connection failure on the first hop."""
+    from hud.environment.egress import Egress, Peer
+
+    assert Egress("/tmp/unused", set(), [Peer("db", 5432)]).environment() == {}
+    assert Egress("/tmp/unused", {"pypi.org"}).environment()["https_proxy"].endswith(":3128")
+
+
 def test_a_host_is_permitted_by_name_or_as_a_subdomain() -> None:
     from hud.environment.egress import ANY_HOST, permitted
 

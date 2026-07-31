@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
-from hud.environment.egress import Egress
+from hud.environment.egress import Egress, Peer, hosts_text
 from hud.utils.process import create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -327,6 +327,7 @@ class Workspace:
         mounts: Sequence[Mount] = (),
         network: bool = False,
         allowed_hosts: Collection[str] | None = None,
+        peers: Sequence[Peer] = (),
         env: Mapping[str, str] | None = None,
         system_mounts: Sequence[Mount] | None = None,
         guest_path: str = "/workspace",
@@ -363,7 +364,17 @@ class Workspace:
         #: addressable from inside, and no session can reach a host the task
         #: did not declare.
         self.allowed_hosts = None if allowed_hosts is None else frozenset(allowed_hosts)
+        #: Substrate services the workspace may reach, each at the address the
+        #: task expects. A workspace with a network of its own cannot address
+        #: the substrate at all, so anything the environment itself runs — a
+        #: database the task depends on, an API it is meant to call — has to be
+        #: named here to exist for it. Nothing to do where sessions share the
+        #: substrate's network: the services are already at those addresses.
+        self.peers: tuple[Peer, ...] = tuple(peers)
         self._egress: Egress | None = None
+        # The workspace's own /etc/hosts (the substrate's, plus its peers),
+        # materialized alongside the session keys when there is one to write.
+        self._hosts_path: Path | None = None
         self.env: dict[str, str] = dict(env or {})
         self._system_mounts: tuple[Mount, ...] = tuple(
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
@@ -507,6 +518,8 @@ class Workspace:
                 os.lchown(self.root, self._shell_uid, self._shell_uid)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
+        if self.peers and self.owns_netns and self._bwrap is not None:
+            self._hosts_path = self._write_hosts()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((self._ssh_host, self._ssh_port))
@@ -717,6 +730,11 @@ class Workspace:
         argv.extend(["--bind", str(self.root), self._guest_path])
         for m in self.mounts:
             argv.extend(m.to_bwrap_args())
+        if self._hosts_path is not None:
+            # Last, so it survives whatever the caller mounted over /etc: a
+            # peer the task can address by port but not by name is not at the
+            # address the task expects.
+            argv.extend(Mount("ro", src=str(self._hosts_path), dst="/etc/hosts").to_bwrap_args())
         argv.extend(["--chdir", target_cwd])
         argv.append("--")
         argv.extend(_payload_argv(command, full_env, ctty=tty))
@@ -862,8 +880,8 @@ class Workspace:
             await self.discard_sandbox()
             raise RuntimeError(f"the sandbox never became ready: {reason}")
         self._sandbox_init = pid
-        if self.allowed_hosts:
-            self._egress = Egress(self._credentials_dir() / "egress.sock", self.allowed_hosts)
+        if self.owns_netns and (self.allowed_hosts or self.peers):
+            self._egress = Egress(self._credentials_dir(), self.allowed_hosts or (), self.peers)
             self._egress.start()
             await self._egress.attach(pid)
         return pid
@@ -963,6 +981,22 @@ class Workspace:
                 # Named for what it holds, not for what put it there.
                 self._cred_dir = Path(tempfile.mkdtemp(prefix="ssh-"))
         return self._cred_dir
+
+    def _write_hosts(self) -> Path:
+        """The workspace's own ``/etc/hosts``: the substrate's, plus its peers.
+
+        World-readable, unlike the rest of the credentials directory: it is
+        bound over ``/etc/hosts`` inside the sandbox, where every session —
+        including one dropped to an id of its own — resolves names from it.
+        """
+        substrate = Path("/etc/hosts")
+        path = self._credentials_dir() / "hosts"
+        path.write_text(
+            hosts_text(self.peers, substrate.read_text() if substrate.is_file() else ""),
+            encoding="utf-8",
+        )
+        path.chmod(0o644)
+        return path
 
     def _load_or_generate_host_key(self) -> tuple[asyncssh.SSHKey, str]:
         if self._ssh_host_key_path is not None:
@@ -1263,5 +1297,6 @@ __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
     "Mount",
     "MountKind",
+    "Peer",
     "Workspace",
 ]
