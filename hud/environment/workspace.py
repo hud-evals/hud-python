@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
+from hud.environment.egress import Egress
 from hud.utils.process import create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -27,7 +28,7 @@ if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import termios
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from hud.capabilities import Capability
 
@@ -325,6 +326,7 @@ class Workspace:
         # bwrap configuration
         mounts: Sequence[Mount] = (),
         network: bool = False,
+        allowed_hosts: Collection[str] | None = None,
         env: Mapping[str, str] | None = None,
         system_mounts: Sequence[Mount] | None = None,
         guest_path: str = "/workspace",
@@ -353,6 +355,15 @@ class Workspace:
         # bwrap state
         self.mounts: tuple[Mount, ...] = tuple(mounts)
         self.network = network
+        #: Which hosts a session may reach. ``None`` leaves the network as the
+        #: substrate's — sessions share it, and so can reach whatever else is
+        #: listening there, the control channel included. A set (``{ANY_HOST}``
+        #: for everything) gives the workspace its own network namespace whose
+        #: only route out is the policy: nothing else on the substrate is
+        #: addressable from inside, and no session can reach a host the task
+        #: did not declare.
+        self.allowed_hosts = None if allowed_hosts is None else frozenset(allowed_hosts)
+        self._egress: Egress | None = None
         self.env: dict[str, str] = dict(env or {})
         self._system_mounts: tuple[Mount, ...] = tuple(
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
@@ -412,6 +423,17 @@ class Workspace:
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
+
+    @property
+    def owns_netns(self) -> bool:
+        """Whether the workspace has a network of its own.
+
+        True when the task severed the network, and true when it declared what
+        may be reached — a policy needs somewhere to apply. False leaves
+        sessions on the substrate's network, where they can address whatever
+        else is listening on it.
+        """
+        return not self.network or self.allowed_hosts is not None
 
     def _setpriv(self) -> str | None:
         """Absolute path to ``setpriv``, resolved via the *server's* PATH.
@@ -674,7 +696,7 @@ class Workspace:
             "--unshare-uts",
             "--unshare-cgroup-try",
         ]
-        if not self.network:
+        if self.owns_netns:
             argv.append("--unshare-net")
         if info_fd is not None:
             argv.extend(["--info-fd", str(info_fd)])
@@ -722,7 +744,10 @@ class Workspace:
             "--pid",
             "--uts",
             "--ipc",
-            *(() if self.network else ("--net",)),
+            # Joined exactly when the sandbox has a network of its own —
+            # otherwise a session would run on the substrate's, which is the
+            # network the workspace was given a policy to keep it off.
+            *(("--net",) if self.owns_netns else ()),
             f"--wd={cwd if cwd is not None else self._guest_path}",
             "--",
         ]
@@ -738,9 +763,10 @@ class Workspace:
         Dropped sessions get the minimal one built for the wall; otherwise the
         serving process's environment carries through, less HUD's own.
         """
+        proxy = self._egress.environment() if self._egress is not None else {}
         if self._drops_privileges():
-            return {**(self._session_env() or {}), **(env or {})}
-        return {**_without_harness_config(os.environ), **self.env, **(env or {})}
+            return {**(self._session_env() or {}), **proxy, **(env or {})}
+        return {**_without_harness_config(os.environ), **proxy, **self.env, **(env or {})}
 
     def _drop_argv(self) -> list[str]:
         """The ``setpriv`` prefix that drops to ``shell_uid``, if it applies."""
@@ -822,6 +848,10 @@ class Workspace:
             await self.discard_sandbox()
             raise RuntimeError(f"the sandbox never became ready: {reason}")
         self._sandbox_init = pid
+        if self.allowed_hosts:
+            self._egress = Egress(self._credentials_dir() / "egress.sock", self.allowed_hosts)
+            self._egress.start()
+            self._egress.attach(pid)
         return pid
 
     async def _sandbox_error(self) -> str:
@@ -842,6 +872,9 @@ class Workspace:
         every process the agent left behind goes with it — including ones it
         detached. A later session starts a fresh sandbox.
         """
+        if self._egress is not None:
+            self._egress.stop()
+            self._egress = None
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
         if sandbox is None or sandbox.returncode is not None:
             return

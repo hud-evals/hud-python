@@ -542,6 +542,11 @@ def environment(ref: str | Path = HUD_ROOT / "tasks", *, name: str | None = None
         # session would otherwise be pointed at the harness's home.
         env={**({"HOME": home} if (home := phase_home(agent_uid)) else {}), **policy["agent_env"]},
         network=policy["network"],
+        # What the task declared its agent may reach. Given a set, the
+        # workspace takes a network of its own whose only way out applies it —
+        # which is also what puts the substrate, and the channel grading this
+        # rollout, out of the agent's reach.
+        allowed_hosts=policy["allowed_hosts"],
         # Always: the sandbox is what keeps the baked tests and the serving
         # venv out of the graded party's reach — an unsandboxed fallback
         # would hand the agent the verifier's answers.

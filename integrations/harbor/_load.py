@@ -38,6 +38,7 @@ class _Phase(BaseModel):
     timeout_sec: float | None = Field(default=None, gt=0)
     user: str | int | None = None
     network_mode: str | None = None
+    allowed_hosts: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     environment: dict[str, Any] | None = None
     environment_mode: str | None = None
@@ -57,6 +58,7 @@ class _EnvironmentSection(BaseModel):
     gpu_types: list[str] = Field(default_factory=list)
     tpu: dict[str, Any] | None = None
     network_mode: str | None = None
+    allowed_hosts: list[str] = Field(default_factory=list)
     workdir: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     healthcheck: dict[str, Any] | None = None
@@ -117,13 +119,29 @@ class TaskConfig(BaseModel):
         return self.agent if role == "agent" else self.verifier
 
     def network(self, role: str) -> bool:
-        """Whether *role*'s processes may reach the network.
+        """Whether *role*'s processes may reach the network at all.
 
         Harbor declares isolation container-wide or per phase; either severs
         that phase, so the workspace and the verifier cannot disagree about
         what one task declared.
         """
         return "no-network" not in (self.environment.network_mode, self.phase(role).network_mode)
+
+    def allowed_hosts(self, role: str) -> frozenset[str] | None:
+        """Which hosts *role* may reach, or None to leave its network alone.
+
+        A phase declaring ``allowlist`` may reach the hosts it names and
+        nothing else — including nothing else on the substrate, which is where
+        the harness serving it lives. ``public`` names no hosts and so permits
+        all of them; ``no-network`` is the empty set, which permits none.
+        """
+        mode = self.phase(role).network_mode or self.environment.network_mode or "public"
+        if mode == "no-network":
+            return frozenset()
+        if mode != "allowlist":
+            return None
+        declared = [*self.environment.allowed_hosts, *self.phase(role).allowed_hosts]
+        return frozenset(declared)
 
     def phase_user(self, role: str) -> str | int | None:
         """The identity *role* runs as, if the task names one for it.
@@ -208,6 +226,12 @@ def workspace_policy(task_dir: Path) -> dict[str, Any]:
         "agent_env": dict(config.agent.env),
         "workdir": config.environment.workdir or None,
         "user": config.user,
+        # Sorted rather than a set: the policy is hashed to key environments,
+        # so it has to serialize, and two tasks naming the same hosts in a
+        # different order declare the same thing.
+        "allowed_hosts": (
+            None if (hosts := config.allowed_hosts("agent")) is None else sorted(hosts)
+        ),
         "agent_user": config.phase_user("agent"),
         "verifier_user": config.phase_user("verifier"),
     }
@@ -262,8 +286,16 @@ def unsupported_features(task_dir: Path) -> list[str]:
         ("agent", agent.network_mode),
         ("verifier", verifier.network_mode),
     ):
-        if mode == "allowlist":
-            reasons.append(f"{role}.network_mode='allowlist' (per-host policy is not enforceable)")
+        if mode == "allowlist" and role in ("environment", "verifier"):
+            # The agent's allowlist is applied by its workspace's own egress.
+            # The verifier runs on the substrate's network with nothing between
+            # it and the hosts it dials — and an allowlist declared for the
+            # environment is one the verifier inherits, so it is refused too.
+            effective = verifier.network_mode or environment.network_mode
+            if effective == "allowlist":
+                reasons.append(
+                    "verifier network_mode='allowlist' (only the agent's is enforceable)"
+                )
     if environment.os not in (None, "linux"):
         reasons.append(f"environment.os={environment.os!r}")
     if environment.tpu:

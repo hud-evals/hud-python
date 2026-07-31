@@ -363,6 +363,39 @@ def test_the_sandbox_reports_readiness_before_sessions_join_it(
     assert argv[-1] == "echo ready"
 
 
+def test_making_a_network_and_joining_it_are_the_same_question(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sandbox that owns a network must be entered through it. Answered
+    differently in the two places, sessions run on the substrate's network —
+    the one the policy exists to keep them off — while the sandbox sits in an
+    empty namespace nothing ever enters."""
+    for allowed, network, owns in (
+        ({"example.com"}, True, True),  # a policy needs a network to apply to
+        (set(), True, True),  # declared unreachable
+        (None, False, True),  # no-network, however it was spelled
+        (None, True, False),  # the substrate's network, as before
+    ):
+        ws = Workspace(tmp_path / "root", network=network, allowed_hosts=allowed)
+        monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+
+        assert ws.owns_netns is owns
+        assert ("--unshare-net" in ws.bwrap_argv(["true"])) is owns
+        assert ("--net" in ws.enter_argv(7, "true")) is owns
+
+
+def test_a_host_is_permitted_by_name_or_as_a_subdomain() -> None:
+    from hud.environment.egress import ANY_HOST, permitted
+
+    assert permitted("pypi.org", {"pypi.org"})
+    assert permitted("files.pypi.org", {"pypi.org"})  # a subdomain of what was named
+    assert not permitted("notpypi.org", {"pypi.org"})  # not a subdomain, a different host
+    assert not permitted("pypi.org.evil.com", {"pypi.org"})
+    assert not permitted("anything", set())  # declared unreachable
+    assert permitted("anything", {ANY_HOST})
+    assert not permitted(None, {ANY_HOST})
+
+
 def test_shell_uid_wraps_sessions_in_setpriv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

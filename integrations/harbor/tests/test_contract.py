@@ -275,6 +275,7 @@ def test_declared_workspace_policy_is_translated(tmp_path) -> None:
         "env": {"TOKEN": "abc"},
         "agent_env": {},
         "workdir": "/srv/app",
+        "allowed_hosts": None,
         "user": None,
         # Per phase, because Harbor's are: a task may restrict the agent and
         # still verify as root.
@@ -297,10 +298,23 @@ def test_no_network_is_honored_and_allowlist_refused(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    # no-network is deliverable (a sandboxed workspace); allowlist is not.
+    # no-network is deliverable (a sandboxed workspace). An allowlist is too,
+    # but only for the agent: its workspace has an egress to apply it to. The
+    # verifier runs on the substrate's own network, and an allowlist declared
+    # for the environment is one the verifier inherits.
     assert harbor_load.unsupported_features(isolated) == []
     assert harbor_load.workspace_policy(isolated)["network"] is False
+    assert harbor_load.workspace_policy(isolated)["allowed_hosts"] == []
     assert "allowlist" in " ".join(harbor_load.unsupported_features(filtered))
+
+    agent_only = _write_harbor_task(tmp_path, "agent-only")
+    (agent_only / "task.toml").write_text(
+        'schema_version = "1.3"\n\n[task]\nname = "demo/agent-only"\n\n'
+        '[agent]\nnetwork_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n',
+        encoding="utf-8",
+    )
+    assert harbor_load.unsupported_features(agent_only) == []
+    assert harbor_load.workspace_policy(agent_only)["allowed_hosts"] == ["pypi.org"]
 
 
 def test_tasks_with_different_policies_get_separate_envs(tmp_path) -> None:
