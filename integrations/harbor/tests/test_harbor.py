@@ -34,7 +34,7 @@ def test_load_single_task_dir_maps_rows(single_task: Path) -> None:
     row = taskset["cancel-async-tasks"]
     assert row.id == "cancel-async-tasks"
     assert row.args == {}
-    assert row.env == taskset.name
+    assert row.env.startswith(f"{taskset.name}-")
 
 
 def test_load_dataset_shares_one_env_per_build_context(dataset_same_env: Path) -> None:
@@ -42,17 +42,50 @@ def test_load_dataset_shares_one_env_per_build_context(dataset_same_env: Path) -
 
     assert len(taskset) == 3
     # Identical Dockerfiles -> all rows reference one env name.
-    assert taskset.environment_names() == {"terminal-bench-sample"}
+    (env_name,) = taskset.environment_names()
+    assert env_name.startswith("terminal-bench-sample-")
 
 
 def test_load_dataset_groups_by_distinct_build_contexts(dataset_multi_env: Path) -> None:
     taskset = load(dataset_multi_env)
 
     assert len(taskset) == 4
-    assert taskset.environment_names() == {"mixed-bench-g1", "mixed-bench-g2"}
+    names = taskset.environment_names()
+    assert len(names) == 2
+    assert all(name.startswith("mixed-bench-") for name in names)
     assert taskset["build-pmars"].env == taskset["cancel-async-tasks"].env
     assert taskset["caffe-cifar-10"].env == taskset["sam-cell-seg"].env
     assert taskset["build-pmars"].env != taskset["caffe-cifar-10"].env
+
+
+def test_env_name_survives_other_tasks_joining_the_dataset(tmp_path: Path) -> None:
+    """A row's env name follows its own environment, not the dataset's shape.
+
+    Names used to be positional (``-g1``, ``-g2``, assigned largest group
+    first), so growing one group renumbered the others and rows kept naming
+    an environment that had come to mean a different image.
+    """
+    dataset = tmp_path / "bench"
+    dataset.mkdir()
+    solo_image, pair_image = "FROM alpine:3\n", "FROM debian:12\n"
+    make_harbor_task(dataset, "solo", dockerfile=solo_image)
+    for name in ("pair-a", "pair-b"):
+        make_harbor_task(dataset, name, dockerfile=pair_image)
+
+    before = load(dataset)
+    solo_env = before["solo"].env
+    pair_env = before["pair-a"].env
+    assert solo_env != pair_env
+
+    # The smaller group overtakes the larger one; under positional naming the
+    # two names swapped, silently re-pointing every row in both.
+    for name in ("solo-b", "solo-c"):
+        make_harbor_task(dataset, name, dockerfile=solo_image)
+
+    after = load(dataset)
+    assert after["solo"].env == solo_env
+    assert after["pair-a"].env == pair_env
+    assert after["solo-b"].env == solo_env
 
 
 def test_load_rejects_dirs_without_harbor_tasks(tmp_path: Path) -> None:
