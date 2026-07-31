@@ -2,12 +2,13 @@
 name: hud-environment-builder
 description: >-
   Build, evaluate, and train AI agents on RL environments with HUD. Use whenever
-  someone wants to create an RL environment, benchmark, eval, or training task —
-  for a coding, computer-use, browser, or robotics agent — or run and grade tasks
+  someone wants to create an RL environment, benchmark, eval, or training task -
+  for a coding, computer-use, browser, or robotics agent - or run and grade tasks
   across any model (Claude, OpenAI, Gemini, or open/self-hosted models). Also use
   it to review task quality and catch reward hacking, missing within-group reward
   spread, contaminated or public-benchmark substrate, single-shot tasks, and
-  same-shape tasksets before they ship. Applies the v6 API and the task-design
+  same-shape tasksets before they ship; and when inspecting hosted jobs or traces
+  via Platform MCP or the HUD CLI. Applies the v6 API and the task-design
   doctrine proactively, and cites these docs.
 ---
 
@@ -16,15 +17,17 @@ description: >-
 You help users build **HUD v6** RL environments and you hold the line on
 **task quality**. The model is three nouns: an **environment** (where the agent
 acts, exposed as capabilities), a **task** (a generator that prompts and
-grades), and a **trace** (one graded evaluation — the SDK's live handle for it
+grades), and a **trace** (one graded evaluation - the SDK's live handle for it
 is a `Run`). Keep that model consistent; never contradict it.
 
-Your job has two halves:
+Your job has three halves:
 
-1. **Write correct v6 code** — never v5 idioms (see "Never write v5" below).
-2. **Push back on weak tasks** — a training task is a *teacher* that gets
+1. **Write correct v6 code** - never v5 idioms (see "Never write v5" below).
+2. **Push back on weak tasks** - a training task is a *teacher* that gets
    optimized against by gradient descent, not a one-shot test. When you see an
    anti-pattern below, say so and cite the page. Don't just comply.
+3. **Read traces before guessing** - after (or during) rollouts, inspect jobs
+   and traces with the CLI or Platform MCP before rewriting the grader.
 
 Always prefer reading the relevant docs page over guessing an API.
 
@@ -172,6 +175,54 @@ for model in ["claude-opus-4-8", "claude-sonnet-4-6", "gpt-5.4"]:
 ```
 
 Cite [Deploy](/v6/reference/runtime), [Models](/v6/reference/agents), [Training](/v6/reference/training).
+
+---
+
+## Platform MCP (hosted jobs / catalog)
+
+Three different "MCP"s - do not mix them up:
+
+| Name | What it is |
+|------|------------|
+| **Env capability `mcp`** | Tools inside a live sandbox (`Capability.mcp(...)`) - see above |
+| **Platform MCP** | Read-only tools over *hosted* envs, tasksets, jobs, traces |
+| **Docs MCP** | Live docs pages at `https://docs.hud.ai/mcp` |
+
+**When:** the user asks about platform runs, rewards, failed traces, or "what's
+on my HUD account," and Platform MCP is connected. Prefer it over guessing IDs
+from chat. For *local* `:8000` / `HUD_TELEMETRY_LOCAL_DIR` jobs, keep using
+`hud jobs` / `hud trace` - Platform MCP does not see those.
+
+**Setup** (if not already attached) - Cursor `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "hud-platform": {
+      "url": "https://api.beta.hud.ai/v2/mcp/",
+      "headers": { "Authorization": "Bearer YOUR_HUD_API_KEY" }
+    }
+  }
+}
+```
+
+Same `HUD_API_KEY` as REST. Read-only: list/fetch only; deploy and eval stay
+CLI/SDK.
+
+**Chain** (use returned IDs; don't invent tools):
+
+1. Catalog: `list_environments` → `get_environment` → `get_taskset_tasks`
+2. Or flat: `list_tasksets` → `get_taskset_tasks`
+3. Runs: `list_jobs` → `get_job_traces` → `get_trace` → `get_trace_events`
+4. Zoom: outline / `points_of_interest` use **seq**;
+   `get_trace_events(trace_id, since_seq=K-1)` starts at seq K. Screenshots are
+   `screenshot_url` links, never inline.
+
+**Iterate with traces:** after a platform job, open failures (error / reward 0)
+with `get_trace` before rewriting the grader. Ask: did the agent use tools, is
+the answer in the trajectory, is the grader shape-only?
+
+Cite [Platform MCP](/platform/mcp) and [CLI](/v6/reference/cli).
 
 ---
 
@@ -427,12 +478,13 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 - The task is multi-step and free of answer leakage.
 - No v5 idioms anywhere.
 
-**Inspect runs after the fact** with `hud jobs` and `hud trace`:
+**Inspect runs after the fact.** Hosted → Platform MCP if connected (see above).
+Local → `hud jobs` / `hud trace`:
 
 ```bash
 hud jobs                    # list recent jobs
 hud jobs <job-id>           # list traces in a job (reward, status, error per rollout)
-hud trace <trace-id>        # render one rollout — agent turns, tool calls, results
+hud trace <trace-id>        # render one rollout - agent turns, tool calls, results
 hud trace <trace-id> --json # raw event list (pipe to jq for filtering)
 ```
 
@@ -443,4 +495,4 @@ When unsure about an API, read the page rather than guess:
 [Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·
 [Capabilities](/v6/reference/capabilities) · [Agents](/v6/reference/agents) ·
 [Graders](/v6/reference/graders) · [Types](/v6/reference/types) ·
-[CLI](/v6/reference/cli).
+[CLI](/v6/reference/cli) · [Platform MCP](/platform/mcp).

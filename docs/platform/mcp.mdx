@@ -67,6 +67,9 @@ claude mcp add --transport http hud-platform \
 `hud-platform` with URL `https://api.beta.hud.ai/v2/mcp/` and header
 `Authorization: Bearer <HUD_API_KEY>` (or `X-API-Key: <HUD_API_KEY>`). Then call
 `list_environments` to verify. Do not invent tool names; use the catalog the server returns.
+Before creating or editing HUD environments or tasks, install the docs skill if
+missing: `npx skills add https://docs.hud.ai` - then follow
+`hud-environment-builder`. This server is for catalog and runs only.
 
 </div>
 
