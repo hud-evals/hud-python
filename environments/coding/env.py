@@ -82,25 +82,24 @@ AGENT_HOME = Path("/tmp/agent-home")  # noqa: S108 - container-local, created at
 
 env = Environment(name="coding")
 
-# shell_uid is the privilege wall: the env process (root, in images) keeps the
-# vault and instance assets under /hud at mode 700; the uid-dropped agent can
-# edit the repo but never read the answer key. No-op off root (local).
-_ws = Workspace(
-    REPO_DIR,
-    guest_path=str(REPO_DIR),
-    network=True,
-    env={"HOME": str(AGENT_HOME)},
-    track_files=settings.file_tracking_enabled,
-    shell_uid=AGENT_UID,
-)
-
+_ws: Workspace | None = None
 _github = MockGitHub()
 _github_server: asyncio.Task[None] | None = None
 
 
 @env.initialize
 async def _up() -> None:
-    global _github_server
+    global _github_server, _ws
+    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+    _ws = Workspace(
+        REPO_DIR,
+        guest_path=str(REPO_DIR),
+        network=True,
+        env={"HOME": str(AGENT_HOME)},
+        track_files=settings.file_tracking_enabled,
+        shell_uid=AGENT_UID,
+        require_isolation=not is_root,
+    )
     if _LOCAL_SUBSTRATE and not (REPO_DIR / ".git").exists():
         REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
         logger.info("cloning %s into %s", REPO_URL, REPO_DIR)
@@ -115,9 +114,12 @@ async def _up() -> None:
 
 @env.shutdown
 async def _down() -> None:
+    global _ws
     if _github_server is not None:
         _github_server.cancel()
-    await _ws.stop()
+    if _ws is not None:
+        await _ws.stop()
+        _ws = None
     if _LOCAL_SUBSTRATE:
         for path in (REPO_DIR, VAULT_DIR, LOGS_DIR, REMOTE_DIR.parent):
             shutil.rmtree(path, ignore_errors=True)
@@ -166,7 +168,7 @@ async def _grade_generic(
     if validate_mode == "golden":
         if not (base_ref and golden_ref):
             raise ValueError('validate_mode="golden" needs base_ref and golden_ref')
-        _, diff, _ = await repo_lib.git(REPO_DIR, "diff", base_ref, golden_ref)
+        diff = await repo_lib.diff_refs(REPO_DIR, base_ref, golden_ref)
     else:
         diff = await repo_lib.capture_agent_diff(REPO_DIR, setup_commit)
 
@@ -179,7 +181,7 @@ async def _grade_generic(
         # so agent edits to them never survive into grading.
         await repo_lib.git(REPO_DIR, "checkout", test_ref, "--", *(test_files or ["."]))
 
-    command = test_command.format(test_files=" ".join(test_files or []))
+    command = test_command.replace("{test_files}", " ".join(test_files or []))
     return await combine(
         BashGrader.grade(weight=1.0, command=command, cwd=str(REPO_DIR), timeout_seconds=int(TESTS_TIMEOUT))
     )
@@ -217,12 +219,6 @@ async def coding_task(
 # ─── SDLC flavor: issue-driven fix, graded on the pushed PR branch ───────
 
 
-async def _fetch_hidden_ref(dest: Path, ref: str) -> None:
-    """Fetch an answer-key ref from the vaulted history into *dest*."""
-    full = f"refs/remotes/{ref}" if ref.startswith("origin/") else ref
-    await repo_lib.git(dest, "fetch", "-q", str(VAULT_DIR / "git"), full)
-
-
 async def _grade_sdlc(
     test_command: str,
     test_ref: str,
@@ -245,23 +241,26 @@ async def _grade_sdlc(
     if pr is None:
         return EvaluationResult(reward=0.0, content="no pull request was opened")
 
-    # Hermetic checkout of the PR head from the remote (never the worktree).
-    grading_dir = LOGS_DIR / "pr-checkout"
-    shutil.rmtree(grading_dir, ignore_errors=True)
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    await repo_lib.run("git", "clone", "-q", str(REMOTE_DIR), str(grading_dir), cwd=LOGS_DIR)
-    code, _, err = await repo_lib.git(grading_dir, "checkout", "-q", pr.head, check=False)
+    await repo_lib.restore_history(REPO_DIR, VAULT_DIR)
+    code, _, err = await repo_lib.git(
+        REPO_DIR,
+        "fetch",
+        "-q",
+        str(REMOTE_DIR),
+        f"refs/heads/{pr.head}",
+        check=False,
+    )
     if code != 0:
         return EvaluationResult(
             reward=0.0,
             content=f"pull request head branch {pr.head!r} was never pushed",
-            info={"git_checkout": err.strip()[-2000:]},
+            info={"git_fetch": err.strip()[-2000:]},
         )
 
-    await _fetch_hidden_ref(grading_dir, test_ref)
-    await repo_lib.git(grading_dir, "checkout", "FETCH_HEAD", "--", *test_files)
+    await repo_lib.reset_worktree(REPO_DIR, "FETCH_HEAD")
+    await repo_lib.git(REPO_DIR, "checkout", test_ref, "--", *test_files)
 
-    command = test_command.format(test_files=" ".join(test_files))
+    command = test_command.replace("{test_files}", " ".join(test_files))
     quality: Any
     if pr_rubric:
         quality = LLMJudgeGrader.grade(weight=0.2, answer=_github.transcript(), criteria=[pr_rubric])
@@ -269,7 +268,7 @@ async def _grade_sdlc(
         opened_well = bool(pr.title.strip() and pr.body.strip())
         quality = SubScore(name="pull_request", value=1.0 if opened_well else 0.0, weight=0.2)
     return await combine(
-        BashGrader.grade(weight=0.8, command=command, cwd=str(grading_dir), timeout_seconds=int(TESTS_TIMEOUT)),
+        BashGrader.grade(weight=0.8, command=command, cwd=str(REPO_DIR), timeout_seconds=int(TESTS_TIMEOUT)),
         quality,
     )
 

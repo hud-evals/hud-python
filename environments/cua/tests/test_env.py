@@ -37,16 +37,17 @@ class TestGrading:
         assert any(s.name == "llm_judge" for s in result.subscores)
 
     async def test_weights_normalize_across_bash_and_skipped_judge(self, monkeypatch):
-        # bash passes (1.0) + judge skipped (0.0), each weight 0.5 after combine normalizes
         monkeypatch.setattr(M.settings, "api_key", "", raising=False)
         gen = GEN(
             prompt="p",
-            bash_checks=[{"name": "ok", "command": "true", "weight": 1.0}],
+            bash_checks=[{"name": "ok", "command": "true", "weight": 0.3}],
             grading_criteria=["x"],
         )
         await gen.asend(None)
         result = await gen.asend("answer")
         assert result.reward == 0.5
+        weights = {subscore.name: subscore.weight for subscore in result.subscores}
+        assert weights == {"ok": 0.5, "llm_judge": 0.5}
 
     async def test_named_bash_subscores_preserved(self):
         gen = GEN(

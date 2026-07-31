@@ -85,6 +85,8 @@ integration suite is the same check for built SWE-bench Pro instances.
 
 - Public benchmarks are public: a networked agent could fetch solutions from GitHub. Disable
   network egress at the runtime layer if that matters for your run.
+- Non-root local runs require bubblewrap. If it is unavailable, serving fails rather than
+  exposing vaulted answer-key refs to the agent process.
 - The uid wall needs `setpriv` (util-linux) in the image; the repo path comes from `REPO_DIR`
   (`/app` in instance images).
 - The agent runs as uid 1000, so the baked repo must belong to it. The workspace only chowns

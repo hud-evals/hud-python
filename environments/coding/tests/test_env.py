@@ -22,3 +22,10 @@ def test_swe_bench_template_registered_when_instance_baked():
     instance_id = FIXTURE_INSTANCE["instance_id"]
     assert instance_id in env.tasks
     assert env.tasks[instance_id].manifest_entry()["id"] == instance_id
+
+
+def test_private_clone_does_not_persist_the_build_secret():
+    dockerfile = (Path(__file__).parent.parent / "Dockerfile.hud").read_text("utf-8")
+
+    assert 'git -c "http.extraHeader=Authorization: Basic ${auth}" clone "${REPO_URL}"' in dockerfile
+    assert "@${REPO_URL#https://}" not in dockerfile

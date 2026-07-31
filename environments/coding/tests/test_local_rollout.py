@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from hud import LocalRuntime, Run, connect
+from hud.environment import workspace as workspace_lib
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -30,6 +31,11 @@ def _git(cwd: Path, *args: str) -> None:
         check=True,
         capture_output=True,
     )
+
+
+@pytest.fixture
+def isolated_workspace(monkeypatch):
+    monkeypatch.setattr(workspace_lib, "usable_bwrap", lambda: "/usr/bin/true")
 
 
 @pytest.fixture(scope="session")
@@ -75,7 +81,7 @@ def _coding_task(validate_mode: str | None):
 
     return coding_task(
         description="Fix the widget.",
-        test_command="python3 -m unittest {test_files}",
+        test_command='test -n "${HOME}" && python3 -m unittest {test_files}',
         base_ref="origin/bug_baseline",
         test_ref="origin/bug_test",
         test_files=["test_widget.py"],
@@ -89,7 +95,7 @@ def _sdlc_task(validate_mode: str | None):
 
     return sdlc_task(
         description="Issue #1 reports a broken widget. Fix it and open a PR.",
-        test_command="python3 -m unittest {test_files}",
+        test_command='test -n "${HOME}" && python3 -m unittest {test_files}',
         base_ref="origin/bug_baseline",
         test_ref="origin/bug_test",
         test_files=["test_widget.py"],
@@ -99,18 +105,92 @@ def _sdlc_task(validate_mode: str | None):
     )
 
 
-async def test_golden_ref_scores_one(fixture_repo):
+async def test_golden_ref_scores_one(fixture_repo, isolated_workspace):
     assert await _run_task(fixture_repo, _coding_task("golden")) == 1.0
 
 
-async def test_untouched_baseline_scores_zero(fixture_repo):
+async def test_untouched_baseline_scores_zero(fixture_repo, isolated_workspace):
     assert await _run_task(fixture_repo, _coding_task(None)) == 0.0
 
 
-async def test_sdlc_golden_pr_scores_one(fixture_repo):
+async def test_sdlc_golden_pr_scores_one(fixture_repo, isolated_workspace):
     """Golden validation of the full PR workflow: pushed branch + opened PR."""
     assert await _run_task(fixture_repo, _sdlc_task("golden")) == 1.0
 
 
-async def test_sdlc_no_pull_request_scores_zero(fixture_repo):
+async def test_sdlc_no_pull_request_scores_zero(fixture_repo, isolated_workspace):
     assert await _run_task(fixture_repo, _sdlc_task(None)) == 0.0
+
+
+async def test_local_runtime_refuses_unisolated_non_root_workspace(
+    fixture_repo,
+    monkeypatch,
+):
+    monkeypatch.setattr(workspace_lib, "usable_bwrap", lambda: None)
+    monkeypatch.setattr(os, "geteuid", lambda: 501)
+    os.environ["REPO_URL"] = str(fixture_repo)
+
+    runtime = LocalRuntime(str(PROJECT_ROOT / "env.py"))
+    with pytest.raises(RuntimeError, match="isolation was required"):
+        async with runtime(_coding_task(None)):
+            pass
+
+
+async def test_sdlc_grades_pushed_head_with_prepared_dependencies(tmp_path, monkeypatch):
+    import env as coding_env
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / ".gitignore").write_text(".prepared/\n")
+    (repo / "widget.py").write_text("BROKEN = True\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "buggy widget")
+    _git(repo, "branch", "bug_baseline")
+
+    _git(repo, "checkout", "-qb", "bug_test")
+    (repo / "test_widget.py").write_text(
+        "import unittest\n"
+        "import widget\n\n\n"
+        "class TestWidget(unittest.TestCase):\n"
+        "    def test_not_broken(self):\n"
+        "        self.assertFalse(widget.BROKEN)\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "hidden tests")
+    _git(repo, "checkout", "-q", "bug_baseline")
+
+    prepared = repo / ".prepared" / "dependency"
+    prepared.parent.mkdir()
+    prepared.write_text("ready\n")
+
+    monkeypatch.setattr(coding_env, "REPO_DIR", repo)
+    monkeypatch.setattr(coding_env, "VAULT_DIR", tmp_path / "vault")
+    monkeypatch.setattr(coding_env, "LOGS_DIR", tmp_path / "logs")
+    monkeypatch.setattr(coding_env, "REMOTE_DIR", tmp_path / "remote" / "project.git")
+
+    task = coding_env.sdlc_task.func(
+        description="Fix the widget and open a pull request.",
+        test_command="test -f .prepared/dependency && awk 'BEGIN { exit 0 }' && python3 -m unittest {test_files}",
+        base_ref="bug_baseline",
+        test_ref="bug_test",
+        test_files=["test_widget.py"],
+    )
+    await task.asend(None)
+
+    _git(repo, "checkout", "-qb", "fix-widget")
+    (repo / "widget.py").write_text("BROKEN = False\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "fix widget")
+    _git(repo, "push", "-q", "-u", "origin", "fix-widget")
+    coding_env._github.create_pull_request(
+        "Fix widget",
+        "Makes the widget work.",
+        head="fix-widget",
+        base="main",
+    )
+
+    result = await task.asend("done")
+
+    assert result.reward == 1.0
+    assert prepared.read_text() == "ready\n"

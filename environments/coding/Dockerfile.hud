@@ -30,9 +30,10 @@ ARG REPO_URL="https://github.com/hud-evals/coding-template-sample"
 # Doing it at build makes it free at runtime, whatever the repo's size.
 RUN --mount=type=secret,id=CODING_GITHUB_TOKEN \
     if [ -f /run/secrets/CODING_GITHUB_TOKEN ]; then \
-        git clone "https://$(cat /run/secrets/CODING_GITHUB_TOKEN)@${REPO_URL#https://}" /app; \
+        auth="$(printf 'x-access-token:%s' "$(cat /run/secrets/CODING_GITHUB_TOKEN)" | openssl base64 -A)"; \
+        git -c "http.extraHeader=Authorization: Basic ${auth}" clone "${REPO_URL}" /app; \
     else \
-        git clone ${REPO_URL} /app; \
+        git clone "${REPO_URL}" /app; \
     fi \
     && chown -R 1000:1000 /app
 # Add a build step for the target repo here if it needs one (deps, compile).

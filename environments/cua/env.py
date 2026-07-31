@@ -168,25 +168,24 @@ async def cua_task(
     """
     answer = yield make_prompt(prompt)
 
-    # Pre-normalize weights to sum to 1.0 (bash checks + one slot for the judge) so combine's
-    # own normalization is a no-op and the displayed subscore weights read as fractions.
-    total = sum(c.get("weight", 1.0) for c in (bash_checks or []))
-    total += 1.0 if grading_criteria else 0.0
-    total = total or 1.0
+    bash_total = sum(c.get("weight", 1.0) for c in (bash_checks or []))
+    if bash_checks and bash_total <= 0:
+        raise ValueError("bash check weights must sum to a positive value")
+    bash_share = 0.5 if grading_criteria else 1.0
 
     graders: list = []
 
     for check in bash_checks or []:
         graders.append(
             BashGrader.grade(
-                weight=check.get("weight", 1.0) / total,
+                weight=check.get("weight", 1.0) / bash_total * bash_share,
                 name=check["name"],
                 command=check["command"],
             )
         )
 
     if grading_criteria:
-        judge_weight = 1.0 / total
+        judge_weight = 0.5 if bash_checks else 1.0
         if settings.api_key:
             graders.append(
                 LLMJudgeGrader.grade(

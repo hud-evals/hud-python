@@ -146,7 +146,12 @@ async def capture_agent_diff(repo: Path, setup_commit: str) -> str:
     await git(repo, "add", "-A")
     await git(repo, "commit", "-q", "--allow-empty", "-m", "hud: final snapshot")
     _, final, _ = await git(repo, "rev-parse", "HEAD")
-    _, diff, _ = await git(repo, "diff", setup_commit, final.strip(), timeout=1200.0)
+    return await diff_refs(repo, setup_commit, final.strip())
+
+
+async def diff_refs(repo: Path, before: str, after: str) -> str:
+    """Return an applyable patch between two refs, including binary changes."""
+    _, diff, _ = await git(repo, "diff", "--binary", before, after, timeout=1200.0)
     return diff
 
 
