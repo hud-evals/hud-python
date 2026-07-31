@@ -413,7 +413,6 @@ async def test_timeout_includes_grading() -> None:
 
 
 async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A live-but-silent env must not stall the batch inside unbounded cancel."""
     from hud.clients.client import HudClient
 
     env = Environment("sums")
