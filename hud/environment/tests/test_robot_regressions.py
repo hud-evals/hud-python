@@ -322,6 +322,20 @@ async def test_claim_rejects_empty_kwargs_after_nonempty_batch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_release_uses_legacy_result_hook() -> None:
+    """Subclasses that override result() (not result_slots) still grade correctly."""
+
+    class _LegacyGrade(_StubBridge):
+        def result(self) -> dict[str, Any]:
+            return {"score": 0.42, "success": True, "total_reward": 3.0, "detail": "custom"}
+
+    bridge = _LegacyGrade()
+    ep = await bridge._claim_episode()
+    grade = await bridge._release_episode(ep["token"])
+    assert grade == {"score": 0.42, "success": True, "total_reward": 3.0, "detail": "custom"}
+
+
+@pytest.mark.asyncio
 async def test_tick_loop_does_not_hold_spin_when_all_claimed_idle() -> None:
     """Terminated slots may keep WS open until close(); barrier must not step."""
     bridge = _StubBridge()

@@ -125,7 +125,9 @@ class RobotBridge(ABC):
     - :meth:`step` advances the sim by one batched action ``[N, A]`` (N=1 ok).
     - :meth:`get_observation` returns ``(data, terminated)`` with ``[N, ...]``
       arrays and an ``[N]`` terminated mask (N=1 ok), or ``None`` if not ready.
-    - :meth:`result_slots` returns one score dict per slot.
+    - :meth:`result` returns the scalar episode score dict (override for richer
+      grading). :meth:`result_slots` fans that out per slot; vectorized bridges
+      with per-slot scores override ``result_slots`` instead.
     """
 
     #: Claim-frame timeout, and how long the barrier waits on a silent live slot
@@ -151,8 +153,8 @@ class RobotBridge(ABC):
         self._registry.configure(1)
         self._tick_task: asyncio.Task[None] | None = None
         self._action_event = asyncio.Event()
-        # Episode scoring read by ``result_slots``; single-env subclasses update these
-        # in ``reset``/``step`` (batched bridges override result_slots instead).
+        # Episode scoring read by ``result`` / ``result_slots``; single-env subclasses
+        # update these in ``reset``/``step`` (batched bridges override result_slots).
         self.task_description: str = ""
         self.total_reward: float = 0.0
         self.success: bool = False
@@ -231,17 +233,26 @@ class RobotBridge(ABC):
     def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
         """Return ``(data[N, ...], terminated[N])``, or ``None`` if not ready."""
 
-    def result_slots(self) -> list[dict[str, Any]]:
-        """One score dict per slot. Default: the scalar episode grade for every slot
-        (vectorized bridges with per-slot scoring override this).
+    def result(self) -> dict[str, Any]:
+        """Scalar episode score dict after the episode ends.
 
-        Invoked on the sim thread via :meth:`_run_on_sim` (same as ``step``).
+        Default: binary success + total reward. Override for richer grading
+        (fractional subtask progress, custom metadata, …). Releases call
+        :meth:`result_slots`, whose default broadcasts this dict to every slot.
         """
-        grade = {
+        return {
             "score": 1.0 if self.success else 0.0,
             "success": bool(self.success),
             "total_reward": float(self.total_reward),
         }
+
+    def result_slots(self) -> list[dict[str, Any]]:
+        """One score dict per slot. Default: broadcast :meth:`result` to every slot
+        (vectorized bridges with per-slot scoring override this).
+
+        Invoked on the sim thread via :meth:`_run_on_sim` (same as ``step``).
+        """
+        grade = self.result()
         return [dict(grade) for _ in range(self.num_envs)]
 
     def hold_action(self) -> np.ndarray:

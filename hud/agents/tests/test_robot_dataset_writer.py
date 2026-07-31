@@ -95,3 +95,44 @@ def test_finalize_clears_all_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert DatasetWriter._datasets == {}  # pyright: ignore[reportPrivateUsage]
     for ds in created:
         ds.finalize.assert_called_once()
+
+
+def test_nested_image_keys_stay_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
+    """left/image + right/image must not both collapse to observation.images.image."""
+    created = _install_fake_lerobot(monkeypatch)
+    contract = {
+        "robot_type": "stereo",
+        "features": {
+            "left/image": {"role": "observation", "dtype": "image", "shape": [2, 2, 3]},
+            "right/image": {"role": "observation", "dtype": "image", "shape": [2, 2, 3]},
+            "state": {"role": "observation", "dtype": "float32", "shape": [1]},
+            "action": {"role": "action", "dtype": "float32", "shape": [1]},
+        },
+    }
+    writer = DatasetWriter(contract, fps=10)
+    left = np.zeros((2, 2, 3), dtype=np.uint8)
+    right = np.full((2, 2, 3), 255, dtype=np.uint8)
+    writer.add(
+        {"left/image": left, "right/image": right, "state": np.zeros(1, dtype=np.float32)},
+        np.zeros(1, dtype=np.float32),
+        task="t",
+    )
+    features = created[0].create_kwargs["features"]
+    assert "observation.images.left_image" in features
+    assert "observation.images.right_image" in features
+    assert writer._frames[0]["observation.images.left_image"] is left  # pyright: ignore[reportPrivateUsage]
+    assert writer._frames[0]["observation.images.right_image"] is right  # pyright: ignore[reportPrivateUsage]
+
+
+def test_duplicate_mapped_keys_raise() -> None:
+    contract = {
+        "robot_type": "bad",
+        "features": {
+            # Same LeRobot slug after / → _ (or identical leaf under observation.state).
+            "cam/rgb": {"role": "observation", "dtype": "image", "shape": [2, 2, 3]},
+            "cam_rgb": {"role": "observation", "dtype": "image", "shape": [2, 2, 3]},
+            "action": {"role": "action", "dtype": "float32", "shape": [1]},
+        },
+    }
+    with pytest.raises(ValueError, match="both map to LeRobot key"):
+        DatasetWriter(contract, fps=10)

@@ -571,9 +571,9 @@ process exit. Destination and Hub push come from the environment:
 | `HF_PRIVATE` | Push the dataset private |
 
 The [contract](#contract) drives the schema with no extra wiring: image features become
-`observation.images.<camera>` (encoded to per-episode video), the lone state vector becomes
-`observation.state`, the action becomes `action`, and the task prompt rides along as each frame's
-`task`.
+`observation.images.<wire_path>` (``/`` → ``_``, so nested cameras stay distinct; encoded
+to per-episode video), the lone state vector becomes `observation.state`, the action becomes
+`action`, and the task prompt rides along as each frame's `task`.
 
 
 ## API summary

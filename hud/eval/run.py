@@ -402,8 +402,10 @@ async def rollout(
                     if client is not None:
                         # Cancel before abort so env teardown frees robot slots;
                         # a bare abort parks the session and would leak claims.
+                        # Bound cancel: a live-but-silent peer would otherwise hang
+                        # forever inside read_frame and never reach abort.
                         with contextlib.suppress(Exception):
-                            await client.cancel()
+                            await asyncio.wait_for(client.cancel(), timeout=2.0)
                         client.abort()
                     if phase != "cleanup":
                         driver.cancel()
@@ -419,7 +421,7 @@ async def rollout(
         except asyncio.CancelledError:
             if client is not None:
                 with contextlib.suppress(Exception):
-                    await client.cancel()
+                    await asyncio.wait_for(client.cancel(), timeout=2.0)
                 client.abort()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)

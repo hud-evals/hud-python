@@ -38,9 +38,11 @@ logger = logging.getLogger(__name__)
 def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     """Map a robot contract to LeRobot ``features`` + a wire-key -> LeRobot-key map.
 
-    Image obs -> ``observation.images.<leaf>`` (video); the lone vector obs ->
-    ``observation.state`` (else ``observation.<leaf>``); the action -> ``action``.
-    String obs are dropped (LeRobot carries the prompt as its per-frame ``task``).
+    Image obs -> ``observation.images.<wire_path>`` (video; ``/`` → ``_`` so nested
+    cameras like ``left/image`` and ``right/image`` stay distinct); the lone vector
+    obs -> ``observation.state`` (else ``observation.<wire_path>``); the action ->
+    ``action``. String obs are dropped (LeRobot carries the prompt as its
+    per-frame ``task``). Duplicate mapped keys raise.
     """
     feats = contract.get("features", {})
     vectors = [
@@ -54,14 +56,21 @@ def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any
     key_map: dict[str, str] = {}
     for name, f in feats.items():
         role, dtype, shape = f.get("role"), f.get("dtype"), tuple(f.get("shape") or ())
-        leaf = name.split("/")[-1]  # contract keys are slash-paths; LeRobot wants the leaf
+        # Full wire path → LeRobot slug (leaf alone collides for left/image + right/image).
+        slug = name.replace("/", "_")
+        leaf = name.split("/")[-1]
         if role == "observation" and dtype != "string":
             if _is_image(f):
-                key, dtype = f"observation.images.{leaf}", "video"
+                key, dtype = f"observation.images.{slug}", "video"
             elif leaf == "state" or single_state:
                 key = "observation.state"
             else:
-                key = f"observation.{leaf}"
+                key = f"observation.{slug}"
+            if key in features:
+                prior = next(w for w, k in key_map.items() if k == key)
+                raise ValueError(
+                    f"contract features {prior!r} and {name!r} both map to LeRobot key {key!r}"
+                )
             # Derived contracts omit dtype/shape; default the dtype, and leave a
             # missing shape empty for add() to fill from the first real frame.
             features[key] = {"dtype": dtype or "float32", "shape": shape, "names": _names(f, leaf)}

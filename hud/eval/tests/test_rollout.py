@@ -412,6 +412,48 @@ async def test_timeout_includes_grading() -> None:
     await asyncio.wait_for(grading_cancelled.wait(), 1.0)
 
 
+async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A live-but-silent env must not stall the batch inside unbounded cancel."""
+    from hud.clients.client import HudClient
+
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        yield f"add:{a}:{b}"
+        await asyncio.Event().wait()
+
+    aborted: list[bool] = []
+
+    async def hang_cancel(self: HudClient) -> None:
+        await asyncio.Event().wait()
+
+    real_abort = HudClient.abort
+
+    def track_abort(self: HudClient) -> None:
+        aborted.append(True)
+        real_abort(self)
+
+    monkeypatch.setattr(HudClient, "cancel", hang_cancel)
+    monkeypatch.setattr(HudClient, "abort", track_abort)
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    run = await rollout(
+        _add_task(2, 3),
+        _SlowAgent(_solve_add),
+        runtime=lambda _row: _local(env),
+        rollout_timeout=0.2,
+    )
+    elapsed = loop.time() - started
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert aborted
+    # rollout_timeout (0.2) + cancel grace (2.0); must not hang forever on read_frame.
+    assert elapsed < 5.0
+
+
 async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
     env = Environment("sums")
     cleanup_started = asyncio.Event()
