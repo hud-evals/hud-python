@@ -471,9 +471,13 @@ job = await taskset.run(
   calls `reset` / `result` as usual - the environment resolves each call to that rollout's own
   [slot](#gym-style-envs).
 - **One boot per run.** The substrate boots on the first rollout and is torn down when `run(...)`
-  returns; rollout `width + 1` waits for a freed slot instead of provisioning (or erroring). To
+  returns; rollout `width + 1` waits for capacity instead of provisioning (or erroring). To
   keep the sim warm across several calls, open the scope yourself:
   `async with Shared(...) as rt: await taskset.run(..., runtime=rt)`.
+- **Slots free in waves.** A lockstep sim resets globally, so a finished rollout's slot becomes
+  reclaimable once every in-flight episode on that sim has graded and the next reset reclaims the
+  whole batch. Staggered finishes wait for the slowest in-flight episode, so keep `group` a
+  multiple of `width`.
 - **EnvHub sims work unchanged.** A [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub)
   package's `make_env` often already returns a vectorized sim, so `env.gym(make_env, num_envs=N)`
   serves it directly.

@@ -262,9 +262,9 @@ class JobRecorder:
     ) -> None:
         """Record one batched step. Pass the tensors straight from ``env.step``.
 
-        On ``done[i]`` the slot's episode is closed (final reward attributed) and
-        the post-reset observation returned on the same step is skipped, so frames
-        never bleed across the episode boundary.
+        On ``done[i]`` the action still belongs to the episode that just ended
+        (recorded before close), while the post-reset observation returned on
+        the same step is skipped, so frames never bleed across the boundary.
         """
         done_np = to_numpy(done) if done is not None else None
         reward_np = to_numpy(reward) if reward is not None else None
@@ -274,19 +274,20 @@ class JobRecorder:
             rec = self._rec[i] or self._open(i)
             if reward_np is not None:
                 rec.add_reward(float(reward_np[i]))
-            if done_np is not None and bool(done_np[i]):
-                self._close(i, rec, success=bool(success_np[i]) if success_np is not None else None)
-                continue  # the returned obs belongs to the next episode
-            data: dict[str, Any] = {}
-            if obs is not None:
-                sliced = obs if isinstance(obs, dict) else {"obs": obs}
-                data.update({k: to_numpy(v)[i] for k, v in sliced.items()})
-            data.update({k: to_numpy(v)[i] for k, v in (frames or {}).items()})
-            if data:
-                rec.record_observation(data, tick=self._tick[i])
+            done_i = done_np is not None and bool(done_np[i])
+            if not done_i:  # a done step's returned obs is the next episode's
+                data: dict[str, Any] = {}
+                if obs is not None:
+                    sliced = obs if isinstance(obs, dict) else {"obs": obs}
+                    data.update({k: to_numpy(v)[i] for k, v in sliced.items()})
+                data.update({k: to_numpy(v)[i] for k, v in (frames or {}).items()})
+                if data:
+                    rec.record_observation(data, tick=self._tick[i])
             if action is not None:
                 rec.record_inference(to_numpy(action)[i], tick=self._tick[i])
             self._tick[i] += 1
+            if done_i:
+                self._close(i, rec, success=bool(success_np[i]) if success_np is not None else None)
 
     def close_slots(self) -> None:
         """Close every open per-slot trace (an explicit mid-run reset ends its episodes)."""

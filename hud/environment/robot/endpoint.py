@@ -73,10 +73,16 @@ def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
         if not hasattr(bridge, attr):
             continue
         value = getattr(bridge, attr)
-        try:
-            json.dumps(value)  # stream sinks / recorders are not child-portable
-        except TypeError:
+        # Callables stay parent-side; anything else must serialize or spawn
+        # would silently boot the child with a different config.
+        if callable(value):
             continue
+        try:
+            json.dumps(value)
+        except TypeError as exc:
+            raise TypeError(
+                f"bridge ctor param {name!r} is not JSON-serializable for spawn: {value!r}"
+            ) from exc
         out[name] = value
     # Attrs often assigned on the declaration instance, not as ctor params.
     state: dict[str, Any] = {}
@@ -305,11 +311,15 @@ class RobotEndpoint:
             if await self._result_with_retry(token):
                 self._claims.pop(session_id, None)
 
-    async def _result_with_retry(self, token: str, *, attempts: int = 3) -> bool:
+    async def _result_with_retry(
+        self, token: str, *, attempts: int = 3, timeout: float = 10.0
+    ) -> bool:
         """``result`` RPC with short retries; teardown only runs once per cancel path."""
+        # Each attempt is bounded: a wedged sim can hold the link open yet never
+        # answer, and shutdown must still finish (stop() owns a child to terminate).
         for attempt in range(attempts):
             try:
-                await self._call("result", {"token": token})
+                await asyncio.wait_for(self._call("result", {"token": token}), timeout)
                 return True
             except Exception:
                 if attempt + 1 < attempts:

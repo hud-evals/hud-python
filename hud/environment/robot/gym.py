@@ -231,8 +231,14 @@ class GymBridge(RobotBridge):
             # **kwargs factories: env.gym(..., num_envs=8) defaults are build args.
             if any(p.kind is p.VAR_KEYWORD for p in params.values()):
                 self._build_params |= set(defaults)
+            # Build args with no factory default and no env.gym default: the start-time
+            # probe cannot supply them (only a template reset could, which is too late).
+            self._required_build_args = {
+                n for n, p in params.items() if p.default is p.empty and n in self._build_params
+            } - set(defaults)
         else:
             self._build_params = {"num_envs"}  # registry targets: vectorization only
+            self._required_build_args: set[str] = set()
         self.env: Any = None
         self.batched = False  # env carries a leading [N] dim (any env exposing num_envs)
         self._obs: Any = None  # latest observation (reset or step)
@@ -298,6 +304,13 @@ class GymBridge(RobotBridge):
         if "num_envs" in self._defaults:
             self.num_envs = int(self._defaults["num_envs"])
             self.batched = self.num_envs > 0
+        if self._required_build_args and not self.contract:
+            # The probe would die inside the factory with a bare TypeError; say why.
+            raise RuntimeError(
+                f"env build args {sorted(self._required_build_args)} have no default: pass "
+                "them to env.gym(...) or pre-write contract.json — start() must build the "
+                "env to mint the capability contract"
+            )
         if not self.contract:
             # Manifest is minted from bridge.contract right after start returns.
             print(

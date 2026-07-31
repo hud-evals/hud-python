@@ -164,6 +164,9 @@ class RobotAgent(Agent):
             if self.log_every and step % self.log_every == 0:
                 print(f"[agent] step {step}/{max_steps}", flush=True)
             obs = await robot.get_observation()
+            # Env-reported per-step reward (RL wire sibling) → the trace total.
+            if (reward := obs.get("reward")) is not None:
+                recorder.add_reward(reward)
         else:
             print(f"[agent] reached max_steps={max_steps}", flush=True)
 

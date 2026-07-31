@@ -80,7 +80,8 @@ class RobotClient(CapabilityClient):
         ``endpoint.reset()`` there. Waits for the first observation so a rejected
         claim fails here instead of hanging the first ``get_observation``.
         """
-        ws = await websockets.connect(cap.url, max_size=None, ping_interval=None)
+        # Bounded dial: an undialed claim stalls the bridge's barrier for every peer.
+        ws = await websockets.connect(cap.url, max_size=None, ping_interval=None, open_timeout=30.0)
         # Consume initial metadata; string means env error.
         raw = await ws.recv()
         if isinstance(raw, str):

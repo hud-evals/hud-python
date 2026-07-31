@@ -18,6 +18,7 @@ import secrets
 import signal
 import sys
 import threading
+import traceback
 from abc import ABC, abstractmethod
 from concurrent.futures import Future
 from dataclasses import dataclass, field
@@ -342,8 +343,6 @@ class RobotBridge(ABC):
         except websockets.exceptions.ConnectionClosed:
             pass
         except Exception:
-            import traceback
-
             with contextlib.suppress(Exception):
                 await ws.send(traceback.format_exc())
             raise
@@ -377,10 +376,14 @@ class RobotBridge(ABC):
                 try:
                     await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
                 except TimeoutError:
-                    # Connected but silent too long — drop out so peers can proceed.
+                    # Connected but silent too long — fail it (its agent would
+                    # otherwise hang on an observation) and drop out so peers proceed.
                     for s in live:
                         if s.action is None and s.ws is not None:
                             s.idle = True
+                            with contextlib.suppress(Exception):
+                                await s.ws.send("robot env: slot timed out waiting for an action")
+                                await s.ws.close()
                 claimed = self._registry.claimed()
                 if any(s.ws is None and not s.idle for s in claimed):
                     live = []
@@ -400,8 +403,21 @@ class RobotBridge(ABC):
                 row = s.action if s in acting else hold
                 rows.append(np.asarray(row, dtype=np.float32).reshape(-1))
                 s.action = None
-            await self._run_on_sim(self.step, np.stack(rows))
-            batch = await self._run_on_sim(self.get_observation)
+            try:
+                await self._run_on_sim(self.step, np.stack(rows))
+                batch = await self._run_on_sim(self.get_observation)
+            except Exception:
+                # A sim raise here would kill this task and wedge every client on
+                # an observation that never arrives — fail each connection instead.
+                tb = traceback.format_exc()
+                for s in self._registry.claimed():
+                    if s.ws is None:
+                        continue
+                    s.idle = True  # drop out of the barrier before close settles
+                    with contextlib.suppress(Exception):
+                        await s.ws.send(tb)  # a str frame is the wire's error convention
+                        await s.ws.close()
+                continue
             for s in acting:
                 await self._send_slot_observation(s, batch)
 
@@ -552,7 +568,11 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
             for fn, fut in touches:
                 if fut.set_running_or_notify_cancel():
                     try:
-                        fut.set_result(fn())
+                        result = fn()
+                        if inspect.iscoroutine(result):  # async hook: unawaitable here
+                            result.close()
+                            raise TypeError("bridge hooks must be sync when serving")
+                        fut.set_result(result)
                     except BaseException as exc:  # propagate to the awaiting caller
                         fut.set_exception(exc)
             if kit:
