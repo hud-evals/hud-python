@@ -178,6 +178,13 @@ class _EchoAgent(RobotAgent):
         self.adapter = adapter
 
 
+class _EarlyStopAgent(_EchoAgent):
+    """Stop after one action through the public rollout hook."""
+
+    def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
+        return step >= 1 or super().should_stop(obs, step=step, max_steps=max_steps)
+
+
 # ─── gates ─────────────────────────────────────────────────────────────
 
 
@@ -207,6 +214,27 @@ async def test_single_env_rollout_drives_the_policy_and_grades_the_episode() -> 
     assert adapter.wired[0]["image"].shape == (16, 16, 3)
     assert adapter.wired[0]["image"].dtype == np.uint8
     assert adapter.wired[0]["state"].tolist() == [1.0, 0.0]  # slot 1, before any step
+
+
+async def test_agent_stop_hook_ends_the_rollout_before_the_env_terminates() -> None:
+    sim = _StubSim()
+
+    async with _sim_env(sim) as (env, endpoint):
+
+        @env.template()
+        async def episode() -> AsyncGenerator[Any, Any]:
+            ep = await endpoint.reset()
+            yield {"prompt": ep["prompt"]}
+            yield await endpoint.result()
+
+        run = await rollout(
+            Task(env="stub-sim", id="episode"),
+            _EarlyStopAgent(_EchoAdapter()),
+            runtime=_serving(env),
+        )
+
+    assert sim.tick == 1
+    assert run.reward == 1
 
 
 async def test_the_slot_token_pins_each_rollout_to_its_own_slot() -> None:

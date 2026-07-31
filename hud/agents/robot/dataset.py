@@ -208,7 +208,7 @@ class DatasetWriter:
             self._fps,
             self._contract.get("robot_type") or "robot",
             tuple(
-                (n, f.get("dtype"), tuple(f.get("shape") or ()))
+                (n, f.get("dtype"), tuple(f.get("shape") or ()), tuple(f.get("names") or ()))
                 for n, f in sorted(self._features.items())
             ),
         )

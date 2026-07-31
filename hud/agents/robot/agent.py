@@ -53,6 +53,10 @@ class RobotAgent(Agent):
     #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
+    def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
+        """Return whether to stop before selecting the next action."""
+        return bool(np.asarray(obs["terminated"]).reshape(-1)[0])
+
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
         """The generic rollout contract: one run, one scalar robot connection.
 
@@ -132,10 +136,10 @@ class RobotAgent(Agent):
         for step in range(max_steps):
             # Record every frame, including the terminal one.
             recorder.record_observation(obs["data"], tick=step)
-            # Already done (including a pre-terminated first obs) → don't act.
-            if bool(np.asarray(obs["terminated"]).reshape(-1)[0]):
+            # Stop before acting, including on a pre-terminated first observation.
+            if self.should_stop(obs, step=step, max_steps=max_steps):
                 if step:
-                    print(f"[agent] terminated at step {step}", flush=True)
+                    print(f"[agent] stopped at step {step}", flush=True)
                 break
 
             if not chunk:  # refill with a fresh forward (BatchedModel coalesces ainfer)

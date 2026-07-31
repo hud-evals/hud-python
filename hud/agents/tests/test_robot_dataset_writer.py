@@ -82,6 +82,28 @@ def test_different_fps_or_features_get_separate_datasets(
     assert tuple(created[2].create_kwargs["features"]["observation.state"]["shape"]) == (4,)
 
 
+def test_different_feature_names_get_separate_datasets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _install_fake_lerobot(monkeypatch)
+    first = _contract(state_shape=(2,), action_shape=(1,), robot="arm")
+    second = _contract(state_shape=(2,), action_shape=(1,), robot="arm")
+    first["features"]["state"]["names"] = ["shoulder", "elbow"]
+    second["features"]["state"]["names"] = ["x", "y"]
+    obs = {"state": np.zeros(2, dtype=np.float32)}
+    action = np.zeros(1, dtype=np.float32)
+
+    DatasetWriter(first, fps=10).add(obs, action, task="t")
+    DatasetWriter(second, fps=10).add(obs, action, task="t")
+
+    assert len(created) == 2
+    assert created[0].create_kwargs["features"]["observation.state"]["names"] == [
+        "shoulder",
+        "elbow",
+    ]
+    assert created[1].create_kwargs["features"]["observation.state"]["names"] == ["x", "y"]
+
+
 def test_finalize_clears_all_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     created = _install_fake_lerobot(monkeypatch)
     act = np.zeros(2, dtype=np.float32)
