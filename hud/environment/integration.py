@@ -14,8 +14,9 @@ inside an image built for that purpose — packaging the constructor into
 such images is a format extra (e.g. ``harbor.adapt``), not part of the
 contract.
 
-Implementations live outside core (e.g. :mod:`hud.integrations`, or any
-installable package); core knows only this interface.
+Implementations live outside core — this repository's ``integrations/``, or
+any installable package; core knows only this interface, and imports none of
+them.
 """
 
 from __future__ import annotations
@@ -34,8 +35,8 @@ if TYPE_CHECKING:
 class Integration(ABC):
     """One foreign format's frontend. See module docstring for the contract."""
 
-    #: The format's identifier: its origin scheme (``<name>:<ref>`` on loaded
-    #: tasksets), CLI ``--format`` value, and registry key.
+    #: The format's identifier, and the scheme its loaded tasksets are
+    #: origin-stamped with (``<name>:<ref>``).
     name: ClassVar[str]
 
     @abstractmethod

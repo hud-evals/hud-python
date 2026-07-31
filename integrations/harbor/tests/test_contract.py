@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.integrations import harbor
-from hud.integrations.harbor import _load as harbor_load
+from integrations import harbor
+from integrations.harbor import _load as harbor_load
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -59,7 +59,7 @@ async def test_adapt_contexts_bake_the_serving_layer(tmp_path) -> None:
     context = tmp_path / ".hud-adapt" / contexts[0]
     dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
     # The CMD serves the contract constructor by module reference — no baked env.py.
-    assert "hud.integrations.harbor:environment" in dockerfile
+    assert "harbor:environment" in dockerfile
     assert f'"name={context.name}"' in dockerfile
     assert "EXPOSE 8765" in dockerfile
     assert not (context / "_hud" / "env.py").exists()
@@ -100,7 +100,7 @@ async def test_environment_serves_the_baked_tasks(tmp_path, monkeypatch) -> None
     assert sorted(env.tasks) == ["task-a", "task-b"]
     # The adapted CMD serves exactly this constructor.
     dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
-    assert "hud.integrations.harbor:environment" in dockerfile
+    assert "harbor:environment" in dockerfile
 
 
 def test_harbor_implements_the_integration_contract() -> None:
@@ -254,7 +254,7 @@ def test_adapted_cmd_serves_the_contract_constructor(tmp_path) -> None:
     (context,) = sorted((tmp_path / ".hud-adapt").iterdir())
     dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "hud.integrations.harbor:environment" in dockerfile
+    assert "harbor:environment" in dockerfile
 
 
 async def test_planted_reward_files_are_discarded_before_grading(tmp_path) -> None:
@@ -263,7 +263,7 @@ async def test_planted_reward_files_are_discarded_before_grading(tmp_path) -> No
     import asyncio
     import json
 
-    from hud.integrations.harbor._adapt import _grade_with_verifier
+    from integrations.harbor._adapt import _grade_with_verifier
 
     task = _write_harbor_task(tmp_path, "task-a")
     logs = tmp_path / "logs"
@@ -334,7 +334,7 @@ def test_declared_uid_zero_beats_the_source_user(tmp_path) -> None:
 def test_rewards_are_finite_numbers_not_booleans(tmp_path) -> None:
     import json as jsonlib
 
-    from hud.integrations.harbor._adapt import _read_reward
+    from integrations.harbor._adapt import _read_reward
 
     logs = tmp_path / "verifier"
     logs.mkdir()
@@ -460,7 +460,7 @@ def test_final_stage_reads_only_what_the_shipped_image_declares() -> None:
     is not the shipped image's; ``user[:group]`` is a legal operand; and a
     heredoc body is data, not instructions.
     """
-    from hud.integrations.harbor._load import final_stage
+    from integrations.harbor._load import final_stage
 
     multistage = final_stage(
         'FROM golang:1.22 AS build\nUSER builder\nENTRYPOINT ["/tool"]\nRUN true\n'
@@ -534,8 +534,8 @@ async def test_a_chatty_verifier_does_not_deadlock(tmp_path) -> None:
     # would block the writer forever and score a finished script as a timeout.
     import asyncio
 
-    from hud.integrations.harbor._adapt import _grade_with_verifier
     from hud.utils.process import create_process_group_exec
+    from integrations.harbor._adapt import _grade_with_verifier
 
     task = _write_harbor_task(tmp_path, "task-a")
     logs = tmp_path / "logs"
@@ -609,8 +609,8 @@ async def test_a_cancelled_grade_leaves_nothing_running(tmp_path) -> None:
     # process group and the pipe readers are released.
     import asyncio
 
-    from hud.integrations.harbor._adapt import _grade_with_verifier
     from hud.utils.process import create_process_group_exec
+    from integrations.harbor._adapt import _grade_with_verifier
 
     task = _write_harbor_task(tmp_path, "task-a")
     logs = tmp_path / "logs"
@@ -645,7 +645,7 @@ async def test_a_cancelled_grade_leaves_nothing_running(tmp_path) -> None:
 def test_image_tags_do_not_depend_on_host_state(tmp_path) -> None:
     # Links are copied as links, so hashing must read the link — not what it
     # points at — or the same dataset tags differently on another machine.
-    from hud.integrations.harbor._load import hash_directory
+    from integrations.harbor._load import hash_directory
 
     target = tmp_path / "outside.txt"
     target.write_text("first", encoding="utf-8")
