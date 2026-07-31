@@ -133,8 +133,8 @@ def load(path: str | Path, *, images: dict[str, str] | None = None) -> Taskset:
     """Load a Harbor task dir (or dataset dir) into a :class:`Taskset`.
 
     One row per task dir (``id`` = the dir name); rows share one env name per
-    distinct ``environment/`` build context (content-hashed), derived from
-    the dataset name. Each row carries the task's declared launch
+    distinct environment (see :func:`grouped` for what distinguishes them and
+    how the name is derived). Each row carries the task's declared launch
     requirements (:func:`runtime_config`: cpu/memory/gpu and time budgets),
     plus the adapted image ref once
     :func:`~harbor.adapt` has produced it, so it runs on any
@@ -387,11 +387,15 @@ def final_stage(dockerfile_text: str) -> FinalStage:
 
 
 def grouped(root: str | Path) -> list[tuple[str, list[Path]]]:
-    """Task dirs grouped by identical ``environment/`` content, largest first.
+    """Task dirs grouped by the env they need, under content-derived names.
 
-    One env name per group (the dataset slug, ``-gN``-suffixed when there are
-    several): the join key between :func:`load`'s rows and
-    :func:`~harbor.adapt`'s images.
+    One env name per group — ``<dataset>-<digest>`` over everything that
+    decides what the group's image is — and that name is the join key
+    between :func:`load`'s rows and :func:`~harbor.adapt`'s images. Deriving
+    it from content rather than position is what makes the join safe: a name
+    denotes one image forever, so editing, adding or removing a task can
+    never leave a row pointing at an environment that has since come to mean
+    something else.
     """
     resolved = Path(root).resolve()
     dataset_name = resolved.parent.name if is_harbor_task(resolved) else resolved.name
@@ -411,11 +415,17 @@ def grouped(root: str | Path) -> list[tuple[str, list[Path]]]:
         # for the whole group.
         policy = json.dumps(workspace_policy(task_dir), sort_keys=True)
         groups.setdefault((env_hash, policy), []).append(task_dir)
-    ordered = sorted(groups.values(), key=lambda group: -len(group))
     base_name = slugify(dataset_name)
-    if len(ordered) == 1:
-        return [(base_name, ordered[0])]
-    return [(f"{base_name}-g{idx}", group) for idx, group in enumerate(ordered, start=1)]
+    return sorted(
+        (f"{base_name}-{_group_digest(env_hash, policy)}", group)
+        for (env_hash, policy), group in groups.items()
+    )
+
+
+def _group_digest(env_hash: str, policy: str) -> str:
+    """Short stable digest of one group's key — its build context and the
+    workspace policy its image bakes in, which together are the image."""
+    return hashlib.sha256(f"{env_hash}\0{policy}".encode()).hexdigest()[:12]
 
 
 # ─── task-dir primitives ────────────────────────────────────────────────
