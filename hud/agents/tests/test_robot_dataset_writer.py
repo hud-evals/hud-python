@@ -98,7 +98,6 @@ def test_finalize_clears_all_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_nested_image_keys_stay_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
-    """left/image + right/image must not both collapse to observation.images.image."""
     created = _install_fake_lerobot(monkeypatch)
     contract = {
         "robot_type": "stereo",
@@ -117,18 +116,21 @@ def test_nested_image_keys_stay_distinct(monkeypatch: pytest.MonkeyPatch) -> Non
         np.zeros(1, dtype=np.float32),
         task="t",
     )
+    writer.end_episode()
+
     features = created[0].create_kwargs["features"]
     assert "observation.images.left_image" in features
     assert "observation.images.right_image" in features
-    assert writer._frames[0]["observation.images.left_image"] is left  # pyright: ignore[reportPrivateUsage]
-    assert writer._frames[0]["observation.images.right_image"] is right  # pyright: ignore[reportPrivateUsage]
+    frame = created[0].add_frame.call_args.args[0]
+    assert frame["observation.images.left_image"] is left
+    assert frame["observation.images.right_image"] is right
 
 
 def test_duplicate_mapped_keys_raise() -> None:
     contract = {
         "robot_type": "bad",
         "features": {
-            # Same LeRobot slug after / → _ (or identical leaf under observation.state).
+            # Both wire names become the same LeRobot key after path flattening.
             "cam/rgb": {"role": "observation", "dtype": "image", "shape": [2, 2, 3]},
             "cam_rgb": {"role": "observation", "dtype": "image", "shape": [2, 2, 3]},
             "action": {"role": "action", "dtype": "float32", "shape": [1]},
