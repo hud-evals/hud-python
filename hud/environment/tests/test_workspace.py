@@ -305,7 +305,12 @@ def test_sessions_join_one_sandbox_rather_than_each_making_its_own(
     # The user namespace has to be joined first: it is what confers the
     # privilege to join the others in a container given no extra capability.
     assert first.index("--user") < min(first.index("--mount"), first.index("--pid"))
-    assert "--wd=/app" in first
+    # The sandbox's own working directory, never a path spelled out here:
+    # nsenter opens a directory it is given *before* it joins anything, out
+    # where a guest path the substrate does not have does not resolve at all.
+    assert "--wd" in first
+    assert not any(argument.startswith("--wd=") for argument in first)
+    assert "/app" not in first[: first.index("--")]
 
 
 @pytest.mark.asyncio

@@ -727,7 +727,6 @@ class Workspace:
         pid: int,
         command: str | None = None,
         *,
-        cwd: str | None = None,
         env: Mapping[str, str] | None = None,
         tty: bool = False,
     ) -> list[str]:
@@ -743,6 +742,11 @@ class Workspace:
         sharing sandbox is already in this process's netns, and that netns
         belongs to an outer user namespace: once joined to bwrap's, we hold no
         authority there and rejoining fails outright.
+
+        The sandbox's own working directory is the only one a session can be
+        started in, so there is no ``cwd`` to choose here: a directory named
+        to ``nsenter`` is opened *before* it joins anything, out where a guest
+        path that exists only inside the sandbox does not resolve.
         """
         nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
         argv = [
@@ -758,7 +762,7 @@ class Workspace:
             # otherwise a session would run on the substrate's, which is the
             # network the workspace was given a policy to keep it off.
             *(("--net",) if self.owns_netns else ()),
-            f"--wd={cwd if cwd is not None else self._guest_path}",
+            "--wd",
             "--",
         ]
         # Unlike the bwrap path, the drop goes *inside*: joining namespaces
