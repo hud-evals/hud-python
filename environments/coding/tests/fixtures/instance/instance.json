@@ -1,0 +1,18 @@
+{
+  "repo": "acme/widgets",
+  "instance_id": "instance_acme__widgets-0000000000000000000000000000000000000000-vnan",
+  "base_commit": "0000000000000000000000000000000000000000",
+  "patch": "diff --git a/widgets.py b/widgets.py\n--- a/widgets.py\n+++ b/widgets.py\n@@ -1 +1 @@\n-BROKEN = True\n+BROKEN = False\n",
+  "test_patch": "",
+  "problem_statement": "Widgets are broken.",
+  "requirements": "- Widgets should not be broken.",
+  "interface": "",
+  "repo_language": "py",
+  "fail_to_pass": "['tests/test_widgets.py | test_widgets_work', \"tests/test_widgets.py | test_widgets_don't_break\"]",
+  "pass_to_pass": "['tests/test_widgets.py | test_existing_behavior']",
+  "issue_specificity": "[\"minor_bug\"]",
+  "issue_categories": "[\"back_end_knowledge\"]",
+  "before_repo_set_cmd": "git reset --hard 0000000000000000000000000000000000000000\ngit clean -fd \ngit checkout 0000000000000000000000000000000000000000 \ngit checkout 1111111111111111111111111111111111111111 -- tests/test_widgets.py",
+  "selected_test_files_to_run": "[\"tests/test_widgets.py\"]",
+  "dockerhub_tag": "acme.widgets-acme__widgets-0000000000000000000000000000000000000000"
+}
