@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import asyncssh
 
 from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
-from hud.utils.process import create_process_group_exec
+from hud.utils.process import ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import fcntl
@@ -695,6 +695,101 @@ class Workspace:
             url=f"tcp://{self._ft_host}:{self._ft_port}",
             params={"root": self.root.as_posix(), "setup_diff": True},
         )
+
+    async def run(
+        self,
+        command: list[str],
+        *,
+        isolated: bool = False,
+        env: Mapping[str, str] | None = None,
+        identity: int | None | Literal["workspace"] = "workspace",
+        inherit_workspace_env: bool = True,
+        allowed_hosts: Collection[str] = (),
+        no_new_privs: bool = True,
+        max_wait: float | None = None,
+    ) -> ProcessResult:
+        """Run a captured command against this workspace.
+
+        Normally the command joins the persistent sandbox used by SSH sessions,
+        so it can inspect processes the agent started. ``allowed_hosts`` opens a
+        separate egress policy only for the command's lifetime. ``isolated=True``
+        instead creates a fresh no-network sandbox over the same filesystem.
+        """
+        if (
+            isinstance(identity, int)
+            and hasattr(os, "geteuid")
+            and identity != os.geteuid()
+            and not (_is_root() and self._setpriv() is not None)
+        ):
+            raise RuntimeError("setpriv is required to run a workspace command as another user")
+
+        process_env = dict(env or {})
+        if not isolated:
+            sandbox = await self.sandbox_pid()
+            if sandbox is None:
+                raise RuntimeError("workspace commands require a live sandbox")
+            async with self.visiting(allowed_hosts) as visitor_env:
+                process_env.update(visitor_env)
+                process = await create_process_group_exec(
+                    *self.enter_argv(
+                        sandbox,
+                        command,
+                        env=process_env,
+                        identity=identity,
+                        inherit_workspace_env=inherit_workspace_env,
+                        preserve_credentials=True,
+                        no_new_privs=no_new_privs,
+                    ),
+                    cwd=self.root,
+                    env={**os.environ, **process_env},
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                return await process.complete(max_wait=max_wait)
+
+        if allowed_hosts:
+            raise ValueError("an isolated workspace command has no network")
+
+        info_read, info_write = os.pipe()
+        block_read, block_write = os.pipe()
+        try:
+            os.set_inheritable(info_write, True)
+            os.set_inheritable(block_read, True)
+            if identity == "workspace":
+                drop = self._drop_argv(no_new_privs=no_new_privs)
+            elif identity is None:
+                drop = []
+            else:
+                drop = self._drop_argv(identity, no_new_privs=no_new_privs)
+            process = await create_process_group_exec(
+                *self.bwrap_argv(
+                    [*drop, *command],
+                    env=process_env,
+                    inherit_host_env=False,
+                    inherit_workspace_env=inherit_workspace_env,
+                    info_fd=info_write,
+                    userns_block_fd=block_read,
+                    network=False,
+                    mount_hosts=False,
+                    isolate_processes=False,
+                ),
+                cwd=self.root,
+                env={**os.environ, **process_env},
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                pass_fds=(info_write, block_read),
+            )
+            os.close(info_write)
+            os.close(block_read)
+            info_write = block_read = -1
+            await install_identity_map(info_read, block_write)
+        finally:
+            os.close(info_read)
+            os.close(block_write)
+            for descriptor in (info_write, block_read):
+                if descriptor != -1:
+                    os.close(descriptor)
+        return await process.complete(max_wait=max_wait)
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
 

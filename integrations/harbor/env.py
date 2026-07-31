@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import math
@@ -15,9 +14,7 @@ from typing import Any
 
 from hud.environment import Environment, Mount
 from hud.environment.egress import ANY_HOST
-from hud.environment.workspace import install_identity_map
 from hud.graders import EvaluationResult
-from hud.utils.process import ProcessGroup, create_process_group_exec
 
 ROOT = Path("/media/hud")
 TESTS = Path("/tests")
@@ -158,8 +155,6 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     verifier_uid = uid(verifier)
     verifier_env = dict(verifier["env"])
     if verifier_uid is not None:
-        if os.geteuid() == 0 and shutil.which("setpriv") is None:
-            raise RuntimeError("setpriv is required to run the Harbor verifier as another user")
         for root in (TESTS, VERIFIER_LOGS):
             for path in (root, *root.rglob("*")):
                 os.lchown(path, verifier_uid, verifier_uid)
@@ -167,31 +162,16 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
             verifier_env["HOME"] = verifier_home
 
     verifier_network, verifier_hosts = network(verifier)
-    command = [str(test_script)]
-    if verifier_network:
-        sandbox = await workspace.sandbox_pid()
-        if sandbox is None:
-            raise RuntimeError("the Harbor verifier requires the workspace sandbox")
-        async with workspace.visiting(verifier_hosts) as visitor_env:
-            process = await create_process_group_exec(
-                *workspace.enter_argv(
-                    sandbox,
-                    command,
-                    env={**verifier_env, **visitor_env},
-                    identity=verifier_uid,
-                    inherit_workspace_env=False,
-                    preserve_credentials=True,
-                    no_new_privs=False,
-                ),
-                cwd=WORKDIR,
-                env={**os.environ, **verifier_env, **visitor_env},
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            execution = await process.complete(max_wait=timeout_sec)
-    else:
-        process = await isolated(command, verifier_env, verifier_uid)
-        execution = await process.complete(max_wait=timeout_sec)
+    execution = await workspace.run(
+        [str(test_script)],
+        isolated=not verifier_network,
+        env=verifier_env,
+        identity=verifier_uid,
+        inherit_workspace_env=False,
+        allowed_hosts=verifier_hosts,
+        no_new_privs=False,
+        max_wait=timeout_sec,
+    )
 
     info: dict[str, Any] = {
         "exit_code": execution.returncode,
@@ -215,58 +195,6 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
             info=info,
         )
     return EvaluationResult(reward=score, info=info)
-
-
-async def isolated(
-    command: list[str],
-    verifier_env: dict[str, str],
-    verifier_uid: int | None,
-) -> ProcessGroup:
-    info_read, info_write = os.pipe()
-    block_read, block_write = os.pipe()
-    try:
-        os.set_inheritable(info_write, True)
-        os.set_inheritable(block_read, True)
-        if verifier_uid is not None:
-            command = [
-                shutil.which("setpriv") or "setpriv",
-                "--reuid",
-                str(verifier_uid),
-                "--regid",
-                str(verifier_uid),
-                "--clear-groups",
-                "--",
-                *command,
-            ]
-        process = await create_process_group_exec(
-            *workspace.bwrap_argv(
-                command,
-                cwd=WORKDIR.as_posix(),
-                env=verifier_env,
-                inherit_workspace_env=False,
-                info_fd=info_write,
-                userns_block_fd=block_read,
-                network=False,
-                mount_hosts=False,
-                isolate_processes=False,
-            ),
-            cwd=WORKDIR,
-            env={**os.environ, **verifier_env},
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            pass_fds=(info_write, block_read),
-        )
-        os.close(info_write)
-        os.close(block_read)
-        info_write = block_read = -1
-        await install_identity_map(info_read, block_write)
-        return process
-    finally:
-        os.close(info_read)
-        os.close(block_write)
-        for descriptor in (info_write, block_read):
-            if descriptor != -1:
-                os.close(descriptor)
 
 
 def reward() -> tuple[float | None, dict[str, Any]]:

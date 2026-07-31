@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import os
 import shutil
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import asyncssh
 import pytest
@@ -19,6 +21,7 @@ import pytest
 from hud.capabilities import SSHClient
 from hud.environment import workspace as workspace_mod
 from hud.environment.workspace import Mount, Workspace
+from hud.utils.process import ProcessResult
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
 
@@ -390,34 +393,65 @@ def test_making_a_network_and_joining_it_are_the_same_question(
         assert ("--net" in ws.enter_argv(7, "true")) is owns
 
 
-def test_process_builders_can_apply_a_phase_policy(
+@pytest.mark.asyncio
+async def test_run_uses_the_shared_sandbox_and_visitor_egress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ws = Workspace(tmp_path / "root", network=True, env={"AGENT_ONLY": "yes"})
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    ws = Workspace(tmp_path / "root")
 
-    verifier = ws.bwrap_argv(
-        ["true"],
-        env={"VERIFIER_ONLY": "yes"},
-        inherit_workspace_env=False,
-        network=False,
-        mount_hosts=False,
-    )
-    entered = ws.enter_argv(
-        7,
-        ["true"],
-        env={"VERIFIER_ONLY": "yes"},
+    @contextlib.asynccontextmanager
+    async def visiting(allowed):
+        assert allowed == {"pypi.org"}
+        yield {"HTTPS_PROXY": "http://visitor"}
+
+    complete = AsyncMock(return_value=ProcessResult(0, b"passed", b""))
+    spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
+
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    monkeypatch.setattr(ws, "visiting", visiting)
+    monkeypatch.setattr(workspace_mod, "create_process_group_exec", spawn)
+
+    result = await ws.run(
+        ["test.sh"],
         identity=None,
-        inherit_workspace_env=False,
-        preserve_credentials=True,
+        allowed_hosts={"pypi.org"},
+        max_wait=12,
     )
 
-    assert "--unshare-net" in verifier
-    assert "AGENT_ONLY=yes" not in verifier
-    assert "VERIFIER_ONLY=yes" in verifier
-    assert "--preserve-credentials" in entered
-    assert "AGENT_ONLY=yes" not in entered
-    assert "VERIFIER_ONLY=yes" in entered
+    assert result.stdout == b"passed"
+    complete.assert_awaited_once_with(max_wait=12)
+    argv, kwargs = spawn.await_args
+    assert argv[argv.index("--target") + 1] == "7"
+    assert "HTTPS_PROXY=http://visitor" in argv
+    assert kwargs["env"]["HTTPS_PROXY"] == "http://visitor"
+
+
+@pytest.mark.asyncio
+async def test_run_can_use_a_fresh_no_network_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    install_identity_map = AsyncMock(return_value=9)
+    complete = AsyncMock(return_value=ProcessResult(0, b"isolated", b""))
+    spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
+
+    monkeypatch.setattr(workspace_mod, "install_identity_map", install_identity_map)
+    monkeypatch.setattr(workspace_mod, "create_process_group_exec", spawn)
+
+    result = await ws.run(
+        ["test.sh"],
+        isolated=True,
+        identity=None,
+        max_wait=5,
+    )
+
+    assert result.stdout == b"isolated"
+    complete.assert_awaited_once_with(max_wait=5)
+    install_identity_map.assert_awaited_once()
+    argv, kwargs = spawn.await_args
+    assert "--unshare-net" in argv
+    assert len(kwargs["pass_fds"]) == 2
 
 
 def test_a_peer_answers_at_the_address_the_task_expects() -> None:

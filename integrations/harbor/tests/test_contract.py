@@ -201,6 +201,11 @@ VERIFIER_ONLY = "yes"
     [
         ('[environment]\nos = "windows"\n', "os="),
         ('[environment]\ntpu = {type = "v5", topology = "2x2"}\n', "TPUs"),
+        (
+            '[environment]\ngpus = 1\ngpu_types = ["H100", "A100"]\n',
+            "multiple GPU types",
+        ),
+        ('[environment]\ngpu_types = ["H100"]\n', "GPU types without GPUs"),
         ('[environment.healthcheck]\ncommand = "curl localhost"\n', "healthcheck"),
         ('[[environment.mcp_servers]]\nname = "db"\n', "MCP servers"),
         ('[verifier]\nenvironment_mode = "separate"\n', "separate verifier"),

@@ -131,6 +131,10 @@ async def adapt(
             unsupported.append(f"os={config.environment.os!r}")
         if config.environment.tpu:
             unsupported.append("TPUs")
+        if len(config.environment.gpu_types) > 1:
+            unsupported.append("multiple GPU types")
+        elif config.environment.gpu_types and not config.environment.gpus:
+            unsupported.append("GPU types without GPUs")
         if config.environment.healthcheck:
             unsupported.append("healthcheck")
         if config.environment.mcp_servers:
