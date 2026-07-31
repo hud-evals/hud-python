@@ -50,8 +50,19 @@ LOGGER = logging.getLogger("hud.environment.egress")
 ANY_HOST = "*"
 
 #: Headers that belong to one hop and must not be forwarded to the next.
+#: ``transfer-encoding`` among them: the response body is read back already
+#: de-chunked, so passing the upstream's framing along leaves the client
+#: looking for chunk headers in what is now plain bytes.
 _HOP_BY_HOP = frozenset(
-    {"connection", "proxy-connection", "keep-alive", "te", "trailers", "upgrade"}
+    {
+        "connection",
+        "proxy-connection",
+        "keep-alive",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
 )
 
 #: The proxy port offered on the workspace's loopback. 3128 is unremarkable —

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -458,6 +459,59 @@ def test_a_peer_is_reached_directly_rather_than_through_the_proxy() -> None:
 
     assert "db" in bypass and "replica" in bypass
     assert "127.0.0.1" in bypass and "127.0.0.2" in bypass
+
+
+def test_the_proxy_does_not_forward_framing_it_has_already_undone() -> None:
+    """The body comes back de-chunked, so passing the upstream's chunked
+    framing along with it leaves the client reading chunk headers out of plain
+    bytes — an index that fails halfway rather than an obvious error."""
+    import socket as socket_mod
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from hud.environment.egress import Egress
+
+    class Chunked(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            self.wfile.write(b"5\r\nhello\r\n0\r\n\r\n")
+
+        def log_message(self, *_: object) -> None:
+            pass
+
+    upstream = HTTPServer(("127.0.0.1", 0), Chunked)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    port = upstream.server_address[1]
+    # Not the pytest tmp dir: a unix socket path is capped near 104 bytes.
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {"127.0.0.1"})
+    egress.start()
+    try:
+        client = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+        client.settimeout(10)
+        client.connect(str(egress.socket_path))
+        client.sendall(f"GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode())
+        received = b""
+        while b"hello" not in received:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            received += chunk
+        client.close()
+    finally:
+        egress.stop()
+        upstream.shutdown()
+        upstream.server_close()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+    headers, _, body = received.partition(b"\r\n\r\n")
+    assert b"200" in headers
+    assert b"transfer-encoding" not in headers.lower()
+    assert body == b"hello"
 
 
 def test_a_workspace_that_reaches_no_host_is_told_of_no_proxy() -> None:
