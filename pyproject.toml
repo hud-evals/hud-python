@@ -110,6 +110,7 @@ packages = ["hud"]
 # Ensure py.typed is included in the package
 [tool.hatch.build.targets.wheel.force-include]
 "hud/py.typed" = "hud/py.typed"
+"hud/eval/docker-seccomp.json" = "hud/eval/docker-seccomp.json"
 
 [project.optional-dependencies]
 # AI providers (openai, anthropic, google-genai) are now core dependencies; this

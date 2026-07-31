@@ -158,13 +158,16 @@ def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
     return modal.Image.from_registry(image_uri)
 
 
-#: What a container needs to sandbox *inside itself*: bubblewrap's nested
-#: user/mount/proc namespaces are blocked by Docker's default seccomp profile
-#: and masked ``/proc``. Off by default — an env that does not sandbox
-#: internally keeps full container isolation.
-NESTED_SANDBOX_SECURITY_ARGS = (
+#: DockerRuntime always serves HUD environments, so this is part of the
+#: provider contract rather than a per-image option. This is intentionally a
+#: default-allow compatibility profile: Workspace's bwrap sessions need the
+#: namespace and mount syscalls, while unrelated kernel interfaces stay denied.
+_DOCKER_SECCOMP_PROFILE = Path(__file__).with_name("docker-seccomp.json")
+_DOCKER_SECURITY_ARGS = (
     "--security-opt",
-    "seccomp=unconfined",
+    f"seccomp={_DOCKER_SECCOMP_PROFILE}",
+    # Docker exposes system-path masking only as an all-or-nothing option;
+    # bwrap replaces the container's proc and dev mounts while building a wall.
     "--security-opt",
     "systempaths=unconfined",
 )
@@ -447,7 +450,9 @@ class DockerRuntime:
     container (the scaffolded ``Dockerfile.hud`` serves 8765). Each
     acquisition publishes that port on an ephemeral loopback port, yields its
     :class:`Runtime`, and force-removes the container on exit. *run_args* are
-    extra provider-specific ``docker run`` flags (``-e``, volumes).
+    extra provider-specific ``docker run`` flags (``-e``, volumes). Every
+    container gets HUD's nested-workspace security profile so its environment
+    can use bubblewrap-backed :class:`~hud.environment.Workspace` sessions.
 
     Acquisition returns as soon as the port mapping exists — the env may
     still be importing behind it. Protocol-level readiness is the client's
@@ -461,15 +466,9 @@ class DockerRuntime:
         port: int = 8765,
         run_args: Sequence[str] = (),
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
-        nested_sandbox: bool = False,
     ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
-        #: Whether the image sandboxes *inside* the container (a workspace
-        #: using bubblewrap). Relaxing seccomp and unmasking /proc is what
-        #: nested namespaces need, and what an image that never sandboxes
-        #: internally should not be given.
-        self.nested_sandbox = nested_sandbox
         config = RuntimeConfig(image=image) if image is not None else RuntimeConfig()
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
@@ -499,9 +498,9 @@ class DockerRuntime:
         out, _ = await _docker(
             "run",
             "--detach",
-            *(NESTED_SANDBOX_SECURITY_ARGS if self.nested_sandbox else ()),
             *self.run_args,
             *resource_args,
+            *_DOCKER_SECURITY_ARGS,
             "--publish",
             f"127.0.0.1::{self.port}",
             config.image,
