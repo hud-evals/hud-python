@@ -161,6 +161,8 @@ def _load_remote(trace_id: str) -> list[dict[str, Any]]:
 
 
 def _render_events(events: list[dict[str, Any]]) -> None:
+    # Payloads render as Text, never as markup: rich would read a literal
+    # `[len(s) // 2]` in agent output as a style tag and drop it.
     turn = 0
     for ev in events:
         kind = ev.get("kind")
@@ -175,7 +177,7 @@ def _render_events(events: list[dict[str, Any]]) -> None:
 
             text = ev.get("text")
             if text:
-                console.print(text)
+                console.print(Text(str(text)))
 
             for tc in ev.get("tool_calls") or []:
                 name = tc.get("name") or tc.get("function", {}).get("name", "?")
@@ -184,29 +186,30 @@ def _render_events(events: list[dict[str, Any]]) -> None:
                     with contextlib.suppress(Exception):
                         args = json.loads(args)
                 console.print(
-                    f"  [green]→[/green] [bold]{name}[/bold]({_fmt_args(args)})",
-                    highlight=False,
+                    Text.assemble(
+                        "  ", ("→", "green"), " ", (str(name), "bold"), f"({_fmt_args(args)})"
+                    )
                 )
 
             if ev.get("error"):
-                console.print(f"  [red]error: {ev['error']}[/red]")
+                console.print(Text(f"  error: {ev['error']}", style="red"))
 
         elif kind in ("tool_call", "tool_result"):
             name = ev.get("tool_name") or ev.get("name") or "?"
             result = ev.get("result_text") or ev.get("result") or ""
             error = ev.get("error")
             if error:
-                console.print(f"  [red]✗ {name}: {error}[/red]")
+                console.print(Text(f"  ✗ {name}: {error}", style="red"))
             else:
-                console.print(f"  [dim]{name} →[/dim]")
+                console.print(Text(f"  {name} →", style="dim"))
                 for line in str(result).splitlines():
-                    console.print(f"    {line}")
+                    console.print(Text(f"    {line}"))
 
         elif kind == "environment":
             msg = ev.get("text") or ev.get("content") or ""
             if msg:
                 console.print(Rule("[yellow]env[/yellow]", style="yellow"))
-                console.print(msg)
+                console.print(Text(str(msg)))
 
 
 def _fmt_args(args: Any) -> str:

@@ -175,7 +175,7 @@ class Taskset:
         by_slug: dict[str, Task] = {}
         duplicates: set[str] = set()
         for task in tasks:
-            slug = task.slug or task.default_slug()
+            slug = task.slug
             if slug in by_slug:
                 duplicates.add(slug)
             by_slug[slug] = task

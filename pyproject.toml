@@ -12,11 +12,11 @@ dependencies = [
     # Core dependencies - minimal for MCP servers and CLI
     "httpx>=0.23.0,<1",
     "packaging>=21.0",
-    "pydantic>=2.6,<3",
+    "pydantic>=2.10,<3",
     "pydantic-settings>=2.2,<3",
     # MCP dependencies
     "mcp>=1.24.0,<2.0",
-    "fastmcp==3.0.2",
+    "fastmcp==3.2.0",
     # For all inference agents
     "openai>=2.45.0",
     "anthropic>=0.78.0",

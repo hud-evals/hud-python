@@ -44,17 +44,36 @@ def test_env_task_call_returns_public_task() -> None:
     assert runnable.env == "e"  # the row carries the env's name, not the object
 
 
-def test_default_slug_is_task_id_without_args() -> None:
+def test_slug_defaults_to_task_id_without_args() -> None:
     v = Task(env="e", id="solve")
-    assert v.default_slug() == "solve"
+    assert v.slug == "solve"
 
 
-def test_default_slug_is_deterministic_with_args() -> None:
+def test_slug_default_is_deterministic_with_args() -> None:
     a = Task(env="e", id="solve", args={"b": 2, "a": 1})
     b = Task(env="e", id="solve", args={"a": 1, "b": 2})  # key order differs
-    assert a.default_slug() == b.default_slug()  # stable: keys sorted
-    assert a.default_slug().startswith("solve-")
-    assert a.default_slug() != Task(env="e", id="solve", args={"a": 9}).default_slug()
+    assert a.slug == b.slug  # stable: keys sorted
+    assert a.slug.startswith("solve-")
+    assert a.slug != Task(env="e", id="solve", args={"a": 9}).slug
+
+
+def test_slug_rejects_none() -> None:
+    with pytest.raises(ValueError, match="slug"):
+        Task.model_validate({"env": "e", "id": "solve", "slug": None})
+
+
+def test_slug_rejects_empty_string() -> None:
+    with pytest.raises(ValueError, match="slug"):
+        Task(env="e", id="solve", slug="")
+
+
+def test_slug_rejects_empty_assignment() -> None:
+    task = Task(env="e", id="solve", slug="valid")
+
+    with pytest.raises(ValueError, match="slug"):
+        task.slug = ""
+
+    assert task.slug == "valid"
 
 
 # ─── the portable row shape ────────────────────────────────────────────
@@ -70,7 +89,8 @@ def test_env_serializes_as_name_reference() -> None:
 
 def test_compact_dump_omits_unset_metadata() -> None:
     data = Task(env="e", id="t").model_dump(exclude_none=True)
-    assert set(data) == {"env", "id", "args"}  # no None slug/validation/etc.
+    assert set(data) == {"env", "id", "args", "slug"}
+    assert data["slug"] == "t"
 
     data2 = Task(env="e", id="t", slug="s").model_dump(exclude_none=True)
     assert data2["slug"] == "s"

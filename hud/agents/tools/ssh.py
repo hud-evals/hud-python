@@ -7,11 +7,20 @@ differs between providers.
 
 from __future__ import annotations
 
+import asyncssh
 import mcp.types as mcp_types
 
-from hud.agents.tools.base import AgentTool
+from hud.agents.tools.base import AgentTool, tool_err, tool_ok
 from hud.capabilities import SSHClient
 from hud.types import MCPToolResult
+
+
+def _remote_error(exc: asyncssh.ProcessError) -> str:
+    """What the remote command printed to stderr — a failed file op is an
+    ordinary tool outcome, so the agent gets the shell's message, not the
+    exception's repr."""
+    stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else exc.stderr
+    return (stderr or "").strip() or f"exit {exc.exit_status}"
 
 
 class SSHTool(AgentTool[SSHClient]):
@@ -37,19 +46,26 @@ class SSHTool(AgentTool[SSHClient]):
 
     async def file_read(self, path: str) -> MCPToolResult:
         """Read a text file through SSH exec."""
-        return tool_ok(await self.client.read_text(path))
+        try:
+            return tool_ok(await self.client.read_text(path))
+        except asyncssh.ProcessError as e:
+            return tool_err(_remote_error(e))
 
     async def file_write(self, path: str, content: str) -> MCPToolResult:
         """Write a text file through SSH exec."""
-        await self.client.write_text(path, content)
+        try:
+            await self.client.write_text(path, content)
+        except asyncssh.ProcessError as e:
+            return tool_err(_remote_error(e))
         return tool_ok(f"wrote {len(content)} bytes to {path}")
 
     async def file_list(self, path: str = "/") -> MCPToolResult:
         """List directory entries through SSH exec."""
-        names = await self.client.listdir(path)
+        try:
+            names = await self.client.listdir(path)
+        except asyncssh.ProcessError as e:
+            return tool_err(_remote_error(e))
         return tool_ok("\n".join(names) if names else "(empty)")
 
-
-from hud.agents.tools.base import tool_ok  # noqa: E402
 
 __all__ = ["SSHTool"]
