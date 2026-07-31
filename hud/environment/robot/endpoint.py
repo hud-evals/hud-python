@@ -312,14 +312,14 @@ class RobotEndpoint:
                 self._claims.pop(session_id, None)
 
     async def _result_with_retry(
-        self, token: str, *, attempts: int = 3, timeout: float = 10.0
+        self, token: str, *, attempts: int = 3, timeout_s: float = 10.0
     ) -> bool:
         """``result`` RPC with short retries; teardown only runs once per cancel path."""
         # Each attempt is bounded: a wedged sim can hold the link open yet never
         # answer, and shutdown must still finish (stop() owns a child to terminate).
         for attempt in range(attempts):
             try:
-                await asyncio.wait_for(self._call("result", {"token": token}), timeout)
+                await asyncio.wait_for(self._call("result", {"token": token}), timeout_s)
                 return True
             except Exception:
                 if attempt + 1 < attempts:
