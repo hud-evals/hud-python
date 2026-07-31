@@ -712,7 +712,7 @@ curl https://api.beta.hud.ai/v2/tasks/<task_id>/brief/download \
   -H "Authorization: Bearer $HUD_API_KEY"
 ```
 
-Returns `200` with an empty body.
+Returns `200` with a file body.
 
 {/* /api */}
 
@@ -1117,6 +1117,7 @@ curl https://api.beta.hud.ai/v2/jobs/<job_id>/usage \
     "count": 0,
     "details": {}
   },
+  "inference_cost_incomplete": false,
   "total_cost": 0.0,
   "training_cost": {
     "total_cost": 0.0,
@@ -1257,13 +1258,13 @@ curl https://api.beta.hud.ai/v2/jobs/<job_id>/traces \
       "status": "string",
       "created_at": "2026-07-26T17:04:11Z",
       "task_version_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "task_slug": "string",
       "instance_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "inference_llm_model_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "reward": 0.0,
       "stop_reason": "done",
       "views": 0,
-      "error": "string",
-      "metadata": {}
+      "error": "string"
     }
   ],
   "total": 0,
@@ -1840,13 +1841,13 @@ curl https://api.beta.hud.ai/v2/trace/<trace_id> \
   "status": "string",
   "created_at": "2026-07-26T17:04:11Z",
   "task_version_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "task_slug": "string",
   "instance_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "inference_llm_model_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "reward": 0.0,
   "stop_reason": "done",
   "views": 0,
-  "error": "string",
-  "metadata": {}
+  "error": "string"
 }
 ```
 
@@ -1873,14 +1874,14 @@ curl https://api.beta.hud.ai/v2/trace/<trace_id>/info \
   "job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "string",
   "created_at": "2026-07-26T17:04:11Z",
+  "execution_mode": "external",
   "task_version_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "task_slug": "string",
   "task_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "instance_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "inference_llm_model_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "reward": 0.0,
-  "stop_reason": "done",
-  "views": 0,
-  "error": "string"
+  "stop_reason": "done"
 }
 ```
 
@@ -1913,14 +1914,14 @@ curl https://api.beta.hud.ai/v2/trace/<trace_id> \
   "job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "string",
   "created_at": "2026-07-26T17:04:11Z",
+  "execution_mode": "external",
   "task_version_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "task_slug": "string",
   "task_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "instance_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "inference_llm_model_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "reward": 0.0,
-  "stop_reason": "done",
-  "views": 0,
-  "error": "string"
+  "stop_reason": "done"
 }
 ```
 
@@ -2785,7 +2786,7 @@ curl https://api.beta.hud.ai/v2/builds/<build_id>/workspace/download \
   -H "Authorization: Bearer $HUD_API_KEY"
 ```
 
-Returns `200` with an empty body.
+Returns `200` with a file body.
 
 {/* /api */}
 
@@ -3781,13 +3782,13 @@ curl https://api.beta.hud.ai/v2/limits \
       "api_key_name": "string",
       "membership_id": 0,
       "member_name": "string",
+      "parent_limit_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "threshold_percent": "string",
       "interval": "week",
       "amount_usd": "string",
       "action": "alert",
       "enabled": false,
-      "spend_usd": "string",
-      "period_start": "string",
-      "period_end": "string"
+      "spend_usd": "string"
     }
   ]
 }
@@ -3808,10 +3809,12 @@ curl https://api.beta.hud.ai/v2/limits \
   -H "Content-Type: application/json" \
   -d '{
     "interval": "week",
-    "amount_usd": 0.0,
     "action": "alert",
     "api_key_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "membership_id": 0,
+    "parent_limit_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "threshold_percent": 0.0,
+    "amount_usd": 0.0,
     "enabled": true
   }'
 ```
@@ -3823,13 +3826,13 @@ curl https://api.beta.hud.ai/v2/limits \
   "api_key_name": "string",
   "membership_id": 0,
   "member_name": "string",
+  "parent_limit_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "threshold_percent": "string",
   "interval": "week",
   "amount_usd": "string",
   "action": "alert",
   "enabled": false,
-  "spend_usd": "string",
-  "period_start": "string",
-  "period_end": "string"
+  "spend_usd": "string"
 }
 ```
 
@@ -3852,6 +3855,7 @@ curl https://api.beta.hud.ai/v2/limits/<limit_id> \
   -H "Content-Type: application/json" \
   -d '{
     "amount_usd": 0.0,
+    "threshold_percent": 0.0,
     "enabled": false
   }'
 ```
@@ -3863,13 +3867,13 @@ curl https://api.beta.hud.ai/v2/limits/<limit_id> \
   "api_key_name": "string",
   "membership_id": 0,
   "member_name": "string",
+  "parent_limit_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "threshold_percent": "string",
   "interval": "week",
   "amount_usd": "string",
   "action": "alert",
   "enabled": false,
-  "spend_usd": "string",
-  "period_start": "string",
-  "period_end": "string"
+  "spend_usd": "string"
 }
 ```
 

@@ -200,14 +200,38 @@ def body_schema(spec: dict[str, Any], op: dict[str, Any]) -> tuple[str, dict[str
     return None
 
 
-def success_response(spec: dict[str, Any], op: dict[str, Any]) -> tuple[str, Any] | None:
+def success_response(
+    spec: dict[str, Any], op: dict[str, Any]
+) -> tuple[str, str | None, Any] | None:
+    """First 2xx as (status, media, payload).
+
+    media/payload:
+      (None, None) — no body (e.g. 204)
+      ("application/json", value) — sampled JSON
+      (other media, None) — file/binary download of that type
+    """
     for code, response in op.get("responses", {}).items():
         if not code.startswith("2"):
             continue
-        schema = response.get("content", {}).get("application/json", {}).get("schema")
-        if schema is None:
-            return code, None
-        return code, sample(spec, schema)
+        content = response.get("content") or {}
+        if not content:
+            return code, None, None
+
+        # Prefer a real JSON example when the schema yields one.
+        json_body = content.get("application/json")
+        if json_body is not None:
+            schema = json_body.get("schema")
+            if schema:
+                payload = sample(spec, schema)
+                if payload is not None:
+                    return code, "application/json", payload
+
+        # Non-JSON success media, or empty/untyped JSON schema (FastAPI
+        # StreamingResponse often documents zip downloads that way).
+        for media in content:
+            if media != "application/json":
+                return code, media, None
+        return code, "application/octet-stream", None
     return None
 
 
@@ -266,11 +290,15 @@ def render(spec: dict[str, Any], method: str, path: str) -> str:
 
     result = success_response(spec, op)
     if result:
-        code, payload = result
-        if payload is None:
+        code, media, payload = result
+        if media is None:
             parts.append(f"Returns `{code}` with an empty body.")
-        else:
+        elif media == "application/json":
             parts.append(f"```json Response {code}\n" + json.dumps(payload, indent=2) + "\n```")
+        elif media == "application/octet-stream":
+            parts.append(f"Returns `{code}` with a file body.")
+        else:
+            parts.append(f"Returns `{code}` as `{media}`.")
     return "\n\n".join(parts)
 
 
