@@ -24,7 +24,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .runtime import RuntimeConfig
 
@@ -56,6 +56,8 @@ class Task(BaseModel):
     placement comes from ``runtime=`` (a provider), else the HUD runtime
     tunnel by ``env`` name.
     """
+
+    model_config = ConfigDict(validate_assignment=True)
 
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)

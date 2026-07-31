@@ -67,6 +67,15 @@ def test_slug_rejects_empty_string() -> None:
         Task(env="e", id="solve", slug="")
 
 
+def test_slug_rejects_empty_assignment() -> None:
+    task = Task(env="e", id="solve", slug="valid")
+
+    with pytest.raises(ValueError, match="slug"):
+        task.slug = ""
+
+    assert task.slug == "valid"
+
+
 # ─── the portable row shape ────────────────────────────────────────────
 
 
