@@ -124,6 +124,7 @@ bedrock = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud[agents]",  # Include agents for dev
+    "hud[robot]",  # the robot end-to-end gates (hud/tests/test_robot.py) run the real wire
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff >=0.11.8, <0.15.0",
@@ -145,6 +146,7 @@ robot = [
     "numpy>=1.24",
     "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
     "av>=12",  # PyAV (ffmpeg): H.264/CMAF camera-frame video streaming for traces
+    "gymnasium>=1.0",  # registry ids and gym-style env bridges
 ]
 
 # Modal placement (ModalRuntime): per-rollout cloud sandboxes from a built image

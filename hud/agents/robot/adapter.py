@@ -1,56 +1,59 @@
 """Translate observations and actions between env and policy spaces.
 
-The loop calls ``bind``, ``reset``, ``adapt_observation``, and ``adapt_action``.
+The loop calls ``bind``, ``reset``, ``adapt_observation``, and the action hooks.
 Use :class:`LeRobotAdapter` for LeRobot models; subclass for custom wiring;
 ``adapter=None`` for pass-through.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
-if TYPE_CHECKING:
-    from ._types import ActionArray
+#: A policy-emitted action / chunk array (the robot stack's shared alias).
+ActionArray = NDArray[np.floating[Any]]
 
-# ─── the abstraction ──────────────────────────────────────────────────────────
+#: Image types the bundled adapters treat as cameras (vs the state vector).
+IMAGE_TYPES = ("rgb", "bgr", "gray", "depth")
 
 
 class Adapter:
     """Translate between an env's observation/action spaces and a policy's.
 
-    Driven by :class:`~hud.agents.robot.agent.RobotAgent`: :meth:`bind` once after
-    connect, :meth:`reset` once per episode, then :meth:`adapt_observation` /
-    :meth:`adapt_action` each step. Construct with the policy's image-slot names;
-    everything env-side is learned in :meth:`bind`.
+    Driven by :class:`~hud.agents.robot.agent.RobotAgent`: :meth:`bind` once
+    after connect, :meth:`reset` once per episode, then :meth:`adapt_observation`
+    per inference and the action hooks per chunk/step. Construct with the
+    policy's image-slot names; everything env-side is learned in :meth:`bind`.
     """
 
-    def __init__(self, *, model_image_keys: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model_image_keys: list[str] | None = None,
+        chunk_size: int | None = None,
+    ) -> None:
         #: The policy's ordered image-slot names (model side; known at load time).
         self.model_image_keys: list[str] = list(model_image_keys or [])
-        #: The env's selected action feature (set in :meth:`bind`).
+        #: Open-loop horizon: how many predicted actions to execute before re-querying.
+        #: ``None`` = full model chunk. Applied by :class:`~.agent.RobotAgent`, not here —
+        #: so subclass ``adapt_chunk`` overrides stay free of truncation duty.
+        self.chunk_size: int | None = chunk_size
+        #: The env's action feature and observation layout (set in :meth:`bind`).
         self.action_space: dict[str, Any] = {}
-        #: The env's image / state observation keys (set in :meth:`bind`).
         self.image_keys: list[str] = []
         self.state_key: str | None = None
 
     def bind(self, action_space: dict[str, Any], observation_space: dict[str, Any]) -> None:
-        """Learn the env's layout from the contract (``client.spaces()``).
-
-        Splits observation features into image keys vs the single state key and stores
-        the action feature. Override to derive extra env-side parameters.
-        """
-        # TODO CLEAN
+        """Learn the env's layout from the contract (``client.spaces()``): image
+        features become the camera keys (in contract order), the first non-image
+        feature is the state. Override to derive extra env-side parameters."""
         self.action_space = action_space or {}
-        image_types = ("rgb", "bgr", "gray", "depth")
-        self.image_keys = []
-        self.state_key = None
-        for name, feature in observation_space.items():
-            if feature.get("type") in image_types:
-                self.image_keys.append(name)
-            elif self.state_key is None:
-                self.state_key = name
+        self.image_keys = [n for n, f in observation_space.items() if f.get("type") in IMAGE_TYPES]
+        self.state_key = next(
+            (n for n, f in observation_space.items() if f.get("type") not in IMAGE_TYPES), None
+        )
 
     def reset(self) -> None:
         """Override only if the adapter is stateful across steps within an episode."""
@@ -59,38 +62,52 @@ class Adapter:
         """Translate an env observation + task prompt into the policy's input."""
         raise NotImplementedError
 
+    def adapt_chunk(self, chunk: ActionArray, obs: dict[str, Any]) -> ActionArray:
+        """Translate a freshly-inferred ``[T, A]`` chunk to env space, given the
+        (per-slot) query-time observation it was inferred from (default identity).
+
+        Called once per slot at inference time, so a chunk expressed relative to
+        the query state — e.g. joint *deltas* to be added to the query-time
+        joints — converts in one shot.
+        """
+        return chunk
+
     def adapt_action(self, action: ActionArray, obs: dict[str, Any]) -> ActionArray:
-        """Translate a policy action into the env's action space (default identity)."""
+        """Per-step execution-time hook on the popped action (default identity)."""
         return action
 
 
 class LeRobotAdapter(Adapter):
-    """Vanilla LeRobot adapter for a standard image/state env.
+    """Vanilla LeRobot adapter for a standard image/state env, single or batched.
 
-    Maps env cameras onto the model's image slots in order, converts HWC ``uint8`` to
-    CHW ``float`` in ``[0, 1]``, and passes state + prompt through. Actions are identity
-    (postprocess already returns env-space actions); subclass for resize/pad/reshaping.
+    Maps env cameras onto the model's image slots in order and converts HWC
+    ``uint8`` to CHW ``float`` in ``[0, 1]``; state and prompt pass through.
+    A batched observation (state ``[N, S]``) maps in one go — cameras become
+    ``[N, C, H, W]`` and the shared task is repeated to ``N``. Actions are
+    identity (postprocess already returns env-space actions).
     """
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
         import torch  # pyright: ignore[reportMissingImports]
 
-        torch_mod: Any = torch
+        torch_mod: Any = torch  # torch ships no stubs; keep strict mode quiet
         data = obs["data"]
+        state = np.asarray(data[self.state_key], dtype=np.float32)
+        batched = state.ndim > 1  # [N, S] vs [S]
         batch: dict[str, Any] = {
-            "observation.state": torch_mod.from_numpy(data[self.state_key].astype(np.float32)),
-            "task": prompt,
+            "observation.state": torch_mod.from_numpy(state),
+            "task": [prompt] * len(state) if batched else prompt,
         }
         for model_key, env_key in zip(self.model_image_keys, self.image_keys, strict=False):
-            batch[model_key] = torch_mod.from_numpy(data[env_key]).permute(2, 0, 1).float() / 255.0
+            img = torch_mod.from_numpy(np.asarray(data[env_key]))
+            perm = (0, 3, 1, 2) if batched else (2, 0, 1)
+            batch[model_key] = img.permute(*perm).float() / 255.0
         return batch
-
-    def adapt_action(self, action: ActionArray, obs: dict[str, Any]) -> ActionArray:
-        return action
 
 
 class OpenPIAdapter(Adapter):
-    """unwraps obs['data'] to OpenPI wire keys, attaches prompt; actions are passthrough"""
+    """Unwraps ``obs['data']`` to OpenPI wire keys and attaches the prompt;
+    actions are pass-through."""
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
         out = dict(obs["data"])
@@ -98,8 +115,4 @@ class OpenPIAdapter(Adapter):
         return out
 
 
-__all__ = [
-    "Adapter",
-    "LeRobotAdapter",
-    "OpenPIAdapter",
-]
+__all__ = ["ActionArray", "Adapter", "LeRobotAdapter", "OpenPIAdapter"]

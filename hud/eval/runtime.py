@@ -39,7 +39,7 @@ from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -149,6 +149,64 @@ class Runtime:
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
+
+
+class Shared:
+    """Lease provider: at most ``width`` concurrent rollouts share one substrate.
+
+    The substrate boots lazily on the first lease and lives for the enclosing
+    ``async with`` scope — one boot however many rollouts flow through, torn
+    down deterministically at scope exit. ``width`` is the substrate's real
+    capacity (e.g. a vectorized sim's slot count): lease ``width + 1`` waits
+    for a slot instead of erroring, so the scheduler needs no pairing —
+    ``group`` and ``max_concurrent`` keep their ordinary meanings.
+
+    ``Taskset.run`` scopes a context-manager placement to the call, so
+    ``runtime=Shared(DockerRuntime(...), width=8)`` works bare; open the scope
+    yourself to keep the substrate warm across several calls::
+
+        async with Shared(DockerRuntime("hud-isaac-env"), width=8) as rt:
+            await taskset.run(agent, runtime=rt, group=8)
+    """
+
+    def __init__(self, inner: Provider, *, width: int) -> None:
+        if width < 1:
+            raise ValueError("Shared width must be >= 1")
+        self.inner = inner
+        self.width = width
+        self._sem = asyncio.Semaphore(width)
+        self._boot = asyncio.Lock()
+        self._addr: Runtime | None = None
+        self._stack: contextlib.AsyncExitStack | None = None
+        self._opens = 0
+
+    async def __aenter__(self) -> Self:
+        self._opens += 1
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._opens -= 1
+        if self._opens == 0 and self._stack is not None:
+            stack, self._stack, self._addr = self._stack, None, None
+            await stack.aclose()
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        if self._opens == 0:
+            raise RuntimeError(
+                "Shared substrates outlive single rollouts; lease inside the scope "
+                "(Taskset.run opens it for you, or wrap calls in `async with Shared(...)`)"
+            )
+        async with self._sem:
+            async with self._boot:
+                if self._addr is None:
+                    # First leaseholder boots. A failed boot fails only its own
+                    # rollout (nothing entered the stack); the next lease retries.
+                    stack = contextlib.AsyncExitStack()
+                    self._addr = await stack.enter_async_context(self.inner(task))
+                    self._stack = stack
+                addr = self._addr
+            yield addr
 
 
 def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
@@ -1352,5 +1410,6 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "Shared",
     "SubprocessRuntime",
 ]

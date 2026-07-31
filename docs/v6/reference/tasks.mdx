@@ -154,7 +154,7 @@ job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurren
 |-----------|------|-------------|
 | `agent` | `Agent` | The shared, stateless agent driven across every rollout. |
 | `runtime` | `Provider \| HostedRuntime \| None` | Where each rollout runs; omit it and placement is inferred (local source serves itself, else the HUD tunnel by env name). See [runtime](/v6/reference/runtime). |
-| `group` | `int \| None` | Repeats each task N times for the reward spread GRPO trains on. |
+| `group` | `int \| None` | Repeats each task N times for GRPO. |
 | `max_concurrent` | `int \| None` | Caps how many rollouts run in parallel. |
 | `job` | `Job \| None` | An open [`Job`](/v6/reference/types#job) to accumulate into; defaults to a fresh job per call. |
 | `rollout_timeout` | `float \| None` | Hard deadline (seconds) for the full local rollout lifecycle; a breach returns a failed run. |

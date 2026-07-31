@@ -1,29 +1,38 @@
-"""Env-side robot runtime: the ``robot`` bridge + its building blocks.
+"""Env-side robot runtime: bridges, the sim program, and the control endpoint.
 
-This package holds everything an *environment* needs to own a simulator and serve it to
-an agent over the ``robot`` WebSocket protocol:
+A simulator always runs in its own process — the **sim program**
+(``python -m hud.environment.robot.gym``), where the sim owns the main
+thread and a bridge serves the wire. The env server holds a
+:class:`~.endpoint.RobotEndpoint` on it:
 
-- :class:`~hud.environment.robot.bridge.RobotBridge` — the server-side (synchronous)
-  bridge: one sim step per received action.
-- :class:`~hud.environment.robot.sim_runner.SimRunner` (``Inline`` / ``Thread`` /
-  ``MainThread``) — the strategy for *which thread* runs the thread-affine simulator.
+- :class:`~.bridge.RobotBridge` — bridge base (``num_envs`` slots in lockstep
+  internally; scalar openpi wire per claimed connection): the agent's
+  ``robot`` WebSocket plus the JSON-RPC control side channel.
+- :class:`~.gym.GymBridge` — the generic gym path (``env.gym(...)`` — a
+  factory, registry id, or declared env): contract derivation, capability,
+  episode control.
+- :class:`~.endpoint.RobotEndpoint` — the env server's handle: spawn (owned)
+  or remote (attached), same control surface either way.
+- :func:`~.bridge.serve_bridge` — the sim program's blocking entry
+  (``RobotEndpoint(MyBridge)`` spawns it; custom containers can call it too).
+- :func:`~.gym.wrap` — one-line trace streaming for any gym env you drive
+  yourself, plus the shared gym introspection.
 
-The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives under
-:mod:`hud.capabilities` (it is a capability *client*, dialed by the agent); these two ends
-share the ``robot`` wire codec defined there.
+The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives
+under :mod:`hud.capabilities`; both ends share the wire codec defined there.
 """
 
 from __future__ import annotations
 
-from .bridge import RobotBridge
+from .bridge import RobotBridge, serve_bridge
 from .endpoint import RobotEndpoint
-from .sim_runner import InlineSimRunner, MainThreadSimRunner, SimRunner, ThreadSimRunner
+from .gym import GymBridge, TracedEnv, wrap
 
 __all__ = [
-    "InlineSimRunner",
-    "MainThreadSimRunner",
+    "GymBridge",
     "RobotBridge",
     "RobotEndpoint",
-    "SimRunner",
-    "ThreadSimRunner",
+    "TracedEnv",
+    "serve_bridge",
+    "wrap",
 ]

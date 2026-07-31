@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
@@ -27,6 +28,9 @@ if TYPE_CHECKING:
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+#: Control-session id for the running accept/cancel task (robot slot claims key on it).
+current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
 
 
 class Answer(BaseModel, Generic[T]):
@@ -167,6 +171,8 @@ class Environment(LegacyEnvMixin):
         # stands up). Run once by the serving substrate around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
+        # Per task-session end (cancel / bye / post-grade cleanup).
+        self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
         self._init_legacy()
 
     # ─── task registration ───────────────────────────────────────────
@@ -304,6 +310,35 @@ class Environment(LegacyEnvMixin):
             await ws.stop()
 
         return ws
+
+    def gym(self, target: Any, *, name: str = "robot", **kwargs: Any) -> Any:
+        """Attach a gym-style sim serving ``name`` over the ``robot`` protocol.
+
+        ``target`` is a factory, gymnasium id (``"CartPole-v1"``), or constructed
+        registry env (reduced to its spec). Registers spawn → publish → teardown
+        on this env's hooks; nothing runs until serve. Returns a
+        :class:`~hud.environment.robot.RobotEndpoint` (``sim.reset`` / ``sim.result``).
+
+        Every capability the bridge declares is published, not just the wire —
+        a ``bridge=`` subclass serving its own tools from the sim process shows
+        up in the manifest alongside ``name``.
+        """
+        from hud.environment.robot import RobotEndpoint
+        from hud.environment.robot.gym import gym_command
+
+        sim = RobotEndpoint.spawn(gym_command(target, **kwargs)).attach(self)
+
+        @self.initialize
+        async def _up() -> None:
+            await sim.start()
+            for cap in await sim.capabilities(name):
+                self.add_capability(cap)
+
+        @self.shutdown
+        async def _down() -> None:
+            await sim.stop()
+
+        return sim
 
     # ─── substrate-run daemon lifecycle ──────────────────────────────────
 

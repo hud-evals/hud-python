@@ -24,6 +24,7 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
 | `Runtime("tcp://host:8765")` | A substrate you already started | Attaching to a long-lived container or sandbox you own |
+| `Shared(provider, width=N)` | One substrate from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout on a HUD-leased box | Agent and env run together off your machine |
 
@@ -195,6 +196,32 @@ Runtime(url, params=..., config=...)
 
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
+
+### `Shared`
+
+```python
+Shared(provider, *, width)
+```
+
+- **`provider`** - the `Provider` to provision once, e.g. `DockerRuntime("my-env")`.
+- **`width`** - how many concurrent connections that one substrate accepts.
+
+A lease pool over one substrate: it boots through `provider` on the first lease and lives for the
+enclosing `async with` scope, so every rollout in that scope is handed the same address - agents
+that need to share, compete, or coordinate in the same environment (a vectorized sim's `num_envs`
+slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals), are one case). Lease
+`width + 1` waits for a slot to free instead of erroring, so `group` and `max_concurrent` keep
+their ordinary meanings. `Taskset.run` scopes a context-manager placement to the call, so a bare
+`runtime=Shared(...)` boots once per `run(...)`; open the scope yourself to keep the substrate
+warm across several calls:
+
+```python
+async with Shared(DockerRuntime("hud-isaac-env"), width=8) as rt:
+    await taskset.run(agent, runtime=rt, group=8)
+    await taskset.run(agent, runtime=rt, group=8)  # same live sim
+```
+
+`Runtime(url)` needs no wrapping since every caller already dials the same address.
 
 ## Run on your own infra
 

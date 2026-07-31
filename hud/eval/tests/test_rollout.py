@@ -167,6 +167,46 @@ async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     assert run.runtime.startswith("tcp://127.0.0.1:")
 
 
+def _bindings_env(published: Any) -> Environment:
+    """An env whose task publishes per-episode binding data alongside the prompt."""
+    env = Environment("slots")
+
+    @env.template()
+    async def claim():
+        yield {"prompt": "go", "bindings": published}
+        yield 1.0
+
+    return env
+
+
+async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
+    seen: dict[str, dict[str, Any]] = {}
+
+    class _Claiming(Agent):
+        async def __call__(self, run: Any) -> None:
+            seen.update(run.bindings)
+
+    env = _bindings_env({"robot": {"token": "slot-2"}})
+    run = await rollout(
+        Task(env="slots", id="claim"), _Claiming(), runtime=lambda _task: _local(env)
+    )
+
+    # Episode-scoped connection data reaches the agent by capability name,
+    # without reading it back off the recorded setup step.
+    assert seen == {"robot": {"token": "slot-2"}}
+    assert run.bindings == {"robot": {"token": "slot-2"}}
+
+
+async def test_a_malformed_bindings_frame_fails_the_rollout_loudly() -> None:
+    env = _bindings_env({"robot": "slot-2"})  # capability data must be an object
+    run = await rollout(
+        Task(env="slots", id="claim"), _FnAgent(lambda _p: ""), runtime=lambda _task: _local(env)
+    )
+
+    assert run.trace.status == "error"
+    assert "bindings" in str(run.trace.steps[-1].error)
+
+
 async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     report = workspace / "REPORT.md"
@@ -370,6 +410,47 @@ async def test_timeout_includes_grading() -> None:
     assert run.trace.stop_reason == "timeout"
     assert run.grade.raw == {}
     await asyncio.wait_for(grading_cancelled.wait(), 1.0)
+
+
+async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.clients.client import HudClient
+
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        yield f"add:{a}:{b}"
+        await asyncio.Event().wait()
+
+    aborted: list[bool] = []
+
+    async def hang_cancel(self: HudClient) -> None:
+        await asyncio.Event().wait()
+
+    real_abort = HudClient.abort
+
+    def track_abort(self: HudClient) -> None:
+        aborted.append(True)
+        real_abort(self)
+
+    monkeypatch.setattr(HudClient, "cancel", hang_cancel)
+    monkeypatch.setattr(HudClient, "abort", track_abort)
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    run = await rollout(
+        _add_task(2, 3),
+        _SlowAgent(_solve_add),
+        runtime=lambda _row: _local(env),
+        rollout_timeout=0.2,
+    )
+    elapsed = loop.time() - started
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert aborted
+    # rollout_timeout (0.2) + cancel grace (2.0); must not hang forever on read_frame.
+    assert elapsed < 5.0
 
 
 async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
