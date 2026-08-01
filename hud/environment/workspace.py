@@ -198,7 +198,16 @@ async def install_identity_map(info_read: int, block_write: int) -> int:
     who its ids are, and only then does anything run in it. Returns that pid.
     """
     loop = asyncio.get_running_loop()
-    raw = await asyncio.wait_for(loop.run_in_executor(None, os.read, info_read, 4096), 30.0)
+    # The info document arrives in as many chunks as the pipe delivers — a
+    # single read can return a prefix of it (bwrap's write is not atomic with
+    # this side's read). Read until the document parses or the fd closes.
+    raw = b""
+    async with asyncio.timeout(30.0):
+        while chunk := await loop.run_in_executor(None, os.read, info_read, 4096):
+            raw += chunk
+            with contextlib.suppress(json.JSONDecodeError):
+                json.loads(raw)
+                break
     pid = int(json.loads(raw)["child-pid"]) if raw else 0
     if pid:
         _map_identities(pid)
@@ -1212,7 +1221,14 @@ class Workspace:
         return {**os.environ, **self.env} if self.env else None
 
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
-        pid = await self.sandbox_pid()
+        try:
+            pid = await self.sandbox_pid()
+        except Exception:
+            # asyncssh reports a raising process factory to the client as a
+            # bare "Session request failed" — without this, the reason exists
+            # nowhere.
+            LOGGER.exception("session refused: the shared sandbox could not start")
+            raise
         # Sessions start from an exact environment, so a terminal's TERM has to
         # be put there deliberately: without it curses and tput have no
         # terminal description and fall back or fail outright.

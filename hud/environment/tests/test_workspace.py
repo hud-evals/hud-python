@@ -9,10 +9,12 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest import mock
 from unittest.mock import AsyncMock
 
 import asyncssh
@@ -771,3 +773,33 @@ async def test_a_plain_root_publishes_no_alias(tmp_path: Path) -> None:
         assert "cwd_aliases" not in ws.capability().params
     finally:
         await ws.stop()
+
+
+@pytest.mark.asyncio
+async def test_identity_map_reads_a_chunked_info_document() -> None:
+    """bwrap's info JSON arrives in as many chunks as the pipe delivers; a
+    reader that stops at the first chunk parses a truncated document and the
+    sandbox never starts (observed as every session failing on a live box)."""
+    info_read, info_write = os.pipe()
+    block_read, block_write = os.pipe()
+    document = b'{\n "child-pid": 4242,\n "other": "field"\n}\n'
+
+    def write_in_chunks() -> None:
+        os.write(info_write, document[:21])  # cut mid-document, line 2
+        time.sleep(0.05)
+        os.write(info_write, document[21:])
+        os.close(info_write)
+
+    writer = threading.Thread(target=write_in_chunks)
+    writer.start()
+    try:
+        with mock.patch.object(workspace_mod, "_map_identities") as mapped:
+            pid = await workspace_mod.install_identity_map(info_read, block_write)
+        assert pid == 4242
+        mapped.assert_called_once_with(4242)
+        assert os.read(block_read, 1) == b"\n"  # the sandbox was released
+    finally:
+        writer.join()
+        for fd in (info_read, block_read, block_write):
+            with contextlib.suppress(OSError):
+                os.close(fd)
