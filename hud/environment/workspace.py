@@ -268,12 +268,14 @@ def _ctty_argv() -> list[str]:
     tty file descriptors alone are not a terminal session: ``/dev/tty`` cannot
     be opened, and job control has no foreground process group to signal. Run
     inside the sandbox, ``setsid`` is not a process-group leader there and so
-    execs in place rather than forking, which keeps the pid and exit status
-    the caller is waiting on. Where the binary is absent (macOS ships none)
-    the session still gets a working tty, only without a ctty.
+    execs in place. Spawned directly (no sandbox), it *is* already a leader
+    and must fork — ``--wait`` keeps the parent alive relaying the payload's
+    exit status, or the session would end the instant the fork returns.
+    Where the binary is absent (macOS ships none) the session still gets a
+    working tty, only without a ctty.
     """
     setsid = shutil.which("setsid")
-    return [setsid, "-c"] if setsid else []
+    return [setsid, "--wait", "-c"] if setsid else []
 
 
 async def _pty_streams(master_fd: int) -> tuple[Any, asyncio.StreamReader]:
