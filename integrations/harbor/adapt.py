@@ -223,8 +223,20 @@ async def adapt(
             shutil.rmtree(context)
         (context / "tasks").mkdir(parents=True)
         (context / "packages").mkdir()
-        for asset in ("Dockerfile", "env.py", "install.sh"):
+        for asset in ("Dockerfile", "install.sh"):
             shutil.copy2(ASSETS / asset, context / asset)
+        # ``hud deploy`` resolves the context's identity from a literal
+        # Environment(...) name in source, so the copy carries the group's
+        # name as a literal; the value is the same one tasks.json serves.
+        served = (ASSETS / "env.py").read_text("utf-8")
+        sentinel = 'Environment(CONFIG["name"])'
+        if sentinel not in served:
+            raise RuntimeError(f"env.py asset no longer constructs {sentinel}")
+        (context / "env.py").write_text(
+            served.replace(sentinel, f'Environment("{name}")'),
+            encoding="utf-8",
+            newline="\n",
+        )
 
         workdir = source.runtime["workdir"] or image_config.get("WorkingDir") or "/"
         if Path(workdir).is_relative_to(HUD_ROOT):

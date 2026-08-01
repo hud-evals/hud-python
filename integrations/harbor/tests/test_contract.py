@@ -50,8 +50,13 @@ async def test_adapt_builds_the_source_then_an_authored_hud_environment(
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     integration = Path(__file__).parents[1]
-    for asset in ("Dockerfile", "env.py", "install.sh"):
+    for asset in ("Dockerfile", "install.sh"):
         assert (context / asset).read_bytes() == (integration / asset).read_bytes()
+    # env.py names the environment as a literal — `hud deploy` resolves the
+    # context's identity from source, and refuses a computed name.
+    served = (context / "env.py").read_text(encoding="utf-8")
+    assert f'Environment("{context.name}")' in served
+    assert 'Environment(CONFIG["name"])' not in served
     assert (context / "tasks" / "task-a" / "instruction.md").is_file()
     assert (context / "tasks" / "task-a" / "tests" / "test.sh").is_file()
 
