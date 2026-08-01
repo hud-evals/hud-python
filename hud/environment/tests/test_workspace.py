@@ -460,6 +460,30 @@ async def test_run_can_use_a_fresh_no_network_sandbox(
     assert len(kwargs["pass_fds"]) == 2
 
 
+@pytest.mark.asyncio
+async def test_an_isolated_command_keeps_the_image_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command must not lose the image's PATH — the interpreters and tools
+    the task installed — merely because it asked for an isolated sandbox.
+    Both branches of run() give it the serving environment, less HUD's own."""
+    monkeypatch.setenv("PATH", "/task/bin:/usr/bin")
+    monkeypatch.setenv("HUD_API_KEY", "sk-secret")
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(workspace_mod, "install_identity_map", AsyncMock(return_value=9))
+    complete = AsyncMock(return_value=ProcessResult(0, b"", b""))
+    spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
+    monkeypatch.setattr(workspace_mod, "create_process_group_exec", spawn)
+
+    await ws.run(["test.sh"], isolated=True, identity=None)
+
+    assert spawn.await_args is not None
+    argv, _ = spawn.await_args
+    assert "PATH=/task/bin:/usr/bin" in argv
+    assert not any(arg.startswith("HUD_API_KEY=") for arg in argv)
+
+
 def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     """A task that names a service says where it expects to find it. Placed
     anywhere else, the task's own client configuration points at nothing."""
@@ -773,3 +797,15 @@ async def test_identity_map_reads_a_chunked_info_document() -> None:
         for fd in (info_read, block_read, block_write):
             with contextlib.suppress(OSError):
                 os.close(fd)
+
+
+def test_the_proxy_refuses_to_forward_a_folded_header() -> None:
+    """An upstream header is remote text, and a folded value keeps its CRLF
+    through http.client. Re-emitting it verbatim would let an allowed host
+    write headers of its own into the response the workspace reads."""
+    from hud.environment.egress import _sanitized
+
+    assert _sanitized("text/plain") == "text/plain"
+    assert _sanitized("a\r\n b") is None
+    assert _sanitized("a\nX-Injected: 1") is None
+    assert _sanitized(None) is None

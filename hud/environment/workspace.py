@@ -768,7 +768,12 @@ class Workspace:
                 *self.bwrap_argv(
                     [*drop, *command],
                     env=process_env,
-                    inherit_host_env=False,
+                    # Same environment the joined branch gives a command (the
+                    # serving process's, less HUD's own): a command must not
+                    # run without the image's PATH — losing the interpreters
+                    # and tools the task installed — merely because it asked
+                    # for an isolated sandbox.
+                    inherit_host_env=True,
                     inherit_workspace_env=inherit_workspace_env,
                     info_fd=info_write,
                     userns_block_fd=block_read,
