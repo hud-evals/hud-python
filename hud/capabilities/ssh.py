@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import posixpath
 import shlex
 from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
@@ -14,7 +13,13 @@ from .base import Capability, CapabilityClient
 
 
 class SSHClient(CapabilityClient):
-    """Thin asyncssh wrapper. Exposes the raw connection via ``conn``."""
+    """Thin asyncssh wrapper. Exposes the raw connection via ``conn``.
+
+    File helpers pass paths to the session verbatim: relative paths resolve
+    against the session cwd, absolute paths mean what they say. The namespace
+    the session runs in is the only path truth — file helpers and shell
+    commands must never disagree about what a path names.
+    """
 
     protocol: ClassVar[str] = "ssh/2"
 
@@ -48,46 +53,8 @@ class SSHClient(CapabilityClient):
         """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
 
-    def map_path(self, path: str) -> str:
-        """Anchor a path to the session cwd (the served workspace).
-
-        The old SFTP subsystem was chrooted, so harness tools address files as
-        ``/REPORT.md`` meaning workspace-relative. The exec channel sees the
-        real filesystem; replicate the chroot: strip the cwd prefix if present,
-        normalize the remainder against ``/`` (clamping ``..`` at the root,
-        exactly as a chroot does), and re-anchor under the cwd. Idempotent.
-
-        ``cwd_aliases`` are the same directory reached through symlinks, and are
-        stripped like the cwd: re-anchoring one would turn an already correct
-        absolute path into a nested one that does not exist.
-        """
-        cwd = str(self.capability.params.get("cwd", "")).rstrip("/")
-        if not cwd:
-            return path
-        aliases = [
-            str(alias).rstrip("/") for alias in self.capability.params.get("cwd_aliases") or []
-        ]
-        if self._is_windows:
-            # The workspace publishes cwd via as_posix() (e.g. "C:/work") but
-            # callers pass native paths ("C:\work\file.txt"); NTFS paths are
-            # case-insensitive.
-            path = path.replace("\\", "/")
-            if path.lower() == cwd.lower() or path.lower().startswith(cwd.lower() + "/"):
-                path = path[len(cwd) :]
-            elif len(path) >= 2 and path[1] == ":" and path[0].isalpha():
-                # Drive-absolute outside the workspace: anchor like the chroot.
-                path = path[2:]
-        else:
-            for prefix in (cwd, *aliases):
-                if prefix and (path == prefix or path.startswith(prefix + "/")):
-                    path = path[len(prefix) :]
-                    break
-        normalized = posixpath.normpath("/" + path.lstrip("/"))
-        return cwd if normalized == "/" else cwd + normalized
-
     async def read_text(self, path: str) -> str:
         """Read a UTF-8 text file through the exec channel."""
-        path = self.map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
             script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
@@ -100,7 +67,6 @@ class SSHClient(CapabilityClient):
 
     async def write_text(self, path: str, content: str) -> None:
         """Write UTF-8 text through the exec channel without command interpolation."""
-        path = self.map_path(path)
         if self._is_windows:
             quoted = _powershell_quote(path)
             truncate = f"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"
@@ -120,7 +86,6 @@ class SSHClient(CapabilityClient):
 
     async def listdir(self, path: str) -> list[str]:
         """List direct children through the exec channel."""
-        path = self.map_path(path)
         if self._is_windows:
             script = f"Get-ChildItem -Force -Name -LiteralPath {_powershell_quote(path)}"
             result = await self._conn.run(_powershell(script), check=True)

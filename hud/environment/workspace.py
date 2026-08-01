@@ -394,13 +394,6 @@ class Workspace:
         # Only override the default; respect an explicit guest_path.
         if self._bwrap is None and guest_path == "/workspace":
             self._guest_path = self.root.as_posix()
-        # The caller's spelling of the same directory when it differs from the real
-        # path (macOS resolves /tmp to /private/tmp) and sessions run under the real
-        # one. A client that knows only the real path treats the other spelling as a
-        # workspace-relative address and re-anchors it somewhere that does not exist.
-        given = Path(root).absolute().as_posix()
-        real = self.root.as_posix()
-        self._cwd_aliases = [given] if given != real and self._guest_path == real else []
         # ssh config
         self._ssh_host = host
         self._ssh_port = port
@@ -684,7 +677,6 @@ class Workspace:
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
             cwd=self._guest_path,
-            cwd_aliases=self._cwd_aliases or None,
         )
 
     @property

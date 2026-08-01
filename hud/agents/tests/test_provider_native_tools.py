@@ -319,54 +319,27 @@ async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
     assert ssh.files["/REPORT.md"] == b"done"
 
 
-async def test_absolute_paths_anchor_to_the_capability_cwd() -> None:
-    """The old SFTP chroot resolved ``/REPORT.md`` against the workspace root;
-    exec-channel file helpers must keep that contract via the capability cwd."""
-    ssh = _FakeSSH(cwd="/workspace", files={"/workspace/f.txt": b"inside"})
+async def test_paths_reach_the_session_verbatim() -> None:
+    """A path means what it says in the session's own namespace: file helpers
+    and shell commands must never disagree about what a path names, so
+    nothing is anchored or rewritten on the way through."""
+    ssh = _FakeSSH(cwd="/app", files={"/app/f.txt": b"inside"})
     tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
 
-    await tool.execute({"filePath": "/REPORT.md", "content": "done"})
+    await tool.execute({"filePath": "/tmp/probe.txt", "content": "done"})
 
-    assert ssh.files["/workspace/REPORT.md"] == b"done"
-    # Paths already inside the workspace are untouched.
-    assert await cast("SSHClient", ssh).read_text("/workspace/f.txt") == "inside"
-
-
-def test_map_path_clamps_traversal_like_a_chroot() -> None:
-    ssh = cast("SSHClient", _FakeSSH(cwd="/workspace"))
-    assert ssh.map_path("/workspace/../etc/passwd") == "/workspace/etc/passwd"
-    assert ssh.map_path("/../etc/passwd") == "/workspace/etc/passwd"
-    assert ssh.map_path("../../etc/passwd") == "/workspace/etc/passwd"
-    assert ssh.map_path("a/../b.txt") == "/workspace/b.txt"
-    assert ssh.map_path("/") == "/workspace"
-    assert ssh.map_path(".") == "/workspace"
-
-
-def test_map_path_handles_windows_native_paths() -> None:
-    """The workspace publishes cwd via as_posix(); callers pass native
-    backslash paths, and NTFS compares case-insensitively."""
-    cap = Capability(
-        name="shell",
-        protocol="ssh/2",
-        url="ssh://localhost:22",
-        params={"shell": "powershell", "cwd": "C:/work"},
-    )
-    ssh = SSHClient(cap, cast("Any", None))
-    assert ssh.map_path("C:\\work\\file.txt") == "C:/work/file.txt"
-    assert ssh.map_path("C:\\Work\\sub\\f.txt") == "C:/work/sub/f.txt"
-    assert ssh.map_path("D:\\other\\f.txt") == "C:/work/other/f.txt"
-    assert ssh.map_path("\\temp\\f.txt") == "C:/work/temp/f.txt"
-    assert ssh.map_path("sub\\f.txt") == "C:/work/sub/f.txt"
-    assert ssh.map_path("C:\\work\\..\\secrets.txt") == "C:/work/secrets.txt"
+    assert ssh.files["/tmp/probe.txt"] == b"done"
+    assert "/app/tmp/probe.txt" not in ssh.files
+    assert await cast("SSHClient", ssh).read_text("/app/f.txt") == "inside"
 
 
 async def test_read_maps_the_directory_predicate_and_listing_together() -> None:
-    """`test -d`, listing, and reads must agree on the anchored path, or
-    absolute workspace dirs are misclassified as files."""
+    """`test -d`, listing, and reads must agree on the same path, or
+    workspace dirs are misclassified as files."""
     ssh = _FakeSSH(cwd="/workspace", files={"/workspace/pkg/mod.py": b"x = 1\n"})
     tool = ReadTool(spec=ReadTool.default_spec("qwen"), client=cast("SSHClient", ssh))
 
-    result = await tool.execute({"filePath": "/pkg"})
+    result = await tool.execute({"filePath": "/workspace/pkg"})
 
     text = result_text(result)
     assert "<type>directory</type>" in text
@@ -536,26 +509,6 @@ async def test_gemini_edit_creates_file_when_old_string_empty() -> None:
     await tool.execute({"file_path": "/n.txt", "old_string": "", "new_string": "fresh"})
 
     assert ssh.files["/n.txt"] == b"fresh"
-
-
-def test_map_path_leaves_a_symlinked_spelling_of_the_workspace_alone() -> None:
-    """A workspace made at /tmp/w is served as /private/tmp/w on macOS; re-anchoring
-    the caller's spelling instead of stripping it nests the path under itself."""
-    cap = Capability(
-        name="shell",
-        protocol="ssh/2",
-        url="ssh://localhost:22",
-        params={"cwd": "/private/tmp/w", "cwd_aliases": ["/tmp/w"]},
-    )
-    ssh = SSHClient(cap, cast("Any", None))
-
-    assert ssh.map_path("/tmp/w/calc.py") == "/private/tmp/w/calc.py"
-    assert ssh.map_path("/private/tmp/w/calc.py") == "/private/tmp/w/calc.py"
-    assert ssh.map_path("/tmp/w") == "/private/tmp/w"
-    # Workspace-relative addressing still anchors, and an unrelated absolute
-    # path is still clamped into the workspace like a chroot.
-    assert ssh.map_path("/REPORT.md") == "/private/tmp/w/REPORT.md"
-    assert ssh.map_path("/tmp/elsewhere/f.txt") == "/private/tmp/w/tmp/elsewhere/f.txt"
 
 
 async def test_reading_a_missing_file_is_a_tool_error_not_a_raised_traceback() -> None:
