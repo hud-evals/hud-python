@@ -56,10 +56,25 @@ class Job:
 
     @property
     def reward(self) -> float:
-        """Mean reward across runs (0.0 for an empty job)."""
-        if not self.runs:
+        """Mean reward across graded runs (0.0 when none were graded).
+
+        An errored run carries no verdict — infrastructure failure is never
+        a score — so it is excluded from the mean rather than averaged in as
+        a zero that silently deflates the job. :attr:`errors` holds them.
+        """
+        graded = [run.reward for run in self.runs if not (run.trace.is_error or run.grade.is_error)]
+        if not graded:
             return 0.0
-        return sum(run.reward for run in self.runs) / len(self.runs)
+        return sum(graded) / len(graded)
+
+    @property
+    def errors(self) -> list[Run]:
+        """Runs that ended in error: ungraded, and excluded from :attr:`reward`.
+
+        Either error signal counts — a trace that ended in error (launch or
+        mid-run failure) or a grade the env itself marked as an error.
+        """
+        return [run for run in self.runs if run.trace.is_error or run.grade.is_error]
 
     @property
     def results(self) -> dict[str, list[Run]]:
