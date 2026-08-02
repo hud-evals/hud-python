@@ -74,6 +74,7 @@ class Manifest:
     protocol_version: str  # e.g. "hud/1.0"
     server_info: ServerInfo
     bindings: list[Capability]
+    readiness: dict[str, Any] | None = None
 
 
 class HudClient:
@@ -152,6 +153,9 @@ class HudClient:
                 version=env.get("version", "0.0.0"),
             ),
             bindings=bindings,
+            readiness=(
+                result["readiness"] if isinstance(result.get("readiness"), dict) else None
+            ),
         )
         return self.manifest
 

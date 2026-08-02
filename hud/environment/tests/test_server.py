@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from hud.clients import HudProtocolError
 from hud.environment import Answer, Environment
@@ -25,6 +25,46 @@ class _Payload(BaseModel):
 
 
 _Mode = Literal["upper", "lower"]
+
+
+async def test_hello_publishes_validated_readiness_declaration() -> None:
+    """The author-facing declaration is emitted on the control-channel hello frame."""
+    readiness = {
+        "schema_version": "hud.environment-readiness.v0",
+        "probe": {"scenario": "probe", "args": {"seed": 0}},
+        "reset": {"strategy": "reprovision"},
+        "budgets": {
+            "startup_timeout_s": 120,
+            "probe_timeout_s": 300,
+            "reset_timeout_s": 180,
+        },
+    }
+    env = Environment("ready", readiness=readiness)
+
+    async with served(env) as client:
+        assert client.manifest is not None
+        assert client.manifest.readiness == readiness
+
+
+def test_readiness_declaration_rejects_secret_args() -> None:
+    """Environment authors cannot publish credentials as readiness arguments."""
+    with pytest.raises(ValidationError, match="must not contain"):
+        Environment(
+            "unsafe",
+            readiness={
+                "schema_version": "hud.environment-readiness.v0",
+                "probe": {
+                    "scenario": "probe",
+                    "args": {"nested": {"apiKey": "secret"}},
+                },
+                "reset": {"strategy": "reprovision"},
+                "budgets": {
+                    "startup_timeout_s": 120,
+                    "probe_timeout_s": 300,
+                    "reset_timeout_s": 180,
+                },
+            },
+        )
 
 
 async def test_dict_grade_without_numeric_score_errors_loudly() -> None:
