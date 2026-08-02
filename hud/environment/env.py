@@ -10,10 +10,11 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
+import re
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, ParamSpec, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, field_validator
 
 from hud.capabilities import Capability
 
@@ -46,6 +47,135 @@ class Answer(BaseModel, Generic[T]):
 
     content: T = Field(description="The parsed structured answer")
     raw: str = Field(default="", description="Original answer string before parsing")
+
+
+_READINESS_SECRET_KEYS = frozenset(
+    {
+        "api_key",
+        "access_token",
+        "authorization",
+        "client_secret",
+        "credential",
+        "credentials",
+        "hud_api_key",
+        "mcp_config",
+        "password",
+        "private_key",
+        "refresh_token",
+        "secret",
+        "secret_key",
+        "secrets",
+        "token",
+    }
+)
+_READINESS_SECRET_SUFFIXES = (
+    "_access_key",
+    "_api_key",
+    "_api_keys",
+    "_client_secret",
+    "_credential",
+    "_credentials",
+    "_password",
+    "_passwords",
+    "_private_key",
+    "_private_keys",
+    "_secret",
+    "_secret_access_key",
+    "_secret_key",
+    "_secret_keys",
+    "_secrets",
+)
+_READINESS_NONSECRET_TOKEN_QUALIFIERS = frozenset(
+    {
+        "completion",
+        "context",
+        "estimated",
+        "input",
+        "max",
+        "num",
+        "output",
+        "prompt",
+        "remaining",
+        "stop",
+        "total",
+        "used",
+    }
+)
+
+
+def _normalize_readiness_key(key: str) -> str:
+    """Normalize snake, kebab, camel, and acronym-prefixed credential keys."""
+    value = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+
+def _is_nonsecret_token_setting(key: str) -> bool:
+    parts = key.split("_")
+    return (
+        len(parts) > 1
+        and parts[-1] in {"token", "tokens"}
+        and all(part in _READINESS_NONSECRET_TOKEN_QUALIFIERS for part in parts[:-1])
+    )
+
+
+def _readiness_has_secret_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in cast("dict[str, Any]", value).items():
+            normalized = _normalize_readiness_key(key)
+            if (
+                normalized in _READINESS_SECRET_KEYS
+                or normalized.endswith(_READINESS_SECRET_SUFFIXES)
+                or (
+                    normalized.endswith(("_token", "_tokens"))
+                    and not _is_nonsecret_token_setting(normalized)
+                )
+                or _readiness_has_secret_key(item)
+            ):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_readiness_has_secret_key(item) for item in cast("list[Any]", value))
+    return False
+
+
+class _EnvironmentReadinessProbe(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: str = Field(min_length=1)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("args")
+    @classmethod
+    def _reject_secrets(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if _readiness_has_secret_key(value):
+            raise ValueError("readiness probe args must not contain secret-bearing keys")
+        return value
+
+
+class _EnvironmentReadinessReset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: Literal["reprovision"]
+
+
+class _EnvironmentReadinessBudgets(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    startup_timeout_s: int = Field(gt=0)
+    probe_timeout_s: int = Field(gt=0)
+    reset_timeout_s: int = Field(gt=0)
+
+
+class EnvironmentReadiness(BaseModel):
+    """Versioned active-probe declaration published in the environment manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["hud.environment-readiness.v0"]
+    probe: _EnvironmentReadinessProbe
+    reset: _EnvironmentReadinessReset
+    budgets: _EnvironmentReadinessBudgets
 
 
 def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
@@ -142,6 +272,7 @@ class Environment(LegacyEnvMixin):
         *,
         version: str = "0.0.1",
         capabilities: Sequence[Capability] | None = None,
+        readiness: EnvironmentReadiness | dict[str, Any] | None = None,
         **legacy_kwargs: Any,
     ) -> None:
         if legacy_kwargs:
@@ -155,6 +286,9 @@ class Environment(LegacyEnvMixin):
             )
         self.name = name
         self.version = version
+        self.readiness = (
+            EnvironmentReadiness.model_validate(readiness) if readiness is not None else None
+        )
         #: Published capabilities — always concrete wire data. Daemons the env
         #: runs itself publish theirs at serve time (:meth:`add_capability`
         #: from an ``@env.initialize`` hook; :meth:`workspace` wires the
