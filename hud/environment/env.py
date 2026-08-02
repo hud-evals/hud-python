@@ -80,8 +80,22 @@ _READINESS_SECRET_SUFFIXES = (
     "_secret_key",
     "_secret_keys",
     "_secrets",
-    "_token",
-    "_tokens",
+)
+_READINESS_NONSECRET_TOKEN_QUALIFIERS = frozenset(
+    {
+        "completion",
+        "context",
+        "estimated",
+        "input",
+        "max",
+        "num",
+        "output",
+        "prompt",
+        "remaining",
+        "stop",
+        "total",
+        "used",
+    }
 )
 
 
@@ -92,6 +106,15 @@ def _normalize_readiness_key(key: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
+def _is_nonsecret_token_setting(key: str) -> bool:
+    parts = key.split("_")
+    return (
+        len(parts) > 1
+        and parts[-1] in {"token", "tokens"}
+        and all(part in _READINESS_NONSECRET_TOKEN_QUALIFIERS for part in parts[:-1])
+    )
+
+
 def _readiness_has_secret_key(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in cast("dict[str, Any]", value).items():
@@ -99,6 +122,10 @@ def _readiness_has_secret_key(value: Any) -> bool:
             if (
                 normalized in _READINESS_SECRET_KEYS
                 or normalized.endswith(_READINESS_SECRET_SUFFIXES)
+                or (
+                    normalized.endswith(("_token", "_tokens"))
+                    and not _is_nonsecret_token_setting(normalized)
+                )
                 or _readiness_has_secret_key(item)
             ):
                 return True
