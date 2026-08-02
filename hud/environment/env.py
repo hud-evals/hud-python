@@ -63,6 +63,7 @@ _READINESS_SECRET_KEYS = frozenset(
         "private_key",
         "refresh_token",
         "secret",
+        "secret_key",
         "secrets",
         "token",
     }
@@ -77,15 +78,22 @@ _READINESS_SECRET_SUFFIXES = (
     "_private_key",
     "_secret",
     "_secret_access_key",
+    "_secret_key",
     "_token",
 )
+
+
+def _normalize_readiness_key(key: str) -> str:
+    """Normalize snake, kebab, camel, and acronym-prefixed credential keys."""
+    value = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
 def _readiness_has_secret_key(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in cast("dict[str, Any]", value).items():
-            snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
-            normalized = re.sub(r"[^a-z0-9]+", "_", snake.lower()).strip("_")
+            normalized = _normalize_readiness_key(key)
             if (
                 normalized in _READINESS_SECRET_KEYS
                 or normalized.endswith(_READINESS_SECRET_SUFFIXES)

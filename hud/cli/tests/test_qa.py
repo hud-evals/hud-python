@@ -151,7 +151,10 @@ def test_qa_run_waits_for_terminal_result_and_returns_quality_exit() -> None:
     assert "failed" in result.output.lower()
     assert "A gap was found." in result.output
     assert platform.get.call_count == 2
-    platform.get.assert_called_with(f"/qa-agents/{_AGENT_ID}/runs", params={"limit": 100})
+    platform.get.assert_called_with(
+        "/qa-agents/results/resources",
+        params={"subject_type": "taskset", "subject_ids": [_SUBJECT_ID]},
+    )
 
 
 def test_qa_run_wait_timeout_is_execution_error() -> None:

@@ -46,7 +46,11 @@ async def test_hello_publishes_validated_readiness_declaration() -> None:
         assert client.manifest.readiness == readiness
 
 
-def test_readiness_declaration_rejects_secret_args() -> None:
+@pytest.mark.parametrize(
+    "secret_key",
+    ["apiKey", "APIKey", "MCPConfig", "secret_key"],
+)
+def test_readiness_declaration_rejects_secret_args(secret_key: str) -> None:
     """Environment authors cannot publish credentials as readiness arguments."""
     with pytest.raises(ValidationError, match="must not contain"):
         Environment(
@@ -55,7 +59,7 @@ def test_readiness_declaration_rejects_secret_args() -> None:
                 "schema_version": "hud.environment-readiness.v0",
                 "probe": {
                     "scenario": "probe",
-                    "args": {"nested": {"apiKey": "secret"}},
+                    "args": {"nested": {secret_key: "secret"}},
                 },
                 "reset": {"strategy": "reprovision"},
                 "budgets": {

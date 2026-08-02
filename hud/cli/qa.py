@@ -207,14 +207,29 @@ def run_agent(
     if len(analysis_trace_ids) != len(runs):
         typer.echo("Platform returned QA runs without analysis trace IDs.", err=True)
         raise typer.Exit(3)
+    launched_subject_ids = [
+        str(run["subject_id"]) for run in runs if isinstance(run.get("subject_id"), str)
+    ]
+    launched_subject_types = {
+        str(run["subject_type"])
+        for run in runs
+        if run.get("subject_type") in _RESOURCE_SUBJECT_TYPES
+    }
+    if len(launched_subject_ids) != len(runs) or len(launched_subject_types) != 1:
+        typer.echo("Platform returned QA runs without a consistent resource scope.", err=True)
+        raise typer.Exit(3)
+    launched_subject_type = launched_subject_types.pop()
 
     deadline = time.monotonic() + timeout
     results: list[dict[str, Any]] = []
     while time.monotonic() < deadline:
         try:
             raw_results = platform.get(
-                f"/qa-agents/{agent_id}/runs",
-                params={"limit": 100},
+                "/qa-agents/results/resources",
+                params={
+                    "subject_type": launched_subject_type,
+                    "subject_ids": launched_subject_ids,
+                },
             )
         except HudRequestError as exc:
             _request_error(str(exc))
