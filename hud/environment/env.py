@@ -71,15 +71,21 @@ _READINESS_SECRET_KEYS = frozenset(
 _READINESS_SECRET_SUFFIXES = (
     "_access_key",
     "_api_key",
+    "_api_keys",
     "_client_secret",
     "_credential",
     "_credentials",
     "_password",
+    "_passwords",
     "_private_key",
+    "_private_keys",
     "_secret",
     "_secret_access_key",
     "_secret_key",
+    "_secret_keys",
+    "_secrets",
     "_token",
+    "_tokens",
 )
 
 

@@ -48,7 +48,16 @@ async def test_hello_publishes_validated_readiness_declaration() -> None:
 
 @pytest.mark.parametrize(
     "secret_key",
-    ["apiKey", "APIKey", "MCPConfig", "secret_key"],
+    [
+        "apiKey",
+        "APIKey",
+        "MCPConfig",
+        "secret_key",
+        "db_secrets",
+        "api_tokens",
+        "db_passwords",
+        "signing_private_keys",
+    ],
 )
 def test_readiness_declaration_rejects_secret_args(secret_key: str) -> None:
     """Environment authors cannot publish credentials as readiness arguments."""

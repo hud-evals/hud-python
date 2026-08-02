@@ -181,6 +181,25 @@ def test_qa_run_reused_failure_preserves_quality_exit() -> None:
     )
 
 
+def test_qa_run_matches_canonical_results_for_uppercase_uuid_input() -> None:
+    """API-normalized UUID casing does not make a completed result disappear."""
+    platform = MagicMock()
+    platform.post.return_value = []
+    platform.get.side_effect = [_agent(), [_result("passed")]]
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        result = runner.invoke(
+            app,
+            ["qa", "run", _AGENT_ID.upper(), _SUBJECT_ID.upper()],
+        )
+
+    assert result.exit_code == 0
+    assert "passed" in result.output.lower()
+
+
 def test_qa_run_partial_reuse_waits_for_new_and_scores_all_subjects() -> None:
     """A reused failure remains visible while another subject runs."""
     reused_failure = {**_result("failed"), "subject_id": _SECOND_SUBJECT_ID}
