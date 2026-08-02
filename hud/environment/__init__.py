@@ -22,7 +22,7 @@ from typing import Any
 from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
-from .env import Answer, Environment
+from .env import Answer, Environment, EnvironmentReadiness
 from .integration import Integration
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
@@ -92,6 +92,7 @@ __all__ = [
     "Answer",
     "Capability",
     "Environment",
+    "EnvironmentReadiness",
     "Integration",
     "Mount",
     "MountKind",
