@@ -22,6 +22,7 @@ import pytest
 
 from hud.capabilities import SSHClient
 from hud.environment import workspace as workspace_mod
+from hud.environment.egress import _field, _Unrelayable
 from hud.environment.workspace import Mount, Workspace
 from hud.utils.process import ProcessResult
 
@@ -799,13 +800,19 @@ async def test_identity_map_reads_a_chunked_info_document() -> None:
                 os.close(fd)
 
 
-def test_the_proxy_refuses_to_forward_a_folded_header() -> None:
+def test_the_proxy_refuses_to_relay_a_header_it_cannot_represent() -> None:
     """An upstream header is remote text, and a folded value keeps its CRLF
-    through http.client. Re-emitting it verbatim would let an allowed host
-    write headers of its own into the response the workspace reads."""
-    from hud.environment.egress import _sanitized
-
-    assert _sanitized("text/plain") == "text/plain"
-    assert _sanitized("a\r\n b") is None
-    assert _sanitized("a\nX-Injected: 1") is None
-    assert _sanitized(None) is None
+    through http.client. Relayed verbatim it would carry headers of its own
+    into the response the workspace reads, so a field outside the grammar
+    fails the whole response rather than being quietly repaired."""
+    assert _field("Content-Type", "text/plain") == ("Content-Type", "text/plain")
+    assert _field("X-Meta", "") == ("X-Meta", "")
+    for name, value in (
+        ("X-Evil", "a\r\n b"),
+        ("X-Evil", "a\nX-Injected: 1"),
+        ("X-Evil", "a\x00b"),
+        ("Bad Name", "fine"),
+        ("X-Evil\r\nX-Injected", "fine"),
+    ):
+        with pytest.raises(_Unrelayable):
+            _field(name, value)

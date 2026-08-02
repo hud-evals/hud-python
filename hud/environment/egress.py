@@ -28,6 +28,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import select
 import shutil
 import socket
@@ -64,6 +65,35 @@ _HOP_BY_HOP = frozenset(
         "upgrade",
     }
 )
+
+
+#: RFC 9110 grammar for what a header may contain. A name is a `token`; a
+#: value is visible ASCII, obs-text, and blanks — no control characters, so
+#: nothing in a relayed header can end it and begin another. Matched
+#: positively: a proxy relays what the grammar admits, rather than guessing
+#: which characters an attacker would have used.
+_FIELD_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_FIELD_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")
+
+
+class _Unrelayable(ValueError):
+    """An upstream response that cannot be relayed as the upstream sent it."""
+
+
+def _field(name: str, value: str) -> tuple[str, str]:
+    """*name* and *value* as a header, or raise.
+
+    An upstream response is remote text, and ``http.client`` preserves a
+    folded value's CRLF, so a header relayed verbatim can carry headers of
+    its own into the response the workspace reads. Refusing beats repairing:
+    a value that has to be altered to be safe is no longer the value the
+    upstream sent, and a proxy that quietly rewrites responses is worse to
+    debug than one that says it could not relay this one.
+    """
+    if not _FIELD_NAME.fullmatch(name) or not _FIELD_VALUE.fullmatch(value):
+        raise _Unrelayable(f"header {name[:32]!r} is not relayable")
+    return name, value
+
 
 #: The proxy port offered on the workspace's loopback. 3128 is unremarkable —
 #: an egress proxy is ordinary infrastructure, unlike a control channel.
@@ -234,13 +264,16 @@ class _Proxy(BaseHTTPRequestHandler):
     def log_message(self, *_: object) -> None:
         """The workspace's traffic is not the substrate's log."""
 
-    def _deny(self) -> None:
-        # Loud and diagnosable from inside the workspace: a host held back by
-        # policy should not look like a network that is merely broken.
-        self.send_response(403)
-        self.send_header("X-Proxy-Error", "blocked-by-allowlist")
+    def _fail(self, status: int, reason: str) -> None:
+        # Loud and diagnosable from inside the workspace: a request the proxy
+        # would not carry should not look like a network that is merely broken.
+        self.send_response(status)
+        self.send_header("X-Proxy-Error", reason)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def _deny(self) -> None:
+        self._fail(403, "blocked-by-allowlist")
 
     def do_CONNECT(self) -> None:
         host, _, port = self.path.rpartition(":")
@@ -274,19 +307,32 @@ class _Proxy(BaseHTTPRequestHandler):
         try:
             connection.request(self.command, path, body=body, headers=headers)
             response = connection.getresponse()
-            self.send_response(response.status, response.reason)
+            # Validate every field before writing any of them: a response is
+            # relayed whole or not at all, and half a status line has already
+            # committed this connection by the time a later header fails.
+            relayed = [
+                _field(key, value)
+                for key, value in response.getheaders()
+                if key.lower() not in _HOP_BY_HOP and key.lower() != "content-length"
+            ]
             length = response.getheader("Content-Length")
-            for key, value in response.getheaders():
-                if key.lower() not in _HOP_BY_HOP and key.lower() != "content-length":
-                    self.send_header(key, value)
-            if length is not None:
-                self.send_header("Content-Length", length)
+            framed = length is not None and length.strip().isdigit()
+            _field("Reason", response.reason or "")
+            self.send_response(response.status, response.reason)
+            for key, value in relayed:
+                self.send_header(key, value)
+            if framed:
+                assert length is not None
+                self.send_header("Content-Length", length.strip())
             else:
                 # Nothing upstream framed the body, so the close delimits it.
                 self.send_header("Connection", "close")
                 self.close_connection = True
             self.end_headers()
             shutil.copyfileobj(response, self.wfile)
+        except _Unrelayable as error:
+            LOGGER.warning("refusing to relay %s: %s", parts.hostname, error)
+            self._fail(502, "unrelayable-upstream-header")
         except (OSError, http.client.HTTPException):
             self.close_connection = True
         finally:
