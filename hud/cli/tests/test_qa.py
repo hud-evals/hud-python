@@ -14,6 +14,7 @@ runner = CliRunner()
 
 _AGENT_ID = "00000000-0000-4000-a000-000000000001"
 _SUBJECT_ID = "00000000-0000-4000-a000-000000000002"
+_SECOND_SUBJECT_ID = "00000000-0000-4000-a000-000000000005"
 _TRACE_ID = "00000000-0000-4000-a000-000000000003"
 
 
@@ -108,6 +109,7 @@ def test_qa_agents_json_preserves_platform_payload() -> None:
 def test_qa_run_defaults_to_new_only_without_waiting() -> None:
     """The safe default does not overwrite evidence or block for model execution."""
     platform = MagicMock()
+    platform.get.return_value = _agent()
     platform.post.return_value = [_run()]
 
     with (
@@ -125,7 +127,7 @@ def test_qa_run_defaults_to_new_only_without_waiting() -> None:
         f"/qa-agents/{_AGENT_ID}/run-resources",
         json={"subject_ids": [_SUBJECT_ID], "overwrite": False},
     )
-    platform.get.assert_not_called()
+    platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")
 
 
 def test_qa_run_waits_for_terminal_result_and_returns_quality_exit() -> None:
@@ -133,6 +135,7 @@ def test_qa_run_waits_for_terminal_result_and_returns_quality_exit() -> None:
     platform = MagicMock()
     platform.post.return_value = [_run()]
     platform.get.side_effect = [
+        _agent(),
         [{**_run(), "status": "queued"}],
         [_result("failed")],
     ]
@@ -150,16 +153,71 @@ def test_qa_run_waits_for_terminal_result_and_returns_quality_exit() -> None:
     assert result.exit_code == 1
     assert "failed" in result.output.lower()
     assert "A gap was found." in result.output
-    assert platform.get.call_count == 2
+    assert platform.get.call_count == 3
     platform.get.assert_called_with(
         "/qa-agents/results/resources",
         params={"subject_type": "taskset", "subject_ids": [_SUBJECT_ID]},
     )
 
 
+def test_qa_run_reused_failure_preserves_quality_exit() -> None:
+    """Run-new-only reuse still evaluates the stored result when waiting."""
+    platform = MagicMock()
+    platform.post.return_value = []
+    platform.get.side_effect = [_agent(), [_result("failed")]]
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        result = runner.invoke(app, ["qa", "run", _AGENT_ID, _SUBJECT_ID])
+
+    assert result.exit_code == 1
+    assert "failed" in result.output.lower()
+    assert "A gap was found." in result.output
+    platform.get.assert_called_with(
+        "/qa-agents/results/resources",
+        params={"subject_type": "taskset", "subject_ids": [_SUBJECT_ID]},
+    )
+
+
+def test_qa_run_partial_reuse_waits_for_new_and_scores_all_subjects() -> None:
+    """A reused failure remains visible while another subject runs."""
+    reused_failure = {**_result("failed"), "subject_id": _SECOND_SUBJECT_ID}
+    platform = MagicMock()
+    platform.post.return_value = [_run()]
+    platform.get.side_effect = [
+        _agent(),
+        [{**_run(), "status": "queued"}, reused_failure],
+        [_result("passed"), reused_failure],
+    ]
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+        patch("hud.cli.qa.time.sleep"),
+    ):
+        result = runner.invoke(
+            app,
+            ["qa", "run", _AGENT_ID, _SUBJECT_ID, _SECOND_SUBJECT_ID],
+        )
+
+    assert result.exit_code == 1
+    assert _SUBJECT_ID in result.output
+    assert _SECOND_SUBJECT_ID in result.output
+    platform.get.assert_called_with(
+        "/qa-agents/results/resources",
+        params={
+            "subject_type": "taskset",
+            "subject_ids": [_SUBJECT_ID, _SECOND_SUBJECT_ID],
+        },
+    )
+
+
 def test_qa_run_wait_timeout_is_execution_error() -> None:
     """An exhausted local wait budget is not reported as a quality failure."""
     platform = MagicMock()
+    platform.get.return_value = _agent()
     platform.post.return_value = [_run()]
 
     with (
@@ -174,7 +232,7 @@ def test_qa_run_wait_timeout_is_execution_error() -> None:
 
     assert result.exit_code == 3
     assert "Timed out after 1s" in result.output
-    platform.get.assert_not_called()
+    platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")
 
 
 def test_qa_run_rejects_missing_analysis_trace_contract() -> None:
@@ -182,6 +240,7 @@ def test_qa_run_rejects_missing_analysis_trace_contract() -> None:
     platform = MagicMock()
     run = _run()
     del run["analysis_trace_id"]
+    platform.get.return_value = _agent()
     platform.post.return_value = [run]
 
     with (
@@ -192,7 +251,7 @@ def test_qa_run_rejects_missing_analysis_trace_contract() -> None:
 
     assert result.exit_code == 3
     assert "without analysis trace IDs" in result.output
-    platform.get.assert_not_called()
+    platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")
 
 
 def test_qa_results_queries_repeated_subject_ids() -> None:

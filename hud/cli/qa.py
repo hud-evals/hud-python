@@ -86,20 +86,33 @@ def _render_results(results: list[dict[str, Any]]) -> None:
         typer.echo(f"{line}\t{summary}" if summary else line)
 
 
-def _matching_run_results(
+def _matching_subject_results(
     raw_results: object,
     *,
-    analysis_trace_ids: set[str],
+    agent_id: str,
+    subject_ids: list[str],
+    launched_trace_ids: dict[str, str],
 ) -> list[dict[str, Any]]:
-    results = _dict_list(raw_results, label="QA run history")
-    return [
-        result for result in results if str(result.get("analysis_trace_id")) in analysis_trace_ids
-    ]
+    results = _dict_list(raw_results, label="QA results")
+    expected_subject_ids = set(subject_ids)
+    matched: dict[str, dict[str, Any]] = {}
+    for result in results:
+        subject_id = str(result.get("subject_id"))
+        if str(result.get("qa_agent_id")) != agent_id or subject_id not in expected_subject_ids:
+            continue
+        launched_trace_id = launched_trace_ids.get(subject_id)
+        if (
+            launched_trace_id is not None
+            and str(result.get("analysis_trace_id")) != launched_trace_id
+        ):
+            continue
+        matched[subject_id] = result
+    return [matched[subject_id] for subject_id in subject_ids if subject_id in matched]
 
 
-def _all_terminal(results: list[dict[str, Any]], analysis_trace_ids: set[str]) -> bool:
-    statuses = {str(result.get("analysis_trace_id")): result.get("status") for result in results}
-    return all(statuses.get(trace_id) in _TERMINAL_STATUSES for trace_id in analysis_trace_ids)
+def _all_terminal(results: list[dict[str, Any]], subject_ids: list[str]) -> bool:
+    statuses = {str(result.get("subject_id")): result.get("status") for result in results}
+    return all(statuses.get(subject_id) in _TERMINAL_STATUSES for subject_id in subject_ids)
 
 
 def _result_exit_code(results: list[dict[str, Any]]) -> int:
@@ -179,6 +192,14 @@ def run_agent(
     """Run one QA agent against Environment or Taskset subjects."""
     platform = _platform()
     try:
+        raw_agent = platform.get(f"/qa-agents/{agent_id}")
+        if (
+            not isinstance(raw_agent, dict)
+            or raw_agent.get("subject_type") not in _RESOURCE_SUBJECT_TYPES
+        ):
+            typer.echo("Platform returned an invalid resource QA agent.", err=True)
+            raise typer.Exit(3)
+        agent_subject_type = str(raw_agent["subject_type"])
         raw_runs = platform.post(
             f"/qa-agents/{agent_id}/run-resources",
             json={"subject_ids": subject_ids, "overwrite": overwrite},
@@ -186,7 +207,7 @@ def run_agent(
     except HudRequestError as exc:
         _request_error(str(exc))
     runs = _dict_list(raw_runs, label="QA launch response")
-    if not runs:
+    if not wait and not runs:
         if json_output:
             _print_json([])
         else:
@@ -199,26 +220,17 @@ def run_agent(
             _render_results(runs)
         return
 
-    analysis_trace_ids = {
-        str(run["analysis_trace_id"])
+    launched_trace_ids = {
+        str(run["subject_id"]): str(run["analysis_trace_id"])
         for run in runs
-        if isinstance(run.get("analysis_trace_id"), str)
+        if isinstance(run.get("subject_id"), str) and isinstance(run.get("analysis_trace_id"), str)
     }
-    if len(analysis_trace_ids) != len(runs):
+    if len(launched_trace_ids) != len(runs):
         typer.echo("Platform returned QA runs without analysis trace IDs.", err=True)
         raise typer.Exit(3)
-    launched_subject_ids = [
-        str(run["subject_id"]) for run in runs if isinstance(run.get("subject_id"), str)
-    ]
-    launched_subject_types = {
-        str(run["subject_type"])
-        for run in runs
-        if run.get("subject_type") in _RESOURCE_SUBJECT_TYPES
-    }
-    if len(launched_subject_ids) != len(runs) or len(launched_subject_types) != 1:
-        typer.echo("Platform returned QA runs without a consistent resource scope.", err=True)
+    if not set(launched_trace_ids).issubset(subject_ids):
+        typer.echo("Platform returned QA runs for unexpected resources.", err=True)
         raise typer.Exit(3)
-    launched_subject_type = launched_subject_types.pop()
 
     deadline = time.monotonic() + timeout
     results: list[dict[str, Any]] = []
@@ -227,17 +239,19 @@ def run_agent(
             raw_results = platform.get(
                 "/qa-agents/results/resources",
                 params={
-                    "subject_type": launched_subject_type,
-                    "subject_ids": launched_subject_ids,
+                    "subject_type": agent_subject_type,
+                    "subject_ids": subject_ids,
                 },
             )
         except HudRequestError as exc:
             _request_error(str(exc))
-        results = _matching_run_results(
+        results = _matching_subject_results(
             raw_results,
-            analysis_trace_ids=analysis_trace_ids,
+            agent_id=agent_id,
+            subject_ids=subject_ids,
+            launched_trace_ids=launched_trace_ids,
         )
-        if _all_terminal(results, analysis_trace_ids):
+        if _all_terminal(results, subject_ids):
             break
         time.sleep(_POLL_INTERVAL_SECONDS)
     else:
