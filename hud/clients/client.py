@@ -153,9 +153,7 @@ class HudClient:
                 version=env.get("version", "0.0.0"),
             ),
             bindings=bindings,
-            readiness=(
-                result["readiness"] if isinstance(result.get("readiness"), dict) else None
-            ),
+            readiness=(result["readiness"] if isinstance(result.get("readiness"), dict) else None),
         )
         return self.manifest
 
