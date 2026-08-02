@@ -1,0 +1,268 @@
+"""Discover, run, and inspect resource-scoped platform QA agents."""
+
+from __future__ import annotations
+
+import json
+import time
+from typing import Any, cast
+
+import typer
+
+from hud.cli.utils.api import require_api_key
+from hud.utils.exceptions import HudRequestError
+from hud.utils.platform import PlatformClient
+
+_POLL_INTERVAL_SECONDS = 2.0
+_RESOURCE_SUBJECT_TYPES = {"environment", "taskset"}
+_TERMINAL_STATUSES = {"completed", "error"}
+
+qa_app = typer.Typer(
+    name="qa",
+    help="Discover, run, and inspect platform QA agents.",
+    add_completion=False,
+    rich_markup_mode="rich",
+    no_args_is_help=True,
+)
+
+
+def _request_error(message: str) -> None:
+    typer.echo(message, err=True)
+    raise typer.Exit(2)
+
+
+def _platform() -> PlatformClient:
+    try:
+        require_api_key("use platform QA agents")
+    except typer.Exit as exc:
+        raise typer.Exit(2) from exc
+    return PlatformClient.from_settings()
+
+
+def _subject_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in _RESOURCE_SUBJECT_TYPES:
+        choices = ", ".join(sorted(_RESOURCE_SUBJECT_TYPES))
+        _request_error(f"Subject type must be one of: {choices}.")
+    return normalized
+
+
+def _dict_list(value: object, *, label: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        typer.echo(f"Platform returned invalid {label}.", err=True)
+        raise typer.Exit(3)
+    return cast("list[dict[str, Any]]", value)
+
+
+def _print_json(value: object) -> None:
+    typer.echo(json.dumps(value, indent=2, sort_keys=True, default=str))
+
+
+def _result_verdict(result: dict[str, Any]) -> tuple[str, str | None]:
+    canonical = result.get("canonical_result")
+    if isinstance(canonical, dict):
+        canonical_dict = cast("dict[str, Any]", canonical)
+        verdict = canonical_dict.get("verdict")
+        summary = canonical_dict.get("summary")
+        if isinstance(verdict, str):
+            return verdict, summary if isinstance(summary, str) else None
+    status = result.get("status")
+    error = result.get("error")
+    return (
+        status if isinstance(status, str) else "unknown",
+        error if isinstance(error, str) else None,
+    )
+
+
+def _render_results(results: list[dict[str, Any]]) -> None:
+    if not results:
+        typer.echo("No QA results found.")
+        return
+    for result in results:
+        verdict, summary = _result_verdict(result)
+        subject_id = result.get("subject_id", "-")
+        agent = result.get("agent_name") or result.get("qa_agent_id") or "-"
+        stale = " stale" if result.get("stale") is True else ""
+        line = f"{subject_id}\t{agent}\t{verdict}{stale}"
+        typer.echo(f"{line}\t{summary}" if summary else line)
+
+
+def _matching_run_results(
+    raw_results: object,
+    *,
+    analysis_trace_ids: set[str],
+) -> list[dict[str, Any]]:
+    results = _dict_list(raw_results, label="QA run history")
+    return [
+        result for result in results if str(result.get("analysis_trace_id")) in analysis_trace_ids
+    ]
+
+
+def _all_terminal(results: list[dict[str, Any]], analysis_trace_ids: set[str]) -> bool:
+    statuses = {str(result.get("analysis_trace_id")): result.get("status") for result in results}
+    return all(statuses.get(trace_id) in _TERMINAL_STATUSES for trace_id in analysis_trace_ids)
+
+
+def _result_exit_code(results: list[dict[str, Any]]) -> int:
+    if any(result.get("status") == "error" for result in results):
+        return 3
+    verdicts = [_result_verdict(result)[0] for result in results]
+    if any(verdict in {"failed", "unknown"} for verdict in verdicts):
+        return 1
+    if any(verdict != "passed" for verdict in verdicts):
+        return 3
+    return 0
+
+
+@qa_app.command("agents")
+def list_agents(
+    subject_type: str = typer.Option(
+        "environment",
+        "--subject-type",
+        help="Resource scope: environment or taskset.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
+    offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
+) -> None:
+    """List QA agents available for a resource type."""
+    platform = _platform()
+    normalized_type = _subject_type(subject_type)
+    try:
+        response = platform.get(
+            "/qa-agents",
+            params={"subject_type": normalized_type, "limit": limit, "offset": offset},
+        )
+    except HudRequestError as exc:
+        _request_error(str(exc))
+    if not isinstance(response, dict) or not isinstance(response.get("items"), list):
+        typer.echo("Platform returned an invalid QA agent list.", err=True)
+        raise typer.Exit(3)
+    if json_output:
+        _print_json(response)
+        return
+    agents = _dict_list(response["items"], label="QA agent list")
+    if not agents:
+        typer.echo(f"No {normalized_type} QA agents found.")
+        return
+    for agent in agents:
+        typer.echo(
+            f"{agent.get('id', '-')}\t{agent.get('name', '-')}\t"
+            f"{agent.get('subject_type', '-')}\t{agent.get('model_name') or '-'}"
+        )
+
+
+@qa_app.command("run")
+def run_agent(
+    agent_id: str = typer.Argument(..., help="QA agent UUID."),
+    subject_ids: list[str] = typer.Argument(  # noqa: B008
+        ...,
+        help="One or more Environment or Taskset UUIDs.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Create a fresh attempt even when current evidence already exists.",
+    ),
+    wait: bool = typer.Option(
+        True,
+        "--wait/--no-wait",
+        help="Wait for every launched analysis to finish.",
+    ),
+    timeout: float = typer.Option(
+        900,
+        "--timeout",
+        min=1,
+        help="Maximum seconds to wait for QA execution.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
+) -> None:
+    """Run one QA agent against Environment or Taskset subjects."""
+    platform = _platform()
+    try:
+        raw_runs = platform.post(
+            f"/qa-agents/{agent_id}/run-resources",
+            json={"subject_ids": subject_ids, "overwrite": overwrite},
+        )
+    except HudRequestError as exc:
+        _request_error(str(exc))
+    runs = _dict_list(raw_runs, label="QA launch response")
+    if not runs:
+        if json_output:
+            _print_json([])
+        else:
+            typer.echo("No new QA runs were created; current evidence was reused.")
+        return
+    if not wait:
+        if json_output:
+            _print_json(runs)
+        else:
+            _render_results(runs)
+        return
+
+    analysis_trace_ids = {
+        str(run["analysis_trace_id"])
+        for run in runs
+        if isinstance(run.get("analysis_trace_id"), str)
+    }
+    if len(analysis_trace_ids) != len(runs):
+        typer.echo("Platform returned QA runs without analysis trace IDs.", err=True)
+        raise typer.Exit(3)
+
+    deadline = time.monotonic() + timeout
+    results: list[dict[str, Any]] = []
+    while time.monotonic() < deadline:
+        try:
+            raw_results = platform.get(
+                f"/qa-agents/{agent_id}/runs",
+                params={"limit": 100},
+            )
+        except HudRequestError as exc:
+            _request_error(str(exc))
+        results = _matching_run_results(
+            raw_results,
+            analysis_trace_ids=analysis_trace_ids,
+        )
+        if _all_terminal(results, analysis_trace_ids):
+            break
+        time.sleep(_POLL_INTERVAL_SECONDS)
+    else:
+        if json_output:
+            _print_json(results)
+        else:
+            _render_results(results)
+        typer.echo(f"Timed out after {timeout:g}s waiting for QA runs.", err=True)
+        raise typer.Exit(3)
+
+    if json_output:
+        _print_json(results)
+    else:
+        _render_results(results)
+    exit_code = _result_exit_code(results)
+    if exit_code:
+        raise typer.Exit(exit_code)
+
+
+@qa_app.command("results")
+def list_results(
+    subject_type: str = typer.Argument(..., help="Resource scope: environment or taskset."),
+    subject_ids: list[str] = typer.Argument(  # noqa: B008
+        ...,
+        help="One or more Environment or Taskset UUIDs.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
+) -> None:
+    """Inspect QA results attached to Environment or Taskset subjects."""
+    platform = _platform()
+    normalized_type = _subject_type(subject_type)
+    try:
+        raw_results = platform.get(
+            "/qa-agents/results/resources",
+            params={"subject_type": normalized_type, "subject_ids": subject_ids},
+        )
+    except HudRequestError as exc:
+        _request_error(str(exc))
+    results = _dict_list(raw_results, label="QA results")
+    if json_output:
+        _print_json(results)
+    else:
+        _render_results(results)
