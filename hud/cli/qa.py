@@ -57,6 +57,11 @@ def _print_json(value: object) -> None:
     typer.echo(json.dumps(value, indent=2, sort_keys=True, default=str))
 
 
+def _canonical_id(value: object) -> str:
+    """Match UUID-like identifiers independently of accepted hex casing."""
+    return str(value).casefold()
+
+
 def _result_verdict(result: dict[str, Any]) -> tuple[str, str | None]:
     canonical = result.get("canonical_result")
     if isinstance(canonical, dict):
@@ -94,25 +99,34 @@ def _matching_subject_results(
     launched_trace_ids: dict[str, str],
 ) -> list[dict[str, Any]]:
     results = _dict_list(raw_results, label="QA results")
-    expected_subject_ids = set(subject_ids)
+    expected_subject_ids = {_canonical_id(subject_id) for subject_id in subject_ids}
     matched: dict[str, dict[str, Any]] = {}
     for result in results:
-        subject_id = str(result.get("subject_id"))
-        if str(result.get("qa_agent_id")) != agent_id or subject_id not in expected_subject_ids:
+        subject_id = _canonical_id(result.get("subject_id"))
+        if (
+            _canonical_id(result.get("qa_agent_id")) != _canonical_id(agent_id)
+            or subject_id not in expected_subject_ids
+        ):
             continue
         launched_trace_id = launched_trace_ids.get(subject_id)
         if (
             launched_trace_id is not None
-            and str(result.get("analysis_trace_id")) != launched_trace_id
+            and _canonical_id(result.get("analysis_trace_id")) != launched_trace_id
         ):
             continue
         matched[subject_id] = result
-    return [matched[subject_id] for subject_id in subject_ids if subject_id in matched]
+    return [
+        matched[canonical_id]
+        for subject_id in subject_ids
+        if (canonical_id := _canonical_id(subject_id)) in matched
+    ]
 
 
 def _all_terminal(results: list[dict[str, Any]], subject_ids: list[str]) -> bool:
-    statuses = {str(result.get("subject_id")): result.get("status") for result in results}
-    return all(statuses.get(subject_id) in _TERMINAL_STATUSES for subject_id in subject_ids)
+    statuses = {_canonical_id(result.get("subject_id")): result.get("status") for result in results}
+    return all(
+        statuses.get(_canonical_id(subject_id)) in _TERMINAL_STATUSES for subject_id in subject_ids
+    )
 
 
 def _result_exit_code(results: list[dict[str, Any]]) -> int:
@@ -221,14 +235,16 @@ def run_agent(
         return
 
     launched_trace_ids = {
-        str(run["subject_id"]): str(run["analysis_trace_id"])
+        _canonical_id(run["subject_id"]): _canonical_id(run["analysis_trace_id"])
         for run in runs
         if isinstance(run.get("subject_id"), str) and isinstance(run.get("analysis_trace_id"), str)
     }
     if len(launched_trace_ids) != len(runs):
         typer.echo("Platform returned QA runs without analysis trace IDs.", err=True)
         raise typer.Exit(3)
-    if not set(launched_trace_ids).issubset(subject_ids):
+    if not set(launched_trace_ids).issubset(
+        {_canonical_id(subject_id) for subject_id in subject_ids},
+    ):
         typer.echo("Platform returned QA runs for unexpected resources.", err=True)
         raise typer.Exit(3)
 
