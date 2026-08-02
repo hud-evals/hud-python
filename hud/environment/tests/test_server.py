@@ -80,6 +80,29 @@ def test_readiness_declaration_rejects_secret_args(secret_key: str) -> None:
         )
 
 
+def test_readiness_declaration_allows_noncredential_token_settings() -> None:
+    """Token budgets and stop-token controls are not credentials."""
+    env = Environment(
+        "safe",
+        readiness={
+            "schema_version": "hud.environment-readiness.v0",
+            "probe": {
+                "scenario": "probe",
+                "args": {"max_tokens": 512, "stop_tokens": ["DONE"]},
+            },
+            "reset": {"strategy": "reprovision"},
+            "budgets": {
+                "startup_timeout_s": 120,
+                "probe_timeout_s": 300,
+                "reset_timeout_s": 180,
+            },
+        },
+    )
+
+    assert env.readiness is not None
+    assert env.readiness.probe.args["max_tokens"] == 512
+
+
 async def test_dict_grade_without_numeric_score_errors_loudly() -> None:
     env = Environment("badgrade")
 
