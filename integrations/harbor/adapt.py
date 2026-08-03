@@ -46,6 +46,15 @@ class Phase(BaseModel):
     environment_mode: str | None = None
 
 
+class HealthcheckConfig(BaseModel):
+    command: str
+    interval_sec: float = 5.0
+    timeout_sec: float = 30.0
+    start_period_sec: float = 0.0
+    start_interval_sec: float = 5.0
+    retries: int = 3
+
+
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -62,7 +71,7 @@ class EnvironmentConfig(BaseModel):
     allowed_hosts: list[str] = Field(default_factory=list)
     workdir: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
-    healthcheck: dict[str, Any] | None = None
+    healthcheck: HealthcheckConfig | None = None
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     skills_dir: str | None = None
 
@@ -135,8 +144,6 @@ async def adapt(
             unsupported.append("multiple GPU types")
         elif config.environment.gpu_types and not config.environment.gpus:
             unsupported.append("GPU types without GPUs")
-        if config.environment.healthcheck:
-            unsupported.append("healthcheck")
         if config.environment.mcp_servers:
             unsupported.append("MCP servers")
         if config.environment.skills_dir:
@@ -173,6 +180,11 @@ async def adapt(
                     "environment_env": environment.env,
                     "environment_network": environment.network_mode,
                     "environment_hosts": environment.allowed_hosts,
+                    "healthcheck": (
+                        environment.healthcheck.model_dump()
+                        if environment.healthcheck is not None
+                        else None
+                    ),
                     "agent": config.agent.model_dump(
                         include={"user", "network_mode", "allowed_hosts", "env"}
                     ),
@@ -245,10 +257,12 @@ async def adapt(
             "name": name,
             "workdir": workdir,
             "image_user": image_config.get("User") or None,
+            "entrypoint": image_config.get("Entrypoint") or [],
             "environment": {
                 "env": source.runtime["environment_env"],
                 "network_mode": source.runtime["environment_network"],
                 "allowed_hosts": source.runtime["environment_hosts"],
+                "healthcheck": source.runtime["healthcheck"],
             },
             "agent": source.runtime["agent"],
             "verifier": source.runtime["verifier"],

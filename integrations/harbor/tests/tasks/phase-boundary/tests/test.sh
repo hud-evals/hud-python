@@ -14,6 +14,8 @@ harness=absent"
 [ "${VERIFIER_ONLY:-}" = "present" ] || fail "the verifier lost its phase configuration"
 [ "${PHASE:-}" = "verifier" ] || fail "the verifier did not override the baseline environment"
 [ -z "${AGENT_ONLY+x}" ] || fail "the verifier inherited the agent environment"
+[ "$(cat /app/startup.txt 2>/dev/null)" = "baseline" ] \
+  || fail "the image entrypoint service was not available to the agent"
 [ -s /app/page.html ] || fail "the agent could not fetch its allowed host"
 [ "$(cat /app/probe.txt 2>/dev/null)" = "$expected" ] \
   || fail "the agent crossed a harness or network boundary"

@@ -1,5 +1,7 @@
 Save `http://example.com/` to `/app/page.html`.
 
+Save `http://127.0.0.1:8080/status` to `/app/startup.txt`.
+
 Write `/app/probe.txt` with these keys, one per line:
 
 - `outside_host`: whether `https://pypi.org/simple/` is `reachable` or `blocked`

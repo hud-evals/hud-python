@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import grp
 import json
@@ -9,6 +10,7 @@ import math
 import os
 import pwd
 import shutil
+import subprocess
 from collections.abc import AsyncGenerator  # noqa: TC003
 from pathlib import Path
 from typing import Any
@@ -83,9 +85,11 @@ def home(user_id: int | None) -> str | None:
 
 
 agent = CONFIG["agent"]
+image_identity = identity({})
 agent_identity = identity(agent)
 agent_uid = agent_identity[0] if agent_identity is not None else None
 agent_network, agent_hosts = network(agent)
+environment_network, environment_hosts = network({})
 rooted_at_filesystem = len(WORKDIR.parts) == 1
 harness_parent = ROOT.parent
 harness_mounts = (
@@ -128,6 +132,72 @@ workspace = env.workspace(
 )
 
 
+async def start_entrypoint() -> asyncio.subprocess.Process | None:
+    entrypoint = CONFIG["entrypoint"]
+    if not entrypoint:
+        return None
+    sandbox = await workspace.sandbox_pid()
+    if sandbox is None:
+        raise RuntimeError("Harbor entrypoints require an isolated workspace")
+    process = await asyncio.create_subprocess_exec(
+        *workspace.enter_argv(
+            sandbox,
+            [*entrypoint, "sh", "-c", "sleep infinity"],
+            env=CONFIG["environment"]["env"],
+            identity=image_identity,
+            inherit_workspace_env=False,
+            no_new_privs=False,
+        ),
+        stdin=subprocess.DEVNULL,
+        env={},
+    )
+    await asyncio.sleep(0)
+    if process.returncode is not None:
+        raise RuntimeError(f"Harbor environment entrypoint exited with status {process.returncode}")
+    return process
+
+
+async def wait_until_healthy(entrypoint: asyncio.subprocess.Process | None) -> None:
+    healthcheck = CONFIG["environment"]["healthcheck"]
+    if healthcheck is None:
+        return
+
+    loop = asyncio.get_running_loop()
+    start_period_end = loop.time() + healthcheck["start_period_sec"]
+    failures = 0
+    while True:
+        in_start_period = loop.time() < start_period_end
+        if entrypoint is not None and entrypoint.returncode is not None:
+            raise RuntimeError(
+                f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
+            )
+        result = await workspace.run(
+            ["sh", "-c", healthcheck["command"]],
+            isolated=not environment_network,
+            env=CONFIG["environment"]["env"],
+            identity=image_identity,
+            inherit_workspace_env=False,
+            allowed_hosts=environment_hosts,
+            no_new_privs=False,
+            max_wait=healthcheck["timeout_sec"],
+        )
+        if result.returncode == 0 and not result.timed_out:
+            return
+
+        if in_start_period:
+            delay = healthcheck["start_interval_sec"]
+        else:
+            failures += 1
+            if failures >= healthcheck["retries"]:
+                detail = result.stderr.decode("utf-8", "replace").strip()
+                raise RuntimeError(
+                    f"Harbor environment healthcheck failed after {failures} attempts"
+                    + (f": {detail}" if detail else "")
+                )
+            delay = healthcheck["interval_sec"]
+        await asyncio.sleep(delay)
+
+
 def register(task: dict[str, Any]) -> None:
     task_dir = ROOT / "tasks" / task["id"]
 
@@ -137,12 +207,22 @@ def register(task: dict[str, Any]) -> None:
     )
     async def run() -> AsyncGenerator[Any, Any]:
         clear_grading_files()
+        entrypoint = None
         try:
+            entrypoint = await start_entrypoint()
+            await wait_until_healthy(entrypoint)
             answer = yield (task_dir / "instruction.md").read_text("utf-8")
+            if entrypoint is not None and entrypoint.returncode is not None:
+                raise RuntimeError(
+                    f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
+                )
             yield await grade(task_dir, task["verifier_timeout"], answer)
         finally:
             clear_grading_files()
             await workspace.discard_sandbox()
+            if entrypoint is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(entrypoint.wait(), 10.0)
 
 
 for task_config in CONFIG["tasks"]:

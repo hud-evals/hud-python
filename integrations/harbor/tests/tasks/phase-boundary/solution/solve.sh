@@ -2,6 +2,7 @@
 set -eu
 
 curl -sS --max-time 30 -o /app/page.html http://example.com/
+curl -sS --max-time 10 -o /app/startup.txt http://127.0.0.1:8080/status
 {
   if curl -sS --max-time 20 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
     echo "outside_host=reachable"

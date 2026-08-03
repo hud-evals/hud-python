@@ -165,6 +165,14 @@ allowed_hosts = ["pypi.org"]
 [environment.env]
 SHARED = "yes"
 
+[environment.healthcheck]
+command = "curl -f http://localhost:8080/health"
+interval_sec = 2
+timeout_sec = 4
+start_period_sec = 6
+start_interval_sec = 1
+retries = 5
+
 [agent]
 user = "agent"
 
@@ -190,6 +198,14 @@ VERIFIER_ONLY = "yes"
         "env": {"SHARED": "yes"},
         "network_mode": "allowlist",
         "allowed_hosts": ["pypi.org"],
+        "healthcheck": {
+            "command": "curl -f http://localhost:8080/health",
+            "interval_sec": 2.0,
+            "timeout_sec": 4.0,
+            "start_period_sec": 6.0,
+            "start_interval_sec": 1.0,
+            "retries": 5,
+        },
     }
     assert manifest["agent"]["user"] == "agent"
     assert manifest["agent"]["env"] == {"AGENT_ONLY": "yes"}
@@ -199,6 +215,38 @@ VERIFIER_ONLY = "yes"
     dockerfile = (context / "Dockerfile").read_text("utf-8")
     assert "SHARED" not in dockerfile
     assert "WORKDIR /app" not in dockerfile
+
+
+async def test_image_entrypoint_is_preserved_as_runtime_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_harbor_task(tmp_path, "task-a")
+
+    async def docker(*args: str, **_kwargs):
+        if args[:3] == ("image", "inspect", "--format"):
+            return (
+                json.dumps(
+                    {
+                        "User": "1000:2000",
+                        "WorkingDir": "/workspace",
+                        "Entrypoint": ["/usr/local/bin/start-environment"],
+                        "Cmd": ["ignored-by-harbor"],
+                    }
+                ),
+                "",
+            )
+        return "", ""
+
+    module = importlib.import_module("integrations.harbor.adapt")
+    monkeypatch.setattr(module, "docker", docker)
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["entrypoint"] == ["/usr/local/bin/start-environment"]
+    assert "ignored-by-harbor" not in json.dumps(manifest)
 
 
 @pytest.mark.parametrize(
@@ -211,7 +259,6 @@ VERIFIER_ONLY = "yes"
             "multiple GPU types",
         ),
         ('[environment]\ngpu_types = ["H100"]\n', "GPU types without GPUs"),
-        ('[environment.healthcheck]\ncommand = "curl localhost"\n', "healthcheck"),
         ('[[environment.mcp_servers]]\nname = "db"\n', "MCP servers"),
         ('[verifier]\nenvironment_mode = "separate"\n', "separate verifier"),
     ],

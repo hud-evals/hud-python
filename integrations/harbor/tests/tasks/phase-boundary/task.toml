@@ -7,6 +7,14 @@ description = "Agent and verifier share the task machine without sharing trust b
 SHARED_ENV = "baseline"
 PHASE = "environment"
 
+[environment.healthcheck]
+command = "test \"$(curl -fsS http://127.0.0.1:8080/status)\" = baseline"
+interval_sec = 0.2
+timeout_sec = 5
+start_period_sec = 1
+start_interval_sec = 0.1
+retries = 5
+
 [agent]
 network_mode = "allowlist"
 allowed_hosts = ["example.com"]

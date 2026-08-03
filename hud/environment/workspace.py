@@ -900,7 +900,7 @@ class Workspace:
         command: str | list[str] | None = None,
         *,
         env: Mapping[str, str] | None = None,
-        identity: int | None | Literal["workspace"] = "workspace",
+        identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
         inherit_workspace_env: bool = True,
         preserve_credentials: bool = False,
         no_new_privs: bool = True,

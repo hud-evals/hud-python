@@ -855,6 +855,20 @@ def test_shell_identity_keeps_the_declared_primary_group(
     assert argv[argv.index("--regid") + 1] == "2000"
 
 
+def test_entered_process_keeps_an_explicit_primary_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wall(monkeypatch)
+    monkeypatch.setattr(workspace_mod, "_is_root", lambda: True)
+    monkeypatch.setattr(workspace_mod.sys, "platform", "linux")
+    ws = Workspace(tmp_path / "root")
+
+    argv = ws.enter_argv(7, ["run-service"], identity=(1000, 2000))
+
+    assert argv[argv.index("--reuid") + 1] == "1000"
+    assert argv[argv.index("--regid") + 1] == "2000"
+
+
 def test_caller_env_is_injected_only_after_the_drop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
