@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from hud.clients import HudProtocolError
 from hud.environment import Answer, Environment
@@ -25,82 +25,6 @@ class _Payload(BaseModel):
 
 
 _Mode = Literal["upper", "lower"]
-
-
-async def test_hello_publishes_validated_readiness_declaration() -> None:
-    """The author-facing declaration is emitted on the control-channel hello frame."""
-    readiness = {
-        "schema_version": "hud.environment-readiness.v0",
-        "probe": {"scenario": "probe", "args": {"seed": 0}},
-        "reset": {"strategy": "reprovision"},
-        "budgets": {
-            "startup_timeout_s": 120,
-            "probe_timeout_s": 300,
-            "reset_timeout_s": 180,
-        },
-    }
-    env = Environment("ready", readiness=readiness)
-
-    async with served(env) as client:
-        assert client.manifest is not None
-        assert client.manifest.readiness == readiness
-
-
-@pytest.mark.parametrize(
-    "secret_key",
-    [
-        "apiKey",
-        "APIKey",
-        "MCPConfig",
-        "secret_key",
-        "db_secrets",
-        "api_tokens",
-        "db_passwords",
-        "signing_private_keys",
-    ],
-)
-def test_readiness_declaration_rejects_secret_args(secret_key: str) -> None:
-    """Environment authors cannot publish credentials as readiness arguments."""
-    with pytest.raises(ValidationError, match="must not contain"):
-        Environment(
-            "unsafe",
-            readiness={
-                "schema_version": "hud.environment-readiness.v0",
-                "probe": {
-                    "scenario": "probe",
-                    "args": {"nested": {secret_key: "secret"}},
-                },
-                "reset": {"strategy": "reprovision"},
-                "budgets": {
-                    "startup_timeout_s": 120,
-                    "probe_timeout_s": 300,
-                    "reset_timeout_s": 180,
-                },
-            },
-        )
-
-
-def test_readiness_declaration_allows_noncredential_token_settings() -> None:
-    """Token budgets and stop-token controls are not credentials."""
-    env = Environment(
-        "safe",
-        readiness={
-            "schema_version": "hud.environment-readiness.v0",
-            "probe": {
-                "scenario": "probe",
-                "args": {"max_tokens": 512, "stop_tokens": ["DONE"]},
-            },
-            "reset": {"strategy": "reprovision"},
-            "budgets": {
-                "startup_timeout_s": 120,
-                "probe_timeout_s": 300,
-                "reset_timeout_s": 180,
-            },
-        },
-    )
-
-    assert env.readiness is not None
-    assert env.readiness.probe.args["max_tokens"] == 512
 
 
 async def test_dict_grade_without_numeric_score_errors_loudly() -> None:

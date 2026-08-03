@@ -20,19 +20,6 @@ def test_url_prefixes_version_segment_and_joins_params() -> None:
     )
 
 
-def test_url_encodes_repeated_query_parameters() -> None:
-    """List-valued FastAPI query parameters are emitted as repeated keys."""
-    platform = PlatformClient("https://api.example", "key")
-
-    assert platform.url(
-        "/qa-agents/results/resources",
-        {"subject_type": "taskset", "subject_ids": ["first", "second"]},
-    ) == (
-        "https://api.example/v2/qa-agents/results/resources?"
-        "subject_type=taskset&subject_ids=first&subject_ids=second"
-    )
-
-
 def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 

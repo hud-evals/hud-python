@@ -332,11 +332,6 @@ class _ControlChannel:
                                 "session_id": session_id,
                                 "env": {"name": env.name, "version": env.version},
                                 "bindings": bindings,
-                                "readiness": (
-                                    env.readiness.model_dump(mode="json")
-                                    if env.readiness is not None
-                                    else None
-                                ),
                             },
                         )
 
