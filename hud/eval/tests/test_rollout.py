@@ -363,6 +363,9 @@ async def test_task_agent_timeout_still_grades_completed_work() -> None:
     assert run.trace.stop_reason == "timeout"
     assert any("agent timed out" in (step.error or "") for step in run.trace.steps)
     assert agent.cancelled.is_set()
+    job = Job(id="timeout-job", name="timeout", runs=[run])
+    assert job.reward == 1.0
+    assert job.errors == []
 
 
 async def test_timeout_includes_grading() -> None:

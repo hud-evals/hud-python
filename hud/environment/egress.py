@@ -411,13 +411,18 @@ class _Proxy(BaseHTTPRequestHandler):
         except ValueError:
             self._fail(400, "invalid-target")
             return
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP_BY_HOP}
+        headers = {
+            k: v
+            for k, v in self.headers.items()
+            if k.lower() not in _HOP_BY_HOP and k.lower() != "host"
+        }
         # Rebuilt from the parsed components rather than forwarded raw: the
         # policy was applied to *this* hostname, and the request that goes out
         # must be the one it was applied to.
         path = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
         host = parts.hostname or ""
         connection = http.client.HTTPConnection(host, port, timeout=60)
+        response_started = False
         try:
             connection.sock = _connect_public(host, port, timeout=60)
             connection.request(self.command, path, body=body, headers=headers)
@@ -433,6 +438,7 @@ class _Proxy(BaseHTTPRequestHandler):
             length = response.getheader("Content-Length")
             framed = length is not None and length.strip().isdigit()
             _field("Reason", response.reason or "")
+            response_started = True
             self.send_response(response.status, response.reason)
             for key, value in relayed:
                 self.send_header(key, value)
@@ -451,7 +457,10 @@ class _Proxy(BaseHTTPRequestHandler):
         except _BlockedAddress:
             self._fail(403, "blocked-by-address")
         except (OSError, http.client.HTTPException):
-            self.close_connection = True
+            if response_started:
+                self.close_connection = True
+            else:
+                self._fail(502, "upstream-failure")
         finally:
             connection.close()
 

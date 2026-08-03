@@ -1286,10 +1286,10 @@ class Workspace:
                 if pid is None
                 else self.enter_argv(pid, process.command, env=session_env, tty=wants_tty)
             )
-            if self._drops_privileges():
-                # The pre-drop processes (setpriv, bwrap) run as root; caller env
-                # like an LD_PRELOAD in self.env must not load into them. The
-                # session env is injected after the drop by shell_argv.
+            if sys.platform != "win32":
+                # Namespace/process wrappers must not receive caller-controlled
+                # loader variables or server secrets. The inner payload injects
+                # the session's actual environment after those wrappers.
                 proc_env: dict[str, str] | None = {
                     "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
                 }

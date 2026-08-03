@@ -7,6 +7,7 @@ import contextlib
 import itertools
 import os
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -668,10 +669,12 @@ def test_the_proxy_normalizes_http_framing_in_both_directions(
     class Chunked(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         request_body = b""
+        request_host: str | None = None
         request_length: str | None = None
         request_transfer: str | None = None
 
         def do_POST(self) -> None:
+            type(self).request_host = self.headers.get("Host")
             type(self).request_length = self.headers.get("Content-Length")
             type(self).request_transfer = self.headers.get("Transfer-Encoding")
             type(self).request_body = self.rfile.read(int(type(self).request_length or 0))
@@ -702,7 +705,7 @@ def test_the_proxy_normalizes_http_framing_in_both_directions(
         client.sendall(
             (
                 f"POST http://127.0.0.1:{port}/ HTTP/1.1\r\n"
-                "Host: 127.0.0.1\r\n"
+                "Host: forbidden.example\r\n"
                 "Transfer-Encoding: chunked\r\n\r\n"
                 "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
             ).encode()
@@ -725,6 +728,7 @@ def test_the_proxy_normalizes_http_framing_in_both_directions(
     assert b"transfer-encoding" not in headers.lower()
     assert body == b"hello"
     assert Chunked.request_body == b"hello world"
+    assert Chunked.request_host == f"127.0.0.1:{port}"
     assert Chunked.request_length == "11"
     assert Chunked.request_transfer is None
 
@@ -772,6 +776,34 @@ def test_public_egress_cannot_reach_substrate_addresses(
 
     assert b"403" in response
     assert b"X-Proxy-Error: blocked-by-address" in response
+
+
+def test_plain_http_upstream_failures_return_a_proxy_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.environment import egress as egress_mod
+    from hud.environment.egress import Egress
+
+    def unavailable(*_args: object, **_kwargs: object) -> socket.socket:
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(egress_mod, "_connect_public", unavailable)
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {"example.com"})
+    egress.start()
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(egress.socket_path))
+        client.sendall(b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        response = client.recv(4096)
+        client.close()
+    finally:
+        egress.stop()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+    assert b"502" in response
+    assert b"X-Proxy-Error: upstream-failure" in response
 
 
 def test_a_visitor_proxy_requires_its_ephemeral_credential() -> None:
@@ -933,6 +965,29 @@ def test_shell_uid_is_a_noop_off_root(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_without_shell_uid_argv_is_unchanged(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "root")
     assert "setpriv" not in ws.shell_argv("echo hi")
+
+
+@pytest.mark.asyncio
+async def test_session_wrapper_environment_contains_no_server_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class SpawnCaptured(Exception):
+        def __init__(self, env: dict[str, str] | None) -> None:
+            self.env = env
+
+    async def capture_spawn(*_args: str, **kwargs: Any) -> None:
+        raise SpawnCaptured(kwargs.get("env"))
+
+    monkeypatch.setenv("HUD_API_KEY", "super-secret")
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    monkeypatch.setattr(workspace_mod, "create_process_group_exec", capture_spawn)
+    process = SimpleNamespace(term_type=None, command="true")
+
+    with pytest.raises(SpawnCaptured) as captured:
+        await ws._handle_process(cast("Any", process))
+
+    assert captured.value.env == {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
 
 
 @pytest.mark.asyncio

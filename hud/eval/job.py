@@ -58,23 +58,31 @@ class Job:
     def reward(self) -> float:
         """Mean reward across graded runs (0.0 when none were graded).
 
-        An errored run carries no verdict — infrastructure failure is never
-        a score — so it is excluded from the mean rather than averaged in as
-        a zero that silently deflates the job. :attr:`errors` holds them.
+        Infrastructure failures without a verdict are excluded rather than
+        averaged in as zero. A run that timed out or raised after task start
+        still counts when its environment returned a valid grade.
         """
-        graded = [run.reward for run in self.runs if not (run.trace.is_error or run.grade.is_error)]
+        graded = [
+            run.reward
+            for run in self.runs
+            if not run.grade.is_error and (run.grade.raw or not run.trace.is_error)
+        ]
         if not graded:
             return 0.0
         return sum(graded) / len(graded)
 
     @property
     def errors(self) -> list[Run]:
-        """Runs that ended in error: ungraded, and excluded from :attr:`reward`.
+        """Runs that ended without a valid grade and are excluded from reward.
 
-        Either error signal counts — a trace that ended in error (launch or
-        mid-run failure) or a grade the env itself marked as an error.
+        Trace failures remain visible on each run, but a best-effort grade
+        keeps a timed-out or mid-run failure out of this infrastructure list.
         """
-        return [run for run in self.runs if run.trace.is_error or run.grade.is_error]
+        return [
+            run
+            for run in self.runs
+            if run.grade.is_error or (run.trace.is_error and not run.grade.raw)
+        ]
 
     @property
     def results(self) -> dict[str, list[Run]]:
