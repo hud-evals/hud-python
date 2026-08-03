@@ -89,6 +89,13 @@ graded run is parked. Setup that isn't deterministic for its args (randomized
 challenges, per-run state) grades a different run than the captured prompt;
 move such randomness into `args` before exporting.
 
+## Validate with the reference solution
+
+Run each task's `solution/solve.sh` before evaluating a model. This verifies
+that the adapted environment and verifier can produce the expected reward.
+[`cookbooks/harbor-terminal-bench`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/harbor-terminal-bench)
+provides a complete runner for Harbor task directories.
+
 ## Review, then rely
 
 The mapping is mechanical, so **review the result** - confirm the prompt reads
