@@ -514,6 +514,31 @@ async def test_an_isolated_command_keeps_the_image_environment(
 
 
 @pytest.mark.asyncio
+async def test_failed_isolated_run_terminates_its_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    process = SimpleNamespace(terminate=AsyncMock(), complete=AsyncMock())
+    monkeypatch.setattr(
+        workspace_mod,
+        "create_process_group_exec",
+        AsyncMock(return_value=process),
+    )
+    monkeypatch.setattr(
+        workspace_mod,
+        "install_identity_map",
+        AsyncMock(side_effect=RuntimeError("map failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="map failed"):
+        await ws.run(["test.sh"], isolated=True, identity=None)
+
+    process.terminate.assert_awaited_once()
+    process.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_failed_sandbox_start_discards_the_holder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1067,6 +1092,31 @@ async def test_identity_map_reads_a_chunked_info_document() -> None:
         for fd in (info_read, block_read, block_write):
             with contextlib.suppress(OSError):
                 os.close(fd)
+
+
+def test_identity_map_preserves_every_id_available_to_the_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    maps = {
+        "/proc/self/uid_map": "0 100000 131072\n",
+        "/proc/self/gid_map": "0 200000 65536\n70000 300000 1000\n",
+    }
+    writes: dict[str, str] = {}
+
+    def read_text(path: Path) -> str:
+        return maps[str(path)]
+
+    def write_text(path: Path, value: str) -> int:
+        writes[str(path)] = value
+        return len(value)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "write_text", write_text)
+
+    workspace_mod._map_identities(42)
+
+    assert writes["/proc/42/uid_map"] == "0 0 131072\n"
+    assert writes["/proc/42/gid_map"] == "0 0 65536\n70000 70000 1000\n"
 
 
 def test_the_proxy_refuses_to_relay_a_header_it_cannot_represent() -> None:

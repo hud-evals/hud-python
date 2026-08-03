@@ -370,14 +370,21 @@ async def rollout(
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
                         async with file_tracking_observer(client):
-                            try:
-                                await asyncio.wait_for(agent(run), timeout=agent_timeout)
-                            except TimeoutError:
-                                detail = f"agent timed out after {agent_timeout:g}s"
-                                logger.warning(detail)
-                                run.trace.status = "error"
-                                run.trace.stop_reason = "timeout"
-                                run.record(Step(source="system", error=detail))
+                            if agent_timeout is None:
+                                await agent(run)
+                            else:
+                                deadline = asyncio.timeout(agent_timeout)
+                                try:
+                                    async with deadline:
+                                        await agent(run)
+                                except TimeoutError:
+                                    if not deadline.expired():
+                                        raise
+                                    detail = f"agent timed out after {agent_timeout:g}s"
+                                    logger.warning(detail)
+                                    run.trace.status = "error"
+                                    run.trace.stop_reason = "timeout"
+                                    run.record(Step(source="system", error=detail))
                         _phase = "grading"
                 finally:
                     _phase = "cleanup"

@@ -89,7 +89,7 @@ image_identity = identity({})
 agent_identity = identity(agent)
 agent_uid = agent_identity[0] if agent_identity is not None else None
 agent_network, agent_hosts = network(agent)
-environment_network, environment_hosts = network({})
+environment_hosts = network({})[1]
 rooted_at_filesystem = len(WORKDIR.parts) == 1
 harness_parent = ROOT.parent
 harness_mounts = (
@@ -173,7 +173,6 @@ async def wait_until_healthy(entrypoint: asyncio.subprocess.Process | None) -> N
             )
         result = await workspace.run(
             ["sh", "-c", healthcheck["command"]],
-            isolated=not environment_network,
             env=CONFIG["environment"]["env"],
             identity=image_identity,
             inherit_workspace_env=False,
@@ -272,10 +271,9 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
         if verifier_home := home(verifier_uid):
             verifier_env["HOME"] = verifier_home
 
-    verifier_network, verifier_hosts = network(verifier)
+    verifier_hosts = network(verifier)[1]
     execution = await workspace.run(
         [str(test_script)],
-        isolated=not verifier_network,
         mounts=harness_mounts,
         env=verifier_env,
         identity=verifier_identity,

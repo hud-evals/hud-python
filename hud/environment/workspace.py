@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import asyncssh
 
 from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
-from hud.utils.process import ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import fcntl
@@ -165,9 +165,6 @@ _DEFAULT_USER = "agent"
 _SANDBOX_HOLDER = ["sh", "-c", "echo ready; exec sleep 2147483647"]
 _SANDBOX_READY = b"ready\n"
 
-#: What the sandbox's user namespace maps: the container's ids, unchanged.
-_FULL_ID_RANGE = "0 0 65536"
-
 
 def _without_harness_config(environ: Mapping[str, str]) -> dict[str, str]:
     """The serving process's environment, minus HUD's own configuration.
@@ -217,7 +214,7 @@ async def install_identity_map(info_read: int, block_write: int) -> int:
 
 
 def _map_identities(pid: int) -> None:
-    """Give the sandbox the whole id space, not just the id that created it.
+    """Give the sandbox every id available to the container that created it.
 
     Left to itself bwrap maps one id, so every file owned by anyone else is
     ``nobody`` inside — unreadable, unwritable, not even chownable by the
@@ -232,8 +229,12 @@ def _map_identities(pid: int) -> None:
     with contextlib.suppress(OSError):
         (proc / "setgroups").write_text("allow")
     for name, own in (("uid_map", os.geteuid()), ("gid_map", os.getegid())):
+        identity_map = ""
+        for line in (Path("/proc/self") / name).read_text().splitlines():
+            start, _, length = line.split()
+            identity_map += f"{start} {start} {length}\n"
         try:
-            (proc / name).write_text(_FULL_ID_RANGE)
+            (proc / name).write_text(identity_map)
         except OSError:
             if name == "gid_map":
                 # Giving up supplementary groups is the kernel's price for
@@ -776,6 +777,7 @@ class Workspace:
 
         info_read, info_write = os.pipe()
         block_read, block_write = os.pipe()
+        process: ProcessGroup | None = None
         try:
             os.set_inheritable(info_write, True)
             os.set_inheritable(block_read, True)
@@ -807,12 +809,17 @@ class Workspace:
             os.close(block_read)
             info_write = block_read = -1
             await install_identity_map(info_read, block_write)
+        except BaseException:
+            if process is not None:
+                await process.terminate()
+            raise
         finally:
             os.close(info_read)
             os.close(block_write)
             for descriptor in (info_write, block_read):
                 if descriptor != -1:
                     os.close(descriptor)
+        assert process is not None
         return await process.complete(max_wait=max_wait)
 
     # ─── argv builders (public — useful if you want your own subprocess) ──

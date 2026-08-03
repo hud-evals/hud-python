@@ -7,6 +7,8 @@ chown -R 1000:2000 /app/data || fail "the verifier could not chown the graded tr
 tar -cf /tmp/data.tar -C /app data || fail "the verifier could not archive the graded tree"
 [ "$(cat /app/data/payload.txt 2>/dev/null)" = "hello" ] \
   || fail "the payload is incorrect"
+[ "$(curl -fsS --max-time 5 http://127.0.0.1:9100/status)" = "ready" ] \
+  || fail "the no-network verifier lost task-local loopback"
 if curl -sf --max-time 5 -o /dev/null http://example.com/ 2>/dev/null; then
   fail "the no-network verifier reached the internet"
 fi
