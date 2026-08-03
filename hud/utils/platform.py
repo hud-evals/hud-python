@@ -46,7 +46,7 @@ class PlatformClient:
     def url(self, path: str, params: dict[str, Any] | None = None) -> str:
         url = f"{self.base_url}{path}"
         if params:
-            url += "?" + urlencode(params)
+            url += "?" + urlencode(params, doseq=True)
         return url
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
