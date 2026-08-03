@@ -1,0 +1,10 @@
+version = "1.0"
+
+[task]
+description = "The agent keeps its declared identity and long-lived processes."
+
+[agent]
+user = "agent:worker"
+
+[verifier]
+timeout_sec = 120

@@ -30,6 +30,16 @@ uv run pytest -q
 
 Tests run on Python 3.11 and 3.12 in CI.
 
+Integration tests are excluded by default because they may use external
+services, network access, or container builds. Run them explicitly:
+
+```bash
+uv run pytest -m integration
+```
+
+The Harbor integration tests require Docker and may take several minutes with
+a cold build cache.
+
 ### Code Quality
 
 ```bash

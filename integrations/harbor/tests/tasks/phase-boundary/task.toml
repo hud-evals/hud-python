@@ -1,0 +1,11 @@
+version = "1.0"
+
+[task]
+description = "Agent and verifier share the task machine without sharing trust boundaries."
+
+[agent]
+network_mode = "allowlist"
+allowed_hosts = ["example.com"]
+
+[verifier]
+timeout_sec = 180

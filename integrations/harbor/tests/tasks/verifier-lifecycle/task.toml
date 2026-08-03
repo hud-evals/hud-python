@@ -1,0 +1,8 @@
+version = "1.0"
+
+[task]
+description = "A no-network verifier can inspect the task and finish independently of its children."
+
+[verifier]
+network_mode = "no-network"
+timeout_sec = 60

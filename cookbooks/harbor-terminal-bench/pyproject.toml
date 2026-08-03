@@ -1,0 +1,14 @@
+[project]
+name = "harbor-terminal-bench"
+version = "0.1.0"
+description = "Run Terminal-Bench (Harbor) tasks through the HUD runtime (cookbook)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+hud = { path = "../..", editable = true }
