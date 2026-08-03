@@ -28,6 +28,7 @@ import binascii
 import contextlib
 import hmac
 import http.client
+import ipaddress
 import json
 import logging
 import os
@@ -65,7 +66,7 @@ _HOP_BY_HOP = frozenset(
         "proxy-authorization",
         "keep-alive",
         "te",
-        "trailers",
+        "trailer",
         "transfer-encoding",
         "upgrade",
     }
@@ -83,6 +84,10 @@ _FIELD_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")
 
 class _Unrelayable(ValueError):
     """An upstream response that cannot be relayed as the upstream sent it."""
+
+
+class _BlockedAddress(OSError):
+    """A destination outside the public internet."""
 
 
 def _field(name: str, value: str) -> tuple[str, str]:
@@ -251,6 +256,32 @@ def permitted(host: str | None, allowed: Collection[str]) -> bool:
     return any(host == entry or host.endswith(f".{entry}") for entry in allowed)
 
 
+def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
+    blocked = False
+    last_error: OSError | None = None
+    for family, socktype, protocol, _, target in socket.getaddrinfo(
+        host, port, type=socket.SOCK_STREAM
+    ):
+        address = ipaddress.ip_address(target[0])
+        if not address.is_global or address.is_multicast:
+            blocked = True
+            continue
+        upstream = socket.socket(family, socktype, protocol)
+        upstream.settimeout(timeout)
+        try:
+            upstream.connect(target)
+        except OSError as error:
+            upstream.close()
+            last_error = error
+        else:
+            return upstream
+    if last_error is not None:
+        raise last_error
+    if blocked:
+        raise _BlockedAddress(f"{host} does not resolve to a public address")
+    raise OSError(f"{host} has no reachable address")
+
+
 def _relay(one: socket.socket, other: socket.socket, timeout: float = 300.0) -> None:
     """Copy bytes between two connected sockets until either end is done."""
     while True:
@@ -304,15 +335,56 @@ class _Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         return False
 
+    def _request_body(self) -> bytes | None:
+        transfer = self.headers.get("Transfer-Encoding")
+        length = self.headers.get("Content-Length")
+        if transfer is None:
+            if length is None:
+                return None
+            size = int(length)
+            if size < 0:
+                raise ValueError
+            body = self.rfile.read(size)
+            if len(body) != size:
+                raise ValueError
+            return body
+        if length is not None or transfer.strip().lower() != "chunked":
+            raise ValueError
+
+        chunks: list[bytes] = []
+        while True:
+            line = self.rfile.readline(65537)
+            if len(line) > 65536 or not line.endswith(b"\r\n"):
+                raise ValueError
+            size_text = line[:-2].split(b";", 1)[0].strip()
+            if not size_text or any(byte not in b"0123456789abcdefABCDEF" for byte in size_text):
+                raise ValueError
+            size = int(size_text, 16)
+            if size == 0:
+                while True:
+                    trailer = self.rfile.readline(65537)
+                    if len(trailer) > 65536 or not trailer.endswith(b"\r\n"):
+                        raise ValueError
+                    if trailer == b"\r\n":
+                        return b"".join(chunks)
+            chunk = self.rfile.read(size)
+            if len(chunk) != size or self.rfile.read(2) != b"\r\n":
+                raise ValueError
+            chunks.append(chunk)
+
     def do_CONNECT(self) -> None:
         if not self._authorized():
             return
-        host, _, port = self.path.rpartition(":")
+        target = urllib.parse.urlsplit(f"//{self.path}")
+        host = target.hostname
         if not permitted(host, self.allowed):
             self._deny()
             return
         try:
-            upstream = socket.create_connection((host, int(port or 443)), timeout=15)
+            upstream = _connect_public(host or "", target.port or 443, timeout=15)
+        except _BlockedAddress:
+            self._fail(403, "blocked-by-address")
+            return
         except (OSError, ValueError):
             self.send_error(502)
             return
@@ -328,16 +400,26 @@ class _Proxy(BaseHTTPRequestHandler):
         if not permitted(parts.hostname, self.allowed):
             self._deny()
             return
-        body = None
-        if length := self.headers.get("Content-Length"):
-            body = self.rfile.read(int(length))
+        try:
+            body = self._request_body()
+        except ValueError:
+            self.close_connection = True
+            self._fail(400, "invalid-request-body")
+            return
+        try:
+            port = parts.port or 80
+        except ValueError:
+            self._fail(400, "invalid-target")
+            return
         headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP_BY_HOP}
         # Rebuilt from the parsed components rather than forwarded raw: the
         # policy was applied to *this* hostname, and the request that goes out
         # must be the one it was applied to.
         path = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
-        connection = http.client.HTTPConnection(parts.hostname or "", parts.port or 80, timeout=60)
+        host = parts.hostname or ""
+        connection = http.client.HTTPConnection(host, port, timeout=60)
         try:
+            connection.sock = _connect_public(host, port, timeout=60)
             connection.request(self.command, path, body=body, headers=headers)
             response = connection.getresponse()
             # Validate every field before writing any of them: a response is
@@ -366,6 +448,8 @@ class _Proxy(BaseHTTPRequestHandler):
         except _Unrelayable as error:
             LOGGER.warning("refusing to relay %s: %s", parts.hostname, error)
             self._fail(502, "unrelayable-upstream-header")
+        except _BlockedAddress:
+            self._fail(403, "blocked-by-address")
         except (OSError, http.client.HTTPException):
             self.close_connection = True
         finally:

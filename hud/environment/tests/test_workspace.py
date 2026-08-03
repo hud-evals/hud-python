@@ -419,7 +419,9 @@ def test_making_a_network_and_joining_it_are_the_same_question(
 async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ws = Workspace(tmp_path / "root")
+    monkeypatch.setenv("PATH", "/task/bin:/usr/bin")
+    monkeypatch.setenv("HUD_API_KEY", "sk-secret")
+    ws = Workspace(tmp_path / "root", env={"AGENT_ONLY": "secret"})
     monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
 
     @contextlib.asynccontextmanager
@@ -436,7 +438,9 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
 
     result = await ws.run(
         ["test.sh"],
+        env={"VERIFIER_ONLY": "yes"},
         identity=None,
+        inherit_workspace_env=False,
         allowed_hosts={"pypi.org"},
         max_wait=12,
     )
@@ -448,6 +452,10 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
     assert argv[argv.index("--target") + 1] == "7"
     assert "--user" in argv and "--mount" not in argv and "--pid" not in argv
     assert "HTTPS_PROXY=http://visitor" in argv
+    assert "PATH=/task/bin:/usr/bin" in argv
+    assert "VERIFIER_ONLY=yes" in argv
+    assert "AGENT_ONLY=secret" not in argv
+    assert not any(arg.startswith("HUD_API_KEY=") for arg in argv)
     assert kwargs["env"]["HTTPS_PROXY"] == "http://visitor"
 
 
@@ -647,20 +655,26 @@ def test_a_peer_is_reached_directly_rather_than_through_the_proxy() -> None:
     assert "127.0.0.1" in bypass and "127.0.0.2" in bypass
 
 
-def test_the_proxy_does_not_forward_framing_it_has_already_undone() -> None:
-    """The body comes back de-chunked, so passing the upstream's chunked
-    framing along with it leaves the client reading chunk headers out of plain
-    bytes — an index that fails halfway rather than an obvious error."""
+def test_the_proxy_normalizes_http_framing_in_both_directions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import socket as socket_mod
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
+    from hud.environment import egress as egress_mod
     from hud.environment.egress import Egress
 
     class Chunked(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        request_body = b""
+        request_length: str | None = None
+        request_transfer: str | None = None
 
-        def do_GET(self) -> None:
+        def do_POST(self) -> None:
+            type(self).request_length = self.headers.get("Content-Length")
+            type(self).request_transfer = self.headers.get("Transfer-Encoding")
+            type(self).request_body = self.rfile.read(int(type(self).request_length or 0))
             self.send_response(200)
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
@@ -672,6 +686,11 @@ def test_the_proxy_does_not_forward_framing_it_has_already_undone() -> None:
     upstream = HTTPServer(("127.0.0.1", 0), Chunked)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     port = upstream.server_address[1]
+    monkeypatch.setattr(
+        egress_mod,
+        "_connect_public",
+        lambda host, port, timeout: socket_mod.create_connection((host, port), timeout),
+    )
     # Not the pytest tmp dir: a unix socket path is capped near 104 bytes.
     sockets = Path(tempfile.mkdtemp(dir="/tmp"))
     egress = Egress(sockets, {"127.0.0.1"})
@@ -680,7 +699,14 @@ def test_the_proxy_does_not_forward_framing_it_has_already_undone() -> None:
         client = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
         client.settimeout(10)
         client.connect(str(egress.socket_path))
-        client.sendall(f"GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode())
+        client.sendall(
+            (
+                f"POST http://127.0.0.1:{port}/ HTTP/1.1\r\n"
+                "Host: 127.0.0.1\r\n"
+                "Transfer-Encoding: chunked\r\n\r\n"
+                "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+            ).encode()
+        )
         received = b""
         while b"hello" not in received:
             chunk = client.recv(4096)
@@ -698,6 +724,54 @@ def test_the_proxy_does_not_forward_framing_it_has_already_undone() -> None:
     assert b"200" in headers
     assert b"transfer-encoding" not in headers.lower()
     assert body == b"hello"
+    assert Chunked.request_body == b"hello world"
+    assert Chunked.request_length == "11"
+    assert Chunked.request_transfer is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"CONNECT 127.0.0.1:8765 HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n",
+        b"GET http://internal.example:8765/ HTTP/1.1\r\nHost: internal.example\r\n\r\n",
+    ],
+)
+def test_public_egress_cannot_reach_substrate_addresses(
+    payload: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket as socket_mod
+
+    from hud.environment.egress import ANY_HOST, Egress
+
+    monkeypatch.setattr(
+        socket_mod,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                socket_mod.AF_INET,
+                socket_mod.SOCK_STREAM,
+                socket_mod.IPPROTO_TCP,
+                "",
+                ("127.0.0.1", 8765),
+            )
+        ],
+    )
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {ANY_HOST})
+    egress.start()
+    try:
+        client = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(egress.socket_path))
+        client.sendall(payload)
+        response = client.recv(4096)
+        client.close()
+    finally:
+        egress.stop()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+    assert b"403" in response
+    assert b"X-Proxy-Error: blocked-by-address" in response
 
 
 def test_a_visitor_proxy_requires_its_ephemeral_credential() -> None:

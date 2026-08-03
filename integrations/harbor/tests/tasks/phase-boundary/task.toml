@@ -3,9 +3,21 @@ version = "1.0"
 [task]
 description = "Agent and verifier share the task machine without sharing trust boundaries."
 
+[environment.env]
+SHARED_ENV = "baseline"
+PHASE = "environment"
+
 [agent]
 network_mode = "allowlist"
 allowed_hosts = ["example.com"]
 
+[agent.env]
+AGENT_ONLY = "secret"
+PHASE = "agent"
+
 [verifier]
 timeout_sec = 180
+
+[verifier.env]
+VERIFIER_ONLY = "present"
+PHASE = "verifier"

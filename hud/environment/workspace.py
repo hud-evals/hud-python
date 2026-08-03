@@ -757,7 +757,7 @@ class Workspace:
                     *self.bwrap_argv(
                         [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
                         env=process_env,
-                        inherit_host_env=False,
+                        inherit_host_env=True,
                         inherit_workspace_env=inherit_workspace_env,
                         network=True,
                         isolate_processes=False,

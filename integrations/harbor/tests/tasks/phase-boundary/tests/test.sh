@@ -9,6 +9,11 @@ tests=absent
 verdict=absent
 harness=absent"
 
+[ "${IMAGE_ONLY:-}" = "present" ] || fail "the verifier lost the image environment"
+[ "${SHARED_ENV:-}" = "baseline" ] || fail "the verifier lost the environment configuration"
+[ "${VERIFIER_ONLY:-}" = "present" ] || fail "the verifier lost its phase configuration"
+[ "${PHASE:-}" = "verifier" ] || fail "the verifier did not override the baseline environment"
+[ -z "${AGENT_ONLY+x}" ] || fail "the verifier inherited the agent environment"
 [ -s /app/page.html ] || fail "the agent could not fetch its allowed host"
 [ "$(cat /app/probe.txt 2>/dev/null)" = "$expected" ] \
   || fail "the agent crossed a harness or network boundary"

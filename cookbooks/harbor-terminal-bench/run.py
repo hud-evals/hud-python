@@ -101,10 +101,9 @@ async def main() -> None:
     for run in sorted(job.runs, key=lambda r: r.task_id):
         print(f"{run.task_id:<40} {run.reward:>7}  {run.trace.status}")
 
-    scored = [run for run in job.runs if run.trace.status != "error"]
-    errored = len(job.runs) - len(scored)
-    mean = sum(run.reward for run in scored) / len(scored) if scored else 0.0
-    print(f"\nscored {len(scored)}/{len(job.runs)} (errored {errored}), mean reward {mean:.2f}")
+    errored = len(job.errors)
+    scored = len(job.runs) - errored
+    print(f"\nscored {scored}/{len(job.runs)} (errored {errored}), mean reward {job.reward:.2f}")
 
 
 if __name__ == "__main__":

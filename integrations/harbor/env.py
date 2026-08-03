@@ -183,7 +183,7 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     verifier = CONFIG["verifier"]
     verifier_identity = identity(verifier)
     verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-    verifier_env = dict(verifier["env"])
+    verifier_env = {**CONFIG["environment"]["env"], **verifier["env"]}
     if verifier_uid is not None:
         assert verifier_identity is not None
         for root in (TESTS, VERIFIER_LOGS):
