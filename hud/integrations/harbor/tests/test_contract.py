@@ -466,6 +466,19 @@ async def test_distinct_environments_build_distinct_images(
     assert len([call for call in fake_docker if call[0] == "build"]) == 4
 
 
+async def test_task_selection_happens_before_validation_and_build(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    make_harbor_task(tmp_path, "selected")
+    make_multi_step_task(tmp_path, "unsupported")
+
+    taskset = await harbor.adapt(tmp_path, task_ids={"selected"})
+
+    assert [task.id for task in taskset] == ["selected"]
+    assert len([call for call in fake_docker if call[0] == "build"]) == 2
+
+
 async def test_adapt_maps_resources_and_pushes_the_images(tmp_path: Path, fake_docker) -> None:
     task = make_harbor_task(tmp_path, "gpu")
     (task / "task.toml").write_text(

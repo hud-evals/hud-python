@@ -14,7 +14,10 @@ import tomllib
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -204,6 +207,7 @@ class HarborTask:
 async def adapt(
     path: str | Path,
     *,
+    task_ids: Collection[str] | None = None,
     push: str | None = None,
     hud_requirement: str = "hud",
 ) -> Taskset:
@@ -220,6 +224,14 @@ async def adapt(
         dataset = root
     if not task_dirs:
         raise ValueError(f"no Harbor tasks found in {path}")
+    if task_ids is not None:
+        selected = set(task_ids)
+        available = {task_dir.name for task_dir in task_dirs}
+        if missing := selected - available:
+            raise ValueError(f"no such Harbor task: {', '.join(sorted(missing))}")
+        task_dirs = [task_dir for task_dir in task_dirs if task_dir.name in selected]
+        if not task_dirs:
+            raise ValueError("no Harbor tasks selected")
 
     tasks = []
     for task_dir in task_dirs:
