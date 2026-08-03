@@ -11,17 +11,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
 import typer
 from pydantic import ValidationError
 
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
-from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
+from hud.eval.deploy import build_status, create_build, trigger_build, upload_context
 from hud.eval.runtime import RuntimeConfig
+from hud.utils.build_context import create_build_context_tarball, format_size
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -471,71 +471,6 @@ class _DeployResult:
     status: str = ""
 
 
-@dataclass(frozen=True)
-class _BuildUpload:
-    upload_url: str
-    build_id: str
-
-
-async def _create_build_upload(platform: PlatformClient) -> _BuildUpload:
-    data = await platform.apost("/builds/upload-url")
-    return _BuildUpload(upload_url=data["upload_url"], build_id=data["build_id"])
-
-
-async def _upload_build_context(upload_url: str, tarball_path: Path) -> None:
-    """PUT the tarball to the presigned S3 URL (not a platform API call)."""
-    content = await asyncio.to_thread(tarball_path.read_bytes)
-    async with httpx.AsyncClient(timeout=300.0) as s3_client:
-        response = await s3_client.put(
-            upload_url,
-            content=content,
-            headers={"Content-Type": "application/gzip"},
-        )
-        response.raise_for_status()
-
-
-async def _trigger_build(
-    platform: PlatformClient,
-    *,
-    build_id: str,
-    plan: _DeployPlan,
-    no_cache: bool,
-    console: HUDConsole,
-) -> dict[str, Any] | None:
-    """Trigger the direct build. The platform resolves the registry by name
-    (get-or-rebuild), so an existing environment with this name is rebuilt."""
-    payload: dict[str, Any] = {
-        "source": "direct",
-        "build_id": build_id,
-        "name": plan.name,
-        "no_cache": no_cache,
-    }
-    if plan.registry_id:
-        payload["registry_id"] = plan.registry_id
-    if plan.runtime:
-        payload["runtime_provider"] = plan.runtime
-    if plan.runtime_config:
-        payload["runtime_config"] = plan.runtime_config
-    if plan.env_vars:
-        payload["environment_variables"] = plan.env_vars
-    if plan.build_args:
-        payload["build_args"] = plan.build_args
-    if plan.build_secrets:
-        payload["build_secrets"] = plan.build_secrets
-
-    try:
-        return await platform.apost("/builds/trigger", json=payload)
-    except HudRequestError as e:
-        console.error(f"Failed to trigger build: {e.status_code or e}")
-        detail = (e.response_json or {}).get("detail", "")
-        if detail:
-            console.error(f"Error: {detail}")
-        return None
-    except Exception as e:
-        console.error(f"Failed to trigger build: {e}")
-        return None
-
-
 async def _deploy_async(
     tarball_path: Path,
     no_cache: bool,
@@ -544,12 +479,16 @@ async def _deploy_async(
     console: HUDConsole,
     env_dir: Path | None = None,
 ) -> _DeployResult:
-    """Async deployment flow: upload context, trigger build, stream logs."""
+    """Async deployment flow: upload context, trigger build, stream logs.
+
+    The wire sequence is :mod:`hud.eval.deploy`; this narrates it, streams the
+    build's logs, and records the link in the project's config.
+    """
     console.progress_message("Getting upload URL...")
     step_start = time.time()
 
     try:
-        upload = await _create_build_upload(platform)
+        upload_url, reserved_id = await create_build(platform)
     except HudRequestError as e:
         console.error(f"Failed to get upload URL: {e.status_code or e}")
         if e.status_code == 401:
@@ -562,13 +501,13 @@ async def _deploy_async(
         return _DeployResult(success=False)
 
     console.success(f"Got upload URL [{time.time() - step_start:.1f}s]")
-    console.info(f"Build ID: {upload.build_id}")
+    console.info(f"Build ID: {reserved_id}")
 
     console.progress_message("Uploading build context...")
     step_start = time.time()
 
     try:
-        await _upload_build_context(upload.upload_url, tarball_path)
+        await upload_context(upload_url, tarball_path)
         console.success(f"Upload complete [{time.time() - step_start:.1f}s]")
     except Exception as e:
         console.error(f"Failed to upload build context: {e}")
@@ -577,18 +516,28 @@ async def _deploy_async(
     console.progress_message("Triggering build...")
     step_start = time.time()
 
-    trigger_data = await _trigger_build(
-        platform,
-        build_id=upload.build_id,
-        plan=plan,
-        no_cache=no_cache,
-        console=console,
-    )
-    if trigger_data is None:
+    try:
+        build_id, registry_id = await trigger_build(
+            platform,
+            build_id=reserved_id,
+            name=plan.name,
+            registry_id=plan.registry_id,
+            env_vars=plan.env_vars,
+            build_args=plan.build_args,
+            build_secrets=plan.build_secrets,
+            runtime=plan.runtime,
+            runtime_config=plan.runtime_config,
+            no_cache=no_cache,
+        )
+    except HudRequestError as e:
+        console.error(f"Failed to trigger build: {e.status_code or e}")
+        detail = (e.response_json or {}).get("detail", "")
+        if detail:
+            console.error(f"Error: {detail}")
         return _DeployResult(success=False)
-
-    build_id = trigger_data["id"]
-    registry_id = trigger_data["registry_id"]
+    except Exception as e:
+        console.error(f"Failed to trigger build: {e}")
+        return _DeployResult(success=False)
 
     # Save immediately after trigger so rebuilds work even if streaming crashes.
     if env_dir and registry_id:
@@ -608,7 +557,7 @@ async def _deploy_async(
         final_status = status_response.get("status", "UNKNOWN")
 
     try:
-        status_data = await platform.aget(f"/builds/{build_id}/status")
+        status_data = await build_status(platform, build_id)
     except Exception as e:
         console.warning(f"Failed to get final status: {e}")
         status_data = {"status": final_status}
