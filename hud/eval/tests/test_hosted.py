@@ -181,6 +181,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         id="add",
         slug="sums-add",
         args={"a": 1, "b": 2},
+        agent_config={"timeout_seconds": 45.0},
         runtime_config=RuntimeConfig(
             image="registry.example/sums:latest",
             resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4", count=1)),
@@ -213,6 +214,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["group_id"] == "g1"
     assert payload["agent"]["type"] == "openai_compatible"
     assert payload["agent"]["config"]["model"] == "test-model"
+    assert payload["agent"]["config"]["timeout_seconds"] == 45.0
 
 
 @pytest.mark.asyncio

@@ -345,6 +345,26 @@ async def test_agent_loop_timeout_is_an_explicit_failure() -> None:
     assert run.trace_id is not None
 
 
+async def test_task_agent_timeout_still_grades_completed_work() -> None:
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    agent = _SlowAgent(_solve_add)
+    task = _add_task(2, 3).model_copy(update={"agent_config": {"timeout_seconds": 0.05}})
+
+    run = await rollout(task, agent, runtime=lambda _row: _local(env))
+
+    assert run.reward == 1.0
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert any("agent timed out" in (step.error or "") for step in run.trace.steps)
+    assert agent.cancelled.is_set()
+
+
 async def test_timeout_includes_grading() -> None:
     env = Environment("sums")
     grading_cancelled = asyncio.Event()

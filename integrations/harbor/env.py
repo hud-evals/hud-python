@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import grp
 import json
 import math
 import os
@@ -38,18 +39,39 @@ def network(phase: dict[str, Any]) -> tuple[bool, frozenset[str]]:
     return True, frozenset({ANY_HOST})
 
 
-def uid(phase: dict[str, Any]) -> int | None:
+def identity(phase: dict[str, Any]) -> tuple[int, int] | None:
     declared = phase.get("user")
     user = str(declared if declared is not None else CONFIG.get("image_user") or "")
-    if not user or user in {"root", "0", "root:root", "0:0"}:
+    if not user:
         return None
-    name = user.split(":", 1)[0]
-    if name.isdigit():
-        return int(name)
-    try:
-        return pwd.getpwnam(name).pw_uid
-    except KeyError as error:
-        raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
+    user_name, separator, group_name = user.partition(":")
+    account = None
+    if user_name.isdigit():
+        user_id = int(user_name)
+        with contextlib.suppress(KeyError):
+            account = pwd.getpwuid(user_id)
+    else:
+        try:
+            account = pwd.getpwnam(user_name)
+        except KeyError as error:
+            raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
+        user_id = account.pw_uid
+
+    if separator:
+        if group_name.isdigit():
+            group_id = int(group_name)
+        else:
+            try:
+                group_id = grp.getgrnam(group_name).gr_gid
+            except KeyError as error:
+                raise ValueError(
+                    f"Harbor group {group_name!r} does not exist in this image"
+                ) from error
+    else:
+        # Docker resolves a known account's primary group; a bare numeric uid
+        # with no passwd entry keeps the container default group (root).
+        group_id = account.pw_gid if account is not None else 0
+    return None if (user_id, group_id) == (0, 0) else (user_id, group_id)
 
 
 def home(user_id: int | None) -> str | None:
@@ -61,7 +83,8 @@ def home(user_id: int | None) -> str | None:
 
 
 agent = CONFIG["agent"]
-agent_uid = uid(agent)
+agent_identity = identity(agent)
+agent_uid = agent_identity[0] if agent_identity is not None else None
 agent_network, agent_hosts = network(agent)
 rooted_at_filesystem = len(WORKDIR.parts) == 1
 harness_parent = ROOT.parent
@@ -73,6 +96,11 @@ harness_mounts = (
         if path != ROOT
     ),
 )
+agent_mounts = (
+    *harness_mounts,
+    Mount("tmpfs", dst=str(TESTS)),
+    Mount("tmpfs", dst=str(VERIFIER_LOGS)),
+)
 
 env = Environment(CONFIG["name"])
 workspace = env.workspace(
@@ -83,9 +111,10 @@ workspace = env.workspace(
         Mount("proc", dst="/proc"),
         Mount("dev", dst="/dev"),
     ),
-    mounts=harness_mounts,
+    mounts=agent_mounts,
     credentials_dir=ROOT / "session-keys",
     shell_uid=agent_uid,
+    shell_gid=agent_identity[1] if agent_identity is not None else None,
     hand_over_root=False,
     track_files=False if rooted_at_filesystem else None,
     env={
@@ -152,12 +181,14 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     answer_file.write_text("" if answer is None else str(answer), encoding="utf-8")
 
     verifier = CONFIG["verifier"]
-    verifier_uid = uid(verifier)
+    verifier_identity = identity(verifier)
+    verifier_uid = verifier_identity[0] if verifier_identity is not None else None
     verifier_env = dict(verifier["env"])
     if verifier_uid is not None:
+        assert verifier_identity is not None
         for root in (TESTS, VERIFIER_LOGS):
             for path in (root, *root.rglob("*")):
-                os.lchown(path, verifier_uid, verifier_uid)
+                os.lchown(path, *verifier_identity)
         if verifier_home := home(verifier_uid):
             verifier_env["HOME"] = verifier_home
 
@@ -165,8 +196,9 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     execution = await workspace.run(
         [str(test_script)],
         isolated=not verifier_network,
+        mounts=harness_mounts,
         env=verifier_env,
-        identity=verifier_uid,
+        identity=verifier_identity,
         inherit_workspace_env=False,
         allowed_hosts=verifier_hosts,
         no_new_privs=False,

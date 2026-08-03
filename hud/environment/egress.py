@@ -23,10 +23,12 @@ obvious error.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
+import hmac
 import http.client
 import json
-import logging
 import os
 import select
 import shutil
@@ -44,8 +46,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
 
-LOGGER = logging.getLogger("hud.environment.egress")
-
 #: In an allowlist, the entry that permits everything.
 ANY_HOST = "*"
 
@@ -57,6 +57,8 @@ _HOP_BY_HOP = frozenset(
     {
         "connection",
         "proxy-connection",
+        "proxy-authenticate",
+        "proxy-authorization",
         "keep-alive",
         "te",
         "trailers",
@@ -178,7 +180,12 @@ def hosts_text(peers: Sequence[Peer], base: str) -> str:
     return f"{base.rstrip(chr(10))}\n{lines}" if base.strip() else lines
 
 
-def proxy_environment(port: int, peers: Sequence[Peer] = ()) -> dict[str, str]:
+def proxy_environment(
+    port: int,
+    peers: Sequence[Peer] = (),
+    *,
+    token: str | None = None,
+) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
 
     In the spellings clients read, and with the peers left out of them: a peer
@@ -188,7 +195,8 @@ def proxy_environment(port: int, peers: Sequence[Peer] = ()) -> dict[str, str]:
     than as 127.0.0.0/8, which most clients (curl among them) match literally
     instead of as a network.
     """
-    url = f"http://127.0.0.1:{port}"
+    credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
+    url = f"http://{credentials}127.0.0.1:{port}"
     addresses = bind_addresses(peers)
     bypass = ",".join(dict.fromkeys(["127.0.0.1", "localhost", *addresses, *addresses.values()]))
     return {
@@ -230,6 +238,7 @@ def _relay(one: socket.socket, other: socket.socket, timeout: float = 300.0) -> 
 class _Proxy(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     allowed: Collection[str] = ()
+    token: str | None = None
 
     def log_message(self, *_: object) -> None:
         """The workspace's traffic is not the substrate's log."""
@@ -242,7 +251,26 @@ class _Proxy(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _authorized(self) -> bool:
+        if self.token is None:
+            return True
+        value = self.headers.get("Proxy-Authorization", "")
+        scheme, _, encoded = value.partition(" ")
+        try:
+            supplied = base64.b64decode(encoded, validate=True).decode()
+        except (binascii.Error, ValueError, UnicodeDecodeError):
+            supplied = ""
+        if scheme.lower() == "basic" and hmac.compare_digest(supplied, f"hud:{self.token}"):
+            return True
+        self.send_response(407, "Proxy Authentication Required")
+        self.send_header("Proxy-Authenticate", 'Basic realm="HUD verifier"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
+
     def do_CONNECT(self) -> None:
+        if not self._authorized():
+            return
         host, _, port = self.path.rpartition(":")
         if not permitted(host, self.allowed):
             self._deny()
@@ -258,6 +286,8 @@ class _Proxy(BaseHTTPRequestHandler):
             _relay(self.connection, upstream)
 
     def _forward(self) -> None:
+        if not self._authorized():
+            return
         parts = urllib.parse.urlsplit(self.path)
         if not permitted(parts.hostname, self.allowed):
             self._deny()
@@ -343,10 +373,13 @@ class Egress:
         socket_dir: Path | str,
         allowed: Collection[str],
         peers: Sequence[Peer] = (),
+        *,
+        token: str | None = None,
     ) -> None:
         self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
         self.peers = tuple(peers)
+        self.token = token
         self._servers: list[tuple[_UnixServer, Path]] = []
         self._bridge: asyncio.subprocess.Process | None = None
 
@@ -367,7 +400,12 @@ class Egress:
         self.socket_dir.mkdir(parents=True, exist_ok=True)
         if self.allowed:
             self._serve(
-                self.socket_path, type("_ScopedProxy", (_Proxy,), {"allowed": self.allowed})
+                self.socket_path,
+                type(
+                    "_ScopedProxy",
+                    (_Proxy,),
+                    {"allowed": self.allowed, "token": self.token},
+                ),
             )
         for index, peer in enumerate(self.peers):
             self._serve(
@@ -423,13 +461,26 @@ class Egress:
                 json.dumps(spec),
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
         assert self._bridge.stdout is not None
         try:
-            await asyncio.wait_for(self._bridge.stdout.readline(), 30.0)
+            ready = await asyncio.wait_for(self._bridge.stdout.readline(), 30.0)
         except TimeoutError:
-            LOGGER.warning("the workspace's ways out did not come up in time")
+            ready = b""
+        if ready != b"ready\n":
+            bridge, self._bridge = self._bridge, None
+            with contextlib.suppress(ProcessLookupError):
+                bridge.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(bridge.wait(), 5.0)
+            detail = ""
+            if bridge.stderr is not None:
+                with contextlib.suppress(Exception):
+                    detail = (await bridge.stderr.read(2048)).decode(errors="replace").strip()
+            raise RuntimeError(
+                "the workspace's ways out did not come up" + (f": {detail}" if detail else "")
+            )
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
         """Proxy variables for what this serves.
@@ -438,7 +489,7 @@ class Egress:
         is not there turns "this task has no network" into a connection error
         on the first hop, which reads as a broken one instead.
         """
-        return proxy_environment(port, self.peers) if self.allowed else {}
+        return proxy_environment(port, self.peers, token=self.token) if self.allowed else {}
 
     def stop(self) -> None:
         """Take the routes away."""

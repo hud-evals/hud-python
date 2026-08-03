@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import asyncssh
 import pytest
@@ -176,6 +176,23 @@ async def test_a_timed_out_command_keeps_what_it_printed(
     assert "progress-so-far" in str(result.stdout)
     assert "timed out" in str(result.stderr)
     assert result.exit_status == 1
+
+
+@pytest.mark.asyncio
+async def test_session_setup_failure_is_reported_to_the_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(side_effect=RuntimeError("map failed")))
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            result = await conn.run("echo unreachable", check=False)
+    finally:
+        await ws.stop()
+
+    assert result.exit_status == 1
+    assert "workspace: cannot prepare shell: map failed" in str(result.stderr)
 
 
 def _wall(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -394,10 +411,11 @@ def test_making_a_network_and_joining_it_are_the_same_question(
 
 
 @pytest.mark.asyncio
-async def test_run_uses_the_shared_sandbox_and_visitor_egress(
+async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
 
     @contextlib.asynccontextmanager
     async def visiting(allowed):
@@ -423,6 +441,7 @@ async def test_run_uses_the_shared_sandbox_and_visitor_egress(
     assert spawn.await_args is not None
     argv, kwargs = spawn.await_args
     assert argv[argv.index("--target") + 1] == "7"
+    assert "--user" in argv and "--mount" not in argv and "--pid" not in argv
     assert "HTTPS_PROXY=http://visitor" in argv
     assert kwargs["env"]["HTTPS_PROXY"] == "http://visitor"
 
@@ -456,6 +475,44 @@ async def test_run_can_use_a_fresh_no_network_sandbox(
     assert len(kwargs["pass_fds"]) == 2
 
 
+@pytest.mark.asyncio
+async def test_failed_sandbox_start_discards_the_holder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    failed_holder = SimpleNamespace(
+        returncode=None,
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
+        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
+        kill=Mock(),
+        wait=AsyncMock(return_value=0),
+    )
+    working_holder = SimpleNamespace(
+        returncode=None,
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
+        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
+        kill=Mock(),
+        wait=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        AsyncMock(side_effect=[failed_holder, working_holder]),
+    )
+    monkeypatch.setattr(
+        workspace_mod,
+        "install_identity_map",
+        AsyncMock(side_effect=[RuntimeError("map failed"), 9]),
+    )
+
+    with pytest.raises(RuntimeError, match="map failed"):
+        await ws.sandbox_pid()
+
+    failed_holder.kill.assert_called_once()
+    assert await ws.sandbox_pid() == 9
+
+
 def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     """A task that names a service says where it expects to find it. Placed
     anywhere else, the task's own client configuration points at nothing."""
@@ -473,6 +530,40 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
 
     with pytest.raises(ValueError, match="two peers are called"):
         bind_addresses([Peer("db", 5432), Peer("db", 6379)])
+
+
+@pytest.mark.asyncio
+async def test_egress_attach_fails_when_the_bridge_never_becomes_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.environment import egress as egress_mod
+    from hud.environment.egress import Egress
+
+    failed_bridge = SimpleNamespace(
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"")),
+        stderr=SimpleNamespace(read=AsyncMock(return_value=b"address already in use")),
+        kill=Mock(),
+        wait=AsyncMock(return_value=1),
+    )
+    working_bridge = SimpleNamespace(
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
+        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
+        kill=Mock(),
+        wait=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        egress_mod.asyncio,
+        "create_subprocess_exec",
+        AsyncMock(side_effect=[failed_bridge, working_bridge]),
+    )
+    route = Egress(tmp_path, {"example.com"})
+
+    with pytest.raises(RuntimeError, match="address already in use"):
+        await route.attach(7)
+
+    failed_bridge.kill.assert_called_once()
+    await route.attach(7)
+    route.stop()
 
 
 def test_a_peers_name_is_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
@@ -580,6 +671,29 @@ def test_the_proxy_does_not_forward_framing_it_has_already_undone() -> None:
     assert body == b"hello"
 
 
+def test_a_visitor_proxy_requires_its_ephemeral_credential() -> None:
+    import socket as socket_mod
+
+    from hud.environment.egress import Egress
+
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {"example.com"}, token="secret")
+    egress.start()
+    try:
+        client = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(egress.socket_path))
+        client.sendall(b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        response = client.recv(4096)
+        client.close()
+    finally:
+        egress.stop()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+    assert b"407 Proxy Authentication Required" in response
+    assert egress.environment()["http_proxy"].startswith("http://hud:secret@")
+
+
 def test_a_workspace_that_reaches_no_host_is_told_of_no_proxy() -> None:
     """Pointing a client at a proxy that was never started turns "this task
     has no network" into a connection failure on the first hop."""
@@ -624,6 +738,18 @@ def test_shell_uid_wraps_sessions_in_setpriv(
     # takes effect after the drop.
     assert argv[8].endswith("/env") and argv[9] == "-i"
     assert "echo hi" in argv
+
+
+def test_shell_identity_keeps_the_declared_primary_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wall(monkeypatch)
+    ws = Workspace(tmp_path / "root", shell_uid=1000, shell_gid=2000)
+
+    argv = ws.shell_argv("id")
+
+    assert argv[argv.index("--reuid") + 1] == "1000"
+    assert argv[argv.index("--regid") + 1] == "2000"
 
 
 def test_caller_env_is_injected_only_after_the_drop(

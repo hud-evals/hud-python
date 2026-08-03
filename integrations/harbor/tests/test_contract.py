@@ -248,6 +248,19 @@ async def test_invalid_task_config_is_not_silently_defaulted(
     assert fake_docker == []
 
 
+async def test_agent_timeout_becomes_per_task_agent_policy(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text("[agent]\ntimeout_sec = 60\n", encoding="utf-8")
+
+    taskset = await harbor.adapt(tmp_path)
+
+    (row,) = list(taskset)
+    assert row.agent_config == {"timeout_seconds": 60.0}
+
+
 async def test_task_symlinks_are_copied_without_reading_host_files(
     tmp_path: Path,
     fake_docker,
