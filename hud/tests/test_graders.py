@@ -7,6 +7,7 @@ import os
 import warnings
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -629,6 +630,25 @@ class TestBashGrader:
         assert subscore.info is not None
         assert subscore.info["timed_out"] is True
         assert subscore.info["timeout"] == 1
+
+    async def test_compute_score_timeout_keeps_partial_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from hud.graders import bash as bash_mod
+        from hud.utils.process import ProcessResult
+
+        process = SimpleNamespace(
+            complete=AsyncMock(
+                return_value=ProcessResult(None, b"progress\n", b"still working\n", timed_out=True)
+            )
+        )
+        monkeypatch.setattr(bash_mod, "create_process_group_exec", AsyncMock(return_value=process))
+
+        subscore = await BashGrader.compute_score(command="slow", timeout_seconds=1)
+
+        assert subscore.info is not None
+        assert subscore.info["stdout"] == "progress\n"
+        assert subscore.info["stderr"] == "still working\n"
 
     async def test_grade_and_combine_compose(self) -> None:
         result = await combine(

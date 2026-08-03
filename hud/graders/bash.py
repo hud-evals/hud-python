@@ -57,21 +57,21 @@ class BashGrader(Grader):
                 },
             )
         result = await process.complete(max_wait=timeout_seconds)
+        stdout = result.stdout.decode(errors="replace")
+        stderr = result.stderr.decode(errors="replace")
         if result.timed_out:
             return SubScore(
                 name=cls.name,
                 value=0.0,
                 info={
                     "exit_code": None,
-                    "stdout": "",
-                    "stderr": "",
+                    "stdout": stdout,
+                    "stderr": stderr,
                     "timed_out": True,
                     "timeout": timeout_seconds,
                 },
             )
 
-        stdout = result.stdout.decode(errors="replace")
-        stderr = result.stderr.decode(errors="replace")
         returncode = result.returncode if result.returncode is not None else 1
         return SubScore(
             name=cls.name,

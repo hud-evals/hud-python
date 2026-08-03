@@ -315,6 +315,11 @@ async def adapt(
                 Task(
                     env=name,
                     id=task.path.name,
+                    agent_config=(
+                        {"timeout_seconds": config.agent.timeout_sec}
+                        if config.agent.timeout_sec is not None
+                        else None
+                    ),
                     columns=columns or None,
                     runtime_config=RuntimeConfig(
                         image=image,

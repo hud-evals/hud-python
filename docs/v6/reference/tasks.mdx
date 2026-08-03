@@ -92,7 +92,7 @@ substrate that placement brings up.
 | `slug` | `str \| None` | Stable id for sync, filtering, and lookup. |
 | `columns` | `dict \| None` | Metadata surfaced as filter/leaderboard facets. |
 | `validation` | `list[dict] \| None` | Platform/sync metadata. |
-| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50}`). |
+| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50, "timeout_seconds": 900}`). |
 | `runtime_config` | `RuntimeConfig \| None` | Per-row launch hints (`image`, `resources`); the [runtime](/v6/reference/runtime) applies what it supports. |
 
 When you don't have the template in hand (data pipelines, generated rows), build the model directly -
@@ -158,6 +158,10 @@ job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurren
 | `max_concurrent` | `int \| None` | Caps how many rollouts run in parallel. |
 | `job` | `Job \| None` | An open [`Job`](/v6/reference/types#job) to accumulate into; defaults to a fresh job per call. |
 | `rollout_timeout` | `float \| None` | Hard deadline (seconds) for the full local rollout lifecycle; a breach returns a failed run. |
+
+`agent_config.timeout_seconds` bounds only the agent phase. If it expires, the
+run is marked as timed out but grading still runs against any completed work.
+`rollout_timeout` instead bounds startup, the agent, grading, and cleanup together.
 
 A crashed rollout comes back as a failed [`Run`](/v6/reference/types#run) inside the job rather than
 raising, so one bad rollout never collapses a batch. For the end-to-end workflow see

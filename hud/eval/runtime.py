@@ -1223,13 +1223,19 @@ class HostedRuntime:
         group_id: str | None,
         trace_id: str,
     ) -> dict[str, Any]:
-        spec_of = getattr(agent, "hosted_spec", None)
-        if not callable(spec_of):
+        from hud.agents.tool_agent import ToolAgent
+
+        if not isinstance(agent, ToolAgent):
             raise ValueError(
                 f"hosted execution requires a gateway agent that can serialize its "
                 f"identity (Claude/OpenAI/Gemini/OpenAIChat); got {type(agent).__name__}"
             )
-        spec = spec_of()
+        spec = agent.hosted_spec()
+        if task.agent_config:
+            spec = {
+                **spec,
+                "config": {**spec.get("config", {}), **task.agent_config},
+            }
         platform = PlatformClient.from_settings()
         if not platform.api_key:
             raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
