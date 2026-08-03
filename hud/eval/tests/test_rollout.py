@@ -819,6 +819,26 @@ async def test_pre_launch_failure_keeps_the_notes_the_provider_attached() -> Non
     assert "No module named 'bugs'" in (run.trace.error or "")
 
 
+async def test_connection_failure_has_its_own_lifecycle_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @asynccontextmanager
+    async def broken_connect(_runtime: Runtime) -> AsyncIterator[HudClient]:
+        raise ConnectionError("handshake unavailable")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(run_module, "connect", broken_connect)
+
+    run = await rollout(
+        _add_task(1, 1),
+        _FnAgent(_solve_add),
+        runtime=Runtime("tcp://127.0.0.1:8765"),
+    )
+
+    assert "[connecting] ConnectionError: handshake unavailable" in (run.trace.error or "")
+    assert run.prompt is None
+
+
 async def test_provider_is_called_with_the_task_row_being_placed(env_file: Path) -> None:
     placed: list[str] = []
 
