@@ -1270,10 +1270,14 @@ class HostedRuntime:
         if error:
             run.record(Step(source="system", error=str(error)))
         reward = state.get("reward")
+        cancelled_without_grade = run.trace.status == "cancelled" and reward is None
+        grade_error = str(error) if error else None
+        if cancelled_without_grade and grade_error is None:
+            grade_error = "rollout was cancelled before grading"
         run.grade = Grade(
             reward=float(reward) if reward is not None else 0.0,
-            is_error=status == "error",
-            content=str(error) if error else None,
+            is_error=run.trace.status == "error" or cancelled_without_grade,
+            content=grade_error,
         )
         run._runtime = f"hud://trace/{trace_id}"
         return run

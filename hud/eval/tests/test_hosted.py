@@ -19,6 +19,7 @@ import pytest
 
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
+from hud.eval.job import Job
 from hud.eval.run import Run
 from hud.eval.runtime import (
     HostedRuntime,
@@ -314,6 +315,29 @@ async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     assert run.reward == 0.0
     assert run.trace.is_error
     assert "env exploded" in (run.trace.error or "")
+
+
+@pytest.mark.asyncio
+async def test_run_folds_ungraded_cancellation_as_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform([{"status": "cancelled", "reward": None, "error": None}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    task = Task(env="sums", id="add", args={})
+    run = await HostedRuntime(poll_interval=0.0).run(
+        task,
+        _agent(),
+        job_id=uuid.uuid4().hex,
+    )
+    job = Job(id="job", name="test", runs=[run])
+
+    assert run.trace.status == "cancelled"
+    assert run.grade.is_error
+    assert job.reward == 0.0
+    assert job.errors == [run]
 
 
 @pytest.mark.asyncio
