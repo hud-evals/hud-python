@@ -318,6 +318,30 @@ async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_keeps_a_grade_from_an_errored_hosted_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform([{"status": "error", "reward": 0.75, "error": "agent timed out"}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    task = Task(env="sums", id="add", args={})
+    run = await HostedRuntime(poll_interval=0.0).run(
+        task,
+        _agent(),
+        job_id=uuid.uuid4().hex,
+    )
+    job = Job(id="job", name="test", runs=[run])
+
+    assert run.trace.is_error
+    assert not run.grade.is_error
+    assert run.evaluation == {"score": 0.75}
+    assert job.reward == 0.75
+    assert job.errors == []
+
+
+@pytest.mark.asyncio
 async def test_run_folds_ungraded_cancellation_as_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
