@@ -253,10 +253,15 @@ async def adapt(
         workdir = source.runtime["workdir"] or image_config.get("WorkingDir") or "/"
         if Path(workdir).is_relative_to(HUD_ROOT):
             raise ValueError(f"Harbor workdir {workdir!r} is inside reserved path {HUD_ROOT}")
+        image_env = {}
+        for entry in image_config.get("Env") or []:
+            key, _, value = entry.partition("=")
+            image_env[key] = value
         manifest = {
             "name": name,
             "workdir": workdir,
             "image_user": image_config.get("User") or None,
+            "image_env": image_env,
             "entrypoint": image_config.get("Entrypoint") or [],
             "environment": {
                 "env": source.runtime["environment_env"],

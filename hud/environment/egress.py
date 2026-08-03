@@ -572,6 +572,7 @@ class Egress:
                 (addresses[peer.name], peer.port, str(self._peer_socket(index)))
                 for index, peer in enumerate(self.peers)
             ),
+            ("127.0.0.1", VISITOR_PORT, str(self.socket_dir / "visit" / "egress.sock")),
         ]
 
     async def attach(self, pid: int, port: int = BRIDGE_PORT) -> None:

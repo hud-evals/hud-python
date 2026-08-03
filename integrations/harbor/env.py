@@ -122,6 +122,7 @@ workspace = env.workspace(
     hand_over_root=False,
     track_files=False if rooted_at_filesystem else None,
     env={
+        **CONFIG["image_env"],
         **CONFIG["environment"]["env"],
         **agent["env"],
         **({"HOME": agent_home} if (agent_home := home(agent_uid)) else {}),

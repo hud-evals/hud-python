@@ -3,6 +3,16 @@ set -eu
 
 curl -sS --max-time 30 -o /app/page.html http://example.com/
 curl -sS --max-time 10 -o /app/startup.txt http://127.0.0.1:8080/status
+python3 -m http.server 3129 >/tmp/visitor-port.log 2>&1 &
+squatter=$!
+sleep 1
+if kill -0 "$squatter" 2>/dev/null; then
+  echo unreserved > /app/visitor-port.txt
+  kill "$squatter"
+else
+  echo reserved > /app/visitor-port.txt
+fi
+wait "$squatter" 2>/dev/null || true
 {
   if curl -sS --max-time 20 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
     echo "outside_host=reachable"

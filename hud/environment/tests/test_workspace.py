@@ -542,7 +542,7 @@ async def test_failed_isolated_run_terminates_its_sandbox(
 async def test_failed_sandbox_start_discards_the_holder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ws = Workspace(tmp_path / "root")
+    ws = Workspace(tmp_path / "root", network=True)
     monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
     failed_holder = SimpleNamespace(
         returncode=None,

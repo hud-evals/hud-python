@@ -230,6 +230,7 @@ async def test_image_entrypoint_is_preserved_as_runtime_data(
                     {
                         "User": "1000:2000",
                         "WorkingDir": "/workspace",
+                        "Env": ["IMAGE_ONLY=present", "VALUE_WITH_EQUALS=one=two"],
                         "Entrypoint": ["/usr/local/bin/start-environment"],
                         "Cmd": ["ignored-by-harbor"],
                     }
@@ -245,6 +246,10 @@ async def test_image_entrypoint_is_preserved_as_runtime_data(
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["image_env"] == {
+        "IMAGE_ONLY": "present",
+        "VALUE_WITH_EQUALS": "one=two",
+    }
     assert manifest["entrypoint"] == ["/usr/local/bin/start-environment"]
     assert "ignored-by-harbor" not in json.dumps(manifest)
 

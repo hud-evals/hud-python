@@ -459,15 +459,13 @@ class Workspace:
         The agent's sessions share this network, so a second and more permissive
         way out that stood open would be one the agent could simply take.
         """
-        pid = await self.sandbox_pid()
-        if pid is None or not self.owns_netns or not allowed:
+        if await self.sandbox_pid() is None or not self.owns_netns or not allowed:
             yield {}
             return
         token = secrets.token_urlsafe(32)
         egress = Egress(self._credentials_dir() / "visit", allowed, token=token)
         egress.start()
         try:
-            await egress.attach(pid, VISITOR_PORT)
             # The peers are the workspace's, bound by its own bridge: a visitor
             # reaches them at those addresses, so they stay out of its proxy.
             yield proxy_environment(VISITOR_PORT, self.peers, token=token)
@@ -1103,7 +1101,7 @@ class Workspace:
             if signal != _SANDBOX_READY:
                 raise RuntimeError(f"the sandbox never became ready: {await self._sandbox_error()}")
             self._sandbox_init = pid
-            if self.owns_netns and (self.allowed_hosts or self.peers):
+            if self.owns_netns:
                 self._egress = Egress(self._credentials_dir(), self.allowed_hosts or (), self.peers)
                 self._egress.start()
                 await self._egress.attach(pid)
