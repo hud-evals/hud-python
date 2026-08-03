@@ -1,0 +1,161 @@
+---
+title: "Placement"
+description: "How a task row finds a server - the Provider contract, Runtime addresses, and the routing patterns they compose into."
+icon: "map-pin"
+mode: "wide"
+---
+
+Every rollout needs a live server to drive, and **placement** is the layer that produces one: given
+a task row, bring up (or find) the environment that row names and hand back a connectable address.
+The [walkthrough](/v6/internals/walkthrough#bringing-up-the-server) visits placement as one step on the
+pointer's path; this page isolates the layer itself - the two abstractions it is made of, how the
+scheduler resolves it, and the routing patterns that fall out of the contract being a plain
+callable.
+
+| Concept | What it is |
+| --- | --- |
+| **Task row** | A `Task` (`hud/eval/task.py`): an env *name*, a task id, bound args. The name is a join key, never a live object - see [what we start with](/v6/internals/walkthrough#what-we-start-with). |
+| **Provider** | Anything callable as `(task) -> async context manager yielding a Runtime` (`hud/eval/runtime.py`). Entering the context provisions; exiting tears down. |
+| **Runtime** | Pure data: the connectable address of one substrate (`url`, connection `params`, optional `config`). |
+| **Substrate** | The provisioned instance behind a url - a local env, a subprocess, a container, a cloud sandbox. |
+
+## The contract
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">1 · A provider is a callable, a Runtime is an address</div>
+
+The whole layer is two definitions. A `Provider` is a structural protocol - no base class, no
+registry - so any function of the right shape is a valid placement strategy. A `Runtime` is the
+value it yields: where to connect, nothing more.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">runtime.py · the contract</p>
+
+```python
+class Provider(Protocol):
+    def __call__(
+        self, task: Task, /
+    ) -> AbstractAsyncContextManager[Runtime]: ...
+
+@dataclass(frozen=True)
+class Runtime:
+    url: str            # tcp://127.0.0.1:7000
+    params: dict = ...  # auth token, sandbox id
+    config: RuntimeConfig | None = None
+
+    def __call__(self, task):     # a Runtime is
+        return nullcontext(self)  # itself a provider
+```
+
+</div>
+</div>
+
+Two consequences do most of the work:
+
+<div className="step-list">
+
+- **The task flows into placement.** A provider receives the row it is placing, so per-row
+  decisions (this env from that file, this row on a bigger GPU) live in the provider, and the
+  engine never branches on them.
+- **A `Runtime` is itself a provider - the borrowed case.** Calling it returns `nullcontext(self)`:
+  entering provisions nothing and yields the address as-is, exiting tears down nothing, because
+  whoever launched that server owns it. This is the degenerate provider every routing pattern below
+  bottoms out in.
+
+</div>
+
+The built-ins (`LocalRuntime`, `SubprocessRuntime`, `DockerRuntime`, `ModalRuntime`,
+`DaytonaRuntime`, `HUDRuntime`) are all providers of this shape. They differ only in *where* the
+substrate runs and how its url is reached; all of them serve the same module and speak the same
+channel.
+
+## Resolution
+
+Placement is chosen **once per batch**. The scheduler, `Taskset.run(agent, runtime=...)`
+(`hud/eval/taskset.py`), resolves a single provider for all rows and threads it into every rollout;
+per-row behavior happens inside the provider, never in the scheduler.
+
+When `runtime=` is omitted, `_resolve_placement` uses what the process already knows:
+
+<div className="step-list">
+
+- A taskset loaded from `.py` source serves that source fresh per rollout (a `LocalRuntime` on the
+  file), provided the source actually declares the rows' envs.
+- A platform taskset runs against the platform (`HUDRuntime`).
+- Rows naming envs declared in already-imported modules serve each env fresh from its declaring
+  file.
+- Anything else raises, naming the forms to pass.
+
+</div>
+
+One placement decision is also *local-drive vs delegated*: every provider yields a channel that
+this process drives through the [rollout atom](/v6/internals/walkthrough#into-the-rollout-atom), except
+`HostedRuntime`, which submits the whole rollout to the platform and folds the result back into a
+`Run`. The scheduler picks between the two, so the atom never branches on placement.
+
+## Routing patterns
+
+Because the contract is a callable that receives the row, routing is composition, not
+configuration. Four patterns cover what exists today.
+
+### Fresh substrate per rollout
+
+The default, and what every built-in does: one acquisition brings up one new substrate and tears it
+down on exit. Isolation is structural - two rollouts never share state because they never share a
+substrate.
+
+```python
+job = await taskset.run(agent, runtime=DockerRuntime("my-env-image"))
+```
+
+### Build the environment from the row
+
+The `LocalRuntime` constructor form takes a `(task) -> Environment` callable, invoked per
+acquisition with the placed row. This is the pattern for benchmarks where one process holds one
+scene (an Isaac sim, where the scene is fixed at build time): one declaration file, many rows, and
+the constructor reads the row to build the right scene.
+
+```python
+def build(task) -> Environment:
+    return make_env(scene=task.args["task"])   # one scene per acquisition
+
+job = await taskset.run(agent, runtime=LocalRuntime(build))
+```
+
+### Route rows across providers
+
+A lambda that reads the row and picks a provider routes a heterogeneous batch: mixed-env tasksets,
+per-row images, per-row resources. The scheduler still resolves one "provider" - the lambda - and
+all branching stays inside it.
+
+```python
+providers = {"web": DockerRuntime("web-env"), "sim": DockerRuntime("sim-env")}
+runtime = lambda task: providers[task.env](task)
+```
+
+### Borrow warm substrates
+
+When provisioning is expensive (a sim that takes a minute to boot), serve long-lived processes once
+and map rows onto them as bare `Runtime` addresses. Entering the context is a no-op, so episodes
+against one task reuse its warm substrate, and per-episode variation travels through task args
+instead of fresh builds.
+
+```python
+servers = {"peg_insert": Runtime("tcp://127.0.0.1:8765"),
+           "gear_mesh":  Runtime("tcp://127.0.0.1:8766")}
+runtime = lambda task: servers[task.args["task"]](task)
+```
+
+<Note>
+A control channel now supports concurrent sessions, one suspended task each (see the
+[control channel](/v6/internals/control-channel#the-suspended-task)), so a shared warm server no longer
+serializes its rows. Its substrate is still one resource, so rows that drive a single shared world
+(one sim) must cap concurrency or run sequentially.
+</Note>
+
+The [server step of the walkthrough](/v6/internals/walkthrough#bringing-up-the-server) shows where these calls
+sit on the pointer's path through one rollout.

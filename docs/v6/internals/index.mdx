@@ -1,0 +1,43 @@
+---
+title: "Internals"
+description: "How the SDK code actually runs - the module map and the deep dives, for the people changing it."
+icon: "compass"
+mode: "wide"
+---
+
+These pages explain how the SDK is implemented, for people changing it. The rest of the docs
+teach the API from the outside; this section teaches the code from the inside. Nothing here is
+needed to build environments or run evals.
+
+The mental model is small: an **environment** declares what exists (capabilities and tasks), a
+**provider** brings that environment up somewhere as a **server**, and a **client** in your
+process drives one **agent** through it over a thin wire protocol. Everything else is a variation
+on that single loop.
+
+## Pages
+
+| Page | What it covers |
+| --- | --- |
+| [**Walkthrough**](/v6/internals/walkthrough) | The pointer's path through one full run - from declaring an environment to a graded reward - following the real code, file by file, plus the protocol and the assumptions baked in. |
+| [**Placement**](/v6/internals/placement) | How a task row finds a server: the `Provider` contract, `Runtime` addresses, scheduler resolution, and the routing patterns they compose into. |
+| [**Control channel**](/v6/internals/control-channel) | How one TCP port carries both the JSON-RPC control session and raw capability tunnels: the connection grammar, the suspended task, and `tunnel.open`. |
+
+## The code, at a glance
+
+The SDK splits into two halves that meet at the wire protocol. One half **declares and serves** an
+environment; the other **places and drives** it. A `Task` row is the only thing that crosses
+between them at rest, and a TCP control channel is the only thing that connects them at run time.
+
+| Module | Role |
+| --- | --- |
+| `hud/environment/env.py` | The `Environment` declaration - capabilities, task templates, lifecycle hooks. Pure data, no runtime state. |
+| `hud/environment/server.py` | Puts one declaration on the wire: the JSON-RPC control channel and the per-task suspended generator. |
+| `hud/eval/task.py` | The `Task` row - an env name, a task id, bound args. Plain pydantic. |
+| `hud/eval/runtime.py` | Placement: the `Provider` contract and every built-in (`LocalRuntime`, `DockerRuntime`, hosted, ...). |
+| `hud/eval/run.py` | The `rollout` atom and the `Run` handle - one task driven to a graded result. |
+| `hud/eval/taskset.py` | The scheduler: expand tasks, pick placement once, gather rollouts into a `Job`. |
+| `hud/clients/client.py` | `connect` and `HudClient` - the client side of the protocol, plus capability tunneling. |
+| `hud/agents/base.py` | The `Agent` contract: `async __call__(run)`. |
+
+Start with the [walkthrough](/v6/internals/walkthrough) and read it top to bottom - it visits these
+files in the order the code visits them.
