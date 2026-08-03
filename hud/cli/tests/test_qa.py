@@ -136,6 +136,25 @@ def test_qa_run_reuses_evidence_by_default_and_can_skip_waiting() -> None:
     platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")
 
 
+def test_qa_run_rejects_a_non_resource_agent_as_caller_input() -> None:
+    """A valid trace agent is unsupported input, not a broken Platform response."""
+    platform = MagicMock()
+    platform.get.return_value = {**_agent(), "subject_type": "trace"}
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        result = runner.invoke(
+            app,
+            ["qa", "run", _AGENT_ID, _SUBJECT_ID, "--no-wait"],
+        )
+
+    assert result.exit_code == 2
+    assert "must target environment or taskset" in result.output
+    platform.post.assert_not_called()
+
+
 def test_qa_run_no_wait_renders_reused_result_verdict() -> None:
     """A terminal selection reports its stored verdict without an extra result request."""
     platform = MagicMock()

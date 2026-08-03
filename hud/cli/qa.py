@@ -237,12 +237,11 @@ def run_agent(
     platform = _platform()
     try:
         raw_agent = platform.get(f"/qa-agents/{agent_id}")
-        if (
-            not isinstance(raw_agent, dict)
-            or raw_agent.get("subject_type") not in _RESOURCE_SUBJECT_TYPES
-        ):
+        if not isinstance(raw_agent, dict) or not isinstance(raw_agent.get("subject_type"), str):
             _execution_error("Platform returned an invalid resource QA agent.")
-        agent_subject_type = str(raw_agent["subject_type"])
+        agent_subject_type = raw_agent["subject_type"]
+        if agent_subject_type not in _RESOURCE_SUBJECT_TYPES:
+            _request_error("QA agent must target environment or taskset subjects.")
         raw_runs = platform.post(
             f"/qa-agents/{agent_id}/run-resources",
             json={"subject_ids": subject_ids, "overwrite": overwrite},
