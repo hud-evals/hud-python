@@ -324,11 +324,19 @@ async def test_check_attaches_to_a_served_environment(tmp_path: Path) -> None:
 
 
 class _Client:
-    def __init__(self, *, reward: Any = 1.0, start_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        reward: Any = 1.0,
+        start_error: Exception | None = None,
+        grade_error: Exception | None = None,
+    ) -> None:
         self.reward = reward
         self.start_error = start_error
+        self.grade_error = grade_error
         self.started: list[tuple[str, dict[str, Any]]] = []
         self.graded: list[dict[str, Any]] = []
+        self.cancelled = 0
 
     async def start_task(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         if self.start_error is not None:
@@ -338,7 +346,12 @@ class _Client:
 
     async def grade(self, answer: dict[str, Any]) -> dict[str, Any]:
         self.graded.append(answer)
+        if self.grade_error is not None:
+            raise self.grade_error
         return {"score": self.reward}
+
+    async def cancel(self) -> None:
+        self.cancelled += 1
 
 
 @asynccontextmanager
@@ -389,8 +402,28 @@ async def test_start_only_never_invokes_grader() -> None:
 
     assert reward is None
     assert client.graded == []
+    assert client.cancelled == 1
     assert criteria["grader_execution"].status == "skipped"
     assert criteria["oracle_or_agent_reward"].status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_direct_grading_failure_cancels_the_live_task_session() -> None:
+    client = _Client(grade_error=RuntimeError("grader unavailable"))
+    task = Task(env="demo", id="demo:solve")
+
+    with (
+        patch("hud.clients.connect", lambda _runtime: _provided(client)),
+        pytest.raises(RuntimeError, match="grader unavailable"),
+    ):
+        await _run_direct(
+            CheckRequest(task=task.id, answer={"value": "42"}),
+            task,
+            lambda _task: _provided(Runtime("tcp://127.0.0.1:8765")),
+            _criteria_template(),
+        )
+
+    assert client.cancelled == 1
 
 
 @pytest.mark.asyncio

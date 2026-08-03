@@ -233,58 +233,63 @@ async def _run_direct(
             evidence=_redact_evidence({"runtime_url": runtime.url}),
         )
 
+        session_active = False
+        phase = "task_startup"
         try:
             started = await client.start_task(task.id, task.args)
-        except Exception as exc:
+            session_active = True
             criteria["task_startup"] = CheckCriterion(
                 name="task_startup",
-                status="error",
-                detail=f"task did not start: {exc}",
+                status="passed",
+                detail="task started successfully",
+                evidence=_redact_evidence(started),
             )
-            raise
-        criteria["task_startup"] = CheckCriterion(
-            name="task_startup",
-            status="passed",
-            detail="task started successfully",
-            evidence=_redact_evidence(started),
-        )
 
-        if request.start_only:
-            criteria["grader_execution"] = CheckCriterion(
-                name="grader_execution",
-                status="skipped",
-                detail="explicit --start-only check",
-            )
-            criteria["oracle_or_agent_reward"] = CheckCriterion(
-                name="oracle_or_agent_reward",
-                status="skipped",
-                detail="explicit --start-only check",
-            )
-            return None, None
+            if request.start_only:
+                criteria["grader_execution"] = CheckCriterion(
+                    name="grader_execution",
+                    status="skipped",
+                    detail="explicit --start-only check",
+                )
+                criteria["oracle_or_agent_reward"] = CheckCriterion(
+                    name="oracle_or_agent_reward",
+                    status="skipped",
+                    detail="explicit --start-only check",
+                )
+                return None, None
 
-        assert request.answer is not None
-        try:
+            assert request.answer is not None
+            phase = "grader_execution"
             graded = await client.grade({"answer": request.answer})
+            session_active = False
             raw_score = graded["score"]
             if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
                 raise TypeError("grade score is not numeric")
             reward = float(raw_score)
             if not math.isfinite(reward):
                 raise ValueError("grade score is not finite")
-        except Exception as exc:
             criteria["grader_execution"] = CheckCriterion(
                 name="grader_execution",
+                status="passed",
+                detail="grader returned a reward",
+                evidence=_redact_evidence(graded),
+            )
+            return reward, None
+        except BaseException as exc:
+            criteria[phase] = CheckCriterion(
+                name=phase,
                 status="error",
-                detail=f"grader did not return a numeric reward: {exc}",
+                detail=(
+                    f"task did not start: {exc}"
+                    if phase == "task_startup"
+                    else f"grader did not return a numeric reward: {exc}"
+                ),
             )
             raise
-        criteria["grader_execution"] = CheckCriterion(
-            name="grader_execution",
-            status="passed",
-            detail="grader returned a reward",
-            evidence=_redact_evidence(graded),
-        )
-        return reward, None
+        finally:
+            if session_active:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(client.cancel(), timeout=2.0)
 
 
 def _run_error(run: Any) -> str | None:
