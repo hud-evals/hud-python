@@ -7,7 +7,7 @@ import contextlib
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
 
@@ -80,13 +80,20 @@ class ProcessGroup:
         The deadline follows the process leader rather than pipe EOF: a
         background child may inherit the pipes after the leader has finished.
         """
+        stdout = bytearray()
+        stderr = bytearray()
+
+        async def read_into(stream: asyncio.StreamReader, output: bytearray) -> None:
+            while chunk := await stream.read(65536):
+                output.extend(chunk)
+
         stdout_read = (
-            asyncio.create_task(self.process.stdout.read())
+            asyncio.create_task(read_into(self.process.stdout, stdout))
             if self.process.stdout is not None
             else None
         )
         stderr_read = (
-            asyncio.create_task(self.process.stderr.read())
+            asyncio.create_task(read_into(self.process.stderr, stderr))
             if self.process.stderr is not None
             else None
         )
@@ -102,11 +109,24 @@ class ProcessGroup:
             try:
                 await self.terminate()
             finally:
-                await asyncio.gather(*readers)
+                if readers:
+                    done, pending = await asyncio.wait(
+                        readers,
+                        timeout=_PROCESS_EXIT_POLL_INTERVAL,
+                    )
+                    for reader in pending:
+                        reader.cancel()
+                    if pending:
+                        # asyncio exposes no public way to close subprocess pipes
+                        # still held by a child which left the managed group.
+                        cast("Any", self.process)._transport.close()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    for reader in done:
+                        reader.result()
         return ProcessResult(
             returncode,
-            stdout_read.result() if stdout_read is not None else b"",
-            stderr_read.result() if stderr_read is not None else b"",
+            bytes(stdout),
+            bytes(stderr),
             timed_out,
         )
 

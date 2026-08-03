@@ -591,6 +591,9 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     both = bind_addresses([Peer("primary", 5432), Peer("replica", 5432)])
     assert both == {"primary": "127.0.0.1", "replica": "127.0.0.2"}
 
+    proxies = bind_addresses([Peer("agent", 3128), Peer("verifier", 3129)])
+    assert proxies == {"agent": "127.0.0.2", "verifier": "127.0.0.2"}
+
     with pytest.raises(ValueError, match="two peers are called"):
         bind_addresses([Peer("db", 5432), Peer("db", 6379)])
 

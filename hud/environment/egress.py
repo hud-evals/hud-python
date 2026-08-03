@@ -189,7 +189,7 @@ def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
     there, so the second moves down 127.0.0.0/8 and is reached by its name —
     which is how a task naming several services addresses them anyway.
     """
-    taken: set[tuple[str, int]] = set()
+    taken = {("127.0.0.1", BRIDGE_PORT), ("127.0.0.1", VISITOR_PORT)}
     addresses: dict[str, str] = {}
     for peer in peers:
         if peer.name in addresses:

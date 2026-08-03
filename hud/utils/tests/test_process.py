@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import sys
 
 import pytest
@@ -52,6 +53,17 @@ async def test_a_chatty_process_does_not_block_on_a_full_pipe() -> None:
 
     assert result.timed_out is False
     assert len(result.stdout) == 500000
+
+
+async def test_a_child_outside_the_group_cannot_hold_completion_open() -> None:
+    child = shlex.quote(sys.executable)
+    result = await asyncio.wait_for(
+        _run(f"{child} -c 'import os, time; os.setsid(); time.sleep(2)' & echo retained"),
+        1,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == b"retained\n"
 
 
 async def test_a_cancelled_call_leaves_nothing_running() -> None:
