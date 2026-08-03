@@ -224,7 +224,7 @@ def test_qa_run_no_wait_renders_reused_result_verdict() -> None:
             ["qa", "run", _AGENT_ID, _SUBJECT_ID, "--no-wait"],
         )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "failed" in result.output
     assert "A gap was found." in result.output
     platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")

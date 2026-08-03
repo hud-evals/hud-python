@@ -261,6 +261,11 @@ def run_agent(
             _print_json(runs)
         else:
             _render_results(runs)
+        terminal_results = [result for result in runs if result.get("status") in _TERMINAL_STATUSES]
+        if terminal_results:
+            exit_code = _result_exit_code(terminal_results)
+            if exit_code:
+                raise typer.Exit(exit_code)
         return
 
     deadline = time.monotonic() + timeout
