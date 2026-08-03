@@ -136,6 +136,36 @@ def test_qa_run_reuses_evidence_by_default_and_can_skip_waiting() -> None:
     platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")
 
 
+def test_qa_run_no_wait_renders_reused_result_verdict() -> None:
+    """A terminal selection reports its stored verdict without an extra result request."""
+    platform = MagicMock()
+    platform.get.return_value = _agent()
+    platform.post.return_value = [
+        {
+            **_run(status="completed"),
+            "result": {
+                "schema_version": "qa_agent_result.v1",
+                "verdict": "failed",
+                "summary": "A gap was found.",
+            },
+        },
+    ]
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        result = runner.invoke(
+            app,
+            ["qa", "run", _AGENT_ID, _SUBJECT_ID, "--no-wait"],
+        )
+
+    assert result.exit_code == 0
+    assert "failed" in result.output
+    assert "A gap was found." in result.output
+    platform.get.assert_called_once_with(f"/qa-agents/{_AGENT_ID}")
+
+
 def test_qa_run_waits_for_terminal_result_and_returns_quality_exit() -> None:
     """Waiting returns one for a completed quality failure, not an execution error."""
     platform = MagicMock()

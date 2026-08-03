@@ -90,13 +90,14 @@ def _selected_trace_ids(
 
 
 def _result_verdict(result: dict[str, Any]) -> tuple[str, str | None]:
-    canonical = result.get("canonical_result")
-    if isinstance(canonical, dict):
-        canonical_dict = cast("dict[str, Any]", canonical)
-        verdict = canonical_dict.get("verdict")
-        summary = canonical_dict.get("summary")
-        if isinstance(verdict, str):
-            return verdict, summary if isinstance(summary, str) else None
+    for result_field in ("canonical_result", "result"):
+        canonical = result.get(result_field)
+        if isinstance(canonical, dict):
+            canonical_dict = cast("dict[str, Any]", canonical)
+            verdict = canonical_dict.get("verdict")
+            summary = canonical_dict.get("summary")
+            if isinstance(verdict, str):
+                return verdict, summary if isinstance(summary, str) else None
     status = result.get("status")
     error = result.get("error")
     return (
