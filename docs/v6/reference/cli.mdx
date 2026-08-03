@@ -134,6 +134,22 @@ hud sync env                   # sync environment metadata
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/advanced/harbor-convert).
 
+### Resource QA
+
+Use Platform QA agents with Environment or Taskset subjects:
+
+```bash
+hud qa agents --subject-type environment
+hud qa run <agent-id> <environment-or-taskset-id>
+hud qa results environment <environment-id>
+```
+
+`hud qa run` reuses matching evidence by default and waits for every requested
+subject. Pass `--overwrite` to create a fresh attempt, `--no-wait` to return
+after launch, or `--json` for machine-readable output. Exit code `1` means the
+completed QA result failed or remained unknown, `2` means the request was
+rejected, and `3` means execution, polling, or the response contract failed.
+
 ## Inspect
 
 ### `hud jobs [<id>]`
