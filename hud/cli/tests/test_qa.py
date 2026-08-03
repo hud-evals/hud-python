@@ -112,6 +112,29 @@ def test_qa_agents_json_preserves_platform_payload() -> None:
     assert json.loads(result.output) == payload
 
 
+def test_qa_agents_accepts_task_scope() -> None:
+    """Task is a first-class resource scope for discovery."""
+    platform = MagicMock()
+    platform.get.return_value = {
+        "items": [{**_agent(), "subject_type": "task"}],
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+    }
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        result = runner.invoke(app, ["qa", "agents", "--subject-type", "task"])
+
+    assert result.exit_code == 0
+    platform.get.assert_called_once_with(
+        "/qa-agents",
+        params={"subject_type": "task", "limit": 50, "offset": 0},
+    )
+
+
 def test_qa_run_reuses_evidence_by_default_and_can_skip_waiting() -> None:
     """The default preserves evidence, while --no-wait returns after selection."""
     platform = MagicMock()
@@ -151,8 +174,30 @@ def test_qa_run_rejects_a_non_resource_agent_as_caller_input() -> None:
         )
 
     assert result.exit_code == 2
-    assert "must target environment or taskset" in result.output
+    assert "must target environment, taskset, or task" in result.output
     platform.post.assert_not_called()
+
+
+def test_qa_run_accepts_task_agent() -> None:
+    """Task agents use the native resource run endpoint without trace indirection."""
+    platform = MagicMock()
+    platform.get.return_value = {**_agent(), "subject_type": "task"}
+    platform.post.return_value = [{**_run(), "subject_type": "task"}]
+
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        result = runner.invoke(
+            app,
+            ["qa", "run", _AGENT_ID, _SUBJECT_ID, "--no-wait"],
+        )
+
+    assert result.exit_code == 0
+    platform.post.assert_called_once_with(
+        f"/qa-agents/{_AGENT_ID}/run-resources",
+        json={"subject_ids": [_SUBJECT_ID], "overwrite": False},
+    )
 
 
 def test_qa_run_no_wait_renders_reused_result_verdict() -> None:
@@ -414,7 +459,7 @@ def test_qa_results_rejects_trace_scope_before_request() -> None:
         result = runner.invoke(app, ["qa", "results", "trace", _SUBJECT_ID])
 
     assert result.exit_code == 2
-    assert "environment, taskset" in result.output
+    assert "environment, task, taskset" in result.output
     platform.get.assert_not_called()
 
 

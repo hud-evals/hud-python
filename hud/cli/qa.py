@@ -13,7 +13,7 @@ from hud.utils.exceptions import HudNetworkError, HudRequestError, HudTimeoutErr
 from hud.utils.platform import PlatformClient
 
 _POLL_INTERVAL_SECONDS = 2.0
-_RESOURCE_SUBJECT_TYPES = {"environment", "taskset"}
+_RESOURCE_SUBJECT_TYPES = {"environment", "taskset", "task"}
 _TERMINAL_STATUSES = {"completed", "error"}
 
 qa_app = typer.Typer(
@@ -173,7 +173,7 @@ def list_agents(
     subject_type: str = typer.Option(
         "environment",
         "--subject-type",
-        help="Resource scope: environment or taskset.",
+        help="Resource scope: environment, taskset, or task.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
     limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
@@ -213,7 +213,7 @@ def run_agent(
     agent_id: str = typer.Argument(..., help="QA agent UUID."),
     subject_ids: list[str] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more Environment or Taskset UUIDs.",
+        help="One or more Environment, Taskset, or Task UUIDs.",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -233,7 +233,7 @@ def run_agent(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
 ) -> None:
-    """Run one QA agent against Environment or Taskset subjects."""
+    """Run one QA agent against Environment, Taskset, or Task subjects."""
     platform = _platform()
     try:
         raw_agent = platform.get(f"/qa-agents/{agent_id}")
@@ -241,7 +241,7 @@ def run_agent(
             _execution_error("Platform returned an invalid resource QA agent.")
         agent_subject_type = raw_agent["subject_type"]
         if agent_subject_type not in _RESOURCE_SUBJECT_TYPES:
-            _request_error("QA agent must target environment or taskset subjects.")
+            _request_error("QA agent must target environment, taskset, or task subjects.")
         raw_runs = platform.post(
             f"/qa-agents/{agent_id}/run-resources",
             json={"subject_ids": subject_ids, "overwrite": overwrite},
@@ -305,14 +305,17 @@ def run_agent(
 
 @qa_app.command("results")
 def list_results(
-    subject_type: str = typer.Argument(..., help="Resource scope: environment or taskset."),
+    subject_type: str = typer.Argument(
+        ...,
+        help="Resource scope: environment, taskset, or task.",
+    ),
     subject_ids: list[str] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more Environment or Taskset UUIDs.",
+        help="One or more Environment, Taskset, or Task UUIDs.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
 ) -> None:
-    """Inspect QA results attached to Environment or Taskset subjects."""
+    """Inspect QA results attached to Environment, Taskset, or Task subjects."""
     platform = _platform()
     normalized_type = _subject_type(subject_type)
     try:
