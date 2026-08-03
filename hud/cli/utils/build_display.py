@@ -270,7 +270,7 @@ def display_upload_progress(
     if console is None:
         console = HUDConsole()
 
-    from hud.cli.utils.context import format_size
+    from hud.utils.build_context import format_size
 
     uploaded_str = format_size(uploaded_bytes)
     total_str = format_size(total_bytes)

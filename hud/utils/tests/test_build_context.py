@@ -1,11 +1,11 @@
-"""``hud.cli.utils.context`` — build-context tarball + ignore-pattern matching."""
+"""``hud.utils.build_context`` — build-context tarball + ignore-pattern matching."""
 
 from __future__ import annotations
 
 import tarfile
 from typing import TYPE_CHECKING
 
-from hud.cli.utils.context import (
+from hud.utils.build_context import (
     create_build_context_tarball,
     format_size,
     parse_ignore_file,
