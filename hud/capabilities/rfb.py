@@ -1,6 +1,6 @@
 """RFBClient — asyncvnc connection wrapper.
 
-Thin wrapper exposing the live ``asyncvnc.Client`` plus PNG-encoded
+Thin wrapper exposing the live ``asyncvnc.Client`` plus encoded
 screenshots. Higher-level composites (click, type, drag) live on ``RFBTool``.
 
 Latency note
@@ -24,7 +24,7 @@ import contextlib
 import io
 import logging
 from contextlib import AsyncExitStack
-from typing import ClassVar, Self
+from typing import ClassVar, Literal, Self
 from urllib.parse import urlsplit
 
 import asyncvnc
@@ -33,6 +33,8 @@ from PIL import Image
 from .base import Capability, CapabilityClient
 
 LOGGER = logging.getLogger("hud.capabilities.rfb")
+
+ScreenshotMimeType = Literal["image/png", "image/webp"]
 
 
 class RFBClient(CapabilityClient):
@@ -110,15 +112,21 @@ class RFBClient(CapabilityClient):
     def height(self) -> int:
         return self._conn.video.height
 
-    async def screenshot_png(self) -> bytes:
-        """Capture the framebuffer as PNG bytes; reconnect+retry on desync."""
+    async def screenshot_png(
+        self,
+        mime_type: ScreenshotMimeType = "image/png",
+    ) -> tuple[bytes, ScreenshotMimeType]:
+        """Capture the framebuffer in the requested format; reconnect on desync."""
         for attempt in range(3):
             try:
                 rgba = await self._conn.screenshot()
                 image = Image.fromarray(rgba)
                 buf = io.BytesIO()
-                image.save(buf, format="PNG")
-                return buf.getvalue()
+                if mime_type == "image/webp":
+                    image.save(buf, format="WEBP", quality=85)
+                else:
+                    image.save(buf, format="PNG")
+                return buf.getvalue(), mime_type
             except (ValueError, ConnectionError, OSError, EOFError) as exc:
                 LOGGER.warning("screenshot failed (attempt %d): %s", attempt + 1, exc)
                 if attempt == 2:
@@ -134,4 +142,4 @@ class RFBClient(CapabilityClient):
         await self._exit_stack.aclose()
 
 
-__all__ = ["RFBClient"]
+__all__ = ["RFBClient", "ScreenshotMimeType"]

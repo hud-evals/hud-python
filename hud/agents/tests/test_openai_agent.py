@@ -8,10 +8,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+import mcp.types as mcp_types
 from openai.types.responses import ResponseOutputText
 
 from hud.agents.openai.agent import OpenAIAgent, OpenAIRunState
 from hud.agents.openai.tools.base import format_openai_result
+from hud.agents.openai.tools.computer import OPENAI_COMPUTER_SPEC, OpenAIComputerTool
 from hud.agents.types import OpenAIConfig
 from hud.types import MCPToolCall, MCPToolResult
 
@@ -50,6 +52,28 @@ def test_format_openai_result_empty_output_emits_one_text_item() -> None:
     assert formatted["type"] == "function_call_output"
     assert formatted["call_id"] == "call_1"
     assert formatted["output"] == [{"type": "input_text", "text": ""}]
+
+
+def test_format_computer_result_preserves_screenshot_mime_type() -> None:
+    agent = _agent(SimpleNamespace(id="r", output=[]))
+    tool = OpenAIComputerTool(spec=OPENAI_COMPUTER_SPEC, client=cast("Any", object()))
+    state = OpenAIRunState(tools={"computer": tool})
+    result = MCPToolResult(
+        content=[
+            mcp_types.ImageContent(
+                type="image",
+                data="d2VicA==",
+                mimeType="image/webp",
+            ),
+        ],
+    )
+
+    formatted = cast(
+        "dict[str, Any]",
+        agent._format_result(MCPToolCall(id="call_1", name="computer"), result, state),
+    )
+
+    assert formatted["output"]["image_url"] == "data:image/webp;base64,d2VicA=="
 
 
 def _api_response(
