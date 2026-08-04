@@ -15,7 +15,8 @@ from collections.abc import AsyncGenerator  # noqa: TC003
 from pathlib import Path
 from typing import Any
 
-from hud.environment import Environment, Mount
+from hud.capabilities import Capability
+from hud.environment import Environment, Mount, Peer
 from hud.environment.egress import ANY_HOST
 from hud.graders import EvaluationResult
 
@@ -30,10 +31,13 @@ WORKDIR = Path(CONFIG["workdir"])
 os.chdir(WORKDIR)
 
 
-def network(phase: dict[str, Any]) -> tuple[bool, frozenset[str]]:
+def network(phase: dict[str, Any] | None) -> tuple[bool, frozenset[str]]:
     baseline = CONFIG["environment"]
-    mode = phase.get("network_mode") or baseline["network_mode"]
-    hosts = phase.get("allowed_hosts") if phase.get("network_mode") else baseline["allowed_hosts"]
+    mode = phase["network_mode"] if phase is not None else baseline["network_mode"]
+    hosts = phase["allowed_hosts"] if phase is not None else baseline["allowed_hosts"]
+    if mode is None:
+        mode = baseline["network_mode"]
+        hosts = baseline["allowed_hosts"]
     if mode == "no-network":
         return False, frozenset()
     if mode == "allowlist":
@@ -41,9 +45,9 @@ def network(phase: dict[str, Any]) -> tuple[bool, frozenset[str]]:
     return True, frozenset({ANY_HOST})
 
 
-def identity(phase: dict[str, Any]) -> tuple[int, int] | None:
-    declared = phase.get("user")
-    user = str(declared if declared is not None else CONFIG.get("image_user") or "")
+def identity(phase: dict[str, Any] | None) -> tuple[int, int] | None:
+    declared = phase["user"] if phase is not None else None
+    user = str(declared if declared is not None else CONFIG["image_user"] or "")
     if not user:
         return None
     user_name, separator, group_name = user.partition(":")
@@ -85,11 +89,11 @@ def home(user_id: int | None) -> str | None:
 
 
 agent = CONFIG["agent"]
-image_identity = identity({})
+image_identity = identity(None)
 agent_identity = identity(agent)
 agent_uid = agent_identity[0] if agent_identity is not None else None
 agent_network, agent_hosts = network(agent)
-environment_hosts = network({})[1]
+environment_hosts = network(None)[1]
 rooted_at_filesystem = len(WORKDIR.parts) == 1
 harness_parent = ROOT.parent
 harness_mounts = (
@@ -107,6 +111,8 @@ agent_mounts = (
 )
 
 env = Environment(CONFIG["name"])
+for capability in CONFIG["capabilities"]:
+    env.add_capability(Capability.from_manifest(capability))
 workspace = env.workspace(
     WORKDIR,
     guest_path=WORKDIR.as_posix(),
@@ -128,6 +134,10 @@ workspace = env.workspace(
     },
     network=agent_network,
     allowed_hosts=agent_hosts,
+    peers=[
+        Peer(peer["name"], peer["port"], target=(peer["name"], peer["port"]))
+        for peer in CONFIG["peers"]
+    ],
     require_isolation=True,
 )
 

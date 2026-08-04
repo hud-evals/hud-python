@@ -21,6 +21,9 @@ uv run run.py ./terminal-bench --agent claude-sonnet-4-5
 
 # Just the ones you are debugging
 uv run run.py ./terminal-bench --task qemu-startup --task configure-git-webserver
+
+# A multi-container task with an MCP sidecar
+uv run run.py ./hello-mcp --agent claude-sonnet-4-5
 ```
 
 Output is one row per task plus a mean over the tasks that actually finished:
@@ -38,8 +41,8 @@ Runs that end in `error` are reported separately from scored runs.
 
 ## What you need
 
-- Docker. `DockerRuntime` gives every container the profile the in-image
-  workspace sandbox needs, so no extra flags.
+- Docker with Compose. The adapter records each generated Compose file in the task's
+  runtime configuration, and `DockerRuntime()` runs its authored dependencies and health checks.
 - Network, for the image builds and for whatever the tasks fetch.
 - `HUD_API_KEY` only when `--agent` names a model, for gateway inference.
 

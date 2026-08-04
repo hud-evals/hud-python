@@ -1,0 +1,10 @@
+[task]
+name = "hello-mcp"
+
+[verifier]
+timeout_sec = 30
+
+[[environment.mcp_servers]]
+name = "mcp-server"
+transport = "streamable-http"
+url = "http://mcp-server:8000/mcp"

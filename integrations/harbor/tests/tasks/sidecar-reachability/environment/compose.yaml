@@ -1,0 +1,6 @@
+services:
+  main: {}
+  web:
+    image: python:3.11-alpine
+    command: ["python", "-m", "http.server", "5678"]
+    expose: ["5678"]
