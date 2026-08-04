@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 import hud.eval.runtime as runtime_module
+from hud.eval.compose import ComposeService, ImageConfig
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -975,8 +976,17 @@ services:
                 ),
                 "",
             )
-        if args[:3] == ("image", "inspect", "--format"):
-            return json.dumps({"Entrypoint": ["docker-entrypoint.sh"], "Cmd": ["redis-server"]}), ""
+        if args[:3] == ("buildx", "imagetools", "inspect"):
+            return (
+                json.dumps(
+                    {
+                        "Entrypoint": ["docker-entrypoint.sh"],
+                        "Cmd": ["redis-server"],
+                        "WorkingDir": "/data",
+                    }
+                ),
+                "",
+            )
         raise AssertionError(args)
 
     monkeypatch.setattr(runtime_module, "_docker", docker)
@@ -1031,7 +1041,26 @@ services:
         "--format",
         "json",
     )
+    assert docker_calls[1][:3] == ("buildx", "imagetools", "inspect")
     assert docker_calls[1][-1] == "redis:7"
+
+
+def test_compose_service_applies_image_defaults_once() -> None:
+    image = ImageConfig(
+        Entrypoint=["docker-entrypoint.sh"],
+        Cmd=["redis-server"],
+        WorkingDir="/data",
+    )
+
+    inherited = ComposeService(image="redis:7").with_image("redis:7", image)
+    assert inherited.argv == ["docker-entrypoint.sh", "redis-server"]
+    assert inherited.working_dir == "/data"
+
+    overridden = ComposeService(
+        image="redis:7",
+        entrypoint=["custom-entrypoint"],
+    ).with_image("redis:7", image)
+    assert overridden.argv == ["custom-entrypoint"]
 
 
 async def test_daytona_task_runtime_config_overlays_provider_defaults(

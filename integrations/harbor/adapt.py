@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import logging
@@ -19,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from hud.capabilities import Capability
 from hud.eval import Task, Taskset
+from hud.eval.compose import ComposeConfig, ComposeService, ImageConfig
 from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeResources
 from hud.utils.docker import docker
 from hud.utils.naming import normalize_environment_name
@@ -122,7 +122,7 @@ class HarborTask:
     path: Path
     config: TaskConfig
     environment_hash: str
-    compose: dict[str, Any] | None
+    compose: ComposeConfig | None
 
 
 async def adapt(
@@ -200,33 +200,24 @@ async def adapt(
             with tempfile.TemporaryDirectory(prefix="hud-harbor-compose-") as directory:
                 base_compose = Path(directory) / "base.json"
                 base_compose.write_text(json.dumps({"services": {"main": {"image": "hud-main"}}}))
-                output, _ = await docker(
-                    "compose",
-                    "--project-name",
-                    "hud",
-                    "--project-directory",
-                    str(environment_dir),
-                    "--file",
-                    str(base_compose),
-                    "--file",
-                    str(authored_compose),
-                    "config",
-                    "--format",
-                    "json",
-                )
-            try:
-                compose = json.loads(output)
-                compose["services"]["main"]
-            except (json.JSONDecodeError, KeyError, TypeError) as error:
-                raise ValueError(f"{task_dir.name} did not resolve to a Compose project") from error
-            if "name" in compose:
-                del compose["name"]
-            if (
-                "networks" in compose
-                and "default" in compose["networks"]
-                and compose["networks"]["default"] == {"name": "hud_default"}
-            ):
-                compose["networks"]["default"] = {}
+                try:
+                    compose = await ComposeConfig.load(
+                        base_compose,
+                        authored_compose,
+                        docker=docker,
+                        project_name="hud",
+                        project_directory=environment_dir,
+                    )
+                    compose.services["main"]
+                except (ValidationError, KeyError) as error:
+                    raise ValueError(
+                        f"{task_dir.name} did not resolve to a Compose project"
+                    ) from error
+            compose.name = None
+            if "default" in compose.networks and compose.networks["default"] == {
+                "name": "hud_default"
+            }:
+                compose.networks["default"] = {}
 
         environment_digest = hashlib.sha256()
         if environment_dir.exists():
@@ -266,11 +257,11 @@ async def adapt(
         name = f"{base_name}-{digest}"
         source = group[0]
         environment = source.config.environment
-        compose_main = {"image": None, "environment": {}} | (
-            source.compose["services"]["main"] if source.compose is not None else {}
+        compose_main = (
+            source.compose.services["main"] if source.compose is not None else ComposeService()
         )
         dockerfile = source.path / "environment" / "Dockerfile"
-        compose_image = compose_main["image"]
+        compose_image = compose_main.image
         base_image = environment.docker_image or (
             compose_image if compose_image != "hud-main" else None
         )
@@ -288,40 +279,20 @@ async def adapt(
         else:
             raise FileNotFoundError(f"{source.path.name} has no environment/Dockerfile")
 
-        output, _ = await docker(
-            "image",
-            "inspect",
-            "--format",
-            "{{json .Config}}",
-            base_image,
-        )
-        image_config = {
-            "User": None,
-            "WorkingDir": None,
-            "Entrypoint": None,
-            "Env": [],
-        } | json.loads(output)
-        compose = copy.deepcopy(source.compose)
+        image_config = await ImageConfig.inspect(base_image, docker)
+        compose = source.compose.model_copy(deep=True) if source.compose is not None else None
         peers = []
         if compose is not None:
-            for service_name, service in compose["services"].items():
+            for service_name, service in compose.services.items():
                 if service_name == "main":
                     continue
-                service_config = {"expose": (), "ports": (), "image": None} | service
-                exposed_ports = service_config["expose"]
-                published_ports = service_config["ports"]
                 ports = {
                     int(value)
-                    for exposed in exposed_ports
+                    for exposed in service.expose
                     if (value := str(exposed).partition("/")[0]).isdigit()
                 }
                 ports.update(
-                    published["target"]
-                    for published in published_ports
-                    if isinstance(published, dict)
-                    and ("protocol" not in published or published["protocol"] == "tcp")
-                    and "target" in published
-                    and isinstance(published["target"], int)
+                    published.target for published in service.ports if published.protocol == "tcp"
                 )
                 if len(ports) > 1:
                     raise NotImplementedError(
@@ -331,13 +302,18 @@ async def adapt(
                 if ports:
                     peers.append({"name": service_name, "port": next(iter(ports))})
 
-                source_image = service_config["image"]
-                if "build" in service:
+                source_image = service.image
+                if service.build is not None:
                     source_image = f"hud-harbor-sidecar-build:{uuid.uuid4().hex}"
-                    service["image"] = source_image
+                    compose.services[service_name] = service.model_copy(
+                        update={"image": source_image}
+                    )
                     with tempfile.TemporaryDirectory(prefix="hud-harbor-sidecar-") as directory:
                         compose_file = Path(directory) / "compose.json"
-                        compose_file.write_text(json.dumps(compose), encoding="utf-8")
+                        compose_file.write_text(
+                            compose.model_dump_json(exclude_none=True),
+                            encoding="utf-8",
+                        )
                         await docker("compose", "--file", str(compose_file), "build", service_name)
                 elif source_image:
                     await docker("pull", source_image)
@@ -345,34 +321,7 @@ async def adapt(
                     raise ValueError(
                         f"Compose service {service_name!r} has neither image nor build"
                     )
-                output, _ = await docker(
-                    "image", "inspect", "--format", "{{json .Config}}", source_image
-                )
-                image_runtime = {
-                    "Entrypoint": None,
-                    "Cmd": None,
-                    "WorkingDir": None,
-                } | json.loads(output)
-                compose_runtime = {
-                    "entrypoint": None,
-                    "command": None,
-                    "working_dir": None,
-                } | service
-                service["entrypoint"] = (
-                    image_runtime["Entrypoint"] or []
-                    if compose_runtime["entrypoint"] is None
-                    else compose_runtime["entrypoint"]
-                )
-                service["command"] = (
-                    image_runtime["Cmd"] or []
-                    if compose_runtime["command"] is None
-                    else compose_runtime["command"]
-                )
-                service["working_dir"] = (
-                    image_runtime["WorkingDir"] or "/"
-                    if compose_runtime["working_dir"] is None
-                    else compose_runtime["working_dir"]
-                )
+                sidecar_config = await ImageConfig.inspect(source_image, docker)
                 image_id, _ = await docker("image", "inspect", "--format", "{{.Id}}", source_image)
                 fingerprint = image_id.strip().removeprefix("sha256:")[:16]
                 component = normalize_environment_name(f"{name}-{service_name}", default="sidecar")
@@ -384,9 +333,10 @@ async def adapt(
                 await docker("tag", source_image, sidecar_image)
                 if push:
                     await docker("push", sidecar_image)
-                service["image"] = sidecar_image
-                if "build" in service:
-                    del service["build"]
+                compose.services[service_name] = service.with_image(
+                    sidecar_image,
+                    sidecar_config,
+                ).model_copy(update={"build": None})
         context = dataset / ".hud-adapt" / name
         if context.exists():
             shutil.rmtree(context)
@@ -407,22 +357,22 @@ async def adapt(
             newline="\n",
         )
 
-        workdir = environment.workdir or image_config["WorkingDir"] or "/"
+        workdir = environment.workdir or image_config.working_dir or "/"
         if Path(workdir).is_relative_to(HUD_ROOT):
             raise ValueError(f"Harbor workdir {workdir!r} is inside reserved path {HUD_ROOT}")
         image_env = {}
-        for entry in image_config["Env"]:
+        for entry in image_config.environment:
             key, _, value = entry.partition("=")
             image_env[key] = value
         manifest = {
             "name": name,
             "workdir": workdir,
-            "image_user": image_config["User"] or None,
+            "image_user": image_config.user or None,
             "image_env": image_env,
-            "entrypoint": image_config["Entrypoint"] or [],
+            "entrypoint": image_config.entrypoint or [],
             "environment": {
                 "env": {
-                    **compose_main["environment"],
+                    **compose_main.environment,
                     **environment.env,
                 },
                 "network_mode": environment.network_mode,
@@ -498,21 +448,25 @@ async def adapt(
             await docker("push", image)
 
         if compose is not None:
-            main = compose["services"]["main"]
-            main["image"] = image
-            for field in ("build", "command", "entrypoint"):
-                main.pop(field, None)
-            output, _ = await docker("image", "inspect", "--format", "{{json .Config}}", image)
-            image_runtime = {
-                "Entrypoint": None,
-                "Cmd": None,
-                "WorkingDir": None,
-            } | json.loads(output)
-            main["entrypoint"] = image_runtime["Entrypoint"] or []
-            main["command"] = image_runtime["Cmd"] or []
-            main["working_dir"] = image_runtime["WorkingDir"] or "/"
+            main = compose.services["main"].model_copy(
+                update={
+                    "build": None,
+                    "command": None,
+                    "entrypoint": None,
+                    "working_dir": None,
+                }
+            )
+            compose.services["main"] = main.with_image(
+                image,
+                await ImageConfig.inspect(image, docker),
+            )
             (context / "compose.json").write_text(
-                json.dumps(compose, indent=2, sort_keys=True) + "\n",
+                json.dumps(
+                    compose.model_dump(mode="json", exclude_none=True),
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
                 encoding="utf-8",
             )
 
