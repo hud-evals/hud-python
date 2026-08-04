@@ -5,12 +5,18 @@ computer-use action dispatch (translation to RFB primitives), without a live VNC
 
 from __future__ import annotations
 
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import mcp.types as mcp_types
+from PIL import Image
 
 from hud.agents.claude.tools.computer import (
     CLAUDE_COMPUTER_SPECS,
     ClaudeComputerTool,
+    _crop_png,
     _hold_keys,
     _split_keys,
     _translate_key,
@@ -25,6 +31,7 @@ class RecordingComputer(ClaudeComputerTool):
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
+        self.screenshot_mime_type = "image/webp"
         self.client = SimpleNamespace(width=200, height=100)
 
     async def screenshot(self) -> Any:
@@ -147,3 +154,27 @@ async def test_unsupported_action_errors() -> None:
     result = await tool.execute({"action": "frobnicate"})
     assert result.isError
     assert "unsupported" in result_text(result).lower()
+
+
+def test_crop_reports_encoded_mime_type() -> None:
+    source = BytesIO()
+    Image.effect_noise((128, 128), 100).convert("RGB").save(source, format="PNG")
+
+    cropped, mime_type = _crop_png(source.getvalue(), (0, 0, 128, 128), "image/webp")
+
+    assert mime_type == "image/webp"
+    assert cropped.startswith(b"RIFF")
+
+
+async def test_zoom_reports_encoded_mime_type() -> None:
+    tool = RecordingComputer()
+    tool.client.screenshot_png = AsyncMock(return_value=(b"png", "image/png"))
+
+    with patch(
+        "hud.agents.claude.tools.computer._crop_png",
+        return_value=(b"webp", "image/webp"),
+    ):
+        result = await tool._zoom({"region": [0, 0, 10, 10]})
+
+    image = next(block for block in result.content if isinstance(block, mcp_types.ImageContent))
+    assert image.mimeType == "image/webp"

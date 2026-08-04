@@ -16,12 +16,14 @@ from typing import TYPE_CHECKING, Literal
 
 import mcp.types as mcp_types
 
-from hud.agents.tools.base import AgentTool
+from hud.agents.tools.base import AgentTool, AgentToolSpec
 from hud.capabilities import RFBClient
 from hud.types import MCPToolResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterable
+
+    from hud.capabilities.rfb import ScreenshotMimeType
 
 
 #: VNC button index (asyncvnc uses 0 = left, 1 = middle, 2 = right, 3 = wheel-up, 4 = wheel-down).
@@ -33,6 +35,16 @@ class RFBTool(AgentTool[RFBClient]):
     """Capability base: tool driven by an ``RFBClient`` (VNC/RFB)."""
 
     client_type = RFBClient
+
+    def __init__(
+        self,
+        *,
+        spec: AgentToolSpec,
+        client: RFBClient,
+        screenshot_mime_type: ScreenshotMimeType = "image/webp",
+    ) -> None:
+        super().__init__(spec=spec, client=client)
+        self.screenshot_mime_type: ScreenshotMimeType = screenshot_mime_type
 
     # ─── geometry ────────────────────────────────────────────────────
 
@@ -47,14 +59,14 @@ class RFBTool(AgentTool[RFBClient]):
     # ─── framebuffer ─────────────────────────────────────────────────
 
     async def screenshot(self) -> MCPToolResult:
-        """Capture a PNG screenshot and return it as a single ``ImageContent`` block."""
-        png = await self.client.screenshot_png()
+        """Capture a screenshot and return it as a single ``ImageContent`` block."""
+        screenshot, mime_type = await self.client.screenshot_png(self.screenshot_mime_type)
         return MCPToolResult(
             content=[
                 mcp_types.ImageContent(
                     type="image",
-                    mimeType="image/png",
-                    data=base64.b64encode(png).decode("ascii"),
+                    mimeType=mime_type,
+                    data=base64.b64encode(screenshot).decode("ascii"),
                 )
             ],
         )

@@ -278,13 +278,13 @@ class ClaudeComputerTool(RFBTool):
             x0, y0, x1, y1 = (int(v) for v in region_seq)
         except (TypeError, ValueError):
             return tool_err("region must contain 4 integers")
-        png = await self.client.screenshot_png()
-        cropped = _crop_png(png, (x0, y0, x1, y1))
+        screenshot, mime_type = await self.client.screenshot_png(self.screenshot_mime_type)
+        cropped, mime_type = _crop_png(screenshot, (x0, y0, x1, y1), mime_type)
         return MCPToolResult(
             content=[
                 mcp_types.ImageContent(
                     type="image",
-                    mimeType="image/png",
+                    mimeType=mime_type,
                     data=base64.b64encode(cropped).decode("ascii"),
                 )
             ],
@@ -349,14 +349,21 @@ def _drag_path(arguments: dict[str, Any]) -> list[tuple[int, int]]:
     return path
 
 
-def _crop_png(png: bytes, region: tuple[int, int, int, int]) -> bytes:
+def _crop_png(
+    png: bytes,
+    region: tuple[int, int, int, int],
+    mime_type: str,
+) -> tuple[bytes, str]:
     from PIL import Image
 
     image = Image.open(BytesIO(png))
     cropped = image.crop(region)
     buf = BytesIO()
-    cropped.save(buf, format="PNG")
-    return buf.getvalue()
+    if mime_type == "image/webp":
+        cropped.save(buf, format="WEBP", quality=85)
+    else:
+        cropped.save(buf, format="PNG")
+    return buf.getvalue(), mime_type
 
 
 __all__ = ["CLAUDE_COMPUTER_SPECS", "ClaudeComputerTool"]
