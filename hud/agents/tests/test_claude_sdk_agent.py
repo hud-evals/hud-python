@@ -13,7 +13,8 @@ from __future__ import annotations
 import base64
 import re
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -150,3 +151,49 @@ async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
     assert run.trace.status == "error"
     assert run.trace.extra["exit_status"] == 1
     assert run.steps[0].error == "boom"
+
+
+@pytest.mark.parametrize(
+    ("transport", "claude_type"),
+    [("streamable-http", "http"), ("sse", "sse")],
+)
+async def test_manifest_mcp_capability_is_written_for_remote_claude(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: Literal["streamable-http", "sse"],
+    claude_type: str,
+) -> None:
+    shell = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"shell": "bash"},
+    )
+    mcp = Capability.mcp(
+        name="database",
+        url="http://database:8000/mcp",
+        transport=transport,
+    )
+    ssh = SSHClient(shell, cast("Any", object()))
+
+    class Client:
+        manifest = SimpleNamespace(bindings=[shell, mcp])
+
+        async def open(self, ref: str) -> SSHClient:
+            assert ref == "ssh"
+            return ssh
+
+    agent = ClaudeSDKAgent()
+    execute = AsyncMock()
+    monkeypatch.setattr(agent, "_exec", execute)
+
+    await agent(
+        cast(
+            "Any",
+            SimpleNamespace(client=Client(), prompt_text="call the tool"),
+        )
+    )
+
+    assert agent._mcp_servers == {
+        "database": {"type": claude_type, "url": "http://database:8000/mcp"}
+    }
+    execute.assert_awaited_once()

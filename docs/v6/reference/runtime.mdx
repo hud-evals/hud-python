@@ -51,8 +51,8 @@ To deploy an environment to the platform and run against it, see
 
 ## RuntimeConfig
 
-`RuntimeConfig` carries the construction hints a container-based runtime needs: which image, how much
-hardware, and what timeouts. Set it on the runtime (`runtime_config=`) or per row on
+`RuntimeConfig` carries the typed construction input a container-based runtime needs: an image or
+Compose file, hardware, and timeouts. Set it on the runtime (`runtime_config=`) or per row on
 [`Task.runtime_config`](/v6/reference/tasks#task); the runtime merges the two and applies what it
 supports.
 
@@ -64,11 +64,14 @@ RuntimeConfig(
     resources=RuntimeResources(cpu=4, memory_mb=8192, gpu=RuntimeGPU(type="A100", count=1)),
     limits=RuntimeLimits(startup_timeout_s=300, run_timeout_s=1800),
 )
+
+RuntimeConfig(compose="./compose.yaml")
 ```
 
 | Field | Description |
 |-------|-------------|
 | `image` | Image to run. |
+| `compose` | Path to a Compose file. Mutually exclusive with `image`. |
 | `resources` | `RuntimeResources(cpu, memory_mb, gpu=RuntimeGPU(type, count))`. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
@@ -122,7 +125,12 @@ DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None)
 - **`image`** - image name to run; shorthand for `runtime_config.image`.
 - **`port`** - port the image's CMD serves inside the container (the scaffolded `Dockerfile.hud` serves `8765`).
 - **`run_args`** - extra `docker run` flags, e.g. `["--gpus", "all"]` or `["-e", "KEY=VAL"]`.
-- **`runtime_config`** - a `RuntimeConfig` (image, resources) for finer control.
+- **`runtime_config`** - a `RuntimeConfig` (image or Compose file, resources) for finer control.
+
+For Compose environments, the service named `main` must serve HUD's control channel on `port`.
+`DockerRuntime` starts the whole project and publishes only that service's control port. The Compose
+file belongs in `RuntimeConfig`; constructor-level `image` remains a compatibility shorthand for
+`runtime_config.image`.
 
 `DockerRuntime` always starts with HUD's compact seccomp profile and the system
 path configuration required by `Workspace`'s bubblewrap sessions. The profile
@@ -157,6 +165,10 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 - **`ssh_host`** / **`ssh_expires_minutes`** - SSH tunnel settings (Daytona exposes services over an SSH local-forward).
 
 Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`, a task's `runtime_config.resources` builds a sized variant under a suffixed name (`my-env-4cpu`); without `image`, an already-built snapshot cannot be resized.
+
+Compose environments run inside a managed Linux VM snapshot so the guest can start Docker. The
+selected Daytona region must have a Linux-VM runner available; select the region with
+`DAYTONA_TARGET` when the organization's default region does not.
 
 ### `HUDRuntime`
 

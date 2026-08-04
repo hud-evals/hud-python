@@ -7,7 +7,7 @@ import re
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit
 
 #: Matches the scheme prefix of a URL (RFC 3986).
@@ -58,11 +58,18 @@ class Capability:
 
     @classmethod
     def from_manifest(cls, data: dict[str, Any]) -> Capability:
+        protocol = data["protocol"]
+        url = data["url"]
+        params = dict(data["params"]) if "params" in data and data["params"] is not None else {}
+        if protocol.split("/", 1)[0] == "mcp" and "transport" not in params:
+            params["transport"] = (
+                "websocket" if urlsplit(url).scheme in {"ws", "wss"} else "streamable-http"
+            )
         return cls(
             name=data["name"],
-            protocol=data["protocol"],
-            url=data["url"],
-            params=dict(data.get("params") or {}),
+            protocol=protocol,
+            url=url,
+            params=params,
         )
 
     # ─── well-known protocol factories ─────────────────────────────────
@@ -152,6 +159,7 @@ class Capability:
         name: str = "tools",
         url: str,
         auth_token: str | None = None,
+        transport: Literal["sse", "streamable-http", "websocket"] | None = None,
     ) -> Capability:
         """``mcp/2025-11-25`` — MCP server (ws/wss/http/https; no stdio)."""
         m = SCHEME_RE.match(url)
@@ -165,7 +173,13 @@ class Capability:
             raise ValueError(
                 f"mcp/2025-11-25: only ws/wss/http/https URLs are supported, got {scheme!r}",
             )
-        params: dict[str, Any] = {}
+        if transport == "websocket" and scheme not in {"ws", "wss"}:
+            raise ValueError("mcp websocket transport requires a ws:// or wss:// URL")
+        if transport in {"sse", "streamable-http"} and scheme not in {"http", "https"}:
+            raise ValueError(f"mcp {transport} transport requires an http:// or https:// URL")
+        if transport is None:
+            transport = "websocket" if scheme in {"ws", "wss"} else "streamable-http"
+        params: dict[str, Any] = {"transport": transport}
         if auth_token is not None:
             params["auth_token"] = auth_token
         return cls(name=name, protocol="mcp/2025-11-25", url=normalized, params=params)

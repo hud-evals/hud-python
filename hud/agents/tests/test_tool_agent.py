@@ -7,14 +7,15 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 
 from __future__ import annotations
 
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import mcp.types as mcp_types
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentConfig, AgentStep, ToolStep
-from hud.capabilities import SSHClient
+from hud.capabilities import Capability, CapabilityClient, MCPClient, SSHClient
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 _Msg = dict[str, Any]
@@ -62,6 +63,34 @@ def test_init_subclass_derives_clients_from_catalog() -> None:
         tool_catalog = (OpenAIShellTool,)
 
     assert WithCatalog.clients == (SSHClient,)
+
+
+async def test_agent_opens_every_mcp_capability_by_name() -> None:
+    capabilities = [
+        Capability.mcp(name="database", url="http://database:8000/mcp"),
+        Capability.mcp(name="search", url="http://search:8000/mcp"),
+    ]
+    opened: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=capabilities)
+
+        async def open(self, ref: str) -> CapabilityClient:
+            opened.append(ref)
+            return cast("CapabilityClient", object())
+
+    class MultiMCPAgent(DictAgent):
+        clients = (MCPClient,)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await MultiMCPAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
+
+    assert opened == ["database", "search"]
 
 
 # ─── initial messages / user text formatting ──────────────────────────

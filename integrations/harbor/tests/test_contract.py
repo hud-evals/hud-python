@@ -21,8 +21,44 @@ def fake_docker(monkeypatch):
 
     async def run(*args: str, **_kwargs):
         calls.append(args)
-        if args[:3] == ("image", "inspect", "--format"):
-            return json.dumps({"User": "", "WorkingDir": "/workspace"}), ""
+        if args[:4] == ("image", "inspect", "--format", "{{json .Config}}"):
+            return json.dumps({"User": "", "WorkingDir": "/workspace", "Entrypoint": None}), ""
+        if args[:4] == ("image", "inspect", "--format", "{{.Id}}"):
+            return "sha256:0123456789abcdef0123456789abcdef\n", ""
+        if args[0] == "compose" and args[-3:] == ("config", "--format", "json"):
+            return json.dumps(
+                {
+                    "name": "task",
+                    "services": {
+                        "main": {
+                            "image": "hud-main",
+                            "environment": {"FROM_COMPOSE": "yes"},
+                            "depends_on": {
+                                "redis": {
+                                    "condition": "service_healthy",
+                                    "required": True,
+                                }
+                            },
+                            "networks": {"default": None},
+                        },
+                        "redis": {
+                            "image": "redis:7-alpine",
+                            "command": ["redis-server", "--save", ""],
+                            "environment": {"SIDE": "car"},
+                            "expose": ["6379/tcp"],
+                            "healthcheck": {
+                                "test": ["CMD", "redis-cli", "ping"],
+                                "interval": "2s",
+                                "timeout": "3s",
+                                "retries": 5,
+                                "start_period": "1s",
+                            },
+                            "networks": {"default": None},
+                        },
+                    },
+                    "networks": {"default": {"name": "task_default"}},
+                }
+            ), ""
         return "", ""
 
     module = importlib.import_module("integrations.harbor.adapt")
@@ -59,6 +95,74 @@ async def test_adapt_builds_the_source_then_an_authored_hud_environment(
     assert 'Environment(CONFIG["name"])' not in served
     assert (context / "tasks" / "task-a" / "instruction.md").is_file()
     assert (context / "tasks" / "task-a" / "tests" / "test.sh").is_file()
+    assert not (context / "compose.json").exists()
+
+
+async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(await harbor.adapt(tmp_path))
+
+    assert row.runtime_config is not None
+    assert row.runtime_config.image is None
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    assert row.runtime_config.compose == context / "compose.json"
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
+    redis = compose["services"]["redis"]
+    assert redis["image"].startswith("hud-harbor-sidecar:")
+    assert redis["image"].endswith("-0123456789abcdef")
+    assert redis["environment"] == {"SIDE": "car"}
+    assert redis["command"] == ["redis-server", "--save", ""]
+    assert redis["expose"] == ["6379/tcp"]
+    assert redis["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
+    assert "build" not in redis
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["environment"]["env"] == {"FROM_COMPOSE": "yes"}
+    assert manifest["capabilities"] == []
+    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+    assert ("pull", "redis:7-alpine") in fake_docker
+    assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
+
+
+async def test_network_mcp_servers_become_named_capabilities(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
+        encoding="utf-8",
+    )
+    (task / "task.toml").write_text(
+        """
+[[environment.mcp_servers]]
+name = "redis-tools"
+transport = "streamable-http"
+url = "http://redis:6379/mcp"
+args = []
+""",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["capabilities"] == [
+        {
+            "name": "redis-tools",
+            "params": {"transport": "streamable-http"},
+            "protocol": "mcp/2025-11-25",
+            "url": "http://redis:6379/mcp",
+        }
+    ]
 
 
 async def test_adapt_groups_identical_images_and_keeps_row_metadata(
@@ -264,7 +368,10 @@ async def test_image_entrypoint_is_preserved_as_runtime_data(
             "multiple GPU types",
         ),
         ('[environment]\ngpu_types = ["H100"]\n', "GPU types without GPUs"),
-        ('[[environment.mcp_servers]]\nname = "db"\n', "MCP servers"),
+        (
+            '[[environment.mcp_servers]]\nname = "db"\ntransport = "stdio"\ncommand = "db-mcp"\n',
+            "stdio MCP servers",
+        ),
         ('[verifier]\nenvironment_mode = "separate"\n', "separate verifier"),
     ],
 )

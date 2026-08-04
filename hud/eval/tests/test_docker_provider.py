@@ -148,6 +148,10 @@ class _FakeModalSandbox:
         self.wait_until_ready = SimpleNamespace(aio=self._wait_until_ready)
         self.tunnels = SimpleNamespace(aio=self._tunnels)
         self.terminate = SimpleNamespace(aio=self._terminate)
+        self.filesystem = SimpleNamespace(
+            copy_from_local=SimpleNamespace(aio=self._copy_from_local)
+        )
+        self.exec = SimpleNamespace(aio=self._exec)
 
     async def _wait_until_ready(self, **kwargs: object) -> None:
         self._calls["ready_timeout"] = kwargs["timeout"]
@@ -157,6 +161,27 @@ class _FakeModalSandbox:
 
     async def _terminate(self) -> None:
         self._calls["terminated"] = True
+
+    async def _copy_from_local(self, source: Path, target: str) -> None:
+        uploads = self._calls.setdefault("uploads", [])
+        assert isinstance(uploads, list)
+        uploads.append((source.name, target))
+
+    async def _exec(self, *args: str, **kwargs: object) -> SimpleNamespace:
+        commands = self._calls.setdefault("execs", [])
+        assert isinstance(commands, list)
+        commands.append((args, kwargs))
+
+        async def wait() -> int:
+            return 0
+
+        async def read() -> str:
+            return ""
+
+        return SimpleNamespace(
+            wait=SimpleNamespace(aio=wait),
+            stderr=SimpleNamespace(read=SimpleNamespace(aio=read)),
+        )
 
 
 def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -212,6 +237,7 @@ class _CreateSnapshotParams:
     name: str
     image: object
     resources: object | None = None
+    sandbox_class: object | None = None
 
 
 @dataclass(frozen=True)
@@ -264,6 +290,12 @@ class _FakeDaytonaProcess:
         self._calls["logs"] = (session, cmd_id)
         return self.logs
 
+    async def exec(self, command: str, **kwargs: object) -> SimpleNamespace:
+        commands = self._calls.setdefault("process_execs", [])
+        assert isinstance(commands, list)
+        commands.append((command, kwargs))
+        return SimpleNamespace(exit_code=0, result="")
+
 
 class _FakeDaytonaSandbox:
     id = "sandbox-1"
@@ -271,6 +303,12 @@ class _FakeDaytonaSandbox:
     def __init__(self, calls: dict[str, object]) -> None:
         self._calls = calls
         self.process = _FakeDaytonaProcess(calls)
+        self.fs = SimpleNamespace(upload_file=self._upload_file)
+
+    async def _upload_file(self, source: str, target: str) -> None:
+        uploads = self._calls.setdefault("uploads", [])
+        assert isinstance(uploads, list)
+        uploads.append((Path(source).name, target))
 
     async def create_ssh_access(self, *, expires_in_minutes: int) -> SimpleNamespace:
         self._calls["ssh_expires"] = expires_in_minutes
@@ -336,6 +374,7 @@ class _FakeSnapshotApi:
                     ],
                 ),
             )
+        record.sandbox_class = params.sandbox_class
         self.snapshots[params.name] = record
         self.builds.append(params.name)
 
@@ -424,6 +463,7 @@ def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> _FakeDaytonaClient
     setattr(daytona, "Image", SimpleNamespace(base=lambda name: _DaytonaImage(name)))
     setattr(daytona, "Resources", _DaytonaResources)
     setattr(daytona, "GpuType", _DaytonaGpuType)
+    setattr(daytona, "SandboxClass", SimpleNamespace(LINUX_VM="linux-vm"))
     setattr(daytona, "SessionExecuteRequest", _SessionExecuteRequest)
     setattr(daytona, "_async", daytona_async)
     setattr(daytona_async, "object_storage", object_storage)
@@ -530,6 +570,17 @@ def test_runtime_config_overrides_only_explicit_top_level_fields() -> None:
     assert default.with_overrides(RuntimeConfig(resources=None)).resources is None
 
 
+def test_runtime_config_source_override_is_mutually_exclusive(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.yaml"
+
+    assert RuntimeConfig(image="img:default").with_overrides(
+        RuntimeConfig(compose=compose)
+    ) == RuntimeConfig(compose=compose)
+    assert RuntimeConfig(compose=compose).with_overrides(
+        RuntimeConfig(image="img:task")
+    ) == RuntimeConfig(image="img:task")
+
+
 async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
     with pytest.raises(ValueError, match="GPU"):
         async with DockerRuntime()(
@@ -556,6 +607,63 @@ async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
             )
         ):
             pass
+
+
+async def test_docker_runtime_starts_compose_with_a_main_service_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    rendered: dict[str, Any] = {}
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        "services:\n  main:\n    image: hud-env:one\n  db:\n    image: postgres:17\n",
+        encoding="utf-8",
+    )
+
+    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        calls.append(args)
+        if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
+            override = Path(args[args.index("--file", args.index("--file") + 1) + 1])
+            rendered.update(json.loads(override.read_text("utf-8")))
+        if args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    task = Task(
+        env="any-env",
+        id="t",
+        runtime_config=RuntimeConfig(
+            compose=compose,
+            resources=RuntimeResources(cpu=2, memory_mb=4096),
+        ),
+    )
+
+    async with DockerRuntime()(task) as runtime:
+        assert runtime.url == "tcp://127.0.0.1:43210"
+        assert runtime.config == task.runtime_config
+
+    assert rendered["services"]["main"] == {
+        "ports": ["127.0.0.1::8765"],
+        "security_opt": [
+            f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}",
+            "systempaths=unconfined",
+        ],
+        "cpus": 2.0,
+        "mem_limit": "4096m",
+    }
+    up = next(
+        call for call in calls if call[-4:] == ("up", "--detach", "--build", "--remove-orphans")
+    )
+    assert str(compose.resolve()) in up
+    assert all("/var/run/docker.sock" not in " ".join(call) for call in calls)
+    assert calls[-1][-3:] == ("down", "--volumes", "--remove-orphans")
+
+
+def test_docker_runtime_accepts_only_one_environment_definition(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="either image or compose"):
+        RuntimeConfig(image="img:tag", compose=tmp_path / "compose.yaml")
 
 
 def test_docker_runtime_accepts_runtime_config_defaults() -> None:
@@ -620,6 +728,34 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
     }
     assert calls["ready_timeout"] == 30
     assert calls["terminated"] is True
+
+
+async def test_modal_runtime_runs_compose_inside_a_dind_vm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+
+    async with ModalRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
+        assert runtime.url == "tcp://modal.host:4567"
+
+    assert calls["registry_image"] == "docker:28.3.3-dind"
+    kwargs = calls["sandbox_kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["experimental_options"] == {"vm_runtime": True}
+    assert kwargs["readiness_probe"] is None
+    assert calls["uploads"] == [
+        ("project.tar.gz", "/hud/project.tar.gz"),
+        ("override.json", "/hud/override.json"),
+        ("docker-seccomp.json", "/hud/docker-seccomp.json"),
+    ]
+    execs = calls["execs"]
+    assert isinstance(execs, list)
+    assert "docker compose" in execs[0][0][-1]
+    assert "up --detach --build --remove-orphans" in execs[0][0][-1]
+    assert "down" in execs[1][0]
 
 
 async def test_modal_runtime_accepts_modal_image_uri(
@@ -772,7 +908,41 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     )
     assert calls["forward"] == ("127.0.0.1", 0, "127.0.0.1", 8765)
     assert calls["delete"] == "sandbox-1"
-    assert calls["client_closed"] is True
+
+
+async def test_daytona_runtime_runs_compose_inside_a_linux_vm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _install_fake_daytona(monkeypatch)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+
+    async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
+        assert runtime.url == "tcp://127.0.0.1:54321"
+
+    created = client.calls["create"]
+    assert isinstance(created, tuple)
+    create_params, _ = created
+    assert create_params == _CreateSandboxFromSnapshotParams(
+        snapshot="hud-compose-dind-vm-v1",
+        ephemeral=True,
+        auto_stop_interval=0,
+    )
+    snapshot = client.snapshot.snapshots["hud-compose-dind-vm-v1"]
+    assert snapshot.image_name == "docker:28.3.3-dind"
+    assert snapshot.sandbox_class == "linux-vm"
+    assert client.calls["uploads"] == [
+        ("project.tar.gz", "/hud/project.tar.gz"),
+        ("override.json", "/hud/override.json"),
+        ("docker-seccomp.json", "/hud/docker-seccomp.json"),
+    ]
+    commands = client.calls["process_execs"]
+    assert isinstance(commands, list)
+    assert "dockerd-entrypoint.sh" in commands[0][0]
+    assert "up --detach --build --remove-orphans" in commands[0][0]
+    assert "down --volumes --remove-orphans" in commands[1][0]
+    assert client.calls["client_closed"] is True
 
 
 async def test_daytona_task_runtime_config_overlays_provider_defaults(

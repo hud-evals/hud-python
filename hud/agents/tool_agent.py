@@ -128,8 +128,8 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         if manifest is not None:
             wanted = {cls.protocol for cls in type(self).clients}
             for cap in manifest.bindings:
-                if cap.protocol in wanted and cap.protocol not in connections:
-                    connections[cap.protocol] = await run.client.open(cap.protocol)
+                if cap.protocol in wanted:
+                    connections[cap.name] = await run.client.open(cap.name)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(
