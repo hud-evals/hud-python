@@ -303,7 +303,7 @@ class _FakeDaytonaProcess:
     async def exec(self, command: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("process_execs", [])
         assert isinstance(commands, list)
-        commands.append((command, kwargs))
+        commands.append((self._sandbox_id, command, kwargs))
         return SimpleNamespace(exit_code=0, result="")
 
 
@@ -946,6 +946,11 @@ services:
     working_dir: /data
     environment:
       REDIS_ARGS: --save ''
+  worker:
+    image: worker:1
+    entrypoint: []
+    command: worker run
+    working_dir: /srv
 """,
         encoding="utf-8",
     )
@@ -970,6 +975,12 @@ services:
                                 "command": None,
                                 "working_dir": "/data",
                                 "environment": {"REDIS_ARGS": "--save ''"},
+                            },
+                            "worker": {
+                                "image": "worker:1",
+                                "entrypoint": [],
+                                "command": ["worker", "run"],
+                                "working_dir": "/srv",
                             },
                         }
                     }
@@ -1005,14 +1016,27 @@ services:
     assert child.linked_sandbox == "sandbox-1"
     assert child.env_vars == {"REDIS_ARGS": "--save ''"}
     assert child.name is not None and child.name.startswith("hud-redis-")
-    assert client.snapshot.builds == [child.snapshot]
+    worker = client.created[2]
+    assert isinstance(worker, _CreateSandboxFromSnapshotParams)
+    assert worker.linked_sandbox == "sandbox-1"
+    assert worker.name is not None and worker.name.startswith("hud-worker-")
+    assert client.snapshot.builds == [child.snapshot, worker.snapshot]
     assert client.snapshot.snapshots[child.snapshot].image_name == "redis:7"
+    assert client.snapshot.snapshots[worker.snapshot].image_name == "worker:1"
     assert client.calls["session_commands"] == [
         (
             "sandbox-2",
             "hud-redis",
             _SessionExecuteRequest(
                 command="cd /data && docker-entrypoint.sh redis-server",
+                run_async=True,
+            ),
+        ),
+        (
+            "sandbox-3",
+            "hud-worker",
+            _SessionExecuteRequest(
+                command="cd /srv && worker run",
                 run_async=True,
             ),
         ),
@@ -1027,9 +1051,14 @@ services:
     ]
     commands = client.calls["process_execs"]
     assert isinstance(commands, list)
-    assert "getent ahostsv4 sandbox-2" in commands[0][0]
-    assert "redis" in commands[0][0]
-    assert client.calls["deleted"] == ["sandbox-2", "sandbox-1"]
+    aliases = {sandbox_id: command for sandbox_id, command, _ in commands}
+    assert "getent ahostsv4 sandbox-2" in aliases["sandbox-1"]
+    assert "redis" in aliases["sandbox-1"]
+    assert "getent ahostsv4 sandbox-3" in aliases["sandbox-2"]
+    assert "worker" in aliases["sandbox-2"]
+    assert "getent ahostsv4 sandbox-2" in aliases["sandbox-3"]
+    assert "redis" in aliases["sandbox-3"]
+    assert client.calls["deleted"] == ["sandbox-3", "sandbox-2", "sandbox-1"]
     assert client.calls["client_closed"] is True
     assert docker_calls[0] == (
         "compose",

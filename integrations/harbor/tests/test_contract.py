@@ -84,8 +84,22 @@ def fake_docker(monkeypatch):
                 },
                 "networks": {"default": {"name": "task_default"}},
             }
-            authored = Path(args[-4]).read_text("utf-8")
-            if "no-ports:latest" in authored:
+            authored_file = Path(args[-4])
+            authored = authored_file.read_text("utf-8")
+            if "dockerfile: Containerfile" in authored:
+                project["services"] = {
+                    "main": {
+                        "image": "hud-main",
+                        "build": {
+                            "context": str(authored_file.parent),
+                            "dockerfile": "Containerfile",
+                            "args": {"FLAVOR": "compose"},
+                        },
+                        "environment": {"FROM_COMPOSE": "yes"},
+                        "networks": {"default": None},
+                    }
+                }
+            elif "no-ports:latest" in authored:
                 project["services"]["main"].pop("depends_on")
                 project["services"].pop("redis")
                 project["services"]["worker"] = {
@@ -95,6 +109,9 @@ def fake_docker(monkeypatch):
             elif "expose:" not in authored:
                 project["services"]["redis"].pop("expose")
             return json.dumps(project), ""
+        if args[0] == "compose" and args[-2] == "build":
+            compose_file = Path(args[args.index("--file") + 1])
+            calls.append(("compose-build-config", args[-1], compose_file.read_text("utf-8")))
         return "", ""
 
     module = importlib.import_module("integrations.harbor.adapt")
@@ -132,6 +149,39 @@ async def test_adapt_builds_the_source_then_an_authored_hud_environment(
     assert (context / "tasks" / "task-a" / "instruction.md").is_file()
     assert (context / "tasks" / "task-a" / "tests" / "test.sh").is_file()
     assert not (context / "compose.json").exists()
+
+
+async def test_adapt_honors_compose_main_build_settings(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a", dockerfile=None)
+    environment = task / "environment"
+    environment.mkdir()
+    (environment / "compose.yaml").write_text(
+        """\
+services:
+  main:
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        FLAVOR: compose
+""",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    compose_build = next(call for call in fake_docker if call[:2] == ("compose", "--file"))
+    assert compose_build[-2:] == ("build", "main")
+    _, _, serialized = next(call for call in fake_docker if call[0] == "compose-build-config")
+    main = json.loads(serialized)["services"]["main"]
+    assert main["build"]["dockerfile"] == "Containerfile"
+    assert main["build"]["args"] == {"FLAVOR": "compose"}
+    assert main["image"].startswith("hud-harbor-base:")
+    wrapper_build = next(call for call in fake_docker if call[0] == "build")
+    assert any(value.startswith("BASE_IMAGE=hud-harbor-base:") for value in wrapper_build)
 
 
 async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(

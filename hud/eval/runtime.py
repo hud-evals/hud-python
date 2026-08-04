@@ -1108,6 +1108,7 @@ class DaytonaRuntime:
                     )
                 else:
                     assert services is not None and main_service is not None
+                    service_sandboxes = {"main": sandbox}
                     for service_name, service in services.items():
                         if service_name == "main":
                             continue
@@ -1140,6 +1141,37 @@ class DaytonaRuntime:
                             timeout=create_timeout,
                         )
                         linked_sandboxes.append(child)
+                        service_sandboxes[service_name] = child
+
+                    for destination_name, destination in service_sandboxes.items():
+                        aliases = []
+                        for service_name, service_sandbox in service_sandboxes.items():
+                            if service_name == destination_name:
+                                continue
+                            sandbox_id = shlex.quote(service_sandbox.id)
+                            hostname = shlex.quote(service_name)
+                            aliases.append(
+                                f"ip=$(getent ahostsv4 {sandbox_id} | awk 'NR == 1 {{print $1}}')"
+                                " && "
+                                f'test -n "$ip" && printf \'%s %s\\n\' "$ip" {hostname} '
+                                ">> /etc/hosts"
+                            )
+                        if not aliases:
+                            continue
+                        mapped = await destination.process.exec(
+                            " && ".join(aliases),
+                            timeout=30,
+                        )
+                        if mapped.exit_code != 0:
+                            raise RuntimeError(
+                                f"Daytona could not map Compose services in "
+                                f"{destination_name!r}: {mapped.result.strip()}"
+                            )
+
+                    for service_name, service in services.items():
+                        if service_name == "main":
+                            continue
+                        child = service_sandboxes[service_name]
                         session = f"hud-{service_name}"
                         await child.process.create_session(session)
                         if not service.argv:
@@ -1148,19 +1180,6 @@ class DaytonaRuntime:
                             session,
                             SessionExecuteRequest(command=service.shell_command(), run_async=True),
                         )
-                        alias = shlex.quote(child.id)
-                        hostname = shlex.quote(service_name)
-                        mapped = await sandbox.process.exec(
-                            f"ip=$(getent ahostsv4 {alias} | awk 'NR == 1 {{print $1}}') && "
-                            f'test -n "$ip" && printf \'%s %s\\n\' "$ip" {hostname} '
-                            ">> /etc/hosts",
-                            timeout=30,
-                        )
-                        if mapped.exit_code != 0:
-                            raise RuntimeError(
-                                f"Daytona could not resolve linked service {service_name!r}: "
-                                f"{mapped.result.strip()}"
-                            )
                         if service.healthcheck is not None:
                             test = service.healthcheck.test
                             if test and test[0] != "NONE":

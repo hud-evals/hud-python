@@ -257,15 +257,33 @@ async def adapt(
         name = f"{base_name}-{digest}"
         source = group[0]
         environment = source.config.environment
-        compose_main = (
-            source.compose.services["main"] if source.compose is not None else ComposeService()
-        )
+        compose = source.compose.model_copy(deep=True) if source.compose is not None else None
+        compose_main = compose.services["main"] if compose is not None else ComposeService()
         dockerfile = source.path / "environment" / "Dockerfile"
         compose_image = compose_main.image
         base_image = environment.docker_image or (
             compose_image if compose_image != "hud-main" else None
         )
-        if base_image and not dockerfile.is_file():
+        build_timeout = max(task.config.environment.build_timeout_sec for task in group)
+        if compose_main.build is not None and environment.docker_image is None:
+            assert compose is not None
+            base_image = f"hud-harbor-base:{source.environment_hash}"
+            compose.services["main"] = compose_main.model_copy(update={"image": base_image})
+            with tempfile.TemporaryDirectory(prefix="hud-harbor-main-") as directory:
+                compose_file = Path(directory) / "compose.json"
+                compose_file.write_text(
+                    compose.model_dump_json(exclude_none=True),
+                    encoding="utf-8",
+                )
+                await docker(
+                    "compose",
+                    "--file",
+                    str(compose_file),
+                    "build",
+                    "main",
+                    deadline=build_timeout,
+                )
+        elif base_image and not dockerfile.is_file():
             await docker("pull", base_image)
         elif dockerfile.is_file():
             base_image = f"hud-harbor-base:{source.environment_hash}"
@@ -274,13 +292,12 @@ async def adapt(
                 "--tag",
                 base_image,
                 str(dockerfile.parent),
-                deadline=max(task.config.environment.build_timeout_sec for task in group),
+                deadline=build_timeout,
             )
         else:
             raise FileNotFoundError(f"{source.path.name} has no environment/Dockerfile")
 
         image_config = await ImageConfig.inspect(base_image, docker)
-        compose = source.compose.model_copy(deep=True) if source.compose is not None else None
         peers = []
         if compose is not None:
             for service_name, service in compose.services.items():
