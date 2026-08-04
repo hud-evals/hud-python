@@ -173,8 +173,10 @@ async def test_zoom_reports_encoded_mime_type() -> None:
     with patch(
         "hud.agents.claude.tools.computer._crop_png",
         return_value=(b"webp", "image/webp"),
-    ):
+    ) as crop:
         result = await tool._zoom({"region": [0, 0, 10, 10]})
 
+    tool.client.screenshot_png.assert_awaited_once_with("image/png")
+    crop.assert_called_once_with(b"png", (0, 0, 10, 10), "image/webp")
     image = next(block for block in result.content if isinstance(block, mcp_types.ImageContent))
     assert image.mimeType == "image/webp"
