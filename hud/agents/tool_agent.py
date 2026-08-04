@@ -116,8 +116,8 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     async def __call__(self, run: Run) -> None:
         """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
 
-        Opens the capabilities this agent's catalog supports off the connection
-        (``run.client.open(protocol)``), builds the tools into a fresh ``RunState``,
+        Opens the capabilities this agent's catalog supports off the connection,
+        builds the tools into a fresh ``RunState``,
         then runs the loop against ``run.prompt_messages``, accumulating the
         trajectory onto ``run.trace``. Loop budget and prompting come from the agent's config
         (``max_steps``, ``system_prompt``, ``citations_enabled``). No per-rollout
@@ -130,7 +130,9 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             wanted = {cls.protocol for cls in type(self).clients}
             for cap in manifest.bindings:
                 if cap.protocol in wanted:
-                    connections[cap.name] = await run.client.open(cap.name)
+                    key = cap.name if cap.protocol == MCPClient.protocol else cap.protocol
+                    if key not in connections:
+                        connections[key] = await run.client.open(cap.name)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(

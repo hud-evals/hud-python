@@ -16,7 +16,7 @@ from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentConfig, AgentStep, ToolStep
-from hud.capabilities import Capability, CapabilityClient, MCPClient, SSHClient
+from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 _Msg = dict[str, Any]
@@ -92,6 +92,34 @@ async def test_agent_opens_every_mcp_capability_by_name() -> None:
     await MultiMCPAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
 
     assert opened == ["database", "search"]
+
+
+async def test_agent_opens_only_one_non_mcp_capability_per_protocol() -> None:
+    capabilities = [
+        Capability.rfb(name="screen-0", url="rfb://display-0", display=0),
+        Capability.rfb(name="screen-1", url="rfb://display-1", display=1),
+    ]
+    opened: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=capabilities)
+
+        async def open(self, ref: str) -> CapabilityClient:
+            opened.append(ref)
+            return cast("CapabilityClient", object())
+
+    class ComputerAgent(DictAgent):
+        clients = (RFBClient,)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await ComputerAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
+
+    assert opened == ["screen-0"]
 
 
 async def test_multiple_mcp_capabilities_qualify_tool_names() -> None:

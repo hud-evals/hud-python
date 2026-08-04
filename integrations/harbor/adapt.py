@@ -294,14 +294,6 @@ async def adapt(
                 ports.update(
                     published.target for published in service.ports if published.protocol == "tcp"
                 )
-                if len(ports) > 1:
-                    raise NotImplementedError(
-                        f"Compose service {service_name!r} exposes multiple ports; "
-                        "Peer names one endpoint"
-                    )
-                if ports:
-                    peers.append({"name": service_name, "port": next(iter(ports))})
-
                 source_image = service.image
                 if service.build is not None:
                     source_image = f"hud-harbor-sidecar-build:{uuid.uuid4().hex}"
@@ -322,6 +314,22 @@ async def adapt(
                         f"Compose service {service_name!r} has neither image nor build"
                     )
                 sidecar_config = await ImageConfig.inspect(source_image, docker)
+                if not ports:
+                    for value in sidecar_config.exposed_ports:
+                        port, separator, protocol = value.partition("/")
+                        if port.isdigit() and separator and protocol == "tcp":
+                            ports.add(int(port))
+                if len(ports) > 1:
+                    raise NotImplementedError(
+                        f"Compose service {service_name!r} exposes multiple ports; "
+                        "Peer names one endpoint"
+                    )
+                if not ports:
+                    raise ValueError(
+                        f"Compose service {service_name!r} declares no TCP port in Compose "
+                        "or its image"
+                    )
+                peers.append({"name": service_name, "port": next(iter(ports))})
                 image_id, _ = await docker("image", "inspect", "--format", "{{.Id}}", source_image)
                 fingerprint = image_id.strip().removeprefix("sha256:")[:16]
                 component = normalize_environment_name(f"{name}-{service_name}", default="sidecar")

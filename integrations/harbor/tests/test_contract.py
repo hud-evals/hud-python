@@ -22,6 +22,15 @@ def fake_docker(monkeypatch):
     async def run(*args: str, **_kwargs):
         calls.append(args)
         if args[:4] == ("image", "inspect", "--format", "{{json .Config}}"):
+            if args[-1] == "no-ports:latest":
+                return json.dumps(
+                    {
+                        "User": "",
+                        "WorkingDir": "/workspace",
+                        "Entrypoint": None,
+                        "Cmd": ["serve"],
+                    }
+                ), ""
             if args[-1].startswith("hud-harbor:"):
                 return json.dumps(
                     {
@@ -37,45 +46,55 @@ def fake_docker(monkeypatch):
                     "WorkingDir": "/workspace",
                     "Entrypoint": None,
                     "Cmd": None,
+                    "ExposedPorts": {"6379/tcp": {}},
                 }
             ), ""
         if args[:4] == ("image", "inspect", "--format", "{{.Id}}"):
             return "sha256:0123456789abcdef0123456789abcdef\n", ""
         if args[0] == "compose" and args[-3:] == ("config", "--format", "json"):
-            return json.dumps(
-                {
-                    "name": "task",
-                    "services": {
-                        "main": {
-                            "image": "hud-main",
-                            "environment": {"FROM_COMPOSE": "yes"},
-                            "depends_on": {
-                                "redis": {
-                                    "condition": "service_healthy",
-                                    "required": True,
-                                }
-                            },
-                            "networks": {"default": None},
+            project = {
+                "name": "task",
+                "services": {
+                    "main": {
+                        "image": "hud-main",
+                        "environment": {"FROM_COMPOSE": "yes"},
+                        "depends_on": {
+                            "redis": {
+                                "condition": "service_healthy",
+                                "required": True,
+                            }
                         },
-                        "redis": {
-                            "image": "redis:7-alpine",
-                            "entrypoint": None,
-                            "command": ["redis-server", "--save", ""],
-                            "environment": {"SIDE": "car"},
-                            "expose": ["6379/tcp"],
-                            "healthcheck": {
-                                "test": ["CMD", "redis-cli", "ping"],
-                                "interval": "2s",
-                                "timeout": "3s",
-                                "retries": 5,
-                                "start_period": "1s",
-                            },
-                            "networks": {"default": None},
-                        },
+                        "networks": {"default": None},
                     },
-                    "networks": {"default": {"name": "task_default"}},
+                    "redis": {
+                        "image": "redis:7-alpine",
+                        "entrypoint": None,
+                        "command": ["redis-server", "--save", ""],
+                        "environment": {"SIDE": "car"},
+                        "expose": ["6379/tcp"],
+                        "healthcheck": {
+                            "test": ["CMD", "redis-cli", "ping"],
+                            "interval": "2s",
+                            "timeout": "3s",
+                            "retries": 5,
+                            "start_period": "1s",
+                        },
+                        "networks": {"default": None},
+                    },
+                },
+                "networks": {"default": {"name": "task_default"}},
+            }
+            authored = Path(args[-4]).read_text("utf-8")
+            if "no-ports:latest" in authored:
+                project["services"]["main"].pop("depends_on")
+                project["services"].pop("redis")
+                project["services"]["worker"] = {
+                    "image": "no-ports:latest",
+                    "networks": {"default": None},
                 }
-            ), ""
+            elif "expose:" not in authored:
+                project["services"]["redis"].pop("expose")
+            return json.dumps(project), ""
         return "", ""
 
     module = importlib.import_module("integrations.harbor.adapt")
@@ -141,6 +160,7 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
     assert redis["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
     assert redis["entrypoint"] == []
     assert redis["working_dir"] == "/workspace"
+    assert redis["networks"] == {"default": None}
     assert "build" not in redis
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
     assert manifest["environment"]["env"] == {"FROM_COMPOSE": "yes"}
@@ -153,6 +173,37 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
     ]
     assert ("pull", "redis:7-alpine") in fake_docker
     assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
+
+
+async def test_adapt_derives_implicit_peer_port_from_image(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+
+
+async def test_adapt_rejects_sidecar_without_a_tcp_port(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  worker:\n    image: no-ports:latest\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="declares no TCP port"):
+        await harbor.adapt(tmp_path)
 
 
 async def test_network_mcp_servers_become_named_capabilities(

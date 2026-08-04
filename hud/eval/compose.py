@@ -24,6 +24,7 @@ class ImageConfig(BaseModel):
     entrypoint: list[str] | None = Field(default=None, alias="Entrypoint")
     command: list[str] | None = Field(default=None, alias="Cmd")
     environment: list[str] = Field(default_factory=list, alias="Env")
+    exposed_ports: dict[str, Any] = Field(default_factory=dict, alias="ExposedPorts")
 
     @classmethod
     async def inspect(cls, image: str, docker: DockerCommand) -> ImageConfig:
