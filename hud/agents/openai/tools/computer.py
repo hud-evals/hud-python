@@ -23,9 +23,15 @@ OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
 
 def last_image_data(result: MCPToolResult) -> str | None:
     """Base64 data of the most recent screenshot block in a tool result."""
+    image = last_image_content(result)
+    return image.data if image is not None else None
+
+
+def last_image_content(result: MCPToolResult) -> mcp_types.ImageContent | None:
+    """Most recent screenshot block in a tool result."""
     for block in reversed(result.content):
         if isinstance(block, mcp_types.ImageContent):
-            return block.data
+            return block
     return None
 
 

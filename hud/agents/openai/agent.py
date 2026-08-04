@@ -33,7 +33,7 @@ from hud.utils import gateway
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
 from .tools.coding import shell_output
-from .tools.computer import last_image_data
+from .tools.computer import last_image_content
 
 if TYPE_CHECKING:
     import mcp.types as mcp_types
@@ -104,8 +104,8 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         tool = state.tools.get(call.name)
 
         if isinstance(tool, OpenAIComputerTool):
-            screenshot = last_image_data(result)
-            if not screenshot:
+            screenshot = last_image_content(result)
+            if screenshot is None:
                 logger.warning("Computer tool result missing screenshot for call %s", call.name)
                 return None
             output = ComputerCallOutput(
@@ -115,7 +115,9 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                     "Any",
                     {
                         "type": "computer_screenshot",
-                        "image_url": f"data:image/png;base64,{screenshot}",
+                        "image_url": (
+                            f"data:{screenshot.mimeType or 'image/png'};base64,{screenshot.data}"
+                        ),
                         "detail": "original",
                     },
                 ),
