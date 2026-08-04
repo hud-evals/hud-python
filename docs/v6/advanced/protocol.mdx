@@ -5,7 +5,7 @@ icon: "route"
 mode: "wide"
 ---
 
-HUD is **protocol-first**. An agent and an environment never integrate directly - they sit on two sides of a thin envelope and exchange a handful of small messages. HUD owns only that envelope; everything inside it - the model, the harness, the work the agent does - stays swappable.
+HUD is **protocol-first**. An agent and an environment never integrate directly - they sit on two sides of a thin envelope and exchange a handful of small messages. HUD owns only that envelope; everything inside it - the model, the harness, the work the agent does - stays swappable. This page is the contract; how the server carries it over one TCP port is the [control channel](/v6/internals/control-channel) internals page.
 
 Three things take part in every run:
 
