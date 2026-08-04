@@ -110,6 +110,7 @@ packages = ["hud"]
 # Ensure py.typed is included in the package
 [tool.hatch.build.targets.wheel.force-include]
 "hud/py.typed" = "hud/py.typed"
+"hud/eval/docker-seccomp.json" = "hud/eval/docker-seccomp.json"
 
 [project.optional-dependencies]
 # AI providers (openai, anthropic, google-genai) are now core dependencies; this
@@ -265,7 +266,7 @@ omit = [
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 testpaths = ["hud", "integrations"]
-addopts = ""
+addopts = "-m 'not integration'"
 markers = [
-    "integration: marks tests as integration tests (require HUD_API_KEY, network access)",
+    "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
 ]

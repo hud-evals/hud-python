@@ -19,6 +19,7 @@ import pytest
 
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
+from hud.eval.job import Job
 from hud.eval.run import Run
 from hud.eval.runtime import (
     HostedRuntime,
@@ -181,6 +182,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         id="add",
         slug="sums-add",
         args={"a": 1, "b": 2},
+        agent_config={"timeout_seconds": 45.0},
         runtime_config=RuntimeConfig(
             image="registry.example/sums:latest",
             resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4", count=1)),
@@ -213,6 +215,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["group_id"] == "g1"
     assert payload["agent"]["type"] == "openai_compatible"
     assert payload["agent"]["config"]["model"] == "test-model"
+    assert payload["agent"]["config"]["timeout_seconds"] == 45.0
 
 
 @pytest.mark.asyncio
@@ -312,6 +315,53 @@ async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     assert run.reward == 0.0
     assert run.trace.is_error
     assert "env exploded" in (run.trace.error or "")
+
+
+@pytest.mark.asyncio
+async def test_run_keeps_a_grade_from_an_errored_hosted_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform([{"status": "error", "reward": 0.75, "error": "agent timed out"}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    task = Task(env="sums", id="add", args={})
+    run = await HostedRuntime(poll_interval=0.0).run(
+        task,
+        _agent(),
+        job_id=uuid.uuid4().hex,
+    )
+    job = Job(id="job", name="test", runs=[run])
+
+    assert run.trace.is_error
+    assert not run.grade.is_error
+    assert run.evaluation == {"score": 0.75}
+    assert job.reward == 0.75
+    assert job.errors == []
+
+
+@pytest.mark.asyncio
+async def test_run_folds_ungraded_cancellation_as_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform([{"status": "cancelled", "reward": None, "error": None}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    task = Task(env="sums", id="add", args={})
+    run = await HostedRuntime(poll_interval=0.0).run(
+        task,
+        _agent(),
+        job_id=uuid.uuid4().hex,
+    )
+    job = Job(id="job", name="test", runs=[run])
+
+    assert run.trace.status == "cancelled"
+    assert run.grade.is_error
+    assert job.reward == 0.0
+    assert job.errors == [run]
 
 
 @pytest.mark.asyncio

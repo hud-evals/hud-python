@@ -1,0 +1,17 @@
+version = "1.0"
+
+[task]
+description = "A no-network verifier can inspect the task and finish independently of its children."
+
+[environment]
+network_mode = "no-network"
+
+[environment.healthcheck]
+command = "test \"$(curl -fsS http://127.0.0.1:9100/status)\" = ready"
+interval_sec = 0.2
+timeout_sec = 5
+retries = 3
+
+[verifier]
+network_mode = "no-network"
+timeout_sec = 60

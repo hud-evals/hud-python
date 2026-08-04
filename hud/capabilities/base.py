@@ -7,11 +7,8 @@ import re
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 #: Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
@@ -82,7 +79,6 @@ class Capability:
         client_key_path: str | os.PathLike[str] | None = None,
         shell: str | None = None,
         cwd: str | None = None,
-        cwd_aliases: Sequence[str] | None = None,
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
@@ -93,10 +89,8 @@ class Capability:
         type (``bash``, ``powershell``, ``cmd``). Defaults to auto-detect
         from ``sys.platform`` at construction time. Agents read this to
         format commands correctly. ``cwd`` is the absolute path sessions
-        start in (the served workspace); clients anchor file paths to it.
-        ``cwd_aliases`` are other names the same directory answers to (paths
-        that reach it through symlinks), which clients treat as already
-        anchored rather than as workspace-relative addresses.
+        start in. Paths are the session namespace's own — clients pass them
+        verbatim, and nothing is anchored or rewritten.
         """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
@@ -108,8 +102,6 @@ class Capability:
             params["client_key_path"] = os.fspath(client_key_path)
         if cwd is not None:
             params["cwd"] = cwd
-        if cwd_aliases:
-            params["cwd_aliases"] = list(cwd_aliases)
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
 
     @classmethod

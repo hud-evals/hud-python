@@ -169,6 +169,15 @@ class Run:
         return self._client
 
     @property
+    def task_id(self) -> str:
+        """Which task of the environment this run started.
+
+        What an agent driving a whole taskset has to branch on: ``slug`` is
+        assigned by the runner and is not set while the agent is running.
+        """
+        return self._task_id
+
+    @property
     def reward(self) -> float:
         """The graded reward (``grade.reward``)."""
         return self.grade.reward
@@ -356,6 +365,9 @@ async def rollout(
     from hud.agents.tool_agent import ToolAgent
 
     agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
+    agent_timeout = agent.config.timeout_seconds if isinstance(agent, ToolAgent) else None
+    if task.agent_config is not None:
+        agent_timeout = task.agent_config.get("timeout_seconds", agent_timeout)
     with set_trace_context(trace_id):
         await trace_enter(
             trace_id,
@@ -382,7 +394,21 @@ async def rollout(
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
                         async with file_tracking_observer(client):
-                            await agent(run)
+                            if agent_timeout is None:
+                                await agent(run)
+                            else:
+                                deadline = asyncio.timeout(agent_timeout)
+                                try:
+                                    async with deadline:
+                                        await agent(run)
+                                except TimeoutError:
+                                    if not deadline.expired():
+                                        raise
+                                    detail = f"agent timed out after {agent_timeout:g}s"
+                                    logger.warning(detail)
+                                    run.trace.status = "error"
+                                    run.trace.stop_reason = "timeout"
+                                    run.record(Step(source="system", error=detail))
                         _phase = "grading"
                 finally:
                     _phase = "cleanup"

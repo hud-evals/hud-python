@@ -86,3 +86,29 @@ async def test_trace_exit_omits_metadata_when_extra_empty(recorder: _Recorder) -
     assert len(recorder.calls) == 1
     _, body = recorder.calls[0]
     assert "metadata" not in body
+
+
+def test_errored_runs_do_not_deflate_the_job_reward() -> None:
+    """Infrastructure failure is never a score: a run that errored (a launch
+    failure, or a hosted trace that ended in error) carries no verdict and
+    must not drag the job mean down as a silent zero."""
+    from hud.eval.job import Job
+    from hud.eval.run import Grade
+
+    graded = _run_with("t1", extra={})
+    graded.grade = Grade(reward=1.0)
+    failed = Run.failed("provisioning never finished")
+
+    job = Job(id="j1", name="test", runs=[graded, failed])
+
+    assert job.reward == 1.0
+    assert job.errors == [failed]
+
+
+def test_job_with_only_errors_reports_zero_reward() -> None:
+    from hud.eval.job import Job
+
+    job = Job(id="j2", name="test", runs=[Run.failed("boom")])
+
+    assert job.reward == 0.0
+    assert job.errors and job.errors[0].trace.is_error

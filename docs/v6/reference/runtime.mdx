@@ -116,21 +116,20 @@ SubprocessRuntime(path, *, env=None, ready_timeout=120.0)
 ### `DockerRuntime`
 
 ```python
-DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None, nested_sandbox=False)
+DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None)
 ```
 
 - **`image`** - image name to run; shorthand for `runtime_config.image`.
 - **`port`** - port the image's CMD serves inside the container (the scaffolded `Dockerfile.hud` serves `8765`).
 - **`run_args`** - extra `docker run` flags, e.g. `["--gpus", "all"]` or `["-e", "KEY=VAL"]`.
 - **`runtime_config`** - a `RuntimeConfig` (image, resources) for finer control.
-- **`nested_sandbox`** - the image sandboxes *inside* the container (a `Workspace` using bubblewrap). Off by default.
 
-An image that sandboxes internally needs nested user/mount/proc namespaces,
-which Docker's default seccomp profile and masked `/proc` block. Passing
-`nested_sandbox=True` starts the container with `--security-opt
-seccomp=unconfined --security-opt systempaths=unconfined`; without it such an
-environment refuses to serve rather than running unisolated. Images that do
-not sandbox internally keep Docker's full containment, so this is opt-in.
+`DockerRuntime` always starts with HUD's compact seccomp profile and the system
+path configuration required by `Workspace`'s bubblewrap sessions. The profile
+is intentionally default-allow for Docker compatibility, allowing the
+namespace syscalls needed for the inner workspace sandbox while denying a
+small set of unrelated kernel interfaces. It is not Docker's default
+deny-by-default profile.
 
 ### `ModalRuntime`
 

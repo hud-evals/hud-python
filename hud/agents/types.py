@@ -49,6 +49,7 @@ class AgentConfig(BaseModel):
 
     auto_respond: bool = False
     max_steps: int = 10
+    timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     system_prompt: str | None = None
     citations_enabled: bool = False
     #: Conditions that end the rollout instead of being answered with an error

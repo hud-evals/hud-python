@@ -7,9 +7,19 @@ import contextlib
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessResult:
+    """Captured outcome of a managed process group."""
+
+    returncode: int | None
+    stdout: bytes
+    stderr: bytes
+    timed_out: bool = False
 
 
 @dataclass(slots=True)
@@ -60,20 +70,65 @@ class ProcessGroup:
             wait_task.cancel()
             await asyncio.gather(wait_task, return_exceptions=True)
 
-    async def communicate(
+    async def complete(
         self,
-        input: bytes | None = None,
         *,
         max_wait: float | None = None,
-    ) -> tuple[bytes, bytes]:
+    ) -> ProcessResult:
+        """Capture output and teardown, reporting timeout as process data.
+
+        The deadline follows the process leader rather than pipe EOF: a
+        background child may inherit the pipes after the leader has finished.
+        """
+        stdout = bytearray()
+        stderr = bytearray()
+
+        async def read_into(stream: asyncio.StreamReader, output: bytearray) -> None:
+            while chunk := await stream.read(65536):
+                output.extend(chunk)
+
+        stdout_read = (
+            asyncio.create_task(read_into(self.process.stdout, stdout))
+            if self.process.stdout is not None
+            else None
+        )
+        stderr_read = (
+            asyncio.create_task(read_into(self.process.stderr, stderr))
+            if self.process.stderr is not None
+            else None
+        )
+        readers = tuple(reader for reader in (stdout_read, stderr_read) if reader is not None)
+        timed_out = False
         try:
-            if max_wait is None:
-                result = await self.process.communicate(input=input)
-            else:
-                result = await asyncio.wait_for(self.process.communicate(input=input), max_wait)
+            try:
+                await asyncio.wait_for(self.wait(), max_wait)
+            except TimeoutError:
+                timed_out = True
+            returncode = self.returncode
         finally:
-            await self.terminate()
-        return result
+            try:
+                await self.terminate()
+            finally:
+                if readers:
+                    done, pending = await asyncio.wait(
+                        readers,
+                        timeout=_PROCESS_EXIT_POLL_INTERVAL,
+                    )
+                    for reader in pending:
+                        reader.cancel()
+                    if pending:
+                        # asyncio exposes no public way to close subprocess pipes
+                        # still held by a child which left the managed group.
+                        cast("Any", self.process)._transport.close()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    for reader in done:
+                        reader.result()
+        return ProcessResult(
+            returncode,
+            bytes(stdout),
+            bytes(stderr),
+            timed_out,
+        )
 
     async def terminate(self) -> None:
         await _terminate_process_group(

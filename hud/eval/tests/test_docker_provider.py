@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -20,6 +21,7 @@ from typing import Any
 
 import pytest
 
+import hud.eval.runtime as runtime_module
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -121,6 +123,10 @@ def _row() -> Task:
 
 async def _docker_calls(docker_log: Path) -> list[str]:
     return (await asyncio.to_thread(docker_log.read_text)).splitlines()
+
+
+def _docker_security_args() -> str:
+    return " ".join(runtime_module._DOCKER_SECURITY_ARGS)
 
 
 @dataclass(frozen=True)
@@ -439,7 +445,9 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
     async with provider(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:43210"
         calls = await _docker_calls(docker_log)
-        assert calls[0] == "run --detach -e X=1 --publish 127.0.0.1::8765 img:tag"
+        assert calls[0] == (
+            f"run --detach -e X=1 {_docker_security_args()} --publish 127.0.0.1::8765 img:tag"
+        )
         assert calls[1] == "port cid-42 8765"
 
     assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
@@ -465,7 +473,8 @@ async def test_runtime_config_supplies_image_and_resources(
 
     calls = await _docker_calls(docker_log)
     assert calls[0] == (
-        "run --detach --cpus 2 --memory 4096m --gpus 1 --publish 127.0.0.1::8765 img:firefox"
+        f"run --detach --cpus 2 --memory 4096m --gpus 1 {_docker_security_args()} "
+        "--publish 127.0.0.1::8765 img:firefox"
     )
 
 
@@ -488,7 +497,8 @@ async def test_task_runtime_config_overrides_default_image(
         )
 
     assert (await _docker_calls(docker_log))[0] == (
-        "run --detach --cpus 2 --memory 4096m --publish 127.0.0.1::8765 img:task"
+        f"run --detach --cpus 2 --memory 4096m {_docker_security_args()} "
+        "--publish 127.0.0.1::8765 img:task"
     )
 
 
@@ -980,16 +990,37 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
     assert calls[-1] == "rm --force cid-42"  # cleanup still runs on failure
 
 
-async def test_nested_sandbox_relaxes_only_when_asked(
+def test_docker_profile_allows_workspace_namespace_syscalls() -> None:
+    profile = json.loads(runtime_module._DOCKER_SECCOMP_PROFILE.read_text())
+    denied = {name for rule in profile["syscalls"] for name in rule["names"]}
+
+    assert profile["defaultAction"] == "SCMP_ACT_ALLOW"
+    assert {
+        "mount",
+        "pivot_root",
+        "setns",
+        "umount",
+        "umount2",
+        "unshare",
+    }.isdisjoint(denied)
+    assert {
+        "bpf",
+        "keyctl",
+        "perf_event_open",
+        "ptrace",
+        "userfaultfd",
+    } <= denied
+
+
+async def test_docker_runtime_always_prepares_for_workspace_isolation(
     tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Images that sandbox inside themselves need nested namespaces; images
-    that do not keep Docker's full containment."""
     _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
 
-    async with DockerRuntime("img:tag", nested_sandbox=True)(_row()):
+    async with DockerRuntime("img:tag")(_row()):
         pass
 
     calls = await _docker_calls(docker_log)
-    assert "seccomp=unconfined" in calls[0]
+    assert f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}" in calls[0]
+    assert "seccomp=unconfined" not in calls[0]
     assert "systempaths=unconfined" in calls[0]

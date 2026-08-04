@@ -56,10 +56,33 @@ class Job:
 
     @property
     def reward(self) -> float:
-        """Mean reward across runs (0.0 for an empty job)."""
-        if not self.runs:
+        """Mean reward across graded runs (0.0 when none were graded).
+
+        Infrastructure failures without a verdict are excluded rather than
+        averaged in as zero. A run that timed out or raised after task start
+        still counts when its environment returned a valid grade.
+        """
+        graded = [
+            run.reward
+            for run in self.runs
+            if not run.grade.is_error and (run.grade.raw or not run.trace.is_error)
+        ]
+        if not graded:
             return 0.0
-        return sum(run.reward for run in self.runs) / len(self.runs)
+        return sum(graded) / len(graded)
+
+    @property
+    def errors(self) -> list[Run]:
+        """Runs that ended without a valid grade and are excluded from reward.
+
+        Trace failures remain visible on each run, but a best-effort grade
+        keeps a timed-out or mid-run failure out of this infrastructure list.
+        """
+        return [
+            run
+            for run in self.runs
+            if run.grade.is_error or (run.trace.is_error and not run.grade.raw)
+        ]
 
     @property
     def results(self) -> dict[str, list[Run]]:

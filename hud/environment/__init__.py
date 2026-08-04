@@ -22,8 +22,8 @@ from typing import Any
 from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
+from .egress import Peer
 from .env import Answer, Environment
-from .integration import Integration
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
 
@@ -92,9 +92,9 @@ __all__ = [
     "Answer",
     "Capability",
     "Environment",
-    "Integration",
     "Mount",
     "MountKind",
+    "Peer",
     "Workspace",
     "load_environment",
 ]
