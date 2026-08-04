@@ -39,58 +39,94 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 
 _COMMAND_TIMEOUT = 3600.0
 
-# Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
-#: bwrap's usability is a property of the host/container, so probe once per
-#: process: an installed bwrap that cannot create namespaces would otherwise
-#: fail every session instead of falling back.
-_bwrap_usable: bool | None = None
+
+@dataclass(slots=True, frozen=True)
+class Bubblewrap:
+    path: str
+    pid_unshare: str | None = None
 
 
-def usable_bwrap() -> str | None:
-    """``bwrap``'s path if it can actually create namespaces here, else None."""
+# Set once the first Workspace probes the substrate (avoid per-instance work).
+_bwrap_usable: Bubblewrap | Literal[False] | None = None
+
+
+def usable_bwrap() -> Bubblewrap | None:
+    """A working bubblewrap launch mode for this substrate, if one exists."""
     global _bwrap_usable
+    if isinstance(_bwrap_usable, Bubblewrap):
+        return _bwrap_usable
+    if _bwrap_usable is False:
+        return None
+
     path = shutil.which("bwrap")
     if path is None:
         return None
     probe_binary = shutil.which("true")
     if probe_binary is None:
         return None
-    if _bwrap_usable is None:
-        try:
-            probe = subprocess.run(
-                # Mirrors a real session's *namespace* setup — mounting proc is
-                # what an unprivileged container blocks first. The whole root
-                # is bound so the probed binary keeps its loader; a narrower
-                # mount set fails for the wrong reason. It does not prove the
-                # installed bwrap parses every option a session passes, so
-                # bwrap_argv stays within what bubblewrap 0.4 understands.
+
+    direct = Bubblewrap(path)
+    launches = [
+        (
+            direct,
+            [
+                path,
+                "--unshare-user",
+                "--unshare-pid",
+                "--ro-bind",
+                "/",
+                "/",
+                "--proc",
+                "/proc",
+                "--",
+                probe_binary,
+            ],
+        )
+    ]
+    if unshare := shutil.which("unshare"):
+        staged = Bubblewrap(path, pid_unshare=unshare)
+        launches.append(
+            (
+                staged,
                 [
+                    unshare,
+                    "--kill-child=KILL",
+                    "--pid",
+                    "--mount-proc",
                     path,
-                    "--unshare-user-try",
-                    "--unshare-pid",
+                    "--unshare-user",
                     "--ro-bind",
                     "/",
                     "/",
-                    "--proc",
-                    "/proc",
                     "--",
                     probe_binary,
                 ],
+            )
+        )
+
+    failure = "unknown error"
+    for launch, argv in launches:
+        try:
+            probe = subprocess.run(
+                argv,
                 capture_output=True,
                 timeout=15,
                 check=False,
             )
-            _bwrap_usable = probe.returncode == 0
-            if not _bwrap_usable:
-                LOGGER.warning(
-                    "bwrap is installed but cannot create namespaces (%s); sessions will "
-                    "run WITHOUT isolation. The container runtime must allow "
-                    "unprivileged user namespaces to enable it.",
-                    probe.stderr.decode("utf-8", "replace").strip()[:120],
-                )
+            if probe.returncode == 0:
+                _bwrap_usable = launch
+                return launch
+            failure = probe.stderr.decode("utf-8", "replace").strip()[:120]
         except (OSError, subprocess.SubprocessError):
-            _bwrap_usable = False
-    return path if _bwrap_usable else None
+            continue
+
+    _bwrap_usable = False
+    LOGGER.warning(
+        "bwrap is installed but cannot create an isolated process namespace (%s); "
+        "sessions will run WITHOUT isolation.",
+        failure,
+    )
+    return None
 
 
 _warned_no_bwrap = False
@@ -188,7 +224,12 @@ def _env_argv(env: Mapping[str, str]) -> list[str]:
     return [env_bin, "-i", *(f"{k}={v}" for k, v in env.items())]
 
 
-async def install_identity_map(info_read: int, block_write: int) -> int:
+async def install_identity_map(
+    info_read: int,
+    block_write: int,
+    *,
+    launcher_pid: int | None = None,
+) -> int:
     """Map ids into a bwrap held at ``--userns-block-fd``, and release it.
 
     The counterpart to spawning with ``--info-fd``/``--userns-block-fd``:
@@ -207,6 +248,15 @@ async def install_identity_map(info_read: int, block_write: int) -> int:
                 json.loads(raw)
                 break
     pid = int(json.loads(raw)["child-pid"]) if raw else 0
+    if pid and launcher_pid is not None:
+        pid = launcher_pid
+        for _ in range(2):
+            children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+            if len(children) != 1:
+                raise RuntimeError(
+                    f"sandbox launcher {pid} has {len(children)} children; expected one"
+                )
+            pid = int(children[0])
     if pid:
         _map_identities(pid)
     os.write(block_write, b"\n")
@@ -730,6 +780,9 @@ class Workspace:
         no-network namespace instead. ``mounts`` can replace the session's
         mounts where an operation is allowed to see paths hidden from sessions.
         """
+        bwrap = self._bwrap
+        if bwrap is None:
+            raise RuntimeError("workspace commands require bwrap")
         current_identity = (os.geteuid(), os.getegid()) if hasattr(os, "geteuid") else None
         requested_identity = identity if isinstance(identity, tuple) else (identity, identity)
         if (
@@ -751,7 +804,7 @@ class Workspace:
                     nsenter,
                     "--target",
                     str(sandbox),
-                    "--user",
+                    *(("--user",) if bwrap.pid_unshare is None else ()),
                     *(("--net",) if self.owns_netns else ()),
                     "--preserve-credentials",
                     "--",
@@ -808,7 +861,11 @@ class Workspace:
             os.close(info_write)
             os.close(block_read)
             info_write = block_read = -1
-            await install_identity_map(info_read, block_write)
+            await install_identity_map(
+                info_read,
+                block_write,
+                launcher_pid=(process.process.pid if bwrap.pid_unshare is not None else None),
+            )
         except BaseException:
             if process is not None:
                 await process.terminate()
@@ -863,7 +920,8 @@ class Workspace:
         owns_netns = self.owns_netns if network is None else not network
         if not isolate_users and (info_fd is not None or userns_block_fd is not None):
             raise ValueError("identity-map descriptors require a fresh user namespace")
-        argv: list[str] = [self._bwrap, "--die-with-parent"]
+        staged_pid = isolate_processes and self._bwrap.pid_unshare is not None
+        argv: list[str] = [self._bwrap.path, "--die-with-parent"]
         if isolate_users:
             # Blocking means this side installs the map, so the namespace has
             # to be ours to map: --unshare-user, not the best-effort form.
@@ -874,7 +932,7 @@ class Workspace:
         if isolate_processes:
             argv.extend(
                 [
-                    "--unshare-pid",
+                    *(("--unshare-pid",) if not staged_pid else ()),
                     "--unshare-ipc",
                     "--unshare-uts",
                     "--unshare-cgroup-try",
@@ -886,8 +944,10 @@ class Workspace:
             argv.extend(["--info-fd", str(info_fd)])
         if userns_block_fd is not None:
             argv.extend(["--userns-block-fd", str(userns_block_fd)])
-        for m in self._system_mounts:
-            argv.extend(m.to_bwrap_args())
+        for mount in self._system_mounts:
+            if self._bwrap.pid_unshare is not None and mount.kind == "proc":
+                continue
+            argv.extend(mount.to_bwrap_args())
         argv.extend(["--bind", str(self.root), self._guest_path])
         for m in self.mounts if mounts is None else mounts:
             argv.extend(m.to_bwrap_args())
@@ -899,6 +959,15 @@ class Workspace:
         argv.extend(["--chdir", target_cwd])
         argv.append("--")
         argv.extend(_payload_argv(command, full_env, ctty=tty))
+        if staged_pid:
+            assert self._bwrap.pid_unshare is not None
+            argv = [
+                self._bwrap.pid_unshare,
+                "--kill-child=KILL",
+                "--pid",
+                "--mount-proc",
+                *argv,
+            ]
         return argv
 
     def enter_argv(
@@ -1061,6 +1130,8 @@ class Workspace:
         the holder: the pid that matters is the one *this* process can name,
         and bwrap is the only party that knows which of its forks that is.
         """
+        bwrap = self._bwrap
+        assert bwrap is not None
         try:
             read_fd, write_fd = os.pipe()
             block_read, block_write = os.pipe()
@@ -1084,7 +1155,11 @@ class Workspace:
                 write_fd = block_read = -1
                 # The sandbox is held at its own creation until its ids are
                 # mapped: nothing runs in it, and nothing joins it, before then.
-                pid = await install_identity_map(read_fd, block_write)
+                pid = await install_identity_map(
+                    read_fd,
+                    block_write,
+                    launcher_pid=(self._sandbox.pid if bwrap.pid_unshare is not None else None),
+                )
             finally:
                 os.close(read_fd)
                 os.close(block_write)

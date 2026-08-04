@@ -22,7 +22,23 @@ def fake_docker(monkeypatch):
     async def run(*args: str, **_kwargs):
         calls.append(args)
         if args[:4] == ("image", "inspect", "--format", "{{json .Config}}"):
-            return json.dumps({"User": "", "WorkingDir": "/workspace", "Entrypoint": None}), ""
+            if args[-1].startswith("hud-harbor:"):
+                return json.dumps(
+                    {
+                        "User": "",
+                        "WorkingDir": "/workspace",
+                        "Entrypoint": [],
+                        "Cmd": ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py"],
+                    }
+                ), ""
+            return json.dumps(
+                {
+                    "User": "",
+                    "WorkingDir": "/workspace",
+                    "Entrypoint": None,
+                    "Cmd": None,
+                }
+            ), ""
         if args[:4] == ("image", "inspect", "--format", "{{.Id}}"):
             return "sha256:0123456789abcdef0123456789abcdef\n", ""
         if args[0] == "compose" and args[-3:] == ("config", "--format", "json"):
@@ -43,6 +59,7 @@ def fake_docker(monkeypatch):
                         },
                         "redis": {
                             "image": "redis:7-alpine",
+                            "entrypoint": None,
                             "command": ["redis-server", "--save", ""],
                             "environment": {"SIDE": "car"},
                             "expose": ["6379/tcp"],
@@ -122,11 +139,18 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
     assert redis["command"] == ["redis-server", "--save", ""]
     assert redis["expose"] == ["6379/tcp"]
     assert redis["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
+    assert redis["entrypoint"] == []
+    assert redis["working_dir"] == "/workspace"
     assert "build" not in redis
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
     assert manifest["environment"]["env"] == {"FROM_COMPOSE": "yes"}
     assert manifest["capabilities"] == []
     assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+    assert compose["services"]["main"]["command"] == [
+        "/media/hud/venv/bin/hud",
+        "serve",
+        "/media/hud/env.py",
+    ]
     assert ("pull", "redis:7-alpine") in fake_docker
     assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
 

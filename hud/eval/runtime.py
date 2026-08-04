@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import shlex
@@ -917,15 +918,22 @@ class DaytonaRuntime:
             GpuType,
             Image,
             Resources,
-            SandboxClass,
             SessionExecuteRequest,
         )
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
             compose = config.compose.resolve() if config.compose is not None else None
+            project = json.loads(compose.read_text("utf-8")) if compose is not None else None
+            services = project["services"] if project is not None else None
             if config.limits is not None and config.limits.run_timeout_s is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
+            if (
+                services is not None
+                and config.resources is not None
+                and config.resources.gpu is not None
+            ):
+                raise ValueError("Daytona linked sandboxes do not support GPU resources")
 
             daytona_resources = None
             if config.resources is not None:
@@ -950,19 +958,31 @@ class DaytonaRuntime:
                 if resource_kwargs:
                     daytona_resources = Resources(**resource_kwargs)
 
-            if config.image is not None:
+            if config.image is not None or services is not None:
+                main_service = None
+                if services is not None:
+                    main_service = {
+                        "environment": {},
+                        "entrypoint": [],
+                        "command": [],
+                        "working_dir": None,
+                    } | services["main"]
+                main_image = config.image
+                if main_image is None:
+                    assert main_service is not None
+                    main_image = main_service["image"]
                 sandbox_params = CreateSandboxFromImageParams(
-                    image=Image.base(config.image),
+                    image=Image.base(main_image),
                     ephemeral=True,
                     auto_stop_interval=0,
                     resources=daytona_resources,
+                    env_vars=(main_service["environment"] or None)
+                    if main_service is not None
+                    else None,
                 )
             else:
-                snapshot_name = (
-                    "hud-compose-dind-vm-v1" if compose is not None else self.snapshot_name
-                )
-                snapshot_image = "docker:28.3.3-dind" if compose is not None else self._image
-                snapshot_class = SandboxClass.LINUX_VM if compose is not None else None
+                snapshot_name = self.snapshot_name
+                snapshot_image = self._image
                 if snapshot_name is None:
                     raise ValueError(
                         "DaytonaRuntime requires snapshot_name, runtime_config.image, "
@@ -1019,7 +1039,6 @@ class DaytonaRuntime:
                                         name=snapshot_name,
                                         image=snapshot_image,
                                         resources=daytona_resources,
-                                        sandbox_class=snapshot_class,
                                     )
                                 )
                             self._resolved.add(snapshot_name)
@@ -1039,6 +1058,7 @@ class DaytonaRuntime:
                 timeout=create_timeout,
             )
             session_command: Any = None
+            linked_sandboxes: list[Any] = []
             try:
                 if compose is None:
                     # Start the env server in a background session (the snapshot's CMD is
@@ -1051,57 +1071,100 @@ class DaytonaRuntime:
                         session, SessionExecuteRequest(command=cmd, run_async=True)
                     )
                 else:
-                    main: dict[str, Any] = {
-                        "ports": [f"127.0.0.1:{self.port}:{self.port}"],
-                        "security_opt": [
-                            "seccomp=/hud/docker-seccomp.json",
-                            "systempaths=unconfined",
-                        ],
-                    }
-                    resources = config.resources
-                    if resources is not None:
-                        main.update(
-                            {
-                                key: value
-                                for key, value in (
-                                    ("cpus", resources.cpu),
-                                    (
-                                        "mem_limit",
-                                        f"{resources.memory_mb}m"
-                                        if resources.memory_mb is not None
-                                        else None,
-                                    ),
-                                    (
-                                        "gpus",
-                                        resources.gpu.count if resources.gpu is not None else None,
-                                    ),
+                    assert services is not None and main_service is not None
+                    for service_name, raw_service in services.items():
+                        if service_name == "main":
+                            continue
+                        service = {
+                            "environment": {},
+                            "entrypoint": [],
+                            "command": [],
+                            "working_dir": None,
+                            "healthcheck": None,
+                        } | raw_service
+                        image_name = service["image"]
+                        snapshot_name = (
+                            "hud-compose-" + hashlib.sha256(image_name.encode()).hexdigest()[:20]
+                        )
+                        async with self._snapshot_lock:
+                            if snapshot_name not in self._resolved:
+                                try:
+                                    await daytona.snapshot.get(snapshot_name)
+                                except DaytonaNotFoundError:
+                                    await daytona.snapshot.create(
+                                        CreateSnapshotParams(
+                                            name=snapshot_name,
+                                            image=image_name,
+                                        )
+                                    )
+                                self._resolved.add(snapshot_name)
+                        child = await daytona.create(
+                            CreateSandboxFromSnapshotParams(
+                                name=f"hud-{service_name}-{uuid.uuid4().hex[:12]}",
+                                snapshot=snapshot_name,
+                                ephemeral=True,
+                                auto_stop_interval=0,
+                                env_vars=service["environment"],
+                                linked_sandbox=sandbox.id,
+                            ),
+                            timeout=create_timeout,
+                        )
+                        linked_sandboxes.append(child)
+                        session = f"hud-{service_name}"
+                        await child.process.create_session(session)
+                        service_argv = [*service["entrypoint"], *service["command"]]
+                        if not service_argv:
+                            raise ValueError(f"Compose service {service_name!r} has no command")
+                        service_command = shlex.join(service_argv)
+                        if service["working_dir"]:
+                            service_command = (
+                                f"cd {shlex.quote(service['working_dir'])} && {service_command}"
+                            )
+                        await child.process.execute_session_command(
+                            session,
+                            SessionExecuteRequest(command=service_command, run_async=True),
+                        )
+                        alias = shlex.quote(child.id)
+                        hostname = shlex.quote(service_name)
+                        mapped = await sandbox.process.exec(
+                            f"ip=$(getent ahostsv4 {alias} | awk 'NR == 1 {{print $1}}') && "
+                            f'test -n "$ip" && printf \'%s %s\\n\' "$ip" {hostname} '
+                            ">> /etc/hosts",
+                            timeout=30,
+                        )
+                        if mapped.exit_code != 0:
+                            raise RuntimeError(
+                                f"Daytona could not resolve linked service {service_name!r}: "
+                                f"{mapped.result.strip()}"
+                            )
+                        if service["healthcheck"] is not None:
+                            test = ({"test": None} | service["healthcheck"])["test"]
+                            if test and test[0] != "NONE":
+                                health_command = (
+                                    shlex.join(test[1:]) if test[0] == "CMD" else test[1]
                                 )
-                                if value is not None
-                            }
-                        )
-                    with _compose_payload(compose, {"services": {"main": main}}) as (
-                        archive,
-                        override,
-                    ):
-                        await sandbox.fs.upload_file(str(archive), "/hud/project.tar.gz")
-                        await sandbox.fs.upload_file(str(override), "/hud/override.json")
-                        await sandbox.fs.upload_file(
-                            str(_DOCKER_SECCOMP_PROFILE), "/hud/docker-seccomp.json"
-                        )
-                    command = (
-                        "dockerd-entrypoint.sh dockerd >/var/log/dockerd.log 2>&1 & "
-                        "until docker info >/dev/null 2>&1; do sleep 1; done && "
-                        "mkdir -p /hud/project && "
-                        "tar -xzf /hud/project.tar.gz -C /hud/project && "
-                        "docker compose --project-directory /hud/project "
-                        f"--file {shlex.quote(f'/hud/project/{compose.name}')} "
-                        "--file /hud/override.json up --detach --build --remove-orphans"
+                                async with asyncio.timeout(create_timeout):
+                                    while True:
+                                        health = await child.process.exec(
+                                            health_command,
+                                            timeout=30,
+                                        )
+                                        if health.exit_code == 0:
+                                            break
+                                        await asyncio.sleep(1)
+
+                    session = "hud-serve"
+                    await sandbox.process.create_session(session)
+                    main_argv = [*main_service["entrypoint"], *main_service["command"]]
+                    if not main_argv:
+                        raise ValueError("Compose main service has no command")
+                    command = shlex.join(main_argv)
+                    if main_service["working_dir"]:
+                        command = f"cd {shlex.quote(main_service['working_dir'])} && {command}"
+                    session_command = await sandbox.process.execute_session_command(
+                        session,
+                        SessionExecuteRequest(command=command, run_async=True),
                     )
-                    started = await sandbox.process.exec(command, timeout=create_timeout)
-                    if started.exit_code != 0:
-                        raise RuntimeError(
-                            f"Daytona Compose startup failed: {started.result.strip()}"
-                        )
                 ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
                 async with asyncssh.connect(
                     self.ssh_host, username=ssh.token, known_hosts=None
@@ -1117,19 +1180,10 @@ class DaytonaRuntime:
                         # Why it died only exists inside the sandbox, and the
                         # sandbox may already be gone.
                         try:
-                            if compose is None:
-                                logs = await sandbox.process.get_session_command_logs(
-                                    session, session_command.cmd_id
-                                )
-                                output = (logs.stderr or logs.output or logs.stdout or "").strip()
-                            else:
-                                logs = await sandbox.process.exec(
-                                    "docker compose --project-directory /hud/project "
-                                    f"--file {shlex.quote(f'/hud/project/{compose.name}')} "
-                                    "--file /hud/override.json logs --tail 40 main",
-                                    timeout=30,
-                                )
-                                output = logs.result.strip()
+                            logs = await sandbox.process.get_session_command_logs(
+                                session, session_command.cmd_id
+                            )
+                            output = (logs.stderr or logs.output or logs.stdout or "").strip()
                         except Exception as log_exc:
                             exc.add_note(f"env output unavailable: {log_exc}")
                         else:
@@ -1140,13 +1194,14 @@ class DaytonaRuntime:
                             )
                         raise
             finally:
-                if compose is not None:
-                    with contextlib.suppress(Exception):
-                        await sandbox.process.exec(
-                            "docker compose --project-directory /hud/project "
-                            f"--file {shlex.quote(f'/hud/project/{compose.name}')} "
-                            "--file /hud/override.json down --volumes --remove-orphans",
-                            timeout=30,
+                for child in reversed(linked_sandboxes):
+                    try:
+                        await daytona.delete(child)
+                    except Exception:
+                        logger.warning(
+                            "failed to delete linked Daytona sandbox %s; it may still be running",
+                            child.id,
+                            exc_info=True,
                         )
                 try:
                     await daytona.delete(sandbox)
