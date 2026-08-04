@@ -23,6 +23,7 @@ ROOT = Path("/media/hud")
 TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
+AGENT_ANSWER = LOGS / "agent_answer.txt"
 CONFIG = json.loads((ROOT / "tasks.json").read_text("utf-8"))
 
 os.environ.update(CONFIG["environment"]["env"])
@@ -104,6 +105,7 @@ agent_mounts = (
     *harness_mounts,
     Mount("tmpfs", dst=str(TESTS)),
     Mount("tmpfs", dst=str(VERIFIER_LOGS)),
+    Mount("ro", src="/dev/null", dst=str(AGENT_ANSWER)),
 )
 
 env = Environment(CONFIG["name"])
@@ -207,6 +209,8 @@ def register(task: dict[str, Any]) -> None:
     )
     async def run() -> AsyncGenerator[Any, Any]:
         clear_grading_files()
+        AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
+        AGENT_ANSWER.touch()
         entrypoint = None
         try:
             entrypoint = await start_entrypoint()
@@ -246,6 +250,11 @@ def clear_grading_files() -> None:
     for path in (TESTS, VERIFIER_LOGS):
         with contextlib.suppress(FileNotFoundError):
             shutil.rmtree(path)
+    with contextlib.suppress(FileNotFoundError):
+        if AGENT_ANSWER.is_dir() and not AGENT_ANSWER.is_symlink():
+            shutil.rmtree(AGENT_ANSWER)
+        else:
+            AGENT_ANSWER.unlink()
 
 
 async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationResult:
@@ -255,10 +264,7 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     test_script.chmod(test_script.stat().st_mode | 0o111)
 
     clear(VERIFIER_LOGS)
-    answer_file = LOGS / "agent_answer.txt"
-    if answer_file.is_symlink():
-        answer_file.unlink()
-    answer_file.write_text("" if answer is None else str(answer), encoding="utf-8")
+    AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
 
     verifier = CONFIG["verifier"]
     verifier_identity = identity(verifier)

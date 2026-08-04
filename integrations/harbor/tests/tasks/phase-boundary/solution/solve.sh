@@ -13,6 +13,12 @@ else
   echo reserved > /app/visitor-port.txt
 fi
 wait "$squatter" 2>/dev/null || true
+if rm -f /logs/agent_answer.txt 2>/dev/null \
+  && mkfifo /logs/agent_answer.txt 2>/dev/null; then
+  echo unprotected > /app/answer-path.txt
+else
+  echo protected > /app/answer-path.txt
+fi
 {
   if curl -sS --max-time 20 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
     echo "outside_host=reachable"
