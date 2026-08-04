@@ -166,9 +166,9 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 
 Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`, a task's `runtime_config.resources` builds a sized variant under a suffixed name (`my-env-4cpu`); without `image`, an already-built snapshot cannot be resized.
 
-Compose environments run inside a managed Linux VM snapshot so the guest can start Docker. The
-selected Daytona region must have a Linux-VM runner available; select the region with
-`DAYTONA_TARGET` when the organization's default region does not.
+For Compose environments, Daytona runs the main service as the rollout sandbox and each sidecar
+as a linked sandbox. Sidecar images are resolved to reusable Daytona snapshots; a Linux-VM runner
+and nested Docker are not required.
 
 ### `HUDRuntime`
 

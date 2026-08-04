@@ -24,7 +24,7 @@ import pytest
 from hud.capabilities import SSHClient
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import _field, _Unrelayable
-from hud.environment.workspace import Mount, Workspace
+from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessResult
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
@@ -237,7 +237,7 @@ def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.Mo
     _wall(monkeypatch)
 
     ws = Workspace(tmp_path / "root", shell_uid=1000, env={"CUSTOM": "1"})
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     argv = ws.shell_argv("echo hi", env={"PER_CALL": "1"})
 
     sandbox_env = _sandbox_env(argv)
@@ -252,7 +252,7 @@ def test_bwrap_inherits_host_env_when_not_walled(
 ) -> None:
     monkeypatch.setenv("SENTINEL", "visible")
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     argv = ws.bwrap_argv(["bash", "-lc", "true"])
     assert _sandbox_env(argv)["SENTINEL"] == "visible"
 
@@ -268,7 +268,7 @@ def test_the_harness_own_configuration_never_reaches_a_session(
     monkeypatch.setenv("ORDINARY", "kept")
     # What the task itself declares is the task's, HUD-shaped name or not.
     ws = Workspace(tmp_path / "root", env={"HUD_TASK_DECLARED": "mine"})
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
     for argv in (ws.shell_argv("echo hi"), ws.bwrap_argv(["true"]), ws.enter_argv(7, "echo hi")):
         session_env = _sandbox_env(argv)
@@ -306,7 +306,7 @@ def test_session_argv_runs_on_bubblewrap_0_4(
         env={"CUSTOM": "1"},
         mounts=(Mount("tmpfs", dst="/tests"),),
     )
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     _wall(monkeypatch)
 
     for argv in (ws.shell_argv("echo hi"), ws.shell_argv(), ws.bwrap_argv(["true"])):
@@ -319,7 +319,7 @@ def test_sessions_join_one_sandbox_rather_than_each_making_its_own(
     """Two commands must land in the same namespaces, or a process the first
     backgrounds is gone by the second."""
     ws = Workspace(tmp_path / "root", guest_path="/app", network=True)
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
     first = ws.enter_argv(4321, "start-a-server &")
     second = ws.enter_argv(4321, "curl localhost")
@@ -347,7 +347,7 @@ async def test_concurrent_sessions_share_one_sandbox(
     """An agent issues parallel tool calls; if each started its own sandbox,
     what one backgrounds would be invisible to the next."""
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     spawned = 0
 
     async def fake_spawn() -> int:
@@ -375,7 +375,7 @@ def test_a_sharing_sandbox_is_not_rejoined_by_network_namespace(
     shared = Workspace(tmp_path / "shared", network=True)
     severed = Workspace(tmp_path / "severed", network=False)
     for ws in (shared, severed):
-        monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+        monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
     assert "--net" not in shared.enter_argv(11, "true")
     assert "--net" in severed.enter_argv(11, "true")
@@ -387,7 +387,7 @@ def test_the_sandbox_reports_readiness_before_sessions_join_it(
     """bwrap names the child pid before that child has built its mount
     namespace, so the pid alone is not proof the sandbox can run anything."""
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     argv = ws.bwrap_argv(["sh", "-c", "echo ready"], info_fd=7)
 
     assert argv[argv.index("--info-fd") + 1] == "7"
@@ -409,7 +409,7 @@ def test_making_a_network_and_joining_it_are_the_same_question(
         (None, True, False),  # the substrate's network, as before
     ):
         ws = Workspace(tmp_path / "root", network=network, allowed_hosts=allowed)
-        monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+        monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
         assert ws.owns_netns is owns
         assert ("--unshare-net" in ws.bwrap_argv(["true"])) is owns
@@ -423,7 +423,7 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
     monkeypatch.setenv("PATH", "/task/bin:/usr/bin")
     monkeypatch.setenv("HUD_API_KEY", "sk-secret")
     ws = Workspace(tmp_path / "root", env={"AGENT_ONLY": "secret"})
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
     @contextlib.asynccontextmanager
     async def visiting(allowed):
@@ -461,11 +461,35 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
 
 
 @pytest.mark.asyncio
+async def test_staged_verifier_stays_in_the_parent_user_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(
+        ws,
+        "_bwrap",
+        Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare"),
+    )
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=121))
+    complete = AsyncMock(return_value=ProcessResult(0, b"passed", b""))
+    spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
+    monkeypatch.setattr(workspace_mod, "create_process_group_exec", spawn)
+
+    await ws.run(["test.sh"], identity=None)
+
+    assert spawn.await_args is not None
+    argv, _ = spawn.await_args
+    assert argv[argv.index("--target") + 1] == "121"
+    assert "--user" not in argv[: argv.index("--")]
+    assert argv[argv.index("--") + 1] == "/usr/bin/bwrap"
+
+
+@pytest.mark.asyncio
 async def test_run_can_use_a_fresh_no_network_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     install_identity_map = AsyncMock(return_value=9)
     complete = AsyncMock(return_value=ProcessResult(0, b"isolated", b""))
     spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
@@ -499,7 +523,7 @@ async def test_an_isolated_command_keeps_the_image_environment(
     monkeypatch.setenv("PATH", "/task/bin:/usr/bin")
     monkeypatch.setenv("HUD_API_KEY", "sk-secret")
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     monkeypatch.setattr(workspace_mod, "install_identity_map", AsyncMock(return_value=9))
     complete = AsyncMock(return_value=ProcessResult(0, b"", b""))
     spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
@@ -518,7 +542,7 @@ async def test_failed_isolated_run_terminates_its_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     process = SimpleNamespace(terminate=AsyncMock(), complete=AsyncMock())
     monkeypatch.setattr(
         workspace_mod,
@@ -543,7 +567,7 @@ async def test_failed_sandbox_start_discards_the_holder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root", network=True)
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     failed_holder = SimpleNamespace(
         returncode=None,
         stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
@@ -653,7 +677,7 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
     from hud.environment.egress import Peer
 
     ws = Workspace(tmp_path / "root", peers=[Peer("db", 5432)], allowed_hosts={"pypi.org"})
-    monkeypatch.setattr(ws, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     ws._prepare_runtime()
 
     argv = ws.bwrap_argv(["true"])
@@ -664,7 +688,7 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
     assert hosts.stat().st_mode & 0o044
 
     sharing = Workspace(tmp_path / "shared", peers=[Peer("db", 5432)], network=True)
-    monkeypatch.setattr(sharing, "_bwrap", "/usr/bin/bwrap")
+    monkeypatch.setattr(sharing, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     sharing._prepare_runtime()
     assert "/etc/hosts" not in sharing.bwrap_argv(["true"])
 
@@ -1058,6 +1082,69 @@ def test_usable_bwrap_reports_unusable_installs(monkeypatch) -> None:
     assert ws.usable_bwrap() is None
 
 
+def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    from hud.environment import workspace as ws
+
+    monkeypatch.setattr(ws, "_bwrap_usable", None)
+    binaries = {
+        "bwrap": "/usr/bin/bwrap",
+        "unshare": "/usr/bin/unshare",
+        "true": "/usr/bin/true",
+    }
+    monkeypatch.setattr(ws.shutil, "which", binaries.get)
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, int(len(calls) == 1), b"", b"blocked")
+
+    monkeypatch.setattr(ws.subprocess, "run", run)
+
+    assert ws.usable_bwrap() == Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare")
+    assert "--unshare-pid" in calls[0]
+    assert calls[1][:4] == [
+        "/usr/bin/unshare",
+        "--kill-child=KILL",
+        "--pid",
+        "--mount-proc",
+    ]
+    assert "--unshare-pid" not in calls[1]
+
+
+def test_staged_bwrap_keeps_user_isolation_and_uses_the_staged_proc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(
+        ws,
+        "_bwrap",
+        Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare"),
+    )
+
+    argv = ws.bwrap_argv(["true"])
+
+    assert argv[:5] == [
+        "/usr/bin/unshare",
+        "--kill-child=KILL",
+        "--pid",
+        "--mount-proc",
+        "/usr/bin/bwrap",
+    ]
+    assert "--unshare-user-try" in argv
+    assert "--unshare-pid" not in argv
+    assert "--proc" not in argv
+    assert "/proc" not in argv
+
+    joined = ws.bwrap_argv(["true"], isolate_processes=False, isolate_users=False)
+    assert joined[0] == "/usr/bin/bwrap"
+    assert "/usr/bin/unshare" not in joined
+    assert "--proc" not in joined
+
+
 def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> None:
     from hud.environment import workspace as ws
 
@@ -1092,6 +1179,39 @@ async def test_identity_map_reads_a_chunked_info_document() -> None:
         assert os.read(block_read, 1) == b"\n"  # the sandbox was released
     finally:
         writer.join()
+        for fd in (info_read, block_read, block_write):
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
+@pytest.mark.asyncio
+async def test_identity_map_resolves_a_staged_sandbox_to_its_parent_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info_read, info_write = os.pipe()
+    block_read, block_write = os.pipe()
+    os.write(info_write, b'{"child-pid": 14}')
+    os.close(info_write)
+    children = {
+        "/proc/100/task/100/children": "102 ",
+        "/proc/102/task/102/children": "121 ",
+    }
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        return children[str(path)]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    try:
+        with mock.patch.object(workspace_mod, "_map_identities") as mapped:
+            pid = await workspace_mod.install_identity_map(
+                info_read,
+                block_write,
+                launcher_pid=100,
+            )
+        assert pid == 121
+        mapped.assert_called_once_with(121)
+        assert os.read(block_read, 1) == b"\n"
+    finally:
         for fd in (info_read, block_read, block_write):
             with contextlib.suppress(OSError):
                 os.close(fd)

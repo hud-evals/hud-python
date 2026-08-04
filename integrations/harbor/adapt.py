@@ -345,6 +345,34 @@ async def adapt(
                     raise ValueError(
                         f"Compose service {service_name!r} has neither image nor build"
                     )
+                output, _ = await docker(
+                    "image", "inspect", "--format", "{{json .Config}}", source_image
+                )
+                image_runtime = {
+                    "Entrypoint": None,
+                    "Cmd": None,
+                    "WorkingDir": None,
+                } | json.loads(output)
+                compose_runtime = {
+                    "entrypoint": None,
+                    "command": None,
+                    "working_dir": None,
+                } | service
+                service["entrypoint"] = (
+                    image_runtime["Entrypoint"] or []
+                    if compose_runtime["entrypoint"] is None
+                    else compose_runtime["entrypoint"]
+                )
+                service["command"] = (
+                    image_runtime["Cmd"] or []
+                    if compose_runtime["command"] is None
+                    else compose_runtime["command"]
+                )
+                service["working_dir"] = (
+                    image_runtime["WorkingDir"] or "/"
+                    if compose_runtime["working_dir"] is None
+                    else compose_runtime["working_dir"]
+                )
                 image_id, _ = await docker("image", "inspect", "--format", "{{.Id}}", source_image)
                 fingerprint = image_id.strip().removeprefix("sha256:")[:16]
                 component = normalize_environment_name(f"{name}-{service_name}", default="sidecar")
@@ -474,6 +502,15 @@ async def adapt(
             main["image"] = image
             for field in ("build", "command", "entrypoint"):
                 main.pop(field, None)
+            output, _ = await docker("image", "inspect", "--format", "{{json .Config}}", image)
+            image_runtime = {
+                "Entrypoint": None,
+                "Cmd": None,
+                "WorkingDir": None,
+            } | json.loads(output)
+            main["entrypoint"] = image_runtime["Entrypoint"] or []
+            main["command"] = image_runtime["Cmd"] or []
+            main["working_dir"] = image_runtime["WorkingDir"] or "/"
             (context / "compose.json").write_text(
                 json.dumps(compose, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",

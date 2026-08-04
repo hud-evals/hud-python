@@ -230,6 +230,9 @@ class _CreateSandboxFromSnapshotParams:
     snapshot: str
     ephemeral: bool
     auto_stop_interval: int
+    name: str | None = None
+    env_vars: dict[str, str] | None = None
+    linked_sandbox: str | None = None
 
 
 @dataclass(frozen=True)
@@ -237,7 +240,6 @@ class _CreateSnapshotParams:
     name: str
     image: object
     resources: object | None = None
-    sandbox_class: object | None = None
 
 
 @dataclass(frozen=True)
@@ -246,6 +248,9 @@ class _CreateSandboxFromImageParams:
     ephemeral: bool
     auto_stop_interval: int
     resources: object | None = None
+    name: str | None = None
+    env_vars: dict[str, str] | None = None
+    linked_sandbox: str | None = None
 
 
 @dataclass(frozen=True)
@@ -273,8 +278,9 @@ class _SessionExecuteRequest:
 
 
 class _FakeDaytonaProcess:
-    def __init__(self, calls: dict[str, object]) -> None:
+    def __init__(self, calls: dict[str, object], sandbox_id: str) -> None:
         self._calls = calls
+        self._sandbox_id = sandbox_id
         self.logs = SimpleNamespace(
             stderr="ImportError: no module named bugs", output="", stdout=""
         )
@@ -284,6 +290,9 @@ class _FakeDaytonaProcess:
 
     async def execute_session_command(self, session: str, request: object) -> SimpleNamespace:
         self._calls["execute"] = (session, request)
+        commands = self._calls.setdefault("session_commands", [])
+        assert isinstance(commands, list)
+        commands.append((self._sandbox_id, session, request))
         return SimpleNamespace(cmd_id="cmd-1")
 
     async def get_session_command_logs(self, session: str, cmd_id: str) -> SimpleNamespace:
@@ -298,11 +307,10 @@ class _FakeDaytonaProcess:
 
 
 class _FakeDaytonaSandbox:
-    id = "sandbox-1"
-
-    def __init__(self, calls: dict[str, object]) -> None:
+    def __init__(self, calls: dict[str, object], sandbox_id: str) -> None:
+        self.id = sandbox_id
         self._calls = calls
-        self.process = _FakeDaytonaProcess(calls)
+        self.process = _FakeDaytonaProcess(calls, sandbox_id)
         self.fs = SimpleNamespace(upload_file=self._upload_file)
 
     async def _upload_file(self, source: str, target: str) -> None:
@@ -374,7 +382,6 @@ class _FakeSnapshotApi:
                     ],
                 ),
             )
-        record.sandbox_class = params.sandbox_class
         self.snapshots[params.name] = record
         self.builds.append(params.name)
 
@@ -386,7 +393,7 @@ class _FakeSnapshotApi:
 class _FakeDaytonaClient:
     def __init__(self, calls: dict[str, object]) -> None:
         self.calls = calls
-        self.sandbox = _FakeDaytonaSandbox(calls)
+        self.sandbox = _FakeDaytonaSandbox(calls, "sandbox-1")
         self.snapshot = _FakeSnapshotApi()
         #: sandbox-create params in order; the last entry is the booted sandbox.
         self.created: list[Any] = []
@@ -395,12 +402,20 @@ class _FakeDaytonaClient:
     async def create(self, params: object, **kwargs: object) -> _FakeDaytonaSandbox:
         self.calls["create"] = (params, kwargs["timeout"])
         self.created.append(params)
-        return self.sandbox
+        sandbox = (
+            self.sandbox
+            if len(self.created) == 1
+            else _FakeDaytonaSandbox(self.calls, f"sandbox-{len(self.created)}")
+        )
+        return sandbox
 
     async def delete(self, sandbox: _FakeDaytonaSandbox) -> None:
         if self.delete_fails:
             raise RuntimeError("daytona API unreachable")
         self.calls["delete"] = sandbox.id
+        deleted = self.calls.setdefault("deleted", [])
+        assert isinstance(deleted, list)
+        deleted.append(sandbox.id)
 
 
 class _FakeSSHConnection:
@@ -463,7 +478,6 @@ def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> _FakeDaytonaClient
     setattr(daytona, "Image", SimpleNamespace(base=lambda name: _DaytonaImage(name)))
     setattr(daytona, "Resources", _DaytonaResources)
     setattr(daytona, "GpuType", _DaytonaGpuType)
-    setattr(daytona, "SandboxClass", SimpleNamespace(LINUX_VM="linux-vm"))
     setattr(daytona, "SessionExecuteRequest", _SessionExecuteRequest)
     setattr(daytona, "_async", daytona_async)
     setattr(daytona_async, "object_storage", object_storage)
@@ -910,38 +924,74 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert calls["delete"] == "sandbox-1"
 
 
-async def test_daytona_runtime_runs_compose_inside_a_linux_vm(
+async def test_daytona_runtime_maps_compose_services_to_linked_sandboxes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _install_fake_daytona(monkeypatch)
     compose = tmp_path / "compose.yaml"
-    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    compose.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "main": {
+                        "image": "hud-env:one",
+                        "command": ["hud", "serve", "/env.py"],
+                        "entrypoint": [],
+                        "working_dir": "/app",
+                    },
+                    "redis": {
+                        "image": "redis:7",
+                        "entrypoint": ["docker-entrypoint.sh"],
+                        "command": ["redis-server"],
+                        "working_dir": "/data",
+                        "environment": {"REDIS_ARGS": "--save ''"},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:54321"
 
-    created = client.calls["create"]
-    assert isinstance(created, tuple)
-    create_params, _ = created
-    assert create_params == _CreateSandboxFromSnapshotParams(
-        snapshot="hud-compose-dind-vm-v1",
+    assert client.created[0] == _CreateSandboxFromImageParams(
+        image=_DaytonaImage("hud-env:one"),
         ephemeral=True,
         auto_stop_interval=0,
+        resources=None,
     )
-    snapshot = client.snapshot.snapshots["hud-compose-dind-vm-v1"]
-    assert snapshot.image_name == "docker:28.3.3-dind"
-    assert snapshot.sandbox_class == "linux-vm"
-    assert client.calls["uploads"] == [
-        ("project.tar.gz", "/hud/project.tar.gz"),
-        ("override.json", "/hud/override.json"),
-        ("docker-seccomp.json", "/hud/docker-seccomp.json"),
+    child = client.created[1]
+    assert isinstance(child, _CreateSandboxFromSnapshotParams)
+    assert child.linked_sandbox == "sandbox-1"
+    assert child.env_vars == {"REDIS_ARGS": "--save ''"}
+    assert child.name is not None and child.name.startswith("hud-redis-")
+    assert client.snapshot.builds == [child.snapshot]
+    assert client.snapshot.snapshots[child.snapshot].image_name == "redis:7"
+    assert client.calls["session_commands"] == [
+        (
+            "sandbox-2",
+            "hud-redis",
+            _SessionExecuteRequest(
+                command="cd /data && docker-entrypoint.sh redis-server",
+                run_async=True,
+            ),
+        ),
+        (
+            "sandbox-1",
+            "hud-serve",
+            _SessionExecuteRequest(
+                command="cd /app && hud serve /env.py",
+                run_async=True,
+            ),
+        ),
     ]
     commands = client.calls["process_execs"]
     assert isinstance(commands, list)
-    assert "dockerd-entrypoint.sh" in commands[0][0]
-    assert "up --detach --build --remove-orphans" in commands[0][0]
-    assert "down --volumes --remove-orphans" in commands[1][0]
+    assert "getent ahostsv4 sandbox-2" in commands[0][0]
+    assert "redis" in commands[0][0]
+    assert client.calls["deleted"] == ["sandbox-2", "sandbox-1"]
     assert client.calls["client_closed"] is True
 
 
