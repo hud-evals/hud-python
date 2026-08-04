@@ -2,8 +2,8 @@
 
 ``ToolAgent`` enumerates ``client.list_tools()`` after the MCP handshake and
 constructs one instance of every ``MCPTool`` subclass in its catalog per
-discovered upstream tool. ``provider_name`` is the upstream name; ``execute``
-forwards straight through ``client.call_tool``.
+discovered upstream tool. ``execute`` forwards straight through
+``client.call_tool``.
 """
 
 from __future__ import annotations
@@ -30,13 +30,15 @@ class MCPTool(AgentTool[MCPClient]):
         spec: AgentToolSpec,
         client: MCPClient,
         mcp_tool: mcp_types.Tool,
+        provider_name: str | None = None,
     ) -> None:
         super().__init__(spec=spec, client=client)
         self.mcp_tool = mcp_tool
+        self._provider_name = mcp_tool.name if provider_name is None else provider_name
 
     @property
     def provider_name(self) -> str:
-        return self.mcp_tool.name
+        return self._provider_name
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         return await self.client.call_tool(self.mcp_tool.name, arguments)

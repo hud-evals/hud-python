@@ -21,7 +21,7 @@ class OpenAICompatibleMCPProxyTool(MCPTool):
 
     @property
     def provider_name(self) -> str:
-        return openai_compatible_tool_name(self.mcp_tool.name)
+        return openai_compatible_tool_name(super().provider_name)
 
     def to_params(self) -> Any:
         return openai_compatible_tool_param(self.mcp_tool, name=self.provider_name)

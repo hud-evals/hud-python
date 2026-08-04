@@ -931,27 +931,55 @@ async def test_daytona_runtime_maps_compose_services_to_linked_sandboxes(
     client = _install_fake_daytona(monkeypatch)
     compose = tmp_path / "compose.yaml"
     compose.write_text(
-        json.dumps(
-            {
-                "services": {
-                    "main": {
-                        "image": "hud-env:one",
-                        "command": ["hud", "serve", "/env.py"],
-                        "entrypoint": [],
-                        "working_dir": "/app",
-                    },
-                    "redis": {
-                        "image": "redis:7",
-                        "entrypoint": ["docker-entrypoint.sh"],
-                        "command": ["redis-server"],
-                        "working_dir": "/data",
-                        "environment": {"REDIS_ARGS": "--save ''"},
-                    },
-                }
-            }
-        ),
+        """\
+services:
+  main:
+    image: hud-env:one
+    command: hud serve /env.py
+    entrypoint: []
+    working_dir: /app
+  redis:
+    image: redis:7
+    entrypoint: null
+    command: null
+    working_dir: /data
+    environment:
+      REDIS_ARGS: --save ''
+""",
         encoding="utf-8",
     )
+    docker_calls: list[tuple[str, ...]] = []
+
+    async def docker(*args: str, **_: object) -> tuple[str, str]:
+        docker_calls.append(args)
+        if args[0] == "compose":
+            return (
+                json.dumps(
+                    {
+                        "services": {
+                            "main": {
+                                "image": "hud-env:one",
+                                "command": ["hud", "serve", "/env.py"],
+                                "entrypoint": [],
+                                "working_dir": "/app",
+                            },
+                            "redis": {
+                                "image": "redis:7",
+                                "entrypoint": None,
+                                "command": None,
+                                "working_dir": "/data",
+                                "environment": {"REDIS_ARGS": "--save ''"},
+                            },
+                        }
+                    }
+                ),
+                "",
+            )
+        if args[:3] == ("image", "inspect", "--format"):
+            return json.dumps({"Entrypoint": ["docker-entrypoint.sh"], "Cmd": ["redis-server"]}), ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(runtime_module, "_docker", docker)
 
     async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:54321"
@@ -993,6 +1021,17 @@ async def test_daytona_runtime_maps_compose_services_to_linked_sandboxes(
     assert "redis" in commands[0][0]
     assert client.calls["deleted"] == ["sandbox-2", "sandbox-1"]
     assert client.calls["client_closed"] is True
+    assert docker_calls[0] == (
+        "compose",
+        "--project-directory",
+        str(tmp_path),
+        "--file",
+        str(compose),
+        "config",
+        "--format",
+        "json",
+    )
+    assert docker_calls[1][-1] == "redis:7"
 
 
 async def test_daytona_task_runtime_config_overlays_provider_defaults(

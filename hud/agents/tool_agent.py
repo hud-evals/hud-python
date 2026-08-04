@@ -28,6 +28,7 @@ import mcp.types as mcp_types
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool
+from hud.agents.tools.mcp import MCPTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient
 from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
@@ -155,17 +156,27 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         mcp_by_client: dict[MCPClient, list[mcp_types.Tool]] = dict(
             zip(mcp_clients, mcp_lists, strict=False),
         )
+        qualify_mcp_names = len(mcp_clients) > 1
 
         for tool_cls in type(self).tool_catalog:
             spec = tool_cls.default_spec(model)
             if spec is None:
                 continue
-            for client in connections.values():
+            for connection_name, client in connections.items():
                 if not isinstance(client, tool_cls.client_type):
                     continue
-                if isinstance(client, MCPClient):
+                if issubclass(tool_cls, MCPTool):
+                    assert isinstance(client, MCPClient)
                     for mt in mcp_by_client[client]:
-                        tool = tool_cls(spec=spec, client=client, mcp_tool=mt)  # type: ignore[call-arg]
+                        provider_name = (
+                            f"{connection_name}__{mt.name}" if qualify_mcp_names else mt.name
+                        )
+                        tool = tool_cls(
+                            spec=spec,
+                            client=client,
+                            mcp_tool=mt,
+                            provider_name=provider_name,
+                        )
                         tools[tool.provider_name] = tool
                         params.append(tool.to_params())
                 else:

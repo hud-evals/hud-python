@@ -13,6 +13,7 @@ from typing import Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
+from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentConfig, AgentStep, ToolStep
 from hud.capabilities import Capability, CapabilityClient, MCPClient, SSHClient
@@ -91,6 +92,49 @@ async def test_agent_opens_every_mcp_capability_by_name() -> None:
     await MultiMCPAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
 
     assert opened == ["database", "search"]
+
+
+async def test_multiple_mcp_capabilities_qualify_tool_names() -> None:
+    class Client(MCPClient):
+        def __init__(self, *names: str) -> None:
+            self.tools = [
+                mcp_types.Tool(
+                    name=name,
+                    description=f"Run {name}",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+                for name in names
+            ]
+            self.calls: list[str] = []
+
+        async def list_tools(self) -> list[mcp_types.Tool]:
+            return self.tools
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+            self.calls.append(name)
+            return MCPToolResult(content=[])
+
+    class MultiMCPAgent(DictAgent):
+        tool_catalog = (OpenAIMCPProxyTool,)
+
+    database = Client("lookup", "write")
+    search = Client("lookup", "find")
+    tools, params = await MultiMCPAgent([])._build_tools({"database": database, "search": search})
+
+    assert list(tools) == [
+        "database__lookup",
+        "database__write",
+        "search__lookup",
+        "search__find",
+    ]
+    assert [param["name"] for param in params] == list(tools)
+
+    await tools["database__lookup"].execute({})
+    assert database.calls == ["lookup"]
+    assert search.calls == []
+
+    single, _ = await MultiMCPAgent([])._build_tools({"database": Client("lookup")})
+    assert list(single) == ["lookup"]
 
 
 # ─── initial messages / user text formatting ──────────────────────────

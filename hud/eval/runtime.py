@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
@@ -886,6 +886,29 @@ async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
     )
 
 
+class _ComposeHealthcheck(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    test: list[str] | None = None
+
+
+class _DaytonaComposeService(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    image: str
+    environment: dict[str, str] = Field(default_factory=dict)
+    entrypoint: list[str] | None = None
+    command: list[str] | None = None
+    working_dir: str | None = None
+    healthcheck: _ComposeHealthcheck | None = None
+
+    @property
+    def argv(self) -> list[str]:
+        if self.entrypoint is None or self.command is None:
+            raise RuntimeError(f"image defaults were not resolved for {self.image!r}")
+        return [*self.entrypoint, *self.command]
+
+
 class DaytonaRuntime:
     """The Daytona provider: each acquisition creates a fresh sandbox from a snapshot.
 
@@ -958,8 +981,54 @@ class DaytonaRuntime:
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
             compose = config.compose.resolve() if config.compose is not None else None
-            project = json.loads(compose.read_text("utf-8")) if compose is not None else None
-            services = project["services"] if project is not None else None
+            services = None
+            if compose is not None:
+                output, _ = await _docker(
+                    "compose",
+                    "--project-directory",
+                    str(compose.parent),
+                    "--file",
+                    str(compose),
+                    "config",
+                    "--format",
+                    "json",
+                )
+                project = json.loads(output)
+                services = TypeAdapter(dict[str, _DaytonaComposeService]).validate_python(
+                    project["services"]
+                )
+                image_runtimes: dict[str, tuple[list[str], list[str]]] = {}
+                for service in services.values():
+                    if service.entrypoint is not None and service.command is not None:
+                        continue
+                    if service.image not in image_runtimes:
+                        try:
+                            output, _ = await _docker(
+                                "image",
+                                "inspect",
+                                "--format",
+                                "{{json .Config}}",
+                                service.image,
+                            )
+                        except RuntimeError:
+                            await _docker("pull", service.image)
+                            output, _ = await _docker(
+                                "image",
+                                "inspect",
+                                "--format",
+                                "{{json .Config}}",
+                                service.image,
+                            )
+                        image_runtime = {"Entrypoint": None, "Cmd": None} | json.loads(output)
+                        image_runtimes[service.image] = (
+                            image_runtime["Entrypoint"] or [],
+                            image_runtime["Cmd"] or [],
+                        )
+                    image_entrypoint, image_command = image_runtimes[service.image]
+                    if service.entrypoint is None:
+                        service.entrypoint = image_entrypoint
+                    if service.command is None:
+                        service.command = image_command
             if config.limits is not None and config.limits.run_timeout_s is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
             if (
@@ -995,22 +1064,17 @@ class DaytonaRuntime:
             if config.image is not None or services is not None:
                 main_service = None
                 if services is not None:
-                    main_service = {
-                        "environment": {},
-                        "entrypoint": [],
-                        "command": [],
-                        "working_dir": None,
-                    } | services["main"]
+                    main_service = services["main"]
                 main_image = config.image
                 if main_image is None:
                     assert main_service is not None
-                    main_image = main_service["image"]
+                    main_image = main_service.image
                 sandbox_params = CreateSandboxFromImageParams(
                     image=Image.base(main_image),
                     ephemeral=True,
                     auto_stop_interval=0,
                     resources=daytona_resources,
-                    env_vars=(main_service["environment"] or None)
+                    env_vars=(main_service.environment or None)
                     if main_service is not None
                     else None,
                 )
@@ -1106,17 +1170,10 @@ class DaytonaRuntime:
                     )
                 else:
                     assert services is not None and main_service is not None
-                    for service_name, raw_service in services.items():
+                    for service_name, service in services.items():
                         if service_name == "main":
                             continue
-                        service = {
-                            "environment": {},
-                            "entrypoint": [],
-                            "command": [],
-                            "working_dir": None,
-                            "healthcheck": None,
-                        } | raw_service
-                        image_name = service["image"]
+                        image_name = service.image
                         snapshot_name = (
                             "hud-compose-" + hashlib.sha256(image_name.encode()).hexdigest()[:20]
                         )
@@ -1138,7 +1195,7 @@ class DaytonaRuntime:
                                 snapshot=snapshot_name,
                                 ephemeral=True,
                                 auto_stop_interval=0,
-                                env_vars=service["environment"],
+                                env_vars=service.environment,
                                 linked_sandbox=sandbox.id,
                             ),
                             timeout=create_timeout,
@@ -1146,13 +1203,13 @@ class DaytonaRuntime:
                         linked_sandboxes.append(child)
                         session = f"hud-{service_name}"
                         await child.process.create_session(session)
-                        service_argv = [*service["entrypoint"], *service["command"]]
+                        service_argv = service.argv
                         if not service_argv:
                             raise ValueError(f"Compose service {service_name!r} has no command")
                         service_command = shlex.join(service_argv)
-                        if service["working_dir"]:
+                        if service.working_dir:
                             service_command = (
-                                f"cd {shlex.quote(service['working_dir'])} && {service_command}"
+                                f"cd {shlex.quote(service.working_dir)} && {service_command}"
                             )
                         await child.process.execute_session_command(
                             session,
@@ -1171,8 +1228,8 @@ class DaytonaRuntime:
                                 f"Daytona could not resolve linked service {service_name!r}: "
                                 f"{mapped.result.strip()}"
                             )
-                        if service["healthcheck"] is not None:
-                            test = ({"test": None} | service["healthcheck"])["test"]
+                        if service.healthcheck is not None:
+                            test = service.healthcheck.test
                             if test and test[0] != "NONE":
                                 health_command = (
                                     shlex.join(test[1:]) if test[0] == "CMD" else test[1]
@@ -1189,12 +1246,12 @@ class DaytonaRuntime:
 
                     session = "hud-serve"
                     await sandbox.process.create_session(session)
-                    main_argv = [*main_service["entrypoint"], *main_service["command"]]
+                    main_argv = main_service.argv
                     if not main_argv:
                         raise ValueError("Compose main service has no command")
                     command = shlex.join(main_argv)
-                    if main_service["working_dir"]:
-                        command = f"cd {shlex.quote(main_service['working_dir'])} && {command}"
+                    if main_service.working_dir:
+                        command = f"cd {shlex.quote(main_service.working_dir)} && {command}"
                     session_command = await sandbox.process.execute_session_command(
                         session,
                         SessionExecuteRequest(command=command, run_async=True),
