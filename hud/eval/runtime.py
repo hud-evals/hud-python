@@ -248,6 +248,27 @@ _DOCKER_SECURITY_ARGS = (
 )
 
 
+def _docker_compose_main(
+    published_port: str,
+    resources: RuntimeResources | None,
+    *,
+    seccomp: str | Path = _DOCKER_SECCOMP_PROFILE,
+) -> dict[str, Any]:
+    main: dict[str, Any] = {
+        "ports": [published_port],
+        "security_opt": [f"seccomp={seccomp}", "systempaths=unconfined"],
+    }
+    if resources is None:
+        return main
+    if resources.cpu is not None:
+        main["cpus"] = resources.cpu
+    if resources.memory_mb is not None:
+        main["mem_limit"] = f"{resources.memory_mb}m"
+    if resources.gpu is not None:
+        main["gpus"] = resources.gpu.count
+    return main
+
+
 @contextlib.contextmanager
 def _compose_payload(
     compose: Path,
@@ -572,30 +593,7 @@ class DockerRuntime:
                 and resources.gpu.type is not None
             ):
                 raise ValueError("DockerRuntime cannot select Compose GPUs by type")
-            main: dict[str, Any] = {
-                "ports": [f"127.0.0.1::{self.port}"],
-                "security_opt": [
-                    f"seccomp={_DOCKER_SECCOMP_PROFILE}",
-                    "systempaths=unconfined",
-                ],
-            }
-            if resources is not None:
-                main.update(
-                    {
-                        key: value
-                        for key, value in (
-                            ("cpus", resources.cpu),
-                            (
-                                "mem_limit",
-                                f"{resources.memory_mb}m"
-                                if resources.memory_mb is not None
-                                else None,
-                            ),
-                            ("gpus", resources.gpu.count if resources.gpu is not None else None),
-                        )
-                        if value is not None
-                    }
-                )
+            main = _docker_compose_main(f"127.0.0.1::{self.port}", resources)
             project = f"hud-{uuid.uuid4().hex[:12]}"
             with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
                 override = Path(directory) / "compose.json"
@@ -804,33 +802,11 @@ class ModalRuntime:
             if compose is None:
                 await sb.wait_until_ready.aio(timeout=ready_timeout)
             else:
-                main: dict[str, Any] = {
-                    "ports": [f"{self.port}:{self.port}"],
-                    "security_opt": [
-                        "seccomp=/hud/docker-seccomp.json",
-                        "systempaths=unconfined",
-                    ],
-                }
-                if resources is not None:
-                    main.update(
-                        {
-                            key: value
-                            for key, value in (
-                                ("cpus", resources.cpu),
-                                (
-                                    "mem_limit",
-                                    f"{resources.memory_mb}m"
-                                    if resources.memory_mb is not None
-                                    else None,
-                                ),
-                                (
-                                    "gpus",
-                                    resources.gpu.count if resources.gpu is not None else None,
-                                ),
-                            )
-                            if value is not None
-                        }
-                    )
+                main = _docker_compose_main(
+                    f"{self.port}:{self.port}",
+                    resources,
+                    seccomp="/hud/docker-seccomp.json",
+                )
                 with _compose_payload(compose, {"services": {"main": main}}) as (
                     archive,
                     override,

@@ -270,7 +270,11 @@ def test_the_harness_own_configuration_never_reaches_a_session(
     ws = Workspace(tmp_path / "root", env={"HUD_TASK_DECLARED": "mine"})
     monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
-    for argv in (ws.shell_argv("echo hi"), ws.bwrap_argv(["true"]), ws.enter_argv(7, "echo hi")):
+    for argv in (
+        ws.shell_argv("echo hi"),
+        ws.bwrap_argv(["true"]),
+        ws.session_argv("echo hi"),
+    ):
         session_env = _sandbox_env(argv)
         assert "HUD_API_KEY" not in session_env
         assert "HUD_SKIP_VERSION_CHECK" not in session_env
@@ -309,35 +313,32 @@ def test_session_argv_runs_on_bubblewrap_0_4(
     monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     _wall(monkeypatch)
 
-    for argv in (ws.shell_argv("echo hi"), ws.shell_argv(), ws.bwrap_argv(["true"])):
+    for argv in (
+        ws.shell_argv("echo hi"),
+        ws.shell_argv(),
+        ws.bwrap_argv(["true"]),
+        ws.session_argv("echo hi"),
+    ):
         assert not _POST_0_4_BWRAP_OPTIONS.intersection(argv)
 
 
-def test_sessions_join_one_sandbox_rather_than_each_making_its_own(
+def test_hosted_sessions_do_not_create_new_namespaces(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two commands must land in the same namespaces, or a process the first
-    backgrounds is gone by the second."""
     ws = Workspace(tmp_path / "root", guest_path="/app", network=True)
     monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
 
-    first = ws.enter_argv(4321, "start-a-server &")
-    second = ws.enter_argv(4321, "curl localhost")
+    first = ws.session_argv("start-a-server &")
+    second = ws.session_argv("curl localhost")
 
-    assert first[0].endswith("/nsenter") and second[0].endswith("/nsenter")
-    # Same target, so the same live namespaces — not a fresh sandbox per command.
-    assert first[first.index("--target") + 1] == "4321"
-    assert second[second.index("--target") + 1] == "4321"
-    assert "--pid" in first and "--mount" in first and "--user" in first
-    # The user namespace has to be joined first: it is what confers the
-    # privilege to join the others in a container given no extra capability.
-    assert first.index("--user") < min(first.index("--mount"), first.index("--pid"))
-    # The sandbox's own working directory, never a path spelled out here:
-    # nsenter opens a directory it is given *before* it joins anything, out
-    # where a guest path the substrate does not have does not resolve at all.
-    assert "--wd" in first
-    assert not any(argument.startswith("--wd=") for argument in first)
-    assert "/app" not in first[: first.index("--")]
+    assert first[0] == "/usr/bin/bwrap" and second[0] == "/usr/bin/bwrap"
+    for argv in (first, second):
+        assert "--unshare-user" not in argv
+        assert "--unshare-pid" not in argv
+        assert "--unshare-net" not in argv
+        assert "--die-with-parent" not in argv
+        assert argv.count("--cap-drop") == 3
+        assert argv[argv.index("--chdir") + 1] == "/app"
 
 
 @pytest.mark.asyncio
@@ -366,21 +367,6 @@ async def test_concurrent_sessions_share_one_sandbox(
     assert set(pids) == {4001}
 
 
-def test_a_sharing_sandbox_is_not_rejoined_by_network_namespace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Joining bwrap's user namespace forfeits authority over the container's
-    netns, so asking for it fails the session outright; a severed sandbox owns
-    its netns and must be joined or the network comes back."""
-    shared = Workspace(tmp_path / "shared", network=True)
-    severed = Workspace(tmp_path / "severed", network=False)
-    for ws in (shared, severed):
-        monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
-
-    assert "--net" not in shared.enter_argv(11, "true")
-    assert "--net" in severed.enter_argv(11, "true")
-
-
 def test_the_sandbox_reports_readiness_before_sessions_join_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -395,13 +381,9 @@ def test_the_sandbox_reports_readiness_before_sessions_join_it(
     assert argv[-1] == "echo ready"
 
 
-def test_making_a_network_and_joining_it_are_the_same_question(
+def test_network_ownership_matches_bubblewrap_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A sandbox that owns a network must be entered through it. Answered
-    differently in the two places, sessions run on the substrate's network —
-    the one the policy exists to keep them off — while the sandbox sits in an
-    empty namespace nothing ever enters."""
     for allowed, network, owns in (
         ({"example.com"}, True, True),  # a policy needs a network to apply to
         (set(), True, True),  # declared unreachable
@@ -413,7 +395,6 @@ def test_making_a_network_and_joining_it_are_the_same_question(
 
         assert ws.owns_netns is owns
         assert ("--unshare-net" in ws.bwrap_argv(["true"])) is owns
-        assert ("--net" in ws.enter_argv(7, "true")) is owns
 
 
 @pytest.mark.asyncio
@@ -435,7 +416,7 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
 
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
     monkeypatch.setattr(ws, "visiting", visiting)
-    monkeypatch.setattr(workspace_mod, "create_process_group_exec", spawn)
+    ws._namespace = cast("Any", SimpleNamespace(spawn=spawn))
 
     result = await ws.run(
         ["test.sh"],
@@ -449,19 +430,21 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
     assert result.stdout == b"passed"
     complete.assert_awaited_once_with(max_wait=12)
     assert spawn.await_args is not None
-    argv, kwargs = spawn.await_args
-    assert argv[argv.index("--target") + 1] == "7"
-    assert "--user" in argv and "--mount" not in argv and "--pid" not in argv
+    (argv,), kwargs = spawn.await_args
+    assert argv[0] == "/usr/bin/bwrap"
+    assert "--unshare-user" not in argv
+    assert "--unshare-pid" not in argv
     assert "HTTPS_PROXY=http://visitor" in argv
     assert "PATH=/task/bin:/usr/bin" in argv
     assert "VERIFIER_ONLY=yes" in argv
+    assert kwargs["mount_view"] == "host"
     assert "AGENT_ONLY=secret" not in argv
     assert not any(arg.startswith("HUD_API_KEY=") for arg in argv)
     assert kwargs["env"]["HTTPS_PROXY"] == "http://visitor"
 
 
 @pytest.mark.asyncio
-async def test_staged_verifier_stays_in_the_parent_user_namespace(
+async def test_staged_verifier_is_launched_by_the_namespace_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
@@ -473,15 +456,46 @@ async def test_staged_verifier_stays_in_the_parent_user_namespace(
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=121))
     complete = AsyncMock(return_value=ProcessResult(0, b"passed", b""))
     spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
-    monkeypatch.setattr(workspace_mod, "create_process_group_exec", spawn)
+    ws._namespace = cast("Any", SimpleNamespace(spawn=spawn))
 
     await ws.run(["test.sh"], identity=None)
 
     assert spawn.await_args is not None
-    argv, _ = spawn.await_args
-    assert argv[argv.index("--target") + 1] == "121"
-    assert "--user" not in argv[: argv.index("--")]
-    assert argv[argv.index("--") + 1] == "/usr/bin/bwrap"
+    (argv,), kwargs = spawn.await_args
+    assert argv[0] == "/usr/bin/bwrap"
+    assert "CAP_SYS_ADMIN" in argv
+    assert "/usr/bin/unshare" not in argv
+    assert kwargs["mount_view"] == "host"
+
+
+@pytest.mark.asyncio
+async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    _wall(monkeypatch)
+    monkeypatch.setattr(workspace_mod, "_is_root", lambda: True)
+    monkeypatch.setattr(workspace_mod.sys, "platform", "linux")
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=121))
+    launched = SimpleNamespace(returncode=None)
+    spawn = AsyncMock(return_value=launched)
+    ws._namespace = cast("Any", SimpleNamespace(spawn=spawn))
+
+    process = await ws.launch(
+        ["start-environment", "sleep", "infinity"],
+        identity=(1000, 2000),
+        persistent=True,
+    )
+
+    assert process is launched
+    assert spawn.await_args is not None
+    (argv,), kwargs = spawn.await_args
+    assert argv[0] == "/usr/bin/bwrap"
+    assert argv[argv.index("--reuid") + 1] == "1000"
+    assert argv[argv.index("--regid") + 1] == "2000"
+    assert kwargs["mount_view"] == "host"
+    assert kwargs["persistent"] is True
 
 
 @pytest.mark.asyncio
@@ -575,29 +589,21 @@ async def test_failed_sandbox_start_discards_the_holder(
         kill=Mock(),
         wait=AsyncMock(return_value=0),
     )
-    working_holder = SimpleNamespace(
-        returncode=None,
-        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
-        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
-        kill=Mock(),
-        wait=AsyncMock(return_value=0),
-    )
     monkeypatch.setattr(
         asyncio,
         "create_subprocess_exec",
-        AsyncMock(side_effect=[failed_holder, working_holder]),
+        AsyncMock(return_value=failed_holder),
     )
     monkeypatch.setattr(
         workspace_mod,
         "install_identity_map",
-        AsyncMock(side_effect=[RuntimeError("map failed"), 9]),
+        AsyncMock(side_effect=RuntimeError("map failed")),
     )
 
     with pytest.raises(RuntimeError, match="map failed"):
         await ws.sandbox_pid()
 
     failed_holder.kill.assert_called_once()
-    assert await ws.sandbox_pid() == 9
 
 
 def test_a_peer_answers_at_the_address_the_task_expects() -> None:
@@ -620,40 +626,6 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
 
     with pytest.raises(ValueError, match="two peers are called"):
         bind_addresses([Peer("db", 5432), Peer("db", 6379)])
-
-
-@pytest.mark.asyncio
-async def test_egress_attach_fails_when_the_bridge_never_becomes_ready(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from hud.environment import egress as egress_mod
-    from hud.environment.egress import Egress
-
-    failed_bridge = SimpleNamespace(
-        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"")),
-        stderr=SimpleNamespace(read=AsyncMock(return_value=b"address already in use")),
-        kill=Mock(),
-        wait=AsyncMock(return_value=1),
-    )
-    working_bridge = SimpleNamespace(
-        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
-        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
-        kill=Mock(),
-        wait=AsyncMock(return_value=0),
-    )
-    monkeypatch.setattr(
-        egress_mod.asyncio,
-        "create_subprocess_exec",
-        AsyncMock(side_effect=[failed_bridge, working_bridge]),
-    )
-    route = Egress(tmp_path, {"example.com"})
-
-    with pytest.raises(RuntimeError, match="address already in use"):
-        await route.attach(7)
-
-    failed_bridge.kill.assert_called_once()
-    await route.attach(7)
-    route.stop()
 
 
 def test_a_peers_name_is_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
@@ -939,20 +911,6 @@ def test_shell_identity_keeps_the_declared_primary_group(
     assert argv[argv.index("--regid") + 1] == "2000"
 
 
-def test_entered_process_keeps_an_explicit_primary_group(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _wall(monkeypatch)
-    monkeypatch.setattr(workspace_mod, "_is_root", lambda: True)
-    monkeypatch.setattr(workspace_mod.sys, "platform", "linux")
-    ws = Workspace(tmp_path / "root")
-
-    argv = ws.enter_argv(7, ["run-service"], identity=(1000, 2000))
-
-    assert argv[argv.index("--reuid") + 1] == "1000"
-    assert argv[argv.index("--regid") + 1] == "2000"
-
-
 def test_caller_env_is_injected_only_after_the_drop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1033,7 +991,7 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
     monkeypatch.setenv("HUD_API_KEY", "super-secret")
     ws = Workspace(tmp_path / "root")
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
-    monkeypatch.setattr(workspace_mod, "create_process_group_exec", capture_spawn)
+    ws._namespace = cast("Any", SimpleNamespace(spawn=capture_spawn))
     process = SimpleNamespace(term_type=None, command="true")
 
     with pytest.raises(SpawnCaptured) as captured:

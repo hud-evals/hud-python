@@ -10,15 +10,17 @@ import math
 import os
 import pwd
 import shutil
-import subprocess
 from collections.abc import AsyncGenerator  # noqa: TC003
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
 from hud.environment import Environment, Mount, Peer
 from hud.environment.egress import ANY_HOST
 from hud.graders import EvaluationResult
+
+if TYPE_CHECKING:
+    from hud.environment.namespace import NamespaceProcess
 
 ROOT = Path("/media/hud")
 TESTS = Path("/tests")
@@ -145,24 +147,20 @@ workspace = env.workspace(
 )
 
 
-async def start_entrypoint() -> asyncio.subprocess.Process | None:
+async def start_entrypoint() -> NamespaceProcess | None:
     entrypoint = CONFIG["entrypoint"]
     if not entrypoint:
         return None
     sandbox = await workspace.sandbox_pid()
     if sandbox is None:
         raise RuntimeError("Harbor entrypoints require an isolated workspace")
-    process = await asyncio.create_subprocess_exec(
-        *workspace.enter_argv(
-            sandbox,
-            [*entrypoint, "sh", "-c", "sleep infinity"],
-            env=CONFIG["environment"]["env"],
-            identity=image_identity,
-            inherit_workspace_env=False,
-            no_new_privs=False,
-        ),
-        stdin=subprocess.DEVNULL,
-        env={},
+    process = await workspace.launch(
+        [*entrypoint, "sh", "-c", "sleep infinity"],
+        env=CONFIG["environment"]["env"],
+        identity=image_identity,
+        inherit_workspace_env=False,
+        no_new_privs=False,
+        persistent=True,
     )
     await asyncio.sleep(0)
     if process.returncode is not None:
@@ -170,7 +168,7 @@ async def start_entrypoint() -> asyncio.subprocess.Process | None:
     return process
 
 
-async def wait_until_healthy(entrypoint: asyncio.subprocess.Process | None) -> None:
+async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
     healthcheck = CONFIG["environment"]["healthcheck"]
     if healthcheck is None:
         return

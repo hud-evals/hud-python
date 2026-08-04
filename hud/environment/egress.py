@@ -22,7 +22,6 @@ obvious error.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import contextlib
@@ -37,7 +36,6 @@ import select
 import shutil
 import socket
 import socketserver
-import subprocess
 import sys
 import threading
 import urllib.parse
@@ -523,7 +521,6 @@ class Egress:
         self.peers = tuple(peers)
         self.token = token
         self._servers: list[tuple[_UnixServer, Path]] = []
-        self._bridge: asyncio.subprocess.Process | None = None
 
     @property
     def socket_path(self) -> Path:
@@ -572,58 +569,11 @@ class Egress:
                 (addresses[peer.name], peer.port, str(self._peer_socket(index)))
                 for index, peer in enumerate(self.peers)
             ),
-            ("127.0.0.1", VISITOR_PORT, str(self.socket_dir / "visit" / "egress.sock")),
         ]
 
-    async def attach(self, pid: int, port: int = BRIDGE_PORT) -> None:
-        """Offer every route on the loopback of *pid*'s network namespace.
-
-        The bridge joins that namespace and nothing else, so it keeps this
-        filesystem — which is how it reaches sockets the workspace cannot.
-
-        Returns once it is accepting rather than once it is spawned: a session
-        starting in between finds the port refused, which a task opening with
-        a package install reads as a network that does not work.
-        """
-        spec = self._bridge_spec(port)
-        if not spec:
-            return
-        nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
-        self._bridge = await asyncio.create_subprocess_exec(
-            *[
-                nsenter,
-                "--target",
-                str(pid),
-                "--net",
-                "--user",
-                "--preserve-credentials",
-                "--",
-                sys.executable,
-                "-c",
-                _BRIDGE,
-                json.dumps(spec),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        assert self._bridge.stdout is not None
-        try:
-            ready = await asyncio.wait_for(self._bridge.stdout.readline(), 30.0)
-        except TimeoutError:
-            ready = b""
-        if ready != b"ready\n":
-            bridge, self._bridge = self._bridge, None
-            with contextlib.suppress(ProcessLookupError):
-                bridge.kill()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(bridge.wait(), 5.0)
-            detail = ""
-            if bridge.stderr is not None:
-                with contextlib.suppress(Exception):
-                    detail = (await bridge.stderr.read(2048)).decode(errors="replace").strip()
-            raise RuntimeError(
-                "the workspace's ways out did not come up" + (f": {detail}" if detail else "")
-            )
+    def bridge_argv(self, port: int = BRIDGE_PORT) -> list[str]:
+        """Command which serves this policy inside a workspace network namespace."""
+        return [sys.executable, "-c", _BRIDGE, json.dumps(self._bridge_spec(port))]
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
         """Proxy variables for what this serves.
@@ -636,10 +586,6 @@ class Egress:
 
     def stop(self) -> None:
         """Take the routes away."""
-        if self._bridge is not None:
-            with contextlib.suppress(ProcessLookupError):
-                self._bridge.kill()
-            self._bridge = None
         for server, path in self._servers:
             server.shutdown()
             server.server_close()
