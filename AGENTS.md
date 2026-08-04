@@ -67,18 +67,10 @@ Python `>=3.11, <3.13`.
 ## Code Quality Bar
 
 - Prefer direct, typed, maintainable code over clever or magical abstractions.
-- Be ambitious about simplification. Look for ways to delete whole branches,
-  helper layers, modes, and special cases while preserving behavior.
 - Fail fast and loudly. Avoid silent fallbacks, broad exception swallowing, and
   defensive branches that hide broken invariants.
 - Minimize branching. Every new `if`, `try`, compatibility path, or nullable mode
   should earn its keep.
-- Preserve documented public API and persisted behavior unless the task is an
-  intentional migration. Do not add compatibility layers for unshipped branch
-  work; replace the design cleanly.
-- Reuse canonical helpers and local abstractions before adding new ones.
-- Keep feature logic in the layer that owns the concept. Treat scattered
-  feature checks in shared paths as a design problem.
 - Prefer explicit contracts over optional, loosely shaped, or cast-heavy data.
 - Delete dead code. Do not keep obsolete paths around "just in case."
 - Keep comments rare and useful. Explain non-obvious intent, not what the next
@@ -90,6 +82,28 @@ Python `>=3.11, <3.13`.
   focused module to extract.
 - Avoid new core dependencies. If a dependency is only needed for optional
   provider, tool, or integration behavior, put it behind the relevant extra.
+
+## Architecture And Simplification
+
+- Before changing cross-module behavior, identify the layer that owns the concept.
+  Keep its policy and invariants there; other layers should translate or delegate.
+- Before introducing an abstraction, find the existing abstraction that owns the
+  same semantics. Reuse or extend it instead of building a partial copy elsewhere.
+- Reuse abstractions by meaning, not code similarity. Duplication is a reason to
+  inspect ownership, not automatic justification for a shared helper.
+- Prefer one canonical contract, data model, and execution path for each concept.
+  Express legitimate variation through owned configuration or policy rather than
+  parallel implementations.
+- Keep adapters thin: translate external representations into native SDK concepts
+  at the boundary, then use the normal implementation.
+- Add a helper, wrapper, or module only when it reduces total conceptual
+  complexity, centralizes an invariant, or provides meaningful reuse. Inline
+  ceremonial indirection.
+- Public APIs should expose stable user operations and domain concepts, not
+  internal construction stages or compatibility scaffolding.
+- Preserve observable behavior, persisted contracts, and security invariants, not
+  accidental internal structure. Prefer explicit migrations when architecture
+  requires a shipped contract to change.
 
 ## Typing And Imports
 
