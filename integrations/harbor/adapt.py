@@ -19,6 +19,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from hud.capabilities import Capability
+from hud.environment.egress import BRIDGE_PORT, VISITOR_PORT
 from hud.eval import Task, Taskset
 from hud.eval.compose import ComposeConfig, ComposeHealthcheck, ComposeService, ImageConfig
 from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeResources
@@ -517,8 +518,10 @@ async def adapt(
         ports.update(
             published.target for published in compose_main.ports if published.protocol == "tcp"
         )
-        if 8765 in ports:
-            raise ValueError("Harbor main service port 8765 conflicts with the HUD control port")
+        if conflict := ports & {BRIDGE_PORT, VISITOR_PORT, 8765}:
+            raise ValueError(
+                f"Harbor main service port {min(conflict)} conflicts with a HUD reserved port"
+            )
         healthcheck = environment.healthcheck
         if healthcheck is None and compose_main.healthcheck is not None:
             healthcheck = HealthcheckConfig.from_compose(compose_main.healthcheck)

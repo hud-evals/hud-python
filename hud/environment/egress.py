@@ -179,7 +179,11 @@ class Peer:
         return self.target or ("127.0.0.1", self.port)
 
 
-def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
+def bind_addresses(
+    peers: Sequence[Peer],
+    *,
+    reserved_ports: Collection[int] = (),
+) -> dict[str, str]:
     """Which loopback address each peer answers on inside the workspace.
 
     ``127.0.0.1`` wherever the port is free, because a task that says
@@ -187,7 +191,11 @@ def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
     there, so the second moves down 127.0.0.0/8 and is reached by its name —
     which is how a task naming several services addresses them anyway.
     """
-    taken = {("127.0.0.1", BRIDGE_PORT), ("127.0.0.1", VISITOR_PORT)}
+    taken = {
+        ("127.0.0.1", BRIDGE_PORT),
+        ("127.0.0.1", VISITOR_PORT),
+        *(("127.0.0.1", port) for port in reserved_ports),
+    }
     addresses: dict[str, str] = {}
     for peer in peers:
         if peer.name in addresses:
@@ -208,6 +216,7 @@ def hosts_text(
     base: str,
     *,
     local_aliases: Collection[str] = (),
+    reserved_ports: Collection[int] = (),
 ) -> str:
     """*base* — the substrate's ``/etc/hosts`` — plus a line per peer.
 
@@ -216,7 +225,7 @@ def hosts_text(
     verifier does, to reach a service the agent started) still reaches a peer
     at its address, but not by its name.
     """
-    addresses = bind_addresses(peers)
+    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
     lines = "".join(
         [
             *(f"127.0.0.1\t{name}\n" for name in local_aliases),
@@ -231,6 +240,7 @@ def proxy_environment(
     peers: Sequence[Peer] = (),
     *,
     local_aliases: Collection[str] = (),
+    reserved_ports: Collection[int] = (),
     token: str | None = None,
 ) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
@@ -244,7 +254,7 @@ def proxy_environment(
     """
     credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
     url = f"http://{credentials}127.0.0.1:{port}"
-    addresses = bind_addresses(peers)
+    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
     bypass = ",".join(
         dict.fromkeys(["127.0.0.1", "localhost", *local_aliases, *addresses, *addresses.values()])
     )
@@ -528,12 +538,14 @@ class Egress:
         peers: Sequence[Peer] = (),
         *,
         local_aliases: Collection[str] = (),
+        reserved_ports: Collection[int] = (),
         token: str | None = None,
     ) -> None:
         self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
         self.peers = tuple(peers)
         self.local_aliases = tuple(local_aliases)
+        self.reserved_ports = frozenset(reserved_ports)
         self.token = token
         self._servers: list[tuple[_UnixServer, Path]] = []
 
@@ -577,7 +589,7 @@ class Egress:
 
     def _bridge_spec(self, port: int) -> list[tuple[str, int, str]]:
         """Where each route out is offered inside the workspace."""
-        addresses = bind_addresses(self.peers)
+        addresses = bind_addresses(self.peers, reserved_ports=self.reserved_ports)
         return [
             *([("127.0.0.1", port, str(self.socket_path))] if self.allowed else []),
             *(
@@ -611,6 +623,7 @@ class Egress:
                 port,
                 self.peers,
                 local_aliases=self.local_aliases,
+                reserved_ports=self.reserved_ports,
                 token=self.token,
             )
             if self.allowed

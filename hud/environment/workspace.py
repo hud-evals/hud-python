@@ -1067,6 +1067,7 @@ class Workspace:
                     self.allowed_hosts or (),
                     self.peers,
                     local_aliases=self.local_aliases,
+                    reserved_ports=self.ports,
                 )
                 self._egress.start()
             staged = bwrap.pid_unshare is not None
@@ -1343,6 +1344,7 @@ class Workspace:
                 self.peers,
                 substrate.read_text() if substrate.is_file() else "",
                 local_aliases=sorted(self.local_aliases),
+                reserved_ports=self.ports,
             ),
             encoding="utf-8",
         )

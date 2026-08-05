@@ -136,7 +136,10 @@ def fake_docker(monkeypatch):
                 project["services"]["main"]["healthcheck"] = {
                     "test": ["CMD", "true"],
                 }
-            elif "expose:" not in authored:
+            for port in (3128, 3129, 8765):
+                if f"expose: [{port}]" in authored:
+                    project["services"]["main"]["expose"] = [f"{port}/tcp"]
+            if "expose:" not in authored and "redis" in project["services"]:
                 project["services"]["redis"].pop("expose")
             if "user: 1001:1002" in authored:
                 project["services"]["main"]["user"] = "1001:1002"
@@ -655,6 +658,22 @@ async def test_unsupported_harbor_behaviour_fails_before_building(
         await harbor.adapt(tmp_path)
 
     assert fake_docker == []
+
+
+@pytest.mark.parametrize("port", [3128, 3129, 8765])
+async def test_adapt_rejects_main_ports_reserved_by_hud(
+    tmp_path: Path,
+    fake_docker,
+    port: int,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        f"services:\n  main:\n    expose: [{port}]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=f"port {port} conflicts with a HUD reserved port"):
+        await harbor.adapt(tmp_path)
 
 
 async def test_adapt_builds_a_separate_verifier_and_reuses_the_runtime(

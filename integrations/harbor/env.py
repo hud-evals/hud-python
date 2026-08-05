@@ -288,9 +288,16 @@ async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> Proc
 def copy_artifact(source: Path, target: Path) -> None:
     if source.is_symlink():
         raise RuntimeError(f"artifact {source} is a symbolic link")
+    if source.resolve(strict=False) != source.absolute():
+        raise RuntimeError(f"artifact {source} has a symbolic link in its path")
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
-        shutil.copytree(source, target, symlinks=True)
+        for root, directories, files in os.walk(source, followlinks=False):
+            for name in (*directories, *files):
+                entry = Path(root, name)
+                if entry.is_symlink():
+                    raise RuntimeError(f"artifact {source} contains symbolic link {entry}")
+        shutil.copytree(source, target)
     elif source.exists() or source.is_symlink():
         shutil.copy2(source, target, follow_symlinks=False)
 

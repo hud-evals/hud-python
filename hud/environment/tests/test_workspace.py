@@ -726,6 +726,9 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     both = bind_addresses([Peer("primary", 5432), Peer("replica", 5432)])
     assert both == {"primary": "127.0.0.1", "replica": "127.0.0.2"}
 
+    reserved = bind_addresses([Peer("api", 8080)], reserved_ports={8080})
+    assert reserved == {"api": "127.0.0.2"}
+
     proxies = bind_addresses([Peer("agent", 3128), Peer("verifier", 3129)])
     assert proxies == {"agent": "127.0.0.2", "verifier": "127.0.0.2"}
 
@@ -762,6 +765,7 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
         tmp_path / "root",
         peers=[Peer("db", 5432)],
         local_aliases=["main"],
+        ports=[5432],
         allowed_hosts={"pypi.org"},
         credentials_dir=tmp_path / "protected" / "session-keys",
         hosts_path=tmp_path / "runtime" / "hosts",
@@ -774,7 +778,7 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
     assert hosts == tmp_path / "runtime" / "hosts"
     assert argv[argv.index("/etc/hosts") - 2] == "--ro-bind"
     assert "127.0.0.1\tmain\n" in hosts.read_text()
-    assert "127.0.0.1\tdb\n" in hosts.read_text()
+    assert "127.0.0.2\tdb\n" in hosts.read_text()
     # Bound over /etc/hosts, so every session reads it whatever its identity.
     assert hosts.stat().st_mode & 0o044
 
@@ -812,6 +816,7 @@ def test_bridge_socket_paths_are_configuration_not_process_arguments() -> None:
         "/media/hud/session-keys",
         {"pypi.org"},
         [Peer("db", 5432)],
+        reserved_ports={5432},
     )
 
     visitor = Path("/media/hud/session-keys/visitor/egress.sock")
@@ -819,7 +824,9 @@ def test_bridge_socket_paths_are_configuration_not_process_arguments() -> None:
 
     assert "/media/hud/session-keys" not in " ".join(argv)
     assert "/media/hud/session-keys" in config.decode()
-    assert ["127.0.0.1", 3129, str(visitor)] in json.loads(config)
+    routes = json.loads(config)
+    assert ["127.0.0.1", 3129, str(visitor)] in routes
+    assert ["127.0.0.2", 5432, "/media/hud/session-keys/peer-0.sock"] in routes
 
 
 def test_the_proxy_normalizes_http_framing_in_both_directions(
