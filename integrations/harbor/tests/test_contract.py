@@ -132,6 +132,10 @@ def fake_docker(monkeypatch):
                     "retries": 5,
                     "start_period": "1s",
                 }
+            elif "healthcheck-defaults" in authored:
+                project["services"]["main"]["healthcheck"] = {
+                    "test": ["CMD", "true"],
+                }
             elif "expose:" not in authored:
                 project["services"]["redis"].pop("expose")
             if "user: 1001:1002" in authored:
@@ -318,6 +322,27 @@ async def test_adapt_moves_compose_main_healthcheck_into_the_workspace(
         "retries": 5,
     }
     assert "healthcheck" not in compose["services"]["main"]
+
+
+async def test_adapt_uses_compose_healthcheck_defaults(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "# healthcheck-defaults\nservices:\n  main: {}\n",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["environment"]["healthcheck"] == {
+        "command": "true",
+        "interval_sec": 30.0,
+        "timeout_sec": 30.0,
+        "start_period_sec": 0.0,
+        "start_interval_sec": 5.0,
+        "retries": 3,
+    }
 
 
 async def test_adapt_derives_implicit_peer_port_from_image(

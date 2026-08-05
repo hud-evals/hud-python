@@ -1074,6 +1074,7 @@ class Workspace:
                 _SANDBOX_HOLDER,
                 network=True,
                 isolate_users=staged,
+                bind_devices=True,
             )
             socket_path = self._credentials_dir() / "namespace.sock"
             host_argv = [
@@ -1111,7 +1112,8 @@ class Workspace:
                     "--bind",
                     "/",
                     "/",
-                    "--dev",
+                    "--dev-bind",
+                    "/dev",
                     "/dev",
                     "--",
                 ]
@@ -1292,6 +1294,9 @@ class Workspace:
             "--bind",
             "/",
             "/",
+            "--dev-bind",
+            "/dev",
+            "/dev",
             "--chdir",
             target_cwd,
             "--",

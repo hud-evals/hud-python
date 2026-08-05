@@ -32,7 +32,6 @@ AGENT_ANSWER = LOGS / "agent_answer.txt"
 ARTIFACTS = ROOT / "artifacts"
 DOCKER_SOCKET = ROOT / "docker.sock"
 DOCKER = ROOT / "bin" / "docker"
-NULL_SINK = ROOT / "null"
 CONFIG = json.loads((ROOT / "tasks.json").read_text("utf-8"))
 
 os.environ.update(CONFIG["environment"]["env"])
@@ -153,8 +152,6 @@ agent_network, agent_hosts = network(agent)
 environment_hosts = network(None)[1]
 rooted_at_filesystem = len(WORKDIR.parts) == 1
 harness_parent = ROOT.parent
-NULL_SINK.touch(mode=0o666)
-NULL_SINK.chmod(0o666)
 harness_mounts = (
     Mount("tmpfs", dst=str(harness_parent)),
     *(
@@ -180,7 +177,6 @@ workspace = env.workspace(
         Mount("rw", src="/", dst="/"),
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
-        Mount("rw", src=str(NULL_SINK), dst="/dev/null"),
     ),
     mounts=agent_mounts,
     credentials_dir=ROOT / "session-keys",
@@ -234,9 +230,12 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
         return
 
     loop = asyncio.get_running_loop()
-    start_period_end = loop.time() + healthcheck["start_period_sec"]
+    start_period = healthcheck["start_period_sec"]
+    start_period_end = loop.time() + start_period
+    delay = healthcheck["start_interval_sec"] if start_period > 0 else healthcheck["interval_sec"]
     failures = 0
     while True:
+        await asyncio.sleep(delay)
         in_start_period = loop.time() < start_period_end
         if entrypoint is not None and entrypoint.returncode is not None:
             raise RuntimeError(
@@ -265,7 +264,6 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
                     + (f": {detail}" if detail else "")
                 )
             delay = healthcheck["interval_sec"]
-        await asyncio.sleep(delay)
 
 
 async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> ProcessResult:
@@ -392,7 +390,6 @@ def register(task: dict[str, Any]) -> None:
         description=task["description"] or f"Harbor task {task['id']}",
     )
     async def run() -> AsyncGenerator[Any, Any]:
-        NULL_SINK.write_bytes(b"")
         clear_grading_files()
         AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
         AGENT_ANSWER.touch()
@@ -424,7 +421,6 @@ def register(task: dict[str, Any]) -> None:
             description=f"Verify Harbor task {task['id']}",
         )
         async def verify() -> AsyncGenerator[Any, Any]:
-            NULL_SINK.write_bytes(b"")
             answer = yield ""
             try:
                 yield await grade_separate(task, answer)
@@ -506,7 +502,6 @@ async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
     mounts: list[Mount] = [
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
-        Mount("rw", src=str(NULL_SINK), dst="/dev/null"),
         Mount("rw", src=str(LOGS), dst="/logs"),
     ]
     (verifier_root / "logs").mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
-: > /dev/null
+[ -c /dev/null ]
+printf discarded > /dev/null
 curl -fsS --max-time 10 http://web:5678/ > /app/sidecar.html
 case ",${NO_PROXY:-}," in
   *,main,*) ;;

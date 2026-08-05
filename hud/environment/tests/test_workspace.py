@@ -339,6 +339,8 @@ def test_hosted_sessions_do_not_create_new_namespaces(
         assert "--unshare-pid" not in argv
         assert "--unshare-net" not in argv
         assert "--die-with-parent" not in argv
+        dev = argv.index("--dev-bind")
+        assert argv[dev : dev + 3] == ["--dev-bind", "/dev", "/dev"]
         assert argv.count("--cap-drop") == 3
         assert argv[argv.index("--chdir") + 1] == "/app"
 
@@ -692,6 +694,12 @@ async def test_staged_sandbox_hosts_the_namespace_server_outside_bwrap(
         "--pid",
         "--mount-proc",
         "/usr/bin/bwrap",
+    ]
+    holder_dev = config["holder_argv"].index("--dev-bind")
+    assert config["holder_argv"][holder_dev : holder_dev + 3] == [
+        "--dev-bind",
+        "/dev",
+        "/dev",
     ]
     assert config["map_identities"] is True
     assert config["launcher_depth"] == 2
