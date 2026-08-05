@@ -8,7 +8,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Self
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 #: Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
@@ -23,11 +23,17 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
     if parts.hostname is None:
         raise ValueError(f"invalid URL (no host): {url!r}")
     if parts.port is None and default_port is not None:
-        userinfo = f"{parts.username}@" if parts.username else ""
-        path = parts.path
-        query = f"?{parts.query}" if parts.query else ""
-        fragment = f"#{parts.fragment}" if parts.fragment else ""
-        return f"{parts.scheme}://{userinfo}{parts.hostname}:{default_port}{path}{query}{fragment}"
+        userinfo = f"{parts.netloc.rpartition('@')[0]}@" if "@" in parts.netloc else ""
+        hostname = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        return urlunsplit(
+            (
+                parts.scheme,
+                f"{userinfo}{hostname}:{default_port}",
+                parts.path,
+                parts.query,
+                parts.fragment,
+            )
+        )
     return s
 
 

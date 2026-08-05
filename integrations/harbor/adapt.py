@@ -382,7 +382,7 @@ async def adapt(
             newline="\n",
         )
 
-        workdir = environment.workdir or image_config.working_dir or "/"
+        workdir = environment.workdir or compose_main.working_dir or image_config.working_dir or "/"
         if Path(workdir).is_relative_to(HUD_ROOT):
             raise ValueError(f"Harbor workdir {workdir!r} is inside reserved path {HUD_ROOT}")
         image_env = {}
@@ -396,7 +396,11 @@ async def adapt(
                 compose_main.user if compose_main.user is not None else image_config.user or None
             ),
             "image_env": image_env,
-            "entrypoint": image_config.entrypoint or [],
+            "entrypoint": (
+                compose_main.entrypoint
+                if compose is not None and compose_main.entrypoint is not None
+                else image_config.entrypoint or []
+            ),
             "environment": {
                 "env": {
                     **compose_main.environment,

@@ -110,6 +110,8 @@ def fake_docker(monkeypatch):
                 project["services"]["redis"].pop("expose")
             if "user: 1001:1002" in authored:
                 project["services"]["main"]["user"] = "1001:1002"
+                project["services"]["main"]["entrypoint"] = ["/compose-init"]
+                project["services"]["main"]["working_dir"] = "/compose-work"
             return json.dumps(project), ""
         if args[0] == "compose" and args[-2] == "build":
             compose_file = Path(args[args.index("--file") + 1])
@@ -227,13 +229,19 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
     assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
 
 
-async def test_adapt_moves_compose_main_user_into_the_workspace(
+async def test_adapt_moves_compose_main_process_settings_into_the_workspace(
     tmp_path: Path,
     fake_docker,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
     (task / "environment" / "compose.yaml").write_text(
-        "services:\n  main:\n    user: 1001:1002\n",
+        """\
+services:
+  main:
+    user: 1001:1002
+    entrypoint: [/compose-init]
+    working_dir: /compose-work
+""",
         encoding="utf-8",
     )
 
@@ -243,7 +251,10 @@ async def test_adapt_moves_compose_main_user_into_the_workspace(
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
     compose = json.loads((context / "compose.json").read_text("utf-8"))
     assert manifest["image_user"] == "1001:1002"
+    assert manifest["entrypoint"] == ["/compose-init"]
+    assert manifest["workdir"] == "/compose-work"
     assert "user" not in compose["services"]["main"]
+    assert compose["services"]["main"]["entrypoint"] == []
 
 
 async def test_adapt_derives_implicit_peer_port_from_image(
