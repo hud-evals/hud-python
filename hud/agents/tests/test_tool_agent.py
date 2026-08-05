@@ -8,10 +8,12 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+import fastmcp
 import mcp.types as mcp_types
 import pytest
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
@@ -121,6 +123,67 @@ async def test_agent_opens_only_one_non_mcp_capability_per_protocol() -> None:
     await ComputerAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
 
     assert opened == ["screen-0"]
+
+
+async def test_mcp_capability_names_do_not_collide_with_protocol_keys() -> None:
+    capabilities = [
+        Capability.mcp(name="ssh/2", url="http://database:8000/mcp"),
+        Capability.ssh(name="shell", url="ssh://workspace", host_pubkey="key"),
+    ]
+    opened: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=capabilities)
+
+        async def open(self, ref: str) -> CapabilityClient:
+            opened.append(ref)
+            return cast("CapabilityClient", object())
+
+    class MCPAndShellAgent(DictAgent):
+        clients = (MCPClient, SSHClient)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await MCPAndShellAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
+
+    assert opened == ["ssh/2", "shell"]
+
+
+@pytest.mark.parametrize(
+    ("transport", "expected_type"),
+    [("sse", SSETransport), ("streamable-http", StreamableHttpTransport)],
+)
+async def test_mcp_client_uses_the_declared_http_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: Literal["sse", "streamable-http"],
+    expected_type: type[SSETransport] | type[StreamableHttpTransport],
+) -> None:
+    transports: list[Any] = []
+
+    class Client:
+        def __init__(self, selected: Any, **_kwargs: Any) -> None:
+            transports.append(selected)
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(fastmcp, "Client", Client)
+    capability = Capability.mcp(
+        url="https://tools.example/events",
+        transport=transport,
+    )
+
+    client = await MCPClient.connect(capability)
+    await client.close()
+
+    assert isinstance(transports[0], expected_type)
 
 
 async def test_multiple_mcp_capabilities_qualify_tool_names() -> None:

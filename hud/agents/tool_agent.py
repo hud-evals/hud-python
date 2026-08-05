@@ -125,14 +125,17 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         rollouts.
         """
         connections: dict[str, CapabilityClient] = {}
+        opened_protocols: set[str] = set()
         manifest = run.client.manifest
         if manifest is not None:
             wanted = {cls.protocol for cls in type(self).clients}
             for cap in manifest.bindings:
-                if cap.protocol in wanted:
-                    key = cap.name if cap.protocol == MCPClient.protocol else cap.protocol
-                    if key not in connections:
-                        connections[key] = await run.client.open(cap.name)
+                if cap.protocol not in wanted:
+                    continue
+                if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
+                    continue
+                connections[cap.name] = await run.client.open(cap.name)
+                opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(
