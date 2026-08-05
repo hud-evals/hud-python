@@ -519,6 +519,7 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
 
     process = await ws.launch(
         ["start-environment", "sleep", "infinity"],
+        cwd="/app",
         identity=(1000, 2000),
         no_new_privs=False,
         persistent=True,
@@ -533,6 +534,7 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
     assert "--unshare-user-try" in argv
     assert "--dev-bind" in argv
     assert "--reuid" not in argv
+    assert argv[argv.index("--chdir") + 1] == "/app"
     assert kwargs["mount_view"] == "host"
     assert kwargs["identity"] == (1000, 2000)
     assert kwargs["persistent"] is True

@@ -560,6 +560,7 @@ async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
         execution = await isolated.run(
             ["/tests/test.sh"],
             env=verifier_env,
+            cwd=image["workdir"],
             identity=verifier_identity,
             inherit_workspace_env=False,
             allowed_hosts=verifier_hosts,

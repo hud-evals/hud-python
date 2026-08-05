@@ -8,6 +8,7 @@ RUN addgroup -g 1001 verifier \
     && touch /home/verifier/owned \
     && chown verifier:verifier /home/verifier/owned
 
+WORKDIR /home/verifier
 USER verifier
 ENTRYPOINT []
 CMD ["sleep", "infinity"]

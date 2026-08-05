@@ -714,6 +714,7 @@ class Workspace:
         isolated: bool = False,
         mounts: Sequence[Mount] | None = None,
         env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
         identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
         inherit_workspace_env: bool = True,
         allowed_hosts: Collection[str] | None = (),
@@ -742,6 +743,7 @@ class Workspace:
                     command,
                     mounts=mounts,
                     env=process_env,
+                    cwd=cwd,
                     identity=identity,
                     inherit_workspace_env=inherit_workspace_env,
                     no_new_privs=no_new_privs,
@@ -768,6 +770,7 @@ class Workspace:
             process = await create_process_group_exec(
                 *self.bwrap_argv(
                     payload,
+                    cwd=cwd,
                     env=process_env,
                     # Same environment the joined branch gives a command (the
                     # serving process's, less HUD's own): a command must not
@@ -813,6 +816,7 @@ class Workspace:
         *,
         mounts: Sequence[Mount] | None = None,
         env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
         identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
         inherit_workspace_env: bool = True,
         no_new_privs: bool = True,
@@ -834,6 +838,7 @@ class Workspace:
         return await self._namespace.spawn(
             self.bwrap_argv(
                 payload,
+                cwd=cwd,
                 env=process_env,
                 inherit_host_env=True,
                 inherit_workspace_env=inherit_workspace_env,
