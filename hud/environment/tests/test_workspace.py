@@ -520,6 +520,7 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
     process = await ws.launch(
         ["start-environment", "sleep", "infinity"],
         identity=(1000, 2000),
+        no_new_privs=False,
         persistent=True,
     )
 
@@ -527,8 +528,10 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
     assert spawn.await_args is not None
     (argv,), kwargs = spawn.await_args
     assert argv[0] == "/usr/bin/bwrap"
-    assert argv[argv.index("--reuid") + 1] == "1000"
-    assert argv[argv.index("--regid") + 1] == "2000"
+    assert argv[argv.index("--uid") + 1] == "1000"
+    assert argv[argv.index("--gid") + 1] == "2000"
+    assert "--unshare-user-try" in argv
+    assert "--reuid" not in argv
     assert kwargs["mount_view"] == "host"
     assert kwargs["persistent"] is True
 

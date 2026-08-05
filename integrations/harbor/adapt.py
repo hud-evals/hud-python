@@ -342,8 +342,9 @@ async def adapt(
 
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
-    for (environment_hash, config_json, _), group in sorted(grouped.items()):
-        digest = hashlib.sha256((environment_hash + "\0" + config_json).encode()).hexdigest()[:12]
+    for group_key, group in sorted(grouped.items()):
+        environment_hash, config_json, _ = group_key
+        digest = hashlib.sha256("\0".join(group_key).encode()).hexdigest()[:12]
         name = f"{base_name}-{digest}"
         source = group[0]
         environment = source.config.environment

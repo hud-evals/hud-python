@@ -54,27 +54,65 @@ def network(phase: dict[str, Any] | None) -> tuple[bool, frozenset[str]]:
     return True, frozenset({ANY_HOST})
 
 
-def identity(phase: dict[str, Any] | None) -> tuple[int, int] | None:
+def identity(
+    phase: dict[str, Any] | None,
+    *,
+    image_user: str | int | None,
+    root: Path | None = None,
+) -> tuple[int, int] | None:
     declared = phase["user"] if phase is not None else None
-    user = str(declared if declared is not None else CONFIG["image_user"] or "")
+    user = str(declared if declared is not None else image_user or "")
     if not user:
         return None
     user_name, separator, group_name = user.partition(":")
-    account = None
-    if user_name.isdigit():
-        user_id = int(user_name)
-        with contextlib.suppress(KeyError):
-            account = pwd.getpwuid(user_id)
+    if root is None:
+        account = None
+        if user_name.isdigit():
+            user_id = int(user_name)
+            with contextlib.suppress(KeyError):
+                account = pwd.getpwuid(user_id)
+        else:
+            try:
+                account = pwd.getpwnam(user_name)
+            except KeyError as error:
+                raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
+            user_id = account.pw_uid
+        primary_group = account.pw_gid if account is not None else 0
     else:
-        try:
-            account = pwd.getpwnam(user_name)
-        except KeyError as error:
-            raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
-        user_id = account.pw_uid
+        passwd = root / "etc/passwd"
+        accounts = {
+            fields[0]: (int(fields[2]), int(fields[3]))
+            for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
+            if len(fields := line.split(":")) >= 4
+        }
+        if user_name.isdigit():
+            user_id = int(user_name)
+            primary_group = next(
+                (group_id for uid, group_id in accounts.values() if uid == user_id),
+                0,
+            )
+        else:
+            try:
+                user_id, primary_group = accounts[user_name]
+            except KeyError as error:
+                raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
 
     if separator:
         if group_name.isdigit():
             group_id = int(group_name)
+        elif root is not None:
+            group = root / "etc/group"
+            groups = {
+                fields[0]: int(fields[2])
+                for line in (group.read_text("utf-8").splitlines() if group.is_file() else ())
+                if len(fields := line.split(":")) >= 3
+            }
+            try:
+                group_id = groups[group_name]
+            except KeyError as error:
+                raise ValueError(
+                    f"Harbor group {group_name!r} does not exist in this image"
+                ) from error
         else:
             try:
                 group_id = grp.getgrnam(group_name).gr_gid
@@ -85,21 +123,31 @@ def identity(phase: dict[str, Any] | None) -> tuple[int, int] | None:
     else:
         # Docker resolves a known account's primary group; a bare numeric uid
         # with no passwd entry keeps the container default group (root).
-        group_id = account.pw_gid if account is not None else 0
+        group_id = primary_group
     return None if (user_id, group_id) == (0, 0) else (user_id, group_id)
 
 
-def home(user_id: int | None) -> str | None:
+def home(user_id: int | None, *, root: Path | None = None) -> str | None:
     if user_id is None:
         return None
+    if root is not None:
+        passwd = root / "etc/passwd"
+        return next(
+            (
+                fields[5]
+                for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
+                if len(fields := line.split(":")) >= 6 and int(fields[2]) == user_id
+            ),
+            None,
+        )
     with contextlib.suppress(KeyError):
         return pwd.getpwuid(user_id).pw_dir
     return None
 
 
 agent = CONFIG["agent"]
-image_identity = identity(None)
-agent_identity = identity(agent)
+image_identity = identity(None, image_user=CONFIG["image_user"])
+agent_identity = identity(agent, image_user=CONFIG["image_user"])
 agent_uid = agent_identity[0] if agent_identity is not None else None
 agent_network, agent_hosts = network(agent)
 environment_hosts = network(None)[1]
@@ -423,7 +471,7 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
 
     verifier = CONFIG["verifier"]
-    verifier_identity = identity(verifier)
+    verifier_identity = identity(verifier, image_user=CONFIG["image_user"])
     verifier_uid = verifier_identity[0] if verifier_identity is not None else None
     verifier_env = {**CONFIG["environment"]["env"], **verifier["env"]}
     if verifier_uid is not None:
@@ -486,11 +534,15 @@ async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
     verifier = CONFIG["verifier"]
     verifier_network, verifier_hosts = network(verifier)
     image = CONFIG["verifier_image"]
+    verifier_identity = identity(verifier, image_user=image["user"], root=verifier_root)
+    verifier_uid = verifier_identity[0] if verifier_identity is not None else None
     verifier_env = {
         **image["env"],
         **CONFIG["environment"]["env"],
         **verifier["env"],
     }
+    if verifier_home := home(verifier_uid, root=verifier_root):
+        verifier_env["HOME"] = verifier_home
     isolated = Workspace(
         verifier_root,
         guest_path="/",
@@ -508,7 +560,7 @@ async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
         execution = await isolated.run(
             ["/tests/test.sh"],
             env=verifier_env,
-            identity=None,
+            identity=verifier_identity,
             inherit_workspace_env=False,
             allowed_hosts=verifier_hosts,
             no_new_privs=False,

@@ -754,12 +754,20 @@ class Workspace:
         info_read, info_write = os.pipe()
         block_read, block_write = os.pipe()
         process: ProcessGroup | NamespaceProcess | None = None
+        bwrap_identity = (
+            identity if isinstance(identity, int | tuple) and not no_new_privs else None
+        )
+        payload = (
+            command
+            if bwrap_identity is not None
+            else [*self._identity_argv(identity, no_new_privs=no_new_privs), *command]
+        )
         try:
             os.set_inheritable(info_write, True)
             os.set_inheritable(block_read, True)
             process = await create_process_group_exec(
                 *self.bwrap_argv(
-                    [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
+                    payload,
                     env=process_env,
                     # Same environment the joined branch gives a command (the
                     # serving process's, less HUD's own): a command must not
@@ -773,6 +781,7 @@ class Workspace:
                     network=False,
                     mount_hosts=False,
                     isolate_processes=False,
+                    identity=bwrap_identity,
                     mounts=mounts,
                 ),
                 cwd=self.root,
@@ -814,15 +823,24 @@ class Workspace:
             raise RuntimeError("workspace commands require a live sandbox")
         assert self._namespace is not None
         process_env = dict(env or {})
+        bwrap_identity = (
+            identity if isinstance(identity, int | tuple) and not no_new_privs else None
+        )
+        payload = (
+            command
+            if bwrap_identity is not None
+            else [*self._identity_argv(identity, no_new_privs=no_new_privs), *command]
+        )
         return await self._namespace.spawn(
             self.bwrap_argv(
-                [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
+                payload,
                 env=process_env,
                 inherit_host_env=True,
                 inherit_workspace_env=inherit_workspace_env,
                 network=True,
                 isolate_processes=False,
-                isolate_users=False,
+                isolate_users=bwrap_identity is not None,
+                identity=bwrap_identity,
                 mounts=mounts,
             ),
             cwd=self.root,
@@ -851,6 +869,7 @@ class Workspace:
         mount_hosts: bool = True,
         isolate_processes: bool = True,
         isolate_users: bool = True,
+        identity: int | tuple[int, int] | None = None,
         mounts: Sequence[Mount] | None = None,
         tty: bool = False,
     ) -> list[str]:
@@ -878,6 +897,11 @@ class Workspace:
             # Blocking means this side installs the map, so the namespace has
             # to be ours to map: --unshare-user, not the best-effort form.
             argv.append("--unshare-user" if userns_block_fd is not None else "--unshare-user-try")
+            if identity is not None:
+                uid, gid = identity if isinstance(identity, tuple) else (identity, identity)
+                argv.extend(["--uid", str(uid), "--gid", str(gid)])
+        elif identity is not None:
+            raise ValueError("a bwrap identity requires a fresh user namespace")
         # A namespace-root session must not be able to inspect or redirect the
         # authenticated verifier route while both briefly share its network.
         argv.extend(

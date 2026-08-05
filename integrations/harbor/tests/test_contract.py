@@ -683,9 +683,7 @@ timeout_sec = 10
     assert manifest["tasks"] == [
         {
             "artifacts": [{"service": "main", "source": "/tmp/agent.patch"}],
-            "collect": [
-                {"command": "redis-cli save", "service": "redis", "timeout_sec": 10.0}
-            ],
+            "collect": [{"command": "redis-cli save", "service": "redis", "timeout_sec": 10.0}],
             "description": "",
             "id": "separate",
             "separate_verifier": True,
@@ -704,6 +702,35 @@ timeout_sec = 10
     wrapper = [call for call in fake_docker if call[0] == "build"][-1]
     assert wrapper[1:3] == ("--target", "verifier")
     assert any(value.startswith("VERIFIER_IMAGE=hud-harbor-verifier:") for value in wrapper)
+
+
+async def test_separate_verifier_groups_have_distinct_environment_names(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    declaration = '[verifier]\nenvironment_mode = "separate"\n'
+    compose = "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n"
+    verifier = "FROM python:3.12-alpine\nCOPY . /tests\n"
+    for name in ("task-a", "task-b"):
+        task = make_harbor_task(tmp_path, name)
+        (task / "task.toml").write_text(declaration, encoding="utf-8")
+        (task / "environment" / "compose.yaml").write_text(compose, encoding="utf-8")
+        (task / "tests" / "Dockerfile").write_text(verifier, encoding="utf-8")
+
+    rows = list(await harbor.adapt(tmp_path))
+
+    assert len({row.env for row in rows}) == 2
+    compose_paths = {
+        row.runtime_config.compose
+        for row in rows
+        if row.runtime_config is not None and row.runtime_config.compose is not None
+    }
+    assert len(compose_paths) == 2
+    assert all(path.is_file() for path in compose_paths)
+    manifests = [
+        json.loads((path.parent / "tasks.json").read_text("utf-8")) for path in compose_paths
+    ]
+    assert {manifest["tasks"][0]["id"] for manifest in manifests} == {"task-a", "task-b"}
 
 
 async def test_multi_step_tasks_are_refused_directly(tmp_path: Path, fake_docker) -> None:
@@ -777,6 +804,12 @@ async def test_adapt_hashes_links_not_their_targets(
 def test_authored_runtime_assets_are_valid_source() -> None:
     integration = Path(__file__).parents[1]
     compile((integration / "env.py").read_text("utf-8"), "env.py", "exec")
+    installer = (integration / "install.sh").read_text("utf-8")
+    assert "python_version=3.12" in installer
+    assert "sys.version_info[:2] < (3, 13)" in installer
+    assert 'uv python install "$python_version"' in installer
+    assert 'python="$root/bin/python$python_version"' in installer
+    assert 'uv venv "$root/venv" --python "$python"' in installer
     result = subprocess.run(
         ["sh", "-n", integration / "install.sh"],
         check=False,

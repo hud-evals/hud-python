@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
+import signal
 import sys
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
-from hud.utils.process import ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
 
 pytestmark = [
     pytest.mark.asyncio,
@@ -83,3 +87,24 @@ async def test_a_cancelled_call_leaves_nothing_running() -> None:
         await task
 
     assert group.returncode is not None
+
+
+async def test_teardown_survives_a_process_group_becoming_unsignalable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signals: list[int] = []
+
+    def killpg(_process_group: int, sent: int) -> None:
+        signals.append(sent)
+        if sent in (0, signal.SIGKILL):
+            raise PermissionError
+
+    monkeypatch.setattr(os, "killpg", killpg)
+    process = cast(
+        "asyncio.subprocess.Process",
+        SimpleNamespace(pid=1234, returncode=0),
+    )
+
+    await ProcessGroup(process, term_timeout=0).terminate()
+
+    assert signals == [signal.SIGTERM, 0, signal.SIGKILL]

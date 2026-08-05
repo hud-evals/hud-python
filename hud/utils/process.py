@@ -198,7 +198,7 @@ async def _terminate_process_group(
     if await _wait_for_process_group_exit(proc.pid, remaining):
         return
 
-    with contextlib.suppress(ProcessLookupError):
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, signal.SIGKILL)
 
     if proc.returncode is None:

@@ -3,7 +3,10 @@ set -eu
 
 requirement="${1:-hud}"
 root=/media/hud
+python_version=3.12
 
+export UV_PYTHON_INSTALL_DIR="$root/python"
+export UV_PYTHON_BIN_DIR="$root/bin"
 export UV_NO_CACHE=1
 export XDG_CONFIG_HOME="$root/config"
 export PATH="$root/bin:$PATH"
@@ -19,5 +22,11 @@ else
   exit 1
 fi
 
-uv venv "$root/venv" --python "$(command -v python3)"
+python="$(command -v python3)"
+if ! "$python" -c 'import sys; raise SystemExit(not ((3, 11) <= sys.version_info[:2] < (3, 13)))'; then
+  uv python install "$python_version"
+  python="$root/bin/python$python_version"
+fi
+
+uv venv "$root/venv" --python "$python"
 uv pip install --python "$root/venv/bin/python" "$requirement"
