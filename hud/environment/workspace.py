@@ -841,11 +841,13 @@ class Workspace:
                 isolate_processes=False,
                 isolate_users=bwrap_identity is not None,
                 identity=bwrap_identity,
+                bind_devices=True,
                 mounts=mounts,
             ),
             cwd=self.root,
             env={**os.environ, **process_env},
             mount_view="host",
+            identity=bwrap_identity,
             persistent=persistent,
         )
 
@@ -870,6 +872,7 @@ class Workspace:
         isolate_processes: bool = True,
         isolate_users: bool = True,
         identity: int | tuple[int, int] | None = None,
+        bind_devices: bool | None = None,
         mounts: Sequence[Mount] | None = None,
         tty: bool = False,
     ) -> list[str]:
@@ -929,11 +932,12 @@ class Workspace:
             argv.extend(["--info-fd", str(info_fd)])
         if userns_block_fd is not None:
             argv.extend(["--userns-block-fd", str(userns_block_fd)])
+        bind_host_devices = not isolate_users if bind_devices is None else bind_devices
         for mount in self._system_mounts:
-            argv.extend(mount.to_bwrap_args(bind_devices=not isolate_users))
+            argv.extend(mount.to_bwrap_args(bind_devices=bind_host_devices))
         argv.extend(["--bind", str(self.root), self._guest_path])
         for m in self.mounts if mounts is None else mounts:
-            argv.extend(m.to_bwrap_args(bind_devices=not isolate_users))
+            argv.extend(m.to_bwrap_args(bind_devices=bind_host_devices))
         if mount_hosts and self._hosts_path is not None:
             # Last, so it survives whatever the caller mounted over /etc: a
             # peer the task can address by port but not by name is not at the

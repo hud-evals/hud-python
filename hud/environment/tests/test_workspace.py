@@ -531,8 +531,10 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
     assert argv[argv.index("--uid") + 1] == "1000"
     assert argv[argv.index("--gid") + 1] == "2000"
     assert "--unshare-user-try" in argv
+    assert "--dev-bind" in argv
     assert "--reuid" not in argv
     assert kwargs["mount_view"] == "host"
+    assert kwargs["identity"] == (1000, 2000)
     assert kwargs["persistent"] is True
 
 

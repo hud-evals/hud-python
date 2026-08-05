@@ -188,6 +188,7 @@ class NamespaceHost:
         cwd: Path,
         env: dict[str, str],
         mount_view: Literal["workspace", "host"] = "workspace",
+        identity: int | tuple[int, int] | None = None,
         tty: bool = False,
         terminal_size: tuple[int, int, int, int] = (80, 24, 0, 0),
         persistent: bool = False,
@@ -199,6 +200,7 @@ class NamespaceHost:
                 "cwd": str(cwd),
                 "env": env,
                 "mount_view": mount_view,
+                "identity": identity,
                 "persistent": persistent,
             }
         )
@@ -431,6 +433,11 @@ class _NamespaceHost:
         mount_view = request["mount_view"]
         if mount_view not in ("workspace", "host"):
             raise ValueError(f"unknown mount view {mount_view!r}")
+        identity = request["identity"]
+        if isinstance(identity, int):
+            uid = gid = identity
+        elif identity is not None:
+            uid, gid = map(int, identity)
         command_prefix: list[str] = []
         if mount_view == "host":
             unshare = shutil.which("unshare")
@@ -442,6 +449,11 @@ class _NamespaceHost:
                 "--propagation",
                 "private",
                 "--mount-proc",
+                *(
+                    ()
+                    if identity is None
+                    else ("--setgid", str(gid), "--setuid", str(uid))
+                ),
                 "--",
             ]
         argv = [
@@ -452,7 +464,11 @@ class _NamespaceHost:
             "--pid",
             "--uts",
             "--ipc",
-            "--preserve-credentials",
+            *(
+                ("--preserve-credentials",)
+                if identity is None or mount_view == "host"
+                else ("--setgid", str(gid), "--setuid", str(uid))
+            ),
             "--",
             *command_prefix,
             *request["argv"],
