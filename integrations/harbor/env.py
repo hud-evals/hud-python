@@ -539,8 +539,8 @@ async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
     verifier_identity = identity(verifier, image_user=image["user"], root=verifier_root)
     verifier_uid = verifier_identity[0] if verifier_identity is not None else None
     verifier_env = {
-        **image["env"],
         **CONFIG["environment"]["env"],
+        **image["env"],
         **verifier["env"],
     }
     if verifier_home := home(verifier_uid, root=verifier_root):

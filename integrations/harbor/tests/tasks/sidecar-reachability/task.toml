@@ -8,6 +8,9 @@ artifacts = [
 [task]
 name = "sidecar-reachability"
 
+[environment.env]
+VERIFIER_PRECEDENCE = "actor"
+
 [verifier]
 environment_mode = "separate"
 timeout_sec = 30

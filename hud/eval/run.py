@@ -479,7 +479,7 @@ async def rollout(
                     client = verifier_client
                     _phase = "verifying"
                     await _verify(live, verifier_client, verifier)
-            _phase = "cleanup"
+                    _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
         try:

@@ -639,6 +639,52 @@ async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
     await asyncio.wait_for(cleanup_finished.wait(), 1.0)
 
 
+async def test_timeout_does_not_cancel_verifier_provider_cleanup() -> None:
+    actor_env = Environment("actor")
+    verifier_env = Environment("judge")
+    cleanup_started = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @verifier_env.template()
+    async def verify():
+        answer = yield ""
+        yield 1.0 if answer == "secret" else 0.0
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        try:
+            async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+                yield runtime
+        finally:
+            if row.env == "judge":
+                cleanup_started.set()
+                await release_cleanup.wait()
+                cleanup_finished.set()
+
+    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
+    run = await rollout(
+        task,
+        _FnAgent(lambda _prompt: "secret"),
+        runtime=provider,
+        rollout_timeout=0.2,
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert run.reward == 1.0
+    assert cleanup_started.is_set()
+    assert not cleanup_finished.is_set()
+
+    release_cleanup.set()
+    await asyncio.wait_for(cleanup_finished.wait(), 1.0)
+
+
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
     @asynccontextmanager
     async def broken_provider(task: TaskRow) -> AsyncIterator[Runtime]:

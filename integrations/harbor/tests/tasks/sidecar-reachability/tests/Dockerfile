@@ -1,5 +1,6 @@
 FROM python:3.12-alpine
 
+ENV VERIFIER_PRECEDENCE=verifier-image
 COPY . /tests
 RUN addgroup -g 1001 verifier \
     && adduser -D -u 1001 -G verifier verifier \
