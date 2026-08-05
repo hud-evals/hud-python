@@ -85,6 +85,7 @@ class ComposeService(BaseModel):
     healthcheck: ComposeHealthcheck | None = None
     expose: list[str] = Field(default_factory=list)
     ports: list[ComposePort] = Field(default_factory=list)
+    volumes: list[str | dict[str, Any]] = Field(default_factory=list)
 
     def with_image(self, image: str, config: ImageConfig) -> ComposeService:
         entrypoint = (config.entrypoint or []) if self.entrypoint is None else self.entrypoint

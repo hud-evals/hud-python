@@ -162,6 +162,22 @@ async def test_run_rejects_non_gateway_agent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_rejects_verifier_tasks_until_hosted_supports_both_phases() -> None:
+    run = await HostedRuntime(poll_interval=0.0).run(
+        Task(
+            env="actor",
+            id="solve",
+            verifier=Task(env="judge", id="verify"),
+        ),
+        _agent(),
+        job_id="j",
+    )
+
+    assert run.trace.is_error
+    assert "does not support verifier tasks" in (run.trace.error or "")
+
+
+@pytest.mark.asyncio
 async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform(
         [

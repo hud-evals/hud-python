@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import itertools
+import json
 import os
 import shutil
 import socket
@@ -22,6 +23,7 @@ import asyncssh
 import pytest
 
 from hud.capabilities import SSHClient
+from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import _field, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
@@ -444,6 +446,39 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
 
 
 @pytest.mark.asyncio
+async def test_visiting_none_uses_the_workspace_egress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    ws._egress = cast(
+        "Any",
+        SimpleNamespace(environment=Mock(return_value={"HTTPS_PROXY": "http://workspace"})),
+    )
+
+    async with ws.visiting(None) as environment:
+        assert environment == {"HTTPS_PROXY": "http://workspace"}
+
+
+@pytest.mark.asyncio
+async def test_visiting_uses_the_reserved_workspace_bridge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    credentials = Path(tempfile.mkdtemp(prefix="hud-visitor-", dir="/tmp"))
+    try:
+        ws = Workspace(tmp_path / "root", credentials_dir=credentials)
+        monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+
+        async with ws.visiting({"pypi.org"}) as environment:
+            assert environment["HTTPS_PROXY"].endswith("127.0.0.1:3129")
+            assert (credentials / "visitor" / "egress.sock").is_socket()
+
+        assert not (credentials / "visitor" / "egress.sock").exists()
+    finally:
+        shutil.rmtree(credentials)
+
+
+@pytest.mark.asyncio
 async def test_staged_verifier_is_launched_by_the_namespace_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -606,6 +641,55 @@ async def test_failed_sandbox_start_discards_the_holder(
     failed_holder.kill.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_staged_sandbox_hosts_the_namespace_server_outside_bwrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = Workspace(tmp_path / "root", network=False)
+    monkeypatch.setattr(
+        ws,
+        "_bwrap",
+        Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare"),
+    )
+    stdin = SimpleNamespace(write=Mock(), drain=AsyncMock(), close=Mock())
+    sandbox = SimpleNamespace(
+        returncode=None,
+        stdin=stdin,
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=b'{"holder_pid": 121}\n')),
+        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
+    )
+    spawn = AsyncMock(return_value=sandbox)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    bridge = SimpleNamespace(
+        stdin=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=b"ready\n")),
+        stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
+    )
+    namespace = SimpleNamespace(
+        connect=AsyncMock(),
+        forward=AsyncMock(),
+        spawn=AsyncMock(return_value=bridge),
+    )
+    monkeypatch.setattr(workspace_mod, "NamespaceHost", Mock(return_value=namespace))
+
+    assert await ws.sandbox_pid() == 121
+
+    assert spawn.await_args is not None
+    argv, _ = spawn.await_args
+    assert argv[:2] == ("/usr/bin/unshare", "--net")
+    assert "/usr/bin/bwrap" not in argv
+    config = json.loads(stdin.write.call_args.args[0])
+    assert config["holder_argv"][:5] == [
+        "/usr/bin/unshare",
+        "--kill-child=KILL",
+        "--pid",
+        "--mount-proc",
+        "/usr/bin/bwrap",
+    ]
+    assert config["map_identities"] is True
+    assert config["launcher_depth"] == 2
+
+
 def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     """A task that names a service says where it expects to find it. Placed
     anywhere else, the task's own client configuration points at nothing."""
@@ -628,14 +712,19 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
         bind_addresses([Peer("db", 5432), Peer("db", 6379)])
 
 
-def test_a_peers_name_is_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
+def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
     """Dropping the substrate's entries would cost the workspace localhost."""
     from hud.environment.egress import Peer, hosts_text
 
-    text = hosts_text([Peer("db", 5432)], "127.0.0.1\tlocalhost\n::1\tip6-localhost\n")
+    text = hosts_text(
+        [Peer("db", 5432)],
+        "127.0.0.1\tlocalhost\n::1\tip6-localhost\n",
+        local_aliases=["main"],
+    )
 
     assert "127.0.0.1\tlocalhost" in text
     assert "::1\tip6-localhost" in text
+    assert "127.0.0.1\tmain" in text
     assert text.endswith("127.0.0.1\tdb\n")
 
 
@@ -648,13 +737,22 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
     of its own, since otherwise the service is already at its real address."""
     from hud.environment.egress import Peer
 
-    ws = Workspace(tmp_path / "root", peers=[Peer("db", 5432)], allowed_hosts={"pypi.org"})
+    ws = Workspace(
+        tmp_path / "root",
+        peers=[Peer("db", 5432)],
+        local_aliases=["main"],
+        allowed_hosts={"pypi.org"},
+        credentials_dir=tmp_path / "protected" / "session-keys",
+        hosts_path=tmp_path / "runtime" / "hosts",
+    )
     monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
     ws._prepare_runtime()
 
     argv = ws.bwrap_argv(["true"])
     hosts = Path(argv[argv.index("/etc/hosts") - 1])
+    assert hosts == tmp_path / "runtime" / "hosts"
     assert argv[argv.index("/etc/hosts") - 2] == "--ro-bind"
+    assert "127.0.0.1\tmain\n" in hosts.read_text()
     assert "127.0.0.1\tdb\n" in hosts.read_text()
     # Bound over /etc/hosts, so every session reads it whatever its identity.
     assert hosts.stat().st_mode & 0o044
@@ -673,11 +771,34 @@ def test_a_peer_is_reached_directly_rather_than_through_the_proxy() -> None:
     means nothing and its address is something else entirely."""
     from hud.environment.egress import Egress, Peer
 
-    egress = Egress("/tmp/unused", {"pypi.org"}, [Peer("db", 5432), Peer("replica", 5432)])
+    egress = Egress(
+        "/tmp/unused",
+        {"pypi.org"},
+        [Peer("db", 5432), Peer("replica", 5432)],
+        local_aliases=["main"],
+    )
     bypass = egress.environment()["no_proxy"].split(",")
 
+    assert "main" in bypass
     assert "db" in bypass and "replica" in bypass
     assert "127.0.0.1" in bypass and "127.0.0.2" in bypass
+
+
+def test_bridge_socket_paths_are_configuration_not_process_arguments() -> None:
+    from hud.environment.egress import Egress, Peer
+
+    egress = Egress(
+        "/media/hud/session-keys",
+        {"pypi.org"},
+        [Peer("db", 5432)],
+    )
+
+    visitor = Path("/media/hud/session-keys/visitor/egress.sock")
+    argv, config = egress.bridge_command(visitor_socket=visitor)
+
+    assert "/media/hud/session-keys" not in " ".join(argv)
+    assert "/media/hud/session-keys" in config.decode()
+    assert ["127.0.0.1", 3129, str(visitor)] in json.loads(config)
 
 
 def test_the_proxy_normalizes_http_framing_in_both_directions(
@@ -1094,13 +1215,14 @@ def test_staged_bwrap_keeps_user_isolation_and_uses_the_staged_proc(
     ]
     assert "--unshare-user-try" in argv
     assert "--unshare-pid" not in argv
-    assert "--proc" not in argv
-    assert "/proc" not in argv
+    assert "--proc" in argv
 
     joined = ws.bwrap_argv(["true"], isolate_processes=False, isolate_users=False)
     assert joined[0] == "/usr/bin/bwrap"
     assert "/usr/bin/unshare" not in joined
-    assert "--proc" not in joined
+    assert "--proc" in joined
+    dev = joined.index("--dev-bind")
+    assert joined[dev : dev + 3] == ["--dev-bind", "/dev", "/dev"]
 
 
 def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> None:
@@ -1130,8 +1252,8 @@ async def test_identity_map_reads_a_chunked_info_document() -> None:
     writer = threading.Thread(target=write_in_chunks)
     writer.start()
     try:
-        with mock.patch.object(workspace_mod, "_map_identities") as mapped:
-            pid = await workspace_mod.install_identity_map(info_read, block_write)
+        with mock.patch.object(namespace_mod, "_map_identities") as mapped:
+            pid = await namespace_mod.install_identity_map(info_read, block_write)
         assert pid == 4242
         mapped.assert_called_once_with(4242)
         assert os.read(block_read, 1) == b"\n"  # the sandbox was released
@@ -1160,11 +1282,12 @@ async def test_identity_map_resolves_a_staged_sandbox_to_its_parent_pid(
 
     monkeypatch.setattr(Path, "read_text", read_text)
     try:
-        with mock.patch.object(workspace_mod, "_map_identities") as mapped:
-            pid = await workspace_mod.install_identity_map(
+        with mock.patch.object(namespace_mod, "_map_identities") as mapped:
+            pid = await namespace_mod.install_identity_map(
                 info_read,
                 block_write,
                 launcher_pid=100,
+                launcher_depth=2,
             )
         assert pid == 121
         mapped.assert_called_once_with(121)
@@ -1194,7 +1317,7 @@ def test_identity_map_preserves_every_id_available_to_the_container(
     monkeypatch.setattr(Path, "read_text", read_text)
     monkeypatch.setattr(Path, "write_text", write_text)
 
-    workspace_mod._map_identities(42)
+    namespace_mod._map_identities(42)
 
     assert writes["/proc/42/uid_map"] == "0 0 131072\n"
     assert writes["/proc/42/gid_map"] == "0 0 65536\n70000 70000 1000\n"

@@ -167,6 +167,71 @@ async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     assert run.runtime.startswith("tcp://127.0.0.1:")
 
 
+async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> None:
+    env = Environment("reviewed")
+    completed: list[str] = []
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        completed.append(f"actor:{answer}")
+        yield 0.25
+
+    @env.template()
+    async def verify(expected: str):
+        answer = yield ""
+        completed.append(f"verifier:{answer}")
+        yield 1.0 if answer == expected else 0.0
+
+    task = Task(
+        env="reviewed",
+        id="solve",
+        verifier=Task(env="reviewed", id="verify", args={"expected": "secret"}),
+    )
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+
+    assert run.reward == 1.0
+    assert completed == ["actor:secret", "verifier:secret"]
+    evaluations = [
+        step.task_call.name
+        for step in run.trace.steps
+        if step.task_call is not None and step.task_call.phase == "evaluate"
+    ]
+    assert evaluations == ["solve", "verify"]
+
+
+async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> None:
+    actor_env = Environment("actor")
+    verifier_env = Environment("judge")
+    placements: list[str] = []
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @verifier_env.template()
+    async def verify():
+        answer = yield ""
+        yield 1.0 if answer == "secret" else 0.0
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.env)
+        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+            yield runtime
+
+    task = Task(
+        env="actor",
+        id="solve",
+        verifier=Task(env="judge", id="verify"),
+    )
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
+
+    assert run.reward == 1.0
+    assert placements == ["actor", "judge"]
+
+
 def _bindings_env(published: Any) -> Environment:
     """An env whose task publishes per-episode binding data alongside the prompt."""
     env = Environment("slots")

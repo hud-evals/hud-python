@@ -71,6 +71,11 @@ class Task(BaseModel):
     #: Optional row-level runtime construction input. Runtime adapters apply the
     #: supported subset into their native launch shape or reject it.
     runtime_config: RuntimeConfig | None = None
+    #: Optional agent-less task whose evaluation is the grade of record. The
+    #: rollout completes this task first, then starts and grades the verifier
+    #: with the same answer. Placement may reuse the live substrate when both
+    #: tasks name the same environment.
+    verifier: Task | None = None
 
     # ─── execution ────────────────────────────────────────────────────
 

@@ -53,6 +53,14 @@ class Oracle(Agent):
 
     async def __call__(self, run: Run) -> None:
         ssh = cast("SSHClient", await run.client.open("ssh/2"))
+        if run.task_id == "agent-lifecycle":
+            for index in range(40):
+                result = await ssh.conn.run(f"printf '%s' {index}", check=False)
+                assert result.exit_status == 0, f"command session {index} failed: {result.stderr!r}"
+                assert result.stdout == str(index), f"command session {index} lost output"
+            await ssh.conn.run("cat > session-input", input="written", check=True)
+            written = await ssh.conn.run("cat session-input", check=True)
+            assert written.stdout == "written"
         if run.task_id == "hello-mcp":
             mcp = cast("MCPClient", await run.client.open("mcp-server"))
             assert {tool.name for tool in await mcp.list_tools()} == {"get_secret"}
@@ -109,9 +117,16 @@ Path("/app/secret.txt").write_text(result["result"]["content"][0]["text"])
                 raise RuntimeError("workspace MCP client closed without an exit status")
             run.trace.content = "called get_secret from inside the workspace"
             return
-        result = await ssh.conn.run(self.solutions[run.task_id], check=True)
+        result = await ssh.conn.run(self.solutions[run.task_id], check=False)
         if result.exit_status is None:
+            run.trace.content = (
+                "solution SSH channel closed without an exit status:\n"
+                f"{result.stdout}\n{result.stderr}"
+            )
             raise RuntimeError("solution SSH channel closed without an exit status")
+        if result.exit_status != 0:
+            run.trace.content = f"solution failed:\n{result.stdout}\n{result.stderr}"
+            raise RuntimeError(f"solution exited with status {result.exit_status}")
         run.trace.content = "solution completed"
 
 
@@ -131,12 +146,8 @@ async def _grade_every_task(dataset: Path, wheel: Path) -> dict[str, Run]:
 
 
 @pytest.fixture(scope="module")
-def graded(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Run]:
-    """Adapt and grade the fixture dataset once for this module."""
+def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     workdir = tmp_path_factory.mktemp("harbor")
-    dataset = workdir / "harbor-harness"
-    shutil.copytree(TASKS, dataset)
-
     wheels = workdir / "wheels"
     subprocess.run(
         ["uv", "build", "--wheel", "--out-dir", str(wheels)],
@@ -144,7 +155,24 @@ def graded(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Run]:
         check=True,
         capture_output=True,
     )
-    return asyncio.run(_grade_every_task(dataset, next(iter(wheels.glob("*.whl")))))
+    return next(iter(wheels.glob("*.whl")))
+
+
+@pytest.fixture(scope="module")
+def graded(tmp_path_factory: pytest.TempPathFactory, wheel: Path) -> dict[str, Run]:
+    """Adapt and grade the inline-verifier fixtures once for this module."""
+    dataset = tmp_path_factory.mktemp("harbor-inline") / "harbor-harness"
+    shutil.copytree(TASKS, dataset, ignore=shutil.ignore_patterns("sidecar-reachability"))
+    return asyncio.run(_grade_every_task(dataset, wheel))
+
+
+@pytest.fixture(scope="module")
+def separately_graded(tmp_path_factory: pytest.TempPathFactory, wheel: Path) -> dict[str, Run]:
+    """Adapt and grade the separate-verifier fixture."""
+    dataset = tmp_path_factory.mktemp("harbor-separate") / "harbor-harness"
+    dataset.mkdir()
+    shutil.copytree(TASKS / "sidecar-reachability", dataset / "sidecar-reachability")
+    return asyncio.run(_grade_every_task(dataset, wheel))
 
 
 @pytest.mark.parametrize(
@@ -153,7 +181,6 @@ def graded(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Run]:
         "phase-boundary",
         "agent-lifecycle",
         "verifier-lifecycle",
-        "sidecar-reachability",
         "hello-mcp",
     ],
 )
@@ -175,3 +202,7 @@ def test_harbor_phase_behavior(graded: dict[str, Run], task_id: str) -> None:
         )
     )
     assert run.reward == 1.0, f"{task_id} scored {run.reward}; the verifier reported:\n{detail}"
+
+
+def test_separate_verifier_phase_behavior(separately_graded: dict[str, Run]) -> None:
+    test_harbor_phase_behavior(separately_graded, "sidecar-reachability")

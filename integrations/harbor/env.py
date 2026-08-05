@@ -10,14 +10,16 @@ import math
 import os
 import pwd
 import shutil
+import socket
 from collections.abc import AsyncGenerator  # noqa: TC003
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
-from hud.environment import Environment, Mount, Peer
+from hud.environment import Environment, Mount, Peer, Workspace
 from hud.environment.egress import ANY_HOST
 from hud.graders import EvaluationResult
+from hud.utils.process import ProcessResult, create_process_group_exec
 
 if TYPE_CHECKING:
     from hud.environment.namespace import NamespaceProcess
@@ -27,6 +29,10 @@ TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
+ARTIFACTS = ROOT / "artifacts"
+DOCKER_SOCKET = ROOT / "docker.sock"
+DOCKER = ROOT / "bin" / "docker"
+NULL_SINK = ROOT / "null"
 CONFIG = json.loads((ROOT / "tasks.json").read_text("utf-8"))
 
 os.environ.update(CONFIG["environment"]["env"])
@@ -99,6 +105,8 @@ agent_network, agent_hosts = network(agent)
 environment_hosts = network(None)[1]
 rooted_at_filesystem = len(WORKDIR.parts) == 1
 harness_parent = ROOT.parent
+NULL_SINK.touch(mode=0o666)
+NULL_SINK.chmod(0o666)
 harness_mounts = (
     Mount("tmpfs", dst=str(harness_parent)),
     *(
@@ -122,11 +130,13 @@ workspace = env.workspace(
     guest_path=WORKDIR.as_posix(),
     system_mounts=(
         Mount("rw", src="/", dst="/"),
-        Mount("proc", dst="/proc"),
         Mount("dev", dst="/dev"),
+        Mount("proc", dst="/proc"),
+        Mount("rw", src=str(NULL_SINK), dst="/dev/null"),
     ),
     mounts=agent_mounts,
     credentials_dir=ROOT / "session-keys",
+    hosts_path=ROOT / "hosts",
     shell_uid=agent_uid,
     shell_gid=agent_identity[1] if agent_identity is not None else None,
     hand_over_root=False,
@@ -143,6 +153,8 @@ workspace = env.workspace(
         Peer(peer["name"], peer["port"], target=(peer["name"], peer["port"]))
         for peer in CONFIG["peers"]
     ],
+    local_aliases=CONFIG["local_aliases"],
+    ports=CONFIG["ports"],
     require_isolation=True,
 )
 
@@ -187,7 +199,7 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
             env=CONFIG["environment"]["env"],
             identity=image_identity,
             inherit_workspace_env=False,
-            allowed_hosts=environment_hosts,
+            allowed_hosts=None if environment_hosts == agent_hosts else environment_hosts,
             no_new_privs=False,
             max_wait=healthcheck["timeout_sec"],
         )
@@ -208,6 +220,122 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
         await asyncio.sleep(delay)
 
 
+async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> ProcessResult:
+    process = await create_process_group_exec(
+        str(DOCKER),
+        "--host",
+        f"unix://{DOCKER_SOCKET}",
+        *args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    result = await process.complete(max_wait=max_wait)
+    if result.timed_out:
+        raise TimeoutError(f"docker {' '.join(args)} timed out after {max_wait:g}s")
+    if check and result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(f"docker {' '.join(args)} failed: {detail}")
+    return result
+
+
+def copy_artifact(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, target, symlinks=True)
+    elif source.exists() or source.is_symlink():
+        shutil.copy2(source, target, follow_symlinks=False)
+
+
+async def collect(task: dict[str, Any]) -> None:
+    clear(ARTIFACTS)
+    services: dict[str, str] = {}
+
+    async def container(service: str) -> str:
+        service = "main" if service == "workspace" else service
+        if service == "main":
+            return ""
+        if service in services:
+            return services[service]
+        if not DOCKER_SOCKET.exists():
+            raise RuntimeError(
+                f"collecting from Compose service {service!r} requires runtime service access"
+            )
+        if not services:
+            project = await docker(
+                "inspect",
+                "--format",
+                '{{ index .Config.Labels "com.docker.compose.project" }}',
+                socket.gethostname(),
+            )
+            project_name = project.stdout.decode().strip()
+            if not project_name:
+                raise RuntimeError("the Harbor container has no Compose project label")
+            listed = await docker(
+                "ps",
+                "--filter",
+                f"label=com.docker.compose.project={project_name}",
+                "--format",
+                '{{.ID}} {{.Label "com.docker.compose.service"}}',
+            )
+            for line in listed.stdout.decode().splitlines():
+                container_id, service_name = line.split(maxsplit=1)
+                services[service_name] = container_id
+        try:
+            return services[service]
+        except KeyError as error:
+            raise RuntimeError(f"Compose service {service!r} is not running") from error
+
+    for hook in task["collect"]:
+        service = hook["service"]
+        container_id = await container(service)
+        if container_id:
+            await docker(
+                "exec",
+                container_id,
+                "sh",
+                "-c",
+                hook["command"],
+                max_wait=hook["timeout_sec"],
+            )
+        else:
+            execution = await workspace.run(
+                ["sh", "-c", hook["command"]],
+                mounts=harness_mounts,
+                identity=image_identity,
+                inherit_workspace_env=False,
+                allowed_hosts=None,
+                no_new_privs=False,
+                max_wait=hook["timeout_sec"],
+            )
+            if execution.timed_out:
+                raise TimeoutError(
+                    f"collect hook on {service!r} timed out after {hook['timeout_sec']:g}s"
+                )
+            if execution.returncode != 0:
+                detail = execution.stderr.decode("utf-8", "replace").strip()
+                raise RuntimeError(f"collect hook on {service!r} failed: {detail}")
+
+    for artifact in task["artifacts"]:
+        source = artifact["source"]
+        target = ARTIFACTS / source.lstrip("/").rstrip("/")
+        service = artifact["service"]
+        container_id = await container(service)
+        if container_id:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            copied = await docker(
+                "cp",
+                f"{container_id}:{source.rstrip('/') or '/'}",
+                str(target),
+                max_wait=task["verifier_timeout"],
+                check=False,
+            )
+            if copied.returncode != 0:
+                continue
+        else:
+            copy_artifact(Path(source), target)
+
+
 def register(task: dict[str, Any]) -> None:
     task_dir = ROOT / "tasks" / task["id"]
 
@@ -216,6 +344,7 @@ def register(task: dict[str, Any]) -> None:
         description=task["description"] or f"Harbor task {task['id']}",
     )
     async def run() -> AsyncGenerator[Any, Any]:
+        NULL_SINK.write_bytes(b"")
         clear_grading_files()
         AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
         AGENT_ANSWER.touch()
@@ -228,13 +357,32 @@ def register(task: dict[str, Any]) -> None:
                 raise RuntimeError(
                     f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
                 )
-            yield await grade(task_dir, task["verifier_timeout"], answer)
+            if task["separate_verifier"]:
+                await collect(task)
+                yield 0.0
+            else:
+                yield await grade(task_dir, task["verifier_timeout"], answer)
         finally:
             clear_grading_files()
             await workspace.discard_sandbox()
             if entrypoint is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(entrypoint.wait(), 10.0)
+
+    if task["separate_verifier"]:
+
+        @env.template(
+            id=f"{task['id']}:verify",
+            description=f"Verify Harbor task {task['id']}",
+        )
+        async def verify() -> AsyncGenerator[Any, Any]:
+            NULL_SINK.write_bytes(b"")
+            answer = yield ""
+            try:
+                yield await grade_separate(task, answer)
+            finally:
+                clear_grading_files()
+                shutil.rmtree(ARTIFACTS, ignore_errors=True)
 
 
 for task_config in CONFIG["tasks"]:
@@ -297,7 +445,81 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
         no_new_privs=False,
         max_wait=timeout_sec,
     )
+    return evaluation(execution, timeout_sec)
 
+
+async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
+    verifier_root = Path(CONFIG["verifier_root"])
+    clear(VERIFIER_LOGS)
+    VERIFIER_LOGS.chmod(0o777)
+    LOGS.mkdir(parents=True, exist_ok=True)
+    AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
+
+    mounts: list[Mount] = [
+        Mount("dev", dst="/dev"),
+        Mount("proc", dst="/proc"),
+        Mount("rw", src=str(NULL_SINK), dst="/dev/null"),
+        Mount("rw", src=str(LOGS), dst="/logs"),
+    ]
+    (verifier_root / "logs").mkdir(parents=True, exist_ok=True)
+    for artifact in task["artifacts"]:
+        source = artifact["source"].rstrip("/") or "/"
+        staged = ARTIFACTS / source.lstrip("/")
+        target = verifier_root / source.lstrip("/")
+        if not staged.exists() and not staged.is_symlink():
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink(missing_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if staged.is_dir():
+            if target.exists() and not target.is_dir():
+                target.unlink()
+            target.mkdir(exist_ok=True)
+        else:
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            target.touch(exist_ok=True)
+        mounts.append(Mount("rw", src=str(staged), dst=source))
+
+    verifier = CONFIG["verifier"]
+    verifier_network, verifier_hosts = network(verifier)
+    image = CONFIG["verifier_image"]
+    verifier_env = {
+        **image["env"],
+        **CONFIG["environment"]["env"],
+        **verifier["env"],
+    }
+    isolated = Workspace(
+        verifier_root,
+        guest_path="/",
+        system_mounts=(),
+        mounts=mounts,
+        env=verifier_env,
+        network=verifier_network,
+        allowed_hosts=verifier_hosts,
+        credentials_dir=ROOT / "verifier-keys",
+        hand_over_root=False,
+        require_isolation=True,
+    )
+    await isolated.start()
+    try:
+        execution = await isolated.run(
+            ["/tests/test.sh"],
+            env=verifier_env,
+            identity=None,
+            inherit_workspace_env=False,
+            allowed_hosts=verifier_hosts,
+            no_new_privs=False,
+            max_wait=task["verifier_timeout"],
+        )
+    finally:
+        await isolated.stop()
+    return evaluation(execution, task["verifier_timeout"])
+
+
+def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
     info: dict[str, Any] = {
         "exit_code": execution.returncode,
         "stdout": execution.stdout.decode("utf-8", "replace")[-4000:],

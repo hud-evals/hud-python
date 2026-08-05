@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from hud.eval import Task
 from integrations import harbor
 
 from .conftest import make_harbor_task, make_multi_step_task
@@ -40,6 +41,15 @@ def fake_docker(monkeypatch):
                         "Cmd": ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py"],
                     }
                 ), ""
+            if args[-1].startswith("hud-harbor-base:"):
+                return json.dumps(
+                    {
+                        "User": "",
+                        "WorkingDir": "/workspace",
+                        "Entrypoint": None,
+                        "Cmd": None,
+                    }
+                ), ""
             return json.dumps(
                 {
                     "User": "",
@@ -58,6 +68,14 @@ def fake_docker(monkeypatch):
                     "main": {
                         "image": "hud-main",
                         "environment": {"FROM_COMPOSE": "yes"},
+                        "expose": ["8080/tcp"],
+                        "healthcheck": {
+                            "test": ["CMD-SHELL", "curl -f http://localhost:8080/health"],
+                            "interval": "2s",
+                            "timeout": "3s",
+                            "retries": 5,
+                            "start_period": "1s",
+                        },
                         "depends_on": {
                             "redis": {
                                 "condition": "service_healthy",
@@ -226,6 +244,16 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
     assert "build" not in redis
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
     assert manifest["environment"]["env"] == {"FROM_COMPOSE": "yes"}
+    assert manifest["environment"]["healthcheck"] == {
+        "command": "curl -f http://localhost:8080/health",
+        "interval_sec": 2.0,
+        "timeout_sec": 3.0,
+        "start_period_sec": 1.0,
+        "start_interval_sec": 5.0,
+        "retries": 5,
+    }
+    assert manifest["local_aliases"] == ["main"]
+    assert manifest["ports"] == [8080]
     assert manifest["capabilities"] == []
     assert manifest["peers"] == [{"name": "redis", "port": 6379}]
     assert compose["services"]["main"]["command"] == [
@@ -233,6 +261,7 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
         "serve",
         "/media/hud/env.py",
     ]
+    assert "healthcheck" not in compose["services"]["main"]
     assert ("pull", "redis:7-alpine") in fake_docker
     assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
 
@@ -586,7 +615,6 @@ async def test_image_entrypoint_is_preserved_as_runtime_data(
             '[[environment.mcp_servers]]\nname = "db"\ntransport = "stdio"\ncommand = "db-mcp"\n',
             "stdio MCP servers",
         ),
-        ('[verifier]\nenvironment_mode = "separate"\n', "separate verifier"),
     ],
 )
 async def test_unsupported_harbor_behaviour_fails_before_building(
@@ -602,6 +630,80 @@ async def test_unsupported_harbor_behaviour_fails_before_building(
         await harbor.adapt(tmp_path)
 
     assert fake_docker == []
+
+
+async def test_adapt_builds_a_separate_verifier_and_reuses_the_runtime(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "separate")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
+        encoding="utf-8",
+    )
+    (task / "tests" / "Dockerfile").write_text(
+        "FROM python:3.12-alpine\nCOPY . /tests\n",
+        encoding="utf-8",
+    )
+    (task / "task.toml").write_text(
+        """
+artifacts = ["/tmp/agent.patch"]
+
+[environment]
+cpus = 2
+memory_mb = 2048
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+
+[verifier.environment]
+cpus = 4
+memory_mb = 1024
+
+[[verifier.collect]]
+service = "redis"
+command = "redis-cli save"
+timeout_sec = 10
+""",
+        encoding="utf-8",
+    )
+
+    (row,) = list(await harbor.adapt(tmp_path))
+
+    assert row.verifier == Task(env=row.env, id="separate:verify")
+    assert row.runtime_config is not None
+    assert row.runtime_config.resources is not None
+    assert row.runtime_config.resources.cpu == 4
+    assert row.runtime_config.resources.memory_mb == 2048
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["verifier_root"] == "/media/hud/verifier"
+    assert manifest["tasks"] == [
+        {
+            "artifacts": [{"service": "main", "source": "/tmp/agent.patch"}],
+            "collect": [
+                {"command": "redis-cli save", "service": "redis", "timeout_sec": 10.0}
+            ],
+            "description": "",
+            "id": "separate",
+            "separate_verifier": True,
+            "verifier_timeout": 30.0,
+        }
+    ]
+    assert not (context / "tasks" / "separate" / "tests").exists()
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
+    assert compose["services"]["main"]["volumes"] == [
+        {
+            "source": "/var/run/docker.sock",
+            "target": "/media/hud/docker.sock",
+            "type": "bind",
+        }
+    ]
+    wrapper = [call for call in fake_docker if call[0] == "build"][-1]
+    assert wrapper[1:3] == ("--target", "verifier")
+    assert any(value.startswith("VERIFIER_IMAGE=hud-harbor-verifier:") for value in wrapper)
 
 
 async def test_multi_step_tasks_are_refused_directly(tmp_path: Path, fake_docker) -> None:

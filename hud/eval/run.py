@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
 
-    from .runtime import Provider, Runtime
+    from .runtime import Provider
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -314,6 +314,42 @@ class Run:
         return run
 
 
+async def _verify(run: Run, client: HudClient, task: Task) -> None:
+    """Run an agent-less verifier task and make its evaluation authoritative."""
+    started_at = now_iso()
+    started = await client.start_task(task.id, task.args)
+    run.record(
+        Step(
+            source="task",
+            task_call=TaskCall(
+                phase="setup",
+                name=task.id,
+                arguments=task.args,
+                result=started,
+            ),
+            started_at=started_at,
+        )
+    )
+
+    answer = {"answer": run.trace.content}
+    started_at = now_iso()
+    evaluation = await client.grade(answer)
+    run.grade = Grade.from_dict(evaluation)
+    run.record(
+        Step(
+            source="task",
+            task_call=TaskCall(
+                phase="evaluate",
+                name=task.id,
+                arguments=answer,
+                result=evaluation,
+            ),
+            started_at=started_at,
+            error=run.grade.content if run.grade.is_error else None,
+        )
+    )
+
+
 async def rollout(
     task: Task,
     agent: Agent,
@@ -383,17 +419,16 @@ async def rollout(
 
         async def _drive() -> None:
             nonlocal client, run, _phase
-            async with contextlib.AsyncExitStack() as stack:
-                addr = cast("Runtime", await stack.enter_async_context(runtime(task)))
+            async with runtime(task) as addr:
                 _phase = "starting task"
-                client = cast("HudClient", await stack.enter_async_context(connect(addr)))
-                live = Run(client, task.id, task.args)
-                live._runtime = addr.url  # the placement record for the receipt
-                try:
-                    async with live:  # start on enter; grade on exit
+                async with connect(addr) as actor_client:
+                    client = actor_client
+                    live = Run(actor_client, task.id, task.args)
+                    live._runtime = addr.url  # the placement record for the receipt
+                    async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
-                        async with file_tracking_observer(client):
+                        async with file_tracking_observer(actor_client):
                             if agent_timeout is None:
                                 await agent(run)
                             else:
@@ -410,8 +445,33 @@ async def rollout(
                                     run.trace.stop_reason = "timeout"
                                     run.record(Step(source="system", error=detail))
                         _phase = "grading"
-                finally:
-                    _phase = "cleanup"
+
+                    verifier = task.verifier
+                    if (
+                        verifier is not None
+                        and verifier.env == task.env
+                        and verifier.runtime_config is None
+                    ):
+                        _phase = "verifying"
+                        live.grade = Grade()
+                        await _verify(live, actor_client, verifier)
+                        _phase = "cleanup"
+                        return
+
+                _phase = "cleanup"
+
+            verifier = task.verifier
+            if verifier is not None:
+                _phase = "provisioning verifier"
+                live.grade = Grade()
+                async with (
+                    runtime(verifier) as verifier_addr,
+                    connect(verifier_addr) as verifier_client,
+                ):
+                    client = verifier_client
+                    _phase = "verifying"
+                    await _verify(live, verifier_client, verifier)
+            _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
         try:

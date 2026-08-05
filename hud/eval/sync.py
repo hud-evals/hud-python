@@ -123,6 +123,7 @@ def _record_to_task(record: dict[str, Any]) -> Task:
             "agent_config": record.get("agent_config"),
             "columns": record.get("columns"),
             "runtime_config": record.get("runtime_config"),
+            "verifier": record.get("verifier"),
         }
     )
 
@@ -164,6 +165,8 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
         payload["columns"] = task.columns
     if task.runtime_config is not None:
         payload["runtime_config"] = task.runtime_config.request_payload()
+    if task.verifier is not None:
+        payload["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
     return payload
 
 
@@ -177,6 +180,8 @@ def _task_signature(task: Task) -> str:
         sig_data["columns"] = task.columns
     if task.runtime_config is not None:
         sig_data["runtime_config"] = task.runtime_config.request_payload()
+    if task.verifier is not None:
+        sig_data["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
     return f"{task.id}|" + json.dumps(
         sig_data,
         sort_keys=True,

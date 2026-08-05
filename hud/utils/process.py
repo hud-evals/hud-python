@@ -217,6 +217,8 @@ async def _wait_for_process_group_exit(process_group: int, max_wait: float) -> b
             os.killpg(process_group, 0)
         except ProcessLookupError:
             return True
+        except PermissionError:
+            return False
         if loop.time() >= deadline:
             return False
         await asyncio.sleep(min(_PROCESS_EXIT_POLL_INTERVAL, deadline - loop.time()))

@@ -160,3 +160,25 @@ def test_task_upload_payload_preserves_runtime_config_null_override() -> None:
     payload = task_upload_payload(task)
 
     assert payload["runtime_config"] == {"resources": None}
+
+
+def test_task_upload_payload_includes_verifier_task() -> None:
+    task = Task(
+        env="actor",
+        id="solve",
+        verifier=Task(
+            env="judge",
+            id="verify",
+            runtime_config=RuntimeConfig(image="judge:latest"),
+        ),
+    )
+
+    payload = task_upload_payload(task)
+
+    assert payload["verifier"] == {
+        "env": "judge",
+        "id": "verify",
+        "args": {},
+        "slug": "verify",
+        "runtime_config": {"image": "judge:latest"},
+    }

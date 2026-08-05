@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import json
 import logging
 import shlex
@@ -57,7 +56,6 @@ from hud.utils.docker import docker as _docker
 from hud.utils.platform import PlatformClient
 from hud.utils.process import ProcessGroup, create_process_group_exec
 
-from .compose import ComposeConfig
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
@@ -976,23 +974,10 @@ class DaytonaRuntime:
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
-            compose = config.compose.resolve() if config.compose is not None else None
-            services = None
-            if compose is not None:
-                compose_config = await ComposeConfig.load(
-                    compose,
-                    docker=_docker,
-                    project_directory=compose.parent,
-                )
-                services = (await compose_config.resolve_registry_images(_docker)).services
+            if config.compose is not None:
+                raise ValueError("DaytonaRuntime does not support runtime_config.compose")
             if config.limits is not None and config.limits.run_timeout_s is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
-            if (
-                services is not None
-                and config.resources is not None
-                and config.resources.gpu is not None
-            ):
-                raise ValueError("Daytona linked sandboxes do not support GPU resources")
 
             daytona_resources = None
             if config.resources is not None:
@@ -1017,31 +1002,19 @@ class DaytonaRuntime:
                 if resource_kwargs:
                     daytona_resources = Resources(**resource_kwargs)
 
-            if config.image is not None or services is not None:
-                main_service = None
-                if services is not None:
-                    main_service = services["main"]
-                main_image = config.image
-                if main_image is None:
-                    assert main_service is not None
-                    main_image = main_service.image
-                assert main_image is not None
+            if config.image is not None:
                 sandbox_params = CreateSandboxFromImageParams(
-                    image=Image.base(main_image),
+                    image=Image.base(config.image),
                     ephemeral=True,
                     auto_stop_interval=0,
                     resources=daytona_resources,
-                    env_vars=(main_service.environment or None)
-                    if main_service is not None
-                    else None,
                 )
             else:
                 snapshot_name = self.snapshot_name
                 snapshot_image = self._image
                 if snapshot_name is None:
                     raise ValueError(
-                        "DaytonaRuntime requires snapshot_name, runtime_config.image, "
-                        "or runtime_config.compose"
+                        "DaytonaRuntime requires snapshot_name or runtime_config.image"
                     )
                 if daytona_resources is not None and snapshot_image is None:
                     raise ValueError(
@@ -1113,116 +1086,16 @@ class DaytonaRuntime:
                 timeout=create_timeout,
             )
             session_command: Any = None
-            linked_sandboxes: list[Any] = []
             try:
-                if compose is None:
-                    # Start the env server in a background session (the snapshot's CMD is
-                    # not the sandbox's main process). connect() retries the handshake,
-                    # so we don't poll for readiness here.
-                    session: str = "hud-serve"
-                    await sandbox.process.create_session(session)
-                    cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
-                    session_command = await sandbox.process.execute_session_command(
-                        session, SessionExecuteRequest(command=cmd, run_async=True)
-                    )
-                else:
-                    assert services is not None and main_service is not None
-                    service_sandboxes = {"main": sandbox}
-                    for service_name, service in services.items():
-                        if service_name == "main":
-                            continue
-                        image_name = service.image
-                        assert image_name is not None
-                        snapshot_name = (
-                            "hud-compose-" + hashlib.sha256(image_name.encode()).hexdigest()[:20]
-                        )
-                        async with self._snapshot_lock:
-                            if snapshot_name not in self._resolved:
-                                try:
-                                    await daytona.snapshot.get(snapshot_name)
-                                except DaytonaNotFoundError:
-                                    await daytona.snapshot.create(
-                                        CreateSnapshotParams(
-                                            name=snapshot_name,
-                                            image=image_name,
-                                        )
-                                    )
-                                self._resolved.add(snapshot_name)
-                        child = await daytona.create(
-                            CreateSandboxFromSnapshotParams(
-                                name=f"hud-{service_name}-{uuid.uuid4().hex[:12]}",
-                                snapshot=snapshot_name,
-                                ephemeral=True,
-                                auto_stop_interval=0,
-                                env_vars=service.environment,
-                                linked_sandbox=sandbox.id,
-                            ),
-                            timeout=create_timeout,
-                        )
-                        linked_sandboxes.append(child)
-                        service_sandboxes[service_name] = child
-
-                    for destination_name, destination in service_sandboxes.items():
-                        aliases = []
-                        for service_name, service_sandbox in service_sandboxes.items():
-                            if service_name == destination_name:
-                                continue
-                            sandbox_id = shlex.quote(service_sandbox.id)
-                            hostname = shlex.quote(service_name)
-                            aliases.append(
-                                f"ip=$(getent ahostsv4 {sandbox_id} | awk 'NR == 1 {{print $1}}')"
-                                " && "
-                                f'test -n "$ip" && printf \'%s %s\\n\' "$ip" {hostname} '
-                                ">> /etc/hosts"
-                            )
-                        if not aliases:
-                            continue
-                        mapped = await destination.process.exec(
-                            " && ".join(aliases),
-                            timeout=30,
-                        )
-                        if mapped.exit_code != 0:
-                            raise RuntimeError(
-                                f"Daytona could not map Compose services in "
-                                f"{destination_name!r}: {mapped.result.strip()}"
-                            )
-
-                    for service_name, service in services.items():
-                        if service_name == "main":
-                            continue
-                        child = service_sandboxes[service_name]
-                        session = f"hud-{service_name}"
-                        await child.process.create_session(session)
-                        if not service.argv:
-                            raise ValueError(f"Compose service {service_name!r} has no command")
-                        await child.process.execute_session_command(
-                            session,
-                            SessionExecuteRequest(command=service.shell_command(), run_async=True),
-                        )
-                        if service.healthcheck is not None:
-                            test = service.healthcheck.test
-                            if test and test[0] != "NONE":
-                                health_command = (
-                                    shlex.join(test[1:]) if test[0] == "CMD" else test[1]
-                                )
-                                async with asyncio.timeout(create_timeout):
-                                    while True:
-                                        health = await child.process.exec(
-                                            health_command,
-                                            timeout=30,
-                                        )
-                                        if health.exit_code == 0:
-                                            break
-                                        await asyncio.sleep(1)
-
-                    session = "hud-serve"
-                    await sandbox.process.create_session(session)
-                    if not main_service.argv:
-                        raise ValueError("Compose main service has no command")
-                    session_command = await sandbox.process.execute_session_command(
-                        session,
-                        SessionExecuteRequest(command=main_service.shell_command(), run_async=True),
-                    )
+                # Start the env server in a background session (the snapshot's CMD is
+                # not the sandbox's main process). connect() retries the handshake,
+                # so we don't poll for readiness here.
+                session: str = "hud-serve"
+                await sandbox.process.create_session(session)
+                cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
+                session_command = await sandbox.process.execute_session_command(
+                    session, SessionExecuteRequest(command=cmd, run_async=True)
+                )
                 ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
                 async with asyncssh.connect(
                     self.ssh_host, username=ssh.token, known_hosts=None
@@ -1252,15 +1125,6 @@ class DaytonaRuntime:
                             )
                         raise
             finally:
-                for child in reversed(linked_sandboxes):
-                    try:
-                        await daytona.delete(child)
-                    except Exception:
-                        logger.warning(
-                            "failed to delete linked Daytona sandbox %s; it may still be running",
-                            child.id,
-                            exc_info=True,
-                        )
                 try:
                     await daytona.delete(sandbox)
                 except Exception:
@@ -1555,6 +1419,11 @@ class HostedRuntime:
         """
         trace_id = trace_id or uuid.uuid4().hex
         try:
+            if task.verifier is not None:
+                raise ValueError(
+                    "HostedRuntime does not support verifier tasks until hosted rollouts "
+                    "can keep both phases in one runtime scope"
+                )
             async with asyncio.timeout(self.run_timeout):
                 state = await self._submit_and_await(
                     task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id

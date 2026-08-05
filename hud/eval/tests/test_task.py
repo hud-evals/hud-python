@@ -139,6 +139,29 @@ def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
     assert rebuilt.model_dump(exclude_none=True) == original
 
 
+def test_verifier_roundtrips_as_an_ordinary_nested_task() -> None:
+    original = Task(
+        env="actor",
+        id="solve",
+        verifier=Task(
+            env="judge",
+            id="verify",
+            args={"suite": "hidden"},
+            runtime_config=RuntimeConfig(image="judge:latest"),
+        ),
+    ).model_dump(exclude_none=True)
+
+    rebuilt = Task.model_validate(original)
+
+    assert rebuilt.verifier == Task(
+        env="judge",
+        id="verify",
+        args={"suite": "hidden"},
+        runtime_config=RuntimeConfig(image="judge:latest"),
+    )
+    assert rebuilt.model_dump(exclude_none=True) == original
+
+
 def test_runtime_config_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError, match="Extra inputs"):
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})

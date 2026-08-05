@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 import hud.eval.runtime as runtime_module
-from hud.eval.compose import ComposeService, ImageConfig
+from hud.eval.compose import ComposeHealthcheck, ComposeService, ImageConfig
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -930,153 +930,19 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert calls["delete"] == "sandbox-1"
 
 
-async def test_daytona_runtime_maps_compose_services_to_linked_sandboxes(
+async def test_daytona_runtime_rejects_compose(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _install_fake_daytona(monkeypatch)
     compose = tmp_path / "compose.yaml"
-    compose.write_text(
-        """\
-services:
-  main:
-    image: hud-env:one
-    command: hud serve /env.py
-    entrypoint: []
-    working_dir: /app
-  redis:
-    image: redis:7
-    entrypoint: null
-    command: null
-    working_dir: /data
-    environment:
-      REDIS_ARGS: --save ''
-  worker:
-    image: worker:1
-    entrypoint: []
-    command: worker run
-    working_dir: /srv
-""",
-        encoding="utf-8",
-    )
-    docker_calls: list[tuple[str, ...]] = []
+    compose.write_text("services: {}\n", encoding="utf-8")
 
-    async def docker(*args: str, **_: object) -> tuple[str, str]:
-        docker_calls.append(args)
-        if args[0] == "compose":
-            return (
-                json.dumps(
-                    {
-                        "services": {
-                            "main": {
-                                "image": "hud-env:one",
-                                "command": ["hud", "serve", "/env.py"],
-                                "entrypoint": [],
-                                "working_dir": "/app",
-                            },
-                            "redis": {
-                                "image": "redis:7",
-                                "entrypoint": None,
-                                "command": None,
-                                "working_dir": "/data",
-                                "environment": {"REDIS_ARGS": "--save ''"},
-                            },
-                            "worker": {
-                                "image": "worker:1",
-                                "entrypoint": [],
-                                "command": ["worker", "run"],
-                                "working_dir": "/srv",
-                            },
-                        }
-                    }
-                ),
-                "",
-            )
-        if args[:3] == ("buildx", "imagetools", "inspect"):
-            return (
-                json.dumps(
-                    {
-                        "Entrypoint": ["docker-entrypoint.sh"],
-                        "Cmd": ["redis-server"],
-                        "WorkingDir": "/data",
-                    }
-                ),
-                "",
-            )
-        raise AssertionError(args)
+    with pytest.raises(ValueError, match=r"does not support runtime_config\.compose"):
+        async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()):
+            pass
 
-    monkeypatch.setattr(runtime_module, "_docker", docker)
-
-    async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
-        assert runtime.url == "tcp://127.0.0.1:54321"
-
-    assert client.created[0] == _CreateSandboxFromImageParams(
-        image=_DaytonaImage("hud-env:one"),
-        ephemeral=True,
-        auto_stop_interval=0,
-        resources=None,
-    )
-    child = client.created[1]
-    assert isinstance(child, _CreateSandboxFromSnapshotParams)
-    assert child.linked_sandbox == "sandbox-1"
-    assert child.env_vars == {"REDIS_ARGS": "--save ''"}
-    assert child.name is not None and child.name.startswith("hud-redis-")
-    worker = client.created[2]
-    assert isinstance(worker, _CreateSandboxFromSnapshotParams)
-    assert worker.linked_sandbox == "sandbox-1"
-    assert worker.name is not None and worker.name.startswith("hud-worker-")
-    assert client.snapshot.builds == [child.snapshot, worker.snapshot]
-    assert client.snapshot.snapshots[child.snapshot].image_name == "redis:7"
-    assert client.snapshot.snapshots[worker.snapshot].image_name == "worker:1"
-    assert client.calls["session_commands"] == [
-        (
-            "sandbox-2",
-            "hud-redis",
-            _SessionExecuteRequest(
-                command="cd /data && docker-entrypoint.sh redis-server",
-                run_async=True,
-            ),
-        ),
-        (
-            "sandbox-3",
-            "hud-worker",
-            _SessionExecuteRequest(
-                command="cd /srv && worker run",
-                run_async=True,
-            ),
-        ),
-        (
-            "sandbox-1",
-            "hud-serve",
-            _SessionExecuteRequest(
-                command="cd /app && hud serve /env.py",
-                run_async=True,
-            ),
-        ),
-    ]
-    commands = client.calls["process_execs"]
-    assert isinstance(commands, list)
-    aliases = {sandbox_id: command for sandbox_id, command, _ in commands}
-    assert "getent ahostsv4 sandbox-2" in aliases["sandbox-1"]
-    assert "redis" in aliases["sandbox-1"]
-    assert "getent ahostsv4 sandbox-3" in aliases["sandbox-2"]
-    assert "worker" in aliases["sandbox-2"]
-    assert "getent ahostsv4 sandbox-2" in aliases["sandbox-3"]
-    assert "redis" in aliases["sandbox-3"]
-    assert client.calls["deleted"] == ["sandbox-3", "sandbox-2", "sandbox-1"]
-    assert client.calls["client_closed"] is True
-    assert docker_calls[0] == (
-        "compose",
-        "--project-directory",
-        str(tmp_path),
-        "--file",
-        str(compose),
-        "config",
-        "--format",
-        "json",
-    )
-    assert docker_calls[1][:3] == ("buildx", "imagetools", "inspect")
-    assert docker_calls[1][-1] == "redis:7"
+    assert client.created == []
 
 
 def test_compose_service_applies_image_defaults_once() -> None:
@@ -1095,6 +961,16 @@ def test_compose_service_applies_image_defaults_once() -> None:
         entrypoint=["custom-entrypoint"],
     ).with_image("redis:7", image)
     assert overridden.argv == ["custom-entrypoint"]
+
+
+def test_compose_healthcheck_does_not_invent_duration_values() -> None:
+    service = ComposeService(
+        healthcheck=ComposeHealthcheck(test=["CMD", "healthcheck"]),
+    )
+
+    assert service.model_dump(exclude_none=True)["healthcheck"] == {
+        "test": ["CMD", "healthcheck"]
+    }
 
 
 async def test_daytona_task_runtime_config_overlays_provider_defaults(
