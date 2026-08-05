@@ -185,6 +185,48 @@ async def test_minted_tasks_resolve_a_declared_env_by_name(imported_env) -> None
     assert all(run.reward == 1.0 for run in job.runs)
 
 
+async def test_inferred_placement_includes_a_verifier_environment(tmp_path, request) -> None:
+    actor_name = f"actor-{request.node.name}"
+    verifier_name = f"verifier-{request.node.name}"
+    module_name = f"_verifier_placement_{request.node.name}"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text(
+        f"""from hud import Environment
+
+actor = Environment("{actor_name}")
+verifier = Environment("{verifier_name}")
+
+@actor.template(id="solve")
+async def solve():
+    answer = yield "answer"
+    yield 0.25
+
+@verifier.template(id="verify")
+async def verify():
+    answer = yield ""
+    yield 1.0 if answer == "secret" else 0.0
+""",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+    try:
+        task = Task(
+            env=actor_name,
+            id="solve",
+            verifier=Task(env=verifier_name, id="verify"),
+        )
+        job = await task.run(_FnAgent(lambda _: "secret"))
+    finally:
+        del sys.modules[module_name]
+
+    assert job.runs[0].reward == 1.0
+
+
 async def test_no_placement_fails_with_the_forms_to_pass() -> None:
     with pytest.raises(ValueError, match="no placement for env"):
         await Task(env="ghost", id="add").run(_FnAgent(_solve_add))

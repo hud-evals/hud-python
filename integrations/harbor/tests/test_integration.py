@@ -206,3 +206,23 @@ def test_harbor_phase_behavior(graded: dict[str, Run], task_id: str) -> None:
 
 def test_separate_verifier_phase_behavior(separately_graded: dict[str, Run]) -> None:
     test_harbor_phase_behavior(separately_graded, "sidecar-reachability")
+
+
+def test_separate_verifier_rejects_artifact_symlinks(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-symlink") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    solution = task / "solution" / "solve.sh"
+    solution.write_text(
+        solution.read_text("utf-8")
+        + "\nrm -f /app/main.html\n"
+        + "ln -s /media/hud/verifier/tests /app/main.html\n",
+        encoding="utf-8",
+    )
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 0.0
+    assert "artifact /app/main.html is a symbolic link" in (run.trace.error or "")

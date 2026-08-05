@@ -286,6 +286,8 @@ async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> Proc
 
 
 def copy_artifact(source: Path, target: Path) -> None:
+    if source.is_symlink():
+        raise RuntimeError(f"artifact {source} is a symbolic link")
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
         shutil.copytree(source, target, symlinks=True)
@@ -362,6 +364,7 @@ async def collect(task: dict[str, Any]) -> None:
                 detail = execution.stderr.decode("utf-8", "replace").strip()
                 raise RuntimeError(f"collect hook on {service!r} failed: {detail}")
 
+    await workspace.discard_sandbox()
     for artifact in task["artifacts"]:
         source = artifact["source"]
         target = ARTIFACTS / source.lstrip("/").rstrip("/")
@@ -380,6 +383,8 @@ async def collect(task: dict[str, Any]) -> None:
                 continue
         else:
             copy_artifact(Path(source), target)
+        if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
+            raise RuntimeError(f"artifact {source} contains a symbolic link")
 
 
 def register(task: dict[str, Any]) -> None:

@@ -221,7 +221,13 @@ async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.Monk
 
 def test_taskset_is_ordered_and_keyed_by_slug() -> None:
     first = Task(env="e", id="solve", args={"n": 1}, slug="first")
-    second = Task(env="e", id="solve", args={"n": 2}, slug="second")
+    second = Task(
+        env="e",
+        id="solve",
+        args={"n": 2},
+        slug="second",
+        verifier=Task(env="judge", id="verify"),
+    )
 
     tasks = Taskset("demo", [first, second])
 
@@ -230,7 +236,7 @@ def test_taskset_is_ordered_and_keyed_by_slug() -> None:
     assert list(tasks.filter(["second"])) == [second]
     assert list(tasks.exclude(["first"])) == [second]
     assert list(tasks.items()) == [("first", first), ("second", second)]
-    assert tasks.environment_names() == {"e"}
+    assert tasks.environment_names() == {"e", "judge"}
 
 
 def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:

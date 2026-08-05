@@ -143,7 +143,7 @@ class Taskset:
                 tasks.append(value)
             elif isinstance(value, Taskset):
                 tasks.extend(value)
-            elif isinstance(value, (list, tuple)):
+            elif isinstance(value, list | tuple):
                 tasks.extend(item for item in value if isinstance(item, Task))
         return tasks
 
@@ -213,7 +213,9 @@ class Taskset:
 
     def environment_names(self) -> set[str]:
         """Return env names referenced by tasks in this taskset."""
-        return {task.env for task in self}
+        return {task.env for task in self} | {
+            task.verifier.env for task in self if task.verifier is not None
+        }
 
     def _resolve_placement(self) -> Provider | HUDRuntime:
         if self.origin and self.origin.startswith("module:"):
