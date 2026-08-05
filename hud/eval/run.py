@@ -428,22 +428,30 @@ async def rollout(
                     async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
-                        async with file_tracking_observer(actor_client):
-                            if agent_timeout is None:
-                                await agent(run)
-                            else:
-                                deadline = asyncio.timeout(agent_timeout)
-                                try:
-                                    async with deadline:
-                                        await agent(run)
-                                except TimeoutError:
-                                    if not deadline.expired():
-                                        raise
-                                    detail = f"agent timed out after {agent_timeout:g}s"
-                                    logger.warning(detail)
-                                    run.trace.status = "error"
-                                    run.trace.stop_reason = "timeout"
-                                    run.record(Step(source="system", error=detail))
+                        try:
+                            async with file_tracking_observer(actor_client):
+                                if agent_timeout is None:
+                                    await agent(run)
+                                else:
+                                    deadline = asyncio.timeout(agent_timeout)
+                                    try:
+                                        async with deadline:
+                                            await agent(run)
+                                    except TimeoutError:
+                                        if not deadline.expired():
+                                            raise
+                                        detail = f"agent timed out after {agent_timeout:g}s"
+                                        logger.warning(detail)
+                                        run.trace.status = "error"
+                                        run.trace.stop_reason = "timeout"
+                                        run.record(Step(source="system", error=detail))
+                        except Exception as exc:
+                            if task.verifier is None:
+                                raise
+                            detail = "".join(traceback.format_exception_only(exc)).strip()
+                            logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
+                            run.trace.status = "error"
+                            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         _phase = "grading"
 
                     verifier = task.verifier

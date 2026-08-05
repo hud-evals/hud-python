@@ -968,9 +968,7 @@ def test_compose_healthcheck_does_not_invent_duration_values() -> None:
         healthcheck=ComposeHealthcheck(test=["CMD", "healthcheck"]),
     )
 
-    assert service.model_dump(exclude_none=True)["healthcheck"] == {
-        "test": ["CMD", "healthcheck"]
-    }
+    assert service.model_dump(exclude_none=True)["healthcheck"] == {"test": ["CMD", "healthcheck"]}
 
 
 async def test_daytona_task_runtime_config_overlays_provider_defaults(

@@ -449,11 +449,7 @@ class _NamespaceHost:
                 "--propagation",
                 "private",
                 "--mount-proc",
-                *(
-                    ()
-                    if identity is None
-                    else ("--setgid", str(gid), "--setuid", str(uid))
-                ),
+                *(() if identity is None else ("--setgid", str(gid), "--setuid", str(uid))),
                 "--",
             ]
         argv = [

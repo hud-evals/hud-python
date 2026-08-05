@@ -232,6 +232,40 @@ async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> 
     assert placements == ["actor", "judge"]
 
 
+async def test_verifier_remains_authoritative_after_an_agent_error() -> None:
+    actor_env = Environment("actor")
+    verifier_env = Environment("judge")
+    placements: list[str] = []
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @verifier_env.template()
+    async def verify():
+        answer = yield ""
+        yield 1.0 if answer == "secret" else 0.0
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.env)
+        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+            yield runtime
+
+    task = Task(
+        env="actor",
+        id="solve",
+        verifier=Task(env="judge", id="verify"),
+    )
+    run = await rollout(task, _AnswerThenBoomAgent(lambda _prompt: "secret"), runtime=provider)
+
+    assert run.trace.is_error
+    assert "agent exploded after answering" in (run.trace.error or "")
+    assert run.reward == 1.0
+    assert placements == ["actor", "judge"]
+
+
 def _bindings_env(published: Any) -> Environment:
     """An env whose task publishes per-episode binding data alongside the prompt."""
     env = Environment("slots")

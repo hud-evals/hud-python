@@ -162,6 +162,19 @@ def test_verifier_roundtrips_as_an_ordinary_nested_task() -> None:
     assert rebuilt.model_dump(exclude_none=True) == original
 
 
+def test_verifier_rejects_another_verifier() -> None:
+    with pytest.raises(ValueError, match="nested verifier tasks are not supported"):
+        Task(
+            env="actor",
+            id="solve",
+            verifier=Task(
+                env="judge",
+                id="verify",
+                verifier=Task(env="final-judge", id="verify-final"),
+            ),
+        )
+
+
 def test_runtime_config_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError, match="Extra inputs"):
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})

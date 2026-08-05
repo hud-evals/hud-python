@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .runtime import RuntimeConfig
 
@@ -76,6 +76,12 @@ class Task(BaseModel):
     #: with the same answer. Placement may reuse the live substrate when both
     #: tasks name the same environment.
     verifier: Task | None = None
+
+    @model_validator(mode="after")
+    def _reject_nested_verifier(self) -> Self:
+        if self.verifier is not None and self.verifier.verifier is not None:
+            raise ValueError("nested verifier tasks are not supported")
+        return self
 
     # ─── execution ────────────────────────────────────────────────────
 
