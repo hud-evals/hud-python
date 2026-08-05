@@ -499,6 +499,8 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
 
 async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
     verifier_root = Path(CONFIG["verifier_root"])
+    test_script = verifier_root / "tests/test.sh"
+    test_script.chmod(test_script.stat().st_mode | 0o555)
     clear(VERIFIER_LOGS)
     VERIFIER_LOGS.chmod(0o777)
     LOGS.mkdir(parents=True, exist_ok=True)

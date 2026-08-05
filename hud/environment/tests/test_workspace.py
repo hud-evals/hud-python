@@ -547,7 +547,11 @@ async def test_run_can_use_a_fresh_no_network_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
-    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
+    monkeypatch.setattr(
+        ws,
+        "_bwrap",
+        Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare"),
+    )
     install_identity_map = AsyncMock(return_value=9)
     complete = AsyncMock(return_value=ProcessResult(0, b"isolated", b""))
     spawn = AsyncMock(return_value=SimpleNamespace(complete=complete))
@@ -567,6 +571,8 @@ async def test_run_can_use_a_fresh_no_network_sandbox(
     install_identity_map.assert_awaited_once()
     assert spawn.await_args is not None
     argv, kwargs = spawn.await_args
+    assert argv[0] == "/usr/bin/bwrap"
+    assert "/usr/bin/unshare" not in argv
     assert "--unshare-net" in argv
     assert len(kwargs["pass_fds"]) == 2
 
