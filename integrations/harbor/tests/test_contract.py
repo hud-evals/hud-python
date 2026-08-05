@@ -108,6 +108,8 @@ def fake_docker(monkeypatch):
                 }
             elif "expose:" not in authored:
                 project["services"]["redis"].pop("expose")
+            if "user: 1001:1002" in authored:
+                project["services"]["main"]["user"] = "1001:1002"
             return json.dumps(project), ""
         if args[0] == "compose" and args[-2] == "build":
             compose_file = Path(args[args.index("--file") + 1])
@@ -223,6 +225,25 @@ async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
     ]
     assert ("pull", "redis:7-alpine") in fake_docker
     assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
+
+
+async def test_adapt_moves_compose_main_user_into_the_workspace(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main:\n    user: 1001:1002\n",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
+    assert manifest["image_user"] == "1001:1002"
+    assert "user" not in compose["services"]["main"]
 
 
 async def test_adapt_derives_implicit_peer_port_from_image(

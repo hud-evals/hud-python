@@ -179,6 +179,11 @@ class Capability:
             raise ValueError(f"mcp {transport} transport requires an http:// or https:// URL")
         if transport is None:
             transport = "websocket" if scheme in {"ws", "wss"} else "streamable-http"
+        normalized = normalize_url(
+            normalized,
+            default_scheme="ws",
+            default_port=443 if scheme in {"https", "wss"} else 80,
+        )
         params: dict[str, Any] = {"transport": transport}
         if auth_token is not None:
             params["auth_token"] = auth_token

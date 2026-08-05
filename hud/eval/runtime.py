@@ -1007,6 +1007,7 @@ class DaytonaRuntime:
                 if main_image is None:
                     assert main_service is not None
                     main_image = main_service.image
+                assert main_image is not None
                 sandbox_params = CreateSandboxFromImageParams(
                     image=Image.base(main_image),
                     ephemeral=True,

@@ -51,6 +51,13 @@ def _echo_env(port: int) -> Environment:
     return Environment("echo-env", capabilities=[cap])
 
 
+def test_mcp_capabilities_materialize_default_tunnel_ports() -> None:
+    assert Capability.mcp(url="http://tools.example/mcp").url == "http://tools.example:80/mcp"
+    assert Capability.mcp(url="https://tools.example/mcp").url == "https://tools.example:443/mcp"
+    assert Capability.mcp(url="ws://tools.example/mcp").url == "ws://tools.example:80/mcp"
+    assert Capability.mcp(url="wss://tools.example/mcp").url == "wss://tools.example:443/mcp"
+
+
 async def test_bytes_round_trip_through_the_forwarded_binding(echo_port: int) -> None:
     async with served(_echo_env(echo_port)) as client:
         assert client.manifest is not None

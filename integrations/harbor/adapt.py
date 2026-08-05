@@ -392,7 +392,9 @@ async def adapt(
         manifest = {
             "name": name,
             "workdir": workdir,
-            "image_user": image_config.user or None,
+            "image_user": (
+                compose_main.user if compose_main.user is not None else image_config.user or None
+            ),
             "image_env": image_env,
             "entrypoint": image_config.entrypoint or [],
             "environment": {
@@ -479,6 +481,7 @@ async def adapt(
                     "command": None,
                     "entrypoint": None,
                     "working_dir": None,
+                    "user": None,
                 }
             )
             compose.services["main"] = main.with_image(

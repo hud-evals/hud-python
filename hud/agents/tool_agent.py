@@ -179,6 +179,10 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                             mcp_tool=mt,
                             provider_name=provider_name,
                         )
+                        if provider_name in tools:
+                            raise ValueError(
+                                f"MCP tool name collision after qualification: {provider_name!r}"
+                            )
                         tools[tool.provider_name] = tool
                         params.append(tool.to_params())
                 else:

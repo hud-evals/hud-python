@@ -71,6 +71,7 @@ class ComposeService(BaseModel):
 
     image: str | None = None
     build: str | dict[str, Any] | None = None
+    user: str | int | None = None
     environment: dict[str, str] = Field(default_factory=dict)
     entrypoint: list[str] | None = None
     command: list[str] | None = None

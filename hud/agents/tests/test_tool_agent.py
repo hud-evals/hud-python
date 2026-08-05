@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import mcp.types as mcp_types
+import pytest
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
@@ -163,6 +164,28 @@ async def test_multiple_mcp_capabilities_qualify_tool_names() -> None:
 
     single, _ = await MultiMCPAgent([])._build_tools({"database": Client("lookup")})
     assert list(single) == ["lookup"]
+
+
+async def test_multiple_mcp_capabilities_reject_qualified_name_collisions() -> None:
+    class Client(MCPClient):
+        def __init__(self, name: str) -> None:
+            self.tool = mcp_types.Tool(
+                name=name,
+                description=f"Run {name}",
+                inputSchema={"type": "object", "properties": {}},
+            )
+
+        async def list_tools(self) -> list[mcp_types.Tool]:
+            return [self.tool]
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+            raise AssertionError("colliding tools must not be callable")
+
+    class MultiMCPAgent(DictAgent):
+        tool_catalog = (OpenAIMCPProxyTool,)
+
+    with pytest.raises(ValueError, match=r"MCP tool name collision.*a__b__c"):
+        await MultiMCPAgent([])._build_tools({"a": Client("b__c"), "a__b": Client("c")})
 
 
 # ─── initial messages / user text formatting ──────────────────────────
