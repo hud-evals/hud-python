@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from hud.eval import Task
-from integrations import harbor
+from hud.integrations import harbor
 
 from .conftest import make_harbor_task, make_multi_step_task
 
@@ -151,7 +151,7 @@ def fake_docker(monkeypatch):
             calls.append(("compose-build-config", args[-1], compose_file.read_text("utf-8")))
         return "", ""
 
-    module = importlib.import_module("integrations.harbor.adapt")
+    module = importlib.import_module("hud.integrations.harbor.adapt")
     monkeypatch.setattr(module, "docker", run)
     return calls
 
@@ -614,7 +614,7 @@ async def test_image_entrypoint_is_preserved_as_runtime_data(
             )
         return "", ""
 
-    module = importlib.import_module("integrations.harbor.adapt")
+    module = importlib.import_module("hud.integrations.harbor.adapt")
     monkeypatch.setattr(module, "docker", docker)
 
     await harbor.adapt(tmp_path)

@@ -29,8 +29,9 @@ inventory of current incidents.
   `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
   connected by `hud/capabilities/` and `hud/clients/`.
 - `hud/cli/` is the Typer surface over the same modules.
+- `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
-- `cookbooks/` and `integrations/` live outside the `hud` package.
+- `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
 

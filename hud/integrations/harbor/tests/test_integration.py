@@ -18,14 +18,14 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.eval import DockerRuntime, Shared
-from integrations import harbor
+from hud.integrations import harbor
 
 if TYPE_CHECKING:
     from hud.capabilities import MCPClient, SSHClient
     from hud.eval.run import Run
 
 TASKS = Path(__file__).parent / "tasks"
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 
 pytestmark = [
     pytest.mark.integration,

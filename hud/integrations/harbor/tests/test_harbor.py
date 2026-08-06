@@ -1,4 +1,4 @@
-"""``integrations.harbor`` — load Harbor task dirs as a Taskset; export HUD tasks."""
+"""``hud.integrations.harbor`` task adaptation and export."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from integrations.harbor import export
+from hud.integrations.harbor import export
 
 if TYPE_CHECKING:
     from pathlib import Path

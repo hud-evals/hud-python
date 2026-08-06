@@ -1,7 +1,9 @@
-"""Harbor task interop.
+"""Experimental Harbor task interop.
 
 ``adapt()`` builds Harbor task directories as runnable HUD tasksets.
 ``export()`` writes HUD tasks back to Harbor directories.
+
+This API may change between minor releases while the integration is experimental.
 """
 
 from .adapt import adapt
