@@ -35,6 +35,8 @@ if TYPE_CHECKING:
     from hud.eval.runtime import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
+_CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
+_CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 
 #: protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
@@ -99,6 +101,7 @@ class HudClient:
         #: raw stream pairs (no dialable endpoint): bindings pass through.
         self._endpoint = endpoint
         self._ids = itertools.count(1)
+        self._call_lock = asyncio.Lock()
         self._closed = False
         self.manifest: Manifest | None = None
         self._routes: dict[str, str] = {}
@@ -299,24 +302,45 @@ class HudClient:
 
     # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
-    async def _call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        msg_id = next(self._ids)
-        await send_frame(
-            self._writer,
-            {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
-        )
-        reply = await read_frame(self._reader)
-        if reply is None:
-            # Connection-level event, not a protocol error: the peer hung up
-            # without answering (e.g. a proxied port whose backend isn't up).
-            raise EOFError(f"env closed connection during {method!r}")
-        if "error" in reply:
-            err = reply["error"]
-            raise HudProtocolError(int(err.get("code", -32000)), str(err.get("message", "")))
-        result = reply.get("result")
-        if not isinstance(result, dict):
-            raise HudProtocolError(-32603, f"{method!r}: result was not an object")
-        return result
+    async def _call(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        reply_timeout: float | None = None,
+    ) -> dict[str, Any]:
+        async with self._call_lock:
+            try:
+                async with asyncio.timeout(reply_timeout):
+                    msg_id = next(self._ids)
+                    await send_frame(
+                        self._writer,
+                        {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
+                    )
+                    reply = await read_frame(self._reader)
+                    if reply is None:
+                        raise EOFError(f"env closed connection during {method!r}")
+                    if reply.get("id") != msg_id:
+                        self.abort()
+                        raise HudProtocolError(
+                            -32603,
+                            f"{method!r}: reply id did not match request",
+                        )
+                    if "error" in reply:
+                        err = reply["error"]
+                        raise HudProtocolError(
+                            int(err.get("code", -32000)),
+                            str(err.get("message", "")),
+                        )
+                    result = reply.get("result")
+                    if not isinstance(result, dict):
+                        raise HudProtocolError(-32603, f"{method!r}: result was not an object")
+                    return result
+            except HudProtocolError:
+                raise
+            except BaseException:
+                self.abort()
+                raise
 
 
 # ─── module-level entry points ────────────────────────────────────────
@@ -401,10 +425,42 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIte
         parts.port or 0,
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
     )
+    owner = asyncio.current_task()
+    assert owner is not None
+    heartbeat_error: Exception | None = None
+
+    async def heartbeat() -> None:
+        nonlocal heartbeat_error
+        while True:
+            await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
+            assert client.manifest is not None
+            try:
+                await client._call(
+                    "hello",
+                    {"session_id": client.manifest.session_id},
+                    reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS,
+                )
+            except HudProtocolError as exc:
+                LOGGER.warning("control heartbeat failed: %s", exc)
+                return
+            except Exception as exc:
+                LOGGER.warning("control heartbeat failed: %s", exc)
+                heartbeat_error = exc
+                owner.cancel()
+                return
+
+    heartbeat_task = asyncio.create_task(heartbeat(), name="hud-control-heartbeat")
     try:
-        yield client
-    finally:
-        await client.close()
+        try:
+            yield client
+        finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            await client.close()
+    except asyncio.CancelledError:
+        if heartbeat_error is not None:
+            raise heartbeat_error from None
+        raise
 
 
 __all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo", "connect"]
