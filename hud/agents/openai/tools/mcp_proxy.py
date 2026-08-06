@@ -6,6 +6,8 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from typing_extensions import override
+
 from hud.agents.tools import MCPTool
 
 from .base import OpenAIToolSpec
@@ -21,10 +23,12 @@ class OpenAIMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as an OpenAI function tool."""
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OpenAIToolSpec(api_type="function", api_name="function")
 
+    @override
     def to_params(self) -> Any:
         if self.mcp_tool.description is None:
             raise ValueError(f"MCP tool {self.mcp_tool.name!r} requires a description.")

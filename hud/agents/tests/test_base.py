@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from typing_extensions import override
 
 from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
 from hud.agents.base import Agent
@@ -18,6 +19,7 @@ from hud.utils.exceptions import HudAuthenticationError
 
 
 class _FillingAgent(Agent):
+    @override
     async def __call__(self, run: Any) -> None:
         run.trace.content = "done"
 
@@ -27,7 +29,7 @@ class _FillingAgent(Agent):
 
 def test_agent_requires_call_implementation() -> None:
     with pytest.raises(TypeError):
-        Agent()  # type: ignore[abstract]
+        Agent()
 
 
 async def test_agent_call_fills_trace() -> None:

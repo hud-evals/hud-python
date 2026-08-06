@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettingsSource
+from typing_extensions import override
 
 
 class Settings(BaseSettings):
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="allow")
 
     @classmethod
+    @override
     def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],

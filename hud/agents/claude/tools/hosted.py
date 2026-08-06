@@ -12,6 +12,7 @@ from anthropic.types.beta import (
     BetaWebFetchTool20250910Param,
     BetaWebSearchTool20250305Param,
 )
+from typing_extensions import override
 
 if TYPE_CHECKING:
     BetaUserLocationParam = Any
@@ -33,6 +34,7 @@ class ClaudeWebSearchTool(ClaudeHostedTool):
     blocked_domains: list[str] | None = None
     user_location: BetaUserLocationParam | None = None
 
+    @override
     def to_params(self) -> BetaWebSearchTool20250305Param:
         _validate_domain_filters(self.allowed_domains, self.blocked_domains)
         params = BetaWebSearchTool20250305Param(
@@ -60,6 +62,7 @@ class ClaudeWebFetchTool(ClaudeHostedTool):
     max_content_tokens: int | None = None
     citations_enabled: bool = False
 
+    @override
     def to_params(self) -> BetaWebFetchTool20250910Param:
         _validate_domain_filters(self.allowed_domains, self.blocked_domains)
         params = BetaWebFetchTool20250910Param(
@@ -85,6 +88,7 @@ class ClaudeToolSearchTool(ClaudeHostedTool):
 
     threshold: int = 10
 
+    @override
     def to_params(self) -> BetaToolSearchToolBm25_20251119Param:
         return BetaToolSearchToolBm25_20251119Param(
             type="tool_search_tool_bm25_20251119",

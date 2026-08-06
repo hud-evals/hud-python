@@ -290,9 +290,9 @@ def patch_server_output_validation() -> None:
                         tool = await self._get_cached_tool_definition(tool_name)
 
                         if validate_input and tool:
-                            try:
-                                import jsonschema
+                            import jsonschema
 
+                            try:
                                 jsonschema.validate(instance=arguments, schema=tool.inputSchema)
                             except jsonschema.ValidationError as e:
                                 return self._make_error_result(

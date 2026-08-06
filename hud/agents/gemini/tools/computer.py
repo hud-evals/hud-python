@@ -7,6 +7,7 @@ import platform
 from typing import TYPE_CHECKING, Any
 
 from google.genai import types as genai_types
+from typing_extensions import override
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
@@ -53,10 +54,12 @@ class GeminiComputerTool(RFBTool):
         self.excluded_predefined_functions: list[str] = []
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_COMPUTER_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(
             computer_use=genai_types.ComputerUse(
@@ -65,6 +68,7 @@ class GeminiComputerTool(RFBTool):
             ),
         )
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         if not isinstance(action, str):

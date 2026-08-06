@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import asyncssh
+from typing_extensions import override
 
 from hud.environment.utils import splice
 from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
@@ -239,6 +240,7 @@ class NamespaceHost:
 
 
 class _NoAuth(asyncssh.SSHServer):
+    @override
     def begin_auth(self, username: str) -> bool:
         return False
 
@@ -462,10 +464,12 @@ class _NamespaceHost:
         if scope == "environment" and mount_view != "host":
             raise ValueError("environment processes require the host mount view")
         identity = request["identity"]
+        identity_argv: tuple[str, ...] = ()
         if isinstance(identity, int):
-            uid = gid = identity
+            identity_argv = ("--setgid", str(identity), "--setuid", str(identity))
         elif identity is not None:
             uid, gid = map(int, identity)
+            identity_argv = ("--setgid", str(gid), "--setuid", str(uid))
         command_prefix: list[str] = []
         if mount_view == "host":
             unshare = shutil.which("unshare")
@@ -477,7 +481,7 @@ class _NamespaceHost:
                 "--propagation",
                 "private",
                 "--mount-proc",
-                *(() if identity is None else ("--setgid", str(gid), "--setuid", str(uid))),
+                *identity_argv,
                 "--",
             ]
         held = self.holders.get(scope)
@@ -495,7 +499,7 @@ class _NamespaceHost:
             *(
                 ("--preserve-credentials",)
                 if identity is None or mount_view == "host"
-                else ("--setgid", str(gid), "--setuid", str(uid))
+                else identity_argv
             ),
             "--",
             *command_prefix,

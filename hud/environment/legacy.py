@@ -285,7 +285,7 @@ class LegacyEnvMixin:
         )
 
         def decorate(fn: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
-            scenario_name = name or fn.__name__
+            scenario_name = name or cast("Any", fn).__name__
             if ":" in scenario_name:
                 raise ValueError(
                     f"scenario name {scenario_name!r} cannot contain ':' (reserved separator)",

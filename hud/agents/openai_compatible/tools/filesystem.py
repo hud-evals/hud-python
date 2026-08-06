@@ -8,6 +8,7 @@ import shlex
 from typing import Any, ClassVar
 
 import mcp.types as mcp_types
+from typing_extensions import override
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
@@ -21,10 +22,12 @@ class _FilesystemTool(SSHTool):
     parameters: ClassVar[dict[str, Any]]
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return AgentToolSpec(api_type="function", api_name=cls.name)
 
+    @override
     def to_params(self) -> dict[str, Any]:
         return {
             "type": "function",
@@ -62,6 +65,7 @@ class ReadTool(_FilesystemTool):
         "required": ["filePath"],
     }
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
@@ -147,6 +151,7 @@ class BashTool(_FilesystemTool):
         "required": ["command"],
     }
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
         if not isinstance(command, str) or not command:
@@ -189,6 +194,7 @@ class EditTool(_FilesystemTool):
         "required": ["filePath", "oldString", "newString"],
     }
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
@@ -248,6 +254,7 @@ class WriteTool(_FilesystemTool):
         "required": ["content", "filePath"],
     }
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
@@ -283,6 +290,7 @@ class GrepTool(_FilesystemTool):
         "required": ["pattern"],
     }
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str):
@@ -307,6 +315,7 @@ class GlobTool(_FilesystemTool):
         "required": ["pattern"],
     }
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str):

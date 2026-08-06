@@ -14,6 +14,7 @@ dependencies = [
     "packaging>=21.0",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.2,<3",
+    "typing-extensions>=4.12",
     # MCP dependencies
     "mcp>=1.24.0,<2.0",
     "fastmcp==3.2.0",
@@ -132,7 +133,7 @@ dev = [
     "pytest-asyncio",
     "pytest-mock",
     "pytest-cov",
-    "pyright==1.1.407",
+    "ty==0.0.67",
 ]
 
 # Alias for backwards compatibility
@@ -225,18 +226,15 @@ docstring-code-format = true
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
-[tool.pyright]
+[tool.ty.src]
 include = ["hud"]
-exclude = [
-    "**/node_modules",
-    "**/__pycache__",
-    "**/venv",
-    "**/.venv",
-]
-pythonVersion = "3.11"
-typeCheckingMode = "basic"
-strict = ["hud/agents"]
-reportMissingImports = "warning"
+
+[tool.ty.rules]
+all = "error"
+
+[tool.ty.analysis]
+respect-type-ignore-comments = false
+strict-equality-semantics = true
 
 [tool.coverage.run]
 source = ["hud"]

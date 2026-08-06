@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from google.genai import types as genai_types
+from typing_extensions import override
 
 from hud.agents.tools import HostedTool
 
@@ -20,6 +21,7 @@ class GeminiGoogleSearchTool(GeminiHostedTool):
 
     dynamic_threshold: float | None = None
 
+    @override
     def to_params(self) -> genai_types.Tool:
         if self.dynamic_threshold is not None:
             raise ValueError("dynamic_threshold is not supported by Gemini Google Search.")
@@ -30,6 +32,7 @@ class GeminiGoogleSearchTool(GeminiHostedTool):
 class GeminiUrlContextTool(GeminiHostedTool):
     """Gemini URL context."""
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(url_context=genai_types.UrlContext())
 
@@ -38,5 +41,6 @@ class GeminiUrlContextTool(GeminiHostedTool):
 class GeminiCodeExecutionTool(GeminiHostedTool):
     """Gemini code execution."""
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(code_execution=genai_types.ToolCodeExecution())

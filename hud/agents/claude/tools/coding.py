@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import mcp.types as mcp_types
+from typing_extensions import override
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
@@ -36,16 +37,19 @@ class ClaudeBashTool(SSHTool):
     name = "bash"
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> ClaudeToolSpec:
         del model
         return CLAUDE_BASH_SPEC
 
+    @override
     def to_params(self) -> BetaToolBash20250124Param:
         return cast(
             "BetaToolBash20250124Param",
             {"type": self.spec.api_type, "name": self.name},
         )
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         if arguments.get("restart"):
             # SSH session lives across calls; "restart" is a no-op for us.
@@ -72,20 +76,24 @@ class ClaudeTextEditorTool(SSHTool):
     name = "str_replace_based_edit_tool"
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> ClaudeToolSpec:
         del model
         return CLAUDE_TEXT_EDITOR_SPEC
 
     @property
+    @override
     def provider_name(self) -> str:
         return self.spec.api_name
 
+    @override
     def to_params(self) -> BetaToolTextEditor20250728Param:
         return cast(
             "BetaToolTextEditor20250728Param",
             {"type": self.spec.api_type, "name": self.provider_name},
         )
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
         path = arguments.get("path")

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from typing_extensions import override
+
 from hud.agents.tools import MCPTool
 
 from .base import openai_compatible_tool_name, openai_compatible_tool_param
@@ -13,6 +15,7 @@ class OpenAICompatibleMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as an OpenAI-compatible function tool."""
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> Any:
         del model
         from hud.agents.tools.base import AgentToolSpec
@@ -20,9 +23,11 @@ class OpenAICompatibleMCPProxyTool(MCPTool):
         return AgentToolSpec(api_type="function", api_name="function")
 
     @property
+    @override
     def provider_name(self) -> str:
         return openai_compatible_tool_name(super().provider_name)
 
+    @override
     def to_params(self) -> Any:
         return openai_compatible_tool_param(self.mcp_tool, name=self.provider_name)
 

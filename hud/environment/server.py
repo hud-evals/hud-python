@@ -458,8 +458,9 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 await writer.wait_closed()
 
     server = await asyncio.start_server(accept, host=host, port=port)
-    server._hud_handlers = active  # type: ignore[attr-defined]
-    server._hud_channel = channel  # type: ignore[attr-defined]
+    server_state = cast("Any", server)
+    server_state._hud_handlers = active
+    server_state._hud_channel = channel
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])
     return server
@@ -471,7 +472,8 @@ async def _shutdown(server: asyncio.Server) -> None:
     for task in handlers:
         task.cancel()
     await asyncio.gather(*handlers, return_exceptions=True)
-    await server._hud_channel.cancel_all()  # type: ignore[attr-defined]
+    channel = cast("_ControlChannel", cast("Any", server)._hud_channel)
+    await channel.cancel_all()
     await server.wait_closed()
 
 

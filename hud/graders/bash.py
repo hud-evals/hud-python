@@ -6,6 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
+from typing_extensions import override
+
 from hud.utils.process import create_process_group_exec
 
 from .base import Grader
@@ -22,14 +24,17 @@ class BashGrader(Grader):
     default_timeout: int = 600
 
     @classmethod
+    @override
     async def compute_score(
         cls,
-        command: str,
+        command: str | None = None,
         cwd: str | None = None,
         timeout_seconds: float | None = None,
         **kwargs: Any,
     ) -> SubScore:
         """Run ``command`` via ``bash -lc`` and score by exit code."""
+        if command is None:
+            raise ValueError("BashGrader requires command")
         if timeout_seconds is None:
             timeout_seconds = cls.default_timeout
         del kwargs

@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.clients import HudProtocolError
@@ -39,6 +40,7 @@ class _FnAgent(Agent):
     def __init__(self, fn: Any) -> None:
         self._fn = fn
 
+    @override
     async def __call__(self, run: Any) -> None:
         run.trace.content = self._fn(run.prompt)
 

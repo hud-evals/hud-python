@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import mcp.types as mcp_types
 from PIL import Image
+from typing_extensions import override
 
 from hud.agents.tools.rfb import RFBTool
 from hud.capabilities.rfb import RFBClient
@@ -21,10 +22,12 @@ class RecordingRFBTool(RFBTool):
             screenshot_png=AsyncMock(return_value=(b"webp", "image/webp")),
         )
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> Any:
         del arguments
         raise NotImplementedError
 
+    @override
     def to_params(self) -> Any:
         raise NotImplementedError
 

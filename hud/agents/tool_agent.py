@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
 
 import mcp.types as mcp_types
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
@@ -83,7 +84,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if "tool_catalog" in cls.__dict__:
-            seen: dict[type, None] = {}
+            seen: dict[type[CapabilityClient], None] = {}
             for t in cls.tool_catalog:
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
@@ -113,6 +114,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         )
         return {"type": agent_type.value, "config": config}
 
+    @override
     async def __call__(self, run: Run) -> None:
         """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
 
@@ -252,7 +254,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     if msg is None:
                         continue
                     if isinstance(msg, list):
-                        state.messages.extend(cast("list[MessageT]", msg))
+                        state.messages.extend(msg)
                     else:
                         state.messages.append(cast("MessageT", msg))
 

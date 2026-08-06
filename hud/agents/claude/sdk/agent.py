@@ -16,6 +16,8 @@ import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from typing_extensions import override
+
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, ClaudeSDKConfig, Usage
 from hud.settings import settings
@@ -84,6 +86,7 @@ class ClaudeSDKAgent(Agent):
         self._mcp_servers: dict[str, dict[str, Any]] = {}
         self._shell = "bash"
 
+    @override
     async def __call__(self, run: Run) -> None:
         self._mcp_servers = {}
         manifest = run.client.manifest

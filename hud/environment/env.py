@@ -14,6 +14,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
+from typing_extensions import override
 
 from hud.capabilities import Capability
 
@@ -207,7 +208,7 @@ class Environment(LegacyEnvMixin):
                     f"@env.template: {getattr(func, '__qualname__', func)} must be an async "
                     "generator function (`async def ...:` with `yield`)",
                 )
-            task_id = id or func.__name__
+            task_id = id or cast("Any", func).__name__
             if task_id in self.tasks:
                 raise ValueError(
                     f"template {task_id!r} already registered on env {self.name!r}",
@@ -242,6 +243,7 @@ class Environment(LegacyEnvMixin):
 
     # ─── capabilities ─────────────────────────────────────────────────────
 
+    @override
     def add_capability(self, cap: Capability) -> None:
         """Publish concrete wire data, replacing any same-named entry.
 

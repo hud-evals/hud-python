@@ -17,6 +17,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
@@ -57,6 +58,7 @@ class RobotAgent(Agent):
         """Return whether to stop before selecting the next action."""
         return bool(np.asarray(obs["terminated"]).reshape(-1)[0])
 
+    @override
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
         """The generic rollout contract: one run, one scalar robot connection.
 

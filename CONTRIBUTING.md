@@ -16,7 +16,7 @@ We welcome contributions to the HUD SDK! This guide covers how to get started.
 
 ### Git Hooks
 
-Enable the shared pre-push hook (runs ruff, pyright, pytest before each push):
+Enable the shared pre-push hook (runs ruff, ty, pytest before each push):
 
 ```bash
 git config core.hooksPath .githooks
@@ -45,7 +45,7 @@ a cold build cache.
 ```bash
 uv run ruff format . --check   # Formatting
 uv run ruff check .            # Linting
-uv run pyright                 # Type checking
+uv run --extra train ty check  # Type checking
 ```
 
 ## Code Style
@@ -59,7 +59,7 @@ uv run pyright                 # Type checking
 
 1. **Branch naming**: `feature/description` or `fix/issue-number`
 2. **Commits**: Use clear, descriptive messages
-3. **Tests**: All CI checks must pass (ruff, pyright, pytest)
+3. **Tests**: All CI checks must pass (ruff, ty, pytest)
 4. **Review**: Address feedback promptly
 
 ## Need Help?

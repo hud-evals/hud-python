@@ -5,16 +5,20 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
+from typing_extensions import override
 
 from hud.environment.env import current_session_id
 from hud.environment.robot.bridge import _HUD_STATE, RobotBridge, _apply_declaration_state
 from hud.environment.robot.endpoint import RobotEndpoint, _bridge_init_kwargs
 from hud.environment.robot.gym import GymBridge, action_dim_of
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 # --- spawn state (declaration → child) -------------------------------------------------
 
@@ -26,12 +30,15 @@ class _CustomBridge(RobotBridge):
         super().__init__()
         self.use_delta = use_delta
 
+    @override
     def reset(self, **kwargs: Any) -> str:
         return "p"
 
+    @override
     def step(self, action: Any) -> None:
         return None
 
+    @override
     def get_observation(self) -> tuple[dict[str, Any], Any] | None:
         return None
 
@@ -112,7 +119,7 @@ def test_step_reshapes_float_box_action() -> None:
         def __init__(self) -> None:
             self.last_action: Any = None
 
-        def step(self, action: Any) -> tuple:
+        def step(self, action: Any) -> tuple[Any, ...]:
             self.last_action = action
             return np.zeros(3, dtype=np.float32), 0.0, False, False, {}
 
@@ -135,7 +142,7 @@ def test_step_reshapes_batched_float_box_action() -> None:
         def __init__(self) -> None:
             self.last_action: Any = None
 
-        def step(self, action: Any) -> tuple:
+        def step(self, action: Any) -> tuple[Any, ...]:
             self.last_action = action
             return (
                 np.zeros((2, 3), dtype=np.float32),
@@ -168,7 +175,9 @@ def test_plain_env_observation_always_gets_batch_axis() -> None:
         "state": np.array([1.0], dtype=np.float32),
         "camera": np.zeros((1, 4, 3), dtype=np.uint8),
     }
-    data, terminated = bridge.get_observation()  # type: ignore[misc]
+    observation = bridge.get_observation()
+    assert observation is not None
+    data, terminated = observation
     assert data is not None
     assert data["state"].shape == (1, 1)
     assert data["camera"].shape == (1, 1, 4, 3)
@@ -183,30 +192,32 @@ def test_plain_env_observation_always_gets_batch_axis() -> None:
 @pytest.fixture
 def endpoint() -> RobotEndpoint:
     ep = RobotEndpoint.remote("127.0.0.1", 9)
-    ep._call = AsyncMock()  # type: ignore[method-assign]
+    setattr(ep, "_call", AsyncMock())
     return ep
 
 
 @pytest.mark.asyncio
 async def test_release_claim_frees_current_session_slot(endpoint: RobotEndpoint) -> None:
-    endpoint._call.return_value = {"prompt": "p", "token": "slot-0-abcd"}  # type: ignore[attr-defined]
+    call = cast("AsyncMock", endpoint._call)
+    call.return_value = {"prompt": "p", "token": "slot-0-abcd"}
     token = current_session_id.set("sess-a")
     try:
         await endpoint.reset()
         assert endpoint._claims["sess-a"] == "slot-0-abcd"
-        endpoint._call.return_value = {"score": 0.0}  # type: ignore[attr-defined]
+        call.return_value = {"score": 0.0}
         await endpoint.release_claim()
         assert "sess-a" not in endpoint._claims
-        endpoint._call.assert_called_with("result", {"token": "slot-0-abcd"})  # type: ignore[attr-defined]
+        call.assert_called_with("result", {"token": "slot-0-abcd"})
     finally:
         current_session_id.reset(token)
 
 
 @pytest.mark.asyncio
 async def test_release_claim_on_shutdown_frees_each_session(endpoint: RobotEndpoint) -> None:
+    call = cast("AsyncMock", endpoint._call)
     endpoint._claims["sess-a"] = "tok-a"
     endpoint._claims["sess-b"] = "tok-b"
-    endpoint._call.return_value = {"score": 0.0}  # type: ignore[attr-defined]
+    call.return_value = {"score": 0.0}
 
     for sid in ("sess-a", "sess-b"):
         token = current_session_id.set(sid)
@@ -216,7 +227,7 @@ async def test_release_claim_on_shutdown_frees_each_session(endpoint: RobotEndpo
             current_session_id.reset(token)
 
     assert endpoint._claims == {}
-    tokens = [c.args[1]["token"] for c in endpoint._call.call_args_list]  # type: ignore[attr-defined]
+    tokens = [c.args[1]["token"] for c in call.call_args_list]
     assert sorted(tokens) == ["tok-a", "tok-b"]
 
 
@@ -224,39 +235,42 @@ async def test_release_claim_on_shutdown_frees_each_session(endpoint: RobotEndpo
 async def test_result_marks_claim_freed_so_disconnect_does_not_re_result(
     endpoint: RobotEndpoint,
 ) -> None:
+    call = cast("AsyncMock", endpoint._call)
     token = current_session_id.set("sess-a")
     try:
         endpoint._claims["sess-a"] = "tok-a"
-        endpoint._call.return_value = {"score": 1.0, "success": True, "total_reward": 1.0}  # type: ignore[attr-defined]
+        call.return_value = {"score": 1.0, "success": True, "total_reward": 1.0}
         await endpoint.result(token="tok-a")
         assert endpoint._claims["sess-a"] == ""
-        endpoint._call.reset_mock()  # type: ignore[attr-defined]
+        call.reset_mock()
         await endpoint.release_claim()
-        endpoint._call.assert_not_called()  # type: ignore[attr-defined]
+        call.assert_not_called()
     finally:
         current_session_id.reset(token)
 
 
 @pytest.mark.asyncio
 async def test_failed_release_rpc_retries_then_succeeds(endpoint: RobotEndpoint) -> None:
+    call = cast("AsyncMock", endpoint._call)
     token = current_session_id.set("sess-a")
     try:
         endpoint._claims["sess-a"] = "tok-a"
-        endpoint._call.side_effect = [  # type: ignore[attr-defined]
+        call.side_effect = [
             ConnectionError("sim down"),
             {"score": 0.0},
         ]
         await endpoint.release_claim()
         assert "sess-a" not in endpoint._claims
-        assert endpoint._call.call_count == 2  # type: ignore[attr-defined]
+        assert call.call_count == 2
     finally:
         current_session_id.reset(token)
 
 
 @pytest.mark.asyncio
 async def test_stop_drains_claims_that_cancel_failed_to_free(endpoint: RobotEndpoint) -> None:
+    call = cast("AsyncMock", endpoint._call)
     endpoint._claims["sess-a"] = "tok-a"
-    endpoint._call.side_effect = [  # type: ignore[attr-defined]
+    call.side_effect = [
         ConnectionError("sim down"),
         ConnectionError("sim down"),
         ConnectionError("sim down"),
@@ -268,8 +282,8 @@ async def test_stop_drains_claims_that_cancel_failed_to_free(endpoint: RobotEndp
     finally:
         current_session_id.reset(token)
 
-    endpoint._call.side_effect = None  # type: ignore[attr-defined]
-    endpoint._call.return_value = {"score": 0.0}  # type: ignore[attr-defined]
+    call.side_effect = None
+    call.return_value = {"score": 0.0}
     await endpoint.stop()  # last chance while the control link is up
     assert endpoint._claims == {}
 
@@ -280,16 +294,19 @@ async def test_stop_drains_claims_that_cancel_failed_to_free(endpoint: RobotEndp
 class _StubBridge(RobotBridge):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.steps: list[np.ndarray] = []
+        self.steps: list[NDArray[Any]] = []
         self.contract = {"features": {"action": {"role": "action", "names": ["a"]}}}
 
+    @override
     def reset(self, **kwargs: Any) -> str:
         return f"prompt:{kwargs!r}"
 
-    def step(self, action: np.ndarray) -> None:
+    @override
+    def step(self, action: NDArray[Any]) -> None:
         self.steps.append(np.asarray(action))
 
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+    @override
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]] | None:
         return {"x": np.zeros((self.num_envs, 1), dtype=np.float32)}, np.zeros(
             self.num_envs, dtype=bool
         )
@@ -302,12 +319,14 @@ class _FakeWS:
 
 @pytest.mark.asyncio
 async def test_claim_awaits_legacy_async_reset() -> None:
-    class _AsyncReset(_StubBridge):
-        async def reset(self, **kwargs: Any) -> str:
-            await asyncio.sleep(0)
-            return "async-prompt"
+    bridge = _StubBridge()
 
-    ep = await _AsyncReset()._claim_episode()
+    async def async_reset(**kwargs: Any) -> str:
+        await asyncio.sleep(0)
+        return "async-prompt"
+
+    setattr(bridge, "reset", async_reset)
+    ep = await bridge._claim_episode()
     assert ep["prompt"] == "async-prompt"
 
 
@@ -324,6 +343,7 @@ async def test_claim_rejects_empty_kwargs_after_nonempty_batch() -> None:
 @pytest.mark.asyncio
 async def test_release_uses_overridden_result() -> None:
     class _CustomGrade(_StubBridge):
+        @override
         def result(self) -> dict[str, Any]:
             return {"score": 0.42, "success": True, "total_reward": 3.0, "detail": "custom"}
 
@@ -367,11 +387,13 @@ async def test_tick_loop_stops_after_terminal_obs_while_ws_still_open() -> None:
             super().__init__()
             self.tick = 0
 
-        def step(self, action: np.ndarray) -> None:
+        @override
+        def step(self, action: NDArray[Any]) -> None:
             self.tick += 1
             super().step(action)
 
-        def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+        @override
+        def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]] | None:
             data = {"x": np.zeros((self.num_envs, 1), dtype=np.float32)}
             return data, np.array([self.tick >= 3])
 

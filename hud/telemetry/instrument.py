@@ -240,8 +240,9 @@ def instrument(
                 _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
         wrapper = async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-        wrapper._hud_instrumented = True  # type: ignore[attr-defined]
-        wrapper._hud_original = func  # type: ignore[attr-defined]
+        wrapper_state = cast("Any", wrapper)
+        wrapper_state._hud_instrumented = True
+        wrapper_state._hud_original = func
 
         return wrapper
 

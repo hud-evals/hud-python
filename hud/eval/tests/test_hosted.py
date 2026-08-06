@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
+from typing_extensions import override
 
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
@@ -32,6 +33,9 @@ from hud.eval.runtime import (
     _splice_websocket,
 )
 from hud.eval.task import Task
+
+if TYPE_CHECKING:
+    from hud.agents.base import Agent
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 
@@ -154,8 +158,8 @@ async def test_run_rejects_non_gateway_agent() -> None:
     """An agent that can't serialize its identity yields a failed Run, not a crash."""
     run = await HostedRuntime(poll_interval=0.0).run(
         Task(env="e", id="x"),
-        object(),  # type: ignore[arg-type]
-        job_id="j",  # type: ignore[arg-type]
+        cast("Agent", object()),
+        job_id="j",
     )
     assert run.trace.is_error
     assert "gateway agent" in (run.trace.error or "")
@@ -277,6 +281,7 @@ async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.Monke
     never = asyncio.Event()
 
     class _StuckSubmitPlatform(_FakePlatform):
+        @override
         async def apost(self, path: str, *, json: Any | None = None) -> Any:
             self.posts.append((path, json or {}))
             if path == "/rollouts/submit":
@@ -413,7 +418,8 @@ async def test_scheduler_delegates_hosted(monkeypatch: pytest.MonkeyPatch) -> No
     seen: dict[str, Any] = {}
 
     class _RecordingHostedRuntime(HostedRuntime):
-        async def run(self, task: Task, agent: Any, **kwargs: Any) -> Run:  # type: ignore[override]
+        @override
+        async def run(self, task: Task, agent: Agent, **kwargs: Any) -> Run:
             seen.update(kwargs)
             run = Run(None, task.id, {})
             run.trace.status = "completed"

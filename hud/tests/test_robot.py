@@ -24,12 +24,16 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
+from typing_extensions import override
 
 from hud.agents.robot import Adapter, Model, RobotAgent
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
 from hud.eval.runtime import _local
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -70,16 +74,19 @@ class _StubSim(RobotBridge):
         self.tick = 0
         self.executed = np.zeros(num_envs)
 
+    @override
     def reset(self, **task_args: Any) -> str:
         self.tick = 0
         self.executed[:] = 0.0
         return f"stub task: {task_args.get('goal', 'none')}"
 
-    def step(self, action: np.ndarray) -> None:
+    @override
+    def step(self, action: NDArray[Any]) -> None:
         self.tick += 1
         self.executed += np.asarray(action)[:, 0]  # one row per slot
 
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    @override
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
         slots = np.arange(1, self.num_envs + 1, dtype=np.float32)
         data = {
             "observation/image": np.zeros((self.num_envs, 16, 16, 3), dtype=np.uint8),
@@ -89,6 +96,7 @@ class _StubSim(RobotBridge):
         }
         return data, np.full(self.num_envs, self.tick >= EPISODE_TICKS)
 
+    @override
     def result_slots(self) -> list[dict[str, Any]]:
         # Per-slot grades, never one batch-wide scalar: the token has to resolve.
         return [
@@ -150,6 +158,7 @@ class _EchoAdapter(Adapter):
         super().__init__()
         self.wired: list[dict[str, Any]] = []
 
+    @override
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
         data = obs["data"]
         batch = {"state": data[self.state_key], "image": data[self.image_keys[0]], "task": prompt}
@@ -163,6 +172,7 @@ class _EchoModel(Model):
     def __init__(self, action_dim: int) -> None:
         self.action_dim = action_dim
 
+    @override
     def infer(self, batch: Any) -> Any:
         slot = float(np.asarray(batch["state"]).reshape(-1)[0])
         return np.full((1, 1, self.action_dim), slot, dtype=np.float32)  # [N, T, A]
@@ -181,6 +191,7 @@ class _EchoAgent(RobotAgent):
 class _EarlyStopAgent(_EchoAgent):
     """Stop after one action through the public rollout hook."""
 
+    @override
     def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
         return step >= 1 or super().should_stop(obs, step=step, max_steps=max_steps)
 

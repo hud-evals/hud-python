@@ -23,6 +23,7 @@ from openai.types.responses.response_input_param import (
     ResponseInputItemParam,
 )
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
+from typing_extensions import override
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
@@ -83,9 +84,11 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
+    @override
     async def _initialize_state(self, *, prompt: list[mcp_types.PromptMessage]) -> OpenAIRunState:
         return OpenAIRunState(messages=self._initial_messages(prompt))
 
+    @override
     def _format_message(self, role: str, text: str) -> ResponseInputItemParam:
         return cast(
             "ResponseInputItemParam",
@@ -95,6 +98,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             ),
         )
 
+    @override
     def _format_result(
         self,
         call: MCPToolCall,
@@ -157,6 +161,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
         return format_openai_result(call, result)
 
+    @override
     async def get_response(
         self,
         state: RunState[ResponseInputItemParam],

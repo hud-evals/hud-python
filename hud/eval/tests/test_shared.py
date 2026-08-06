@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.environment import Environment
@@ -57,6 +58,7 @@ def _echo_env() -> Environment:
 
 
 class _OkAgent(Agent):
+    @override
     async def __call__(self, run: Any) -> None:
         run.trace.content = "ok"
 
@@ -93,6 +95,7 @@ async def test_width_bounds_occupancy_by_waiting_not_erroring() -> None:
     peak = 0
 
     class _SlowAgent(Agent):
+        @override
         async def __call__(self, run: Any) -> None:
             nonlocal live, peak
             live += 1

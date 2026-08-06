@@ -1,17 +1,17 @@
 """``ClaudeComputerTool`` — key translation, per-model spec gating, and the
 computer-use action dispatch (translation to RFB primitives), without a live VNC.
 """
-# pyright: reportPrivateUsage=false, reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
 import mcp.types as mcp_types
 from PIL import Image
+from typing_extensions import override
 
 from hud.agents.claude.tools.computer import (
     CLAUDE_COMPUTER_SPECS,
@@ -21,6 +21,9 @@ from hud.agents.claude.tools.computer import (
     _split_keys,
     _translate_key,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 from hud.agents.tools.base import result_text, tool_ok
 
 
@@ -34,39 +37,77 @@ class RecordingComputer(ClaudeComputerTool):
         self.screenshot_mime_type = "image/webp"
         self.client = SimpleNamespace(width=200, height=100)
 
+    @override
     async def screenshot(self) -> Any:
         self.calls.append(("screenshot",))
         return tool_ok("shot")
 
-    async def click(self, x: Any, y: Any, **kw: Any) -> None:
+    @override
+    async def click(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        *,
+        button: Any = "left",
+        hold_keys: Iterable[str] | None = None,
+        count: int = 1,
+        interval_ms: int = 0,
+    ) -> None:
+        kw: dict[str, Any] = {}
+        if button != "left":
+            kw["button"] = button
+        if hold_keys is not None:
+            kw["hold_keys"] = hold_keys
+        if count != 1:
+            kw["count"] = count
+        if interval_ms:
+            kw["interval_ms"] = interval_ms
         self.calls.append(("click", x, y, kw))
 
+    @override
     async def move(self, x: Any, y: Any) -> None:
         self.calls.append(("move", x, y))
 
-    async def mouse_down(self, button: Any) -> None:
+    @override
+    async def mouse_down(self, button: Any = "left") -> None:
         self.calls.append(("down", button))
 
-    async def mouse_up(self, button: Any) -> None:
+    @override
+    async def mouse_up(self, button: Any = "left") -> None:
         self.calls.append(("up", button))
 
+    @override
     async def type_text(self, text: Any) -> None:
         self.calls.append(("type", text))
 
+    @override
     async def press_keys(self, keys: Any, **kw: Any) -> None:
         self.calls.append(("keys", tuple(keys), kw))
 
+    @override
     async def hold_key(self, key: Any, **kw: Any) -> None:
         self.calls.append(("hold", key, kw))
 
-    async def scroll(self, x: Any, y: Any, **kw: Any) -> None:
+    @override
+    async def scroll(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        *,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
+        hold_keys: Iterable[str] | None = None,
+    ) -> None:
+        kw = {"scroll_x": scroll_x, "scroll_y": scroll_y, "hold_keys": hold_keys}
         self.calls.append(("scroll", x, y, kw))
 
+    @override
     async def drag(self, path: Any, **kw: Any) -> None:
         self.calls.append(("drag", tuple(path), kw))
 
-    async def wait(self, ms: Any) -> None:
-        self.calls.append(("wait", ms))
+    @override
+    async def wait(self, duration_ms: int) -> None:
+        self.calls.append(("wait", duration_ms))
 
 
 # ─── key translation helpers ──────────────────────────────────────────

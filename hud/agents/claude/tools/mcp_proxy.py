@@ -5,6 +5,8 @@ from __future__ import annotations
 from inspect import cleandoc
 from typing import TYPE_CHECKING, cast
 
+from typing_extensions import override
+
 from hud.agents.tools import MCPTool
 
 from .base import ClaudeToolSpec
@@ -17,10 +19,12 @@ class ClaudeMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as a Claude function tool."""
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> ClaudeToolSpec:
         del model
         return ClaudeToolSpec(api_type="function", api_name="function")
 
+    @override
     def to_params(self) -> BetaToolUnionParam:
         if self.mcp_tool.description is None:
             raise ValueError(

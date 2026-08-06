@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from google.genai import types as genai_types
+from typing_extensions import override
 
 from hud.agents.tools import MCPTool
 
@@ -13,10 +14,12 @@ class GeminiMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as a Gemini FunctionDeclaration."""
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GeminiToolSpec(api_type="function", api_name="function")
 
+    @override
     def to_params(self) -> genai_types.Tool:
         if self.mcp_tool.description is None:
             raise ValueError(f"MCP tool {self.mcp_tool.name!r} requires a description.")

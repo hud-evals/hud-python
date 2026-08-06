@@ -6,6 +6,7 @@ import logging
 from typing import Any, cast
 
 import mcp.types as mcp_types
+from typing_extensions import override
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
@@ -81,13 +82,16 @@ class OpenAIComputerTool(RFBTool):
     name = "computer"
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OPENAI_COMPUTER_SPEC
 
+    @override
     def to_params(self) -> Any:
         return {"type": "computer"}
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         actions = arguments.get("actions")
         if isinstance(actions, list):
@@ -148,14 +152,14 @@ class OpenAIComputerTool(RFBTool):
             if button_raw == "wheel":
                 button = "middle"
             elif isinstance(button_raw, str):
-                button = button_raw  # type: ignore[assignment]
+                button = button_raw
             else:
                 button = "left"
             hold = _hold_keys(args.get("keys"))
             await self.click(
                 args.get("x"),
                 args.get("y"),
-                button=button,  # type: ignore[arg-type]
+                button=button,
                 hold_keys=hold,
             )
 

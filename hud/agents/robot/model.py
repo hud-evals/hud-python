@@ -16,6 +16,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from typing_extensions import override
 
 if TYPE_CHECKING:
     from .adapter import ActionArray
@@ -63,6 +64,7 @@ class LeRobotModel(Model):
         #: CUDA/flow-matching warmup message.
         self._first_inference = True
 
+    @override
     def infer(self, batch: Any) -> ActionArray:
         """run batch dict (N dim) → [N, T, A] chunk"""
         torch: Any = importlib.import_module("torch")
@@ -113,6 +115,7 @@ class RemoteModel(Model):
             )
             self._client = mod.WebsocketClientPolicy(self.host, self.port)
 
+    @override
     def infer(self, batch: Any) -> ActionArray:
         """Ship one request dict → the server's ``[T, A]`` chunk, returned as ``[1, T, A]``."""
         self.connect()  # lazy connect on first call (blocks until the server is up)

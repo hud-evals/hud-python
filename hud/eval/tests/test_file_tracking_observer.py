@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hud.capabilities import Capability
 from hud.environment.file_tracker import FileTracker
@@ -13,6 +13,8 @@ from hud.telemetry.context import set_trace_context
 
 if TYPE_CHECKING:
     import pytest
+
+    from hud.clients.client import HudClient
 
 _CAP = Capability(
     name="filetracking",
@@ -128,7 +130,7 @@ async def test_setup_failure_skips_polling(monkeypatch: pytest.MonkeyPatch) -> N
     ft = _FakeFt(setup_raises=True)
     _connects_to(monkeypatch, ft)
 
-    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(cast("HudClient", _BoundClient())):
         await asyncio.sleep(0.05)
 
     assert ft.setup_calls == 1
@@ -151,7 +153,7 @@ async def test_successful_setup_anchors_and_polls(monkeypatch: pytest.MonkeyPatc
     ft = _FakeFt()
     _connects_to(monkeypatch, ft)
 
-    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(cast("HudClient", _BoundClient())):
         await asyncio.sleep(0.05)
 
     assert ft.setup_calls == 1
@@ -176,7 +178,7 @@ async def test_legacy_server_advances_without_setup_event(
     ft = _FakeFt()
     _connects_to(monkeypatch, ft, _LEGACY_CAP)
 
-    async with observer.file_tracking_observer(_BoundClient(_LEGACY_CAP)):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(cast("HudClient", _BoundClient(_LEGACY_CAP))):
         pass
 
     assert ft.advance_calls == 1
@@ -205,7 +207,7 @@ async def test_flush_emits_skipped_capture_metadata(monkeypatch: pytest.MonkeyPa
     ft = _FakeFt(flush_result={"diff": {"files_changed": 0, "patches": []}, "capture": capture})
     _connects_to(monkeypatch, ft)
 
-    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(cast("HudClient", _BoundClient())):
         pass
 
     assert ft.flush_calls == 1
@@ -231,7 +233,7 @@ async def test_connect_failure_does_not_break_the_rollout(monkeypatch: pytest.Mo
 
     # A failed connection must degrade to a no-op, not raise into the agent loop.
     ran = False
-    async with observer.file_tracking_observer(_BoundClient()):  # type: ignore[arg-type]
+    async with observer.file_tracking_observer(cast("HudClient", _BoundClient())):
         ran = True
 
     assert ran

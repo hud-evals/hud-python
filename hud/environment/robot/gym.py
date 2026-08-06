@@ -26,19 +26,24 @@ plots; an existing file is loaded instead, so edits stick.
 from __future__ import annotations
 
 import atexit
+import importlib
 import inspect
 import itertools
 import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
+from typing_extensions import override
 
 from hud.telemetry.robot import JobRecorder, to_numpy
 
 from .bridge import RobotBridge, serve_bridge
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +110,7 @@ def split_observation(obs: Any, *, batched: bool = False) -> tuple[dict[str, Any
     return state, frames
 
 
-def probe_success(info: Any, *, num_envs: int = 1) -> np.ndarray | None:
+def probe_success(info: Any, *, num_envs: int = 1) -> NDArray[Any] | None:
     """Per-env success bools from conventional info keys; ``None`` when the env reports none."""
     if not isinstance(info, dict):
         return None
@@ -245,10 +250,10 @@ class GymBridge(RobotBridge):
         self._instance: Any = None  # current env-defining args; a mismatch rebuilds
         self._is_torch = False
         # Per-slot episode scoring, sticky until the next reset.
-        self._done: np.ndarray = np.zeros(1, dtype=bool)
-        self._success: np.ndarray = np.zeros(1, dtype=bool)
-        self._acc_reward: np.ndarray = np.zeros(1)
-        self._step_reward: np.ndarray = np.zeros(1)  # last env.step reward (RL wire sibling)
+        self._done: NDArray[Any] = np.zeros(1, dtype=bool)
+        self._success: NDArray[Any] = np.zeros(1, dtype=bool)
+        self._acc_reward: NDArray[Any] = np.zeros(1)
+        self._step_reward: NDArray[Any] = np.zeros(1)  # last env.step reward (RL wire sibling)
         self._seen_success = False  # any env-reported success signal this episode
 
     @property
@@ -283,6 +288,7 @@ class GymBridge(RobotBridge):
         if not existed and self._contract_path is not None:
             print(f"[env] wrote {self._contract_path} (edit names to relabel plots)", flush=True)
 
+    @override
     async def ensure_contract(self) -> dict[str, Any]:
         """Return the wire contract, probing the env when start() did not already.
 
@@ -293,6 +299,7 @@ class GymBridge(RobotBridge):
             await self._run_on_sim(self.reset)
         return self.contract
 
+    @override
     async def start(self) -> None:
         """Bind the wire with a complete contract so ``env.initialize`` can publish it.
 
@@ -320,6 +327,7 @@ class GymBridge(RobotBridge):
             await self._run_on_sim(self.reset)
         await super().start()
 
+    @override
     def reset(self, **task_args: Any) -> str:
         """Build/reset the gym env on the sim thread (base claim hops here)."""
         # Defaults from env.gym(..., num_envs=N) fill in when the task omits them.
@@ -347,6 +355,7 @@ class GymBridge(RobotBridge):
         self._ensure_contract_from_env()  # no-op when start() already probed
         return self._prompt(merged)
 
+    @override
     async def stop(self) -> None:
         await super().stop()
         if self.env is not None:
@@ -386,7 +395,8 @@ class GymBridge(RobotBridge):
 
     # ── bridge protocol ──────────────────────────────────────────────────────────
 
-    def step(self, action: np.ndarray) -> None:
+    @override
+    def step(self, action: NDArray[Any]) -> None:
         act: Any = np.array(action, dtype=np.float32)  # wire buffer is read-only
         if not self.batched:
             act = act[0] if act.ndim > 1 else act  # single plain env: drop the batch dim
@@ -400,8 +410,7 @@ class GymBridge(RobotBridge):
         if dtype is not None and np.issubdtype(dtype, np.integer):
             act = act.astype(dtype)
         if self._is_torch:
-            import torch
-
+            torch: Any = importlib.import_module("torch")
             act = torch.as_tensor(act, device=getattr(self._unwrapped, "device", None))
         obs, reward, terminated, truncated, info = self.env.step(act)
         self._obs = obs
@@ -419,7 +428,7 @@ class GymBridge(RobotBridge):
                 self._success |= success & newly
         self._done |= done
 
-    def _resolve_success(self, info: Any) -> np.ndarray | None:
+    def _resolve_success(self, info: Any) -> NDArray[Any] | None:
         """Env-reported success at a done step: info keys, else Isaac's termination term."""
         found = probe_success(info, num_envs=self.num_envs)
         if found is not None:
@@ -432,7 +441,8 @@ class GymBridge(RobotBridge):
                 return None
         return None
 
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+    @override
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]] | None:
         """Always ``[N, ...]`` arrays + ``[N]`` terminated for the barrier fan-out."""
         if self.env is None or self._obs is None:
             return None
@@ -448,6 +458,7 @@ class GymBridge(RobotBridge):
             data["reward"] = np.atleast_1d(reward)
         return data, np.asarray(self._done, dtype=bool).reshape(self.num_envs)
 
+    @override
     def result_slots(self) -> list[dict[str, Any]]:
         """Per-slot grades: env-reported success when available, else accumulated reward."""
         # The env's own success check outranks accumulated shaped reward.

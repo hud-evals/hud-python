@@ -143,7 +143,7 @@ class _ModalImageRef:
 class _FakeModalSandbox:
     object_id = "sb-1"
 
-    def __init__(self, calls: dict[str, object], port: int) -> None:
+    def __init__(self, calls: dict[str, Any], port: int) -> None:
         self._calls = calls
         self._port = port
         self.wait_until_ready = SimpleNamespace(aio=self._wait_until_ready)
@@ -188,8 +188,8 @@ class _FakeModalSandbox:
         )
 
 
-def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    calls: dict[str, object] = {}
+def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    calls: dict[str, Any] = {}
     modal = ModuleType("modal")
 
     class Image:
@@ -282,7 +282,7 @@ class _SessionExecuteRequest:
 
 
 class _FakeDaytonaProcess:
-    def __init__(self, calls: dict[str, object], sandbox_id: str) -> None:
+    def __init__(self, calls: dict[str, Any], sandbox_id: str) -> None:
         self._calls = calls
         self._sandbox_id = sandbox_id
         self.logs = SimpleNamespace(
@@ -311,7 +311,7 @@ class _FakeDaytonaProcess:
 
 
 class _FakeDaytonaSandbox:
-    def __init__(self, calls: dict[str, object], sandbox_id: str) -> None:
+    def __init__(self, calls: dict[str, Any], sandbox_id: str) -> None:
         self.id = sandbox_id
         self._calls = calls
         self.process = _FakeDaytonaProcess(calls, sandbox_id)
@@ -399,7 +399,7 @@ class _FakeSnapshotApi:
 
 
 class _FakeDaytonaClient:
-    def __init__(self, calls: dict[str, object]) -> None:
+    def __init__(self, calls: dict[str, Any]) -> None:
         self.calls = calls
         self.sandbox = _FakeDaytonaSandbox(calls, "sandbox-1")
         self.snapshot = _FakeSnapshotApi()
@@ -427,7 +427,7 @@ class _FakeDaytonaClient:
 
 
 class _FakeSSHConnection:
-    def __init__(self, calls: dict[str, object]) -> None:
+    def __init__(self, calls: dict[str, Any]) -> None:
         self._calls = calls
 
     async def forward_local_port(
@@ -444,7 +444,7 @@ class _FakeSSHConnection:
 class _FakeSSHConnect:
     def __init__(
         self,
-        calls: dict[str, object],
+        calls: dict[str, Any],
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> None:
@@ -461,7 +461,7 @@ class _FakeSSHConnect:
 
 
 def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> _FakeDaytonaClient:
-    calls: dict[str, object] = {}
+    calls: dict[str, Any] = {}
     client = _FakeDaytonaClient(calls)
     daytona = ModuleType("daytona")
     daytona_async = ModuleType("daytona._async")

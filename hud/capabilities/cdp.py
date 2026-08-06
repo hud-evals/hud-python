@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from urllib.parse import urlsplit
 
 import httpx
+from typing_extensions import override
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed
 
@@ -63,6 +64,7 @@ class CDPClient(CapabilityClient):
         self._reader: asyncio.Task[None] | None = None
 
     @classmethod
+    @override
     async def connect(cls, cap: Capability) -> Self:
         parts = urlsplit(cap.url)
         if parts.hostname is None or parts.port is None:
@@ -136,6 +138,7 @@ class CDPClient(CapabilityClient):
                 if not future.done():
                     future.set_exception(ConnectionError("CDP connection closed"))
 
+    @override
     async def close(self) -> None:
         if self._reader is not None:
             self._reader.cancel()

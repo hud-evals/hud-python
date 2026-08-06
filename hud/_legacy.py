@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import BaseModel, Field
+from typing_extensions import override
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -267,6 +268,7 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     no-op) so deployed v5 envs still import without error.
     """
 
+    @override
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
         if fullname.startswith(("hud.native", "hud.services")):
             if _alias_target(fullname) is None:
@@ -276,9 +278,11 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             return importlib.util.spec_from_loader(fullname, self)
         return None
 
+    @override
     def create_module(self, spec: Any) -> ModuleType:
         return ModuleType(spec.name)
 
+    @override
     def exec_module(self, module: ModuleType) -> None:
         name = module.__name__
 
@@ -286,13 +290,13 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             target = _alias_target(name)
             assert target is not None  # find_spec already filtered unknowns
             module.__path__ = []  # mark as package so submodule imports route back here
-            module.__getattr__ = _make_alias_getattr(name, target)  # type: ignore[attr-defined]
+            module.__getattr__ = _make_alias_getattr(name, target)
             return
 
         # Removed submodule (types, computer, executors, filesystem, ...):
         # resolve names lazily (redirect / capability marker / no-op).
         module.__path__ = []
-        module.__getattr__ = _make_legacy_getattr(name)  # type: ignore[attr-defined]
+        module.__getattr__ = _make_legacy_getattr(name)
 
 
 def install() -> None:

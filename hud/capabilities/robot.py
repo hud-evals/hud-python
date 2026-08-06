@@ -21,6 +21,7 @@ import numpy as np
 import websockets
 import websockets.exceptions
 from openpi_client import msgpack_numpy
+from typing_extensions import override
 
 from .base import Capability, CapabilityClient
 
@@ -72,6 +73,7 @@ class RobotClient(CapabilityClient):
         return action, observations
 
     @classmethod
+    @override
     async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
         """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
 
@@ -147,6 +149,7 @@ class RobotClient(CapabilityClient):
             msg["delay_used"] = int(delay_used)
         await self._ws.send(_packb(msg))
 
+    @override
     async def close(self) -> None:
         self._mailman.cancel()
         with contextlib.suppress(asyncio.CancelledError):

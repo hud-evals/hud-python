@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from openai.types.responses import ToolParam
+from typing_extensions import override
 
 from hud.agents.tools import HostedTool
 
@@ -21,6 +22,7 @@ class OpenAICodeInterpreterTool(OpenAIHostedTool):
 
     container: dict[str, Any]
 
+    @override
     def to_params(self) -> ToolParam:
         return cast("ToolParam", {"type": "code_interpreter", "container": self.container})
 
@@ -31,5 +33,6 @@ class OpenAIToolSearchTool(OpenAIHostedTool):
 
     threshold: int = 10
 
+    @override
     def to_params(self) -> ToolParam:
         return cast("ToolParam", {"type": "tool_search"})

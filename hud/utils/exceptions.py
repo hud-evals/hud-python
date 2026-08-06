@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from typing_extensions import override
+
 if TYPE_CHECKING:
     from typing import Self
 
@@ -50,6 +52,7 @@ class HudException(Exception):
         # If hints not provided, use defaults defined by subclass
         self.hints: list[Hint] = hints if hints is not None else list(self.default_hints)
 
+    @override
     def __str__(self) -> str:
         if self.response_json:
             prefix = f"{self.message} | " if self.message else ""
@@ -108,6 +111,7 @@ class HudRequestError(HudException):
             return [PRO_PLAN_REQUIRED] if mentions_pro else [HUD_API_KEY_MISSING]
         return None
 
+    @override
     def __str__(self) -> str:
         parts = [self.message]
 

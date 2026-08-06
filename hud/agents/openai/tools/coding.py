@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import mcp.types as mcp_types
+from typing_extensions import override
 
 from hud.agents.tools import SSHTool
 from hud.types import MCPToolResult
@@ -24,15 +25,18 @@ class OpenAIShellTool(SSHTool):
     name = "shell"
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> OpenAIToolSpec:
         del model
         return OPENAI_SHELL_SPEC
 
+    @override
     def to_params(self) -> Any:
         # openai.types.responses.FunctionShellToolParam, as a plain dict (TypedDicts
         # are dicts at runtime, and the param type isn't present in all SDK versions).
         return {"type": "shell", "environment": {"type": "local"}}
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         requested_limit = arguments.get("max_output_length")
         if requested_limit is None:

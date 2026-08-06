@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from typing_extensions import override
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, OpenAIChatConfig, Sample, Usage
@@ -89,11 +90,13 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
+    @override
     async def _initialize_state(
         self, *, prompt: list[mcp_types.PromptMessage]
     ) -> OpenAIChatRunState:
         return OpenAIChatRunState(messages=self._initial_messages(prompt))
 
+    @override
     def _format_message(self, role: str, text: str) -> ChatCompletionMessageParam:
         return cast(
             "ChatCompletionMessageParam",
@@ -103,6 +106,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             },
         )
 
+    @override
     def _format_result(
         self,
         call: MCPToolCall,
@@ -111,6 +115,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
     ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam] | None:
         return format_chat_result(call, result)
 
+    @override
     async def get_response(
         self,
         state: RunState[ChatCompletionMessageParam],

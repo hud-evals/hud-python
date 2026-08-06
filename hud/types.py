@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, ca
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from typing_extensions import override
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -138,6 +139,7 @@ class MCPToolCall(CallToolRequestParams):
     #: a str is never executed — dispatch answers it with an error result.
     arguments: dict[str, Any] | str | None = None
 
+    @override
     def __str__(self) -> str:
         """Format tool call as plain text."""
         args_str = ""
@@ -196,6 +198,7 @@ class MCPToolResult(CallToolResult):
 
         return content_summary
 
+    @override
     def __str__(self) -> str:
         """Format tool result as plain text for compatibility."""
         content_summary = self._get_content_summary()

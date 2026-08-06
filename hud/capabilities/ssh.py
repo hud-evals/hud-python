@@ -8,6 +8,7 @@ from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
 
 import asyncssh
+from typing_extensions import override
 
 from .base import Capability, CapabilityClient
 
@@ -28,6 +29,7 @@ class SSHClient(CapabilityClient):
         self._conn = conn
 
     @classmethod
+    @override
     async def connect(cls, cap: Capability) -> Self:
         parts = urlsplit(cap.url)
         if parts.hostname is None or parts.port is None:
@@ -100,6 +102,7 @@ class SSHClient(CapabilityClient):
     def _is_windows(self) -> bool:
         return self.capability.params.get("shell") in ("cmd", "powershell")
 
+    @override
     async def close(self) -> None:
         self._conn.close()
         await self._conn.wait_closed()

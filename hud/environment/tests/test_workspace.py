@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, Mock
 
 import asyncssh
 import pytest
+from typing_extensions import override
 
 from hud.capabilities import SSHClient
 from hud.environment import namespace as namespace_mod
@@ -878,7 +879,8 @@ def test_the_proxy_normalizes_http_framing_in_both_directions(
             self.end_headers()
             self.wfile.write(b"5\r\nhello\r\n0\r\n\r\n")
 
-        def log_message(self, *_: object) -> None:
+        @override
+        def log_message(self, format: str, *args: Any) -> None:
             pass
 
     upstream = HTTPServer(("127.0.0.1", 0), Chunked)

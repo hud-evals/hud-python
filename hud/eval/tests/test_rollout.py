@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import mcp.types as mcp_types
 import pytest
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
@@ -68,6 +69,7 @@ class _FnAgent(Agent):
     def __init__(self, fn: Any) -> None:
         self._fn = fn
 
+    @override
     async def __call__(self, run: Any) -> None:
         run.trace.content = self._fn(run.prompt)
 
@@ -344,6 +346,7 @@ async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
     seen: dict[str, dict[str, Any]] = {}
 
     class _Claiming(Agent):
+        @override
         async def __call__(self, run: Any) -> None:
             seen.update(run.bindings)
 
@@ -485,6 +488,7 @@ class _AnswerThenBoomAgent(Agent):
     def __init__(self, fn: Any) -> None:
         self._fn = fn
 
+    @override
     async def __call__(self, run: Any) -> None:
         run.trace.content = self._fn(run.prompt)
         raise RuntimeError("agent exploded after answering")
@@ -510,6 +514,7 @@ class _SlowAgent(Agent):
         self._fn = fn
         self.cancelled = asyncio.Event()
 
+    @override
     async def __call__(self, run: Any) -> None:
         run.trace.content = self._fn(run.prompt)
         try:
@@ -579,6 +584,7 @@ async def test_agent_timeout_error_is_not_the_phase_deadline(agent_timeout: floa
         yield 1.0 if answer == str(a + b) else 0.0
 
     class TimeoutAgent(Agent):
+        @override
         async def __call__(self, run: Any) -> None:
             run.trace.content = _solve_add(run.prompt)
             raise TimeoutError("provider timed out")

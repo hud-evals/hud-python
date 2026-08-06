@@ -11,9 +11,10 @@ string (the service resolves recorded tokens + reward) or a :class:`hud.Run`
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hud.agents.types import AgentStep
 from hud.train.base import BaseTrainingClient
@@ -234,7 +235,7 @@ class TrainingClient(BaseTrainingClient):
         torch (``pip install 'hud[train]'``).
         """
         try:
-            import torch
+            torch: Any = importlib.import_module("torch")
         except ImportError as exc:
             raise ImportError(
                 "forward_backward_custom requires torch; install 'hud[train]'"

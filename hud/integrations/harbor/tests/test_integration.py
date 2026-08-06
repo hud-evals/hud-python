@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.eval import DockerRuntime, Shared
@@ -51,6 +52,7 @@ class Oracle(Agent):
     def __init__(self, solutions: dict[str, str]) -> None:
         self.solutions = solutions
 
+    @override
     async def __call__(self, run: Run) -> None:
         ssh = cast("SSHClient", await run.client.open("ssh/2"))
         if run.task_id == "agent-lifecycle":

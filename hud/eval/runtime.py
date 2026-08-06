@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import json
 import logging
 import os
@@ -45,7 +46,7 @@ from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Self, cast
+from typing import TYPE_CHECKING, Any, Protocol, Self
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -691,7 +692,11 @@ class DockerRuntime:
         resources = config.resources
         if resources is not None:
             if resources.cpu is not None:
-                cpu = str(int(resources.cpu)) if resources.cpu.is_integer() else str(resources.cpu)
+                cpu = (
+                    str(int(resources.cpu))
+                    if isinstance(resources.cpu, float) and resources.cpu.is_integer()
+                    else str(resources.cpu)
+                )
                 resource_args.extend(("--cpus", cpu))
             if resources.memory_mb is not None:
                 resource_args.extend(("--memory", f"{resources.memory_mb}m"))
@@ -788,7 +793,7 @@ class ModalRuntime:
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         compose = config.compose.resolve() if config.compose is not None else None
-        import modal
+        modal: Any = importlib.import_module("modal")
 
         app = None
         if compose is not None:
@@ -929,11 +934,12 @@ async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
     build = snapshot.build_info
     if build is None:
         return False
-    from daytona._async.object_storage import AsyncObjectStorage
+    object_storage: Any = importlib.import_module("daytona._async.object_storage")
+    AsyncObjectStorage = object_storage.AsyncObjectStorage
 
     # The hasher is an instance method only for code organization; credentials
     # are needed to upload, not to hash, so skip the credentialed __init__.
-    storage = cast("Any", AsyncObjectStorage.__new__(AsyncObjectStorage))
+    storage = AsyncObjectStorage.__new__(AsyncObjectStorage)
     hashes = [
         await storage._compute_hash_for_path_md5(entry.source_path, entry.archive_path)
         for entry in image._context_list
@@ -1001,17 +1007,17 @@ class DaytonaRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         import asyncssh
-        from daytona import (
-            AsyncDaytona,
-            CreateSandboxFromImageParams,
-            CreateSandboxFromSnapshotParams,
-            CreateSnapshotParams,
-            DaytonaNotFoundError,
-            GpuType,
-            Image,
-            Resources,
-            SessionExecuteRequest,
-        )
+
+        daytona_sdk: Any = importlib.import_module("daytona")
+        AsyncDaytona = daytona_sdk.AsyncDaytona
+        CreateSandboxFromImageParams = daytona_sdk.CreateSandboxFromImageParams
+        CreateSandboxFromSnapshotParams = daytona_sdk.CreateSandboxFromSnapshotParams
+        CreateSnapshotParams = daytona_sdk.CreateSnapshotParams
+        DaytonaNotFoundError = daytona_sdk.DaytonaNotFoundError
+        GpuType = daytona_sdk.GpuType
+        Image = daytona_sdk.Image
+        Resources = daytona_sdk.Resources
+        SessionExecuteRequest = daytona_sdk.SessionExecuteRequest
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
@@ -1025,7 +1031,10 @@ class DaytonaRuntime:
                 resource_kwargs: dict[str, Any] = {}
                 if config.resources.cpu is not None:
                     # Daytona allocates whole cores; truncating resizes silently.
-                    if not config.resources.cpu.is_integer():
+                    if (
+                        isinstance(config.resources.cpu, float)
+                        and not config.resources.cpu.is_integer()
+                    ):
                         raise ValueError(
                             "DaytonaRuntime needs a whole number of CPUs, got "
                             f"{config.resources.cpu}"

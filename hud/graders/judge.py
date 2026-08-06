@@ -14,6 +14,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from typing_extensions import override
+
 from .base import Grader
 from .results import SubScore
 
@@ -72,6 +74,7 @@ class LLMJudgeGrader(Grader):
     name = "LLMJudgeGrader"
 
     @classmethod
+    @override
     async def compute_score(
         cls,
         answer: str | Any = "",

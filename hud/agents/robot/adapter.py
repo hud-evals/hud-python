@@ -7,10 +7,12 @@ Use :class:`LeRobotAdapter` for LeRobot models; subclass for custom wiring;
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import override
 
 #: A policy-emitted action / chunk array (the robot stack's shared alias).
 ActionArray = NDArray[np.floating[Any]]
@@ -87,10 +89,9 @@ class LeRobotAdapter(Adapter):
     identity (postprocess already returns env-space actions).
     """
 
+    @override
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
-        import torch  # pyright: ignore[reportMissingImports]
-
-        torch_mod: Any = torch  # torch ships no stubs; keep strict mode quiet
+        torch_mod: Any = importlib.import_module("torch")
         data = obs["data"]
         state = np.asarray(data[self.state_key], dtype=np.float32)
         batched = state.ndim > 1  # [N, S] vs [S]
@@ -109,6 +110,7 @@ class OpenPIAdapter(Adapter):
     """Unwraps ``obs['data']`` to OpenPI wire keys and attaches the prompt;
     actions are pass-through."""
 
+    @override
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
         out = dict(obs["data"])
         out.setdefault("prompt", prompt)

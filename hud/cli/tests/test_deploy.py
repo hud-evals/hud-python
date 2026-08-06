@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import typer
+from typing_extensions import override
 
 from hud.cli.deploy import _resolve_environment_name
 from hud.cli.utils.registry import RegistryEnvironment
@@ -355,6 +356,7 @@ class TestDeployAsync:
         class FakePlatform(PlatformClient):
             payload: dict[str, object] | None = None
 
+            @override
             async def apost(
                 self,
                 path: str,
@@ -396,6 +398,7 @@ class TestDeployAsync:
         class FakePlatform(PlatformClient):
             payload: dict[str, object] | None = None
 
+            @override
             async def apost(
                 self,
                 path: str,

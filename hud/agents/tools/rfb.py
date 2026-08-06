@@ -174,8 +174,7 @@ class RFBTool(AgentTool[RFBClient]):
 
     # ─── timing ──────────────────────────────────────────────────────
 
-    @staticmethod
-    async def wait(duration_ms: int) -> None:
+    async def wait(self, duration_ms: int) -> None:
         await asyncio.sleep(duration_ms / 1000)
 
     # ─── internal ────────────────────────────────────────────────────

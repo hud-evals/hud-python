@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 import fastmcp
 from fastmcp.client.auth import BearerAuth
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from typing_extensions import override
 
 from .base import Capability, CapabilityClient
 
@@ -38,6 +39,7 @@ class MCPClient(CapabilityClient):
         self._exit_stack = exit_stack
 
     @classmethod
+    @override
     async def connect(cls, cap: Capability) -> Self:
         token = cap.params.get("auth_token")
         auth = BearerAuth(token) if token else None
@@ -74,6 +76,7 @@ class MCPClient(CapabilityClient):
         data.setdefault("content", [])
         return _Result.model_validate(data)
 
+    @override
     async def close(self) -> None:
         await self._exit_stack.aclose()
 

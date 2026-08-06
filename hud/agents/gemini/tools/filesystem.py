@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from typing_extensions import override
+
 from hud.agents.tools import SSHTool
 from hud.types import MCPToolResult
 
@@ -33,13 +35,16 @@ class GeminiReadTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_READ_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         path = required_str(arguments, "file_path")
         result = await self.file_read(path)
@@ -76,13 +81,16 @@ class GeminiSearchTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_SEARCH_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
@@ -106,13 +114,16 @@ class GeminiGlobTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_GLOB_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
@@ -132,13 +143,16 @@ class GeminiListTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_LIST_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         return await self.file_list(required_str(arguments, "dir_path"))
 

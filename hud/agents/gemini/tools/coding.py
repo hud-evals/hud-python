@@ -6,6 +6,7 @@ import shlex
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from google.genai import types as genai_types
+from typing_extensions import override
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
@@ -49,13 +50,16 @@ class GeminiShellTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_SHELL_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         command = arguments.get("command")
         if not isinstance(command, str) or not command:
@@ -84,13 +88,16 @@ class GeminiEditTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_EDIT_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         file_path = required_str(arguments, "file_path")
         old_string = arguments.get("old_string", "")
@@ -119,13 +126,16 @@ class GeminiWriteTool(SSHTool):
     }
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> GeminiToolSpec:
         del model
         return GEMINI_WRITE_SPEC
 
+    @override
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         return await self.file_write(
             required_str(arguments, "file_path"),

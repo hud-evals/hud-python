@@ -2,15 +2,19 @@
 
 No live VNC: a recording subclass captures the primitive calls.
 """
-# pyright: reportPrivateUsage=false, reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from typing_extensions import override
 
 from hud.agents.gemini.tools.computer import GEMINI_COMPUTER_SPEC, GeminiComputerTool
 from hud.agents.tools.base import tool_ok
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class RecordingGemini(GeminiComputerTool):
@@ -21,30 +25,56 @@ class RecordingGemini(GeminiComputerTool):
         self.client = SimpleNamespace(width=400, height=300)
         self.excluded_predefined_functions = []
 
+    @override
     async def screenshot(self) -> Any:
         self.calls.append(("screenshot",))
         return tool_ok("shot")
 
-    async def click(self, x: Any, y: Any, **kw: Any) -> None:
+    @override
+    async def click(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        *,
+        button: Any = "left",
+        hold_keys: Iterable[str] | None = None,
+        count: int = 1,
+        interval_ms: int = 0,
+    ) -> None:
         self.calls.append(("click", x, y))
 
+    @override
     async def move(self, x: Any, y: Any) -> None:
         self.calls.append(("move", x, y))
 
+    @override
     async def type_text(self, text: Any) -> None:
         self.calls.append(("type", text))
 
+    @override
     async def press_keys(self, keys: Any, **kw: Any) -> None:
         self.calls.append(("keys", tuple(keys)))
 
-    async def scroll(self, x: Any, y: Any, **kw: Any) -> None:
+    @override
+    async def scroll(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        *,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
+        hold_keys: Iterable[str] | None = None,
+    ) -> None:
+        kw = {"scroll_x": scroll_x, "scroll_y": scroll_y, "hold_keys": hold_keys}
         self.calls.append(("scroll", x, y, kw))
 
+    @override
     async def drag(self, path: Any, **kw: Any) -> None:
         self.calls.append(("drag", tuple(path)))
 
-    async def wait(self, ms: Any) -> None:
-        self.calls.append(("wait", ms))
+    @override
+    async def wait(self, duration_ms: int) -> None:
+        self.calls.append(("wait", duration_ms))
 
 
 def test_default_spec() -> None:

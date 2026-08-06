@@ -9,6 +9,7 @@ from typing import Any, cast
 import mcp.types as mcp_types
 from google import genai
 from google.genai import types as genai_types
+from typing_extensions import override
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, GeminiConfig, Usage
@@ -77,11 +78,13 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
+    @override
     async def _initialize_state(
         self, *, prompt: list[mcp_types.PromptMessage]
     ) -> RunState[genai_types.Content]:
         return RunState(messages=self._initial_messages(prompt))
 
+    @override
     def _format_message(self, role: str, text: str) -> genai_types.Content:
         # Gemini uses "model" for the assistant role.
         return genai_types.Content(
@@ -89,6 +92,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
             parts=[genai_types.Part(text=text)],
         )
 
+    @override
     def _format_result(
         self,
         call: MCPToolCall,
@@ -129,6 +133,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
             ],
         )
 
+    @override
     async def get_response(
         self,
         state: RunState[genai_types.Content],

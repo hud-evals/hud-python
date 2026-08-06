@@ -13,6 +13,7 @@ from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
 import mcp.types as mcp_types
+from typing_extensions import override
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
@@ -119,12 +120,14 @@ class ClaudeComputerTool(RFBTool):
     name = "computer"
 
     @classmethod
+    @override
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
         return _DEFAULT_COMPUTER_SPEC
 
+    @override
     def to_params(self) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
         if self.spec.api_type == "computer_20251124":
             return cast(
@@ -149,6 +152,7 @@ class ClaudeComputerTool(RFBTool):
             },
         )
 
+    @override
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         try:

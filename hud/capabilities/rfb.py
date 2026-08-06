@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 
 import asyncvnc
 from PIL import Image
+from typing_extensions import override
 
 from .base import Capability, CapabilityClient
 
@@ -59,6 +60,7 @@ class RFBClient(CapabilityClient):
         self._password = capability.params.get("password")
 
     @classmethod
+    @override
     async def connect(cls, cap: Capability) -> Self:
         parts = urlsplit(cap.url)
         if parts.hostname is None or parts.port is None:
@@ -138,6 +140,7 @@ class RFBClient(CapabilityClient):
         """Flush any queued mouse/keyboard writes to the server."""
         await self._conn.drain()
 
+    @override
     async def close(self) -> None:
         await self._exit_stack.aclose()
 

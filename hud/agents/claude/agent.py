@@ -23,6 +23,7 @@ from anthropic.types.beta import (
     BetaToolResultBlockParam,
     BetaToolUnionParam,
 )
+from typing_extensions import override
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
@@ -35,7 +36,7 @@ from .tools.computer import ClaudeComputerTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import BetaTextBlock, BetaTextCitation
+    from anthropic.types.beta import BetaTextCitation
 
 logger = logging.getLogger(__name__)
 
@@ -70,17 +71,20 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
+    @override
     async def _initialize_state(
         self, *, prompt: list[mcp_types.PromptMessage]
     ) -> RunState[BetaMessageParam]:
         return RunState(messages=self._initial_messages(prompt))
 
+    @override
     def _format_message(self, role: str, text: str) -> BetaMessageParam:
         return BetaMessageParam(
             role="assistant" if role == "assistant" else "user",
             content=[BetaTextBlockParam(type="text", text=text)],
         )
 
+    @override
     def _format_result(
         self,
         call: MCPToolCall,
@@ -168,6 +172,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
 
     # ─── Anthropic call ───────────────────────────────────────────────
 
+    @override
     async def get_response(
         self,
         state: RunState[BetaMessageParam],
@@ -284,7 +289,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     )
                     result.done = False
                 case "text":
-                    text_block = cast("BetaTextBlock", block)
+                    text_block = block
                     text_parts.append(text_block.text)
                     citations.extend(self._citation(c) for c in (text_block.citations or []))
                 case "thinking":

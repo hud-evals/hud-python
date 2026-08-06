@@ -11,6 +11,8 @@ import copy
 import importlib
 from typing import TYPE_CHECKING, Any
 
+from typing_extensions import override
+
 from hud.agents.base import Agent
 
 from .model import Model
@@ -46,9 +48,11 @@ class BatchedModel(Model):
         self._queue: asyncio.Queue[tuple[Any, asyncio.Future[ActionArray]]] | None = None
         self._worker: asyncio.Task[None] | None = None
 
+    @override
     def infer(self, batch: Any) -> ActionArray:
         return self.inner.infer(batch)
 
+    @override
     async def ainfer(self, batch: Any) -> ActionArray:
         loop = asyncio.get_running_loop()
         if self._worker is None:
@@ -117,6 +121,7 @@ class BatchedAgent(Agent):
         # Every per-run clone shares this batcher by reference.
         agent.model = BatchedModel(agent.model, batch_size=batch_size, max_wait_s=max_wait_s)
 
+    @override
     async def __call__(self, run: Run, **kwargs: Any) -> None:
         worker = copy.copy(self._template)  # fresh __dict__; shares the batched model
         if worker.adapter is not None:  # defensive: a stateful custom adapter must be per-run

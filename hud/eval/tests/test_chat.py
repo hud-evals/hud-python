@@ -7,10 +7,11 @@ Turn tests place each turn's rollout with ``runtime=SubprocessRuntime(env_file)`
 from __future__ import annotations
 
 import textwrap
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from mcp.types import TextContent
+from typing_extensions import override
 
 from hud.agents.base import Agent
 from hud.eval import SubprocessRuntime, Task
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 class _EchoAgent(Agent):
     """Replies with ``echo:<last user message>`` read from the prompt."""
 
+    @override
     async def __call__(self, run: Any) -> None:
         last = run.prompt[-1]["content"]["text"]
         run.trace.content = f"echo:{last}"
@@ -49,7 +51,7 @@ class TestContentHelpers:
 class TestChatConstruction:
     def test_requires_an_agent(self, dummy_task: Any) -> None:
         with pytest.raises(TypeError):
-            Chat(dummy_task)  # type: ignore[call-arg]
+            cast("Any", Chat)(dummy_task)
 
     def test_messages_start_empty_and_are_the_public_history(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, _EchoAgent())
@@ -122,6 +124,7 @@ class TestSend:
         self, chat_env_file: Path
     ) -> None:
         class _Boom(Agent):
+            @override
             async def __call__(self, run: Any) -> None:
                 raise RuntimeError("agent exploded")
 
