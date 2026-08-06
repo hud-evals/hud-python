@@ -16,8 +16,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       # Only 'hud' is published. The old 'hud-python' name is closed off by a
-      # final release that refuses to install and points at 'hud'; its source
-      # lives in hud-python/ and is published once, by hand.
+      # final PyPI release (0.6.10) that refuses to install and points at 'hud'.
       - name: Build and publish 'hud' to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
