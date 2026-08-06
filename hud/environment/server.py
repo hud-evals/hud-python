@@ -19,8 +19,10 @@ import inspect
 import logging
 import secrets
 import signal
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
+from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -39,6 +41,15 @@ LOGGER = logging.getLogger("hud.environment.server")
 #: Line a serving process prints once its control channel is bound; the
 #: ``spawn`` provider reads it from the child's stdout.
 PORT_ANNOUNCEMENT = "HUD_SERVE_PORT="
+
+
+@dataclass
+class _ServerState:
+    handlers: set[asyncio.Task[None]]
+    channel: _ControlChannel
+
+
+_SERVER_STATES: WeakKeyDictionary[asyncio.Server, _ServerState] = WeakKeyDictionary()
 
 
 # ─── task execution ──────────────────────────────────────────────────────
@@ -458,9 +469,7 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 await writer.wait_closed()
 
     server = await asyncio.start_server(accept, host=host, port=port)
-    server_state = cast("Any", server)
-    server_state._hud_handlers = active
-    server_state._hud_channel = channel
+    _SERVER_STATES[server] = _ServerState(handlers=active, channel=channel)
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])
     return server
@@ -468,12 +477,12 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
 
 async def _shutdown(server: asyncio.Server) -> None:
     server.close()
-    handlers = list(getattr(server, "_hud_handlers", ()))
+    state = _SERVER_STATES.pop(server)
+    handlers = list(state.handlers)
     for task in handlers:
         task.cancel()
     await asyncio.gather(*handlers, return_exceptions=True)
-    channel = cast("_ControlChannel", cast("Any", server)._hud_channel)
-    await channel.cancel_all()
+    await state.channel.cancel_all()
     await server.wait_closed()
 
 

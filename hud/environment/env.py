@@ -11,7 +11,7 @@ import contextlib
 import functools
 import inspect
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from typing_extensions import override
@@ -32,6 +32,13 @@ T = TypeVar("T")
 
 #: Control-session id for the running accept/cancel task (robot slot claims key on it).
 current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
+
+
+class _TaskFunction(Protocol[P]):
+    __name__: str
+    __doc__: str | None
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[Any, Any]: ...
 
 
 class Answer(BaseModel, Generic[T]):
@@ -89,7 +96,7 @@ class _TaskFactory(Generic[P]):
         env: Environment,
         id: str,
         description: str,
-        func: Callable[P, AsyncGenerator[Any, Any]],
+        func: _TaskFunction[P],
         *,
         input: Any = None,
         returns: Any = None,
@@ -183,6 +190,7 @@ class Environment(LegacyEnvMixin):
         """The registered ``@env.template`` factories by id (alias of ``tasks``)."""
         return self.tasks
 
+    @override
     def template(
         self,
         *,
@@ -190,7 +198,7 @@ class Environment(LegacyEnvMixin):
         description: str = "",
         input: Any = None,
         returns: Any = None,
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
+    ) -> Callable[[_TaskFunction[P]], _TaskFactory[P]]:
         """Register a **task template** — an async generator that mints tasks.
 
         The generator yields a prompt, then — once the answer is sent back — a
@@ -202,13 +210,13 @@ class Environment(LegacyEnvMixin):
         args returns a concrete :class:`~hud.eval.Task` row.
         """
 
-        def decorate(func: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
+        def decorate(func: _TaskFunction[P]) -> _TaskFactory[P]:
             if not inspect.isasyncgenfunction(func):
                 raise TypeError(
                     f"@env.template: {getattr(func, '__qualname__', func)} must be an async "
                     "generator function (`async def ...:` with `yield`)",
                 )
-            task_id = id or cast("Any", func).__name__
+            task_id = id or func.__name__
             if task_id in self.tasks:
                 raise ValueError(
                     f"template {task_id!r} already registered on env {self.name!r}",

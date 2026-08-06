@@ -1073,13 +1073,24 @@ async def test_daytona_snapshot_sandboxes_disable_auto_stop(
     assert create_timeout == 120
 
 
-def _build_image(context: Path) -> SimpleNamespace:
+@dataclass(frozen=True)
+class _BuildContextEntry:
+    source_path: str
+    archive_path: str
+
+
+class _BuildImage:
+    def __init__(self, context: Path) -> None:
+        self._context_list = [_BuildContextEntry(source_path=str(context), archive_path=".")]
+
+    def dockerfile(self) -> str:
+        return "FROM python:3.11-slim\nCOPY . .\n"
+
+
+def _build_image(context: Path) -> _BuildImage:
     """A stand-in for ``daytona.Image.from_dockerfile``: the Dockerfile text plus
     the context entries the SDK would archive and upload."""
-    return SimpleNamespace(
-        dockerfile=lambda: "FROM python:3.11-slim\nCOPY . .\n",
-        _context_list=[SimpleNamespace(source_path=str(context), archive_path=".")],
-    )
+    return _BuildImage(context)
 
 
 async def _boot_snapshot(context: Path, daytona: _FakeDaytonaClient) -> str:

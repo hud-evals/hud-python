@@ -33,7 +33,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 
 import numpy as np
 from typing_extensions import override
@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 #: Conventional info keys carrying env-reported success, probed in order.
 SUCCESS_KEYS = ("success", "is_success", "task_success")
+
+
+class _TorchModule(Protocol):
+    def as_tensor(self, data: object, *, device: object = None) -> object: ...
 
 
 # ── env introspection (pure; no telemetry, no wrapper state) ──────────────────
@@ -397,7 +401,7 @@ class GymBridge(RobotBridge):
 
     @override
     def step(self, action: NDArray[Any]) -> None:
-        act: Any = np.array(action, dtype=np.float32)  # wire buffer is read-only
+        act = np.array(action, dtype=np.float32)  # wire buffer is read-only
         if not self.batched:
             act = act[0] if act.ndim > 1 else act  # single plain env: drop the batch dim
         elif act.ndim == 1:
@@ -409,10 +413,11 @@ class GymBridge(RobotBridge):
         dtype = getattr(space, "dtype", None)
         if dtype is not None and np.issubdtype(dtype, np.integer):
             act = act.astype(dtype)
+        env_action: object = act
         if self._is_torch:
-            torch: Any = importlib.import_module("torch")
-            act = torch.as_tensor(act, device=getattr(self._unwrapped, "device", None))
-        obs, reward, terminated, truncated, info = self.env.step(act)
+            torch = cast("_TorchModule", importlib.import_module("torch"))
+            env_action = torch.as_tensor(act, device=getattr(self._unwrapped, "device", None))
+        obs, reward, terminated, truncated, info = self.env.step(env_action)
         self._obs = obs
         done = np.atleast_1d(to_numpy(terminated)).astype(bool) | np.atleast_1d(
             to_numpy(truncated)
