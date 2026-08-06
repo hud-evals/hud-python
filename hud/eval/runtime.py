@@ -111,7 +111,7 @@ class RuntimeConfig(BaseModel):
 
     image: str | None = Field(default=None, min_length=1)
     compose: Path | None = None
-    compose_service_access: bool = False
+    compose_service_access: bool | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
 
@@ -130,7 +130,7 @@ class RuntimeConfig(BaseModel):
         changes = override.model_dump(exclude_unset=True)
         if override.image is not None:
             config["compose"] = None
-            config["compose_service_access"] = False
+            config["compose_service_access"] = None
         elif override.compose is not None:
             config["image"] = None
         return RuntimeConfig.model_validate(config | changes)

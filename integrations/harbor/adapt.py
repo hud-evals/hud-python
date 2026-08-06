@@ -718,7 +718,9 @@ async def adapt(
                     runtime_config=RuntimeConfig(
                         image=image if compose is None else None,
                         compose=context / "compose.json" if compose is not None else None,
-                        compose_service_access=compose is not None and task_separate,
+                        compose_service_access=(
+                            True if compose is not None and task_separate else None
+                        ),
                         resources=resources if resources.model_dump(exclude_none=True) else None,
                     ),
                     verifier=(
