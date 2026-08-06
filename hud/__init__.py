@@ -7,7 +7,6 @@ from __future__ import annotations
 
 # Apply patches to third-party libraries early, before other imports
 from . import patches as _patches  # noqa: F401
-from ._legacy import install as _install_v5_compat
 from .clients import connect
 from .environment import Environment
 from .eval import (
@@ -33,8 +32,6 @@ from .telemetry.instrument import instrument
 from .train import TrainingClient
 from .types import Trace
 from .version import __version__
-
-_install_v5_compat()
 
 __all__ = [
     "Chat",

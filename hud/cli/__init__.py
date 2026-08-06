@@ -44,7 +44,6 @@ from .task import task_app  # noqa: E402
 from .trace import trace_app  # noqa: E402
 
 app.command(name="serve")(serve_command)
-app.command(name="dev", deprecated=True, hidden=True)(serve_command)  # alias for now
 app.command(name="deploy")(deploy_command)
 app.command(name="login")(login_command)
 app.command(name="eval")(eval_command)

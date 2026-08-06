@@ -79,9 +79,7 @@ def load_environment(
     if path.is_file() or "/" in str(target):
         raise FileNotFoundError(f"no environment source at {target}")
     obj = getattr(importlib.import_module(str(target)), name or "env")
-    # An Environment is callable (legacy scenario surface), so check it first;
-    # anything else callable is a factory.
-    env = obj if isinstance(obj, Environment) or not callable(obj) else obj(**args or {})
+    env = obj(**args or {}) if callable(obj) else obj
     if not isinstance(env, Environment):
         raise ValueError(f"{target}:{name or 'env'} resolved to {env!r}, not an Environment")
     return env

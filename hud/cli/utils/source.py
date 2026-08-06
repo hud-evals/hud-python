@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from hud.utils.naming import normalize_environment_name
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -172,11 +170,6 @@ class EnvironmentSource:
             if ref.file.resolve() == served_file and ref.name is not None
         }
         return next(iter(names)) if len(names) == 1 else None
-
-    def environment_name(self) -> str:
-        """Directory-derived fallback name for projects without ``Environment(...)``."""
-        directory_name = self.root.name or self.root.parent.name
-        return normalize_environment_name(directory_name)
 
     def load_config(self) -> dict[str, Any]:
         if self.config_path.exists():
@@ -504,17 +497,17 @@ def _dockerfile_command_tokens(content: str) -> list[list[str]]:
 
 
 def _hud_serve_spec(tokens: list[str]) -> str | None:
-    """The serve target from a ``hud serve|dev <spec>`` token list.
+    """The serve target from a ``hud serve <spec>`` token list.
 
     Returns the explicit ``module[:attr]`` spec, ``"env"`` when ``hud serve`` is
     invoked with no target (the runtime default), or ``None`` when the tokens
-    contain no ``hud serve``/``hud dev`` invocation.
+    contain no ``hud serve`` invocation.
     """
     for index, token in enumerate(tokens):
         if Path(token).name != "hud":
             continue
         rest = tokens[index + 1 :]
-        if not rest or rest[0] not in {"serve", "dev"}:
+        if not rest or rest[0] != "serve":
             continue
         target = rest[1] if len(rest) > 1 else None
         if target is None or target.startswith("-"):

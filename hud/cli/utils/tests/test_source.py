@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
+from hud.cli.utils.source import EnvironmentSource
+from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,12 +26,6 @@ def test_normalize_environment_name() -> None:
     assert normalize_environment_name("a---b") == "a-b"
     assert normalize_environment_name("@#$") == "environment"
     assert normalize_environment_name("", default="converted") == "converted"
-
-
-def test_environment_name_auto(tmp_path: Path) -> None:
-    env = tmp_path / "my_env"
-    env.mkdir()
-    assert EnvironmentSource.open(env).environment_name() == "my-env"
 
 
 def test_detects_environment_directory(tmp_path: Path) -> None:
@@ -188,7 +183,7 @@ def test_no_references_is_a_pass(tmp_path: Path) -> None:
 
 
 def test_served_module_parses_exec_form(tmp_path: Path) -> None:
-    _write(tmp_path / "Dockerfile", 'CMD ["hud", "dev", "env:env", "--port", "8765"]\n')
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "env:env", "--port", "8765"]\n')
 
     assert EnvironmentSource.open(tmp_path).served_environment_module() == "env"
 
@@ -212,7 +207,7 @@ def test_served_module_none_without_entrypoint(tmp_path: Path) -> None:
 
 
 def test_served_name_ignores_in_process_subagent(tmp_path: Path) -> None:
-    _write(tmp_path / "Dockerfile", 'CMD ["hud", "dev", "env:env", "--port", "8765"]\n')
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "env:env", "--port", "8765"]\n')
     _write(tmp_path / "env.py", 'env = Environment(name="trace-explorer")\n')
     _write(tmp_path / "verify.py", 'verify_env = Environment(name="qa-verifier")\n')
 

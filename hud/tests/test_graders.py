@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import warnings
@@ -383,27 +382,6 @@ class TestCombine:
         assert not [
             warning for warning in caught if "Subscores don't match reward" in str(warning.message)
         ]
-
-
-class TestGradeCompatShim:
-    """v5 environments call ``Grade.gather`` / ``Grade.from_subscores`` via ``hud.native``."""
-
-    async def test_gather_combines_like_combine(self) -> None:
-        Grade = getattr(importlib.import_module("hud.native"), "Grade")
-
-        result = await Grade.gather(
-            SubScore(name="alpha", value=1.0, weight=1.0),
-            SubScore(name="beta", value=0.0, weight=1.0),
-        )
-        assert isinstance(result, EvaluationResult)
-        assert result.reward == pytest.approx(0.5)
-
-    def test_from_subscores_is_sync(self) -> None:
-        Grade = getattr(importlib.import_module("hud.native.graders"), "Grade")
-
-        result = Grade.from_subscores([SubScore(name="alpha", value=1.0, weight=1.0)])
-        assert isinstance(result, EvaluationResult)
-        assert result.reward == 1.0
 
 
 class TestGrader:

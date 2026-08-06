@@ -20,10 +20,11 @@ from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
-from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
+from hud.cli.utils.source import EnvironmentSource
 from hud.eval.runtime import RuntimeConfig
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
@@ -164,8 +165,8 @@ def _validate_before_deploy(env_source: EnvironmentSource, console: HUDConsole) 
         console.success("Validation passed")
 
 
-def _resolve_declared_name(env_source: EnvironmentSource, console: HUDConsole) -> str | None:
-    """The environment name declared in code, or None for legacy MCP projects.
+def _resolve_declared_name(env_source: EnvironmentSource, console: HUDConsole) -> str:
+    """Resolve the environment name declared in code.
 
     Prefers the Environment served by the Dockerfile entrypoint
     (``hud serve module:attr``), so a project may define auxiliary in-process
@@ -179,7 +180,9 @@ def _resolve_declared_name(env_source: EnvironmentSource, console: HUDConsole) -
 
     references = env_source.environment_name_references()
     if not references:
-        return None
+        console.error("No Environment(...) declaration found in source.")
+        console.info('Declare the environment explicitly, e.g. Environment("my-env").')
+        raise typer.Exit(1)
 
     named = sorted({ref.name for ref in references if ref.name is not None})
 
@@ -214,25 +217,19 @@ def _resolve_environment_name(
 
     The name declared in ``Environment(...)`` is the environment's identity:
     the platform resolves the target registry by this name (get-or-rebuild).
-    Projects without an ``Environment(...)`` call (legacy MCP environments)
-    fall back to the directory name.
+    Projects must declare an ``Environment(...)`` in source.
     """
-    declared = _resolve_declared_name(env_source, console)
-    name = declared if declared is not None else env_source.environment_name()
+    name = _resolve_declared_name(env_source, console)
 
     if registry_id:
         registry_env = get_registry_environment(platform, registry_id)
-        if registry_env is not None:
-            if declared is not None and normalize_environment_name(name) != registry_env.name:
-                console.error(
-                    f"Code declares Environment('{name}') but --registry-id targets "
-                    f"'{registry_env.name}'. Rename the environment in code or drop "
-                    "--registry-id to deploy by name."
-                )
-                raise typer.Exit(1)
-            if declared is None:
-                name = registry_env.name
-
+        if registry_env is not None and normalize_environment_name(name) != registry_env.name:
+            console.error(
+                f"Code declares Environment('{name}') but --registry-id targets "
+                f"'{registry_env.name}'. Rename the environment in code or drop "
+                "--registry-id to deploy by name."
+            )
+            raise typer.Exit(1)
     console.info(f"Environment name: {name}")
     return name
 
