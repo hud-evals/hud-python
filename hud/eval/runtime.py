@@ -35,6 +35,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import shlex
 import sys
 import tarfile
@@ -67,6 +68,8 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
+
+_COMPOSE_SERVICE_SOCKET = "/media/hud/docker.sock"
 
 
 class RuntimeGPU(BaseModel):
@@ -108,6 +111,7 @@ class RuntimeConfig(BaseModel):
 
     image: str | None = Field(default=None, min_length=1)
     compose: Path | None = None
+    compose_service_access: bool = False
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
 
@@ -115,6 +119,8 @@ class RuntimeConfig(BaseModel):
     def validate_source(self) -> Self:
         if self.image is not None and self.compose is not None:
             raise ValueError("runtime_config accepts either image or compose, not both")
+        if self.compose_service_access and self.compose is None:
+            raise ValueError("compose_service_access requires runtime_config.compose")
         return self
 
     def with_overrides(self, override: RuntimeConfig | None) -> RuntimeConfig:
@@ -124,6 +130,7 @@ class RuntimeConfig(BaseModel):
         changes = override.model_dump(exclude_unset=True)
         if override.image is not None:
             config["compose"] = None
+            config["compose_service_access"] = False
         elif override.compose is not None:
             config["image"] = None
         return RuntimeConfig.model_validate(config | changes)
@@ -252,11 +259,20 @@ def _docker_compose_main(
     resources: RuntimeResources | None,
     *,
     seccomp: str | Path = _DOCKER_SECCOMP_PROFILE,
+    service_socket: str | None = None,
 ) -> dict[str, Any]:
     main: dict[str, Any] = {
         "ports": [published_port],
         "security_opt": [f"seccomp={seccomp}", "systempaths=unconfined"],
     }
+    if service_socket is not None:
+        main["volumes"] = [
+            {
+                "type": "bind",
+                "source": service_socket,
+                "target": _COMPOSE_SERVICE_SOCKET,
+            }
+        ]
     if resources is None:
         return main
     if resources.cpu is not None:
@@ -604,7 +620,29 @@ class DockerRuntime:
                 and resources.gpu.type is not None
             ):
                 raise ValueError("DockerRuntime cannot select Compose GPUs by type")
-            main = _docker_compose_main(f"127.0.0.1::{self.port}", resources)
+            service_socket = None
+            if config.compose_service_access:
+                endpoint = os.environ.get("DOCKER_HOST")
+                if not endpoint:
+                    endpoint, _ = await _docker(
+                        "context",
+                        "inspect",
+                        "--format",
+                        "{{.Endpoints.docker.Host}}",
+                    )
+                    endpoint = endpoint.strip()
+                parsed = urlsplit(endpoint)
+                if parsed.scheme != "unix" or not parsed.path:
+                    raise ValueError(
+                        "DockerRuntime Compose service access requires a local Unix "
+                        f"Docker endpoint, got {endpoint!r}"
+                    )
+                service_socket = parsed.path
+            main = _docker_compose_main(
+                f"127.0.0.1::{self.port}",
+                resources,
+                service_socket=service_socket,
+            )
             project = f"hud-{uuid.uuid4().hex[:12]}"
             with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
                 override, ports = _compose_overrides(Path(directory), main)
@@ -818,6 +856,9 @@ class ModalRuntime:
                     f"{self.port}:{self.port}",
                     resources,
                     seccomp="/hud/docker-seccomp.json",
+                    service_socket=(
+                        "/var/run/docker.sock" if config.compose_service_access else None
+                    ),
                 )
                 with _compose_payload(compose, main) as (
                     archive,

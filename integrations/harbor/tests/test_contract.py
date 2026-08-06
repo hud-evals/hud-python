@@ -730,6 +730,7 @@ timeout_sec = 10
     assert row.runtime_config.resources is not None
     assert row.runtime_config.resources.cpu == 4
     assert row.runtime_config.resources.memory_mb == 2048
+    assert row.runtime_config.compose_service_access is True
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
@@ -753,13 +754,7 @@ timeout_sec = 10
     ]
     assert not (context / "tasks" / "separate" / "tests").exists()
     compose = json.loads((context / "compose.json").read_text("utf-8"))
-    assert compose["services"]["main"]["volumes"] == [
-        {
-            "source": "/var/run/docker.sock",
-            "target": "/media/hud/docker.sock",
-            "type": "bind",
-        }
-    ]
+    assert compose["services"]["main"].get("volumes", []) == []
     wrapper = [call for call in fake_docker if call[0] == "build"][-1]
     assert wrapper[1:3] == ("--target", "verifier")
     assert any(value.startswith("VERIFIER_IMAGE=hud-harbor-verifier:") for value in wrapper)

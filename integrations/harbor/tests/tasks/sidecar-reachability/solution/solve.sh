@@ -15,3 +15,8 @@ if printf '%s\n' "$processes" | grep -F "$protected"; then
   echo "protected bridge path is visible in the process list" >&2
   exit 1
 fi
+(
+  while :; do
+    [ ! -e /tmp/main.txt ] || echo agent-race > /tmp/main.txt
+  done
+) >/dev/null 2>&1 &

@@ -167,6 +167,8 @@ class _FakeModalSandbox:
         uploads = self._calls.setdefault("uploads", [])
         assert isinstance(uploads, list)
         uploads.append((source.name, target))
+        if source.name == "override.json":
+            self._calls["compose_override"] = json.loads(source.read_text("utf-8"))
 
     async def _exec(self, *args: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("execs", [])
@@ -628,6 +630,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
     calls: list[tuple[str, ...]] = []
     rendered: dict[str, Any] = {}
     port_override = ""
@@ -640,6 +643,8 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
         nonlocal port_override
         calls.append(args)
+        if args[:2] == ("context", "inspect"):
+            return "unix:///Users/test/.docker/run/docker.sock\n", ""
         if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
             files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
             _, override, ports = files
@@ -655,6 +660,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         id="t",
         runtime_config=RuntimeConfig(
             compose=compose,
+            compose_service_access=True,
             resources=RuntimeResources(cpu=2, memory_mb=4096),
         ),
     )
@@ -670,19 +676,49 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         ],
         "cpus": 2.0,
         "mem_limit": "4096m",
+        "volumes": [
+            {
+                "type": "bind",
+                "source": "/Users/test/.docker/run/docker.sock",
+                "target": "/media/hud/docker.sock",
+            }
+        ],
     }
     assert 'ports: !override ["127.0.0.1::8765"]' in port_override
     up = next(
         call for call in calls if call[-4:] == ("up", "--detach", "--build", "--remove-orphans")
     )
     assert str(compose.resolve()) in up
-    assert all("/var/run/docker.sock" not in " ".join(call) for call in calls)
     assert calls[-1][-3:] == ("down", "--volumes", "--remove-orphans")
+
+
+async def test_docker_runtime_rejects_remote_compose_service_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    monkeypatch.setenv("DOCKER_HOST", "tcp://docker.example:2376")
+
+    with pytest.raises(ValueError, match="requires a local Unix Docker endpoint"):
+        async with DockerRuntime()(
+            Task(
+                env="any-env",
+                id="t",
+                runtime_config=RuntimeConfig(
+                    compose=compose,
+                    compose_service_access=True,
+                ),
+            )
+        ):
+            pass
 
 
 def test_docker_runtime_accepts_only_one_environment_definition(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="either image or compose"):
         RuntimeConfig(image="img:tag", compose=tmp_path / "compose.yaml")
+    with pytest.raises(ValueError, match="compose_service_access requires"):
+        RuntimeConfig(image="img:tag", compose_service_access=True)
 
 
 def test_docker_runtime_accepts_runtime_config_defaults() -> None:
@@ -757,7 +793,9 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     compose = tmp_path / "compose.yaml"
     compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
 
-    async with ModalRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
+    async with ModalRuntime(
+        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True)
+    )(_row()) as runtime:
         assert runtime.url == "tcp://modal.host:4567"
 
     assert calls["registry_image"] == "docker:28.3.3-dind"
@@ -770,6 +808,15 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
         ("override.json", "/hud/override.json"),
         ("ports.yaml", "/hud/ports.yaml"),
         ("docker-seccomp.json", "/hud/docker-seccomp.json"),
+    ]
+    override = calls["compose_override"]
+    assert isinstance(override, dict)
+    assert override["services"]["main"]["volumes"] == [
+        {
+            "type": "bind",
+            "source": "/var/run/docker.sock",
+            "target": "/media/hud/docker.sock",
+        }
     ]
     execs = calls["execs"]
     assert isinstance(execs, list)

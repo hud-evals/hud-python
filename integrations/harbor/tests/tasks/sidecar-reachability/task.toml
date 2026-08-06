@@ -17,7 +17,7 @@ timeout_sec = 30
 
 [[verifier.collect]]
 service = "main"
-command = "head -c 1 /dev/urandom >/dev/null && echo collected-from-main > /tmp/main.txt"
+command = "head -c 1 /dev/urandom >/dev/null && echo collected-from-main > /tmp/main.txt && sleep 0.2"
 timeout_sec = 10
 
 [[verifier.collect]]

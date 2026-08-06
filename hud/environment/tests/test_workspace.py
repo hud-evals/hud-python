@@ -513,7 +513,7 @@ async def test_staged_verifier_is_launched_by_the_namespace_host(
 
 
 @pytest.mark.asyncio
-async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
+async def test_launch_keeps_an_environment_entrypoint_outside_agent_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
@@ -532,6 +532,7 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
         identity=(1000, 2000),
         no_new_privs=False,
         persistent=True,
+        scope="environment",
     )
 
     assert process is launched
@@ -547,6 +548,19 @@ async def test_launch_keeps_an_environment_entrypoint_in_the_sandbox(
     assert kwargs["mount_view"] == "host"
     assert kwargs["identity"] == (1000, 2000)
     assert kwargs["persistent"] is True
+    assert kwargs["scope"] == "environment"
+
+
+@pytest.mark.asyncio
+async def test_terminate_sessions_preserves_the_namespace_host(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path / "root")
+    terminate_sessions = AsyncMock()
+    ws._namespace = cast("Any", SimpleNamespace(terminate_sessions=terminate_sessions))
+
+    await ws.terminate_sessions()
+
+    terminate_sessions.assert_awaited_once_with()
+    assert ws._namespace is not None
 
 
 @pytest.mark.asyncio

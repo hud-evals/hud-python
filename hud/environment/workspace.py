@@ -721,6 +721,7 @@ class Workspace:
         allowed_hosts: Collection[str] | None = (),
         no_new_privs: bool = True,
         max_wait: float | None = None,
+        scope: Literal["session", "environment"] = "session",
     ) -> ProcessResult:
         """Run a captured command against this workspace.
 
@@ -748,6 +749,7 @@ class Workspace:
                     identity=identity,
                     inherit_workspace_env=inherit_workspace_env,
                     no_new_privs=no_new_privs,
+                    scope=scope,
                 )
                 return await process.complete(max_wait=max_wait)
 
@@ -822,8 +824,9 @@ class Workspace:
         inherit_workspace_env: bool = True,
         no_new_privs: bool = True,
         persistent: bool = False,
+        scope: Literal["session", "environment"] = "session",
     ) -> NamespaceProcess:
-        """Launch a process in the persistent workspace sandbox."""
+        """Launch a process in the workspace network and selected process scope."""
         if await self.sandbox_pid() is None:
             raise RuntimeError("workspace commands require a live sandbox")
         assert self._namespace is not None
@@ -855,6 +858,7 @@ class Workspace:
             mount_view="host",
             identity=bwrap_identity,
             persistent=persistent,
+            scope=scope,
         )
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
@@ -1176,6 +1180,7 @@ class Workspace:
                     cwd=self.root,
                     env=dict(os.environ),
                     mount_view="host",
+                    scope="environment",
                 )
                 self._bridge.stdin.write(config)
                 await self._bridge.stdin.drain()
@@ -1223,6 +1228,11 @@ class Workspace:
         sandbox.kill()
         with contextlib.suppress(Exception):
             await asyncio.wait_for(sandbox.wait(), 10.0)
+
+    async def terminate_sessions(self) -> None:
+        """Kill the agent-visible PID namespace while preserving its environment."""
+        if self._namespace is not None:
+            await self._namespace.terminate_sessions()
 
     def shell_argv(
         self,

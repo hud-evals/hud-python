@@ -656,16 +656,6 @@ async def adapt(
             await docker("push", image)
 
         if compose is not None:
-            volumes = compose.services["main"].volumes
-            if separate:
-                volumes = [
-                    *volumes,
-                    {
-                        "type": "bind",
-                        "source": "/var/run/docker.sock",
-                        "target": str(HUD_ROOT / "docker.sock"),
-                    },
-                ]
             main = compose.services["main"].model_copy(
                 update={
                     "build": None,
@@ -674,7 +664,6 @@ async def adapt(
                     "working_dir": None,
                     "user": None,
                     "healthcheck": None,
-                    "volumes": volumes,
                 }
             )
             compose.services["main"] = main.with_image(
@@ -729,6 +718,7 @@ async def adapt(
                     runtime_config=RuntimeConfig(
                         image=image if compose is None else None,
                         compose=context / "compose.json" if compose is not None else None,
+                        compose_service_access=compose is not None and task_separate,
                         resources=resources if resources.model_dump(exclude_none=True) else None,
                     ),
                     verifier=(

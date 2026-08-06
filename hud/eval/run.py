@@ -470,6 +470,10 @@ async def rollout(
                         _phase = "grading"
 
                     verifier = task.verifier
+                    if verifier is not None:
+                        # The verifier is authoritative. Once its phase begins,
+                        # an actor-side grade must not survive a verifier failure.
+                        live.grade = Grade()
                     if (
                         verifier is not None
                         and verifier.env == task.env

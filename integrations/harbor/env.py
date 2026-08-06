@@ -219,6 +219,7 @@ async def start_entrypoint() -> NamespaceProcess | None:
         inherit_workspace_env=False,
         no_new_privs=False,
         persistent=True,
+        scope="environment",
     )
     await asyncio.sleep(0)
     if process.returncode is not None:
@@ -251,6 +252,7 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
             allowed_hosts=None if environment_hosts == agent_hosts else environment_hosts,
             no_new_privs=False,
             max_wait=healthcheck["timeout_sec"],
+            scope="environment",
         )
         if result.returncode == 0 and not result.timed_out:
             return
@@ -364,6 +366,7 @@ async def collect(task: dict[str, Any]) -> None:
                 allowed_hosts=None,
                 no_new_privs=False,
                 max_wait=hook["timeout_sec"],
+                scope="environment",
             )
             if execution.timed_out:
                 raise TimeoutError(
@@ -373,7 +376,6 @@ async def collect(task: dict[str, Any]) -> None:
                 detail = execution.stderr.decode("utf-8", "replace").strip()
                 raise RuntimeError(f"collect hook on {service!r} failed: {detail}")
 
-    await workspace.discard_sandbox()
     for artifact in task["artifacts"]:
         source = artifact["source"]
         target = ARTIFACTS / source.lstrip("/").rstrip("/")
@@ -417,6 +419,7 @@ def register(task: dict[str, Any]) -> None:
                     f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
                 )
             if task["separate_verifier"]:
+                await workspace.terminate_sessions()
                 await collect(task)
                 yield 0.0
             else:

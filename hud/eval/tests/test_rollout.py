@@ -304,7 +304,7 @@ async def test_verifier_remains_authoritative_when_actor_grading_fails(
     assert placements == ["actor", "judge"]
 
 
-async def test_actor_grade_survives_a_verifier_provisioning_failure() -> None:
+async def test_verifier_provisioning_failure_leaves_the_run_ungraded() -> None:
     actor_env = Environment("actor")
 
     @actor_env.template()
@@ -324,7 +324,8 @@ async def test_actor_grade_survives_a_verifier_provisioning_failure() -> None:
 
     assert run.trace.is_error
     assert "verifier unavailable" in (run.trace.error or "")
-    assert run.reward == 0.25
+    assert run.grade.raw == {}
+    assert run.reward == 0.0
 
 
 def _bindings_env(published: Any) -> Environment:

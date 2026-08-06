@@ -192,6 +192,7 @@ class NamespaceHost:
         tty: bool = False,
         terminal_size: tuple[int, int, int, int] = (80, 24, 0, 0),
         persistent: bool = False,
+        scope: Literal["session", "environment"] = "session",
     ) -> NamespaceProcess:
         connection = self._require_connection()
         request = json.dumps(
@@ -202,6 +203,7 @@ class NamespaceHost:
                 "mount_view": mount_view,
                 "identity": identity,
                 "persistent": persistent,
+                "scope": scope,
             }
         )
         if tty:
@@ -215,6 +217,19 @@ class NamespaceHost:
         else:
             process = await connection.create_process(request, encoding=None)
         return NamespaceProcess(process)
+
+    async def terminate_sessions(self) -> None:
+        connection = self._require_connection()
+        result = await connection.run(
+            json.dumps({"operation": "terminate_sessions"}),
+            check=False,
+            encoding=None,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr or b""
+            assert isinstance(stderr, bytes)
+            detail = stderr.decode("utf-8", "replace").strip()
+            raise RuntimeError(detail or "failed to terminate workspace sessions")
 
     def _require_connection(self) -> asyncssh.SSHClientConnection:
         if self._connection is None:
@@ -278,8 +293,7 @@ class _NamespaceHost:
         self.launcher_depth = launcher_depth
         self.map_identities = map_identities
         self.ports = ports
-        self.holder: ProcessGroup | None = None
-        self.holder_pid: int | None = None
+        self.holders: dict[Literal["session", "environment"], tuple[ProcessGroup, int]] = {}
         self.forwarders: list[asyncio.AbstractServer] = []
 
     async def serve(self) -> None:
@@ -287,7 +301,8 @@ class _NamespaceHost:
         try:
             if self.setup_loopback:
                 self._enable_loopback()
-            self.holder_pid = await self._start_holder()
+            self.holders["session"] = await self._start_holder()
+            self.holders["environment"] = await self._start_holder()
             with contextlib.suppress(FileNotFoundError):
                 self.socket_path.unlink()
             listener = socket.socket(socket.AF_UNIX)
@@ -317,7 +332,7 @@ class _NamespaceHost:
                 process_factory=self._handle,
                 encoding=None,
             )
-            sys.stdout.write(json.dumps({"holder_pid": self.holder_pid}) + "\n")
+            sys.stdout.write(json.dumps({"holder_pid": self.holders["session"][1]}) + "\n")
             sys.stdout.flush()
             await asyncio.Event().wait()
         finally:
@@ -335,10 +350,9 @@ class _NamespaceHost:
         for port in self.ports:
             with contextlib.suppress(FileNotFoundError):
                 _port_socket(self.socket_path, port).unlink()
-        if self.holder is not None:
-            await self.holder.terminate()
-            self.holder = None
-            self.holder_pid = None
+        holders = tuple(self.holders.values())
+        self.holders.clear()
+        await asyncio.gather(*(holder.terminate() for holder, _ in holders))
         with contextlib.suppress(FileNotFoundError):
             self.socket_path.unlink()
 
@@ -347,15 +361,20 @@ class _NamespaceHost:
             if process.command is None:
                 raise ValueError("spawn request required")
             request: dict[str, Any] = json.loads(process.command)
-            process.exit(await self._spawn(request, process))
+            if request.get("operation") == "terminate_sessions":
+                await self._terminate_sessions()
+                process.exit(0)
+            else:
+                process.exit(await self._spawn(request, process))
         except Exception as exc:
             process.stderr.write(str(exc).encode())
             process.exit(1)
         await process.wait_closed()
 
-    async def _start_holder(self) -> int:
+    async def _start_holder(self) -> tuple[ProcessGroup, int]:
         read_fd, write_fd = os.pipe()
         block_read = block_write = -1
+        holder: ProcessGroup | None = None
         try:
             os.set_inheritable(write_fd, True)
             argv = list(self.holder_argv)
@@ -370,7 +389,7 @@ class _NamespaceHost:
                     "--userns-block-fd",
                     str(block_read),
                 ]
-            self.holder = await create_process_group_exec(
+            holder = await create_process_group_exec(
                 *argv,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
@@ -385,19 +404,18 @@ class _NamespaceHost:
                 pid = await install_identity_map(
                     read_fd,
                     block_write,
-                    launcher_pid=self.holder.process.pid,
+                    launcher_pid=holder.process.pid,
                     launcher_depth=self.launcher_depth,
                 )
                 os.close(block_write)
                 block_write = -1
             else:
                 pid = await read_bwrap_pid(read_fd)
-            assert self.holder.stdout is not None
-            if await asyncio.wait_for(self.holder.stdout.readline(), 30.0) != b"ready\n":
-                raise RuntimeError(await self._holder_error())
-            return pid
+            assert holder.stdout is not None
+            if await asyncio.wait_for(holder.stdout.readline(), 30.0) != b"ready\n":
+                raise RuntimeError(await self._holder_error(holder))
+            return holder, pid
         except BaseException as exc:
-            holder, self.holder = self.holder, None
             if holder is not None:
                 with contextlib.suppress(Exception):
                     await holder.terminate()
@@ -417,22 +435,31 @@ class _NamespaceHost:
                 if descriptor != -1:
                     os.close(descriptor)
 
-    async def _holder_error(self) -> str:
-        if self.holder is None or self.holder.stderr is None:
+    async def _holder_error(self, holder: ProcessGroup) -> str:
+        if holder.stderr is None:
             return "sandbox holder did not become ready"
-        detail = await self.holder.stderr.read(2048)
+        detail = await holder.stderr.read(2048)
         return detail.decode(errors="replace").strip() or "sandbox holder did not become ready"
+
+    async def _terminate_sessions(self) -> None:
+        held = self.holders.pop("session", None)
+        if held is not None:
+            holder, _ = held
+            await holder.terminate()
 
     async def _spawn(
         self,
         request: dict[str, Any],
         channel: asyncssh.SSHServerProcess[bytes],
     ) -> int:
-        if self.holder_pid is None:
-            raise RuntimeError("workspace holder is not running")
         mount_view = request["mount_view"]
         if mount_view not in ("workspace", "host"):
             raise ValueError(f"unknown mount view {mount_view!r}")
+        scope = request["scope"]
+        if scope not in ("session", "environment"):
+            raise ValueError(f"unknown process scope {scope!r}")
+        if scope == "environment" and mount_view != "host":
+            raise ValueError("environment processes require the host mount view")
         identity = request["identity"]
         if isinstance(identity, int):
             uid = gid = identity
@@ -452,10 +479,14 @@ class _NamespaceHost:
                 *(() if identity is None else ("--setgid", str(gid), "--setuid", str(uid))),
                 "--",
             ]
+        held = self.holders.get(scope)
+        if held is None:
+            raise RuntimeError(f"workspace {scope} holder is not running")
+        _, holder_pid = held
         argv = [
             shutil.which("nsenter") or "/usr/bin/nsenter",
             "--target",
-            str(self.holder_pid),
+            str(holder_pid),
             *(("--mount",) if mount_view == "workspace" else ()),
             "--pid",
             "--uts",
