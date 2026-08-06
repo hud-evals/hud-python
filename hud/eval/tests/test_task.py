@@ -175,6 +175,19 @@ def test_verifier_rejects_another_verifier() -> None:
         )
 
 
+def test_verifier_rejects_another_verifier_on_assignment() -> None:
+    task = Task(env="actor", id="solve")
+
+    with pytest.raises(ValueError, match="nested verifier tasks are not supported"):
+        task.verifier = Task(
+            env="judge",
+            id="verify",
+            verifier=Task(env="final-judge", id="verify-final"),
+        )
+
+    assert task.verifier is None
+
+
 def test_runtime_config_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError, match="Extra inputs"):
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
