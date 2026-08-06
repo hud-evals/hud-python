@@ -157,7 +157,12 @@ def _resolve(request: CheckRequest) -> tuple[Any, Any, str]:
 
     args = parse_task_args(request.args_json)
     attached_url = request.url
-    if attached_url is None and request.source is None and request.runtime is None:
+    if (
+        attached_url is None
+        and request.source is None
+        and request.runtime is None
+        and not request.remote
+    ):
         attached_url = find_local_env_url()
 
     if request.source is not None:

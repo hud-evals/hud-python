@@ -21,6 +21,7 @@ from hud.cli.check import (
     TaskCheckReport,
     _criteria_template,
     _redact_evidence,
+    _resolve,
     _run_agent,
     _run_check,
     _run_direct,
@@ -216,6 +217,27 @@ def test_check_remote_agent_uses_hosted_strategy() -> None:
     assert request.agent == "claude"
     assert request.model == "claude-sonnet"
     assert request.remote is True
+
+
+def test_remote_check_does_not_auto_attach_to_a_local_environment() -> None:
+    from hud.settings import settings
+
+    task = Task(env="demo", id="demo:solve")
+    with (
+        patch.object(settings, "api_key", "api-key"),
+        patch("hud.cli.check.find_local_env_url", return_value="tcp://127.0.0.1:8765") as find,
+        patch("hud.cli.check.attached_task") as attached,
+        patch("hud.cli.check.select_local_task", return_value=(task, "env.py")) as select,
+    ):
+        resolved, _, runtime = _resolve(
+            CheckRequest(task=task.id, agent="claude", remote=True),
+        )
+
+    assert resolved is task
+    assert runtime == "hosted"
+    find.assert_not_called()
+    attached.assert_not_called()
+    select.assert_called_once_with(task.id, ".", {})
 
 
 def test_evidence_is_redacted_and_bounded() -> None:
