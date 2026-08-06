@@ -1,4 +1,5 @@
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.12-alpine
+RUN apk add --no-cache curl
 WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["sh", "-c", "python3 -m http.server 8080 --directory /app >/tmp/main-http.log 2>&1 & exec \"$@\"", "--"]

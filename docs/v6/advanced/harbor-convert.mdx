@@ -40,12 +40,12 @@ as `runtime_config`. The image's `tasks.json` carries workdir, environment,
 network, and phase-user declarations into the authored HUD environment.
 
 Tasks whose declared behaviour cannot be reproduced faithfully are refused
-rather than silently downgraded. Adaptation replaces the container's own boot
-process with the HUD server, so `healthcheck` and `mcp_servers` declarations are
-refused when they depend on that process. Compose environments, separate
-verifier environments, non-Linux tasks, TPUs, skills directories, and
-multi-step tasks are also refused. Prebuilt images, allowlists, and distinct
-agent/verifier users are supported.
+rather than silently downgraded. Compose environments, network MCP servers,
+healthchecks, and separate verifier Dockerfiles are translated into the HUD
+runtime contract; Docker and Modal can run the resulting Compose environments,
+while Daytona rejects Compose runtime configuration. Stdio MCP servers,
+non-Linux tasks, TPUs, skills directories, and multi-step tasks are refused.
+Prebuilt images, allowlists, and distinct agent/verifier users are supported.
 
 ## Export HUD tasks to Harbor
 

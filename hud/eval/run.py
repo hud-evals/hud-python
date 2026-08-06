@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
 
-    from .runtime import Provider, Runtime
+    from .runtime import Provider
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -133,10 +133,18 @@ class Run:
     half-working.
     """
 
-    def __init__(self, client: HudClient | None, task_id: str, args: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        client: HudClient | None,
+        task_id: str,
+        args: dict[str, Any],
+        *,
+        best_effort_grade: bool = False,
+    ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
+        self._best_effort_grade = best_effort_grade
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -270,18 +278,19 @@ class Run:
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
 
-        # A mid-run error grades best-effort (capture a salvageable reward, keep
-        # status=error), but a grade failure must not mask the original error. A
-        # clean run grades normally — a grader fault propagates.
         if exc_type is not None:
             self.trace.status = "error"
-            try:
-                evaluation = await self.client.grade(answer)
-            except Exception as grade_exc:
-                logger.warning("grade failed after mid-run error: %s", grade_exc)
-                return False
-        else:
+
+        try:
             evaluation = await self.client.grade(answer)
+        except Exception as grade_exc:
+            if exc_type is None and not self._best_effort_grade:
+                raise
+            detail = "".join(traceback.format_exception_only(grade_exc)).strip()
+            logger.warning("best-effort grade failed: %s", detail)
+            self.trace.status = "error"
+            self.record(Step(source="system", error=f"[grading] {detail}"))
+            return False
 
         self.grade = Grade.from_dict(evaluation)
         self.record(
@@ -312,6 +321,42 @@ class Run:
         run = cls(None, "", {})
         run.trace = Trace(status="error", steps=[Step(source="system", error=error)])
         return run
+
+
+async def _verify(run: Run, client: HudClient, task: Task) -> None:
+    """Run an agent-less verifier task and make its evaluation authoritative."""
+    started_at = now_iso()
+    started = await client.start_task(task.id, task.args)
+    run.record(
+        Step(
+            source="task",
+            task_call=TaskCall(
+                phase="setup",
+                name=task.id,
+                arguments=task.args,
+                result=started,
+            ),
+            started_at=started_at,
+        )
+    )
+
+    answer = {"answer": run.trace.content}
+    started_at = now_iso()
+    evaluation = await client.grade(answer)
+    run.grade = Grade.from_dict(evaluation)
+    run.record(
+        Step(
+            source="task",
+            task_call=TaskCall(
+                phase="evaluate",
+                name=task.id,
+                arguments=answer,
+                result=evaluation,
+            ),
+            started_at=started_at,
+            error=run.grade.content if run.grade.is_error else None,
+        )
+    )
 
 
 async def rollout(
@@ -378,39 +423,81 @@ async def rollout(
         )
         run: Run | None = None
         _phase = "provisioning"
+        rollout_expired = False
 
         client: HudClient | None = None
 
         async def _drive() -> None:
             nonlocal client, run, _phase
-            async with contextlib.AsyncExitStack() as stack:
-                addr = cast("Runtime", await stack.enter_async_context(runtime(task)))
+            async with runtime(task) as addr:
                 _phase = "starting task"
-                client = cast("HudClient", await stack.enter_async_context(connect(addr)))
-                live = Run(client, task.id, task.args)
-                live._runtime = addr.url  # the placement record for the receipt
-                try:
-                    async with live:  # start on enter; grade on exit
+                async with connect(addr) as actor_client:
+                    client = actor_client
+                    live = Run(
+                        actor_client,
+                        task.id,
+                        task.args,
+                        best_effort_grade=task.verifier is not None,
+                    )
+                    live._runtime = addr.url  # the placement record for the receipt
+                    async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
-                        async with file_tracking_observer(client):
-                            if agent_timeout is None:
-                                await agent(run)
-                            else:
-                                deadline = asyncio.timeout(agent_timeout)
-                                try:
-                                    async with deadline:
-                                        await agent(run)
-                                except TimeoutError:
-                                    if not deadline.expired():
-                                        raise
-                                    detail = f"agent timed out after {agent_timeout:g}s"
-                                    logger.warning(detail)
-                                    run.trace.status = "error"
-                                    run.trace.stop_reason = "timeout"
-                                    run.record(Step(source="system", error=detail))
+                        try:
+                            async with file_tracking_observer(actor_client):
+                                if agent_timeout is None:
+                                    await agent(run)
+                                else:
+                                    deadline = asyncio.timeout(agent_timeout)
+                                    try:
+                                        async with deadline:
+                                            await agent(run)
+                                    except TimeoutError:
+                                        if not deadline.expired():
+                                            raise
+                                        detail = f"agent timed out after {agent_timeout:g}s"
+                                        logger.warning(detail)
+                                        run.trace.status = "error"
+                                        run.trace.stop_reason = "timeout"
+                                        run.record(Step(source="system", error=detail))
+                        except Exception as exc:
+                            if task.verifier is None:
+                                raise
+                            detail = "".join(traceback.format_exception_only(exc)).strip()
+                            logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
+                            run.trace.status = "error"
+                            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         _phase = "grading"
-                finally:
+
+                    verifier = task.verifier
+                    if verifier is not None:
+                        # The verifier is authoritative. Once its phase begins,
+                        # an actor-side grade must not survive a verifier failure.
+                        live.grade = Grade()
+                    if (
+                        verifier is not None
+                        and verifier.env == task.env
+                        and verifier.runtime_config is None
+                    ):
+                        _phase = "verifying"
+                        await _verify(live, actor_client, verifier)
+                        _phase = "cleanup"
+                        return
+
+                _phase = "actor cleanup"
+
+            if rollout_expired:
+                return
+            verifier = task.verifier
+            if verifier is not None:
+                _phase = "provisioning verifier"
+                async with (
+                    runtime(verifier) as verifier_addr,
+                    connect(verifier_addr) as verifier_client,
+                ):
+                    client = verifier_client
+                    _phase = "verifying"
+                    await _verify(live, verifier_client, verifier)
                     _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
@@ -422,6 +509,7 @@ async def rollout(
                 if done:
                     await driver
                 else:
+                    rollout_expired = True
                     phase = _phase
                     if run is not None:
                         run.trace.stop_reason = "timeout"
@@ -433,7 +521,7 @@ async def rollout(
                         with contextlib.suppress(Exception):
                             await asyncio.wait_for(client.cancel(), timeout=2.0)
                         client.abort()
-                    if phase != "cleanup":
+                    if phase not in {"actor cleanup", "cleanup"}:
                         driver.cancel()
                     driver.add_done_callback(_consume_task_result)
                     detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"

@@ -1,5 +1,9 @@
 ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
+ARG VERIFIER_IMAGE
+
+FROM ${VERIFIER_IMAGE} AS verifier-root
+FROM docker:28.3.3-cli AS docker-cli
+FROM ${BASE_IMAGE} AS runtime
 
 USER root
 ARG HUD_REQUIREMENT=hud
@@ -13,3 +17,9 @@ ENV HUD_SKIP_VERSION_CHECK=1
 EXPOSE 8765
 ENTRYPOINT []
 CMD ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py", "--host", "0.0.0.0", "--port", "8765"]
+
+FROM runtime AS plain
+
+FROM runtime AS verifier
+COPY --from=docker-cli /usr/local/bin/docker /media/hud/bin/docker
+COPY --from=verifier-root / /media/hud/verifier

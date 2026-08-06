@@ -24,7 +24,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .runtime import RuntimeConfig
 
@@ -71,6 +71,18 @@ class Task(BaseModel):
     #: Optional row-level runtime construction input. Runtime adapters apply the
     #: supported subset into their native launch shape or reject it.
     runtime_config: RuntimeConfig | None = None
+    #: Optional agent-less task whose evaluation is the grade of record. The
+    #: rollout completes this task first, then starts and grades the verifier
+    #: with the same answer. Placement may reuse the live substrate when both
+    #: tasks name the same environment.
+    verifier: Task | None = None
+
+    @field_validator("verifier")
+    @classmethod
+    def _reject_nested_verifier(cls, verifier: Task | None) -> Task | None:
+        if verifier is not None and verifier.verifier is not None:
+            raise ValueError("nested verifier tasks are not supported")
+        return verifier
 
     # ─── execution ────────────────────────────────────────────────────
 

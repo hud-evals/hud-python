@@ -139,6 +139,55 @@ def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
     assert rebuilt.model_dump(exclude_none=True) == original
 
 
+def test_verifier_roundtrips_as_an_ordinary_nested_task() -> None:
+    original = Task(
+        env="actor",
+        id="solve",
+        verifier=Task(
+            env="judge",
+            id="verify",
+            args={"suite": "hidden"},
+            runtime_config=RuntimeConfig(image="judge:latest"),
+        ),
+    ).model_dump(exclude_none=True)
+
+    rebuilt = Task.model_validate(original)
+
+    assert rebuilt.verifier == Task(
+        env="judge",
+        id="verify",
+        args={"suite": "hidden"},
+        runtime_config=RuntimeConfig(image="judge:latest"),
+    )
+    assert rebuilt.model_dump(exclude_none=True) == original
+
+
+def test_verifier_rejects_another_verifier() -> None:
+    with pytest.raises(ValueError, match="nested verifier tasks are not supported"):
+        Task(
+            env="actor",
+            id="solve",
+            verifier=Task(
+                env="judge",
+                id="verify",
+                verifier=Task(env="final-judge", id="verify-final"),
+            ),
+        )
+
+
+def test_verifier_rejects_another_verifier_on_assignment() -> None:
+    task = Task(env="actor", id="solve")
+
+    with pytest.raises(ValueError, match="nested verifier tasks are not supported"):
+        task.verifier = Task(
+            env="judge",
+            id="verify",
+            verifier=Task(env="final-judge", id="verify-final"),
+        )
+
+    assert task.verifier is None
+
+
 def test_runtime_config_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError, match="Extra inputs"):
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
@@ -198,7 +247,13 @@ async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.Monk
 
 def test_taskset_is_ordered_and_keyed_by_slug() -> None:
     first = Task(env="e", id="solve", args={"n": 1}, slug="first")
-    second = Task(env="e", id="solve", args={"n": 2}, slug="second")
+    second = Task(
+        env="e",
+        id="solve",
+        args={"n": 2},
+        slug="second",
+        verifier=Task(env="judge", id="verify"),
+    )
 
     tasks = Taskset("demo", [first, second])
 
@@ -207,7 +262,7 @@ def test_taskset_is_ordered_and_keyed_by_slug() -> None:
     assert list(tasks.filter(["second"])) == [second]
     assert list(tasks.exclude(["first"])) == [second]
     assert list(tasks.items()) == [("first", first), ("second", second)]
-    assert tasks.environment_names() == {"e"}
+    assert tasks.environment_names() == {"e", "judge"}
 
 
 def test_taskset_from_file_loads_json_and_jsonl(tmp_path) -> None:

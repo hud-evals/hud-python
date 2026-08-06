@@ -115,7 +115,7 @@ BRIDGE_PORT = 3128
 VISITOR_PORT = 3129
 
 #: Run inside the workspace's network namespace, one listener per route out.
-#: Its argument is ``[[host, port, socket], ...]``; every listener is bound
+#: Its stdin is ``[[host, port, socket], ...]``; every listener is bound
 #: before it says it is ready, since a session that starts in between finds
 #: the port refused.
 _BRIDGE = """
@@ -147,7 +147,7 @@ def bridged(path):
 async def main():
     servers = [
         await asyncio.start_server(bridged(path), host, port)
-        for host, port, path in json.loads(sys.argv[1])
+        for host, port, path in json.loads(sys.stdin.readline())
     ]
     print("ready", flush=True)
     await asyncio.gather(*(server.serve_forever() for server in servers))
@@ -179,7 +179,11 @@ class Peer:
         return self.target or ("127.0.0.1", self.port)
 
 
-def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
+def bind_addresses(
+    peers: Sequence[Peer],
+    *,
+    reserved_ports: Collection[int] = (),
+) -> dict[str, str]:
     """Which loopback address each peer answers on inside the workspace.
 
     ``127.0.0.1`` wherever the port is free, because a task that says
@@ -187,7 +191,11 @@ def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
     there, so the second moves down 127.0.0.0/8 and is reached by its name —
     which is how a task naming several services addresses them anyway.
     """
-    taken = {("127.0.0.1", BRIDGE_PORT), ("127.0.0.1", VISITOR_PORT)}
+    taken = {
+        ("127.0.0.1", BRIDGE_PORT),
+        ("127.0.0.1", VISITOR_PORT),
+        *(("127.0.0.1", port) for port in reserved_ports),
+    }
     addresses: dict[str, str] = {}
     for peer in peers:
         if peer.name in addresses:
@@ -203,7 +211,13 @@ def bind_addresses(peers: Sequence[Peer]) -> dict[str, str]:
     return addresses
 
 
-def hosts_text(peers: Sequence[Peer], base: str) -> str:
+def hosts_text(
+    peers: Sequence[Peer],
+    base: str,
+    *,
+    local_aliases: Collection[str] = (),
+    reserved_ports: Collection[int] = (),
+) -> str:
     """*base* — the substrate's ``/etc/hosts`` — plus a line per peer.
 
     Names resolve for what runs in the workspace's *mount* namespace, which
@@ -211,8 +225,13 @@ def hosts_text(peers: Sequence[Peer], base: str) -> str:
     verifier does, to reach a service the agent started) still reaches a peer
     at its address, but not by its name.
     """
-    addresses = bind_addresses(peers)
-    lines = "".join(f"{addresses[peer.name]}\t{peer.name}\n" for peer in peers)
+    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
+    lines = "".join(
+        [
+            *(f"127.0.0.1\t{name}\n" for name in local_aliases),
+            *(f"{addresses[peer.name]}\t{peer.name}\n" for peer in peers),
+        ]
+    )
     return f"{base.rstrip(chr(10))}\n{lines}" if base.strip() else lines
 
 
@@ -220,6 +239,8 @@ def proxy_environment(
     port: int,
     peers: Sequence[Peer] = (),
     *,
+    local_aliases: Collection[str] = (),
+    reserved_ports: Collection[int] = (),
     token: str | None = None,
 ) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
@@ -233,8 +254,10 @@ def proxy_environment(
     """
     credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
     url = f"http://{credentials}127.0.0.1:{port}"
-    addresses = bind_addresses(peers)
-    bypass = ",".join(dict.fromkeys(["127.0.0.1", "localhost", *addresses, *addresses.values()]))
+    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
+    bypass = ",".join(
+        dict.fromkeys(["127.0.0.1", "localhost", *local_aliases, *addresses, *addresses.values()])
+    )
     return {
         "http_proxy": url,
         "https_proxy": url,
@@ -514,11 +537,15 @@ class Egress:
         allowed: Collection[str],
         peers: Sequence[Peer] = (),
         *,
+        local_aliases: Collection[str] = (),
+        reserved_ports: Collection[int] = (),
         token: str | None = None,
     ) -> None:
         self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
         self.peers = tuple(peers)
+        self.local_aliases = tuple(local_aliases)
+        self.reserved_ports = frozenset(reserved_ports)
         self.token = token
         self._servers: list[tuple[_UnixServer, Path]] = []
 
@@ -562,7 +589,7 @@ class Egress:
 
     def _bridge_spec(self, port: int) -> list[tuple[str, int, str]]:
         """Where each route out is offered inside the workspace."""
-        addresses = bind_addresses(self.peers)
+        addresses = bind_addresses(self.peers, reserved_ports=self.reserved_ports)
         return [
             *([("127.0.0.1", port, str(self.socket_path))] if self.allowed else []),
             *(
@@ -571,9 +598,18 @@ class Egress:
             ),
         ]
 
-    def bridge_argv(self, port: int = BRIDGE_PORT) -> list[str]:
-        """Command which serves this policy inside a workspace network namespace."""
-        return [sys.executable, "-c", _BRIDGE, json.dumps(self._bridge_spec(port))]
+    def bridge_command(
+        self,
+        port: int = BRIDGE_PORT,
+        *,
+        visitor_socket: Path | None = None,
+    ) -> tuple[list[str], bytes]:
+        """Command and private input serving this policy in the workspace network."""
+        routes = self._bridge_spec(port)
+        if visitor_socket is not None:
+            routes.append(("127.0.0.1", VISITOR_PORT, str(visitor_socket)))
+        config = json.dumps(routes).encode() + b"\n"
+        return [sys.executable, "-c", _BRIDGE], config
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
         """Proxy variables for what this serves.
@@ -582,7 +618,17 @@ class Egress:
         is not there turns "this task has no network" into a connection error
         on the first hop, which reads as a broken one instead.
         """
-        return proxy_environment(port, self.peers, token=self.token) if self.allowed else {}
+        return (
+            proxy_environment(
+                port,
+                self.peers,
+                local_aliases=self.local_aliases,
+                reserved_ports=self.reserved_ports,
+                token=self.token,
+            )
+            if self.allowed
+            else {}
+        )
 
     def stop(self) -> None:
         """Take the routes away."""

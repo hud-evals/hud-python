@@ -16,12 +16,17 @@ if command -v apt-get >/dev/null 2>&1; then
   apt-get install -y -qq bubblewrap util-linux python3 python3-venv python3-pip git curl ca-certificates
   rm -rf /var/lib/apt/lists/*
 elif command -v apk >/dev/null 2>&1; then
-  apk add --no-cache bubblewrap util-linux python3 py3-pip git curl ca-certificates
+  apk add --no-cache bash bubblewrap util-linux python3 py3-pip git curl ca-certificates
 else
   echo "hud: Harbor environments require an apt- or apk-based image" >&2
   exit 1
 fi
 
-uv python install "$python_version"
-uv venv "$root/venv" --python "$python_version"
+python="$(command -v python3)"
+if ! "$python" -c 'import sys; raise SystemExit(not ((3, 11) <= sys.version_info[:2] < (3, 13)))'; then
+  uv python install "$python_version"
+  python="$root/bin/python$python_version"
+fi
+
+uv venv "$root/venv" --python "$python"
 uv pip install --python "$root/venv/bin/python" "$requirement"

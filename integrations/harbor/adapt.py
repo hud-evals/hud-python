@@ -13,12 +13,13 @@ import tempfile
 import tomllib
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from hud.capabilities import Capability
+from hud.environment.egress import BRIDGE_PORT, VISITOR_PORT
 from hud.eval import Task, Taskset
 from hud.eval.compose import ComposeConfig, ComposeHealthcheck, ComposeService, ImageConfig
 from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeResources
@@ -47,16 +48,32 @@ COMPOSE_FILENAMES = (
 )
 
 
-class Phase(BaseModel):
-    model_config = ConfigDict(extra="allow")
+class Artifact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    timeout_sec: float | None = Field(default=None, gt=0)
-    user: str | int | None = None
-    network_mode: NetworkMode | None = None
-    allowed_hosts: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    environment: dict[str, Any] | None = None
-    environment_mode: str | None = None
+    source: str = Field(pattern=r"^/")
+    service: str = Field(default="main", min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def expand_path(cls, value: Any) -> Any:
+        return {"source": value} if isinstance(value, str) else value
+
+    @field_validator("source")
+    @classmethod
+    def normalize_source(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if len(path.parts) == 1 or ".." in path.parts:
+            raise ValueError("artifact source must name a path beneath /")
+        return str(path)
+
+
+class Collect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service: str = Field(default="main", min_length=1)
+    command: str = Field(min_length=1)
+    timeout_sec: float = Field(default=600.0, gt=0)
 
 
 class HealthcheckConfig(BaseModel):
@@ -138,6 +155,23 @@ class EnvironmentConfig(BaseModel):
     skills_dir: str | None = None
 
 
+class Phase(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    timeout_sec: float | None = Field(default=None, gt=0)
+    user: str | int | None = None
+    network_mode: NetworkMode | None = None
+    allowed_hosts: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    environment: EnvironmentConfig | None = None
+    environment_mode: Literal["separate"] | None = None
+    collect: list[Collect] = Field(default_factory=list)
+
+    @property
+    def separate(self) -> bool:
+        return self.environment_mode == "separate" or self.environment is not None
+
+
 class PackageInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -152,6 +186,7 @@ class TaskConfig(BaseModel):
     schema_version: str | None = None
     task: PackageInfo = Field(default_factory=PackageInfo)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    artifacts: list[Artifact] = Field(default_factory=list)
     environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
     agent: Phase = Field(default_factory=Phase)
     verifier: Phase = Field(default_factory=Phase)
@@ -210,8 +245,22 @@ async def adapt(
             unsupported.append("stdio MCP servers")
         if config.environment.skills_dir:
             unsupported.append("skills_dir")
-        if config.verifier.environment_mode == "separate" or config.verifier.environment:
-            unsupported.append("a separate verifier environment")
+        verifier_environment = config.verifier.environment
+        if verifier_environment is not None:
+            if verifier_environment.os != "linux":
+                unsupported.append(f"verifier os={verifier_environment.os!r}")
+            if verifier_environment.tpu:
+                unsupported.append("verifier TPUs")
+            if len(verifier_environment.gpu_types) > 1:
+                unsupported.append("multiple verifier GPU types")
+            elif verifier_environment.gpu_types and not verifier_environment.gpus:
+                unsupported.append("verifier GPU types without GPUs")
+            gpu_types = {
+                *config.environment.gpu_types,
+                *verifier_environment.gpu_types,
+            }
+            if len(gpu_types) > 1:
+                unsupported.append("different agent and verifier GPU types")
         if config.steps:
             unsupported.append("multi-step tasks")
         if unsupported:
@@ -285,18 +334,26 @@ async def adapt(
             )
         )
 
-    grouped: dict[tuple[str, str], list[HarborTask]] = {}
+    grouped: dict[tuple[str, str, str], list[HarborTask]] = {}
     for task in tasks:
         config_json = json.dumps(
             task.config.model_dump(mode="json", exclude={"task", "metadata", "steps"}),
             sort_keys=True,
         )
-        grouped.setdefault((task.environment_hash, config_json), []).append(task)
+        grouped.setdefault(
+            (
+                task.environment_hash,
+                config_json,
+                task.path.name if task.config.verifier.separate else "",
+            ),
+            [],
+        ).append(task)
 
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
-    for (environment_hash, config_json), group in sorted(grouped.items()):
-        digest = hashlib.sha256((environment_hash + "\0" + config_json).encode()).hexdigest()[:12]
+    for group_key, group in sorted(grouped.items()):
+        environment_hash, config_json, _ = group_key
+        digest = hashlib.sha256("\0".join(group_key).encode()).hexdigest()[:12]
         name = f"{base_name}-{digest}"
         source = group[0]
         environment = source.config.environment
@@ -341,6 +398,35 @@ async def adapt(
             raise FileNotFoundError(f"{source.path.name} has no environment/Dockerfile")
 
         image_config = await ImageConfig.inspect(base_image, docker)
+        separate = source.config.verifier.separate
+        verifier_environment = source.config.verifier.environment or EnvironmentConfig()
+        verifier_image = base_image
+        verifier_config = image_config
+        if separate:
+            verifier_dockerfile = source.path / "tests" / "Dockerfile"
+            if not verifier_dockerfile.is_file():
+                raise FileNotFoundError(
+                    f"{source.path.name} uses a separate verifier but has no tests/Dockerfile"
+                )
+            verifier_digest = hashlib.sha256()
+            for entry in sorted(verifier_dockerfile.parent.rglob("*")):
+                relative_path = entry.relative_to(verifier_dockerfile.parent).as_posix().encode()
+                if entry.is_symlink():
+                    verifier_digest.update(
+                        relative_path + b"\0symlink\0" + os.readlink(entry).encode()
+                    )
+                elif entry.is_file():
+                    verifier_digest.update(relative_path + b"\0" + entry.read_bytes())
+            verifier_image = f"hud-harbor-verifier:{name}-{verifier_digest.hexdigest()[:16]}"
+            await docker(
+                "build",
+                "--tag",
+                verifier_image,
+                str(verifier_dockerfile.parent),
+                deadline=verifier_environment.build_timeout_sec,
+            )
+            verifier_config = await ImageConfig.inspect(verifier_image, docker)
+
         peers = []
         if compose is not None:
             for service_name, service in compose.services.items():
@@ -432,9 +518,38 @@ async def adapt(
         for entry in image_config.environment:
             key, _, value = entry.partition("=")
             image_env[key] = value
+        ports = {
+            int(port)
+            for exposed in (*image_config.exposed_ports, *compose_main.expose)
+            if (port := str(exposed).partition("/")[0]).isdigit()
+        }
+        ports.update(
+            published.target for published in compose_main.ports if published.protocol == "tcp"
+        )
+        if conflict := ports & {BRIDGE_PORT, VISITOR_PORT, 8765}:
+            raise ValueError(
+                f"Harbor main service port {min(conflict)} conflicts with a HUD reserved port"
+            )
         healthcheck = environment.healthcheck
         if healthcheck is None and compose_main.healthcheck is not None:
             healthcheck = HealthcheckConfig.from_compose(compose_main.healthcheck)
+        verifier_env = {
+            key: value
+            for entry in verifier_config.environment
+            for key, _, value in (entry.partition("="),)
+        }
+        verifier_phase = source.config.verifier
+        verifier_policy = verifier_phase.model_dump(
+            include={"user", "network_mode", "allowed_hosts", "env"}
+        )
+        if verifier_phase.environment is not None:
+            if verifier_phase.network_mode is None:
+                verifier_policy["network_mode"] = verifier_environment.network_mode
+                verifier_policy["allowed_hosts"] = verifier_environment.allowed_hosts
+            verifier_policy["env"] = {
+                **verifier_environment.env,
+                **verifier_phase.env,
+            }
         manifest = {
             "name": name,
             "workdir": workdir,
@@ -447,6 +562,13 @@ async def adapt(
                 if compose is not None and compose_main.entrypoint is not None
                 else image_config.entrypoint or []
             ),
+            "ports": sorted(ports),
+            "verifier_root": str(HUD_ROOT / "verifier") if separate else None,
+            "verifier_image": {
+                "user": verifier_config.user or None,
+                "workdir": verifier_environment.workdir or verifier_config.working_dir or "/",
+                "env": verifier_env,
+            },
             "environment": {
                 "env": {
                     **compose_main.environment,
@@ -459,9 +581,7 @@ async def adapt(
             "agent": source.config.agent.model_dump(
                 include={"user", "network_mode", "allowed_hosts", "env"}
             ),
-            "verifier": source.config.verifier.model_dump(
-                include={"user", "network_mode", "allowed_hosts", "env"}
-            ),
+            "verifier": verifier_policy,
             "capabilities": [
                 Capability.mcp(
                     name=server.name,
@@ -470,6 +590,7 @@ async def adapt(
                 ).to_manifest()
                 for server in environment.mcp_servers
             ],
+            "local_aliases": ["main"] if compose is not None else [],
             "peers": peers,
             "tasks": [],
         }
@@ -479,12 +600,22 @@ async def adapt(
             target = context / "tasks" / task.path.name
             target.mkdir()
             shutil.copy2(task.path / "instruction.md", target / "instruction.md")
-            shutil.copytree(task.path / "tests", target / "tests", symlinks=True, ignore=IGNORED)
+            task_separate = task.config.verifier.separate
+            if not task_separate:
+                shutil.copytree(
+                    task.path / "tests",
+                    target / "tests",
+                    symlinks=True,
+                    ignore=IGNORED,
+                )
             manifest["tasks"].append(
                 {
                     "id": task.path.name,
                     "description": task.config.task.description,
                     "verifier_timeout": task.config.verifier.timeout_sec or 600.0,
+                    "separate_verifier": task_separate,
+                    "collect": [hook.model_dump() for hook in task.config.verifier.collect],
+                    "artifacts": [artifact.model_dump() for artifact in task.config.artifacts],
                 }
             )
         (context / "tasks.json").write_text(
@@ -509,8 +640,12 @@ async def adapt(
         image = f"{push}/{name}:{tag}" if push else f"hud-harbor:{name}-{tag}"
         await docker(
             "build",
+            "--target",
+            "verifier" if separate else "plain",
             "--build-arg",
             f"BASE_IMAGE={base_image}",
+            "--build-arg",
+            f"VERIFIER_IMAGE={verifier_image}",
             "--build-arg",
             f"HUD_REQUIREMENT={requirement}",
             "--tag",
@@ -547,15 +682,23 @@ async def adapt(
 
         for task in group:
             config = task.config
+            task_separate = config.verifier.separate
+            phase_environment = config.verifier.environment or EnvironmentConfig()
+            gpu_count = max(config.environment.gpus or 0, phase_environment.gpus or 0)
+            gpu_types = config.environment.gpu_types or phase_environment.gpu_types
             resources = RuntimeResources(
-                cpu=config.environment.cpus,
-                memory_mb=config.environment.memory_mb,
+                cpu=max(config.environment.cpus or 0, phase_environment.cpus or 0) or None,
+                memory_mb=max(
+                    config.environment.memory_mb or 0,
+                    phase_environment.memory_mb or 0,
+                )
+                or None,
                 gpu=(
                     RuntimeGPU(
-                        count=config.environment.gpus,
-                        type=next(iter(filter(None, config.environment.gpu_types)), None),
+                        count=gpu_count,
+                        type=next(iter(filter(None, gpu_types)), None),
                     )
-                    if config.environment.gpus
+                    if gpu_count
                     else None
                 ),
             )
@@ -575,7 +718,13 @@ async def adapt(
                     runtime_config=RuntimeConfig(
                         image=image if compose is None else None,
                         compose=context / "compose.json" if compose is not None else None,
+                        compose_service_access=(
+                            True if compose is not None and task_separate else None
+                        ),
                         resources=resources if resources.model_dump(exclude_none=True) else None,
+                    ),
+                    verifier=(
+                        Task(env=name, id=f"{task.path.name}:verify") if task_separate else None
                     ),
                 )
             )

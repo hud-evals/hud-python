@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 import hud.eval.runtime as runtime_module
-from hud.eval.compose import ComposeService, ImageConfig
+from hud.eval.compose import ComposeHealthcheck, ComposeService, ImageConfig
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -167,6 +167,8 @@ class _FakeModalSandbox:
         uploads = self._calls.setdefault("uploads", [])
         assert isinstance(uploads, list)
         uploads.append((source.name, target))
+        if source.name == "override.json":
+            self._calls["compose_override"] = json.loads(source.read_text("utf-8"))
 
     async def _exec(self, *args: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("execs", [])
@@ -628,6 +630,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
     calls: list[tuple[str, ...]] = []
     rendered: dict[str, Any] = {}
     port_override = ""
@@ -640,6 +643,8 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
         nonlocal port_override
         calls.append(args)
+        if args[:2] == ("context", "inspect"):
+            return "unix:///Users/test/.docker/run/docker.sock\n", ""
         if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
             files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
             _, override, ports = files
@@ -655,6 +660,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         id="t",
         runtime_config=RuntimeConfig(
             compose=compose,
+            compose_service_access=True,
             resources=RuntimeResources(cpu=2, memory_mb=4096),
         ),
     )
@@ -670,19 +676,49 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         ],
         "cpus": 2.0,
         "mem_limit": "4096m",
+        "volumes": [
+            {
+                "type": "bind",
+                "source": "/Users/test/.docker/run/docker.sock",
+                "target": "/media/hud/docker.sock",
+            }
+        ],
     }
     assert 'ports: !override ["127.0.0.1::8765"]' in port_override
     up = next(
         call for call in calls if call[-4:] == ("up", "--detach", "--build", "--remove-orphans")
     )
     assert str(compose.resolve()) in up
-    assert all("/var/run/docker.sock" not in " ".join(call) for call in calls)
     assert calls[-1][-3:] == ("down", "--volumes", "--remove-orphans")
+
+
+async def test_docker_runtime_rejects_remote_compose_service_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    monkeypatch.setenv("DOCKER_HOST", "tcp://docker.example:2376")
+
+    with pytest.raises(ValueError, match="requires a local Unix Docker endpoint"):
+        async with DockerRuntime()(
+            Task(
+                env="any-env",
+                id="t",
+                runtime_config=RuntimeConfig(
+                    compose=compose,
+                    compose_service_access=True,
+                ),
+            )
+        ):
+            pass
 
 
 def test_docker_runtime_accepts_only_one_environment_definition(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="either image or compose"):
         RuntimeConfig(image="img:tag", compose=tmp_path / "compose.yaml")
+    with pytest.raises(ValueError, match="compose_service_access requires"):
+        RuntimeConfig(image="img:tag", compose_service_access=True)
 
 
 def test_docker_runtime_accepts_runtime_config_defaults() -> None:
@@ -757,7 +793,9 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     compose = tmp_path / "compose.yaml"
     compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
 
-    async with ModalRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
+    async with ModalRuntime(
+        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True)
+    )(_row()) as runtime:
         assert runtime.url == "tcp://modal.host:4567"
 
     assert calls["registry_image"] == "docker:28.3.3-dind"
@@ -770,6 +808,15 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
         ("override.json", "/hud/override.json"),
         ("ports.yaml", "/hud/ports.yaml"),
         ("docker-seccomp.json", "/hud/docker-seccomp.json"),
+    ]
+    override = calls["compose_override"]
+    assert isinstance(override, dict)
+    assert override["services"]["main"]["volumes"] == [
+        {
+            "type": "bind",
+            "source": "/var/run/docker.sock",
+            "target": "/media/hud/docker.sock",
+        }
     ]
     execs = calls["execs"]
     assert isinstance(execs, list)
@@ -930,153 +977,19 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     assert calls["delete"] == "sandbox-1"
 
 
-async def test_daytona_runtime_maps_compose_services_to_linked_sandboxes(
+async def test_daytona_runtime_rejects_compose(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _install_fake_daytona(monkeypatch)
     compose = tmp_path / "compose.yaml"
-    compose.write_text(
-        """\
-services:
-  main:
-    image: hud-env:one
-    command: hud serve /env.py
-    entrypoint: []
-    working_dir: /app
-  redis:
-    image: redis:7
-    entrypoint: null
-    command: null
-    working_dir: /data
-    environment:
-      REDIS_ARGS: --save ''
-  worker:
-    image: worker:1
-    entrypoint: []
-    command: worker run
-    working_dir: /srv
-""",
-        encoding="utf-8",
-    )
-    docker_calls: list[tuple[str, ...]] = []
+    compose.write_text("services: {}\n", encoding="utf-8")
 
-    async def docker(*args: str, **_: object) -> tuple[str, str]:
-        docker_calls.append(args)
-        if args[0] == "compose":
-            return (
-                json.dumps(
-                    {
-                        "services": {
-                            "main": {
-                                "image": "hud-env:one",
-                                "command": ["hud", "serve", "/env.py"],
-                                "entrypoint": [],
-                                "working_dir": "/app",
-                            },
-                            "redis": {
-                                "image": "redis:7",
-                                "entrypoint": None,
-                                "command": None,
-                                "working_dir": "/data",
-                                "environment": {"REDIS_ARGS": "--save ''"},
-                            },
-                            "worker": {
-                                "image": "worker:1",
-                                "entrypoint": [],
-                                "command": ["worker", "run"],
-                                "working_dir": "/srv",
-                            },
-                        }
-                    }
-                ),
-                "",
-            )
-        if args[:3] == ("buildx", "imagetools", "inspect"):
-            return (
-                json.dumps(
-                    {
-                        "Entrypoint": ["docker-entrypoint.sh"],
-                        "Cmd": ["redis-server"],
-                        "WorkingDir": "/data",
-                    }
-                ),
-                "",
-            )
-        raise AssertionError(args)
+    with pytest.raises(ValueError, match=r"does not support runtime_config\.compose"):
+        async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()):
+            pass
 
-    monkeypatch.setattr(runtime_module, "_docker", docker)
-
-    async with DaytonaRuntime(runtime_config=RuntimeConfig(compose=compose))(_row()) as runtime:
-        assert runtime.url == "tcp://127.0.0.1:54321"
-
-    assert client.created[0] == _CreateSandboxFromImageParams(
-        image=_DaytonaImage("hud-env:one"),
-        ephemeral=True,
-        auto_stop_interval=0,
-        resources=None,
-    )
-    child = client.created[1]
-    assert isinstance(child, _CreateSandboxFromSnapshotParams)
-    assert child.linked_sandbox == "sandbox-1"
-    assert child.env_vars == {"REDIS_ARGS": "--save ''"}
-    assert child.name is not None and child.name.startswith("hud-redis-")
-    worker = client.created[2]
-    assert isinstance(worker, _CreateSandboxFromSnapshotParams)
-    assert worker.linked_sandbox == "sandbox-1"
-    assert worker.name is not None and worker.name.startswith("hud-worker-")
-    assert client.snapshot.builds == [child.snapshot, worker.snapshot]
-    assert client.snapshot.snapshots[child.snapshot].image_name == "redis:7"
-    assert client.snapshot.snapshots[worker.snapshot].image_name == "worker:1"
-    assert client.calls["session_commands"] == [
-        (
-            "sandbox-2",
-            "hud-redis",
-            _SessionExecuteRequest(
-                command="cd /data && docker-entrypoint.sh redis-server",
-                run_async=True,
-            ),
-        ),
-        (
-            "sandbox-3",
-            "hud-worker",
-            _SessionExecuteRequest(
-                command="cd /srv && worker run",
-                run_async=True,
-            ),
-        ),
-        (
-            "sandbox-1",
-            "hud-serve",
-            _SessionExecuteRequest(
-                command="cd /app && hud serve /env.py",
-                run_async=True,
-            ),
-        ),
-    ]
-    commands = client.calls["process_execs"]
-    assert isinstance(commands, list)
-    aliases = {sandbox_id: command for sandbox_id, command, _ in commands}
-    assert "getent ahostsv4 sandbox-2" in aliases["sandbox-1"]
-    assert "redis" in aliases["sandbox-1"]
-    assert "getent ahostsv4 sandbox-3" in aliases["sandbox-2"]
-    assert "worker" in aliases["sandbox-2"]
-    assert "getent ahostsv4 sandbox-2" in aliases["sandbox-3"]
-    assert "redis" in aliases["sandbox-3"]
-    assert client.calls["deleted"] == ["sandbox-3", "sandbox-2", "sandbox-1"]
-    assert client.calls["client_closed"] is True
-    assert docker_calls[0] == (
-        "compose",
-        "--project-directory",
-        str(tmp_path),
-        "--file",
-        str(compose),
-        "config",
-        "--format",
-        "json",
-    )
-    assert docker_calls[1][:3] == ("buildx", "imagetools", "inspect")
-    assert docker_calls[1][-1] == "redis:7"
+    assert client.created == []
 
 
 def test_compose_service_applies_image_defaults_once() -> None:
@@ -1095,6 +1008,14 @@ def test_compose_service_applies_image_defaults_once() -> None:
         entrypoint=["custom-entrypoint"],
     ).with_image("redis:7", image)
     assert overridden.argv == ["custom-entrypoint"]
+
+
+def test_compose_healthcheck_does_not_invent_duration_values() -> None:
+    service = ComposeService(
+        healthcheck=ComposeHealthcheck(test=["CMD", "healthcheck"]),
+    )
+
+    assert service.model_dump(exclude_none=True)["healthcheck"] == {"test": ["CMD", "healthcheck"]}
 
 
 async def test_daytona_task_runtime_config_overlays_provider_defaults(
