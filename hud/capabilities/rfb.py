@@ -24,17 +24,37 @@ import contextlib
 import io
 import logging
 from contextlib import AsyncExitStack
-from typing import ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 from urllib.parse import urlsplit
 
 import asyncvnc
 from PIL import Image
+from pydantic import BaseModel, ConfigDict, Field
 
 from .base import Capability, CapabilityClient
 
 LOGGER = logging.getLogger("hud.capabilities.rfb")
 
 ScreenshotMimeType = Literal["image/png", "image/webp"]
+
+
+class PngScreenshotEncoding(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    mime_type: Literal["image/png"] = "image/png"
+
+
+class WebPScreenshotEncoding(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    mime_type: Literal["image/webp"] = "image/webp"
+    quality: int = Field(default=85, ge=0, le=100)
+
+
+ScreenshotEncoding = Annotated[
+    PngScreenshotEncoding | WebPScreenshotEncoding,
+    Field(discriminator="mime_type"),
+]
 
 
 class RFBClient(CapabilityClient):
@@ -114,19 +134,23 @@ class RFBClient(CapabilityClient):
 
     async def screenshot_png(
         self,
-        mime_type: ScreenshotMimeType = "image/png",
+        encoding: ScreenshotEncoding | ScreenshotMimeType = "image/png",
     ) -> tuple[bytes, ScreenshotMimeType]:
         """Capture the framebuffer in the requested format; reconnect on desync."""
+        if isinstance(encoding, str):
+            encoding = (
+                WebPScreenshotEncoding() if encoding == "image/webp" else PngScreenshotEncoding()
+            )
         for attempt in range(3):
             try:
                 rgba = await self._conn.screenshot()
                 image = Image.fromarray(rgba)
                 buf = io.BytesIO()
-                if mime_type == "image/webp":
-                    image.save(buf, format="WEBP", quality=85)
+                if isinstance(encoding, WebPScreenshotEncoding):
+                    image.save(buf, format="WEBP", quality=encoding.quality)
                 else:
                     image.save(buf, format="PNG")
-                return buf.getvalue(), mime_type
+                return buf.getvalue(), encoding.mime_type
             except (ValueError, ConnectionError, OSError, EOFError) as exc:
                 LOGGER.warning("screenshot failed (attempt %d): %s", attempt + 1, exc)
                 if attempt == 2:
@@ -142,4 +166,10 @@ class RFBClient(CapabilityClient):
         await self._exit_stack.aclose()
 
 
-__all__ = ["RFBClient", "ScreenshotMimeType"]
+__all__ = [
+    "PngScreenshotEncoding",
+    "RFBClient",
+    "ScreenshotEncoding",
+    "ScreenshotMimeType",
+    "WebPScreenshotEncoding",
+]

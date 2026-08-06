@@ -16,6 +16,7 @@ import mcp.types as mcp_types
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
+from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import MCPToolResult
 
 from .base import ClaudeToolSpec
@@ -279,11 +280,7 @@ class ClaudeComputerTool(RFBTool):
         except (TypeError, ValueError):
             return tool_err("region must contain 4 integers")
         screenshot, _ = await self.client.screenshot_png("image/png")
-        cropped, mime_type = _crop_png(
-            screenshot,
-            (x0, y0, x1, y1),
-            self.screenshot_mime_type,
-        )
+        cropped, mime_type = _crop_png(screenshot, (x0, y0, x1, y1), self.screenshot_encoding)
         return MCPToolResult(
             content=[
                 mcp_types.ImageContent(
@@ -356,18 +353,18 @@ def _drag_path(arguments: dict[str, Any]) -> list[tuple[int, int]]:
 def _crop_png(
     png: bytes,
     region: tuple[int, int, int, int],
-    mime_type: str,
+    encoding: ScreenshotEncoding,
 ) -> tuple[bytes, str]:
     from PIL import Image
 
     image = Image.open(BytesIO(png))
     cropped = image.crop(region)
     buf = BytesIO()
-    if mime_type == "image/webp":
-        cropped.save(buf, format="WEBP", quality=85)
+    if isinstance(encoding, WebPScreenshotEncoding):
+        cropped.save(buf, format="WEBP", quality=encoding.quality)
     else:
         cropped.save(buf, format="PNG")
-    return buf.getvalue(), mime_type
+    return buf.getvalue(), encoding.mime_type
 
 
 __all__ = ["CLAUDE_COMPUTER_SPECS", "ClaudeComputerTool"]

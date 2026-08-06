@@ -28,6 +28,11 @@ from pydantic import (
 )
 
 from hud.agents.tools.hosted import HostedTool
+from hud.capabilities.rfb import (
+    PngScreenshotEncoding,
+    ScreenshotEncoding,
+    WebPScreenshotEncoding,
+)
 from hud.types import (
     ROBOT_STEP_SCHEMA,
     MCPToolCall,
@@ -56,6 +61,7 @@ class AgentConfig(BaseModel):
     #: result the model can react to; training configs typically stop on both.
     stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
     hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
+    screenshot_encoding: ScreenshotEncoding = Field(default_factory=PngScreenshotEncoding)
 
     model_name: str = "Agent"
     model: str = Field(default="unknown", validation_alias=_model_alias)
@@ -74,6 +80,7 @@ class ClaudeConfig(AgentConfig):
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
     max_tokens: int = 16384
     use_computer_beta: bool = True
+    screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
 
 
 # -----------------------------------------------------------------------------
@@ -147,6 +154,7 @@ class ClaudeSDKConfig(AgentConfig):
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
+    screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     allowed_tools: list[str] = Field(
         default_factory=lambda: [
             "Read",

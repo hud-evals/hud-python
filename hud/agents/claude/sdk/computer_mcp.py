@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 import fastmcp
 
+from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
+
 if TYPE_CHECKING:
     from hud.capabilities.rfb import RFBClient
 
@@ -19,9 +21,13 @@ logger = logging.getLogger(__name__)
 
 #: Keep references to background server tasks so they aren't garbage-collected.
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+_DEFAULT_SCREENSHOT_ENCODING = WebPScreenshotEncoding()
 
 
-def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
+def create_computer_mcp(
+    rfb: RFBClient,
+    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
+) -> fastmcp.FastMCP:
     """Build a FastMCP server with one ``computer`` tool backed by ``rfb``."""
 
     mcp = fastmcp.FastMCP("computer-use")
@@ -79,7 +85,11 @@ def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
                 arguments["region"] = region
 
         spec = AgentToolSpec(api_type="computer", api_name="computer")
-        tool = ClaudeComputerTool(spec=spec, client=rfb)
+        tool = ClaudeComputerTool(
+            spec=spec,
+            client=rfb,
+            screenshot_encoding=screenshot_encoding,
+        )
         result = await tool.execute(arguments)
 
         # Return content blocks directly so the CLI/model sees real images.
@@ -106,6 +116,7 @@ def create_computer_mcp(rfb: RFBClient) -> fastmcp.FastMCP:
 
 async def serve_computer_mcp(
     rfb: RFBClient,
+    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
     host: str = "127.0.0.1",
     port: int = 0,
 ) -> int:
@@ -115,7 +126,7 @@ async def serve_computer_mcp(
         port = srv.sockets[0].getsockname()[1]
         srv.close()
 
-    mcp = create_computer_mcp(rfb)
+    mcp = create_computer_mcp(rfb, screenshot_encoding)
     task = asyncio.create_task(_run(mcp, host, port))
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)

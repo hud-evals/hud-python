@@ -22,6 +22,7 @@ from hud.agents.claude.tools.computer import (
     _translate_key,
 )
 from hud.agents.tools.base import result_text, tool_ok
+from hud.capabilities.rfb import WebPScreenshotEncoding
 
 
 class RecordingComputer(ClaudeComputerTool):
@@ -31,7 +32,7 @@ class RecordingComputer(ClaudeComputerTool):
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
-        self.screenshot_mime_type = "image/webp"
+        self.screenshot_encoding = WebPScreenshotEncoding(quality=42)
         self.client = SimpleNamespace(width=200, height=100)
 
     async def screenshot(self) -> Any:
@@ -160,7 +161,11 @@ def test_crop_reports_encoded_mime_type() -> None:
     source = BytesIO()
     Image.effect_noise((128, 128), 100).convert("RGB").save(source, format="PNG")
 
-    cropped, mime_type = _crop_png(source.getvalue(), (0, 0, 128, 128), "image/webp")
+    cropped, mime_type = _crop_png(
+        source.getvalue(),
+        (0, 0, 128, 128),
+        WebPScreenshotEncoding(quality=42),
+    )
 
     assert mime_type == "image/webp"
     assert cropped.startswith(b"RIFF")
@@ -177,6 +182,6 @@ async def test_zoom_reports_encoded_mime_type() -> None:
         result = await tool._zoom({"region": [0, 0, 10, 10]})
 
     tool.client.screenshot_png.assert_awaited_once_with("image/png")
-    crop.assert_called_once_with(b"png", (0, 0, 10, 10), "image/webp")
+    crop.assert_called_once_with(b"png", (0, 0, 10, 10), tool.screenshot_encoding)
     image = next(block for block in result.content if isinstance(block, mcp_types.ImageContent))
     assert image.mimeType == "image/webp"

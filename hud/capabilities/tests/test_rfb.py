@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import mcp.types as mcp_types
 from PIL import Image
 
 from hud.agents.tools.rfb import RFBTool
-from hud.capabilities.rfb import RFBClient
+from hud.capabilities.rfb import RFBClient, WebPScreenshotEncoding
 
 
 class RecordingRFBTool(RFBTool):
@@ -16,7 +16,7 @@ class RecordingRFBTool(RFBTool):
     client: Any
 
     def __init__(self) -> None:
-        self.screenshot_mime_type = "image/webp"
+        self.screenshot_encoding = WebPScreenshotEncoding(quality=42)
         self.client = SimpleNamespace(
             screenshot_png=AsyncMock(return_value=(b"webp", "image/webp")),
         )
@@ -39,14 +39,13 @@ async def test_screenshot_uses_requested_webp_mime_type() -> None:
         ),
     )
 
-    with patch(
-        "hud.capabilities.rfb.Image.fromarray", return_value=Image.effect_noise((128, 128), 100)
-    ):
-        data, mime_type = await client.screenshot_png("image/webp")
+    save = Mock(side_effect=lambda buffer, **_kwargs: buffer.write(b"webp"))
+    with patch("hud.capabilities.rfb.Image.fromarray", return_value=SimpleNamespace(save=save)):
+        data, mime_type = await client.screenshot_png(WebPScreenshotEncoding(quality=42))
 
     assert mime_type == "image/webp"
-    assert data.startswith(b"RIFF")
-    assert data[8:12] == b"WEBP"
+    assert data == b"webp"
+    save.assert_called_once_with(ANY, format="WEBP", quality=42)
 
 
 async def test_screenshot_uses_requested_png_mime_type() -> None:
@@ -74,3 +73,4 @@ async def test_screenshot_reports_encoded_mime_type() -> None:
     image = result.content[0]
     assert isinstance(image, mcp_types.ImageContent)
     assert image.mimeType == "image/webp"
+    tool.client.screenshot_png.assert_awaited_once_with(tool.screenshot_encoding)
