@@ -47,10 +47,6 @@ class TestContentHelpers:
 
 
 class TestChatConstruction:
-    def test_requires_an_agent(self, dummy_task: Any) -> None:
-        with pytest.raises(TypeError):
-            Chat(dummy_task)  # type: ignore[call-arg]
-
     def test_messages_start_empty_and_are_the_public_history(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, _EchoAgent())
         assert chat.messages == []

@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """``ToolAgent`` plumbing: catalog→clients, message formatting, dispatch + loop.
 
 The provider-specific bits are abstract; this drives a tiny concrete subclass with a
@@ -8,7 +7,7 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import fastmcp
 import mcp.types as mcp_types
@@ -21,6 +20,9 @@ from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentConfig, AgentStep, ToolStep
 from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
+
+if TYPE_CHECKING:
+    from hud.eval.run import Run
 
 _Msg = dict[str, Any]
 
@@ -319,9 +321,9 @@ async def test_dispatch_unparsed_arguments_returns_error_result() -> None:
 
 async def test_loop_finishes_on_done_response() -> None:
     agent = DictAgent([AgentStep(content="final answer", done=True)])
-    run = _FakeRun()
+    run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+    await agent._loop(run, RunState(), max_steps=3)
 
     assert run.trace.status == "completed"
     assert run.trace.content == "final answer"
@@ -344,9 +346,9 @@ async def test_loop_dispatches_tool_calls_then_finishes() -> None:
             AgentStep(content="done now", done=True),
         ]
     )
-    run = _FakeRun()
+    run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+    await agent._loop(run, RunState(), max_steps=3)
 
     assert run.trace.content == "done now"
     assert [step.source for step in run.trace.steps] == ["agent", "tool", "agent"]
@@ -367,9 +369,9 @@ async def test_loop_max_steps_is_normal_termination() -> None:
         AgentStep(content="", done=False, tool_calls=[MCPToolCall(name="ghost")]) for _ in range(5)
     ]
     agent = DictAgent(never_done)
-    run = _FakeRun()
+    run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=2)  # type: ignore[arg-type]
+    await agent._loop(run, RunState(), max_steps=2)
 
     assert run.trace.is_error is False
     assert run.trace.status == "completed"
@@ -385,9 +387,9 @@ async def test_loop_marks_length_finish_as_truncated() -> None:
     # provider's finish-reason vocabulary.
     for finish_reason in ("length", "max_output_tokens", "max_tokens", "MAX_TOKENS"):
         agent = DictAgent([AgentStep(content="partial", done=True, finish_reason=finish_reason)])
-        run = _FakeRun()
+        run = cast("Run", _FakeRun())
 
-        await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+        await agent._loop(run, RunState(), max_steps=3)
 
         assert run.trace.status == "completed"
         assert run.trace.stop_reason == "length"
@@ -406,9 +408,9 @@ async def test_loop_answers_malformed_call_by_default() -> None:
             AgentStep(content="recovered", done=True),
         ]
     )
-    run = _FakeRun()
+    run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+    await agent._loop(run, RunState(), max_steps=3)
 
     assert run.trace.content == "recovered"
     tool_step = run.trace.steps[1]
@@ -430,9 +432,9 @@ async def test_loop_stops_on_malformed_call_when_configured() -> None:
         ],
         stop_on={"malformed_tool_call"},
     )
-    run = _FakeRun()
+    run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+    await agent._loop(run, RunState(), max_steps=3)
 
     assert run.trace.status == "completed"
     assert run.trace.stop_reason == "malformed_tool_call"
@@ -453,9 +455,9 @@ async def test_loop_stops_on_length_when_configured() -> None:
         ],
         stop_on={"length", "malformed_tool_call"},
     )
-    run = _FakeRun()
+    run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)  # type: ignore[arg-type]
+    await agent._loop(run, RunState(), max_steps=3)
 
     assert run.trace.stop_reason == "length"
     assert run.trace.is_truncated is True

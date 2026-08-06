@@ -1,7 +1,6 @@
 """``GeminiAgent`` — ``get_response`` parsing over a fake Generate Content client,
 plus ``_make_tool_call`` mapping and ``_grounding_citations``.
 """
-# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 

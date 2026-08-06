@@ -2,12 +2,12 @@
 
 No live VNC: a recording subclass captures the primitive calls.
 """
-# pyright: reportPrivateUsage=false, reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock, patch
 
 from hud.agents.openai.tools.computer import (
     OpenAIComputerTool,
@@ -15,6 +15,9 @@ from hud.agents.openai.tools.computer import (
     _map_key,
 )
 from hud.agents.tools.base import result_text, tool_ok
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class RecordingOpenAI(OpenAIComputerTool):
@@ -28,7 +31,21 @@ class RecordingOpenAI(OpenAIComputerTool):
         self.calls.append(("screenshot",))
         return tool_ok("shot")
 
-    async def click(self, x: Any, y: Any, **kw: Any) -> None:
+    async def click(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        *,
+        button: Any = "left",
+        hold_keys: Iterable[str] | None = None,
+        count: int = 1,
+        interval_ms: int = 0,
+    ) -> None:
+        kw = {"button": button, "hold_keys": hold_keys}
+        if count != 1:
+            kw["count"] = count
+        if interval_ms:
+            kw["interval_ms"] = interval_ms
         self.calls.append(("click", x, y, kw))
 
     async def move(self, x: Any, y: Any) -> None:
@@ -40,14 +57,20 @@ class RecordingOpenAI(OpenAIComputerTool):
     async def press_keys(self, keys: Any, **kw: Any) -> None:
         self.calls.append(("keys", tuple(keys)))
 
-    async def scroll(self, x: Any, y: Any, **kw: Any) -> None:
+    async def scroll(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        *,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
+        hold_keys: Iterable[str] | None = None,
+    ) -> None:
+        kw = {"scroll_x": scroll_x, "scroll_y": scroll_y, "hold_keys": hold_keys}
         self.calls.append(("scroll", x, y, kw))
 
     async def drag(self, path: Any, **kw: Any) -> None:
         self.calls.append(("drag", tuple(path)))
-
-    async def wait(self, ms: Any) -> None:
-        self.calls.append(("wait", ms))
 
 
 def test_key_mapping() -> None:
@@ -79,9 +102,10 @@ async def test_type_and_keypress() -> None:
 async def test_drag_and_wait() -> None:
     tool = RecordingOpenAI()
     await tool.execute({"type": "drag", "path": [{"x": 0, "y": 0}, {"x": 5, "y": 5}]})
-    await tool.execute({"type": "wait", "ms": 500})
+    with patch("hud.agents.tools.rfb.asyncio.sleep", new_callable=AsyncMock) as sleep:
+        await tool.execute({"type": "wait", "ms": 500})
     assert ("drag", ((0, 0), (5, 5))) in tool.calls
-    assert ("wait", 500) in tool.calls
+    sleep.assert_awaited_once_with(0.5)
 
 
 async def test_response_action_returns_text() -> None:

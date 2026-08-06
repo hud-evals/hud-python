@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hud.eval import Task, Taskset
 from hud.eval.runtime import RuntimeConfig
@@ -60,7 +60,7 @@ def test_fetched_tasks_map_canonical_export_fields(
         ],
     }
 
-    def fake_request(method: str, url: str, **kwargs: object) -> dict:
+    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, Any]:
         requested.update(method=method, url=url)
         return payload
 
@@ -79,7 +79,7 @@ def test_fetched_tasks_map_canonical_export_fields(
 def test_resolve_taskset_id_looks_up_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     requested: dict[str, str] = {}
 
-    def fake_request(method: str, url: str, **kwargs: object) -> dict:
+    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, Any]:
         requested.update(method=method, url=url)
         return {"taskset_id": "ts-id", "name": "demo", "tasks": []}
 
@@ -104,7 +104,9 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     upload = Task(env="e", id="solve", args={"n": 1}, slug="solve-one")
     posted: dict[str, object] = {}
 
-    def fake_request(method: str, url: str, json: object = None, **kwargs: object) -> dict:
+    def fake_request(
+        method: str, url: str, json: object = None, **kwargs: object
+    ) -> dict[str, Any]:
         posted.update(method=method, url=url, json=json, api_key=kwargs.get("api_key"))
         return {"ok": True}
 

@@ -15,13 +15,10 @@ optional dependency
 
 from __future__ import annotations
 
-# browser-use is an optional, untyped dependency (lazy __getattr__ exports), so
-# its symbols and members resolve as Unknown under strict checking. This whole
-# module is the boundary around that SDK; contain the unknowns here.
-# pyright: reportAttributeAccessIssue=false, reportUnknownVariableType=false, reportUnknownMemberType=false
 import contextlib
+import importlib
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from hud.agents.base import Agent
@@ -35,6 +32,44 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.agents.browser_use")
 
 CDP_PROTOCOL = "cdp/1.3"
+
+
+class _Browser(Protocol):
+    async def stop(self) -> None: ...
+
+
+class _History(Protocol):
+    def is_successful(self) -> bool | None: ...
+
+    def final_result(self) -> str | None: ...
+
+    def number_of_steps(self) -> int: ...
+
+    def urls(self) -> list[str]: ...
+
+    def is_done(self) -> bool: ...
+
+
+class _BrowserAgent(Protocol):
+    async def run(self, *, max_steps: int) -> _History: ...
+
+
+class _ChatAnthropicFactory(Protocol):
+    def __call__(self, *, model: str, api_key: str, base_url: str | None) -> object: ...
+
+
+class _BrowserFactory(Protocol):
+    def __call__(self, *, cdp_url: str) -> _Browser: ...
+
+
+class _AgentFactory(Protocol):
+    def __call__(self, *, task: str, llm: object, browser: _Browser) -> _BrowserAgent: ...
+
+
+class _BrowserUseModule(Protocol):
+    ChatAnthropic: _ChatAnthropicFactory
+    Browser: _BrowserFactory
+    Agent: _AgentFactory
 
 
 class BrowserUseAgent(Agent):
@@ -52,8 +87,7 @@ class BrowserUseAgent(Agent):
         loop, and writes the final answer + trajectory metadata onto ``run.trace``
         (graded on exit).
         """
-        from browser_use import Agent as BrowserUseSdkAgent
-        from browser_use import Browser, ChatAnthropic
+        browser_use = cast("_BrowserUseModule", importlib.import_module("browser_use"))
 
         trace = run.trace
         cdp_url = _ws_to_http(run.client.binding(CDP_PROTOCOL).url)
@@ -63,12 +97,16 @@ class BrowserUseAgent(Agent):
         if not api_key:
             raise ValueError("BrowserUseAgent needs an Anthropic API key (set ANTHROPIC_API_KEY)")
 
-        llm = ChatAnthropic(model=self.config.model, api_key=api_key, base_url=self.config.base_url)
-        browser: Any = Browser(cdp_url=cdp_url)
-        sdk_agent = cast("Any", BrowserUseSdkAgent(task=run.prompt_text, llm=llm, browser=browser))
+        llm = browser_use.ChatAnthropic(
+            model=self.config.model,
+            api_key=api_key,
+            base_url=self.config.base_url,
+        )
+        browser = browser_use.Browser(cdp_url=cdp_url)
+        sdk_agent = browser_use.Agent(task=run.prompt_text, llm=llm, browser=browser)
 
         try:
-            history: Any = await sdk_agent.run(max_steps=self.config.max_steps)
+            history = await sdk_agent.run(max_steps=self.config.max_steps)
         except Exception as exc:
             LOGGER.exception("browser-use run failed")
             trace.status = "error"

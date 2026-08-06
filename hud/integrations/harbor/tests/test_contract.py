@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -63,7 +64,7 @@ def fake_docker(monkeypatch):
         if args[:4] == ("image", "inspect", "--format", "{{.Id}}"):
             return "sha256:0123456789abcdef0123456789abcdef\n", ""
         if args[0] == "compose" and args[-3:] == ("config", "--format", "json"):
-            project = {
+            project: Any = {
                 "name": "task",
                 "services": {
                     "main": {

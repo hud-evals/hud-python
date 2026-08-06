@@ -2,7 +2,6 @@
 
 Pure config logic; no agent is constructed and no network is touched.
 """
-# pyright: reportArgumentType=false, reportPrivateUsage=false
 
 from __future__ import annotations
 

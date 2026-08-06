@@ -1,7 +1,6 @@
 """``ClaudeAgent`` — ``get_response`` parsing over a fake streaming Messages client,
 plus the pure ``_citation`` / ``_cache_last_user_block`` helpers.
 """
-# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 

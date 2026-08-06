@@ -1,5 +1,4 @@
 """``OpenAIChatAgent`` — chat.completions ``get_response`` parsing + error path."""
-# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 

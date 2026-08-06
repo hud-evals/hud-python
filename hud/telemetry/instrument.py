@@ -18,7 +18,7 @@ import functools
 import inspect
 import logging
 import time
-from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast, overload
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -41,6 +41,13 @@ if TYPE_CHECKING:
     R = TypeVar("R")
 
 logger = logging.getLogger(__name__)
+
+
+class _InstrumentedCallable(Protocol):
+    _hud_instrumented: bool
+    _hud_original: Callable[..., Any]
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 def _serialize_value(value: Any, max_items: int = 10) -> JsonValue:
@@ -240,8 +247,9 @@ def instrument(
                 _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
         wrapper = async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-        wrapper._hud_instrumented = True  # type: ignore[attr-defined]
-        wrapper._hud_original = func  # type: ignore[attr-defined]
+        wrapper_state = cast("_InstrumentedCallable", wrapper)
+        wrapper_state._hud_instrumented = True
+        wrapper_state._hud_original = func
 
         return wrapper
 

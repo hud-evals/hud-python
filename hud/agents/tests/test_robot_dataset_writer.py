@@ -27,9 +27,9 @@ def _contract(
 
 @pytest.fixture(autouse=True)
 def reset_dataset_writer_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    DatasetWriter._datasets.clear()  # pyright: ignore[reportPrivateUsage]
-    DatasetWriter._open.clear()  # pyright: ignore[reportPrivateUsage]
-    DatasetWriter._atexit_registered = False  # pyright: ignore[reportPrivateUsage]
+    DatasetWriter._datasets.clear()
+    DatasetWriter._open.clear()
+    DatasetWriter._atexit_registered = False
     monkeypatch.setenv("RECORD_DIR", str(tmp_path))
     monkeypatch.delenv("HF_REPO", raising=False)
 
@@ -63,7 +63,7 @@ def test_matching_writers_share_one_dataset(monkeypatch: pytest.MonkeyPatch) -> 
     DatasetWriter(contract, fps=10).add(obs, act, task="t")
     DatasetWriter(contract, fps=10).add(obs, act, task="t")
     assert len(created) == 1
-    assert len(DatasetWriter._datasets) == 1  # pyright: ignore[reportPrivateUsage]
+    assert len(DatasetWriter._datasets) == 1
 
 
 def test_different_fps_or_features_get_separate_datasets(
@@ -114,7 +114,7 @@ def test_finalize_clears_all_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     a.end_episode()
     b.end_episode()
     DatasetWriter.finalize()
-    assert DatasetWriter._datasets == {}  # pyright: ignore[reportPrivateUsage]
+    assert DatasetWriter._datasets == {}
     for ds in created:
         ds.finalize.assert_called_once()
 

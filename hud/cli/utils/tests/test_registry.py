@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hud.cli.utils.registry import (
     RegistryEnvironment,
@@ -42,7 +42,7 @@ def test_resolve_accepts_uuid_without_lookup() -> None:
 
 
 def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_request(method: str, url: str, **kwargs: object) -> dict:
+    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, Any]:
         raise HudRequestError("not found", status_code=404)
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
@@ -55,7 +55,7 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
 def test_search_filters_paginated_registry_list(monkeypatch: pytest.MonkeyPatch) -> None:
     requested: dict[str, str] = {}
 
-    def fake_request(method: str, url: str, **kwargs: object) -> dict:
+    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, Any]:
         requested.update(method=method, url=url)
         return {
             "items": [

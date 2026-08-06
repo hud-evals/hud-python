@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import json
 import logging
 import os
@@ -65,6 +66,14 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.environment.env import Environment
 
+    from ._runtime_protocols import (
+        DaytonaImage,
+        DaytonaModule,
+        DaytonaSnapshot,
+        ModalImage,
+        ModalModule,
+        ObjectStorageModule,
+    )
     from .task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
@@ -232,7 +241,7 @@ class Shared:
             yield addr
 
 
-def _modal_image_from_uri(modal: Any, image_uri: str) -> Any:
+def _modal_image_from_uri(modal: ModalModule, image_uri: str) -> ModalImage:
     modal_uri_prefix = "modal://"
     if image_uri.startswith(modal_uri_prefix):
         return modal.Image.from_id(image_uri.removeprefix(modal_uri_prefix))
@@ -691,7 +700,11 @@ class DockerRuntime:
         resources = config.resources
         if resources is not None:
             if resources.cpu is not None:
-                cpu = str(int(resources.cpu)) if resources.cpu.is_integer() else str(resources.cpu)
+                cpu = (
+                    str(int(resources.cpu))
+                    if isinstance(resources.cpu, float) and resources.cpu.is_integer()
+                    else str(resources.cpu)
+                )
                 resource_args.extend(("--cpus", cpu))
             if resources.memory_mb is not None:
                 resource_args.extend(("--memory", f"{resources.memory_mb}m"))
@@ -746,7 +759,7 @@ class ModalRuntime:
         self,
         image_name: str | None = None,
         *,
-        image: Any = None,
+        image: ModalImage | None = None,
         command: Sequence[str] | None = None,
         app_name: str = "hud-envs",
         workdir: str | None = None,
@@ -781,14 +794,14 @@ class ModalRuntime:
         # Resolved (named) or built-once (from Dockerfile) image, behind a lock so
         # concurrent first acquisitions build/look up exactly once.
         self._image = image
-        self._resolved: Any = None
+        self._resolved: ModalImage | None = None
         self._image_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         compose = config.compose.resolve() if config.compose is not None else None
-        import modal
+        modal = cast("ModalModule", importlib.import_module("modal"))
 
         app = None
         if compose is not None:
@@ -915,7 +928,10 @@ class ModalRuntime:
                 await sb.terminate.aio()
 
 
-async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
+async def _snapshot_is_current(
+    snapshot: DaytonaSnapshot,
+    image: str | DaytonaImage,
+) -> bool:
     """Whether *snapshot* was built from *image* as it exists right now.
 
     Daytona records what a snapshot was built from — the registry ref, or for a
@@ -929,11 +945,15 @@ async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
     build = snapshot.build_info
     if build is None:
         return False
-    from daytona._async.object_storage import AsyncObjectStorage
+    object_storage = cast(
+        "ObjectStorageModule",
+        importlib.import_module("daytona._async.object_storage"),
+    )
+    AsyncObjectStorage = object_storage.AsyncObjectStorage
 
     # The hasher is an instance method only for code organization; credentials
     # are needed to upload, not to hash, so skip the credentialed __init__.
-    storage = cast("Any", AsyncObjectStorage.__new__(AsyncObjectStorage))
+    storage = AsyncObjectStorage.__new__(AsyncObjectStorage)
     hashes = [
         await storage._compute_hash_for_path_md5(entry.source_path, entry.archive_path)
         for entry in image._context_list
@@ -970,7 +990,7 @@ class DaytonaRuntime:
         self,
         snapshot_name: str | None = None,
         *,
-        image: Any = None,
+        image: str | DaytonaImage | None = None,
         command: str | None = None,
         workdir: str | None = "/app",
         port: int = 8765,
@@ -1001,17 +1021,17 @@ class DaytonaRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         import asyncssh
-        from daytona import (
-            AsyncDaytona,
-            CreateSandboxFromImageParams,
-            CreateSandboxFromSnapshotParams,
-            CreateSnapshotParams,
-            DaytonaNotFoundError,
-            GpuType,
-            Image,
-            Resources,
-            SessionExecuteRequest,
-        )
+
+        daytona_sdk = cast("DaytonaModule", importlib.import_module("daytona"))
+        AsyncDaytona = daytona_sdk.AsyncDaytona
+        CreateSandboxFromImageParams = daytona_sdk.CreateSandboxFromImageParams
+        CreateSandboxFromSnapshotParams = daytona_sdk.CreateSandboxFromSnapshotParams
+        CreateSnapshotParams = daytona_sdk.CreateSnapshotParams
+        DaytonaNotFoundError = daytona_sdk.DaytonaNotFoundError
+        GpuType = daytona_sdk.GpuType
+        Image = daytona_sdk.Image
+        Resources = daytona_sdk.Resources
+        SessionExecuteRequest = daytona_sdk.SessionExecuteRequest
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
@@ -1025,7 +1045,10 @@ class DaytonaRuntime:
                 resource_kwargs: dict[str, Any] = {}
                 if config.resources.cpu is not None:
                     # Daytona allocates whole cores; truncating resizes silently.
-                    if not config.resources.cpu.is_integer():
+                    if (
+                        isinstance(config.resources.cpu, float)
+                        and not config.resources.cpu.is_integer()
+                    ):
                         raise ValueError(
                             "DaytonaRuntime needs a whole number of CPUs, got "
                             f"{config.resources.cpu}"
@@ -1074,7 +1097,7 @@ class DaytonaRuntime:
                         if daytona_resources.gpu:
                             sizing.append(f"{daytona_resources.gpu}gpu")
                             sizing.extend(
-                                (t.value if isinstance(t, GpuType) else t).lower()
+                                str(getattr(t, "value", t)).lower()
                                 for t in daytona_resources.gpu_type or []
                             )
                         snapshot_name = "-".join([snapshot_name, *sizing])
@@ -1126,7 +1149,6 @@ class DaytonaRuntime:
                 sandbox_params,
                 timeout=create_timeout,
             )
-            session_command: Any = None
             try:
                 # Start the env server in a background session (the snapshot's CMD is
                 # not the sandbox's main process). connect() retries the handshake,

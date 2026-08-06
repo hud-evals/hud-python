@@ -15,7 +15,7 @@ adding local workarounds.
   capabilities, agents, graders, types, cli), run guides, and cookbooks.
 - `CONTRIBUTING.md` for setup, test, lint, and type-check commands.
 - `pyproject.toml` for supported Python versions, dependencies, optional extras,
-  ruff, pyright, pytest, and coverage configuration.
+  ruff, ty, pytest, and coverage configuration.
 - Source files and colocated tests for exact behavior. Trust code and tests over
   stale prose.
 - `cookbooks/` for runnable end-to-end examples (each is its own uv project).
@@ -56,7 +56,7 @@ uv sync --extra dev
 uv run pytest -q
 uv run ruff format . --check
 uv run ruff check .
-uv run pyright
+uv run --extra dev --extra train ty check
 ```
 
 The shared pre-push hook lives in `.githooks/pre-push`, but agents should not

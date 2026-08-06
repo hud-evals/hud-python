@@ -1,7 +1,6 @@
 """``OpenAIAgent`` — construction + ``get_response`` parsing of the Responses API,
 with a fake ``AsyncOpenAI`` client (no network).
 """
-# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 
