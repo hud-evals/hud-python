@@ -219,7 +219,6 @@ async def start_entrypoint() -> NamespaceProcess | None:
         inherit_workspace_env=False,
         no_new_privs=False,
         persistent=True,
-        scope="environment",
     )
     await asyncio.sleep(0)
     if process.returncode is not None:
