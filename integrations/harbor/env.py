@@ -11,7 +11,8 @@ import os
 import pwd
 import shutil
 import socket
-from collections.abc import AsyncGenerator  # noqa: TC003
+import tempfile
+from collections.abc import AsyncGenerator, Iterator  # noqa: TC003
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -168,6 +169,7 @@ agent_mounts = (
 )
 
 env = Environment(CONFIG["name"])
+verifier_lock = asyncio.Lock()
 for capability in CONFIG["capabilities"]:
     env.add_capability(Capability.from_manifest(capability))
 workspace = env.workspace(
@@ -504,80 +506,104 @@ async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationRe
     return evaluation(execution, timeout_sec)
 
 
-async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
-    verifier_root = Path(CONFIG["verifier_root"])
-    test_script = verifier_root / "tests/test.sh"
-    test_script.chmod(test_script.stat().st_mode | 0o555)
-    clear(VERIFIER_LOGS)
-    VERIFIER_LOGS.chmod(0o777)
-    LOGS.mkdir(parents=True, exist_ok=True)
-    AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
-
+@contextlib.contextmanager
+def artifact_mounts(task: dict[str, Any], verifier_root: Path) -> Iterator[list[Mount]]:
     mounts: list[Mount] = [
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
-        Mount("rw", src=str(LOGS), dst="/logs"),
     ]
-    (verifier_root / "logs").mkdir(parents=True, exist_ok=True)
+    bindings: list[tuple[Path | None, str]] = [(LOGS, "/logs")]
     for artifact in task["artifacts"]:
         source = artifact["source"].rstrip("/") or "/"
         staged = ARTIFACTS / source.lstrip("/")
-        target = verifier_root / source.lstrip("/")
-        if not staged.exists() and not staged.is_symlink():
-            if target.is_dir() and not target.is_symlink():
-                shutil.rmtree(target)
-            else:
-                target.unlink(missing_ok=True)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if staged.is_dir():
-            if target.exists() and not target.is_dir():
-                target.unlink()
-            target.mkdir(exist_ok=True)
-        else:
-            if target.is_dir() and not target.is_symlink():
-                shutil.rmtree(target)
-            target.touch(exist_ok=True)
-        mounts.append(Mount("rw", src=str(staged), dst=source))
+        bindings.append((staged if staged.exists() or staged.is_symlink() else None, source))
 
-    verifier = CONFIG["verifier"]
-    verifier_network, verifier_hosts = network(verifier)
-    image = CONFIG["verifier_image"]
-    verifier_identity = identity(verifier, image_user=image["user"], root=verifier_root)
-    verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-    verifier_env = {
-        **CONFIG["environment"]["env"],
-        **image["env"],
-        **verifier["env"],
-    }
-    if verifier_home := home(verifier_uid, root=verifier_root):
-        verifier_env["HOME"] = verifier_home
-    isolated = Workspace(
-        verifier_root,
-        guest_path="/",
-        system_mounts=(),
-        mounts=mounts,
-        env=verifier_env,
-        network=verifier_network,
-        allowed_hosts=verifier_hosts,
-        credentials_dir=ROOT / "verifier-keys",
-        hand_over_root=False,
-        require_isolation=True,
-    )
-    await isolated.start()
-    try:
-        execution = await isolated.run(
-            ["/tests/test.sh"],
-            env=verifier_env,
-            cwd=image["workdir"],
-            identity=verifier_identity,
-            inherit_workspace_env=False,
-            allowed_hosts=verifier_hosts,
-            no_new_privs=False,
-            max_wait=task["verifier_timeout"],
-        )
-    finally:
-        await isolated.stop()
+    with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=ROOT) as directory:
+        backup_root = Path(directory)
+        replacements: list[tuple[Path, Path | None]] = []
+        try:
+            for staged, destination in bindings:
+                target = verifier_root / destination.lstrip("/")
+                compatible = (
+                    staged is not None
+                    and target.exists()
+                    and not target.is_symlink()
+                    and staged.is_dir() == target.is_dir()
+                )
+                if not compatible and (target.exists() or target.is_symlink()):
+                    backup = backup_root / destination.lstrip("/")
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    target.rename(backup)
+                    replacements.append((target, backup))
+                elif staged is not None and not compatible:
+                    replacements.append((target, None))
+                if staged is None:
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if staged.is_dir():
+                    target.mkdir(exist_ok=True)
+                else:
+                    target.touch(exist_ok=True)
+                mounts.append(Mount("rw", src=str(staged), dst=destination))
+            yield mounts
+        finally:
+            for target, backup in reversed(replacements):
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink(missing_ok=True)
+                if backup is not None:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    backup.rename(target)
+
+
+async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
+    async with verifier_lock:
+        verifier_root = Path(CONFIG["verifier_root"])
+        clear(VERIFIER_LOGS)
+        VERIFIER_LOGS.chmod(0o777)
+        LOGS.mkdir(parents=True, exist_ok=True)
+        AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
+
+        with artifact_mounts(task, verifier_root) as mounts:
+            verifier = CONFIG["verifier"]
+            verifier_network, verifier_hosts = network(verifier)
+            image = CONFIG["verifier_image"]
+            verifier_identity = identity(verifier, image_user=image["user"], root=verifier_root)
+            verifier_uid = verifier_identity[0] if verifier_identity is not None else None
+            verifier_env = {
+                **CONFIG["environment"]["env"],
+                **image["env"],
+                **verifier["env"],
+            }
+            if verifier_home := home(verifier_uid, root=verifier_root):
+                verifier_env["HOME"] = verifier_home
+            isolated = Workspace(
+                verifier_root,
+                guest_path="/",
+                system_mounts=(),
+                mounts=mounts,
+                env=verifier_env,
+                network=verifier_network,
+                allowed_hosts=verifier_hosts,
+                credentials_dir=ROOT / "verifier-keys",
+                hand_over_root=False,
+                require_isolation=True,
+            )
+            try:
+                await isolated.start()
+                execution = await isolated.run(
+                    ["/bin/sh", "/tests/test.sh"],
+                    env=verifier_env,
+                    cwd=image["workdir"],
+                    identity=verifier_identity,
+                    inherit_workspace_env=False,
+                    allowed_hosts=verifier_hosts,
+                    no_new_privs=False,
+                    max_wait=task["verifier_timeout"],
+                )
+            finally:
+                await isolated.stop()
     return evaluation(execution, task["verifier_timeout"])
 
 

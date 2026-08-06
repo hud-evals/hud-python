@@ -799,6 +799,21 @@ async def test_invalid_task_config_is_not_silently_defaulted(
     assert fake_docker == []
 
 
+@pytest.mark.parametrize("source", ["/", "//", "/workspace/../secret"])
+async def test_artifacts_must_name_normalized_paths_beneath_root(
+    tmp_path: Path,
+    fake_docker,
+    source: str,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(f'artifacts = ["{source}"]\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="artifact source must name a path beneath /"):
+        await harbor.adapt(tmp_path)
+
+    assert fake_docker == []
+
+
 async def test_agent_timeout_becomes_per_task_agent_policy(
     tmp_path: Path,
     fake_docker,

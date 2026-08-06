@@ -13,10 +13,10 @@ import tempfile
 import tomllib
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from hud.capabilities import Capability
 from hud.environment.egress import BRIDGE_PORT, VISITOR_PORT
@@ -51,13 +51,21 @@ COMPOSE_FILENAMES = (
 class Artifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source: str = Field(min_length=2, pattern=r"^/")
+    source: str = Field(pattern=r"^/")
     service: str = Field(default="main", min_length=1)
 
     @model_validator(mode="before")
     @classmethod
     def expand_path(cls, value: Any) -> Any:
         return {"source": value} if isinstance(value, str) else value
+
+    @field_validator("source")
+    @classmethod
+    def normalize_source(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if len(path.parts) == 1 or ".." in path.parts:
+            raise ValueError("artifact source must name a path beneath /")
+        return str(path)
 
 
 class Collect(BaseModel):

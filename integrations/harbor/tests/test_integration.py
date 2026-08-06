@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from hud.agents.base import Agent
-from hud.eval import DockerRuntime
+from hud.eval import DockerRuntime, Shared
 from integrations import harbor
 
 if TYPE_CHECKING:
@@ -258,3 +258,46 @@ timeout_sec = 30
 
     assert run.reward == 0.0
     assert "artifact /app/linked/tests has a symbolic link in its path" in (run.trace.error or "")
+
+
+def test_separate_verifier_restores_image_paths_between_shared_rollouts(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-verifier-restore") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    (task / "task.toml").write_text(
+        """\
+artifacts = [{ source = "/tests/test.sh", service = "main" }]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+""",
+        encoding="utf-8",
+    )
+    (task / "solution" / "solve.sh").write_text("true\n", encoding="utf-8")
+
+    async def grade_twice() -> list[Run]:
+        taskset = await harbor.adapt(dataset, hud_requirement=str(wheel))
+        job = await taskset.run(
+            Oracle({"sidecar-reachability": "true"}),
+            runtime=Shared(DockerRuntime(), width=1),
+            group=2,
+            max_concurrent=1,
+        )
+        return job.runs
+
+    runs = asyncio.run(grade_twice())
+
+    assert len(runs) == 2
+    for run in runs:
+        assert any(
+            step.task_call is not None
+            and step.task_call.phase == "evaluate"
+            and step.task_call.name == "sidecar-reachability:verify"
+            for step in run.trace.steps
+        )
