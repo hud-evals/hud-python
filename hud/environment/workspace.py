@@ -716,7 +716,7 @@ class Workspace:
         mounts: Sequence[Mount] | None = None,
         env: Mapping[str, str] | None = None,
         cwd: str | None = None,
-        identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
+        identity: int | tuple[int, int] | Literal["workspace"] | None = "workspace",
         inherit_workspace_env: bool = True,
         allowed_hosts: Collection[str] | None = (),
         no_new_privs: bool = True,
@@ -820,7 +820,7 @@ class Workspace:
         mounts: Sequence[Mount] | None = None,
         env: Mapping[str, str] | None = None,
         cwd: str | None = None,
-        identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
+        identity: int | tuple[int, int] | Literal["workspace"] | None = "workspace",
         inherit_workspace_env: bool = True,
         no_new_privs: bool = True,
         persistent: bool = False,
@@ -986,7 +986,7 @@ class Workspace:
 
     def _identity_argv(
         self,
-        identity: int | tuple[int, int] | None | Literal["workspace"],
+        identity: int | tuple[int, int] | Literal["workspace"] | None,
         *,
         no_new_privs: bool,
     ) -> list[str]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -208,7 +209,7 @@ async def adapt(
     hud_requirement: str = "hud",
 ) -> Taskset:
     """Build a runnable HUD image for each distinct Harbor environment."""
-    root = Path(path).resolve()
+    root = await asyncio.to_thread(Path(path).resolve)
     if (root / "task.toml").is_file():
         task_dirs = [root]
         dataset = root.parent
@@ -625,7 +626,7 @@ async def adapt(
 
         wheel = Path(hud_requirement)
         requirement = hud_requirement
-        if wheel.suffix == ".whl" and wheel.is_file():
+        if wheel.suffix == ".whl" and await asyncio.to_thread(wheel.is_file):
             shutil.copy2(wheel, context / "packages" / wheel.name)
             requirement = f"{HUD_ROOT}/packages/{wheel.name}"
 

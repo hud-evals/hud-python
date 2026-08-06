@@ -168,7 +168,8 @@ class _FakeModalSandbox:
         assert isinstance(uploads, list)
         uploads.append((source.name, target))
         if source.name == "override.json":
-            self._calls["compose_override"] = json.loads(source.read_text("utf-8"))
+            content = await asyncio.to_thread(source.read_text, "utf-8")
+            self._calls["compose_override"] = json.loads(content)
 
     async def _exec(self, *args: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("execs", [])
@@ -326,7 +327,7 @@ class _FakeDaytonaSandbox:
         return SimpleNamespace(token="ssh-token")
 
 
-async def _tree_hash(path_str: str) -> str:
+def _tree_hash_sync(path_str: str) -> str:
     """Deterministic fingerprint of a context tree: same tree, same hash."""
     digest = hashlib.md5(usedforsecurity=False)
     root = Path(path_str)
@@ -334,6 +335,10 @@ async def _tree_hash(path_str: str) -> str:
         digest.update(file.relative_to(root).as_posix().encode())
         digest.update(file.read_bytes())
     return digest.hexdigest()
+
+
+async def _tree_hash(path_str: str) -> str:
+    return await asyncio.to_thread(_tree_hash_sync, path_str)
 
 
 class _FakeObjectStorage:

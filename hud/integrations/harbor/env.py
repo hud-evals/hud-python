@@ -563,12 +563,16 @@ async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
     async with verifier_lock:
         verifier_root = Path(CONFIG["verifier_root"])
         test_script = verifier_root / "tests/test.sh"
-        test_mode = test_script.stat().st_mode
-        test_script.chmod(test_mode | 0o111)
-        clear(VERIFIER_LOGS)
-        VERIFIER_LOGS.chmod(0o777)
-        LOGS.mkdir(parents=True, exist_ok=True)
-        AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
+        test_mode = (await asyncio.to_thread(test_script.stat)).st_mode
+        await asyncio.to_thread(test_script.chmod, test_mode | 0o111)
+        await asyncio.to_thread(clear, VERIFIER_LOGS)
+        await asyncio.to_thread(VERIFIER_LOGS.chmod, 0o777)
+        await asyncio.to_thread(LOGS.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(
+            AGENT_ANSWER.write_text,
+            "" if answer is None else str(answer),
+            encoding="utf-8",
+        )
 
         try:
             with artifact_mounts(task, verifier_root) as mounts:

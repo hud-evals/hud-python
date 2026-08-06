@@ -41,10 +41,12 @@ from hud import Environment
 
 env = Environment(name="letter-count")
 
+
 @env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'?"
     yield 1.0 if answer and str(word.count(letter)) in answer else 0.0
+
 
 tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 ```
@@ -83,28 +85,36 @@ server = FastMCP(name="my-env")
 env = Environment(name="my-env")
 _task: asyncio.Task | None = None
 
+
 @server.tool
 async def do_thing(x: int) -> str:
     return f"result: {x}"
+
 
 @env.initialize
 async def _start() -> None:
     global _task
     if _task is None:
-        s = socket.socket(); s.bind(("", 0)); port = s.getsockname()[1]; s.close()
+        s = socket.socket()
+        s.bind(("", 0))
+        port = s.getsockname()[1]
+        s.close()
         _task = asyncio.create_task(
             server.run_async(transport="http", host="127.0.0.1", port=port, show_banner=False)
         )
         await asyncio.sleep(0.3)
         env.add_capability(Capability.mcp(name="tools", url=f"http://127.0.0.1:{port}/mcp"))
 
+
 @env.shutdown
 async def _stop() -> None:
     global _task
     if _task is not None:
         _task.cancel()
-        with contextlib.suppress(Exception): await _task
+        with contextlib.suppress(Exception):
+            await _task
         _task = None
+
 
 @env.template()
 async def my_task(param: str = "default"):
@@ -196,7 +206,7 @@ for _ in range(steps):
 ```python
 for c in await trainer.checkpoints():
     print(c.name, c.mean_reward, c.metrics.get("reward_std"))
-head = await trainer.head()           # the active checkpoint
+head = await trainer.head()  # the active checkpoint
 ```
 
 **Pick the loss.** `step`/`forward_backward` take `loss_fn` (default `importance_sampling`; also `ppo`, `cispo`, `dro`, `cross_entropy`). Prefer `ppo` when a single lucky rollout could otherwise blow up the update — it clips the IS ratio. Discover the supported set with `await trainer.available_losses()`; leave `loss_fn_config` at `None` unless a provider documents a key.
@@ -206,7 +216,7 @@ head = await trainer.head()           # the active checkpoint
 ```python
 combined: list[Run | TrajectoryPayload] = []
 for run in batch:
-    combined.append(run)                                              # agent side
+    combined.append(run)  # agent side
     combined.append(TrajectoryPayload(samples=opp, reward=1.0 - run.reward))  # opponent
 await trainer.forward_backward(combined, loss_fn="ppo", group_size=2)
 await trainer.optim_step(learning_rate=1e-5)
@@ -217,7 +227,7 @@ Get the opponent's tokens from the gateway call with `extra_body={"return_token_
 **Reset when the objective changes.** If you edit the reward or the environment mid-run, the current head encodes the *old* objective — continuing from it trains a contaminated policy, and the next steps mostly undo the old shaping. Roll the head back to a checkpoint from before the change (or fork a fresh model):
 
 ```python
-await trainer.set_head(checkpoint_id)   # or: hud models head <slug> --set <id>
+await trainer.set_head(checkpoint_id)  # or: hud models head <slug> --set <id>
 ```
 
 **Custom loss / primitives.** Author the loss yourself (e.g. double-sided IS) with `forward_backward_custom` — the service returns per-token tensors, your torch function makes the gradients (needs `pip install 'hud[train]'`). Drop to `forward_backward` + `optim_step` directly when you want the `forward_backward` metrics or gradient accumulation (`num_substeps`) in between; `step` is just the two chained.

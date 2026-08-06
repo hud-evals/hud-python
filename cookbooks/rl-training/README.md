@@ -53,13 +53,13 @@ for the local one. **The training code is identical either way.**
 Both scripts are the same five lines — the only difference is the training call:
 
 ```python
-taskset, runtime = load_taskset_and_runtime()   # deployed+remote, or local
-session = await Job.start("rl", group=8)         # one job spans the session
+taskset, runtime = load_taskset_and_runtime()  # deployed+remote, or local
+session = await Job.start("rl", group=8)  # one job spans the session
 for step in range(steps):
     start = len(session.runs)
-    await taskset.run(agent, runtime=runtime, job=session)   # roll out current weights
-    batch = session.runs[start:]                             # this step's runs
-    await trainer.step(batch, learning_rate=1e-5, group_size=8)   # train + promote
+    await taskset.run(agent, runtime=runtime, job=session)  # roll out current weights
+    batch = session.runs[start:]  # this step's runs
+    await trainer.step(batch, learning_rate=1e-5, group_size=8)  # train + promote
 ```
 
 The loop only ever touches `job.runs`, so where the rollouts executed — a remote
