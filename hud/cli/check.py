@@ -219,6 +219,14 @@ async def _run_direct(
             async with asyncio.timeout(request.startup_timeout):
                 runtime = await stack.enter_async_context(provider(task))
                 client = await stack.enter_async_context(connect(runtime))
+        except TimeoutError as exc:
+            detail = f"environment did not become ready within {request.startup_timeout:g}s"
+            criteria["environment_startup"] = CheckCriterion(
+                name="environment_startup",
+                status="error",
+                detail=detail,
+            )
+            raise TimeoutError(detail) from exc
         except Exception as exc:
             criteria["environment_startup"] = CheckCriterion(
                 name="environment_startup",
@@ -439,8 +447,8 @@ async def _run_check(request: CheckRequest) -> TaskCheckReport:
                 reward, trace_id = await _run_direct(request, task, provider, criteria)
     except asyncio.CancelledError:
         error = "check cancelled"
-    except TimeoutError:
-        error = f"check did not complete within {request.timeout:g}s"
+    except TimeoutError as exc:
+        error = str(exc) or f"check did not complete within {request.timeout:g}s"
     except Exception as exc:
         error = str(exc) or type(exc).__name__
 

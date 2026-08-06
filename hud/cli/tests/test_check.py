@@ -360,6 +360,32 @@ async def _provided(value: Any) -> AsyncIterator[Any]:
 
 
 @pytest.mark.asyncio
+async def test_startup_timeout_is_reported_separately_from_the_overall_timeout() -> None:
+    task = Task(env="demo", id="demo:solve")
+
+    @asynccontextmanager
+    async def stalled_provider(_task: Task) -> AsyncIterator[Runtime]:
+        await asyncio.Event().wait()
+        yield Runtime("tcp://127.0.0.1:8765")
+
+    request = CheckRequest(
+        task=task.id,
+        answer="42",
+        startup_timeout=0.01,
+        timeout=10,
+    )
+    with patch(
+        "hud.cli.check._resolve",
+        return_value=(task, stalled_provider, "local"),
+    ):
+        report = await _run_check(request)
+
+    assert report.outcome == "error"
+    assert report.error == "environment did not become ready within 0.01s"
+    assert report.criteria[1].detail == report.error
+
+
+@pytest.mark.asyncio
 async def test_direct_oracle_uses_start_and_grade_lifecycle() -> None:
     client = _Client(reward=0.75)
     task = Task(env="demo", id="demo:solve", args={"seed": 3})
