@@ -67,6 +67,19 @@ async def test_export_writes_task_folder(tmp_path: Path) -> None:
     assert (task_dir / "environment" / "hud_entrypoint.sh").exists()
 
 
+async def test_export_loads_python_source_on_main_thread(tmp_path: Path) -> None:
+    src = _write_env(tmp_path)
+    source = src.read_text(encoding="utf-8")
+    src.write_text(
+        "import threading\nassert threading.current_thread() is threading.main_thread()\n" + source,
+        encoding="utf-8",
+    )
+
+    created = await export(str(src), tmp_path / "out")
+
+    assert len(created) == 1
+
+
 async def test_requires_dockerfile(tmp_path: Path) -> None:
     _write_env(tmp_path, dockerfile=False)
     with pytest.raises(FileNotFoundError, match="Dockerfile"):

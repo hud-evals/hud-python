@@ -53,12 +53,13 @@ async def install_identity_map(
     if launcher_pid is not None:
         pid = launcher_pid
         for _ in range(launcher_depth):
-            children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+            children_file = Path(f"/proc/{pid}/task/{pid}/children")
+            children = (await asyncio.to_thread(children_file.read_text)).split()
             if len(children) != 1:
                 raise RuntimeError(f"sandbox launcher {pid} has {len(children)} children")
             pid = int(children[0])
-    _map_identities(pid)
-    os.write(block_write, b"\n")
+    await asyncio.to_thread(_map_identities, pid)
+    await asyncio.to_thread(os.write, block_write, b"\n")
     return pid
 
 

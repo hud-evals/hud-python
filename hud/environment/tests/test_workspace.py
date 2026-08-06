@@ -798,10 +798,11 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
     hosts = Path(argv[argv.index("/etc/hosts") - 1])
     assert hosts == tmp_path / "runtime" / "hosts"
     assert argv[argv.index("/etc/hosts") - 2] == "--ro-bind"
-    assert "127.0.0.1\tmain\n" in hosts.read_text()
-    assert "127.0.0.2\tdb\n" in hosts.read_text()
+    hosts_content = await asyncio.to_thread(hosts.read_text)
+    assert "127.0.0.1\tmain\n" in hosts_content
+    assert "127.0.0.2\tdb\n" in hosts_content
     # Bound over /etc/hosts, so every session reads it whatever its identity.
-    assert hosts.stat().st_mode & 0o044
+    assert (await asyncio.to_thread(hosts.stat)).st_mode & 0o044
 
     sharing = Workspace(tmp_path / "shared", peers=[Peer("db", 5432)], network=True)
     monkeypatch.setattr(sharing, "_bwrap", Bubblewrap("/usr/bin/bwrap"))

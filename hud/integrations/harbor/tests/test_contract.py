@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -103,7 +104,7 @@ def fake_docker(monkeypatch):
                 "networks": {"default": {"name": "task_default"}},
             }
             authored_file = Path(args[-4])
-            authored = authored_file.read_text("utf-8")
+            authored = await asyncio.to_thread(authored_file.read_text, "utf-8")
             if "dockerfile: Containerfile" in authored:
                 project["services"] = {
                     "main": {
@@ -148,7 +149,8 @@ def fake_docker(monkeypatch):
             return json.dumps(project), ""
         if args[0] == "compose" and args[-2] == "build":
             compose_file = Path(args[args.index("--file") + 1])
-            calls.append(("compose-build-config", args[-1], compose_file.read_text("utf-8")))
+            compose = await asyncio.to_thread(compose_file.read_text, "utf-8")
+            calls.append(("compose-build-config", args[-1], compose))
         return "", ""
 
     module = importlib.import_module("hud.integrations.harbor.adapt")

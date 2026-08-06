@@ -21,7 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
 import mcp.types as types
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-class AgentType(str, Enum):
+class AgentType(StrEnum):
     CLAUDE = "claude"
     OPENAI = "openai"
     GEMINI = "gemini"

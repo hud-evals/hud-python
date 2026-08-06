@@ -131,11 +131,14 @@ Path("/app/secret.txt").write_text(result["result"]["content"][0]["text"])
 
 
 async def _grade_every_task(dataset: Path, wheel: Path) -> dict[str, Run]:
-    solutions = {
-        task.name: (task / "solution" / "solve.sh").read_text("utf-8")
-        for task in sorted(dataset.iterdir())
-        if (task / "task.toml").is_file()
-    }
+    def load_solutions() -> dict[str, str]:
+        return {
+            task.name: (task / "solution" / "solve.sh").read_text("utf-8")
+            for task in sorted(dataset.iterdir())
+            if (task / "task.toml").is_file()
+        }
+
+    solutions = await asyncio.to_thread(load_solutions)
     taskset = await harbor.adapt(dataset, hud_requirement=str(wheel))
     job = await taskset.run(
         Oracle(solutions),

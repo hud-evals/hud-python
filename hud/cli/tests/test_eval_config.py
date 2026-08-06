@@ -245,6 +245,26 @@ def test_resolve_runtime_local_file_defaults_to_local(tmp_path: Path) -> None:
     assert cfg.runtime == "local"
 
 
+async def test_python_task_source_loads_on_main_thread(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "tasks.py"
+    marker = tmp_path / "main-thread.txt"
+    source.write_text(
+        "import threading\n"
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text("
+        "str(threading.current_thread() is threading.main_thread()))\n"
+        "tasks = []\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(typer.Exit):
+        await eval_mod._run_evaluation(EvalConfig(source=str(source), agent_type="openai"))
+
+    assert marker.read_text(encoding="utf-8") == "True"
+
+
 def test_resolve_runtime_slug_defaults_to_remote() -> None:
     cfg = EvalConfig(source="My Tasks").resolve_runtime()
     assert cfg.runtime is None

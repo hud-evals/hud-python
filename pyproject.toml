@@ -127,7 +127,7 @@ dev = [
     "hud[robot]",  # the robot end-to-end gates (hud/tests/test_robot.py) run the real wire
     "dotenv>=0.9.9",
     # Testing and linting
-    "ruff >=0.11.8, <0.15.0",
+    "ruff==0.16.1",
     "pytest >=8.1.1",
     "pytest-asyncio",
     "pytest-mock",
@@ -167,10 +167,13 @@ train = [
 ]
 
 
+[tool.uv]
+required-version = "==0.12.2"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-lint.extend-select = [
+lint.select = [
     "I",       # isort
     "F",       # pyflakes
     "ANN",     # flake8-annotations
