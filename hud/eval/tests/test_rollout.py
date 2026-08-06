@@ -27,19 +27,20 @@ from typing import TYPE_CHECKING, Any
 import mcp.types as mcp_types
 import pytest
 
+import hud.eval.run as run_module
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.environment import Environment
 from hud.eval import Job, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
-from hud.eval.runtime import _local
+from hud.eval.runtime import Runtime, _local
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from hud.eval.runtime import Runtime
+    from hud.clients.client import HudClient
     from hud.eval.task import Task as TaskRow
 
 _SUMS_ENV = """\

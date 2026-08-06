@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 from hud.cli import app
 from hud.cli.check import (
     CheckCriterion,
+    CheckOutcome,
     CheckRequest,
     TaskCheckReport,
     _criteria_template,
@@ -35,7 +36,7 @@ runner = CliRunner()
 
 def _report(
     *,
-    outcome: str = "passed",
+    outcome: CheckOutcome = "passed",
     reward: float | None = 1.0,
     error: str | None = None,
 ) -> TaskCheckReport:
@@ -182,6 +183,7 @@ def test_check_reads_answer_file_and_forwards_runtime_options(tmp_path: Path) ->
         )
 
     assert result.exit_code == 0
+    assert execute.await_args is not None
     request = execute.await_args.args[0]
     assert request.answer == "file answer"
     assert request.runtime == "hud"
@@ -209,6 +211,7 @@ def test_check_remote_agent_uses_hosted_strategy() -> None:
         )
 
     assert result.exit_code == 0
+    assert execute.await_args is not None
     request = execute.await_args.args[0]
     assert request.agent == "claude"
     assert request.model == "claude-sonnet"
@@ -443,7 +446,7 @@ async def test_direct_grading_failure_cancels_the_live_task_session() -> None:
         pytest.raises(RuntimeError, match="grader unavailable"),
     ):
         await _run_direct(
-            CheckRequest(task=task.id, answer={"value": "42"}),
+            CheckRequest(task=task.id, answer="42"),
             task,
             lambda _task: _provided(Runtime("tcp://127.0.0.1:8765")),
             _criteria_template(),
