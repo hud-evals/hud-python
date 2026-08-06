@@ -560,50 +560,60 @@ def artifact_mounts(task: dict[str, Any], verifier_root: Path) -> Iterator[list[
 async def grade_separate(task: dict[str, Any], answer: Any) -> EvaluationResult:
     async with verifier_lock:
         verifier_root = Path(CONFIG["verifier_root"])
+        test_script = verifier_root / "tests/test.sh"
+        test_mode = test_script.stat().st_mode
+        test_script.chmod(test_mode | 0o111)
         clear(VERIFIER_LOGS)
         VERIFIER_LOGS.chmod(0o777)
         LOGS.mkdir(parents=True, exist_ok=True)
         AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
 
-        with artifact_mounts(task, verifier_root) as mounts:
-            verifier = CONFIG["verifier"]
-            verifier_network, verifier_hosts = network(verifier)
-            image = CONFIG["verifier_image"]
-            verifier_identity = identity(verifier, image_user=image["user"], root=verifier_root)
-            verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-            verifier_env = {
-                **CONFIG["environment"]["env"],
-                **image["env"],
-                **verifier["env"],
-            }
-            if verifier_home := home(verifier_uid, root=verifier_root):
-                verifier_env["HOME"] = verifier_home
-            isolated = Workspace(
-                verifier_root,
-                guest_path="/",
-                system_mounts=(),
-                mounts=mounts,
-                env=verifier_env,
-                network=verifier_network,
-                allowed_hosts=verifier_hosts,
-                credentials_dir=ROOT / "verifier-keys",
-                hand_over_root=False,
-                require_isolation=True,
-            )
-            try:
-                await isolated.start()
-                execution = await isolated.run(
-                    ["/bin/sh", "/tests/test.sh"],
-                    env=verifier_env,
-                    cwd=image["workdir"],
-                    identity=verifier_identity,
-                    inherit_workspace_env=False,
-                    allowed_hosts=verifier_hosts,
-                    no_new_privs=False,
-                    max_wait=task["verifier_timeout"],
+        try:
+            with artifact_mounts(task, verifier_root) as mounts:
+                verifier = CONFIG["verifier"]
+                verifier_network, verifier_hosts = network(verifier)
+                image = CONFIG["verifier_image"]
+                verifier_identity = identity(
+                    verifier,
+                    image_user=image["user"],
+                    root=verifier_root,
                 )
-            finally:
-                await isolated.stop()
+                verifier_uid = verifier_identity[0] if verifier_identity is not None else None
+                verifier_env = {
+                    **CONFIG["environment"]["env"],
+                    **image["env"],
+                    **verifier["env"],
+                }
+                if verifier_home := home(verifier_uid, root=verifier_root):
+                    verifier_env["HOME"] = verifier_home
+                isolated = Workspace(
+                    verifier_root,
+                    guest_path="/",
+                    system_mounts=(),
+                    mounts=mounts,
+                    env=verifier_env,
+                    network=verifier_network,
+                    allowed_hosts=verifier_hosts,
+                    credentials_dir=ROOT / "verifier-keys",
+                    hand_over_root=False,
+                    require_isolation=True,
+                )
+                try:
+                    await isolated.start()
+                    execution = await isolated.run(
+                        ["/tests/test.sh"],
+                        env=verifier_env,
+                        cwd=image["workdir"],
+                        identity=verifier_identity,
+                        inherit_workspace_env=False,
+                        allowed_hosts=verifier_hosts,
+                        no_new_privs=False,
+                        max_wait=task["verifier_timeout"],
+                    )
+                finally:
+                    await isolated.stop()
+        finally:
+            test_script.chmod(test_mode)
     return evaluation(execution, task["verifier_timeout"])
 
 

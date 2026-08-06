@@ -704,6 +704,16 @@ timeout_sec = 30
 [verifier.environment]
 cpus = 4
 memory_mb = 1024
+workdir = "/judge"
+network_mode = "allowlist"
+allowed_hosts = ["verifier.example"]
+
+[verifier.environment.env]
+NESTED_ONLY = "yes"
+SHARED = "nested"
+
+[verifier.env]
+SHARED = "phase"
 
 [[verifier.collect]]
 service = "redis"
@@ -724,6 +734,13 @@ timeout_sec = 10
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
     assert manifest["verifier_root"] == "/media/hud/verifier"
+    assert manifest["verifier_image"]["workdir"] == "/judge"
+    assert manifest["verifier"] == {
+        "user": None,
+        "network_mode": "allowlist",
+        "allowed_hosts": ["verifier.example"],
+        "env": {"NESTED_ONLY": "yes", "SHARED": "phase"},
+    }
     assert manifest["tasks"] == [
         {
             "artifacts": [{"service": "main", "source": "/tmp/agent.patch"}],

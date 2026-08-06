@@ -301,3 +301,36 @@ timeout_sec = 30
             and step.task_call.name == "sidecar-reachability:verify"
             for step in run.trace.steps
         )
+
+
+def test_separate_verifier_honors_the_test_script_shebang(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-verifier-shebang") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    (task / "task.toml").write_text(
+        """\
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+""",
+        encoding="utf-8",
+    )
+    (task / "solution" / "solve.sh").write_text("true\n", encoding="utf-8")
+    (task / "tests" / "test.sh").write_text(
+        """\
+#!/usr/bin/env python3
+from pathlib import Path
+
+Path("/logs/verifier/reward.txt").write_text("1")
+""",
+        encoding="utf-8",
+    )
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 1.0

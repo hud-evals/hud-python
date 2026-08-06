@@ -538,6 +538,18 @@ async def adapt(
             for entry in verifier_config.environment
             for key, _, value in (entry.partition("="),)
         }
+        verifier_phase = source.config.verifier
+        verifier_policy = verifier_phase.model_dump(
+            include={"user", "network_mode", "allowed_hosts", "env"}
+        )
+        if verifier_phase.environment is not None:
+            if verifier_phase.network_mode is None:
+                verifier_policy["network_mode"] = verifier_environment.network_mode
+                verifier_policy["allowed_hosts"] = verifier_environment.allowed_hosts
+            verifier_policy["env"] = {
+                **verifier_environment.env,
+                **verifier_phase.env,
+            }
         manifest = {
             "name": name,
             "workdir": workdir,
@@ -554,7 +566,7 @@ async def adapt(
             "verifier_root": str(HUD_ROOT / "verifier") if separate else None,
             "verifier_image": {
                 "user": verifier_config.user or None,
-                "workdir": verifier_config.working_dir or "/",
+                "workdir": verifier_environment.workdir or verifier_config.working_dir or "/",
                 "env": verifier_env,
             },
             "environment": {
@@ -569,9 +581,7 @@ async def adapt(
             "agent": source.config.agent.model_dump(
                 include={"user", "network_mode", "allowed_hosts", "env"}
             ),
-            "verifier": source.config.verifier.model_dump(
-                include={"user", "network_mode", "allowed_hosts", "env"}
-            ),
+            "verifier": verifier_policy,
             "capabilities": [
                 Capability.mcp(
                     name=server.name,
