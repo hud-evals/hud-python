@@ -116,7 +116,7 @@ def test_qa_run_no_wait_returns_the_launch_response_without_scoring_it() -> None
 def test_qa_run_waits_for_exact_result_ids_and_returns_quality_exit() -> None:
     platform = MagicMock()
     platform.post.return_value = [_run()]
-    platform.get.side_effect = [[_run()], [_result("failed")]]
+    platform.get.side_effect = [[], [_result("failed")]]
 
     with (
         patch("hud.cli.qa.require_api_key", return_value="api-key"),

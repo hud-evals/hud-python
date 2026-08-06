@@ -61,7 +61,9 @@ def _wait_for_results(
                 params={"result_ids": result_ids},
             ),
         )
-        if all(result["status"] in _TERMINAL_STATUSES for result in results):
+        if len(results) == len(result_ids) and all(
+            result["status"] in _TERMINAL_STATUSES for result in results
+        ):
             return results
         if time.monotonic() >= deadline:
             raise HudTimeoutError(f"Timed out after {timeout:g}s waiting for QA runs.")
