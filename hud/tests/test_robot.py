@@ -32,6 +32,9 @@ from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
 from hud.eval.runtime import _local
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
@@ -75,11 +78,11 @@ class _StubSim(RobotBridge):
         self.executed[:] = 0.0
         return f"stub task: {task_args.get('goal', 'none')}"
 
-    def step(self, action: np.ndarray) -> None:
+    def step(self, action: NDArray[Any]) -> None:
         self.tick += 1
         self.executed += np.asarray(action)[:, 0]  # one row per slot
 
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
         slots = np.arange(1, self.num_envs + 1, dtype=np.float32)
         data = {
             "observation/image": np.zeros((self.num_envs, 16, 16, 3), dtype=np.uint8),

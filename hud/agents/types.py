@@ -335,7 +335,7 @@ class ObservationStep(Step):
     """
 
     schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
-    source: RobotStepSource = "observation"  # type: ignore[assignment]
+    source: RobotStepSource = "observation"
 
     tick: int = 0
     # TODO: note - this reuses the MCP-native ImageContent type
@@ -414,7 +414,7 @@ class InferenceStep(Step):
     """
 
     schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
-    source: RobotStepSource = "inference"  # type: ignore[assignment]
+    source: RobotStepSource = "inference"
 
     # tick id
     tick: int = 0  # start of inference
@@ -441,7 +441,7 @@ class VideoSegmentStep(Step):
     """
 
     schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
-    source: RobotStepSource = "video_segment"  # type: ignore[assignment]
+    source: RobotStepSource = "video_segment"
 
     camera: str = ""
     #: Position in the camera's stream; ``index`` 0 is the init segment.

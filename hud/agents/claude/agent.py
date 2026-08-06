@@ -35,7 +35,7 @@ from .tools.computer import ClaudeComputerTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import BetaTextBlock, BetaTextCitation
+    from anthropic.types.beta import BetaTextCitation
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     )
                     result.done = False
                 case "text":
-                    text_block = cast("BetaTextBlock", block)
+                    text_block = block
                     text_parts.append(text_block.text)
                     citations.extend(self._citation(c) for c in (text_block.citations or []))
                 case "thinking":

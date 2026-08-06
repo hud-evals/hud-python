@@ -83,7 +83,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if "tool_catalog" in cls.__dict__:
-            seen: dict[type, None] = {}
+            seen: dict[type[CapabilityClient], None] = {}
             for t in cls.tool_catalog:
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
@@ -252,7 +252,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     if msg is None:
                         continue
                     if isinstance(msg, list):
-                        state.messages.extend(cast("list[MessageT]", msg))
+                        state.messages.extend(msg)
                     else:
                         state.messages.append(cast("MessageT", msg))
 

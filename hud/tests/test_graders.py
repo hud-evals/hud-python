@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import warnings
@@ -388,7 +389,7 @@ class TestGradeCompatShim:
     """v5 environments call ``Grade.gather`` / ``Grade.from_subscores`` via ``hud.native``."""
 
     async def test_gather_combines_like_combine(self) -> None:
-        from hud.native import Grade  # pyright: ignore[reportAttributeAccessIssue]
+        Grade = getattr(importlib.import_module("hud.native"), "Grade")
 
         result = await Grade.gather(
             SubScore(name="alpha", value=1.0, weight=1.0),
@@ -398,7 +399,7 @@ class TestGradeCompatShim:
         assert result.reward == pytest.approx(0.5)
 
     def test_from_subscores_is_sync(self) -> None:
-        from hud.native.graders import Grade
+        Grade = getattr(importlib.import_module("hud.native.graders"), "Grade")
 
         result = Grade.from_subscores([SubScore(name="alpha", value=1.0, weight=1.0)])
         assert isinstance(result, EvaluationResult)
@@ -610,6 +611,10 @@ class TestLLMJudgeGrader:
 
 @pytest.mark.skipif(not _HAS_BASH, reason="/bin/bash not available (e.g. Windows)")
 class TestBashGrader:
+    async def test_compute_score_requires_command(self) -> None:
+        with pytest.raises(ValueError, match="requires command"):
+            await BashGrader.compute_score()
+
     async def test_compute_score_for_passing_command(self) -> None:
         subscore = await BashGrader.compute_score(command="echo hello")
         assert subscore.value == 1.0

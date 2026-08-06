@@ -6,7 +6,6 @@ command must ride a batch file invoked via ``cmd /c``. Bare ``.hud_run.bat`` is
 rejected by the remote shell (and silently fails under PowerShell), so the
 ``cmd /c`` prefix is a regression guard for local Windows setups.
 """
-# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 

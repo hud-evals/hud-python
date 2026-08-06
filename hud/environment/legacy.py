@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     from hud.capabilities import Capability
 
-    from .env import Environment, _TaskFactory
+    from .env import Environment, _TaskFactory, _TaskFunction
 
 LOGGER = logging.getLogger("hud.environment.legacy")
 
@@ -90,6 +90,17 @@ class LegacyEnvMixin:
     add_capability: Callable[[Capability], None]
     _on_start: list[Callable[[], Any]]
     _on_stop: list[Callable[[], Any]]
+
+    if TYPE_CHECKING:
+
+        def template(
+            self,
+            *,
+            id: str | None = None,
+            description: str = "",
+            input: Any = None,
+            returns: Any = None,
+        ) -> Callable[[_TaskFunction[P]], _TaskFactory[P]]: ...
 
     def _init_legacy(self) -> None:
         """Initialize legacy-compat state (called from ``Environment.__init__``)."""
@@ -267,7 +278,7 @@ class LegacyEnvMixin:
         allowed_tools: list[str] | None = None,
         returns: type | None = None,
         enable_citations: bool = False,
-    ) -> Callable[[Callable[P, AsyncGenerator[Any, Any]]], _TaskFactory[P]]:
+    ) -> Callable[[_TaskFunction[P]], _TaskFactory[P]]:
         """[deprecated] Register a scenario as a v6 task. Prefer ``@env.template``.
 
         Accepts the full v5 ``scenario`` signature; the generator (``yield prompt``
@@ -284,7 +295,7 @@ class LegacyEnvMixin:
             stacklevel=2,
         )
 
-        def decorate(fn: Callable[P, AsyncGenerator[Any, Any]]) -> _TaskFactory[P]:
+        def decorate(fn: _TaskFunction[P]) -> _TaskFactory[P]:
             scenario_name = name or fn.__name__
             if ":" in scenario_name:
                 raise ValueError(
@@ -296,10 +307,7 @@ class LegacyEnvMixin:
                 )
 
             desc = description or (fn.__doc__ or "").strip().split("\n", 1)[0]
-            register = cast("Any", self).template  # provided by Environment
-            task: _TaskFactory[P] = register(id=scenario_name, description=desc, returns=returns)(
-                fn
-            )
+            task = self.template(id=scenario_name, description=desc, returns=returns)(fn)
 
             self._scenario_fns[scenario_name] = fn
             if chat:

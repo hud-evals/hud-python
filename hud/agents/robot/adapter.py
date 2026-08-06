@@ -7,16 +7,32 @@ Use :class:`LeRobotAdapter` for LeRobot models; subclass for custom wiring;
 
 from __future__ import annotations
 
-from typing import Any
+import importlib
+from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    import builtins
 
 #: A policy-emitted action / chunk array (the robot stack's shared alias).
 ActionArray = NDArray[np.floating[Any]]
 
 #: Image types the bundled adapters treat as cameras (vs the state vector).
 IMAGE_TYPES = ("rgb", "bgr", "gray", "depth")
+
+
+class _TorchTensor(Protocol):
+    def permute(self, *dims: int) -> Self: ...
+
+    def float(self) -> Self: ...
+
+    def __truediv__(self, value: builtins.float) -> Self: ...
+
+
+class _TorchModule(Protocol):
+    def from_numpy(self, array: NDArray[Any], /) -> _TorchTensor: ...
 
 
 class Adapter:
@@ -88,9 +104,7 @@ class LeRobotAdapter(Adapter):
     """
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
-        import torch  # pyright: ignore[reportMissingImports]
-
-        torch_mod: Any = torch  # torch ships no stubs; keep strict mode quiet
+        torch_mod = cast("_TorchModule", importlib.import_module("torch"))
         data = obs["data"]
         state = np.asarray(data[self.state_key], dtype=np.float32)
         batched = state.ndim > 1  # [N, S] vs [S]

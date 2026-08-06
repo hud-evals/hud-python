@@ -41,8 +41,8 @@ def factory_module(request):
 
     name = f"_loader_target_{request.node.name}"
     mod = ModuleType(name)
-    mod.env = Environment("declared")  # type: ignore[attr-defined]
-    mod.make_env = lambda name="built": Environment(name)  # type: ignore[attr-defined]
+    setattr(mod, "env", Environment("declared"))
+    setattr(mod, "make_env", lambda name="built": Environment(name))
     sys.modules[name] = mod
     yield name
     del sys.modules[name]
@@ -63,7 +63,7 @@ def test_module_env_attribute_is_returned_not_called(factory_module) -> None:
 def test_module_factory_returning_non_environment_raises(factory_module) -> None:
     import sys
 
-    sys.modules[factory_module].make_env = lambda: object()  # type: ignore[attr-defined]
+    setattr(sys.modules[factory_module], "make_env", lambda: object())
 
     with pytest.raises(ValueError, match="not an Environment"):
         load_environment(factory_module, name="make_env")

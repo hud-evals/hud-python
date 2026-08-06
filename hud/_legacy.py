@@ -42,7 +42,8 @@ from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable, Sequence
+    from importlib.machinery import ModuleSpec
 
     from hud.graders import EvaluationResult, SubScore
 
@@ -239,7 +240,7 @@ def _alias_target(fullname: str) -> str | None:
     return None
 
 
-def _make_alias_getattr(fullname: str, target_name: str) -> Any:
+def _make_alias_getattr(fullname: str, target_name: str) -> Callable[[str], Any]:
     def __getattr__(name: str) -> Any:
         if name == "Grade" and target_name == "hud.graders":
             return Grade
@@ -251,11 +252,25 @@ def _make_alias_getattr(fullname: str, target_name: str) -> Any:
     return __getattr__
 
 
-def _make_legacy_getattr(module_name: str) -> Any:
+def _make_legacy_getattr(module_name: str) -> Callable[[str], Any]:
     def __getattr__(name: str) -> Any:
         return resolve_legacy_name(module_name, name)
 
     return __getattr__
+
+
+class _LegacyModule(ModuleType):
+    """Synthetic package whose lazy attribute contract is explicit."""
+
+    __path__: list[str]
+
+    def __init__(self, name: str, resolve: Callable[[str], Any]) -> None:
+        super().__init__(name)
+        self.__path__ = []
+        self._resolve = resolve
+
+    def __getattr__(self, name: str) -> Any:
+        return self._resolve(name)
 
 
 class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
@@ -267,7 +282,12 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     no-op) so deployed v5 envs still import without error.
     """
 
-    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None = None,
+        target: ModuleType | None = None,
+    ) -> ModuleSpec | None:
         if fullname.startswith(("hud.native", "hud.services")):
             if _alias_target(fullname) is None:
                 return None  # unknown legacy name: fail with ModuleNotFoundError
@@ -276,23 +296,17 @@ class _V5CompatFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             return importlib.util.spec_from_loader(fullname, self)
         return None
 
-    def create_module(self, spec: Any) -> ModuleType:
-        return ModuleType(spec.name)
+    def create_module(self, spec: ModuleSpec) -> ModuleType:
+        name = spec.name
+        target = _alias_target(name)
+        resolve = (
+            _make_alias_getattr(name, target) if target is not None else _make_legacy_getattr(name)
+        )
+        return _LegacyModule(name, resolve)
 
     def exec_module(self, module: ModuleType) -> None:
-        name = module.__name__
-
-        if name.startswith(("hud.native", "hud.services")):
-            target = _alias_target(name)
-            assert target is not None  # find_spec already filtered unknowns
-            module.__path__ = []  # mark as package so submodule imports route back here
-            module.__getattr__ = _make_alias_getattr(name, target)  # type: ignore[attr-defined]
-            return
-
-        # Removed submodule (types, computer, executors, filesystem, ...):
-        # resolve names lazily (redirect / capability marker / no-op).
-        module.__path__ = []
-        module.__getattr__ = _make_legacy_getattr(name)  # type: ignore[attr-defined]
+        if not isinstance(module, _LegacyModule):
+            raise TypeError(f"unexpected module type for {module.__name__}")
 
 
 def install() -> None:

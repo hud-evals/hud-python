@@ -243,7 +243,7 @@ async def test_instrument_async_complex_result():
     """Test instrument with complex result object."""
 
     @instrument
-    async def test_func() -> dict:
+    async def test_func() -> dict[str, Any]:
         return {"nested": {"data": [1, 2, 3]}, "count": 3}
 
     result = await test_func()
@@ -430,7 +430,7 @@ def test_instrument_sync_with_kwargs():
     """Test instrument with keyword arguments."""
 
     @instrument
-    def test_func(x: int, **kwargs) -> dict:
+    def test_func(x: int, **kwargs: Any) -> dict[str, Any]:
         return {"x": x, **kwargs}
 
     result = test_func(1, a=2, b=3)

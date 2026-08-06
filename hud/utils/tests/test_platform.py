@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from hud.utils.exceptions import HudAuthenticationError
@@ -23,7 +25,9 @@ def test_url_prefixes_version_segment_and_joins_params() -> None:
 def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
-    def fake_request(method: str, url: str, json: object = None, **kwargs: object) -> dict:
+    def fake_request(
+        method: str, url: str, json: object = None, **kwargs: object
+    ) -> dict[str, Any]:
         calls.append({"method": method, "url": url, "json": json, "api_key": kwargs.get("api_key")})
         return {"ok": True}
 

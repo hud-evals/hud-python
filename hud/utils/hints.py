@@ -165,8 +165,9 @@ def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> 
     if not hints:
         return
 
+    hud_console = design
     try:
-        if design is None:
+        if hud_console is None:
             from hud.utils.hud_console import hud_console as default_design  # lazy import
 
             hud_console = default_design

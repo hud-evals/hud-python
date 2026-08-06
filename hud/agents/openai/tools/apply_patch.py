@@ -1,4 +1,3 @@
-# pyright: reportUnusedFunction=false
 """OpenAI apply_patch parser helpers."""
 
 from __future__ import annotations

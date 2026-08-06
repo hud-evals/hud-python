@@ -27,7 +27,7 @@ import logging
 import traceback
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import mcp.types as mcp_types
 
@@ -65,9 +65,8 @@ def _prompt_message(item: Any) -> mcp_types.PromptMessage:
         return item
     if not isinstance(item, dict):
         item = {"content": str(item)}
-    role = item.get("role")
-    if role not in ("user", "assistant"):
-        role = "user"
+    raw_role = item.get("role")
+    role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
     content = item.get("content")
     if isinstance(content, str):
         return mcp_types.PromptMessage(

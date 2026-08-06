@@ -24,12 +24,14 @@ class BashGrader(Grader):
     @classmethod
     async def compute_score(
         cls,
-        command: str,
+        command: str | None = None,
         cwd: str | None = None,
         timeout_seconds: float | None = None,
         **kwargs: Any,
     ) -> SubScore:
         """Run ``command`` via ``bash -lc`` and score by exit code."""
+        if command is None:
+            raise ValueError("BashGrader requires command")
         if timeout_seconds is None:
             timeout_seconds = cls.default_timeout
         del kwargs

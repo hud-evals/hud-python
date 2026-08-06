@@ -57,7 +57,7 @@ app.add_typer(trace_app, name="trace")
 
 @app.command(name="set")
 def set_command(
-    assignments: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+    assignments: list[str] = typer.Argument(  # noqa: B008
         ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
     ),
 ) -> None:

@@ -37,6 +37,8 @@ from hud.environment.utils import error, read_frame, reply, send_frame
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from numpy.typing import NDArray
+
 #: Line the sim program prints once its control channel is bound; the spawning
 #: RobotEndpoint reads it from this process's stdout.
 PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
@@ -53,7 +55,7 @@ class _Slot:
     index: int
     token: str | None = None
     ws: Any = None
-    action: np.ndarray | None = None
+    action: NDArray[Any] | None = None
     idle: bool = False  # not a barrier participant (disconnected / terminated)
     # Touched this episode; after release stays unreclaimable until the next global reset.
     used: bool = False
@@ -227,11 +229,11 @@ class RobotBridge(ABC):
         """
 
     @abstractmethod
-    def step(self, action: np.ndarray) -> None:
+    def step(self, action: NDArray[Any]) -> None:
         """Advance the sim by one batched action ``[N, A]``."""
 
     @abstractmethod
-    def get_observation(self) -> tuple[dict[str, np.ndarray], np.ndarray] | None:
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]] | None:
         """Return ``(data[N, ...], terminated[N])``, or ``None`` if not ready."""
 
     def result(self) -> dict[str, Any]:
@@ -256,7 +258,7 @@ class RobotBridge(ABC):
         grade = self.result()
         return [dict(grade) for _ in range(self.num_envs)]
 
-    def hold_action(self) -> np.ndarray:
+    def hold_action(self) -> NDArray[Any]:
         """Action used for idle/stalled slots at a barrier step (zeros)."""
         action = next(
             (f for f in self.contract.get("features", {}).values() if f.get("role") == "action"),
@@ -424,7 +426,7 @@ class RobotBridge(ABC):
     async def _send_slot_observation(
         self,
         slot: _Slot,
-        batch: tuple[dict[str, np.ndarray], np.ndarray] | None,
+        batch: tuple[dict[str, NDArray[Any]], NDArray[Any]] | None,
     ) -> None:
         """Fan one scalar obs frame to a claimed connection from a batched read."""
         if slot.ws is None or batch is None:

@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """The OpenAI V4A apply-patch engine: parse a patch + apply it via callbacks.
 
 ``_text_to_patch`` parses the V4A diff text against the current files; ``_apply_patch``

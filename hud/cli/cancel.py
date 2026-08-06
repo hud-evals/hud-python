@@ -79,8 +79,9 @@ def cancel_command(
                     hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
 
         elif trace_id:
+            assert job_id is not None
             hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
-            result = await cancel_task(job_id, trace_id)  # type: ignore[arg-type]
+            result = await cancel_task(job_id, trace_id)
 
             # Two-phase cancel: "accepted" = marked cancelling; "noop" = nothing
             # to do (already terminal, or not found).
@@ -90,8 +91,9 @@ def cancel_command(
                 hud_console.warning("Task not found or already finished.")
 
         else:
+            assert job_id is not None
             hud_console.info(f"Cancelling job {job_id}...")
-            result = await cancel_job(job_id)  # type: ignore[arg-type]
+            result = await cancel_job(job_id)
 
             cancelled = result.get("cancelled", 0)
             if cancelled == 0:

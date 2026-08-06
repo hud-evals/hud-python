@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import textwrap
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -39,7 +39,9 @@ CMD ["hud", "serve", "env:env"]
 """
 
 
-def _write_env(tmp_path: Path, *, dockerfile: bool = True, args: dict | None = None) -> Path:
+def _write_env(
+    tmp_path: Path, *, dockerfile: bool = True, args: dict[str, Any] | None = None
+) -> Path:
     src = tmp_path / "env.py"
     body = textwrap.dedent(_ENV_PY)
     if args is not None:

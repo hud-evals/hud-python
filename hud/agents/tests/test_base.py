@@ -27,7 +27,7 @@ class _FillingAgent(Agent):
 
 def test_agent_requires_call_implementation() -> None:
     with pytest.raises(TypeError):
-        Agent()  # type: ignore[abstract]
+        Agent()
 
 
 async def test_agent_call_fills_trace() -> None:

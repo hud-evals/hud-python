@@ -42,7 +42,7 @@ import urllib.parse
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -325,7 +325,7 @@ class _Proxy(BaseHTTPRequestHandler):
     allowed: Collection[str] = ()
     token: str | None = None
 
-    def log_message(self, *_: object) -> None:
+    def log_message(self, format: str, *args: Any) -> None:
         """The workspace's traffic is not the substrate's log."""
 
     def _fail(self, status: int, reason: str) -> None:

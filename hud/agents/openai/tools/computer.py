@@ -148,14 +148,14 @@ class OpenAIComputerTool(RFBTool):
             if button_raw == "wheel":
                 button = "middle"
             elif isinstance(button_raw, str):
-                button = button_raw  # type: ignore[assignment]
+                button = button_raw
             else:
                 button = "left"
             hold = _hold_keys(args.get("keys"))
             await self.click(
                 args.get("x"),
                 args.get("y"),
-                button=button,  # type: ignore[arg-type]
+                button=button,
                 hold_keys=hold,
             )
 
