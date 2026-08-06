@@ -315,11 +315,27 @@ def _run_error(run: Any) -> str | None:
 
 def _error_phase(detail: str) -> str:
     lowered = detail.lower()
-    if "[provisioning]" in lowered or "[connecting]" in lowered:
+    timeout_phase = lowered.rsplit(" during ", 1)[-1] if " during " in lowered else None
+    if (
+        "[provisioning]" in lowered
+        or "[connecting]" in lowered
+        or timeout_phase in {"provisioning", "connecting"}
+    ):
         return "environment_startup"
-    if "[starting task]" in lowered:
+    if "[starting task]" in lowered or timeout_phase == "starting task":
         return "task_startup"
-    if "[grading]" in lowered:
+    if (
+        "[grading]" in lowered
+        or "[verifying]" in lowered
+        or timeout_phase
+        in {
+            "grading",
+            "verifying",
+            "provisioning verifier",
+            "connecting verifier",
+            "verifier cleanup",
+        }
+    ):
         return "grader_execution"
     return "oracle_or_agent_reward"
 
@@ -431,24 +447,24 @@ async def _run_check(request: CheckRequest) -> TaskCheckReport:
     trace_id: str | None = None
     error: str | None = None
     try:
-        async with asyncio.timeout(request.timeout):
-            if request.mode == "agent":
-                reward, trace_id = await _run_agent(
-                    request,
-                    task,
-                    provider,
-                    agent_instance,
-                    criteria,
-                )
-                error = next(
-                    (
-                        criterion.detail
-                        for criterion in criteria.values()
-                        if criterion.status == "error"
-                    ),
-                    None,
-                )
-            else:
+        if request.mode == "agent":
+            reward, trace_id = await _run_agent(
+                request,
+                task,
+                provider,
+                agent_instance,
+                criteria,
+            )
+            error = next(
+                (
+                    criterion.detail
+                    for criterion in criteria.values()
+                    if criterion.status == "error"
+                ),
+                None,
+            )
+        else:
+            async with asyncio.timeout(request.timeout):
                 reward, trace_id = await _run_direct(request, task, provider, criteria)
     except asyncio.CancelledError:
         error = "check cancelled"

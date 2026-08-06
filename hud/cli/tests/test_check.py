@@ -411,6 +411,42 @@ async def test_startup_timeout_is_reported_separately_from_the_overall_timeout()
 
 
 @pytest.mark.asyncio
+async def test_agent_check_relies_on_rollout_timeout_without_an_outer_deadline() -> None:
+    task = Task(env="demo", id="demo:solve")
+
+    async def completed_agent_run(
+        _request: CheckRequest,
+        _task: Task,
+        _provider: object,
+        _agent: object,
+        criteria: dict[str, CheckCriterion],
+    ) -> tuple[float, str]:
+        for name in ("environment_startup", "task_startup", "grader_execution"):
+            criteria[name] = CheckCriterion(
+                name=name,
+                status="passed",
+                detail=f"{name} completed",
+            )
+        return 1.0, "trace-id"
+
+    with (
+        patch("hud.cli.check._resolve", return_value=(task, object(), "local")),
+        patch("hud.cli.check._agent", return_value=object()),
+        patch("hud.cli.check._run_agent", side_effect=completed_agent_run),
+        patch(
+            "hud.cli.check.asyncio.timeout",
+            side_effect=AssertionError("agent checks must use rollout_timeout"),
+        ),
+    ):
+        report = await _run_check(
+            CheckRequest(task=task.id, agent="claude", timeout=0.01),
+        )
+
+    assert report.outcome == "passed"
+    assert report.trace_id == "trace-id"
+
+
+@pytest.mark.asyncio
 async def test_direct_oracle_uses_start_and_grade_lifecycle() -> None:
     client = _Client(reward=0.75)
     task = Task(env="demo", id="demo:solve", args={"seed": 3})
@@ -525,6 +561,44 @@ async def test_agent_rollout_preserves_trace_and_attributes_grader_failure() -> 
     assert criteria["task_startup"].status == "passed"
     assert criteria["grader_execution"].status == "error"
     assert criteria["oracle_or_agent_reward"].status == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected_criterion"),
+    [
+        ("provisioning", "environment_startup"),
+        ("connecting", "environment_startup"),
+        ("starting task", "task_startup"),
+        ("grading", "grader_execution"),
+        ("verifying", "grader_execution"),
+        ("agent loop", "oracle_or_agent_reward"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_agent_rollout_timeout_is_attributed_to_its_lifecycle_phase(
+    phase: str,
+    expected_criterion: str,
+) -> None:
+    detail = f"rollout timed out after 30s during {phase}"
+    run = SimpleNamespace(
+        trace=SimpleNamespace(status="error", error=detail, trace_id="timeout-trace"),
+        grade=SimpleNamespace(is_error=False, content=None),
+        reward=0.0,
+    )
+    criteria = _criteria_template()
+
+    with patch("hud.eval.run.rollout", AsyncMock(return_value=run)):
+        reward, _ = await _run_agent(
+            CheckRequest(task="demo:solve", agent="claude"),
+            Task(env="demo", id="demo:solve"),
+            Runtime("tcp://127.0.0.1:8765"),
+            object(),
+            criteria,
+        )
+
+    assert reward is None
+    assert criteria[expected_criterion].status == "error"
+    assert criteria[expected_criterion].detail == detail
 
 
 @pytest.mark.asyncio
