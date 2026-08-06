@@ -54,6 +54,108 @@ async def test_connect_retries_through_accept_then_eof_until_the_env_serves() ->
     assert attempts == 3
 
 
+async def test_heartbeat_serializes_calls_without_aborting_on_protocol_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[dict[str, object]] = []
+    heartbeat_received = asyncio.Event()
+    release_heartbeat = asyncio.Event()
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            requests.append(hello)
+            await send_frame(
+                writer,
+                {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT},
+            )
+
+            heartbeat = await read_frame(reader)
+            assert heartbeat is not None
+            requests.append(heartbeat)
+            heartbeat_received.set()
+            await release_heartbeat.wait()
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": heartbeat["id"],
+                    "error": {"code": -32601, "message": "heartbeat refused"},
+                },
+            )
+
+            grade = await read_frame(reader)
+            assert grade is not None
+            requests.append(grade)
+            await send_frame(
+                writer,
+                {"jsonrpc": "2.0", "id": grade["id"], "result": {"score": 1.0}},
+            )
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            await asyncio.wait_for(heartbeat_received.wait(), 1.0)
+            grade = asyncio.create_task(client.grade({"answer": "done"}))
+            await asyncio.sleep(0)
+            assert [request["method"] for request in requests] == ["hello", "hello"]
+            release_heartbeat.set()
+            assert await asyncio.wait_for(grade, 1.0) == {"score": 1.0}
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert [request["method"] for request in requests] == ["hello", "hello", "tasks.grade"]
+    assert requests[1]["params"] == {"session_id": "s-1"}
+
+
+async def test_heartbeat_transport_failure_interrupts_the_connection_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    heartbeat_received = asyncio.Event()
+    body_interrupted = asyncio.Event()
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(
+                writer,
+                {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT},
+            )
+            heartbeat = await read_frame(reader)
+            assert heartbeat is not None
+            heartbeat_received.set()
+            await reader.read()
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_TIMEOUT_SECONDS", 0.01)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        with pytest.raises(TimeoutError):
+            async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
+                await asyncio.wait_for(heartbeat_received.wait(), 1.0)
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    body_interrupted.set()
+                    raise
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert body_interrupted.is_set()
+
+
 async def test_connect_uses_runtime_ready_timeout_param(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
