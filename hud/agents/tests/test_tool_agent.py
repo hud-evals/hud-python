@@ -251,6 +251,39 @@ async def test_multiple_mcp_capabilities_reject_qualified_name_collisions() -> N
         await MultiMCPAgent([])._build_tools({"a": Client("b__c"), "a__b": Client("c")})
 
 
+async def test_qualified_mcp_names_are_valid_provider_tool_names() -> None:
+    class Client(MCPClient):
+        def __init__(self, name: str) -> None:
+            self.tool = mcp_types.Tool(
+                name=name,
+                description=f"Run {name}",
+                inputSchema={"type": "object", "properties": {}},
+            )
+
+        async def list_tools(self) -> list[mcp_types.Tool]:
+            return [self.tool]
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+            return MCPToolResult(content=[])
+
+    class MultiMCPAgent(DictAgent):
+        tool_catalog = (OpenAIMCPProxyTool,)
+
+    long_name = "lookup_" * 10
+    tools, params = await MultiMCPAgent([])._build_tools(
+        {
+            "company.tools": Client(long_name + "a"),
+            "company-tools": Client(long_name + "b"),
+        }
+    )
+
+    assert len(tools) == 2
+    assert set(tools) == {param["name"] for param in params}
+    assert all(
+        len(name) <= 64 and name.replace("_", "").replace("-", "").isalnum() for name in tools
+    )
+
+
 # ─── initial messages / user text formatting ──────────────────────────
 
 

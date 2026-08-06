@@ -12,6 +12,8 @@ on the agent, not on the tool — the agent owns that wire shape.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, TypeVar
@@ -22,6 +24,16 @@ from hud.capabilities import CapabilityClient
 from hud.types import MCPToolResult
 
 ClientT = TypeVar("ClientT", bound=CapabilityClient)
+_PROVIDER_TOOL_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def provider_tool_name(name: str) -> str:
+    sanitized = _PROVIDER_TOOL_NAME_PATTERN.sub("_", name).strip("_") or "tool"
+    if sanitized == name and len(sanitized) <= 64:
+        return sanitized
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    prefix = sanitized[: 64 - len(digest) - 1].rstrip("_") or "tool"
+    return f"{prefix}_{digest}"
 
 
 def tool_ok(text: str) -> MCPToolResult:
@@ -90,4 +102,12 @@ class AgentTool(ABC, Generic[ClientT]):
     def to_params(self) -> Any: ...
 
 
-__all__ = ["AgentTool", "AgentToolSpec", "ClientT", "result_text", "tool_err", "tool_ok"]
+__all__ = [
+    "AgentTool",
+    "AgentToolSpec",
+    "ClientT",
+    "provider_tool_name",
+    "result_text",
+    "tool_err",
+    "tool_ok",
+]
