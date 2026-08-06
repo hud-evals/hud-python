@@ -466,6 +466,7 @@ class Workspace:
                 VISITOR_PORT,
                 self.peers,
                 local_aliases=self.local_aliases,
+                reserved_ports=self.ports,
                 token=token,
             )
         finally:

@@ -25,7 +25,7 @@ import pytest
 from hud.capabilities import SSHClient
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
-from hud.environment.egress import _field, _Unrelayable
+from hud.environment.egress import Peer, _field, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessResult
 
@@ -468,11 +468,18 @@ async def test_visiting_uses_the_reserved_workspace_bridge(
 ) -> None:
     credentials = Path(tempfile.mkdtemp(prefix="hud-visitor-", dir="/tmp"))
     try:
-        ws = Workspace(tmp_path / "root", credentials_dir=credentials)
+        ws = Workspace(
+            tmp_path / "root",
+            peers=[Peer("db", 5432)],
+            ports=[5432],
+            credentials_dir=credentials,
+        )
         monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
 
         async with ws.visiting({"pypi.org"}) as environment:
             assert environment["HTTPS_PROXY"].endswith("127.0.0.1:3129")
+            assert "db" in environment["NO_PROXY"]
+            assert "127.0.0.2" in environment["NO_PROXY"]
             assert (credentials / "visitor" / "egress.sock").is_socket()
 
         assert not (credentials / "visitor" / "egress.sock").exists()
