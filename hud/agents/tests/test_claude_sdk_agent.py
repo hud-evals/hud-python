@@ -17,8 +17,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from hud.agents.claude.sdk import computer_mcp
 from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
-from hud.capabilities import Capability, SSHClient
+from hud.agents.types import ClaudeSDKConfig
+from hud.capabilities import Capability, RFBClient, SSHClient
+from hud.capabilities.rfb import WebPScreenshotEncoding
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
 
@@ -196,3 +199,43 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
         "database": {"type": claude_type, "url": "http://database:8000/mcp"}
     }
     execute.assert_awaited_once()
+
+
+async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"shell": "bash"},
+    )
+    screen = Capability.rfb(name="screen", url="rfb://localhost:5900", display=0)
+    ssh = SSHClient(shell, cast("Any", object()))
+    rfb = object.__new__(RFBClient)
+
+    class Client:
+        manifest = SimpleNamespace(bindings=[shell, screen])
+
+        async def open(self, ref: str) -> Any:
+            return ssh if ref == "ssh" else rfb
+
+    encoding = WebPScreenshotEncoding(quality=42)
+    agent = ClaudeSDKAgent(ClaudeSDKConfig(screenshot_encoding=encoding))
+    execute = AsyncMock()
+    serve = AsyncMock(return_value=8765)
+    monkeypatch.setattr(agent, "_exec", execute)
+    monkeypatch.setattr(computer_mcp, "serve_computer_mcp", serve)
+
+    await agent(
+        cast(
+            "Any",
+            SimpleNamespace(client=Client(), prompt_text="use the computer"),
+        )
+    )
+
+    serve.assert_awaited_once_with(rfb, encoding)
+    assert agent._mcp_servers["computer-use"] == {
+        "type": "http",
+        "url": "http://127.0.0.1:8765/mcp",
+    }

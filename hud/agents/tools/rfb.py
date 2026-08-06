@@ -18,17 +18,17 @@ import mcp.types as mcp_types
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
 from hud.capabilities import RFBClient
+from hud.capabilities.rfb import PngScreenshotEncoding, ScreenshotEncoding
 from hud.types import MCPToolResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterable
 
-    from hud.capabilities.rfb import ScreenshotMimeType
-
 
 #: VNC button index (asyncvnc uses 0 = left, 1 = middle, 2 = right, 3 = wheel-up, 4 = wheel-down).
 Button = Literal["left", "middle", "right"]
 _BUTTON_INDEX: dict[Button, int] = {"left": 0, "middle": 1, "right": 2}
+_DEFAULT_SCREENSHOT_ENCODING = PngScreenshotEncoding()
 
 
 class RFBTool(AgentTool[RFBClient]):
@@ -41,10 +41,10 @@ class RFBTool(AgentTool[RFBClient]):
         *,
         spec: AgentToolSpec,
         client: RFBClient,
-        screenshot_mime_type: ScreenshotMimeType = "image/webp",
+        screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
     ) -> None:
         super().__init__(spec=spec, client=client)
-        self.screenshot_mime_type: ScreenshotMimeType = screenshot_mime_type
+        self.screenshot_encoding = screenshot_encoding
 
     # ─── geometry ────────────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ class RFBTool(AgentTool[RFBClient]):
 
     async def screenshot(self) -> MCPToolResult:
         """Capture a screenshot and return it as a single ``ImageContent`` block."""
-        screenshot, mime_type = await self.client.screenshot_png(self.screenshot_mime_type)
+        screenshot, mime_type = await self.client.screenshot_png(self.screenshot_encoding)
         return MCPToolResult(
             content=[
                 mcp_types.ImageContent(

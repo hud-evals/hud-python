@@ -17,8 +17,11 @@ from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.types import AgentConfig, AgentStep, ToolStep
+from hud.agents.tools.base import AgentToolSpec
+from hud.agents.tools.rfb import RFBTool
+from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
 from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
+from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 if TYPE_CHECKING:
@@ -69,6 +72,52 @@ def test_init_subclass_derives_clients_from_catalog() -> None:
         tool_catalog = (OpenAIShellTool,)
 
     assert WithCatalog.clients == (SSHClient,)
+
+
+def test_claude_defaults_to_configurable_webp_screenshots() -> None:
+    assert AgentConfig().screenshot_encoding == PngScreenshotEncoding()
+    assert ClaudeConfig().screenshot_encoding == WebPScreenshotEncoding()
+    assert ClaudeSDKConfig().screenshot_encoding == WebPScreenshotEncoding()
+
+    configured = ClaudeConfig.model_validate(
+        {"screenshot_encoding": {"mime_type": "image/webp", "quality": 42}},
+    )
+    assert configured.screenshot_encoding == WebPScreenshotEncoding(quality=42)
+
+    with pytest.raises(ValueError):
+        ClaudeConfig.model_validate(
+            {"screenshot_encoding": {"mime_type": "image/webp", "quality": 101}},
+        )
+
+
+async def test_agent_passes_screenshot_encoding_to_rfb_tools() -> None:
+    class ScreenTool(RFBTool):
+        name = "screen"
+
+        @classmethod
+        def default_spec(cls, model: str) -> AgentToolSpec:
+            del model
+            return AgentToolSpec(api_type="screen", api_name="screen")
+
+        async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+            del arguments
+            return MCPToolResult(content=[])
+
+        def to_params(self) -> dict[str, str]:
+            return {"name": self.name}
+
+    class ScreenAgent(DictAgent):
+        tool_catalog = (ScreenTool,)
+
+    encoding = {"mime_type": "image/webp", "quality": 42}
+    agent = ScreenAgent([AgentStep(content="done", done=True)], screenshot_encoding=encoding)
+    rfb = object.__new__(RFBClient)
+
+    tools, _ = await agent._build_tools({"screen": rfb})
+
+    tool = tools["screen"]
+    assert isinstance(tool, ScreenTool)
+    assert tool.screenshot_encoding == WebPScreenshotEncoding(quality=42)
 
 
 async def test_agent_opens_every_mcp_capability_by_name() -> None:

@@ -108,7 +108,7 @@ class ClaudeSDKAgent(Agent):
                 from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
 
                 rfb = cast("RFBClient", await run.client.open("rfb"))
-                port = await serve_computer_mcp(rfb)
+                port = await serve_computer_mcp(rfb, self.config.screenshot_encoding)
                 self._mcp_servers["computer-use"] = {
                     "type": "http",
                     "url": f"http://127.0.0.1:{port}/mcp",
