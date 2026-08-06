@@ -57,6 +57,21 @@ class TestResolveEnvironmentName:
 
         assert self._resolve(tmp_path) == "trace-explorer"
 
+    def test_dotted_entrypoint_disambiguates_nested_environment(self, tmp_path: Path) -> None:
+        source_dir = tmp_path / "src" / "acme"
+        source_dir.mkdir(parents=True)
+        (tmp_path / "Dockerfile").write_text(
+            'CMD ["hud", "serve", "src.acme.env:env", "--port", "8765"]\n', encoding="utf-8"
+        )
+        (source_dir / "env.py").write_text(
+            'env = Environment("trace-explorer")\n', encoding="utf-8"
+        )
+        (tmp_path / "verify.py").write_text(
+            'verify_env = Environment("qa-verifier")\n', encoding="utf-8"
+        )
+
+        assert self._resolve(tmp_path) == "trace-explorer"
+
     def test_unnamed_environment_exit(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text("env = Environment()\n", encoding="utf-8")
 

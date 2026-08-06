@@ -112,35 +112,39 @@ class EnvironmentSource:
         reported with ``name=None`` so callers can demand an explicit one.
         """
         references: list[EnvironmentNameReference] = []
-        py_files = list(self.root.glob("*.py")) + list(self.root.glob("*/*.py"))
-        for py_file in py_files:
-            try:
-                source = py_file.read_text(encoding="utf-8")
-                tree = ast.parse(source)
-            except (OSError, SyntaxError):
-                continue
-            lines = source.splitlines()
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = sorted(name for name in dirnames if name not in self.SOURCE_EXCLUDE_DIRS)
+            py_files = (Path(dirpath) / name for name in sorted(filenames) if name.endswith(".py"))
+            for py_file in py_files:
+                try:
+                    source = py_file.read_text(encoding="utf-8")
+                    tree = ast.parse(source)
+                except (OSError, SyntaxError):
                     continue
-                callee = node.func
-                callee_name = (
-                    callee.id
-                    if isinstance(callee, ast.Name)
-                    else callee.attr
-                    if isinstance(callee, ast.Attribute)
-                    else None
-                )
-                if callee_name != "Environment":
-                    continue
-                references.append(
-                    EnvironmentNameReference(
-                        file=py_file,
-                        line=node.lineno,
-                        text=lines[node.lineno - 1].strip() if node.lineno <= len(lines) else "",
-                        name=_environment_call_name(node),
+                lines = source.splitlines()
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    callee = node.func
+                    callee_name = (
+                        callee.id
+                        if isinstance(callee, ast.Name)
+                        else callee.attr
+                        if isinstance(callee, ast.Attribute)
+                        else None
                     )
-                )
+                    if callee_name != "Environment":
+                        continue
+                    references.append(
+                        EnvironmentNameReference(
+                            file=py_file,
+                            line=node.lineno,
+                            text=(
+                                lines[node.lineno - 1].strip() if node.lineno <= len(lines) else ""
+                            ),
+                            name=_environment_call_name(node),
+                        )
+                    )
         return references
 
     def served_environment_module(self) -> str | None:
@@ -163,7 +167,8 @@ class EnvironmentSource:
         if module is None:
             return None
 
-        served_file = (self.root / module).with_suffix(".py").resolve()
+        module_path = Path(module) if module.endswith(".py") else Path(*module.split("."))
+        served_file = (self.root / module_path).with_suffix(".py").resolve()
         names = {
             ref.name
             for ref in self.environment_name_references()
