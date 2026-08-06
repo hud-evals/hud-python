@@ -279,6 +279,7 @@ async def test_adapt_moves_compose_main_healthcheck_into_the_workspace(
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
     assert manifest["environment"]["healthcheck"] == {
         "command": "curl -f http://localhost:8080/health",
         "interval_sec": 2.0,
@@ -287,6 +288,7 @@ async def test_adapt_moves_compose_main_healthcheck_into_the_workspace(
         "start_interval_sec": 5.0,
         "retries": 5,
     }
+    assert "healthcheck" not in compose["services"]["main"]
 
 
 async def test_adapt_derives_implicit_peer_port_from_image(

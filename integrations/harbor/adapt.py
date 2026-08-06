@@ -528,6 +528,7 @@ async def adapt(
                     "entrypoint": None,
                     "working_dir": None,
                     "user": None,
+                    "healthcheck": None,
                 }
             )
             compose.services["main"] = main.with_image(
