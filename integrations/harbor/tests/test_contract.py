@@ -21,8 +21,109 @@ def fake_docker(monkeypatch):
 
     async def run(*args: str, **_kwargs):
         calls.append(args)
-        if args[:3] == ("image", "inspect", "--format"):
-            return json.dumps({"User": "", "WorkingDir": "/workspace"}), ""
+        if args[:4] == ("image", "inspect", "--format", "{{json .Config}}"):
+            if args[-1] == "no-ports:latest":
+                return json.dumps(
+                    {
+                        "User": "",
+                        "WorkingDir": "/workspace",
+                        "Entrypoint": None,
+                        "Cmd": ["serve"],
+                    }
+                ), ""
+            if args[-1].startswith("hud-harbor:"):
+                return json.dumps(
+                    {
+                        "User": "",
+                        "WorkingDir": "/workspace",
+                        "Entrypoint": [],
+                        "Cmd": ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py"],
+                    }
+                ), ""
+            return json.dumps(
+                {
+                    "User": "",
+                    "WorkingDir": "/workspace",
+                    "Entrypoint": None,
+                    "Cmd": None,
+                    "ExposedPorts": {"6379/tcp": {}},
+                }
+            ), ""
+        if args[:4] == ("image", "inspect", "--format", "{{.Id}}"):
+            return "sha256:0123456789abcdef0123456789abcdef\n", ""
+        if args[0] == "compose" and args[-3:] == ("config", "--format", "json"):
+            project = {
+                "name": "task",
+                "services": {
+                    "main": {
+                        "image": "hud-main",
+                        "environment": {"FROM_COMPOSE": "yes"},
+                        "depends_on": {
+                            "redis": {
+                                "condition": "service_healthy",
+                                "required": True,
+                            }
+                        },
+                        "networks": {"default": None},
+                    },
+                    "redis": {
+                        "image": "redis:7-alpine",
+                        "entrypoint": None,
+                        "command": ["redis-server", "--save", ""],
+                        "environment": {"SIDE": "car"},
+                        "expose": ["6379/tcp"],
+                        "healthcheck": {
+                            "test": ["CMD", "redis-cli", "ping"],
+                            "interval": "2s",
+                            "timeout": "3s",
+                            "retries": 5,
+                            "start_period": "1s",
+                        },
+                        "networks": {"default": None},
+                    },
+                },
+                "networks": {"default": {"name": "task_default"}},
+            }
+            authored_file = Path(args[-4])
+            authored = authored_file.read_text("utf-8")
+            if "dockerfile: Containerfile" in authored:
+                project["services"] = {
+                    "main": {
+                        "image": "hud-main",
+                        "build": {
+                            "context": str(authored_file.parent),
+                            "dockerfile": "Containerfile",
+                            "args": {"FLAVOR": "compose"},
+                        },
+                        "environment": {"FROM_COMPOSE": "yes"},
+                        "networks": {"default": None},
+                    }
+                }
+            elif "no-ports:latest" in authored:
+                project["services"]["main"].pop("depends_on")
+                project["services"].pop("redis")
+                project["services"]["worker"] = {
+                    "image": "no-ports:latest",
+                    "networks": {"default": None},
+                }
+            elif "main-healthcheck" in authored:
+                project["services"]["main"]["healthcheck"] = {
+                    "test": ["CMD-SHELL", "curl -f http://localhost:8080/health"],
+                    "interval": "2s",
+                    "timeout": "3s",
+                    "retries": 5,
+                    "start_period": "1s",
+                }
+            elif "expose:" not in authored:
+                project["services"]["redis"].pop("expose")
+            if "user: 1001:1002" in authored:
+                project["services"]["main"]["user"] = "1001:1002"
+                project["services"]["main"]["entrypoint"] = ["/compose-init"]
+                project["services"]["main"]["working_dir"] = "/compose-work"
+            return json.dumps(project), ""
+        if args[0] == "compose" and args[-2] == "build":
+            compose_file = Path(args[args.index("--file") + 1])
+            calls.append(("compose-build-config", args[-1], compose_file.read_text("utf-8")))
         return "", ""
 
     module = importlib.import_module("integrations.harbor.adapt")
@@ -59,6 +160,223 @@ async def test_adapt_builds_the_source_then_an_authored_hud_environment(
     assert 'Environment(CONFIG["name"])' not in served
     assert (context / "tasks" / "task-a" / "instruction.md").is_file()
     assert (context / "tasks" / "task-a" / "tests" / "test.sh").is_file()
+    assert not (context / "compose.json").exists()
+
+
+async def test_adapt_honors_compose_main_build_settings(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a", dockerfile=None)
+    environment = task / "environment"
+    environment.mkdir()
+    (environment / "compose.yaml").write_text(
+        """\
+services:
+  main:
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        FLAVOR: compose
+""",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    compose_build = next(call for call in fake_docker if call[:2] == ("compose", "--file"))
+    assert compose_build[-2:] == ("build", "main")
+    _, _, serialized = next(call for call in fake_docker if call[0] == "compose-build-config")
+    main = json.loads(serialized)["services"]["main"]
+    assert main["build"]["dockerfile"] == "Containerfile"
+    assert main["build"]["args"] == {"FLAVOR": "compose"}
+    assert main["image"].startswith("hud-harbor-base:")
+    wrapper_build = next(call for call in fake_docker if call[0] == "build")
+    assert any(value.startswith("BASE_IMAGE=hud-harbor-base:") for value in wrapper_build)
+
+
+async def test_adapt_emits_compose_with_pinned_sidecars_and_peers(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(await harbor.adapt(tmp_path))
+
+    assert row.runtime_config is not None
+    assert row.runtime_config.image is None
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    assert row.runtime_config.compose == context / "compose.json"
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
+    redis = compose["services"]["redis"]
+    assert redis["image"].startswith("hud-harbor-sidecar:")
+    assert redis["image"].endswith("-0123456789abcdef")
+    assert redis["environment"] == {"SIDE": "car"}
+    assert redis["command"] == ["redis-server", "--save", ""]
+    assert redis["expose"] == ["6379/tcp"]
+    assert redis["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
+    assert redis["entrypoint"] == []
+    assert redis["working_dir"] == "/workspace"
+    assert redis["networks"] == {"default": None}
+    assert "build" not in redis
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["environment"]["env"] == {"FROM_COMPOSE": "yes"}
+    assert manifest["capabilities"] == []
+    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+    assert compose["services"]["main"]["command"] == [
+        "/media/hud/venv/bin/hud",
+        "serve",
+        "/media/hud/env.py",
+    ]
+    assert ("pull", "redis:7-alpine") in fake_docker
+    assert any(call[:2] == ("tag", "redis:7-alpine") for call in fake_docker)
+
+
+async def test_adapt_moves_compose_main_process_settings_into_the_workspace(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        """\
+services:
+  main:
+    user: 1001:1002
+    entrypoint: [/compose-init]
+    working_dir: /compose-work
+""",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
+    assert manifest["image_user"] == "1001:1002"
+    assert manifest["entrypoint"] == ["/compose-init"]
+    assert manifest["workdir"] == "/compose-work"
+    assert "user" not in compose["services"]["main"]
+    assert compose["services"]["main"]["entrypoint"] == []
+
+
+async def test_adapt_moves_compose_main_healthcheck_into_the_workspace(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "# main-healthcheck\nservices:\n  main: {}\n",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.json").read_text("utf-8"))
+    assert manifest["environment"]["healthcheck"] == {
+        "command": "curl -f http://localhost:8080/health",
+        "interval_sec": 2.0,
+        "timeout_sec": 3.0,
+        "start_period_sec": 1.0,
+        "start_interval_sec": 5.0,
+        "retries": 5,
+    }
+    assert "healthcheck" not in compose["services"]["main"]
+
+
+async def test_adapt_derives_implicit_peer_port_from_image(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+
+
+async def test_adapt_rejects_sidecar_without_a_tcp_port(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  worker:\n    image: no-ports:latest\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="declares no TCP port"):
+        await harbor.adapt(tmp_path)
+
+
+async def test_network_mcp_servers_become_named_capabilities(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
+        encoding="utf-8",
+    )
+    (task / "task.toml").write_text(
+        """
+[[environment.mcp_servers]]
+name = "redis-tools"
+transport = "streamable-http"
+url = "http://redis:6379/mcp"
+args = []
+""",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["capabilities"] == [
+        {
+            "name": "redis-tools",
+            "params": {"transport": "streamable-http"},
+            "protocol": "mcp/2025-11-25",
+            "url": "http://redis:6379/mcp",
+        }
+    ]
+
+
+@pytest.mark.parametrize("name", ["shell", "filetracking"])
+async def test_mcp_server_names_cannot_shadow_workspace_capabilities(
+    tmp_path: Path,
+    fake_docker,
+    name: str,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        f"""\
+[[environment.mcp_servers]]
+name = "{name}"
+transport = "streamable-http"
+url = "http://server:8000/mcp"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=f"MCP server name {name!r} is reserved"):
+        await harbor.adapt(tmp_path)
+
+    assert fake_docker == []
 
 
 async def test_adapt_groups_identical_images_and_keeps_row_metadata(
@@ -264,7 +582,10 @@ async def test_image_entrypoint_is_preserved_as_runtime_data(
             "multiple GPU types",
         ),
         ('[environment]\ngpu_types = ["H100"]\n', "GPU types without GPUs"),
-        ('[[environment.mcp_servers]]\nname = "db"\n', "MCP servers"),
+        (
+            '[[environment.mcp_servers]]\nname = "db"\ntransport = "stdio"\ncommand = "db-mcp"\n',
+            "stdio MCP servers",
+        ),
         ('[verifier]\nenvironment_mode = "separate"\n', "separate verifier"),
     ],
 )

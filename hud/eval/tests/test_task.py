@@ -26,6 +26,8 @@ from hud.eval import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from hud.agents.base import Agent
 
 
@@ -140,6 +142,17 @@ def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
 def test_runtime_config_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError, match="Extra inputs"):
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
+
+
+def test_compose_runtime_config_serializes_as_task_data(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.yaml"
+    config = RuntimeConfig(compose=compose)
+    task = Task(env="database", id="cutover", runtime_config=config)
+
+    rebuilt = Task.model_validate(task.model_dump())
+
+    assert rebuilt.runtime_config == config
+    assert config.request_payload() == {"compose": str(compose)}
 
 
 def test_row_validation_rejects_malformed_entries() -> None:

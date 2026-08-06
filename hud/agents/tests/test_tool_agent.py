@@ -7,14 +7,19 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 
 from __future__ import annotations
 
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Literal, cast
 
+import fastmcp
 import mcp.types as mcp_types
+import pytest
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
 from hud.agents.openai.tools.coding import OpenAIShellTool
+from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentConfig, AgentStep, ToolStep
-from hud.capabilities import SSHClient
+from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 _Msg = dict[str, Any]
@@ -62,6 +67,221 @@ def test_init_subclass_derives_clients_from_catalog() -> None:
         tool_catalog = (OpenAIShellTool,)
 
     assert WithCatalog.clients == (SSHClient,)
+
+
+async def test_agent_opens_every_mcp_capability_by_name() -> None:
+    capabilities = [
+        Capability.mcp(name="database", url="http://database:8000/mcp"),
+        Capability.mcp(name="search", url="http://search:8000/mcp"),
+    ]
+    opened: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=capabilities)
+
+        async def open(self, ref: str) -> CapabilityClient:
+            opened.append(ref)
+            return cast("CapabilityClient", object())
+
+    class MultiMCPAgent(DictAgent):
+        clients = (MCPClient,)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await MultiMCPAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
+
+    assert opened == ["database", "search"]
+
+
+async def test_agent_opens_only_one_non_mcp_capability_per_protocol() -> None:
+    capabilities = [
+        Capability.rfb(name="screen-0", url="rfb://display-0", display=0),
+        Capability.rfb(name="screen-1", url="rfb://display-1", display=1),
+    ]
+    opened: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=capabilities)
+
+        async def open(self, ref: str) -> CapabilityClient:
+            opened.append(ref)
+            return cast("CapabilityClient", object())
+
+    class ComputerAgent(DictAgent):
+        clients = (RFBClient,)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await ComputerAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
+
+    assert opened == ["screen-0"]
+
+
+async def test_mcp_capability_names_do_not_collide_with_protocol_keys() -> None:
+    capabilities = [
+        Capability.mcp(name="ssh/2", url="http://database:8000/mcp"),
+        Capability.ssh(name="shell", url="ssh://workspace", host_pubkey="key"),
+    ]
+    opened: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=capabilities)
+
+        async def open(self, ref: str) -> CapabilityClient:
+            opened.append(ref)
+            return cast("CapabilityClient", object())
+
+    class MCPAndShellAgent(DictAgent):
+        clients = (MCPClient, SSHClient)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await MCPAndShellAgent([AgentStep(content="done", done=True)])(cast("Any", LiveRun()))
+
+    assert opened == ["ssh/2", "shell"]
+
+
+@pytest.mark.parametrize(
+    ("transport", "expected_type"),
+    [("sse", SSETransport), ("streamable-http", StreamableHttpTransport)],
+)
+async def test_mcp_client_uses_the_declared_http_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: Literal["sse", "streamable-http"],
+    expected_type: type[SSETransport] | type[StreamableHttpTransport],
+) -> None:
+    transports: list[Any] = []
+
+    class Client:
+        def __init__(self, selected: Any, **_kwargs: Any) -> None:
+            transports.append(selected)
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(fastmcp, "Client", Client)
+    capability = Capability.mcp(
+        url="https://tools.example/events",
+        transport=transport,
+    )
+
+    client = await MCPClient.connect(capability)
+    await client.close()
+
+    assert isinstance(transports[0], expected_type)
+
+
+async def test_multiple_mcp_capabilities_qualify_tool_names() -> None:
+    class Client(MCPClient):
+        def __init__(self, *names: str) -> None:
+            self.tools = [
+                mcp_types.Tool(
+                    name=name,
+                    description=f"Run {name}",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+                for name in names
+            ]
+            self.calls: list[str] = []
+
+        async def list_tools(self) -> list[mcp_types.Tool]:
+            return self.tools
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+            self.calls.append(name)
+            return MCPToolResult(content=[])
+
+    class MultiMCPAgent(DictAgent):
+        tool_catalog = (OpenAIMCPProxyTool,)
+
+    database = Client("lookup", "write")
+    search = Client("lookup", "find")
+    tools, params = await MultiMCPAgent([])._build_tools({"database": database, "search": search})
+
+    assert list(tools) == [
+        "database__lookup",
+        "database__write",
+        "search__lookup",
+        "search__find",
+    ]
+    assert [param["name"] for param in params] == list(tools)
+
+    await tools["database__lookup"].execute({})
+    assert database.calls == ["lookup"]
+    assert search.calls == []
+
+    single, _ = await MultiMCPAgent([])._build_tools({"database": Client("lookup")})
+    assert list(single) == ["lookup"]
+
+
+async def test_multiple_mcp_capabilities_reject_qualified_name_collisions() -> None:
+    class Client(MCPClient):
+        def __init__(self, name: str) -> None:
+            self.tool = mcp_types.Tool(
+                name=name,
+                description=f"Run {name}",
+                inputSchema={"type": "object", "properties": {}},
+            )
+
+        async def list_tools(self) -> list[mcp_types.Tool]:
+            return [self.tool]
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+            raise AssertionError("colliding tools must not be callable")
+
+    class MultiMCPAgent(DictAgent):
+        tool_catalog = (OpenAIMCPProxyTool,)
+
+    with pytest.raises(ValueError, match=r"MCP tool name collision.*a__b__c"):
+        await MultiMCPAgent([])._build_tools({"a": Client("b__c"), "a__b": Client("c")})
+
+
+async def test_qualified_mcp_names_are_valid_provider_tool_names() -> None:
+    class Client(MCPClient):
+        def __init__(self, name: str) -> None:
+            self.tool = mcp_types.Tool(
+                name=name,
+                description=f"Run {name}",
+                inputSchema={"type": "object", "properties": {}},
+            )
+
+        async def list_tools(self) -> list[mcp_types.Tool]:
+            return [self.tool]
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
+            return MCPToolResult(content=[])
+
+    class MultiMCPAgent(DictAgent):
+        tool_catalog = (OpenAIMCPProxyTool,)
+
+    long_name = "lookup_" * 10
+    tools, params = await MultiMCPAgent([])._build_tools(
+        {
+            "company.tools": Client(long_name + "a"),
+            "company-tools": Client(long_name + "b"),
+        }
+    )
+
+    assert len(tools) == 2
+    assert set(tools) == {param["name"] for param in params}
+    assert all(
+        len(name) <= 64 and name.replace("_", "").replace("-", "").isalnum() for name in tools
+    )
 
 
 # ─── initial messages / user text formatting ──────────────────────────

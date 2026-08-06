@@ -15,6 +15,7 @@ import logging
 import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -62,12 +63,10 @@ class ServerInfo:
 class Manifest:
     """Env welcome frame returned by ``HudClient.hello()``.
 
-    ``bindings`` carry concrete, *client-reachable* connection data: the env
-    resolves backed declarations (materializing their daemons) when it
-    answers ``hello``, and the client transparently forwards any
-    substrate-local (loopback) address through the control port — so a
-    binding's url always works from here, whether the substrate is a local
-    child process or a container with one published port.
+    ``bindings`` are the environment-native addresses published by the
+    substrate. Agents executing inside that environment consume these raw
+    endpoints; controller-side consumers use :meth:`HudClient.binding` or
+    :meth:`HudClient.open`, which route them through the control channel.
     """
 
     session_id: str
@@ -102,6 +101,7 @@ class HudClient:
         self._ids = itertools.count(1)
         self._closed = False
         self.manifest: Manifest | None = None
+        self._routes: dict[str, str] = {}
         self._opened: dict[str, CapabilityClient] = {}
         self._forwarders: list[asyncio.Server] = []
         self._tunnels: set[asyncio.Task[None]] = set()
@@ -145,78 +145,70 @@ class HudClient:
         """
         params: dict[str, Any] = {} if session_id is None else {"session_id": session_id}
         result = await self._call("hello", params)
-        env = result.get("env") or {}
-        bindings = [
-            await self._reachable(Capability.from_manifest(b))
-            for b in (result.get("bindings") or [])
-        ]
+        env = result["env"]
+        bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
         self.manifest = Manifest(
             session_id=result["session_id"],
             protocol_version=self.PROTOCOL_VERSION,
             server_info=ServerInfo(
-                name=env.get("name", "unknown"),
-                version=env.get("version", "0.0.0"),
+                name=env["name"],
+                version=env["version"],
             ),
             bindings=bindings,
         )
-        return self.manifest
+        self._routes.clear()
+        if self._endpoint is not None:
+            host, port = self._endpoint
 
-    # ─── capability tunneling ─────────────────────────────────────────
-    #
-    # A loopback address in the manifest is the *substrate's* loopback — the
-    # daemon the env resolved lives in its network namespace, which may not
-    # be ours (a container with one published port, a hosted sandbox). A
-    # non-loopback address is globally reachable and passes through. For the
-    # loopback case the client runs a local forwarder (``ssh -L`` style):
-    # each accepted connection is one fresh TCP connection to the control
-    # port, opened with a ``tunnel.open`` preface frame and spliced raw from
-    # there. The preface is transport-level routing (the server decides what
-    # a connection is from its first frame), not a session method.
-
-    async def _reachable(self, cap: Capability) -> Capability:
-        parts = urlsplit(cap.url)
-        if self._endpoint is None or parts.hostname not in ("127.0.0.1", "localhost", "::1"):
-            return cap
-        host, port = self._endpoint
-
-        async def forward(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            task = asyncio.current_task()
-            assert task is not None
-            self._tunnels.add(task)
-            try:
+            async def forward(
+                capability: Capability,
+                reader: asyncio.StreamReader,
+                writer: asyncio.StreamWriter,
+            ) -> None:
+                task = asyncio.current_task()
+                assert task is not None
+                self._tunnels.add(task)
                 try:
-                    up_reader, up_writer = await asyncio.open_connection(host, port)
-                except OSError:
-                    writer.close()
-                    return
-                await send_frame(
-                    up_writer,
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tunnel.open",
-                        "params": {"capability": cap.name},
-                    },
-                )
-                opened = await read_frame(up_reader)
-                if opened is None or "error" in opened:
-                    LOGGER.warning("tunnel.open %r refused: %s", cap.name, opened)
-                    up_writer.close()
-                    writer.close()
-                    return
-                await splice((reader, writer), (up_reader, up_writer))
-            finally:
-                self._tunnels.discard(task)
+                    try:
+                        up_reader, up_writer = await asyncio.open_connection(host, port)
+                    except OSError:
+                        writer.close()
+                        return
+                    await send_frame(
+                        up_writer,
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "tunnel.open",
+                            "params": {"capability": capability.name},
+                        },
+                    )
+                    opened = await read_frame(up_reader)
+                    if opened is None or "error" in opened:
+                        LOGGER.warning("tunnel.open %r refused: %s", capability.name, opened)
+                        up_writer.close()
+                        writer.close()
+                        return
+                    await splice((reader, writer), (up_reader, up_writer))
+                finally:
+                    self._tunnels.discard(task)
 
-        forwarder = await asyncio.start_server(forward, "127.0.0.1", 0)
-        self._forwarders.append(forwarder)
-        local_port = forwarder.sockets[0].getsockname()[1]
-        userinfo = f"{parts.username}@" if parts.username else ""
-        netloc = f"{userinfo}127.0.0.1:{local_port}"
-        return replace(
-            cap,
-            url=urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)),
-        )
+            for capability in bindings:
+                forwarder = await asyncio.start_server(partial(forward, capability), "127.0.0.1", 0)
+                self._forwarders.append(forwarder)
+                local_port = forwarder.sockets[0].getsockname()[1]
+                parts = urlsplit(capability.url)
+                userinfo = f"{parts.username}@" if parts.username else ""
+                self._routes[capability.name] = urlunsplit(
+                    (
+                        parts.scheme,
+                        f"{userinfo}127.0.0.1:{local_port}",
+                        parts.path,
+                        parts.query,
+                        parts.fragment,
+                    )
+                )
+        return self.manifest
 
     # ─── capability access ────────────────────────────────────────────
     #
@@ -235,12 +227,20 @@ class HudClient:
         if self.manifest is None:
             raise RuntimeError("call hello() before accessing bindings")
         matches = [
-            c
-            for c in self.manifest.bindings
-            if ref in (c.name, c.protocol, c.protocol.split("/", 1)[0])
+            capability
+            for capability in self.manifest.bindings
+            if ref
+            in (
+                capability.name,
+                capability.protocol,
+                capability.protocol.split("/", 1)[0],
+            )
         ]
         if len(matches) == 1:
-            return matches[0]
+            capability = matches[0]
+            if capability.name in self._routes:
+                return replace(capability, url=self._routes[capability.name])
+            return capability
         if len(matches) > 1:
             names = ", ".join(f"{c.name} ({c.protocol})" for c in matches)
             raise KeyError(f"ambiguous capability {ref!r}; matches: {names}")

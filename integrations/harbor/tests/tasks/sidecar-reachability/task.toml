@@ -1,0 +1,5 @@
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+timeout_sec = 30

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import mcp.types as mcp_types
 
 from hud.agents.tools.base import AgentToolSpec
+from hud.agents.tools.base import provider_tool_name as openai_compatible_tool_name
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
@@ -16,7 +15,6 @@ if TYPE_CHECKING:
     from hud.types import MCPToolCall, MCPToolResult
 
 OpenAICompatibleToolParam: TypeAlias = "ChatCompletionToolParam"
-_TOOL_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 
 
 def format_chat_result(
@@ -77,15 +75,6 @@ def format_chat_result(
             },
         ),
     ]
-
-
-def openai_compatible_tool_name(name: str) -> str:
-    sanitized = _TOOL_NAME_PATTERN.sub("_", name).strip("_") or "tool"
-    if sanitized == name and len(sanitized) <= 64:
-        return sanitized
-    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
-    prefix = sanitized[: 64 - len(digest) - 1].rstrip("_") or "tool"
-    return f"{prefix}_{digest}"
 
 
 def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:

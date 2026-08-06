@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import fastmcp
 from fastmcp.client.auth import BearerAuth
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
 from .base import Capability, CapabilityClient
 
@@ -39,10 +40,14 @@ class MCPClient(CapabilityClient):
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
         token = cap.params.get("auth_token")
-        client: fastmcp.Client[Any] = fastmcp.Client(
-            cap.url,
-            auth=BearerAuth(token) if token else None,
-        )
+        auth = BearerAuth(token) if token else None
+        transport = cap.params.get("transport")
+        if transport == "sse":
+            client: fastmcp.Client[Any] = fastmcp.Client(SSETransport(cap.url, auth=auth))
+        elif transport == "streamable-http":
+            client = fastmcp.Client(StreamableHttpTransport(cap.url, auth=auth))
+        else:
+            client = fastmcp.Client(cap.url, auth=auth)
         stack = AsyncExitStack()
         await stack.enter_async_context(client)
         return cls(cap, client, stack)

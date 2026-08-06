@@ -12,7 +12,8 @@ elsewhere) are the same code, differing only in the url.
   ``(task) -> Environment`` constructor.
 - :class:`SubprocessRuntime` — serve the row's env from a ``.py`` source in a
   child process, when the env should not share the orchestrator's fate.
-- :class:`DockerRuntime` — ``docker run``s an image whose CMD serves the channel.
+- :class:`DockerRuntime` — starts an image or Compose environment whose primary
+  service serves the channel.
 - ``Runtime(url)`` — the ``nullcontext`` of providers: yields itself, a
   *borrowed, shared* substrate provisioned elsewhere (env served anywhere —
   a cloud sandbox, another host — that this process connects to).
@@ -32,8 +33,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
+import shlex
 import sys
+import tarfile
+import tempfile
 import uuid
 from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
@@ -43,7 +49,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
@@ -51,6 +57,7 @@ from hud.utils.docker import docker as _docker
 from hud.utils.platform import PlatformClient
 from hud.utils.process import ProcessGroup, create_process_group_exec
 
+from .compose import ComposeConfig
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
@@ -93,7 +100,7 @@ class RuntimeLimits(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
-    """Portable task-environment launch requirements.
+    """Typed task-environment launch requirements.
 
     ``Task.runtime_config`` is requested construction input. ``Runtime.config``
     is the effective config used to construct a runtime.
@@ -102,15 +109,26 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     image: str | None = Field(default=None, min_length=1)
+    compose: Path | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+
+    @model_validator(mode="after")
+    def validate_source(self) -> Self:
+        if self.image is not None and self.compose is not None:
+            raise ValueError("runtime_config accepts either image or compose, not both")
+        return self
 
     def with_overrides(self, override: RuntimeConfig | None) -> RuntimeConfig:
         if override is None:
             return self
-        return RuntimeConfig.model_validate(
-            self.model_dump() | override.model_dump(exclude_unset=True)
-        )
+        config = self.model_dump()
+        changes = override.model_dump(exclude_unset=True)
+        if override.image is not None:
+            config["compose"] = None
+        elif override.compose is not None:
+            config["image"] = None
+        return RuntimeConfig.model_validate(config | changes)
 
     def request_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_unset=True)
@@ -229,6 +247,55 @@ _DOCKER_SECURITY_ARGS = (
     "--security-opt",
     "systempaths=unconfined",
 )
+
+
+def _docker_compose_main(
+    published_port: str,
+    resources: RuntimeResources | None,
+    *,
+    seccomp: str | Path = _DOCKER_SECCOMP_PROFILE,
+) -> dict[str, Any]:
+    main: dict[str, Any] = {
+        "ports": [published_port],
+        "security_opt": [f"seccomp={seccomp}", "systempaths=unconfined"],
+    }
+    if resources is None:
+        return main
+    if resources.cpu is not None:
+        main["cpus"] = resources.cpu
+    if resources.memory_mb is not None:
+        main["mem_limit"] = f"{resources.memory_mb}m"
+    if resources.gpu is not None:
+        main["gpus"] = resources.gpu.count
+    return main
+
+
+def _compose_overrides(directory: Path, main: dict[str, Any]) -> tuple[Path, Path]:
+    main = dict(main)
+    (published_port,) = main.pop("ports")
+    override = directory / "override.json"
+    override.write_text(json.dumps({"services": {"main": main}}), encoding="utf-8")
+    ports = directory / "ports.yaml"
+    ports.write_text(
+        f'services:\n  main:\n    ports: !override ["{published_port}"]\n',
+        encoding="utf-8",
+    )
+    return override, ports
+
+
+@contextlib.contextmanager
+def _compose_payload(
+    compose: Path,
+    main: dict[str, Any],
+) -> Iterator[tuple[Path, Path, Path]]:
+    with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
+        root = Path(directory)
+        archive = root / "project.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for entry in compose.parent.iterdir():
+                tar.add(entry, arcname=entry.name)
+        override, ports = _compose_overrides(root, main)
+        yield archive, override, ports
 
 
 class LocalRuntime:
@@ -501,20 +568,11 @@ class SubprocessRuntime:
 
 
 class DockerRuntime:
-    """The container provider: each acquisition ``docker run``s a fresh *image*.
+    """Start a HUD environment from an image or a Docker Compose file.
 
-    The positional *image* is shorthand for ``runtime_config.image``. The image's
-    CMD serves the env's control channel on *port* inside the
-    container (the scaffolded ``Dockerfile.hud`` serves 8765). Each
-    acquisition publishes that port on an ephemeral loopback port, yields its
-    :class:`Runtime`, and force-removes the container on exit. *run_args* are
-    extra provider-specific ``docker run`` flags (``-e``, volumes). Every
-    container gets HUD's nested-workspace security profile so its environment
-    can use bubblewrap-backed :class:`~hud.environment.Workspace` sessions.
-
-    Acquisition returns as soon as the port mapping exists — the env may
-    still be importing behind it. Protocol-level readiness is the client's
-    job: ``connect`` retries the handshake until the channel answers.
+    An image is started with ``docker run``. A Compose file is started unchanged
+    except for a small provider override that publishes the ``main`` service's
+    control-channel port and applies HUD's nested-workspace security profile.
     """
 
     def __init__(
@@ -535,10 +593,63 @@ class DockerRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
-        if config.image is None:
-            raise ValueError("DockerRuntime requires runtime_config.image")
         if config.limits is not None and config.limits.model_dump(exclude_none=True):
             raise ValueError("DockerRuntime does not support runtime_config limits")
+        if config.compose is not None:
+            if self.run_args:
+                raise ValueError("DockerRuntime run_args apply only to image environments")
+            compose = config.compose.resolve()
+            resources = config.resources
+            if (
+                resources is not None
+                and resources.gpu is not None
+                and resources.gpu.type is not None
+            ):
+                raise ValueError("DockerRuntime cannot select Compose GPUs by type")
+            main = _docker_compose_main(f"127.0.0.1::{self.port}", resources)
+            project = f"hud-{uuid.uuid4().hex[:12]}"
+            with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
+                override, ports = _compose_overrides(Path(directory), main)
+                command = (
+                    "compose",
+                    "--project-name",
+                    project,
+                    "--file",
+                    str(compose),
+                    "--file",
+                    str(override),
+                    "--file",
+                    str(ports),
+                )
+                try:
+                    await _docker(*command, "up", "--detach", "--build", "--remove-orphans")
+                    mapping, _ = await _docker(*command, "port", "main", str(self.port))
+                    if not mapping.strip():
+                        logs_out, logs_err = await _docker(
+                            *command, "logs", "--tail", "40", "main", check=False
+                        )
+                        raise RuntimeError(
+                            f"Compose main service exited before serving port {self.port}:\n"
+                            f"{(logs_err or logs_out).strip()}"
+                        )
+                    host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
+                    yield Runtime(
+                        f"tcp://127.0.0.1:{host_port}",
+                        config=config if config.model_dump(exclude_none=True) else None,
+                    )
+                finally:
+                    await _docker(
+                        *command,
+                        "down",
+                        "--volumes",
+                        "--remove-orphans",
+                        check=False,
+                    )
+            return
+        if config.image is None:
+            raise ValueError(
+                "DockerRuntime requires runtime_config.image or runtime_config.compose"
+            )
 
         resource_args: list[str] = []
         resources = config.resources
@@ -640,15 +751,21 @@ class ModalRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        compose = config.compose.resolve() if config.compose is not None else None
         import modal
 
         app = None
-        if config.image is not None:
+        if compose is not None:
+            image = modal.Image.from_registry("docker:28.3.3-dind")
+        elif config.image is not None:
             image = _modal_image_from_uri(modal, config.image)
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
         elif self._image is None:
-            raise ValueError("ModalRuntime requires image=, image_name=, or runtime_config.image")
+            raise ValueError(
+                "ModalRuntime requires image=, image_name=, runtime_config.image, "
+                "or runtime_config.compose"
+            )
         else:
             if self._resolved is None:
                 async with self._image_lock:
@@ -684,18 +801,50 @@ class ModalRuntime:
             ready_timeout = config.limits.startup_timeout_s or ready_timeout
 
         sb = await modal.Sandbox.create.aio(
-            *self.command,
+            *(() if compose is not None else self.command),
             app=app,
             image=image,
-            workdir=self.workdir,
+            workdir=None if compose is not None else self.workdir,
             unencrypted_ports=[self.port],
-            readiness_probe=modal.Probe.with_tcp(self.port),
+            readiness_probe=(None if compose is not None else modal.Probe.with_tcp(self.port)),
             # Modal types both timeouts as int seconds; floats raise at proto encode.
             timeout=run_timeout,
+            **({"experimental_options": {"vm_runtime": True}} if compose is not None else {}),
             **sandbox_kwargs,
         )
         try:
-            await sb.wait_until_ready.aio(timeout=ready_timeout)
+            if compose is None:
+                await sb.wait_until_ready.aio(timeout=ready_timeout)
+            else:
+                main = _docker_compose_main(
+                    f"{self.port}:{self.port}",
+                    resources,
+                    seccomp="/hud/docker-seccomp.json",
+                )
+                with _compose_payload(compose, main) as (
+                    archive,
+                    override,
+                    ports,
+                ):
+                    await sb.filesystem.copy_from_local.aio(archive, "/hud/project.tar.gz")
+                    await sb.filesystem.copy_from_local.aio(override, "/hud/override.json")
+                    await sb.filesystem.copy_from_local.aio(ports, "/hud/ports.yaml")
+                    await sb.filesystem.copy_from_local.aio(
+                        _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
+                    )
+                command = (
+                    "mkdir -p /hud/project && "
+                    "tar -xzf /hud/project.tar.gz -C /hud/project && "
+                    "until docker info >/dev/null 2>&1; do sleep 1; done && "
+                    "docker compose --project-directory /hud/project "
+                    f"--file /hud/project/{shlex.quote(compose.name)} "
+                    "--file /hud/override.json --file /hud/ports.yaml "
+                    "up --detach --build --remove-orphans"
+                )
+                process = await sb.exec.aio("sh", "-c", command, timeout=ready_timeout)
+                if await process.wait.aio() != 0:
+                    error = (await process.stderr.read.aio()).strip()
+                    raise RuntimeError(f"Modal Compose startup failed: {error}")
             host, port = (await sb.tunnels.aio())[self.port].tcp_socket
             yield Runtime(
                 f"tcp://{host}:{port}",
@@ -704,6 +853,25 @@ class ModalRuntime:
             )
         finally:
             # check-free teardown: never shadow the run's own error.
+            if compose is not None:
+                with contextlib.suppress(Exception):
+                    process = await sb.exec.aio(
+                        "docker",
+                        "compose",
+                        "--project-directory",
+                        "/hud/project",
+                        "--file",
+                        f"/hud/project/{compose.name}",
+                        "--file",
+                        "/hud/override.json",
+                        "--file",
+                        "/hud/ports.yaml",
+                        "down",
+                        "--volumes",
+                        "--remove-orphans",
+                        timeout=30,
+                    )
+                    await process.wait.aio()
             with contextlib.suppress(Exception):
                 await sb.terminate.aio()
 
@@ -740,7 +908,7 @@ async def _snapshot_is_current(snapshot: Any, image: Any) -> bool:
 class DaytonaRuntime:
     """The Daytona provider: each acquisition creates a fresh sandbox from a snapshot.
 
-    The Daytona :class:`ModalRuntime` — boots a sandbox from a pre-built *snapshot*
+    The Daytona runtime boots a sandbox from a pre-built *snapshot*
     (the durable handle, the snapshot equivalent of Modal's image name), starts the
     env's control channel inside it, then reaches it over an SSH local-forward:
     Daytona exposes services only as HTTPS previews, but :func:`hud.clients.connect`
@@ -808,8 +976,23 @@ class DaytonaRuntime:
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+            compose = config.compose.resolve() if config.compose is not None else None
+            services = None
+            if compose is not None:
+                compose_config = await ComposeConfig.load(
+                    compose,
+                    docker=_docker,
+                    project_directory=compose.parent,
+                )
+                services = (await compose_config.resolve_registry_images(_docker)).services
             if config.limits is not None and config.limits.run_timeout_s is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.run_timeout_s")
+            if (
+                services is not None
+                and config.resources is not None
+                and config.resources.gpu is not None
+            ):
+                raise ValueError("Daytona linked sandboxes do not support GPU resources")
 
             daytona_resources = None
             if config.resources is not None:
@@ -834,27 +1017,38 @@ class DaytonaRuntime:
                 if resource_kwargs:
                     daytona_resources = Resources(**resource_kwargs)
 
-            if config.image is not None:
-                kwargs: dict[str, Any] = {
-                    "image": Image.base(config.image),
-                    "ephemeral": True,
-                    "auto_stop_interval": 0,
-                }
-                if daytona_resources is not None:
-                    kwargs["resources"] = daytona_resources
-                sandbox_params = CreateSandboxFromImageParams(**kwargs)
+            if config.image is not None or services is not None:
+                main_service = None
+                if services is not None:
+                    main_service = services["main"]
+                main_image = config.image
+                if main_image is None:
+                    assert main_service is not None
+                    main_image = main_service.image
+                assert main_image is not None
+                sandbox_params = CreateSandboxFromImageParams(
+                    image=Image.base(main_image),
+                    ephemeral=True,
+                    auto_stop_interval=0,
+                    resources=daytona_resources,
+                    env_vars=(main_service.environment or None)
+                    if main_service is not None
+                    else None,
+                )
             else:
-                if self.snapshot_name is None:
+                snapshot_name = self.snapshot_name
+                snapshot_image = self._image
+                if snapshot_name is None:
                     raise ValueError(
-                        "DaytonaRuntime requires snapshot_name or runtime_config.image"
+                        "DaytonaRuntime requires snapshot_name, runtime_config.image, "
+                        "or runtime_config.compose"
                     )
-                if daytona_resources is not None and self._image is None:
+                if daytona_resources is not None and snapshot_image is None:
                     raise ValueError(
                         "DaytonaRuntime cannot resize an already-built snapshot: resources "
                         "are fixed when it is built, so pass image= to build one"
                     )
-                snapshot_name = self.snapshot_name
-                if self._image is not None:
+                if snapshot_image is not None:
                     if daytona_resources is not None:
                         # Sizing is baked in at build time, so each sizing is its
                         # own snapshot under a readable suffix (env-4cpu-8gb).
@@ -877,7 +1071,7 @@ class DaytonaRuntime:
                             except DaytonaNotFoundError:
                                 existing = None
                             if existing is not None and not await _snapshot_is_current(
-                                existing, self._image
+                                existing, snapshot_image
                             ):
                                 logger.info(
                                     "Daytona snapshot %s is stale; rebuilding", snapshot_name
@@ -898,7 +1092,7 @@ class DaytonaRuntime:
                                 await daytona.snapshot.create(
                                     CreateSnapshotParams(
                                         name=snapshot_name,
-                                        image=self._image,
+                                        image=snapshot_image,
                                         resources=daytona_resources,
                                     )
                                 )
@@ -918,16 +1112,117 @@ class DaytonaRuntime:
                 sandbox_params,
                 timeout=create_timeout,
             )
+            session_command: Any = None
+            linked_sandboxes: list[Any] = []
             try:
-                # Start the env server in a background session (the snapshot's CMD is
-                # not the sandbox's main process). connect() retries the handshake,
-                # so we don't poll for readiness here.
-                session: str = "hud-serve"
-                await sandbox.process.create_session(session)
-                cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
-                started = await sandbox.process.execute_session_command(
-                    session, SessionExecuteRequest(command=cmd, run_async=True)
-                )
+                if compose is None:
+                    # Start the env server in a background session (the snapshot's CMD is
+                    # not the sandbox's main process). connect() retries the handshake,
+                    # so we don't poll for readiness here.
+                    session: str = "hud-serve"
+                    await sandbox.process.create_session(session)
+                    cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
+                    session_command = await sandbox.process.execute_session_command(
+                        session, SessionExecuteRequest(command=cmd, run_async=True)
+                    )
+                else:
+                    assert services is not None and main_service is not None
+                    service_sandboxes = {"main": sandbox}
+                    for service_name, service in services.items():
+                        if service_name == "main":
+                            continue
+                        image_name = service.image
+                        assert image_name is not None
+                        snapshot_name = (
+                            "hud-compose-" + hashlib.sha256(image_name.encode()).hexdigest()[:20]
+                        )
+                        async with self._snapshot_lock:
+                            if snapshot_name not in self._resolved:
+                                try:
+                                    await daytona.snapshot.get(snapshot_name)
+                                except DaytonaNotFoundError:
+                                    await daytona.snapshot.create(
+                                        CreateSnapshotParams(
+                                            name=snapshot_name,
+                                            image=image_name,
+                                        )
+                                    )
+                                self._resolved.add(snapshot_name)
+                        child = await daytona.create(
+                            CreateSandboxFromSnapshotParams(
+                                name=f"hud-{service_name}-{uuid.uuid4().hex[:12]}",
+                                snapshot=snapshot_name,
+                                ephemeral=True,
+                                auto_stop_interval=0,
+                                env_vars=service.environment,
+                                linked_sandbox=sandbox.id,
+                            ),
+                            timeout=create_timeout,
+                        )
+                        linked_sandboxes.append(child)
+                        service_sandboxes[service_name] = child
+
+                    for destination_name, destination in service_sandboxes.items():
+                        aliases = []
+                        for service_name, service_sandbox in service_sandboxes.items():
+                            if service_name == destination_name:
+                                continue
+                            sandbox_id = shlex.quote(service_sandbox.id)
+                            hostname = shlex.quote(service_name)
+                            aliases.append(
+                                f"ip=$(getent ahostsv4 {sandbox_id} | awk 'NR == 1 {{print $1}}')"
+                                " && "
+                                f'test -n "$ip" && printf \'%s %s\\n\' "$ip" {hostname} '
+                                ">> /etc/hosts"
+                            )
+                        if not aliases:
+                            continue
+                        mapped = await destination.process.exec(
+                            " && ".join(aliases),
+                            timeout=30,
+                        )
+                        if mapped.exit_code != 0:
+                            raise RuntimeError(
+                                f"Daytona could not map Compose services in "
+                                f"{destination_name!r}: {mapped.result.strip()}"
+                            )
+
+                    for service_name, service in services.items():
+                        if service_name == "main":
+                            continue
+                        child = service_sandboxes[service_name]
+                        session = f"hud-{service_name}"
+                        await child.process.create_session(session)
+                        if not service.argv:
+                            raise ValueError(f"Compose service {service_name!r} has no command")
+                        await child.process.execute_session_command(
+                            session,
+                            SessionExecuteRequest(command=service.shell_command(), run_async=True),
+                        )
+                        if service.healthcheck is not None:
+                            test = service.healthcheck.test
+                            if test and test[0] != "NONE":
+                                health_command = (
+                                    shlex.join(test[1:]) if test[0] == "CMD" else test[1]
+                                )
+                                async with asyncio.timeout(create_timeout):
+                                    while True:
+                                        health = await child.process.exec(
+                                            health_command,
+                                            timeout=30,
+                                        )
+                                        if health.exit_code == 0:
+                                            break
+                                        await asyncio.sleep(1)
+
+                    session = "hud-serve"
+                    await sandbox.process.create_session(session)
+                    if not main_service.argv:
+                        raise ValueError("Compose main service has no command")
+                    session_command = await sandbox.process.execute_session_command(
+                        session,
+                        SessionExecuteRequest(command=main_service.shell_command(), run_async=True),
+                    )
                 ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
                 async with asyncssh.connect(
                     self.ssh_host, username=ssh.token, known_hosts=None
@@ -944,12 +1239,12 @@ class DaytonaRuntime:
                         # sandbox may already be gone.
                         try:
                             logs = await sandbox.process.get_session_command_logs(
-                                session, started.cmd_id
+                                session, session_command.cmd_id
                             )
+                            output = (logs.stderr or logs.output or logs.stdout or "").strip()
                         except Exception as log_exc:
                             exc.add_note(f"env output unavailable: {log_exc}")
                         else:
-                            output = (logs.stderr or logs.output or logs.stdout or "").strip()
                             exc.add_note(
                                 f"env output in sandbox {sandbox.id}:\n{output}"
                                 if output
@@ -957,6 +1252,15 @@ class DaytonaRuntime:
                             )
                         raise
             finally:
+                for child in reversed(linked_sandboxes):
+                    try:
+                        await daytona.delete(child)
+                    except Exception:
+                        logger.warning(
+                            "failed to delete linked Daytona sandbox %s; it may still be running",
+                            child.id,
+                            exc_info=True,
+                        )
                 try:
                     await daytona.delete(sandbox)
                 except Exception:
@@ -1105,7 +1409,9 @@ class HUDRuntime:
                     "HUDRuntime cannot honor this task's declared GPU/limits on an "
                     "already-deployed env; run it on a placement that provisions them"
                 )
-            softly_ignored = task.runtime_config.model_dump(exclude_none=True, exclude={"image"})
+            softly_ignored = task.runtime_config.model_dump(
+                exclude_none=True, exclude={"image", "compose"}
+            )
             if softly_ignored and not self._warned_unsupported_config:
                 self._warned_unsupported_config = True
                 logger.warning(

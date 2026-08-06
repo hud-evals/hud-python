@@ -99,7 +99,7 @@ class ClaudeSDKAgent(Agent):
             family = cap.protocol.split("/", 1)[0]
             if family == "mcp":
                 token = cap.params.get("auth_token")
-                transport = "http" if cap.url.startswith("http") else "sse"
+                transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
                 server_config: dict[str, Any] = {"type": transport, "url": cap.url}
                 if token:
                     server_config["headers"] = {"Authorization": f"Bearer {token}"}

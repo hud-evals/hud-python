@@ -1,14 +1,13 @@
-"""Capability tunneling: substrate-local daemons reached through the control port.
+"""Capability tunneling: environment daemons reached through the control port.
 
-A capability whose resolved address is loopback lives in the substrate's
-network namespace — a container publishes only the control port, so the
-client can't dial it directly. Instead the manifest binding the client sees
-points at a local forwarder; each connection to it becomes one fresh
-connection to the control port, opened with a ``tunnel.open`` preface frame
-and spliced raw to the daemon. The preface is transport-level routing — a
-connection is a stream or a control session from its first frame, never
-upgraded mid-session. These tests drive that path end to end against a
-served env fronting a real TCP echo server.
+A capability address belongs to the environment's network. The raw manifest
+retains that address for processes executing there, while the client binding
+points at a local forwarder. Each connection to it becomes one fresh connection
+to the control port, opened with a ``tunnel.open`` preface frame and spliced raw
+to the daemon. The preface is transport-level routing — a connection is a stream
+or a control session from its first frame, never upgraded mid-session. These
+tests drive that path end to end against a served env fronting a real TCP echo
+server.
 """
 
 from __future__ import annotations
@@ -52,8 +51,21 @@ def _echo_env(port: int) -> Environment:
     return Environment("echo-env", capabilities=[cap])
 
 
+def test_mcp_capabilities_materialize_default_tunnel_ports() -> None:
+    assert Capability.mcp(url="http://tools.example/mcp").url == "http://tools.example:80/mcp"
+    assert Capability.mcp(url="https://tools.example/mcp").url == "https://tools.example:443/mcp"
+    assert Capability.mcp(url="ws://tools.example/mcp").url == "ws://tools.example:80/mcp"
+    assert Capability.mcp(url="wss://tools.example/mcp").url == "wss://tools.example:443/mcp"
+    assert (
+        Capability.mcp(url="https://user:secret@tools.example/mcp").url
+        == "https://user:secret@tools.example:443/mcp"
+    )
+
+
 async def test_bytes_round_trip_through_the_forwarded_binding(echo_port: int) -> None:
     async with served(_echo_env(echo_port)) as client:
+        assert client.manifest is not None
+        assert urlsplit(client.manifest.bindings[0].url).port == echo_port
         parts = urlsplit(client.binding("echo").url)
         assert parts.port != echo_port  # the binding points at the forwarder
 

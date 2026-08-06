@@ -6,15 +6,21 @@ import hashlib
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
+import tempfile
 import tomllib
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from hud.capabilities import Capability
 from hud.eval import Task, Taskset
+from hud.eval.compose import ComposeConfig, ComposeHealthcheck, ComposeService, ImageConfig
 from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeResources
 from hud.utils.docker import docker
 from hud.utils.naming import normalize_environment_name
@@ -32,6 +38,13 @@ IGNORED = shutil.ignore_patterns(
     ".pytest_cache",
 )
 NetworkMode = Literal["public", "no-network", "allowlist"]
+MCPTransport = Literal["sse", "streamable-http", "stdio"]
+COMPOSE_FILENAMES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+)
 
 
 class Phase(BaseModel):
@@ -54,6 +67,55 @@ class HealthcheckConfig(BaseModel):
     start_interval_sec: float = 5.0
     retries: int = 3
 
+    @classmethod
+    def from_compose(cls, value: ComposeHealthcheck) -> HealthcheckConfig | None:
+        if value.disable or value.test in (None, ["NONE"]):
+            return None
+        test = value.test
+        assert test
+        if test[0] == "CMD" and len(test) > 1:
+            command = shlex.join(str(part) for part in test[1:])
+        elif test[0] == "CMD-SHELL" and len(test) == 2:
+            command = str(test[1])
+        else:
+            raise ValueError("Compose main healthcheck test must be CMD or CMD-SHELL")
+
+        def seconds(raw: str | None, default: float) -> float:
+            if raw is None:
+                return default
+            units = {
+                "ns": 1e-9,
+                "us": 1e-6,
+                "µs": 1e-6,
+                "ms": 1e-3,
+                "s": 1,
+                "m": 60,
+                "h": 3600,
+            }
+            parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", str(raw))
+            if not parts or "".join(number + unit for number, unit in parts) != raw:
+                raise ValueError(f"invalid Compose healthcheck duration {raw!r}")
+            return sum(float(number) * units[unit] for number, unit in parts)
+
+        return cls(
+            command=command,
+            interval_sec=seconds(value.interval, 30.0),
+            timeout_sec=seconds(value.timeout, 30.0),
+            start_period_sec=seconds(value.start_period, 0.0),
+            start_interval_sec=seconds(value.start_interval, 5.0),
+            retries=value.retries if value.retries is not None else 3,
+        )
+
+
+class MCPServerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    transport: MCPTransport
+    url: str | None = None
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+
 
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -72,7 +134,7 @@ class EnvironmentConfig(BaseModel):
     workdir: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     healthcheck: HealthcheckConfig | None = None
-    mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
+    mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     skills_dir: str | None = None
 
 
@@ -101,7 +163,7 @@ class HarborTask:
     path: Path
     config: TaskConfig
     environment_hash: str
-    runtime: dict[str, Any]
+    compose: ComposeConfig | None
 
 
 async def adapt(
@@ -144,71 +206,127 @@ async def adapt(
             unsupported.append("multiple GPU types")
         elif config.environment.gpu_types and not config.environment.gpus:
             unsupported.append("GPU types without GPUs")
-        if config.environment.mcp_servers:
-            unsupported.append("MCP servers")
+        if any(server.transport == "stdio" for server in config.environment.mcp_servers):
+            unsupported.append("stdio MCP servers")
         if config.environment.skills_dir:
             unsupported.append("skills_dir")
         if config.verifier.environment_mode == "separate" or config.verifier.environment:
             unsupported.append("a separate verifier environment")
         if config.steps:
             unsupported.append("multi-step tasks")
-        if any(
-            (task_dir / "environment" / filename).is_file()
-            for filename in (
-                "compose.yaml",
-                "compose.yml",
-                "docker-compose.yaml",
-                "docker-compose.yml",
-            )
-        ):
-            unsupported.append("Docker Compose")
         if unsupported:
             raise NotImplementedError(
                 f"Harbor task {task_dir.name!r} uses unsupported features: "
                 + ", ".join(unsupported)
             )
 
-        environment = config.environment
+        server_names = [server.name for server in config.environment.mcp_servers]
+        if len(server_names) != len(set(server_names)):
+            raise ValueError("MCP server names must be unique")
+        if reserved := {"shell", "filetracking"} & set(server_names):
+            raise ValueError(f"MCP server name {min(reserved)!r} is reserved by the workspace")
+        for server in config.environment.mcp_servers:
+            if server.url is None:
+                raise ValueError(f"MCP server {server.name!r} requires a URL")
+
+        environment_dir = task_dir / "environment"
+        authored_compose = next(
+            (
+                environment_dir / filename
+                for filename in COMPOSE_FILENAMES
+                if (environment_dir / filename).is_file()
+            ),
+            None,
+        )
+        compose = None
+        if authored_compose is not None:
+            with tempfile.TemporaryDirectory(prefix="hud-harbor-compose-") as directory:
+                base_compose = Path(directory) / "base.json"
+                base_compose.write_text(json.dumps({"services": {"main": {"image": "hud-main"}}}))
+                try:
+                    compose = await ComposeConfig.load(
+                        base_compose,
+                        authored_compose,
+                        docker=docker,
+                        project_name="hud",
+                        project_directory=environment_dir,
+                    )
+                    compose.services["main"]
+                except (ValidationError, KeyError) as error:
+                    raise ValueError(
+                        f"{task_dir.name} did not resolve to a Compose project"
+                    ) from error
+            compose.name = None
+            if "default" in compose.networks and compose.networks["default"] == {
+                "name": "hud_default"
+            }:
+                compose.networks["default"] = {}
+
+        environment_digest = hashlib.sha256()
+        if environment_dir.exists():
+            for entry in sorted(environment_dir.rglob("*")):
+                relative_path = entry.relative_to(environment_dir).as_posix().encode()
+                if entry.is_symlink():
+                    environment_digest.update(
+                        relative_path + b"\0symlink\0" + os.readlink(entry).encode()
+                    )
+                elif entry.is_file():
+                    environment_digest.update(relative_path + b"\0" + entry.read_bytes())
+            environment_hash = environment_digest.hexdigest()[:16]
+        else:
+            environment_hash = "missing"
+
         tasks.append(
             HarborTask(
                 path=task_dir,
                 config=config,
-                environment_hash=_tree_hash(task_dir / "environment"),
-                runtime={
-                    "image": environment.docker_image,
-                    "workdir": environment.workdir,
-                    "environment_env": environment.env,
-                    "environment_network": environment.network_mode,
-                    "environment_hosts": environment.allowed_hosts,
-                    "healthcheck": (
-                        environment.healthcheck.model_dump()
-                        if environment.healthcheck is not None
-                        else None
-                    ),
-                    "agent": config.agent.model_dump(
-                        include={"user", "network_mode", "allowed_hosts", "env"}
-                    ),
-                    "verifier": config.verifier.model_dump(
-                        include={"user", "network_mode", "allowed_hosts", "env"}
-                    ),
-                },
+                environment_hash=environment_hash,
+                compose=compose,
             )
         )
 
     grouped: dict[tuple[str, str], list[HarborTask]] = {}
     for task in tasks:
-        runtime_json = json.dumps(task.runtime, sort_keys=True)
-        grouped.setdefault((task.environment_hash, runtime_json), []).append(task)
+        config_json = json.dumps(
+            task.config.model_dump(mode="json", exclude={"task", "metadata", "steps"}),
+            sort_keys=True,
+        )
+        grouped.setdefault((task.environment_hash, config_json), []).append(task)
 
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
-    for (environment_hash, runtime_json), group in sorted(grouped.items()):
-        digest = hashlib.sha256((environment_hash + "\0" + runtime_json).encode()).hexdigest()[:12]
+    for (environment_hash, config_json), group in sorted(grouped.items()):
+        digest = hashlib.sha256((environment_hash + "\0" + config_json).encode()).hexdigest()[:12]
         name = f"{base_name}-{digest}"
         source = group[0]
+        environment = source.config.environment
+        compose = source.compose.model_copy(deep=True) if source.compose is not None else None
+        compose_main = compose.services["main"] if compose is not None else ComposeService()
         dockerfile = source.path / "environment" / "Dockerfile"
-        base_image = source.runtime["image"]
-        if base_image and not dockerfile.is_file():
+        compose_image = compose_main.image
+        base_image = environment.docker_image or (
+            compose_image if compose_image != "hud-main" else None
+        )
+        build_timeout = max(task.config.environment.build_timeout_sec for task in group)
+        if compose_main.build is not None and environment.docker_image is None:
+            assert compose is not None
+            base_image = f"hud-harbor-base:{source.environment_hash}"
+            compose.services["main"] = compose_main.model_copy(update={"image": base_image})
+            with tempfile.TemporaryDirectory(prefix="hud-harbor-main-") as directory:
+                compose_file = Path(directory) / "compose.json"
+                compose_file.write_text(
+                    compose.model_dump_json(exclude_none=True),
+                    encoding="utf-8",
+                )
+                await docker(
+                    "compose",
+                    "--file",
+                    str(compose_file),
+                    "build",
+                    "main",
+                    deadline=build_timeout,
+                )
+        elif base_image and not dockerfile.is_file():
             await docker("pull", base_image)
         elif dockerfile.is_file():
             base_image = f"hud-harbor-base:{source.environment_hash}"
@@ -217,19 +335,76 @@ async def adapt(
                 "--tag",
                 base_image,
                 str(dockerfile.parent),
-                deadline=max(task.config.environment.build_timeout_sec for task in group),
+                deadline=build_timeout,
             )
         else:
             raise FileNotFoundError(f"{source.path.name} has no environment/Dockerfile")
 
-        output, _ = await docker(
-            "image",
-            "inspect",
-            "--format",
-            "{{json .Config}}",
-            base_image,
-        )
-        image_config = json.loads(output)
+        image_config = await ImageConfig.inspect(base_image, docker)
+        peers = []
+        if compose is not None:
+            for service_name, service in compose.services.items():
+                if service_name == "main":
+                    continue
+                ports = {
+                    int(value)
+                    for exposed in service.expose
+                    if (value := str(exposed).partition("/")[0]).isdigit()
+                }
+                ports.update(
+                    published.target for published in service.ports if published.protocol == "tcp"
+                )
+                source_image = service.image
+                if service.build is not None:
+                    source_image = f"hud-harbor-sidecar-build:{uuid.uuid4().hex}"
+                    compose.services[service_name] = service.model_copy(
+                        update={"image": source_image}
+                    )
+                    with tempfile.TemporaryDirectory(prefix="hud-harbor-sidecar-") as directory:
+                        compose_file = Path(directory) / "compose.json"
+                        compose_file.write_text(
+                            compose.model_dump_json(exclude_none=True),
+                            encoding="utf-8",
+                        )
+                        await docker("compose", "--file", str(compose_file), "build", service_name)
+                elif source_image:
+                    await docker("pull", source_image)
+                else:
+                    raise ValueError(
+                        f"Compose service {service_name!r} has neither image nor build"
+                    )
+                sidecar_config = await ImageConfig.inspect(source_image, docker)
+                if not ports:
+                    for value in sidecar_config.exposed_ports:
+                        port, separator, protocol = value.partition("/")
+                        if port.isdigit() and separator and protocol == "tcp":
+                            ports.add(int(port))
+                if len(ports) > 1:
+                    raise NotImplementedError(
+                        f"Compose service {service_name!r} exposes multiple ports; "
+                        "Peer names one endpoint"
+                    )
+                if not ports:
+                    raise ValueError(
+                        f"Compose service {service_name!r} declares no TCP port in Compose "
+                        "or its image"
+                    )
+                peers.append({"name": service_name, "port": next(iter(ports))})
+                image_id, _ = await docker("image", "inspect", "--format", "{{.Id}}", source_image)
+                fingerprint = image_id.strip().removeprefix("sha256:")[:16]
+                component = normalize_environment_name(f"{name}-{service_name}", default="sidecar")
+                sidecar_image = (
+                    f"{push}/{component}:{fingerprint}"
+                    if push
+                    else f"hud-harbor-sidecar:{component}-{fingerprint}"
+                )
+                await docker("tag", source_image, sidecar_image)
+                if push:
+                    await docker("push", sidecar_image)
+                compose.services[service_name] = service.with_image(
+                    sidecar_image,
+                    sidecar_config,
+                ).model_copy(update={"build": None})
         context = dataset / ".hud-adapt" / name
         if context.exists():
             shutil.rmtree(context)
@@ -250,27 +425,52 @@ async def adapt(
             newline="\n",
         )
 
-        workdir = source.runtime["workdir"] or image_config.get("WorkingDir") or "/"
+        workdir = environment.workdir or compose_main.working_dir or image_config.working_dir or "/"
         if Path(workdir).is_relative_to(HUD_ROOT):
             raise ValueError(f"Harbor workdir {workdir!r} is inside reserved path {HUD_ROOT}")
         image_env = {}
-        for entry in image_config.get("Env") or []:
+        for entry in image_config.environment:
             key, _, value = entry.partition("=")
             image_env[key] = value
+        healthcheck = environment.healthcheck
+        if healthcheck is None and compose_main.healthcheck is not None:
+            healthcheck = HealthcheckConfig.from_compose(compose_main.healthcheck)
         manifest = {
             "name": name,
             "workdir": workdir,
-            "image_user": image_config.get("User") or None,
+            "image_user": (
+                compose_main.user if compose_main.user is not None else image_config.user or None
+            ),
             "image_env": image_env,
-            "entrypoint": image_config.get("Entrypoint") or [],
+            "entrypoint": (
+                compose_main.entrypoint
+                if compose is not None and compose_main.entrypoint is not None
+                else image_config.entrypoint or []
+            ),
             "environment": {
-                "env": source.runtime["environment_env"],
-                "network_mode": source.runtime["environment_network"],
-                "allowed_hosts": source.runtime["environment_hosts"],
-                "healthcheck": source.runtime["healthcheck"],
+                "env": {
+                    **compose_main.environment,
+                    **environment.env,
+                },
+                "network_mode": environment.network_mode,
+                "allowed_hosts": environment.allowed_hosts,
+                "healthcheck": healthcheck.model_dump() if healthcheck is not None else None,
             },
-            "agent": source.runtime["agent"],
-            "verifier": source.runtime["verifier"],
+            "agent": source.config.agent.model_dump(
+                include={"user", "network_mode", "allowed_hosts", "env"}
+            ),
+            "verifier": source.config.verifier.model_dump(
+                include={"user", "network_mode", "allowed_hosts", "env"}
+            ),
+            "capabilities": [
+                Capability.mcp(
+                    name=server.name,
+                    url=cast("str", server.url),
+                    transport=cast('Literal["sse", "streamable-http"]', server.transport),
+                ).to_manifest()
+                for server in environment.mcp_servers
+            ],
+            "peers": peers,
             "tasks": [],
         }
         for task in group:
@@ -298,7 +498,14 @@ async def adapt(
             shutil.copy2(wheel, context / "packages" / wheel.name)
             requirement = f"{HUD_ROOT}/packages/{wheel.name}"
 
-        tag = _tree_hash(context)
+        context_digest = hashlib.sha256()
+        for entry in sorted(context.rglob("*")):
+            relative_path = entry.relative_to(context).as_posix().encode()
+            if entry.is_symlink():
+                context_digest.update(relative_path + b"\0symlink\0" + os.readlink(entry).encode())
+            elif entry.is_file():
+                context_digest.update(relative_path + b"\0" + entry.read_bytes())
+        tag = context_digest.hexdigest()[:16]
         image = f"{push}/{name}:{tag}" if push else f"hud-harbor:{name}-{tag}"
         await docker(
             "build",
@@ -312,6 +519,31 @@ async def adapt(
         )
         if push:
             await docker("push", image)
+
+        if compose is not None:
+            main = compose.services["main"].model_copy(
+                update={
+                    "build": None,
+                    "command": None,
+                    "entrypoint": None,
+                    "working_dir": None,
+                    "user": None,
+                    "healthcheck": None,
+                }
+            )
+            compose.services["main"] = main.with_image(
+                image,
+                await ImageConfig.inspect(image, docker),
+            )
+            (context / "compose.json").write_text(
+                json.dumps(
+                    compose.model_dump(mode="json", exclude_none=True),
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
         for task in group:
             config = task.config
@@ -341,7 +573,8 @@ async def adapt(
                     ),
                     columns=columns or None,
                     runtime_config=RuntimeConfig(
-                        image=image,
+                        image=image if compose is None else None,
+                        compose=context / "compose.json" if compose is not None else None,
                         resources=resources if resources.model_dump(exclude_none=True) else None,
                     ),
                 )
@@ -349,16 +582,3 @@ async def adapt(
 
     LOGGER.info("adapted %d Harbor image(s)", len({task.env for task in rows}))
     return Taskset(dataset.name, rows, origin=f"harbor:{dataset}")
-
-
-def _tree_hash(path: Path) -> str:
-    digest = hashlib.sha256()
-    if not path.exists():
-        return "missing"
-    for entry in sorted(path.rglob("*")):
-        name = entry.relative_to(path).as_posix().encode()
-        if entry.is_symlink():
-            digest.update(name + b"\0symlink\0" + os.readlink(entry).encode())
-        elif entry.is_file():
-            digest.update(name + b"\0" + entry.read_bytes())
-    return digest.hexdigest()[:16]

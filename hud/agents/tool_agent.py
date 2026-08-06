@@ -27,7 +27,8 @@ import mcp.types as mcp_types
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
-from hud.agents.tools.base import AgentTool
+from hud.agents.tools.base import AgentTool, provider_tool_name
+from hud.agents.tools.mcp import MCPTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient
 from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
@@ -115,8 +116,8 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     async def __call__(self, run: Run) -> None:
         """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
 
-        Opens the capabilities this agent's catalog supports off the connection
-        (``run.client.open(protocol)``), builds the tools into a fresh ``RunState``,
+        Opens the capabilities this agent's catalog supports off the connection,
+        builds the tools into a fresh ``RunState``,
         then runs the loop against ``run.prompt_messages``, accumulating the
         trajectory onto ``run.trace``. Loop budget and prompting come from the agent's config
         (``max_steps``, ``system_prompt``, ``citations_enabled``). No per-rollout
@@ -124,12 +125,17 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         rollouts.
         """
         connections: dict[str, CapabilityClient] = {}
+        opened_protocols: set[str] = set()
         manifest = run.client.manifest
         if manifest is not None:
             wanted = {cls.protocol for cls in type(self).clients}
             for cap in manifest.bindings:
-                if cap.protocol in wanted and cap.protocol not in connections:
-                    connections[cap.protocol] = await run.client.open(cap.protocol)
+                if cap.protocol not in wanted:
+                    continue
+                if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
+                    continue
+                connections[cap.name] = await run.client.open(cap.name)
+                opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(
@@ -155,17 +161,32 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         mcp_by_client: dict[MCPClient, list[mcp_types.Tool]] = dict(
             zip(mcp_clients, mcp_lists, strict=False),
         )
+        qualify_mcp_names = len(mcp_clients) > 1
 
         for tool_cls in type(self).tool_catalog:
             spec = tool_cls.default_spec(model)
             if spec is None:
                 continue
-            for client in connections.values():
+            for connection_name, client in connections.items():
                 if not isinstance(client, tool_cls.client_type):
                     continue
-                if isinstance(client, MCPClient):
+                if issubclass(tool_cls, MCPTool):
+                    assert isinstance(client, MCPClient)
                     for mt in mcp_by_client[client]:
-                        tool = tool_cls(spec=spec, client=client, mcp_tool=mt)  # type: ignore[call-arg]
+                        qualified_name = (
+                            f"{connection_name}__{mt.name}" if qualify_mcp_names else mt.name
+                        )
+                        tool = tool_cls(
+                            spec=spec,
+                            client=client,
+                            mcp_tool=mt,
+                            provider_name=provider_tool_name(qualified_name),
+                        )
+                        if tool.provider_name in tools:
+                            raise ValueError(
+                                "MCP tool name collision after qualification: "
+                                f"{tool.provider_name!r}"
+                            )
                         tools[tool.provider_name] = tool
                         params.append(tool.to_params())
                 else:

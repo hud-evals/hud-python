@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import asyncssh
 
 from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
+from hud.environment.namespace import NamespaceHost, NamespaceProcess, read_bwrap_pid
 from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -39,58 +40,94 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 
 _COMMAND_TIMEOUT = 3600.0
 
-# Set once the first Workspace logs the missing-bwrap notice (avoid per-instance spam).
-#: bwrap's usability is a property of the host/container, so probe once per
-#: process: an installed bwrap that cannot create namespaces would otherwise
-#: fail every session instead of falling back.
-_bwrap_usable: bool | None = None
+
+@dataclass(slots=True, frozen=True)
+class Bubblewrap:
+    path: str
+    pid_unshare: str | None = None
 
 
-def usable_bwrap() -> str | None:
-    """``bwrap``'s path if it can actually create namespaces here, else None."""
+# Set once the first Workspace probes the substrate (avoid per-instance work).
+_bwrap_usable: Bubblewrap | Literal[False] | None = None
+
+
+def usable_bwrap() -> Bubblewrap | None:
+    """A working bubblewrap launch mode for this substrate, if one exists."""
     global _bwrap_usable
+    if isinstance(_bwrap_usable, Bubblewrap):
+        return _bwrap_usable
+    if _bwrap_usable is False:
+        return None
+
     path = shutil.which("bwrap")
     if path is None:
         return None
     probe_binary = shutil.which("true")
     if probe_binary is None:
         return None
-    if _bwrap_usable is None:
-        try:
-            probe = subprocess.run(
-                # Mirrors a real session's *namespace* setup — mounting proc is
-                # what an unprivileged container blocks first. The whole root
-                # is bound so the probed binary keeps its loader; a narrower
-                # mount set fails for the wrong reason. It does not prove the
-                # installed bwrap parses every option a session passes, so
-                # bwrap_argv stays within what bubblewrap 0.4 understands.
+
+    direct = Bubblewrap(path)
+    launches = [
+        (
+            direct,
+            [
+                path,
+                "--unshare-user",
+                "--unshare-pid",
+                "--ro-bind",
+                "/",
+                "/",
+                "--proc",
+                "/proc",
+                "--",
+                probe_binary,
+            ],
+        )
+    ]
+    if unshare := shutil.which("unshare"):
+        staged = Bubblewrap(path, pid_unshare=unshare)
+        launches.append(
+            (
+                staged,
                 [
+                    unshare,
+                    "--kill-child=KILL",
+                    "--pid",
+                    "--mount-proc",
                     path,
-                    "--unshare-user-try",
-                    "--unshare-pid",
+                    "--unshare-user",
                     "--ro-bind",
                     "/",
                     "/",
-                    "--proc",
-                    "/proc",
                     "--",
                     probe_binary,
                 ],
+            )
+        )
+
+    failure = "unknown error"
+    for launch, argv in launches:
+        try:
+            probe = subprocess.run(
+                argv,
                 capture_output=True,
                 timeout=15,
                 check=False,
             )
-            _bwrap_usable = probe.returncode == 0
-            if not _bwrap_usable:
-                LOGGER.warning(
-                    "bwrap is installed but cannot create namespaces (%s); sessions will "
-                    "run WITHOUT isolation. The container runtime must allow "
-                    "unprivileged user namespaces to enable it.",
-                    probe.stderr.decode("utf-8", "replace").strip()[:120],
-                )
+            if probe.returncode == 0:
+                _bwrap_usable = launch
+                return launch
+            failure = probe.stderr.decode("utf-8", "replace").strip()[:120]
         except (OSError, subprocess.SubprocessError):
-            _bwrap_usable = False
-    return path if _bwrap_usable else None
+            continue
+
+    _bwrap_usable = False
+    LOGGER.warning(
+        "bwrap is installed but cannot create an isolated process namespace (%s); "
+        "sessions will run WITHOUT isolation.",
+        failure,
+    )
+    return None
 
 
 _warned_no_bwrap = False
@@ -188,25 +225,28 @@ def _env_argv(env: Mapping[str, str]) -> list[str]:
     return [env_bin, "-i", *(f"{k}={v}" for k, v in env.items())]
 
 
-async def install_identity_map(info_read: int, block_write: int) -> int:
+async def install_identity_map(
+    info_read: int,
+    block_write: int,
+    *,
+    launcher_pid: int | None = None,
+) -> int:
     """Map ids into a bwrap held at ``--userns-block-fd``, and release it.
 
     The counterpart to spawning with ``--info-fd``/``--userns-block-fd``:
     bwrap reports the pid of the namespace it made and waits, this side says
     who its ids are, and only then does anything run in it. Returns that pid.
     """
-    loop = asyncio.get_running_loop()
-    # The info document arrives in as many chunks as the pipe delivers — a
-    # single read can return a prefix of it (bwrap's write is not atomic with
-    # this side's read). Read until the document parses or the fd closes.
-    raw = b""
-    async with asyncio.timeout(30.0):
-        while chunk := await loop.run_in_executor(None, os.read, info_read, 4096):
-            raw += chunk
-            with contextlib.suppress(json.JSONDecodeError):
-                json.loads(raw)
-                break
-    pid = int(json.loads(raw)["child-pid"]) if raw else 0
+    pid = await read_bwrap_pid(info_read)
+    if pid and launcher_pid is not None:
+        pid = launcher_pid
+        for _ in range(2):
+            children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+            if len(children) != 1:
+                raise RuntimeError(
+                    f"sandbox launcher {pid} has {len(children)} children; expected one"
+                )
+            pid = int(children[0])
     if pid:
         _map_identities(pid)
     os.write(block_write, b"\n")
@@ -439,6 +479,8 @@ class Workspace:
         # backgrounds outlive the command that started it.
         self._sandbox: asyncio.subprocess.Process | None = None
         self._sandbox_init: int | None = None
+        self._namespace: NamespaceHost | None = None
+        self._bridge: NamespaceProcess | None = None
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
@@ -462,14 +504,28 @@ class Workspace:
         if await self.sandbox_pid() is None or not self.owns_netns or not allowed:
             yield {}
             return
+        assert self._namespace is not None
+        namespace = self._namespace
         token = secrets.token_urlsafe(32)
         egress = Egress(self._credentials_dir() / "visit", allowed, token=token)
         egress.start()
+        bridge: NamespaceProcess | None = None
         try:
+            bridge = await namespace.spawn(
+                egress.bridge_argv(VISITOR_PORT),
+                cwd=self.root,
+                env=dict(os.environ),
+                mount_view="host",
+            )
+            if await asyncio.wait_for(bridge.stdout.readline(), 30.0) != b"ready\n":
+                detail = (await bridge.stderr.read(2048)).decode(errors="replace").strip()
+                raise RuntimeError(detail or "visitor bridge did not become ready")
             # The peers are the workspace's, bound by its own bridge: a visitor
             # reaches them at those addresses, so they stay out of its proxy.
             yield proxy_environment(VISITOR_PORT, self.peers, token=token)
         finally:
+            if bridge is not None:
+                await bridge.terminate()
             egress.stop()
 
     @property
@@ -720,53 +776,28 @@ class Workspace:
         """Run a captured command against this workspace.
 
         The command gets a fresh mount namespace over the same filesystem and
-        remains in the parent PID namespace, where it can observe agent
-        processes without becoming visible to them. Normally it joins the
-        persistent sandbox's network so it can reach services the agent
-        started. ``allowed_hosts`` opens an authenticated egress policy only
-        for the command's lifetime. ``isolated=True`` gives it a fresh
-        no-network namespace instead. ``mounts`` can replace the session's
-        mounts where an operation is allowed to see paths hidden from sessions.
+        joins the persistent sandbox's PID and network namespaces, so it can
+        observe agent processes and reach services the agent started. The
+        trusted namespace host remains outside the agent-visible PID namespace.
+        ``allowed_hosts`` opens an authenticated egress policy only for the
+        command's lifetime. ``isolated=True`` gives it a fresh no-network
+        namespace instead. ``mounts`` can replace the session's mounts where
+        an operation is allowed to see paths hidden from sessions.
         """
-        current_identity = (os.geteuid(), os.getegid()) if hasattr(os, "geteuid") else None
-        requested_identity = identity if isinstance(identity, tuple) else (identity, identity)
-        if (
-            isinstance(identity, (int, tuple))
-            and requested_identity != current_identity
-            and not (_is_root() and self._setpriv() is not None)
-        ):
-            raise RuntimeError("setpriv is required to run a workspace command as another user")
-
+        bwrap = self._bwrap
+        if bwrap is None:
+            raise RuntimeError("workspace commands require bwrap")
         process_env = dict(env or {})
         if not isolated:
-            sandbox = await self.sandbox_pid()
-            if sandbox is None:
-                raise RuntimeError("workspace commands require a live sandbox")
             async with self.visiting(allowed_hosts) as visitor_env:
                 process_env.update(visitor_env)
-                nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
-                process = await create_process_group_exec(
-                    nsenter,
-                    "--target",
-                    str(sandbox),
-                    "--user",
-                    *(("--net",) if self.owns_netns else ()),
-                    "--preserve-credentials",
-                    "--",
-                    *self.bwrap_argv(
-                        [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
-                        env=process_env,
-                        inherit_host_env=True,
-                        inherit_workspace_env=inherit_workspace_env,
-                        network=True,
-                        isolate_processes=False,
-                        isolate_users=False,
-                        mounts=mounts,
-                    ),
-                    cwd=self.root,
-                    env={**os.environ, **process_env},
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                process = await self.launch(
+                    command,
+                    mounts=mounts,
+                    env=process_env,
+                    identity=identity,
+                    inherit_workspace_env=inherit_workspace_env,
+                    no_new_privs=no_new_privs,
                 )
                 return await process.complete(max_wait=max_wait)
 
@@ -775,7 +806,7 @@ class Workspace:
 
         info_read, info_write = os.pipe()
         block_read, block_write = os.pipe()
-        process: ProcessGroup | None = None
+        process: ProcessGroup | NamespaceProcess | None = None
         try:
             os.set_inheritable(info_write, True)
             os.set_inheritable(block_read, True)
@@ -806,7 +837,11 @@ class Workspace:
             os.close(info_write)
             os.close(block_read)
             info_write = block_read = -1
-            await install_identity_map(info_read, block_write)
+            await install_identity_map(
+                info_read,
+                block_write,
+                launcher_pid=(process.process.pid if bwrap.pid_unshare is not None else None),
+            )
         except BaseException:
             if process is not None:
                 await process.terminate()
@@ -819,6 +854,39 @@ class Workspace:
                     os.close(descriptor)
         assert process is not None
         return await process.complete(max_wait=max_wait)
+
+    async def launch(
+        self,
+        command: list[str],
+        *,
+        mounts: Sequence[Mount] | None = None,
+        env: Mapping[str, str] | None = None,
+        identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
+        inherit_workspace_env: bool = True,
+        no_new_privs: bool = True,
+        persistent: bool = False,
+    ) -> NamespaceProcess:
+        """Launch a process in the persistent workspace sandbox."""
+        if await self.sandbox_pid() is None:
+            raise RuntimeError("workspace commands require a live sandbox")
+        assert self._namespace is not None
+        process_env = dict(env or {})
+        return await self._namespace.spawn(
+            self.bwrap_argv(
+                [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
+                env=process_env,
+                inherit_host_env=True,
+                inherit_workspace_env=inherit_workspace_env,
+                network=True,
+                isolate_processes=False,
+                isolate_users=False,
+                mounts=mounts,
+            ),
+            cwd=self.root,
+            env={**os.environ, **process_env},
+            mount_view="host",
+            persistent=persistent,
+        )
 
     # ─── argv builders (public — useful if you want your own subprocess) ──
 
@@ -861,18 +929,28 @@ class Workspace:
         owns_netns = self.owns_netns if network is None else not network
         if not isolate_users and (info_fd is not None or userns_block_fd is not None):
             raise ValueError("identity-map descriptors require a fresh user namespace")
-        argv: list[str] = [self._bwrap, "--die-with-parent"]
+        staged_pid = isolate_processes and self._bwrap.pid_unshare is not None
+        argv: list[str] = [self._bwrap.path, "--die-with-parent"]
         if isolate_users:
             # Blocking means this side installs the map, so the namespace has
             # to be ours to map: --unshare-user, not the best-effort form.
             argv.append("--unshare-user" if userns_block_fd is not None else "--unshare-user-try")
         # A namespace-root session must not be able to inspect or redirect the
         # authenticated verifier route while both briefly share its network.
-        argv.extend(["--cap-drop", "CAP_NET_ADMIN", "--cap-drop", "CAP_NET_RAW"])
+        argv.extend(
+            [
+                "--cap-drop",
+                "CAP_SYS_ADMIN",
+                "--cap-drop",
+                "CAP_NET_ADMIN",
+                "--cap-drop",
+                "CAP_NET_RAW",
+            ]
+        )
         if isolate_processes:
             argv.extend(
                 [
-                    "--unshare-pid",
+                    *(("--unshare-pid",) if not staged_pid else ()),
                     "--unshare-ipc",
                     "--unshare-uts",
                     "--unshare-cgroup-try",
@@ -884,8 +962,10 @@ class Workspace:
             argv.extend(["--info-fd", str(info_fd)])
         if userns_block_fd is not None:
             argv.extend(["--userns-block-fd", str(userns_block_fd)])
-        for m in self._system_mounts:
-            argv.extend(m.to_bwrap_args())
+        for mount in self._system_mounts:
+            if self._bwrap.pid_unshare is not None and mount.kind == "proc":
+                continue
+            argv.extend(mount.to_bwrap_args())
         argv.extend(["--bind", str(self.root), self._guest_path])
         for m in self.mounts if mounts is None else mounts:
             argv.extend(m.to_bwrap_args())
@@ -897,69 +977,15 @@ class Workspace:
         argv.extend(["--chdir", target_cwd])
         argv.append("--")
         argv.extend(_payload_argv(command, full_env, ctty=tty))
-        return argv
-
-    def enter_argv(
-        self,
-        pid: int,
-        command: str | list[str] | None = None,
-        *,
-        env: Mapping[str, str] | None = None,
-        identity: int | tuple[int, int] | None | Literal["workspace"] = "workspace",
-        inherit_workspace_env: bool = True,
-        preserve_credentials: bool = False,
-        no_new_privs: bool = True,
-        tty: bool = False,
-    ) -> list[str]:
-        """Argv that runs ``command`` inside the sandbox *pid* belongs to.
-
-        The counterpart to :meth:`bwrap_argv`, which *creates* a sandbox: this
-        joins one that already exists, so successive commands share it. The
-        user namespace is joined first — that is what grants the privileges to
-        join the rest without any capability the container was not given.
-
-        The network namespace is joined only when the sandbox has one of its
-        own, which is exactly when the workspace severed the network. A
-        sharing sandbox is already in this process's netns, and that netns
-        belongs to an outer user namespace: once joined to bwrap's, we hold no
-        authority there and rejoining fails outright.
-
-        The sandbox's own working directory is the only one a session can be
-        started in, so there is no ``cwd`` to choose here: a directory named
-        to ``nsenter`` is opened *before* it joins anything, out where a guest
-        path that exists only inside the sandbox does not resolve.
-        """
-        nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
-        argv = [
-            nsenter,
-            "--target",
-            str(pid),
-            "--user",
-            "--mount",
-            "--pid",
-            "--uts",
-            "--ipc",
-            # Joined exactly when the sandbox has a network of its own —
-            # otherwise a session would run on the substrate's, which is the
-            # network the workspace was given a policy to keep it off.
-            *(("--net",) if self.owns_netns else ()),
-            "--wd",
-            *(("--preserve-credentials",) if preserve_credentials else ()),
-            "--",
-        ]
-        # Unlike the bwrap path, the drop goes *inside*: joining namespaces
-        # needs the privileges the dropped uid does not have.
-        if identity == "workspace":
-            argv.extend(self._drop_argv(no_new_privs=no_new_privs))
-        elif identity is not None:
-            argv.extend(self._drop_argv(identity, no_new_privs=no_new_privs))
-        argv.extend(
-            _payload_argv(
-                command,
-                self._full_env(env, include_workspace_env=inherit_workspace_env),
-                ctty=tty,
-            )
-        )
+        if staged_pid:
+            assert self._bwrap.pid_unshare is not None
+            argv = [
+                self._bwrap.pid_unshare,
+                "--kill-child=KILL",
+                "--pid",
+                "--mount-proc",
+                *argv,
+            ]
         return argv
 
     def _full_env(
@@ -989,6 +1015,10 @@ class Workspace:
             return self._drop_argv(no_new_privs=no_new_privs)
         if identity is None:
             return []
+        current = (os.geteuid(), os.getegid()) if hasattr(os, "geteuid") else None
+        requested = identity if isinstance(identity, tuple) else (identity, identity)
+        if requested != current and not (_is_root() and self._setpriv() is not None):
+            raise RuntimeError("setpriv is required to run a workspace command as another user")
         return self._drop_argv(identity, no_new_privs=no_new_privs)
 
     def _drop_argv(
@@ -1053,26 +1083,56 @@ class Workspace:
         return self._sandbox_init
 
     async def _start_sandbox(self) -> int:
-        """Spawn the holder whose namespaces sessions join, and learn its pid.
-
-        The pid comes from bwrap's ``--info-fd`` rather than by searching for
-        the holder: the pid that matters is the one *this* process can name,
-        and bwrap is the only party that knows which of its forks that is.
-        """
+        """Start the trusted namespace owner and its agent-visible holder."""
+        bwrap = self._bwrap
+        assert bwrap is not None
         try:
+            if self.owns_netns and (self.allowed_hosts or self.peers):
+                self._egress = Egress(self._credentials_dir(), self.allowed_hosts or (), self.peers)
+                self._egress.start()
+            holder_argv = self.bwrap_argv(
+                _SANDBOX_HOLDER,
+                network=True,
+                isolate_users=False,
+            )
             read_fd, write_fd = os.pipe()
             block_read, block_write = os.pipe()
             try:
                 os.set_inheritable(write_fd, True)
                 os.set_inheritable(block_read, True)
-                argv = self.bwrap_argv(
-                    _SANDBOX_HOLDER,
-                    info_fd=write_fd,
-                    userns_block_fd=block_read,
+                socket_path = self._credentials_dir() / "namespace.sock"
+                argv = [
+                    bwrap.path,
+                    "--die-with-parent",
+                    "--unshare-user",
+                    "--cap-add",
+                    "CAP_SYS_ADMIN",
+                    *(("--cap-add", "CAP_NET_ADMIN") if self.owns_netns else ()),
+                    "--info-fd",
+                    str(write_fd),
+                    "--userns-block-fd",
+                    str(block_read),
+                    "--bind",
+                    "/",
+                    "/",
+                    "--",
+                ]
+                if self.owns_netns:
+                    unshare = shutil.which("unshare")
+                    if unshare is None:
+                        raise RuntimeError("workspace network isolation requires unshare")
+                    argv.extend([unshare, "--net"])
+                argv.extend(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("namespace.py")),
+                        str(socket_path),
+                        *(("--setup-loopback",) if self.owns_netns else ()),
+                    ]
                 )
                 self._sandbox = await asyncio.create_subprocess_exec(
                     *argv,
-                    stdin=subprocess.DEVNULL,
+                    stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     pass_fds=(write_fd, block_read),
@@ -1080,31 +1140,43 @@ class Workspace:
                 os.close(write_fd)
                 os.close(block_read)
                 write_fd = block_read = -1
-                # The sandbox is held at its own creation until its ids are
-                # mapped: nothing runs in it, and nothing joins it, before then.
-                pid = await install_identity_map(read_fd, block_write)
+                await install_identity_map(read_fd, block_write)
             finally:
                 os.close(read_fd)
                 os.close(block_write)
                 for stray in (write_fd, block_read):
                     if stray != -1:
                         os.close(stray)
-            if not pid:
-                raise RuntimeError(
-                    f"the sandbox holder did not start: {await self._sandbox_error()}"
-                )
-            assert self._sandbox is not None and self._sandbox.stdout is not None
-            try:
-                signal = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)
-            except TimeoutError:
-                signal = b""
-            if signal != _SANDBOX_READY:
+            assert self._sandbox.stdin is not None and self._sandbox.stdout is not None
+            self._sandbox.stdin.write(
+                json.dumps(
+                    {
+                        "holder_argv": holder_argv,
+                        "bwrap": bwrap.path,
+                        "launcher_depth": 2 if bwrap.pid_unshare is not None else 0,
+                    }
+                ).encode()
+                + b"\n"
+            )
+            await self._sandbox.stdin.drain()
+            self._sandbox.stdin.close()
+            ready = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)
+            if not ready:
                 raise RuntimeError(f"the sandbox never became ready: {await self._sandbox_error()}")
+            pid = int(json.loads(ready)["holder_pid"])
+            self._namespace = NamespaceHost(socket_path)
+            await self._namespace.connect()
+            if self._egress is not None:
+                self._bridge = await self._namespace.spawn(
+                    self._egress.bridge_argv(),
+                    cwd=self.root,
+                    env=dict(os.environ),
+                    mount_view="host",
+                )
+                if await asyncio.wait_for(self._bridge.stdout.readline(), 30.0) != b"ready\n":
+                    detail = (await self._bridge.stderr.read(2048)).decode(errors="replace").strip()
+                    raise RuntimeError(detail or "workspace bridge did not become ready")
             self._sandbox_init = pid
-            if self.owns_netns:
-                self._egress = Egress(self._credentials_dir(), self.allowed_hosts or (), self.peers)
-                self._egress.start()
-                await self._egress.attach(pid)
             return pid
         except BaseException:
             await self.discard_sandbox()
@@ -1128,6 +1200,14 @@ class Workspace:
         every process the agent left behind goes with it — including ones it
         detached. A later session starts a fresh sandbox.
         """
+        bridge, self._bridge = self._bridge, None
+        if bridge is not None:
+            with contextlib.suppress(Exception):
+                await bridge.terminate()
+        namespace, self._namespace = self._namespace, None
+        if namespace is not None:
+            with contextlib.suppress(Exception):
+                await namespace.close()
         if self._egress is not None:
             self._egress.stop()
             self._egress = None
@@ -1182,6 +1262,40 @@ class Workspace:
         if self._drops_privileges():
             argv = [*self._drop_argv(), *argv]
         return argv
+
+    def session_argv(
+        self,
+        command: str | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        tty: bool = False,
+    ) -> list[str]:
+        """Build a session launched by the namespace host."""
+        if self._bwrap is None:
+            return self.shell_argv(command, cwd=cwd, env=env, tty=tty)
+        target_cwd = cwd if cwd is not None else self._guest_path
+        if self._drops_privileges():
+            session_env = {**(self._session_env() or {}), **(env or {})}
+        else:
+            session_env = self._full_env(env)
+        return [
+            self._bwrap.path,
+            "--cap-drop",
+            "CAP_SYS_ADMIN",
+            "--cap-drop",
+            "CAP_NET_ADMIN",
+            "--cap-drop",
+            "CAP_NET_RAW",
+            "--bind",
+            "/",
+            "/",
+            "--chdir",
+            target_cwd,
+            "--",
+            *self._drop_argv(),
+            *_payload_argv(command, session_env, ctty=tty),
+        ]
 
     # ─── ssh server internals ─────────────────────────────────────────
 
@@ -1289,7 +1403,7 @@ class Workspace:
             argv = (
                 self.shell_argv(process.command, env=session_env, tty=wants_tty)
                 if pid is None
-                else self.enter_argv(pid, process.command, env=session_env, tty=wants_tty)
+                else self.session_argv(process.command, env=session_env, tty=wants_tty)
             )
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
@@ -1380,23 +1494,31 @@ class Workspace:
             process.exit(result.returncode)
             return
 
-        # A client that asked for a pty gets one: the child's std fds are the
-        # terminal, so isatty() holds and curses/readline programs behave as
-        # they would in a terminal. stderr merges into stdout, as on any tty.
-        pty_pair = _open_pty(process) if wants_tty else None
-        child_fds: dict[str, Any] = (
-            {
-                "stdin": asyncio.subprocess.PIPE,
-                "stdout": asyncio.subprocess.PIPE,
-                "stderr": asyncio.subprocess.PIPE,
-            }
-            if pty_pair is None
-            else {"stdin": pty_pair[1], "stdout": pty_pair[1], "stderr": pty_pair[1]}
-        )
+        pty_pair = _open_pty(process) if wants_tty and pid is None else None
         try:
-            sub = await create_process_group_exec(
-                *argv, **child_fds, cwd=str(self.root), env=proc_env
-            )
+            if pid is None:
+                child_fds: dict[str, Any] = (
+                    {
+                        "stdin": asyncio.subprocess.PIPE,
+                        "stdout": asyncio.subprocess.PIPE,
+                        "stderr": asyncio.subprocess.PIPE,
+                    }
+                    if pty_pair is None
+                    else {"stdin": pty_pair[1], "stdout": pty_pair[1], "stderr": pty_pair[1]}
+                )
+                sub: ProcessGroup | NamespaceProcess = await create_process_group_exec(
+                    *argv, **child_fds, cwd=str(self.root), env=proc_env
+                )
+            else:
+                assert self._namespace is not None
+                sub = await self._namespace.spawn(
+                    argv,
+                    cwd=self.root,
+                    env=proc_env,
+                    tty=wants_tty,
+                    terminal_size=process.get_terminal_size() if wants_tty else (80, 24, 0, 0),
+                    persistent=True,
+                )
         except FileNotFoundError as exc:
             if pty_pair is not None:
                 os.close(pty_pair[0])
@@ -1410,6 +1532,10 @@ class Workspace:
             os.close(pty_pair[1])
             stdin_writer, stdout_reader = await _pty_streams(pty_pair[0])
             stderr_reader = None
+        elif isinstance(sub, NamespaceProcess):
+            stdin_writer = sub.stdin
+            stdout_reader = sub.stdout
+            stderr_reader = sub.stderr
         else:
             stdin_writer = sub.process.stdin
             stdout_reader = sub.stdout
@@ -1435,6 +1561,13 @@ class Workspace:
                                 resized.pixwidth,
                                 resized.pixheight,
                             )
+                        elif isinstance(sub, NamespaceProcess):
+                            await sub.resize(
+                                resized.width,
+                                resized.height,
+                                resized.pixwidth,
+                                resized.pixheight,
+                            )
                         continue
                     if not chunk:
                         break
@@ -1447,7 +1580,8 @@ class Workspace:
                     stdin_writer.close()
 
         async def relay_output(
-            reader: asyncio.StreamReader, writer: asyncssh.SSHWriter[bytes]
+            reader: asyncio.StreamReader | asyncssh.SSHReader[bytes],
+            writer: asyncssh.SSHWriter[bytes],
         ) -> None:
             """Forward the child's output as it is produced.
 

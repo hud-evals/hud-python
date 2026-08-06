@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -381,20 +382,22 @@ async def test_any_initialize_hook_can_publish_a_capability() -> None:
     assert torn_down  # env.stop() ran the shutdown hook
 
 
-async def test_loopback_declarations_are_forwarded_and_remote_ones_pass_through() -> None:
+async def test_manifest_keeps_environment_addresses_and_client_bindings_are_forwarded() -> None:
     local = Capability.cdp(name="browser", url="ws://127.0.0.1:9222")
     remote = Capability.ssh(name="box", url="ssh://box.example.com:22", host_pubkey="ssh-ed25519 x")
     env = Environment("mixed-env", capabilities=[local, remote])
 
     async with served(env) as client:
-        forwarded = client.binding("browser")
-        # Loopback means substrate-local: the client substitutes a local
-        # forwarder address, everything else about the capability intact.
-        assert forwarded.url != local.url
-        assert forwarded.url.startswith("ws://127.0.0.1:")
-        assert (forwarded.name, forwarded.protocol) == (local.name, local.protocol)
-        # Globally-reachable addresses are the client's to dial directly.
-        assert client.binding("box") == remote
+        assert client.manifest is not None
+        assert client.manifest.bindings == [local, remote]
+        for declared in (local, remote):
+            forwarded = client.binding(declared.name)
+            assert forwarded.url != declared.url
+            assert urlsplit(forwarded.url).hostname == "127.0.0.1"
+            assert (forwarded.name, forwarded.protocol) == (
+                declared.name,
+                declared.protocol,
+            )
 
 
 def test_a_capability_without_a_url_is_rejected() -> None:

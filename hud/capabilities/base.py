@@ -7,8 +7,8 @@ import re
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Self
-from urllib.parse import urlsplit
+from typing import Any, ClassVar, Literal, Self
+from urllib.parse import urlsplit, urlunsplit
 
 #: Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
@@ -23,11 +23,17 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
     if parts.hostname is None:
         raise ValueError(f"invalid URL (no host): {url!r}")
     if parts.port is None and default_port is not None:
-        userinfo = f"{parts.username}@" if parts.username else ""
-        path = parts.path
-        query = f"?{parts.query}" if parts.query else ""
-        fragment = f"#{parts.fragment}" if parts.fragment else ""
-        return f"{parts.scheme}://{userinfo}{parts.hostname}:{default_port}{path}{query}{fragment}"
+        userinfo = f"{parts.netloc.rpartition('@')[0]}@" if "@" in parts.netloc else ""
+        hostname = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        return urlunsplit(
+            (
+                parts.scheme,
+                f"{userinfo}{hostname}:{default_port}",
+                parts.path,
+                parts.query,
+                parts.fragment,
+            )
+        )
     return s
 
 
@@ -58,11 +64,18 @@ class Capability:
 
     @classmethod
     def from_manifest(cls, data: dict[str, Any]) -> Capability:
+        protocol = data["protocol"]
+        url = data["url"]
+        params = dict(data["params"]) if "params" in data and data["params"] is not None else {}
+        if protocol.split("/", 1)[0] == "mcp" and "transport" not in params:
+            params["transport"] = (
+                "websocket" if urlsplit(url).scheme in {"ws", "wss"} else "streamable-http"
+            )
         return cls(
             name=data["name"],
-            protocol=data["protocol"],
-            url=data["url"],
-            params=dict(data.get("params") or {}),
+            protocol=protocol,
+            url=url,
+            params=params,
         )
 
     # ─── well-known protocol factories ─────────────────────────────────
@@ -152,6 +165,7 @@ class Capability:
         name: str = "tools",
         url: str,
         auth_token: str | None = None,
+        transport: Literal["sse", "streamable-http", "websocket"] | None = None,
     ) -> Capability:
         """``mcp/2025-11-25`` — MCP server (ws/wss/http/https; no stdio)."""
         m = SCHEME_RE.match(url)
@@ -165,7 +179,18 @@ class Capability:
             raise ValueError(
                 f"mcp/2025-11-25: only ws/wss/http/https URLs are supported, got {scheme!r}",
             )
-        params: dict[str, Any] = {}
+        if transport == "websocket" and scheme not in {"ws", "wss"}:
+            raise ValueError("mcp websocket transport requires a ws:// or wss:// URL")
+        if transport in {"sse", "streamable-http"} and scheme not in {"http", "https"}:
+            raise ValueError(f"mcp {transport} transport requires an http:// or https:// URL")
+        if transport is None:
+            transport = "websocket" if scheme in {"ws", "wss"} else "streamable-http"
+        normalized = normalize_url(
+            normalized,
+            default_scheme="ws",
+            default_port=443 if scheme in {"https", "wss"} else 80,
+        )
+        params: dict[str, Any] = {"transport": transport}
         if auth_token is not None:
             params["auth_token"] = auth_token
         return cls(name=name, protocol="mcp/2025-11-25", url=normalized, params=params)
