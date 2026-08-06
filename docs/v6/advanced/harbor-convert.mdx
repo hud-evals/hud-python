@@ -2,13 +2,13 @@
 title: "Harbor interop"
 description: "Load Harbor tasks into the HUD runtime or export HUD tasks to Harbor folders, with a field-by-field mapping between formats."
 icon: "ship"
+tag: "Experimental"
 ---
 
 `adapt()` turns Harbor task directories into the same `Environment`, `Task`, and
 `Taskset` primitives used by authored HUD environments. It builds the Harbor
-environment first, then wraps that image with the checked-in
-`integrations/harbor/Dockerfile`, `env.py`, and `install.sh`. The generated
-directory contains task data, not generated source.
+environment first, then wraps that image with the Harbor runtime files packaged
+with the SDK. The generated directory contains task data, not generated source.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ directory contains task data, not generated source.
 Build the images and receive a runnable taskset:
 
 ```python
-from integrations import harbor
+from hud.integrations import harbor
 from hud.eval import DockerRuntime
 
 taskset = await harbor.adapt("./terminal-bench")
@@ -54,7 +54,7 @@ Prebuilt images, allowlists, and distinct agent/verifier users are supported.
 `env.py`) into self-contained Harbor task folders:
 
 ```python
-from integrations.harbor import export
+from hud.integrations.harbor import export
 
 created = await export("tasks.py", "harbor_tasks")
 ```

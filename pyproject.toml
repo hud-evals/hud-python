@@ -60,7 +60,7 @@ path = "hud/version.py"
 exclude = [
     "docs/",
     "cookbooks/",
-    "integrations/",
+    "hud/integrations/harbor/tests/",
     "hud-python/",
     "**/checkpoints/",
     "**/*.safetensors",
@@ -265,7 +265,7 @@ omit = [
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud", "integrations"]
+testpaths = ["hud"]
 addopts = "-m 'not integration'"
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
