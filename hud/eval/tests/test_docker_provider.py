@@ -630,6 +630,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
 ) -> None:
     calls: list[tuple[str, ...]] = []
     rendered: dict[str, Any] = {}
+    port_override = ""
     compose = tmp_path / "compose.yaml"
     compose.write_text(
         "services:\n  main:\n    image: hud-env:one\n  db:\n    image: postgres:17\n",
@@ -637,10 +638,13 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     )
 
     async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        nonlocal port_override
         calls.append(args)
         if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
-            override = Path(args[args.index("--file", args.index("--file") + 1) + 1])
+            files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
+            _, override, ports = files
             rendered.update(json.loads(override.read_text("utf-8")))
+            port_override = ports.read_text("utf-8")
         if args[-3:] == ("port", "main", "8765"):
             return "127.0.0.1:43210\n", ""
         return "", ""
@@ -660,7 +664,6 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         assert runtime.config == task.runtime_config
 
     assert rendered["services"]["main"] == {
-        "ports": ["127.0.0.1::8765"],
         "security_opt": [
             f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}",
             "systempaths=unconfined",
@@ -668,6 +671,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         "cpus": 2.0,
         "mem_limit": "4096m",
     }
+    assert 'ports: !override ["127.0.0.1::8765"]' in port_override
     up = next(
         call for call in calls if call[-4:] == ("up", "--detach", "--build", "--remove-orphans")
     )
@@ -764,6 +768,7 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert calls["uploads"] == [
         ("project.tar.gz", "/hud/project.tar.gz"),
         ("override.json", "/hud/override.json"),
+        ("ports.yaml", "/hud/ports.yaml"),
         ("docker-seccomp.json", "/hud/docker-seccomp.json"),
     ]
     execs = calls["execs"]

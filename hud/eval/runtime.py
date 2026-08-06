@@ -270,20 +270,32 @@ def _docker_compose_main(
     return main
 
 
+def _compose_overrides(directory: Path, main: dict[str, Any]) -> tuple[Path, Path]:
+    main = dict(main)
+    (published_port,) = main.pop("ports")
+    override = directory / "override.json"
+    override.write_text(json.dumps({"services": {"main": main}}), encoding="utf-8")
+    ports = directory / "ports.yaml"
+    ports.write_text(
+        f'services:\n  main:\n    ports: !override ["{published_port}"]\n',
+        encoding="utf-8",
+    )
+    return override, ports
+
+
 @contextlib.contextmanager
 def _compose_payload(
     compose: Path,
-    override_data: dict[str, Any],
-) -> Iterator[tuple[Path, Path]]:
+    main: dict[str, Any],
+) -> Iterator[tuple[Path, Path, Path]]:
     with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
         root = Path(directory)
         archive = root / "project.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:
             for entry in compose.parent.iterdir():
                 tar.add(entry, arcname=entry.name)
-        override = root / "override.json"
-        override.write_text(json.dumps(override_data), encoding="utf-8")
-        yield archive, override
+        override, ports = _compose_overrides(root, main)
+        yield archive, override, ports
 
 
 class LocalRuntime:
@@ -597,8 +609,7 @@ class DockerRuntime:
             main = _docker_compose_main(f"127.0.0.1::{self.port}", resources)
             project = f"hud-{uuid.uuid4().hex[:12]}"
             with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
-                override = Path(directory) / "compose.json"
-                override.write_text(json.dumps({"services": {"main": main}}), encoding="utf-8")
+                override, ports = _compose_overrides(Path(directory), main)
                 command = (
                     "compose",
                     "--project-name",
@@ -607,6 +618,8 @@ class DockerRuntime:
                     str(compose),
                     "--file",
                     str(override),
+                    "--file",
+                    str(ports),
                 )
                 try:
                     await _docker(*command, "up", "--detach", "--build", "--remove-orphans")
@@ -808,12 +821,14 @@ class ModalRuntime:
                     resources,
                     seccomp="/hud/docker-seccomp.json",
                 )
-                with _compose_payload(compose, {"services": {"main": main}}) as (
+                with _compose_payload(compose, main) as (
                     archive,
                     override,
+                    ports,
                 ):
                     await sb.filesystem.copy_from_local.aio(archive, "/hud/project.tar.gz")
                     await sb.filesystem.copy_from_local.aio(override, "/hud/override.json")
+                    await sb.filesystem.copy_from_local.aio(ports, "/hud/ports.yaml")
                     await sb.filesystem.copy_from_local.aio(
                         _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
                     )
@@ -823,7 +838,8 @@ class ModalRuntime:
                     "until docker info >/dev/null 2>&1; do sleep 1; done && "
                     "docker compose --project-directory /hud/project "
                     f"--file /hud/project/{shlex.quote(compose.name)} "
-                    "--file /hud/override.json up --detach --build --remove-orphans"
+                    "--file /hud/override.json --file /hud/ports.yaml "
+                    "up --detach --build --remove-orphans"
                 )
                 process = await sb.exec.aio("sh", "-c", command, timeout=ready_timeout)
                 if await process.wait.aio() != 0:
@@ -848,6 +864,8 @@ class ModalRuntime:
                         f"/hud/project/{compose.name}",
                         "--file",
                         "/hud/override.json",
+                        "--file",
+                        "/hud/ports.yaml",
                         "down",
                         "--volumes",
                         "--remove-orphans",
