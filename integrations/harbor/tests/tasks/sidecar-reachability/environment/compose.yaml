@@ -1,5 +1,10 @@
 services:
-  main: {}
+  main:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080"]
+      interval: 100ms
+      timeout: 2s
+      retries: 50
   web:
     image: python:3.11-alpine
     command: ["python", "-m", "http.server", "5678"]
