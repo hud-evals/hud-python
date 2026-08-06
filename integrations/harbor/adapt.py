@@ -6,6 +6,8 @@ import hashlib
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import tempfile
 import tomllib
@@ -18,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from hud.capabilities import Capability
 from hud.eval import Task, Taskset
-from hud.eval.compose import ComposeConfig, ComposeService, ImageConfig
+from hud.eval.compose import ComposeConfig, ComposeHealthcheck, ComposeService, ImageConfig
 from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeResources
 from hud.utils.docker import docker
 from hud.utils.naming import normalize_environment_name
@@ -64,6 +66,45 @@ class HealthcheckConfig(BaseModel):
     start_period_sec: float = 0.0
     start_interval_sec: float = 5.0
     retries: int = 3
+
+    @classmethod
+    def from_compose(cls, value: ComposeHealthcheck) -> HealthcheckConfig | None:
+        if value.disable or value.test in (None, ["NONE"]):
+            return None
+        test = value.test
+        assert test
+        if test[0] == "CMD" and len(test) > 1:
+            command = shlex.join(str(part) for part in test[1:])
+        elif test[0] == "CMD-SHELL" and len(test) == 2:
+            command = str(test[1])
+        else:
+            raise ValueError("Compose main healthcheck test must be CMD or CMD-SHELL")
+
+        def seconds(raw: str | None, default: float) -> float:
+            if raw is None:
+                return default
+            units = {
+                "ns": 1e-9,
+                "us": 1e-6,
+                "µs": 1e-6,
+                "ms": 1e-3,
+                "s": 1,
+                "m": 60,
+                "h": 3600,
+            }
+            parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", str(raw))
+            if not parts or "".join(number + unit for number, unit in parts) != raw:
+                raise ValueError(f"invalid Compose healthcheck duration {raw!r}")
+            return sum(float(number) * units[unit] for number, unit in parts)
+
+        return cls(
+            command=command,
+            interval_sec=seconds(value.interval, 30.0),
+            timeout_sec=seconds(value.timeout, 30.0),
+            start_period_sec=seconds(value.start_period, 0.0),
+            start_interval_sec=seconds(value.start_interval, 5.0),
+            retries=value.retries if value.retries is not None else 3,
+        )
 
 
 class MCPServerConfig(BaseModel):
@@ -182,6 +223,8 @@ async def adapt(
         server_names = [server.name for server in config.environment.mcp_servers]
         if len(server_names) != len(set(server_names)):
             raise ValueError("MCP server names must be unique")
+        if reserved := {"shell", "filetracking"} & set(server_names):
+            raise ValueError(f"MCP server name {min(reserved)!r} is reserved by the workspace")
         for server in config.environment.mcp_servers:
             if server.url is None:
                 raise ValueError(f"MCP server {server.name!r} requires a URL")
@@ -389,6 +432,9 @@ async def adapt(
         for entry in image_config.environment:
             key, _, value = entry.partition("=")
             image_env[key] = value
+        healthcheck = environment.healthcheck
+        if healthcheck is None and compose_main.healthcheck is not None:
+            healthcheck = HealthcheckConfig.from_compose(compose_main.healthcheck)
         manifest = {
             "name": name,
             "workdir": workdir,
@@ -408,11 +454,7 @@ async def adapt(
                 },
                 "network_mode": environment.network_mode,
                 "allowed_hosts": environment.allowed_hosts,
-                "healthcheck": (
-                    environment.healthcheck.model_dump()
-                    if environment.healthcheck is not None
-                    else None
-                ),
+                "healthcheck": healthcheck.model_dump() if healthcheck is not None else None,
             },
             "agent": source.config.agent.model_dump(
                 include={"user", "network_mode", "allowed_hosts", "env"}

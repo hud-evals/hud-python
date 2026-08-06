@@ -106,6 +106,14 @@ def fake_docker(monkeypatch):
                     "image": "no-ports:latest",
                     "networks": {"default": None},
                 }
+            elif "main-healthcheck" in authored:
+                project["services"]["main"]["healthcheck"] = {
+                    "test": ["CMD-SHELL", "curl -f http://localhost:8080/health"],
+                    "interval": "2s",
+                    "timeout": "3s",
+                    "retries": 5,
+                    "start_period": "1s",
+                }
             elif "expose:" not in authored:
                 project["services"]["redis"].pop("expose")
             if "user: 1001:1002" in authored:
@@ -257,6 +265,30 @@ services:
     assert compose["services"]["main"]["entrypoint"] == []
 
 
+async def test_adapt_moves_compose_main_healthcheck_into_the_workspace(
+    tmp_path: Path,
+    fake_docker,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "compose.yaml").write_text(
+        "# main-healthcheck\nservices:\n  main: {}\n",
+        encoding="utf-8",
+    )
+
+    await harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "tasks.json").read_text("utf-8"))
+    assert manifest["environment"]["healthcheck"] == {
+        "command": "curl -f http://localhost:8080/health",
+        "interval_sec": 2.0,
+        "timeout_sec": 3.0,
+        "start_period_sec": 1.0,
+        "start_interval_sec": 5.0,
+        "retries": 5,
+    }
+
+
 async def test_adapt_derives_implicit_peer_port_from_image(
     tmp_path: Path,
     fake_docker,
@@ -320,6 +352,29 @@ args = []
             "url": "http://redis:6379/mcp",
         }
     ]
+
+
+@pytest.mark.parametrize("name", ["shell", "filetracking"])
+async def test_mcp_server_names_cannot_shadow_workspace_capabilities(
+    tmp_path: Path,
+    fake_docker,
+    name: str,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        f"""\
+[[environment.mcp_servers]]
+name = "{name}"
+transport = "streamable-http"
+url = "http://server:8000/mcp"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=f"MCP server name {name!r} is reserved"):
+        await harbor.adapt(tmp_path)
+
+    assert fake_docker == []
 
 
 async def test_adapt_groups_identical_images_and_keeps_row_metadata(

@@ -54,7 +54,13 @@ class ImageConfig(BaseModel):
 class ComposeHealthcheck(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    test: list[str] | None = None
+    disable: bool | None = None
+    test: list[str] | None = Field(default=None, min_length=1)
+    interval: str | None = None
+    timeout: str | None = None
+    start_period: str | None = None
+    start_interval: str | None = None
+    retries: int | None = None
 
 
 class ComposePort(BaseModel):
