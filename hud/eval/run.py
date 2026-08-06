@@ -133,10 +133,18 @@ class Run:
     half-working.
     """
 
-    def __init__(self, client: HudClient | None, task_id: str, args: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        client: HudClient | None,
+        task_id: str,
+        args: dict[str, Any],
+        *,
+        best_effort_grade: bool = False,
+    ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
+        self._best_effort_grade = best_effort_grade
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -270,18 +278,19 @@ class Run:
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
 
-        # A mid-run error grades best-effort (capture a salvageable reward, keep
-        # status=error), but a grade failure must not mask the original error. A
-        # clean run grades normally — a grader fault propagates.
         if exc_type is not None:
             self.trace.status = "error"
-            try:
-                evaluation = await self.client.grade(answer)
-            except Exception as grade_exc:
-                logger.warning("grade failed after mid-run error: %s", grade_exc)
-                return False
-        else:
+
+        try:
             evaluation = await self.client.grade(answer)
+        except Exception as grade_exc:
+            if exc_type is None and not self._best_effort_grade:
+                raise
+            detail = "".join(traceback.format_exception_only(grade_exc)).strip()
+            logger.warning("best-effort grade failed: %s", detail)
+            self.trace.status = "error"
+            self.record(Step(source="system", error=f"[grading] {detail}"))
+            return False
 
         self.grade = Grade.from_dict(evaluation)
         self.record(
@@ -414,6 +423,7 @@ async def rollout(
         )
         run: Run | None = None
         _phase = "provisioning"
+        rollout_expired = False
 
         client: HudClient | None = None
 
@@ -423,7 +433,12 @@ async def rollout(
                 _phase = "starting task"
                 async with connect(addr) as actor_client:
                     client = actor_client
-                    live = Run(actor_client, task.id, task.args)
+                    live = Run(
+                        actor_client,
+                        task.id,
+                        task.args,
+                        best_effort_grade=task.verifier is not None,
+                    )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes
@@ -461,17 +476,17 @@ async def rollout(
                         and verifier.runtime_config is None
                     ):
                         _phase = "verifying"
-                        live.grade = Grade()
                         await _verify(live, actor_client, verifier)
                         _phase = "cleanup"
                         return
 
-                _phase = "cleanup"
+                _phase = "actor cleanup"
 
+            if rollout_expired:
+                return
             verifier = task.verifier
             if verifier is not None:
                 _phase = "provisioning verifier"
-                live.grade = Grade()
                 async with (
                     runtime(verifier) as verifier_addr,
                     connect(verifier_addr) as verifier_client,
@@ -490,6 +505,7 @@ async def rollout(
                 if done:
                     await driver
                 else:
+                    rollout_expired = True
                     phase = _phase
                     if run is not None:
                         run.trace.stop_reason = "timeout"
@@ -501,7 +517,7 @@ async def rollout(
                         with contextlib.suppress(Exception):
                             await asyncio.wait_for(client.cancel(), timeout=2.0)
                         client.abort()
-                    if phase != "cleanup":
+                    if phase not in {"actor cleanup", "cleanup"}:
                         driver.cancel()
                     driver.add_done_callback(_consume_task_result)
                     detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"

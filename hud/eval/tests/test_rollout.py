@@ -266,6 +266,67 @@ async def test_verifier_remains_authoritative_after_an_agent_error() -> None:
     assert placements == ["actor", "judge"]
 
 
+@pytest.mark.parametrize("agent_fails", [False, True])
+async def test_verifier_remains_authoritative_when_actor_grading_fails(
+    agent_fails: bool,
+) -> None:
+    actor_env = Environment("actor")
+    verifier_env = Environment("judge")
+    placements: list[str] = []
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        raise RuntimeError("actor grade exploded")
+
+    @verifier_env.template()
+    async def verify():
+        answer = yield ""
+        yield 1.0 if answer == "secret" else 0.0
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.env)
+        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+            yield runtime
+
+    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
+    agent = (
+        _AnswerThenBoomAgent(lambda _prompt: "secret")
+        if agent_fails
+        else _FnAgent(lambda _prompt: "secret")
+    )
+    run = await rollout(task, agent, runtime=provider)
+
+    assert run.trace.is_error
+    assert "actor grade exploded" in (run.trace.error or "")
+    assert run.reward == 1.0
+    assert placements == ["actor", "judge"]
+
+
+async def test_actor_grade_survives_a_verifier_provisioning_failure() -> None:
+    actor_env = Environment("actor")
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        if row.env == "judge":
+            raise RuntimeError("verifier unavailable")
+        async with _local(actor_env) as runtime:
+            yield runtime
+
+    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
+
+    assert run.trace.is_error
+    assert "verifier unavailable" in (run.trace.error or "")
+    assert run.reward == 0.25
+
+
 def _bindings_env(published: Any) -> Environment:
     """An env whose task publishes per-episode binding data alongside the prompt."""
     env = Environment("slots")
@@ -637,6 +698,48 @@ async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
 
     release_cleanup.set()
     await asyncio.wait_for(cleanup_finished.wait(), 1.0)
+
+
+async def test_timeout_during_actor_cleanup_does_not_start_the_verifier() -> None:
+    actor_env = Environment("actor")
+    cleanup_started = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    placements: list[str] = []
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.env)
+        if row.env == "judge":
+            raise AssertionError("verifier started after the rollout returned")
+        try:
+            async with _local(actor_env) as runtime:
+                yield runtime
+        finally:
+            cleanup_started.set()
+            await release_cleanup.wait()
+            cleanup_finished.set()
+
+    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
+    run = await rollout(
+        task,
+        _FnAgent(lambda _prompt: "secret"),
+        runtime=provider,
+        rollout_timeout=0.2,
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert placements == ["actor"]
+    release_cleanup.set()
+    await asyncio.wait_for(cleanup_finished.wait(), 1.0)
+    await asyncio.sleep(0)
+    assert placements == ["actor"]
 
 
 async def test_timeout_does_not_cancel_verifier_provider_cleanup() -> None:
