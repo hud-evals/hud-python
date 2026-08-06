@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.cli.utils.source import EnvironmentSource, normalize_environment_name
+from hud.cli.utils.source import EnvironmentSource
+from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,12 +26,6 @@ def test_normalize_environment_name() -> None:
     assert normalize_environment_name("a---b") == "a-b"
     assert normalize_environment_name("@#$") == "environment"
     assert normalize_environment_name("", default="converted") == "converted"
-
-
-def test_environment_name_auto(tmp_path: Path) -> None:
-    env = tmp_path / "my_env"
-    env.mkdir()
-    assert EnvironmentSource.open(env).environment_name() == "my-env"
 
 
 def test_detects_environment_directory(tmp_path: Path) -> None:
@@ -119,13 +114,25 @@ def test_finds_positional_name_reference(tmp_path: Path) -> None:
     assert "Environment" in ref.text
 
 
-def test_finds_single_quotes_and_nested_dirs(tmp_path: Path) -> None:
-    (tmp_path / "sub").mkdir()
-    _write(tmp_path / "sub" / "e.py", "e = Environment('bar')\n")
+def test_finds_single_quotes_and_deeply_nested_dirs(tmp_path: Path) -> None:
+    source_dir = tmp_path / "src" / "acme"
+    source_dir.mkdir(parents=True)
+    _write(source_dir / "e.py", "e = Environment('bar')\n")
 
     names = {ref.name for ref in EnvironmentSource.open(tmp_path).environment_name_references()}
 
     assert names == {"bar"}
+
+
+def test_reference_scan_skips_excluded_dirs(tmp_path: Path) -> None:
+    excluded = tmp_path / ".venv"
+    excluded.mkdir()
+    _write(excluded / "env.py", 'env = Environment("excluded")\n')
+    _write(tmp_path / "env.py", 'env = Environment("included")\n')
+
+    names = {ref.name for ref in EnvironmentSource.open(tmp_path).environment_name_references()}
+
+    assert names == {"included"}
 
 
 def test_keyword_name_is_matched(tmp_path: Path) -> None:
@@ -188,7 +195,7 @@ def test_no_references_is_a_pass(tmp_path: Path) -> None:
 
 
 def test_served_module_parses_exec_form(tmp_path: Path) -> None:
-    _write(tmp_path / "Dockerfile", 'CMD ["hud", "dev", "env:env", "--port", "8765"]\n')
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "env:env", "--port", "8765"]\n')
 
     assert EnvironmentSource.open(tmp_path).served_environment_module() == "env"
 
@@ -212,8 +219,18 @@ def test_served_module_none_without_entrypoint(tmp_path: Path) -> None:
 
 
 def test_served_name_ignores_in_process_subagent(tmp_path: Path) -> None:
-    _write(tmp_path / "Dockerfile", 'CMD ["hud", "dev", "env:env", "--port", "8765"]\n')
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "env:env", "--port", "8765"]\n')
     _write(tmp_path / "env.py", 'env = Environment(name="trace-explorer")\n')
+    _write(tmp_path / "verify.py", 'verify_env = Environment(name="qa-verifier")\n')
+
+    assert EnvironmentSource.open(tmp_path).served_environment_name() == "trace-explorer"
+
+
+def test_served_name_resolves_dotted_module(tmp_path: Path) -> None:
+    source_dir = tmp_path / "src" / "acme"
+    source_dir.mkdir(parents=True)
+    _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "src.acme.env:env"]\n')
+    _write(source_dir / "env.py", 'env = Environment(name="trace-explorer")\n')
     _write(tmp_path / "verify.py", 'verify_env = Environment(name="qa-verifier")\n')
 
     assert EnvironmentSource.open(tmp_path).served_environment_name() == "trace-explorer"

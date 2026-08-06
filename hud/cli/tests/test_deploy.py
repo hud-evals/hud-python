@@ -57,18 +57,32 @@ class TestResolveEnvironmentName:
 
         assert self._resolve(tmp_path) == "trace-explorer"
 
+    def test_dotted_entrypoint_disambiguates_nested_environment(self, tmp_path: Path) -> None:
+        source_dir = tmp_path / "src" / "acme"
+        source_dir.mkdir(parents=True)
+        (tmp_path / "Dockerfile").write_text(
+            'CMD ["hud", "serve", "src.acme.env:env", "--port", "8765"]\n', encoding="utf-8"
+        )
+        (source_dir / "env.py").write_text(
+            'env = Environment("trace-explorer")\n', encoding="utf-8"
+        )
+        (tmp_path / "verify.py").write_text(
+            'verify_env = Environment("qa-verifier")\n', encoding="utf-8"
+        )
+
+        assert self._resolve(tmp_path) == "trace-explorer"
+
     def test_unnamed_environment_exit(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text("env = Environment()\n", encoding="utf-8")
 
         with pytest.raises(typer.Exit):
             self._resolve(tmp_path)
 
-    def test_no_references_falls_back_to_directory(self, tmp_path: Path) -> None:
-        env_dir = tmp_path / "My Legacy_Env"
-        env_dir.mkdir()
-        (env_dir / "server.py").write_text("x = 1\n", encoding="utf-8")
+    def test_no_environment_declaration_exits(self, tmp_path: Path) -> None:
+        (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
 
-        assert self._resolve(env_dir) == "my-legacy-env"
+        with pytest.raises(typer.Exit):
+            self._resolve(tmp_path)
 
     def test_registry_id_name_mismatch_exit(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text('env = Environment("code-name")\n', encoding="utf-8")
@@ -93,15 +107,15 @@ class TestResolveEnvironmentName:
         ):
             assert self._resolve(tmp_path, registry_id="r-1") == "Code Name"
 
-    def test_registry_id_supplies_name_for_legacy_env(self, tmp_path: Path) -> None:
+    def test_registry_id_does_not_replace_missing_declaration(self, tmp_path: Path) -> None:
         (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
         registry_env = RegistryEnvironment(id="r-1", name="platform-name")
 
-        with patch(
-            "hud.cli.deploy.get_registry_environment",
-            return_value=registry_env,
+        with (
+            patch("hud.cli.deploy.get_registry_environment", return_value=registry_env),
+            pytest.raises(typer.Exit),
         ):
-            assert self._resolve(tmp_path, registry_id="r-1") == "platform-name"
+            self._resolve(tmp_path, registry_id="r-1")
 
 
 class TestCollectEnvironmentVariables:

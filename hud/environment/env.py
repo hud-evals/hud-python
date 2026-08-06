@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
 from hud.capabilities import Capability
 
-from .legacy import LegacyEnvMixin
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -134,14 +133,8 @@ class _TaskFactory(Generic[P]):
         return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
 
 
-class Environment(LegacyEnvMixin):
-    """Capabilities + tasks dispatched over the HUD wire protocol.
-
-    Also accepts the deprecated v5 env-authoring surface (positional ``name``,
-    ``@env.scenario``, ``@env.tool`` / ``env.add_tool``, ``env("scenario")``,
-    ``env.run``) via :class:`~hud.environment.legacy.LegacyEnvMixin`, so deployed
-    v5 envs keep running. Each legacy entry point warns and adapts to v6.
-    """
+class Environment:
+    """Capabilities + tasks dispatched over the HUD wire protocol."""
 
     def __init__(
         self,
@@ -149,17 +142,7 @@ class Environment(LegacyEnvMixin):
         *,
         version: str = "0.0.1",
         capabilities: Sequence[Capability] | None = None,
-        **legacy_kwargs: Any,
     ) -> None:
-        if legacy_kwargs:
-            import warnings
-
-            warnings.warn(
-                f"Environment(): ignoring v5 keyword(s) {sorted(legacy_kwargs)} "
-                "(no longer part of the v6 Environment surface).",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         self.name = name
         self.version = version
         #: Published capabilities — always concrete wire data. Daemons the env
@@ -174,13 +157,12 @@ class Environment(LegacyEnvMixin):
         #: Registered task templates by id (the ``@env.template`` registry).
         #: Each value mints concrete :class:`~hud.eval.Task` rows when called.
         self.tasks: dict[str, _TaskFactory[Any]] = {}
-        # Backing-daemon lifecycle hooks (e.g. a legacy MCP server the adapter
-        # stands up). Run once by the serving substrate around its lifetime.
+        # Backing-daemon lifecycle hooks run once by the serving substrate
+        # around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         # Per task-session end (cancel / bye / post-grade cleanup).
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
-        self._init_legacy()
 
     # ─── task registration ───────────────────────────────────────────
 

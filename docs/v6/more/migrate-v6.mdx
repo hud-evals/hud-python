@@ -6,15 +6,15 @@ icon: "arrows-rotate"
 
 v6 is a leaner spec. The environment is no longer an MCP server that hands tools to the agent - it's a small control channel that exposes **capabilities** (connections the agent drives itself) and **tasks** (prompt then reward). The agent's harness owns the tools, so the environment side gets noticeably smaller.
 
-## What stays compatible
+## Upgrade boundary
 
-**Environments are mostly backwards compatible.** The v6 SDK still runs environments written against the v5 surface: `@env.scenario`, `@env.tool` / `env.add_tool`, `env("scenario")`, and `env.run(...)` all keep working - each emits a `DeprecationWarning` and adapts to v6 under the hood. New (v6) agents can evaluate your existing environments unchanged.
+The v6 SDK does not run environments written against the v5 surface. Convert `@env.scenario`, `@env.tool` / `env.add_tool`, `env("scenario")`, and `env.run(...)` before upgrading the environment to v6. The removed `hud.tools`, `hud.native`, `hud.services`, and `hud.server` modules are not importable in v6.
 
 <Warning>
-**The break is on the agent side.** v6 serves a new control channel instead of MCP stdio/http, so **old (v5) agents cannot run old or new environments** - once an environment is served by the v6 SDK (whether authored in the v5 or v6 style), only a v6 client can drive it. Upgrade the side that *runs* agents to v6.
+v6 serves a control channel instead of MCP stdio/http, so old v5 agents cannot run v6 environments. Upgrade the environment source and the side that runs agents together.
 </Warning>
 
-So you can upgrade the SDK first and keep your environments as-is, then convert at your own pace. Converting is worth it: the v6 spec removes most of the tool-wiring boilerplate.
+The v6 spec removes most of the tool-wiring boilerplate. The conversion below maps each removed surface to its v6 owner.
 
 ## At a glance
 
@@ -28,7 +28,7 @@ So you can upgrade the SDK first and keep your environments as-is, then convert 
 | `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` | v6 serves a control channel, not MCP |
 | `.slug`, `.columns` on a task | `.slug`, `.columns` on the `Task` | unchanged |
 
-The CLI you already use is stable: `hud init`, `hud deploy`, `hud eval`, and `hud sync tasks` all carry over. `hud dev` is now `hud serve` (the old name remains as a deprecated alias).
+The CLI you already use is stable: `hud init`, `hud deploy`, `hud eval`, and `hud sync tasks` all carry over. Replace `hud dev` with `hud serve`.
 
 ## Walk through a conversion
 
@@ -76,7 +76,7 @@ async def fix_tests(target: str = "tests/"):
     yield await BashGrader.grade(command=f"pytest {target} -q")
 ```
 
-`@env.template()` also accepts `id=`, `description=`, and optional `input=` / `returns=` types (surfaced as JSON schemas in the manifest). The decorated function is a *template* that mints `Task` rows when called. The v5 scenario options (`chat`, `returns`, `exclude_tools`, ...) still parse through the compatibility layer if you keep `@env.scenario`.
+`@env.template()` also accepts `id=`, `description=`, and optional `input=` / `returns=` types (surfaced as JSON schemas in the manifest). The decorated function is a *template* that mints `Task` rows when called. Removed v5 scenario options such as `chat`, `exclude_tools`, and `allowed_tools` have no direct v6 equivalent; express agent and tool policy in the harness that owns it.
 </Step>
 
 <Step title="Build tasks by calling the task function">
@@ -123,28 +123,28 @@ The conversion is mechanical, so the fastest path is to let your coding agent do
 
 > Convert this v5 HUD environment to v6 using the migration guide at docs.hud.ai. Rename scenarios to tasks, replace registered tools with the capability they imply (shell/files → `ssh`, browser → `cdp`, computer-use → `rfb`, custom tools → `mcp`), switch `env("name", ...)` to calling the task, and fix the `hud.tools` imports below.
 
-Because every old import still resolves (the SDK ships shims) and registered tools are auto-promoted to capabilities at serve time, **your environment keeps running throughout** - convert incrementally and let the `DeprecationWarning`s tell you what's left.
+Make the conversion while the environment still uses the v5 SDK, then upgrade it to v6 and run its task tests. Old imports and registered tools do not have runtime fallbacks in v6.
 
 ### Imports to update
 
-In v6, `hud.tools` was removed entirely - tools are capabilities now - but every old import still resolves with a `DeprecationWarning`:
+In v6, `hud.tools` and the other v5 compatibility modules were removed entirely. Update every old import before upgrading:
 
-| v5 import | What it resolves to now | What to do |
-|-----------|-------------------------|------------|
-| `AgentTool`, `BaseTool` | **removed** - resolve to a no-op stand-in | drop the class; expose a sub-agent as a plain function on a FastMCP server and attach it as an `mcp` capability - see [Subagents as tools](/v6/advanced/extending#subagents-as-tools) |
-| Result types: `EvaluationResult`, `ScenarioResult`, `SubScore`, `AgentAnswer`, `Citation` | redirected to their v6 homes: `hud.graders` (`ScenarioResult` is now `EvaluationResult`), `hud.environment` (`AgentAnswer` is now `Answer`, without `citations`), `hud.agents.types` | change the import to the module the warning names |
+| v5 import | v6 replacement | What to do |
+|-----------|----------------|------------|
+| `AgentTool`, `BaseTool` | none | drop the class; expose a sub-agent as a plain function on a FastMCP server and attach it as an `mcp` capability - see [Subagents as tools](/v6/advanced/extending#subagents-as-tools) |
+| Result types: `EvaluationResult`, `ScenarioResult`, `SubScore`, `AgentAnswer`, `Citation` | `hud.graders` (`ScenarioResult` becomes `EvaluationResult`), `hud.environment.Answer`, and `hud.agents.types.Citation` | import each type from its v6 module |
 | `ContentResult` | supported in v6 at `hud.agents.types` | `from hud.agents.types import ContentResult` - `.to_content_blocks()` builds a tool's `list[ContentBlock]` from text + an optional image |
 | `ToolError` | removed (no v6 counterpart) | return an error result (`ContentResult(error=...).to_content_blocks()`) or raise an ordinary exception - the loop surfaces it to the agent and continues |
-| `hud.server.MCPServer` | **removed** - now plain `fastmcp.FastMCP` (a deprecation shim keeps the old import working and warns) | `from fastmcp import FastMCP` (same `@server.tool` / `run_async`); manage its lifecycle with `@env.initialize` / `@env.shutdown` |
-| Shell/edit tools: `BashTool`, `EditTool`, `ShellTool`, `ApplyPatchTool`, ... | **removed** - resolve to a marker that synthesizes an `ssh` capability at serve | call `env.workspace(root)` instead |
-| Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | **removed** - resolve to a marker that synthesizes an `rfb` capability at serve | declare an `rfb` (computer-use) or `cdp` (browser) capability instead |
-| Anything else under `hud.tools`: `PlaywrightTool`, `JupyterTool`, `MemoryTool`, filesystem tools, executors, `SubmitTool`, `BaseHub` | **no-op stand-in** (silently does nothing) | remove it - declare a capability (`cdp` for browser) or serve your own tool over `mcp` |
-| Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | aliased to `hud.graders` | change the import to `from hud.graders import ...` |
-| Chat: `hud.services.Chat` | aliased to `hud.eval.chat` (re-exported as `hud.Chat`) | change the import to `from hud import Chat` |
+| `hud.server.MCPServer` | `fastmcp.FastMCP` | import `FastMCP` directly and manage its lifecycle with `@env.initialize` / `@env.shutdown` |
+| Shell/edit tools: `BashTool`, `EditTool`, `ShellTool`, `ApplyPatchTool`, ... | `ssh` capability | call `env.workspace(root)` instead |
+| Computer tools: `HudComputerTool`, `AnthropicComputerTool`, `OpenAIComputerTool`, `GeminiComputerTool`, `QwenComputerTool`, ... | `rfb` or `cdp` capability | declare the capability explicitly |
+| Anything else under `hud.tools`: `PlaywrightTool`, `JupyterTool`, `MemoryTool`, filesystem tools, executors, `SubmitTool`, `BaseHub` | no automatic replacement | remove it - declare a capability (`cdp` for browser) or serve your own tool over `mcp` |
+| Graders: `hud.native` (`BashGrader`, `LLMJudgeGrader`, `exact_match`, ...) | `hud.graders` | change the import to `from hud.graders import ...` |
+| Chat: `hud.services.Chat` | `hud.Chat` | change the import to `from hud import Chat` |
 | `hud.services.ChatService` | **removed** - the A2A executor left the SDK | copy the reference server in `cookbooks/a2a-chat/server.py` (a thin A2A adapter over `Chat`) |
 | `hud.shared.*` (`exceptions`, `requests`, ...) | **merged into `hud.utils`** (no alias - no environment imported it) | change the import to `from hud.utils... import ...` |
 
-The rule of thumb: **grading types move to `hud.graders`, tools become capabilities, and everything else under `hud.tools` is going away.** When the deprecation log is quiet, the conversion is done.
+The rule of thumb: **grading types move to `hud.graders`, tools become capabilities, and removed v5 modules must be gone before the v6 upgrade.**
 
 ## Next steps
 

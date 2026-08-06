@@ -55,9 +55,17 @@ def test_module_factory_is_called_with_args(factory_module) -> None:
 
 
 def test_module_env_attribute_is_returned_not_called(factory_module) -> None:
-    # Environments are callable (legacy scenario surface); the instance must
-    # be returned as-is, never invoked as a factory.
-    assert load_environment(factory_module).name == "declared"
+    import sys
+
+    from hud.environment import Environment
+
+    class CallableEnvironment(Environment):
+        def __call__(self) -> None:
+            raise AssertionError("Environment instance was called as a factory")
+
+    setattr(sys.modules[factory_module], "env", CallableEnvironment("callable"))
+
+    assert load_environment(factory_module).name == "callable"
 
 
 def test_module_factory_returning_non_environment_raises(factory_module) -> None:

@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from hud.utils.naming import normalize_environment_name
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -114,35 +112,39 @@ class EnvironmentSource:
         reported with ``name=None`` so callers can demand an explicit one.
         """
         references: list[EnvironmentNameReference] = []
-        py_files = list(self.root.glob("*.py")) + list(self.root.glob("*/*.py"))
-        for py_file in py_files:
-            try:
-                source = py_file.read_text(encoding="utf-8")
-                tree = ast.parse(source)
-            except (OSError, SyntaxError):
-                continue
-            lines = source.splitlines()
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = sorted(name for name in dirnames if name not in self.SOURCE_EXCLUDE_DIRS)
+            py_files = (Path(dirpath) / name for name in sorted(filenames) if name.endswith(".py"))
+            for py_file in py_files:
+                try:
+                    source = py_file.read_text(encoding="utf-8")
+                    tree = ast.parse(source)
+                except (OSError, SyntaxError):
                     continue
-                callee = node.func
-                callee_name = (
-                    callee.id
-                    if isinstance(callee, ast.Name)
-                    else callee.attr
-                    if isinstance(callee, ast.Attribute)
-                    else None
-                )
-                if callee_name != "Environment":
-                    continue
-                references.append(
-                    EnvironmentNameReference(
-                        file=py_file,
-                        line=node.lineno,
-                        text=lines[node.lineno - 1].strip() if node.lineno <= len(lines) else "",
-                        name=_environment_call_name(node),
+                lines = source.splitlines()
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    callee = node.func
+                    callee_name = (
+                        callee.id
+                        if isinstance(callee, ast.Name)
+                        else callee.attr
+                        if isinstance(callee, ast.Attribute)
+                        else None
                     )
-                )
+                    if callee_name != "Environment":
+                        continue
+                    references.append(
+                        EnvironmentNameReference(
+                            file=py_file,
+                            line=node.lineno,
+                            text=(
+                                lines[node.lineno - 1].strip() if node.lineno <= len(lines) else ""
+                            ),
+                            name=_environment_call_name(node),
+                        )
+                    )
         return references
 
     def served_environment_module(self) -> str | None:
@@ -165,18 +167,14 @@ class EnvironmentSource:
         if module is None:
             return None
 
-        served_file = (self.root / module).with_suffix(".py").resolve()
+        module_path = Path(module) if module.endswith(".py") else Path(*module.split("."))
+        served_file = (self.root / module_path).with_suffix(".py").resolve()
         names = {
             ref.name
             for ref in self.environment_name_references()
             if ref.file.resolve() == served_file and ref.name is not None
         }
         return next(iter(names)) if len(names) == 1 else None
-
-    def environment_name(self) -> str:
-        """Directory-derived fallback name for projects without ``Environment(...)``."""
-        directory_name = self.root.name or self.root.parent.name
-        return normalize_environment_name(directory_name)
 
     def load_config(self) -> dict[str, Any]:
         if self.config_path.exists():
@@ -504,17 +502,17 @@ def _dockerfile_command_tokens(content: str) -> list[list[str]]:
 
 
 def _hud_serve_spec(tokens: list[str]) -> str | None:
-    """The serve target from a ``hud serve|dev <spec>`` token list.
+    """The serve target from a ``hud serve <spec>`` token list.
 
     Returns the explicit ``module[:attr]`` spec, ``"env"`` when ``hud serve`` is
     invoked with no target (the runtime default), or ``None`` when the tokens
-    contain no ``hud serve``/``hud dev`` invocation.
+    contain no ``hud serve`` invocation.
     """
     for index, token in enumerate(tokens):
         if Path(token).name != "hud":
             continue
         rest = tokens[index + 1 :]
-        if not rest or rest[0] not in {"serve", "dev"}:
+        if not rest or rest[0] != "serve":
             continue
         target = rest[1] if len(rest) > 1 else None
         if target is None or target.startswith("-"):

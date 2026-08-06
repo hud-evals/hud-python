@@ -1,8 +1,7 @@
 """``hud serve`` — serve a v6 :class:`~hud.environment.Environment` locally.
 
 In v6, ``hud serve`` brings up an environment's control channel (tcp JSON-RPC)
-so agents can connect to it. ``hud dev`` is a deprecated alias. The legacy
-MCP-server hot-reload / Docker / inspector mode is no longer supported.
+so agents can connect to it.
 """
 
 from __future__ import annotations
