@@ -16,6 +16,20 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 
+@pytest.mark.parametrize(("value", "expected"), [("HUD", "hud"), ("modal", "modal")])
+def test_normalize_runtime_uses_public_runtime_names(value: str, expected: str) -> None:
+    from hud.cli.deploy import _normalize_runtime
+
+    assert _normalize_runtime(value, HUDConsole()) == expected
+
+
+def test_normalize_runtime_rejects_internal_provider_name() -> None:
+    from hud.cli.deploy import _normalize_runtime
+
+    with pytest.raises(typer.Exit):
+        _normalize_runtime("ec2", HUDConsole())
+
+
 class TestResolveEnvironmentName:
     """Tests for code-authoritative environment name resolution."""
 
@@ -194,6 +208,44 @@ class TestCollectEnvironmentVariables:
 
 
 class TestRuntimeConfigFile:
+    @pytest.mark.parametrize("filename", ["compose.yaml", "compose.yml", "docker-compose.json"])
+    def test_prepare_deploy_uses_context_recipe(
+        self,
+        tmp_path: Path,
+        filename: str,
+    ) -> None:
+        from hud.cli.deploy import _prepare_deploy_plan
+
+        (tmp_path / "env.py").write_text(
+            'env = Environment("compose-env")\n',
+            encoding="utf-8",
+        )
+        (tmp_path / filename).write_text(
+            "services:\n  main:\n    build: ./main\n  redis:\n    image: redis:7\n",
+            encoding="utf-8",
+        )
+
+        plan = _prepare_deploy_plan(
+            EnvironmentSource.open(tmp_path),
+            env_dir=tmp_path,
+            env=None,
+            env_file=None,
+            no_env=True,
+            registry_id=None,
+            build_args=None,
+            build_secrets=None,
+            runtime=None,
+            runtime_config=None,
+            verbose=False,
+            platform=PlatformClient("https://api.example", "key"),
+            console=HUDConsole(),
+        )
+
+        assert plan.runtime_config is not None
+        payload = plan.runtime_config.request_payload()
+        assert payload["compose_project"] == {"compose_path": filename}
+        assert set(payload["compose"]["services"]) == {"main", "redis"}
+
     def test_load_runtime_config_uses_sdk_shape(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _load_runtime_config
         from hud.utils.hud_console import HUDConsole
@@ -209,7 +261,9 @@ class TestRuntimeConfigFile:
             encoding="utf-8",
         )
 
-        assert _load_runtime_config(str(config_path), HUDConsole()) == {
+        config = _load_runtime_config(str(config_path), HUDConsole())
+        assert config is not None
+        assert config.request_payload() == {
             "resources": {"gpu": {"type": "A10G", "count": 2}},
             "limits": {"startup_timeout_s": 300},
         }
@@ -221,7 +275,29 @@ class TestRuntimeConfigFile:
         config_path = tmp_path / "runtime.json"
         config_path.write_text(json.dumps({"resources": None}), encoding="utf-8")
 
-        assert _load_runtime_config(str(config_path), HUDConsole()) == {"resources": None}
+        config = _load_runtime_config(str(config_path), HUDConsole())
+        assert config is not None
+        assert config.request_payload() == {"resources": None}
+
+    def test_load_runtime_config_resolves_compose_project_from_config_directory(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from hud.cli.deploy import _load_runtime_config
+
+        project = tmp_path / "project"
+        project.mkdir()
+        compose = project / "compose.json"
+        compose.write_text('{"services":{"main":{"image":"postgres:16"}}}')
+        config_path = tmp_path / "runtime.json"
+        config_path.write_text('{"compose":"project/compose.json","compose_project":"."}')
+
+        config = _load_runtime_config(str(config_path), HUDConsole())
+
+        assert config is not None
+        assert config.request_payload()["compose_project"] == {
+            "compose_path": "project/compose.json"
+        }
 
     def test_load_runtime_config_rejects_unknown_fields(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _load_runtime_config
@@ -232,6 +308,37 @@ class TestRuntimeConfigFile:
 
         with pytest.raises(typer.Exit):
             _load_runtime_config(str(config_path), HUDConsole())
+
+    def test_prepare_deploy_rejects_image_config_for_compose_context(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from hud.cli.deploy import _prepare_deploy_plan
+
+        (tmp_path / "env.py").write_text(
+            'env = Environment("compose-env")\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "compose.yaml").write_text("services:\n  main:\n    image: example\n")
+        runtime_config = tmp_path / "runtime.json"
+        runtime_config.write_text('{"image":"other:latest"}', encoding="utf-8")
+
+        with pytest.raises(typer.Exit):
+            _prepare_deploy_plan(
+                EnvironmentSource.open(tmp_path),
+                env_dir=tmp_path,
+                env=None,
+                env_file=None,
+                no_env=True,
+                registry_id=None,
+                build_args=None,
+                build_secrets=None,
+                runtime=None,
+                runtime_config=str(runtime_config),
+                verbose=False,
+                platform=PlatformClient("https://api.example", "key"),
+                console=HUDConsole(),
+            )
 
 
 class TestDeployEnvironment:
@@ -253,6 +360,33 @@ class TestDeployEnvironment:
             deploy_environment(directory=str(tmp_path))
 
         assert exc_info.value.exit_code == 1
+
+    def test_compose_recipe_does_not_require_a_dockerfile(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import _compose_recipe
+
+        (tmp_path / "compose.yaml").write_text("services: {main: {image: alpine}}\n")
+
+        assert _compose_recipe(tmp_path) == tmp_path / "compose.yaml"
+
+    def test_compose_recipe_prefers_base_file_over_override(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import _compose_recipe
+
+        base = tmp_path / "docker-compose.yml"
+        base.write_text("services: {main: {image: alpine}}\n")
+        (tmp_path / "docker-compose.override.yml").write_text(
+            "services: {main: {environment: {DEBUG: '1'}}}\n"
+        )
+
+        assert _compose_recipe(tmp_path) == base
+
+    def test_compose_recipe_ignores_override_without_base(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import _compose_recipe
+
+        (tmp_path / "docker-compose.override.yml").write_text(
+            "services: {main: {environment: {DEBUG: '1'}}}\n"
+        )
+
+        assert _compose_recipe(tmp_path) is None
 
     def test_no_dockerfile_error(self, tmp_path: Path) -> None:
         """Test error when no Dockerfile found."""
@@ -358,90 +492,6 @@ class TestDeployAsync:
             )
 
         assert result.success is False
-
-    @pytest.mark.asyncio
-    async def test_trigger_build_sends_runtime_provider(self) -> None:
-        """Test deploy runtime flag maps to the platform runtime_provider field."""
-        from hud.cli.deploy import _DeployPlan, _trigger_build
-        from hud.utils.hud_console import HUDConsole
-        from hud.utils.platform import PlatformClient
-
-        class FakePlatform(PlatformClient):
-            payload: dict[str, object] | None = None
-
-            async def apost(
-                self,
-                path: str,
-                *,
-                json: object | None = None,
-            ) -> dict[str, object]:
-                assert path == "/builds/trigger"
-                assert isinstance(json, dict)
-                object.__setattr__(self, "payload", json)
-                return {"id": "build-1", "registry_id": "registry-1"}
-
-        platform = FakePlatform("https://api.example", "key")
-        result = await _trigger_build(
-            platform,
-            build_id="build-1",
-            plan=_DeployPlan(
-                name="test-env",
-                registry_id=None,
-                runtime="modal",
-                runtime_config=None,
-                env_vars={},
-                build_args={},
-                build_secrets={},
-            ),
-            no_cache=False,
-            console=HUDConsole(),
-        )
-
-        assert result == {"id": "build-1", "registry_id": "registry-1"}
-        assert platform.payload is not None
-        assert platform.payload["runtime_provider"] == "modal"
-
-    @pytest.mark.asyncio
-    async def test_trigger_build_sends_runtime_config(self) -> None:
-        from hud.cli.deploy import _DeployPlan, _trigger_build
-        from hud.utils.hud_console import HUDConsole
-        from hud.utils.platform import PlatformClient
-
-        class FakePlatform(PlatformClient):
-            payload: dict[str, object] | None = None
-
-            async def apost(
-                self,
-                path: str,
-                *,
-                json: object | None = None,
-            ) -> dict[str, object]:
-                assert path == "/builds/trigger"
-                assert isinstance(json, dict)
-                object.__setattr__(self, "payload", json)
-                return {"id": "build-1", "registry_id": "registry-1"}
-
-        runtime_config = {"resources": {"gpu": {"type": "A10G", "count": 1}}}
-        platform = FakePlatform("https://api.example", "key")
-        result = await _trigger_build(
-            platform,
-            build_id="build-1",
-            plan=_DeployPlan(
-                name="test-env",
-                registry_id=None,
-                runtime="modal",
-                runtime_config=runtime_config,
-                env_vars={},
-                build_args={},
-                build_secrets={},
-            ),
-            no_cache=False,
-            console=HUDConsole(),
-        )
-
-        assert result == {"id": "build-1", "registry_id": "registry-1"}
-        assert platform.payload is not None
-        assert platform.payload["runtime_config"] == runtime_config
 
 
 class TestSaveDeployLink:

@@ -6,9 +6,10 @@ tag: "Experimental"
 ---
 
 `adapt()` turns Harbor task directories into the same `Environment`, `Task`, and
-`Taskset` primitives used by authored HUD environments. It builds the Harbor
-environment first, then wraps that image with the Harbor runtime files packaged
-with the SDK. The generated directory contains task data, not generated source.
+`Taskset` primitives used by authored HUD environments. It is a file-only
+transformation: every environment gets a self-contained `compose-project/`, and
+no image is built or published during adaptation. Task instructions and grading
+configuration live in the generated task rows, outside the image build inputs.
 
 ## Prerequisites
 
@@ -17,27 +18,96 @@ with the SDK. The generated directory contains task data, not generated source.
 
 ## Run Harbor tasks
 
-Build the images and receive a runnable taskset:
+Adapt the tasks and receive a runnable taskset:
 
 ```python
 from hud.integrations import harbor
 from hud.eval import DockerRuntime
 
-taskset = await harbor.adapt("./terminal-bench")
+taskset = harbor.adapt("./terminal-bench")
 job = await taskset.run(agent, runtime=DockerRuntime())
 ```
 
 `DockerRuntime` supplies the inner workspace sandbox needed by adapted images;
 the setting is automatic for all HUD Docker environments.
 
-`adapt(path, push="registry.io/acme")` pushes the wrapped images and returns
-rows bound to those refs. The readable build inputs are left under
-`.hud-adapt/`; `adapt()` owns the two-image build because the wrapper's base is
-the Harbor environment it just built.
+The returned task rows point at `compose-project/compose.json`, making their
+runtime configuration self-contained for local evaluation and task sync. The
+artifact root has a `compose.yaml` build recipe plus `env.py`, `tasks.json`, and
+the contexts under `compose-project/`; no runtime sidecar is involved.
+Inline-verifier image tasks have one `main` service. Their original
+`environment/` is copied unchanged. The carrier's `Dockerfile` appends the HUD
+runtime to the user's final stage and reads `env.py`, environment configuration,
+and the SDK wheel from a BuildKit named context in `hud/`. Inline tests remain in
+`compose-project/tests/<task-id>/` and are mounted read-only when the project
+runs; they are not copied into the image. A separate verifier retains its own
+unchanged `tests/` build input. Multi-service tasks retain their authored
+project: build contexts are rebased inside the artifact, and build-only base and
+verifier services use `scale: 0`.
 
-Each row carries `[metadata]` as `columns` and CPU, memory, and GPU requirements
-as `runtime_config`. The image's `tasks.json` carries workdir, environment,
-network, and phase-user declarations into the authored HUD environment.
+Deploy the generated `.hud-adapt/<environment>/` directory and sync the returned
+taskset; hosted Modal builds multi-service projects inside its DinD sandbox
+without publishing private images. Registry sidecars must be anonymously
+pullable. Private ECR component images are rejected until sandbox-side ECR
+authentication is available.
+
+Bare `hud deploy .hud-adapt/<environment>` discovers `compose.yaml` as the build
+recipe. Multi-service projects use Modal; a single-service project can use the
+default HUD runtime. `--runtime hud|modal` persists a registry default for tasks
+that do not carry their own `Task.runtime_config`; adapted task rows already do.
+
+The artifact also works without HUD infrastructure. Its build script first
+builds or pulls each authored base image, records Docker's resolved OCI config,
+then builds the adapted services:
+
+```bash
+cd compose-project
+sh build.sh registry.example/acme/task:tag
+docker push registry.example/acme/task:tag
+```
+
+This path requires Docker Compose and a BuildKit-era Docker builder because the
+HUD payload is a named context rather than content injected into the user's
+environment.
+
+For any generated project, assign a registry `image:` to every service with a
+`build:` (replace the generated HUD tags and add tags to authored build-only
+sidecars), then run the project build before pushing the Compose services:
+
+```bash
+sh compose-project/build.sh
+docker compose push
+```
+
+The former `push=` argument to `adapt()` was removed: adaptation only packages
+the project, while these ordinary Docker commands make registry publication an
+explicit owner-infrastructure step.
+
+Changing an instruction or per-task verifier setting only changes `tasks.json`;
+sync the tasks again without redeploying the environment. Inline verifier tests
+also stay outside the image. At run time the generic Harbor template uses the
+row's task ID to select `compose-project/tests/<task-id>/`. Separate verifiers
+remain one environment group per task: the verifier row carries that same task
+ID and runs the matching unchanged `tests/` context at `/tests/test.sh`.
+
+Running an adapted image directly requires the same sandbox permissions as
+`DockerRuntime`. Use the `docker-seccomp.json` profile installed at
+`hud/eval/docker-seccomp.json` in the HUD package; without both options, Harbor
+environments that require user-namespace isolation refuse to serve:
+
+```bash
+HUD_SECCOMP=/path/to/site-packages/hud/eval/docker-seccomp.json
+docker run \
+  --rm -p 8765:8765 \
+  --security-opt "seccomp=$HUD_SECCOMP" \
+  --security-opt systempaths=unconfined \
+  registry.example/acme/task:tag
+```
+
+Each row carries its instruction and task-specific grading configuration in
+`args`, `[metadata]` as `columns`, and CPU, memory, and GPU requirements as
+`runtime_config`. The image's `config.json` carries only environment-wide
+workdir, environment, network, and phase-user declarations.
 
 Tasks whose declared behaviour cannot be reproduced faithfully are refused
 rather than silently downgraded. Compose environments, network MCP servers,
@@ -45,7 +115,10 @@ healthchecks, and separate verifier Dockerfiles are translated into the HUD
 runtime contract; Docker and Modal can run the resulting Compose environments,
 while Daytona rejects Compose runtime configuration. Stdio MCP servers,
 non-Linux tasks, TPUs, skills directories, and multi-step tasks are refused.
-Prebuilt images, allowlists, and distinct agent/verifier users are supported.
+An `environment.docker_image` without an `environment/Dockerfile` is also
+refused because adaptation cannot recover the image's user, workdir,
+entrypoint, environment, and exposed ports without inspecting Docker. Allowlists
+and distinct agent/verifier users are supported.
 
 ## Export HUD tasks to Harbor
 

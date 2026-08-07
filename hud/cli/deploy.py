@@ -9,7 +9,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import typer
@@ -28,7 +28,13 @@ from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
-_VALID_RUNTIMES = {"modal"}
+_VALID_RUNTIMES = {"hud", "modal"}
+_COMPOSE_RECIPE_NAMES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+)
 
 
 @dataclass(frozen=True)
@@ -36,7 +42,7 @@ class _DeployPlan:
     name: str
     registry_id: str | None
     runtime: str | None
-    runtime_config: dict[str, Any] | None
+    runtime_config: RuntimeConfig | None
     env_vars: dict[str, str]
     build_args: dict[str, str]
     build_secrets: dict[str, str]
@@ -80,12 +86,38 @@ def _normalize_runtime(runtime: str | None, console: HUDConsole) -> str | None:
     raise typer.Exit(1)
 
 
-def _load_runtime_config(path: str | None, console: HUDConsole) -> dict[str, Any] | None:
+def _compose_recipe(context: Path) -> Path | None:
+    for name in _COMPOSE_RECIPE_NAMES:
+        candidate = context / name
+        if candidate.is_file():
+            return candidate
+    return next(
+        (
+            candidate
+            for candidate in sorted(context.glob("docker-compose.*"))
+            if ".override." not in candidate.name and candidate.is_file()
+        ),
+        None,
+    )
+
+
+def _load_runtime_config(path: str | None, console: HUDConsole) -> RuntimeConfig | None:
     if path is None:
         return None
     config_path = Path(path).expanduser()
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            raw_config = cast("dict[str, Any]", raw)
+            for field in ("compose", "compose_project"):
+                value = raw_config.get(field)
+                if isinstance(value, str):
+                    candidate = Path(value).expanduser()
+                    raw_config[field] = str(
+                        candidate
+                        if candidate.is_absolute()
+                        else (config_path.parent / candidate).resolve()
+                    )
         config = RuntimeConfig.model_validate(raw)
     except FileNotFoundError:
         console.error(f"Runtime config file not found: {config_path}")
@@ -96,8 +128,7 @@ def _load_runtime_config(path: str | None, console: HUDConsole) -> dict[str, Any
     except ValidationError as exc:
         console.error(f"Invalid runtime config in {config_path}: {exc}")
         raise typer.Exit(1) from exc
-    payload = config.request_payload()
-    return payload or None
+    return config
 
 
 def _load_env_vars(path: Path, console: HUDConsole, *, warn_missing: bool) -> dict[str, str]:
@@ -380,12 +411,33 @@ def _prepare_deploy_plan(
     if build_args_dict and verbose:
         console.info(f"Build arguments: {', '.join(build_args_dict.keys())}")
     normalized_runtime = _normalize_runtime(runtime, console)
+    loaded_runtime_config = _load_runtime_config(runtime_config, console)
+    recipe = _compose_recipe(env_dir)
+    if recipe is not None:
+        if loaded_runtime_config is not None and (
+            loaded_runtime_config.image is not None
+            or loaded_runtime_config.compose is not None
+            or loaded_runtime_config.compose_project is not None
+        ):
+            console.error("--runtime-config cannot set image or Compose for a Compose context")
+            raise typer.Exit(1)
+        loaded_runtime_config = RuntimeConfig.model_validate(
+            {
+                **(
+                    loaded_runtime_config.model_dump(exclude_unset=True)
+                    if loaded_runtime_config is not None
+                    else {}
+                ),
+                "compose": recipe,
+                "compose_project": env_dir,
+            }
+        )
 
     return _DeployPlan(
         name=resolved_name,
         registry_id=registry_id,
         runtime=normalized_runtime,
-        runtime_config=_load_runtime_config(runtime_config, console),
+        runtime_config=loaded_runtime_config,
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
@@ -415,14 +467,19 @@ def deploy_environment(
     from hud.cli.utils.api import require_api_key
 
     require_api_key("deploy environments")
+    recipe = _compose_recipe(env_dir)
     dockerfile = env_source.dockerfile
-    if dockerfile is None:
-        hud_console.error("No Dockerfile.hud or Dockerfile found")
+    if recipe is None and dockerfile is None:
+        hud_console.error("No compose.yaml, compose.yml, docker-compose.*, or Dockerfile found")
         hud_console.info(f"Directory: {env_dir}")
-        hud_console.info("\nCreate a Dockerfile.hud with your environment setup.")
+        hud_console.info("\nCreate a Compose or Dockerfile build recipe.")
         hud_console.info("Run 'hud init' to create a template.")
         raise typer.Exit(1)
-    hud_console.info(f"Using Dockerfile: {dockerfile.name}")
+    if recipe is not None:
+        hud_console.info(f"Using Compose recipe: {recipe.name}")
+    else:
+        assert dockerfile is not None
+        hud_console.info(f"Using Dockerfile: {dockerfile.name}")
     _validate_before_deploy(env_source, hud_console)
 
     platform = PlatformClient.from_settings()
@@ -468,22 +525,10 @@ class _DeployResult:
     status: str = ""
 
 
-@dataclass(frozen=True)
-class _BuildUpload:
-    upload_url: str
-    build_id: str
-
-
-async def _create_build_upload(platform: PlatformClient) -> _BuildUpload:
-    data = await platform.apost("/builds/upload-url")
-    return _BuildUpload(upload_url=data["upload_url"], build_id=data["build_id"])
-
-
-async def _upload_build_context(upload_url: str, tarball_path: Path) -> None:
-    """PUT the tarball to the presigned S3 URL (not a platform API call)."""
-    content = await asyncio.to_thread(tarball_path.read_bytes)
-    async with httpx.AsyncClient(timeout=300.0) as s3_client:
-        response = await s3_client.put(
+async def _upload_context(upload_url: str, tarball: Path) -> None:
+    content = await asyncio.to_thread(tarball.read_bytes)
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        response = await client.put(
             upload_url,
             content=content,
             headers={"Content-Type": "application/gzip"},
@@ -497,40 +542,32 @@ async def _trigger_build(
     build_id: str,
     plan: _DeployPlan,
     no_cache: bool,
-    console: HUDConsole,
-) -> dict[str, Any] | None:
-    """Trigger the direct build. The platform resolves the registry by name
-    (get-or-rebuild), so an existing environment with this name is rebuilt."""
+) -> tuple[str, str]:
     payload: dict[str, Any] = {
         "source": "direct",
         "build_id": build_id,
         "name": plan.name,
         "no_cache": no_cache,
     }
-    if plan.registry_id:
-        payload["registry_id"] = plan.registry_id
-    if plan.runtime:
-        payload["runtime_provider"] = plan.runtime
-    if plan.runtime_config:
-        payload["runtime_config"] = plan.runtime_config
-    if plan.env_vars:
-        payload["environment_variables"] = plan.env_vars
-    if plan.build_args:
-        payload["build_args"] = plan.build_args
-    if plan.build_secrets:
-        payload["build_secrets"] = plan.build_secrets
-
-    try:
-        return await platform.apost("/builds/trigger", json=payload)
-    except HudRequestError as e:
-        console.error(f"Failed to trigger build: {e.status_code or e}")
-        detail = (e.response_json or {}).get("detail", "")
-        if detail:
-            console.error(f"Error: {detail}")
-        return None
-    except Exception as e:
-        console.error(f"Failed to trigger build: {e}")
-        return None
+    payload.update(
+        {
+            key: value
+            for key, value in (
+                ("registry_id", plan.registry_id),
+                ("runtime_provider", plan.runtime),
+                (
+                    "runtime_config",
+                    plan.runtime_config.request_payload() if plan.runtime_config else None,
+                ),
+                ("environment_variables", plan.env_vars),
+                ("build_args", plan.build_args),
+                ("build_secrets", plan.build_secrets),
+            )
+            if value
+        }
+    )
+    data = await platform.apost("/builds/trigger", json=payload)
+    return data["id"], data["registry_id"]
 
 
 async def _deploy_async(
@@ -541,12 +578,13 @@ async def _deploy_async(
     console: HUDConsole,
     env_dir: Path | None = None,
 ) -> _DeployResult:
-    """Async deployment flow: upload context, trigger build, stream logs."""
+    """Narrate the library-owned exchange, stream logs, and save the link."""
     console.progress_message("Getting upload URL...")
     step_start = time.time()
 
     try:
-        upload = await _create_build_upload(platform)
+        upload = await platform.apost("/builds/upload-url")
+        upload_url, reserved_id = upload["upload_url"], upload["build_id"]
     except HudRequestError as e:
         console.error(f"Failed to get upload URL: {e.status_code or e}")
         if e.status_code == 401:
@@ -559,13 +597,13 @@ async def _deploy_async(
         return _DeployResult(success=False)
 
     console.success(f"Got upload URL [{time.time() - step_start:.1f}s]")
-    console.info(f"Build ID: {upload.build_id}")
+    console.info(f"Build ID: {reserved_id}")
 
     console.progress_message("Uploading build context...")
     step_start = time.time()
 
     try:
-        await _upload_build_context(upload.upload_url, tarball_path)
+        await _upload_context(upload_url, tarball_path)
         console.success(f"Upload complete [{time.time() - step_start:.1f}s]")
     except Exception as e:
         console.error(f"Failed to upload build context: {e}")
@@ -574,18 +612,22 @@ async def _deploy_async(
     console.progress_message("Triggering build...")
     step_start = time.time()
 
-    trigger_data = await _trigger_build(
-        platform,
-        build_id=upload.build_id,
-        plan=plan,
-        no_cache=no_cache,
-        console=console,
-    )
-    if trigger_data is None:
+    try:
+        build_id, registry_id = await _trigger_build(
+            platform,
+            build_id=reserved_id,
+            plan=plan,
+            no_cache=no_cache,
+        )
+    except HudRequestError as e:
+        console.error(f"Failed to trigger build: {e.status_code or e}")
+        detail = (e.response_json or {}).get("detail", "")
+        if detail:
+            console.error(f"Error: {detail}")
         return _DeployResult(success=False)
-
-    build_id = trigger_data["id"]
-    registry_id = trigger_data["registry_id"]
+    except Exception as e:
+        console.error(f"Failed to trigger build: {e}")
+        return _DeployResult(success=False)
 
     # Save immediately after trigger so rebuilds work even if streaming crashes.
     if env_dir and registry_id:
@@ -658,7 +700,8 @@ def discover_environments(directory: Path) -> list[Path]:
     return [
         child
         for child in sorted(directory.iterdir())
-        if child.is_dir() and EnvironmentSource.open(child).is_environment
+        if child.is_dir()
+        and (EnvironmentSource.open(child).is_environment or _compose_recipe(child) is not None)
     ]
 
 
@@ -790,7 +833,7 @@ def deploy_command(
     runtime: str | None = typer.Option(
         None,
         "--runtime",
-        help="Persist Modal as the hosted runtime for this registry",
+        help="Persist a registry default runtime for tasks that do not specify one: hud or modal",
     ),
     runtime_config: str | None = typer.Option(
         None,

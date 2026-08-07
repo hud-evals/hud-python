@@ -1,4 +1,4 @@
-"""``hud.cli.utils.context`` — build-context tarball + ignore-pattern matching."""
+"""Deploy build-context tarball and ignore-pattern tests."""
 
 from __future__ import annotations
 
