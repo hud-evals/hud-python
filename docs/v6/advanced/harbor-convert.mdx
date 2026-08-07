@@ -61,7 +61,6 @@ builds or pulls each authored base image, records Docker's resolved OCI config,
 then builds the adapted services:
 
 ```bash
-cd compose-project
 sh build.sh registry.example/acme/task:tag
 docker push registry.example/acme/task:tag
 ```
@@ -70,12 +69,11 @@ This path requires Docker Compose and a BuildKit-era Docker builder because the
 HUD payload is a named context rather than content injected into the user's
 environment.
 
-For any generated project, assign a registry `image:` to every service with a
-`build:` (replace the generated HUD tags and add tags to authored build-only
-sidecars), then run the project build before pushing the Compose services:
+For any generated project, replace each generated or local `image:` with your
+registry tag, then run the project build before pushing the Compose services:
 
 ```bash
-sh compose-project/build.sh
+sh build.sh
 docker compose push
 ```
 
