@@ -151,6 +151,10 @@ ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", 
 - **`workdir`** - working directory inside the sandbox. Left unset, Modal keeps the image's `WORKDIR`.
 - **`app_name`** / **`port`** / **`env_vars`** - Modal app name, in-sandbox serving port, and extra environment variables.
 
+Compose runs inside a Docker-in-Docker sandbox with a minimum allocation of 4 CPUs and 8192 MiB.
+`env_vars` are merged into the Compose `main` service at acquisition time; they are not written
+into the Compose file or `RuntimeConfig` payload.
+
 Requires the `modal` extra and a configured token.
 
 ### `DaytonaRuntime`

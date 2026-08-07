@@ -130,7 +130,7 @@ def test_resolve_placement_runtime_hud_uses_tunnel(
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
 
-    placement = eval_mod._resolve_placement(EvalConfig(runtime="hud"), tmp_path)
+    placement = eval_mod._resolve_placement(EvalConfig(runtime="hud"), tmp_path, [])
 
     assert isinstance(placement, HUDRuntime)
 
@@ -144,9 +144,36 @@ def test_resolve_placement_remote_uses_hosted_runtime(
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
 
-    placement = eval_mod._resolve_placement(EvalConfig(remote=True), tmp_path)
+    placement = eval_mod._resolve_placement(EvalConfig(remote=True), tmp_path, [])
 
     assert isinstance(placement, HostedRuntime)
+
+
+def test_resolve_placement_routes_each_local_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hud.eval as eval_api
+    from hud.eval import RuntimeConfig, Task
+
+    docker = lambda task: ("docker", task)
+    subprocess = lambda task: ("subprocess", task)
+    monkeypatch.setattr(eval_api, "DockerRuntime", lambda: docker)
+    monkeypatch.setattr(eval_api, "SubprocessRuntime", lambda _path: subprocess)
+
+    placement = eval_mod._resolve_placement(
+        EvalConfig(runtime="local"),
+        tmp_path,
+        [
+            Task(env="source", id="run"),
+            Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest")),
+        ],
+    )
+
+    source = Task(env="source", id="run")
+    image = Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest"))
+    assert placement(source) == ("subprocess", source)
+    assert placement(image) == ("docker", image)
 
 
 def test_runtime_cli_override_clears_config_remote() -> None:

@@ -24,6 +24,7 @@ from hud.eval import (
     Task,
     Taskset,
 )
+from hud.eval.compose import ComposeConfig, ComposeProjectRef
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -194,14 +195,75 @@ def test_runtime_config_rejects_unknown_fields() -> None:
 
 
 def test_compose_runtime_config_serializes_as_task_data(tmp_path: Path) -> None:
-    compose = tmp_path / "compose.yaml"
+    compose = tmp_path / "compose.json"
+    compose.write_text(
+        json.dumps({"services": {"main": {"image": "hud-env:latest"}}}),
+        encoding="utf-8",
+    )
     config = RuntimeConfig(compose=compose)
     task = Task(env="database", id="cutover", runtime_config=config)
 
     rebuilt = Task.model_validate(task.model_dump())
 
     assert rebuilt.runtime_config == config
-    assert config.request_payload() == {"compose": str(compose)}
+    assert config.request_payload() == {
+        "compose": {
+            "services": {
+                "main": {
+                    "image": "hud-env:latest",
+                    "environment": {},
+                    "expose": [],
+                    "ports": [],
+                    "volumes": [],
+                }
+            },
+            "networks": {},
+        }
+    }
+
+
+def test_compose_project_serializes_document_location_not_author_path(tmp_path: Path) -> None:
+    project = tmp_path / "artifact"
+    project.mkdir()
+    compose = project / "compose-project" / "compose.json"
+    compose.parent.mkdir()
+    compose.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "main": {
+                        "image": "hud-harbor:local",
+                        "build": {"context": "./main"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = RuntimeConfig(compose=compose, compose_project=project).request_payload()
+
+    assert payload["compose_project"] == {"compose_path": "compose-project/compose.json"}
+    assert str(tmp_path) not in json.dumps(payload)
+
+
+def test_compose_runtime_config_round_trips_platform_records() -> None:
+    record = {
+        "compose": {
+            "services": {"main": {"image": "hud-harbor:local"}},
+            "networks": {},
+        },
+        "compose_project": {"compose_path": "compose-project/compose.json"},
+    }
+
+    config = RuntimeConfig.model_validate(record)
+
+    assert isinstance(config.compose, ComposeConfig)
+    assert isinstance(config.compose_project, ComposeProjectRef)
+    payload = config.request_payload()
+    assert payload["compose"]["services"]["main"]["image"] == "hud-harbor:local"
+    assert payload["compose_project"] == {"compose_path": "compose-project/compose.json"}
+    assert RuntimeConfig.model_validate(payload) == config
 
 
 def test_row_validation_rejects_malformed_entries() -> None:

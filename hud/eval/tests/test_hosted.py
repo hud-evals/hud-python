@@ -12,6 +12,7 @@ Run the caller gets back, and the dispatch.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -34,6 +35,8 @@ from hud.eval.runtime import (
 from hud.eval.task import Task
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from hud.agents.base import Agent
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -254,6 +257,45 @@ async def test_run_preserves_runtime_config_null_override(
     )
 
     assert platform.posts[0][1]["runtime_config"] == {"resources": None}
+
+
+@pytest.mark.asyncio
+async def test_run_submits_compose_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / "compose.json"
+    compose.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "main": {"image": "ghcr.io/hud-evals/harbor-main:latest"},
+                    "database": {"image": "postgres:16"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    await HostedRuntime(poll_interval=0.0).run(
+        Task(
+            env="harbor",
+            id="solve",
+            runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+        ),
+        _agent(),
+        job_id=uuid.uuid4().hex,
+        trace_id=uuid.uuid4().hex,
+    )
+
+    runtime_config = platform.posts[0][1]["runtime_config"]
+    assert runtime_config["compose"]["services"]["database"]["image"] == "postgres:16"
+    assert runtime_config["compose_service_access"] is True
+    assert str(compose) not in json.dumps(runtime_config)
 
 
 @pytest.mark.asyncio

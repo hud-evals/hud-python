@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from hud.eval import Task, Taskset
@@ -16,6 +17,8 @@ from hud.eval.sync import (
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pytest
 
 
@@ -150,6 +153,32 @@ def test_task_upload_payload_includes_runtime_config() -> None:
     payload = task_upload_payload(task)
 
     assert payload["runtime_config"] == {"image": "img:tag"}
+
+
+def test_task_upload_payload_embeds_compose_document(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.json"
+    compose.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "main": {"image": "registry.example/hud-main:latest"},
+                    "database": {"image": "postgres:16"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    task = Task(
+        env="e",
+        id="solve",
+        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+    )
+
+    payload = task_upload_payload(task)
+
+    assert payload["runtime_config"]["compose"]["services"]["database"]["image"] == "postgres:16"
+    assert payload["runtime_config"]["compose_service_access"] is True
+    assert str(compose) not in json.dumps(payload)
 
 
 def test_task_upload_payload_preserves_runtime_config_null_override() -> None:
