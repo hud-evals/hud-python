@@ -93,7 +93,8 @@ substrate that placement brings up.
 | `columns` | `dict \| None` | Metadata surfaced as filter/leaderboard facets. |
 | `validation` | `list[dict] \| None` | Platform/sync metadata. |
 | `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50, "timeout_seconds": 900}`). |
-| `runtime_config` | `RuntimeConfig \| None` | Per-row launch hints (`image`, `resources`); the [runtime](/v6/reference/runtime) applies what it supports. |
+| `runtime_config` | `RuntimeConfig \| None` | Per-row launch requirements; the [runtime](/v6/reference/runtime) applies what it supports. |
+| `verifier` | `Task \| None` | Agent-less task whose evaluation replaces the actor task's grade. Nested verifiers are rejected. |
 
 When you don't have the template in hand (data pipelines, generated rows), build the model directly -
 the model *is* the row, so `task.model_dump()` and `Task.model_validate(data)` are the whole codec:
@@ -109,6 +110,10 @@ task = Task(env="letter-count", id="count_letter", args={"word": "strawberry"}, 
 The second yield is the reward. Return a float inline, or reach for the comparison helpers, async
 graders, and composed grades documented in [graders](/v6/reference/graders). For how to design a reward
 that separates good work from bad and resists hacking, see [designing tasks](/v6/reference/advice).
+
+When authoritative grading belongs in another environment, set `Task.verifier`
+to a second task row. Its declaration, placement order, and phase boundary are
+documented in [Verifier environments](/v6/experimental/verifier-environments).
 
 ## Tasksets
 

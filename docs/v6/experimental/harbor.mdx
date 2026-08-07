@@ -1,0 +1,167 @@
+---
+title: "Harbor interoperability"
+description: "Adapt Harbor tasks into runnable HUD tasksets and Compose artifacts, or export HUD tasks to Harbor folders."
+icon: "ship"
+tag: "Experimental"
+---
+
+The **Harbor adapter** (`hud/integrations/harbor/`) translates between Harbor
+task directories and HUD's native `Environment`, `Task`, and `Taskset`
+contracts. `adapt()` packages Harbor tasks without building or publishing
+images. `export()` materializes HUD tasks as self-contained Harbor folders.
+
+## Adapt Harbor tasks
+
+A Harbor source is either one task directory or a dataset directory containing
+task directories. Each task contains `task.toml` and `instruction.md`, plus an
+environment image or build recipe and a `tests/` verifier.
+
+```python
+from hud.integrations import harbor
+from hud.eval import DockerRuntime
+
+taskset = harbor.adapt("./terminal-bench")
+job = await taskset.run(agent, runtime=DockerRuntime())
+```
+
+Each returned row carries its instruction and grading configuration in `args`,
+Harbor metadata in `columns`, resource requirements in `runtime_config`, and,
+when declared, a [`Task.verifier`](/v6/experimental/verifier-environments).
+The row's Compose path points into a generated project under `.hud-adapt/`.
+
+```text
+.hud-adapt/<environment>/
+├── build.sh
+├── compose.yaml
+├── env.py
+├── tasks.json
+└── compose-project/
+    ├── build.sh
+    ├── compose.json
+    ├── environment/
+    ├── hud/ or main/           # HUD build payload (depends on source shape)
+    ├── tests/                 # inline-verifier task tests
+    └── verifier/              # verifier-environment build context, when declared
+```
+
+The artifact is self-contained. Authored build contexts and Compose-relative
+paths are rebased beneath `compose-project/`; task instructions remain in
+`tasks.json`; inline tests remain outside the environment image and are mounted
+read-only for the selected task. Build-only base and verifier services stay in
+the Compose model with `scale: 0` and feed the `main` build through named
+`service:` contexts. The full recipe is covered in
+[Compose environments](/v6/experimental/compose).
+
+Tasks with identical environment and phase configuration share one generated
+environment. A task with a verifier environment forms its own group because its
+verifier image and artifact contract are task-specific.
+
+### Run locally
+
+`DockerRuntime()` reads the Compose project from each task row, runs the adjacent
+`build.sh` preparation hook, starts the `main` service and its sidecars, and
+applies the workspace security profile automatically.
+
+The generated task data is independent from the environment build. Editing an
+instruction, verifier timeout, or inline `tests/` content updates `tasks.json`
+or the mounted test tree without changing the environment image identity.
+
+### Deploy and sync
+
+`hud deploy` recognizes the generated root `compose.yaml` as the build recipe.
+Each generated environment is deployed separately, followed by the task rows
+that reference it:
+
+```bash
+hud deploy .hud-adapt/<environment>
+hud sync tasks my-harbor-tasks .hud-adapt/<environment>/tasks.json
+```
+
+Hosted deploys build the project privately from the uploaded root; any registry
+image the project uses must be pullable by the hosted builder. The generated
+project can also be built and published on owned infrastructure; the commands
+and BuildKit context requirements are documented under
+[Build on owned infrastructure](/v6/experimental/compose#build-on-owned-infrastructure).
+
+### Verifier environments
+
+Harbor's `environment_mode = "separate"` and `[verifier.environment]`
+declarations map to an authoritative verifier task. The adapter requires
+`tests/Dockerfile`, builds its filesystem as a build-only service, and preserves
+the agent/verifier phase boundary. Artifact collection, phase ordering, and
+runtime isolation are described in
+[Verifier environments](/v6/experimental/verifier-environments#harbor-verifier-environments).
+
+## Supported Harbor surface
+
+The adapter handles:
+
+- an `environment/Dockerfile`, an `environment.docker_image`, or a Compose
+  project with a `main` service;
+- Compose sidecars with one declared TCP endpoint each;
+- HTTP MCP servers (`sse` and `streamable-http`), healthchecks, network modes,
+  allowlists, phase users, environment variables, and CPU/memory/GPU requests;
+- inline verifier scripts and separate verifier Dockerfiles;
+- verifier collect hooks and declared artifact paths from `main` or a sidecar.
+
+Unsupported declarations fail during adaptation. These include non-Linux and
+TPU environments, stdio MCP servers, skills directories, multi-step tasks,
+Compose interpolation/include/extends, and sidecars without exactly one usable
+TCP endpoint. A project also fails if its main service has neither an image nor
+a valid build recipe.
+
+## Export HUD tasks to Harbor
+
+`export(source, out_dir)` accepts a Python task source or a JSON/JSONL taskset
+beside its environment source and Dockerfile:
+
+```python
+from hud.integrations.harbor import export
+
+created = await export("tasks.py", "harbor_tasks")
+```
+
+```text
+harbor_tasks/
+└── <slug>/
+    ├── task.toml
+    ├── instruction.md
+    ├── environment/
+    │   ├── Dockerfile
+    │   └── hud_entrypoint.sh
+    └── tests/test.sh
+```
+
+The exported image serves the HUD control channel and parks the task after
+setup. Harbor runs the agent in that container, then `tests/test.sh` reconnects
+to grade the parked task and writes the reward. This mapping requires Harbor's
+same-container verifier; exported `task.toml` files do not declare
+`[verifier.environment]`.
+
+Only environments exposing `ssh` or `mcp` capabilities are exportable. The
+task's setup executes once while exporting `instruction.md` and once when the
+container starts the graded task, so setup must be deterministic for its
+arguments. Randomized state belongs in task arguments.
+
+## Validate the mapping
+
+Run each Harbor task's `solution/solve.sh` against the adapted artifact before
+evaluating a model. The reference solution should exercise the same environment
+and verifier path and produce the expected reward. The generated prompt,
+artifact declarations, and verifier should also be reviewed for answer leakage
+and reward-hacking paths; [Designing tasks for signal](/v6/reference/advice)
+covers that review.
+
+## API surface
+
+| Function | Contract |
+| --- | --- |
+| `harbor.adapt(path, *, hud_requirement="hud") -> Taskset` | Package one Harbor task or a dataset as generated Compose environments and native task rows. |
+| `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
+
+<CardGroup cols={2}>
+<Card title="Compose environments" icon="cubes" href="/v6/experimental/compose" />
+<Card title="Verifier environments" icon="shield-check" href="/v6/experimental/verifier-environments" />
+<Card title="Runtime reference" icon="rocket" href="/v6/reference/runtime" />
+<Card title="Task reference" icon="list-check" href="/v6/reference/tasks" />
+</CardGroup>

@@ -20,7 +20,7 @@ hud init my-env
 cd my-env
 ```
 
-Inside the blank template `my-env` you now have four files, each with one job:
+The blank `my-env` template contains four files, each with one job:
 
 <div className="filetree">
   <div className="ft-root">my-env/</div>
@@ -136,7 +136,7 @@ async def _start():
 
 Other protocols - a browser over `cdp`, a full desktop over `rfb`, a robot loop - attach the same way.
 The [capabilities](/v6/reference/capabilities) page has the spin-up for each, and the
-[protocol](/v6/advanced/protocol) covers how an agent discovers them over the wire.
+[control channel](/v6/internals/control-channel) covers how an agent discovers them over the wire.
 
 <div className="guide-row">
 <div className="guide-main">
@@ -295,14 +295,14 @@ hud sync tasks my-tasks   # publish tasks.py as a named taskset
 hud sync env              # sync environment metadata
 ```
 
-Your environment now lives on the platform, ready to run at scale and compare across models. Running
-those evaluations - locally, on a cloud sandbox, or on the platform - is covered in
+The deployed environment is available on the platform for scaled runs and model comparisons. Running
+evaluations locally, on a cloud sandbox, or on the platform is covered in
 [evaluating agents](/v6/guides/running-an-eval).
 
 ## Export to other formats
 
 A HUD environment isn't locked to HUD: its tasks export through the experimental
-[Harbor adapter](/v6/advanced/harbor-convert) to self-contained task folders.
+[Harbor adapter](/v6/experimental/harbor) to self-contained task folders.
 
 ## See environment examples
 

@@ -52,7 +52,7 @@ To deploy an environment to the platform and run against it, see
 ## RuntimeConfig
 
 `RuntimeConfig` carries the typed construction input a container-based runtime needs: an image or
-Compose file, hardware, and timeouts. Set it on the runtime (`runtime_config=`) or per row on
+Compose project, hardware, and timeouts. Set it on the runtime (`runtime_config=`) or per row on
 [`Task.runtime_config`](/v6/reference/tasks#task); the runtime merges the two and applies what it
 supports.
 
@@ -71,7 +71,9 @@ RuntimeConfig(compose="./compose.yaml")
 | Field | Description |
 |-------|-------------|
 | `image` | Image to run. |
-| `compose` | Path to a Compose file. Mutually exclusive with `image`. |
+| `compose` | Local path to a Compose file, or its serialized `ComposeConfig`. Mutually exclusive with `image`. |
+| `compose_project` | Local project root for upload, or a serialized `ComposeProjectRef`. Requires `compose`. |
+| `compose_service_access` | Mount the runtime's Docker socket into Compose `main` at `/media/hud/docker.sock`. Requires `compose`. |
 | `resources` | `RuntimeResources(cpu, memory_mb, gpu=RuntimeGPU(type, count))`. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
@@ -127,17 +129,12 @@ DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None)
 - **`run_args`** - extra `docker run` flags, e.g. `["--gpus", "all"]` or `["-e", "KEY=VAL"]`.
 - **`runtime_config`** - a `RuntimeConfig` (image or Compose file, resources) for finer control.
 
-For Compose environments, the service named `main` must serve HUD's control channel on `port`.
-`DockerRuntime` starts the whole project and publishes only that service's control port. The Compose
-file belongs in `RuntimeConfig`; constructor-level `image` remains a compatibility shorthand for
-`runtime_config.image`.
-
-`DockerRuntime` always starts with HUD's compact seccomp profile and the system
-path configuration required by `Workspace`'s bubblewrap sessions. The profile
-is intentionally default-allow for Docker compatibility, allowing the
-namespace syscalls needed for the inner workspace sandbox while denying a
-small set of unrelated kernel interfaces. It is not Docker's default
-deny-by-default profile.
+For Compose environments, the service named `main` must serve HUD's control
+channel on `port`. `DockerRuntime` starts the project and publishes that
+service's control port. Constructor-level `image` is shorthand for
+`runtime_config.image`. Project structure, build hooks, service access, and the
+security override are documented in
+[Compose environments](/v6/experimental/compose#runtime-behavior).
 
 ### `ModalRuntime`
 
@@ -151,9 +148,9 @@ ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", 
 - **`workdir`** - working directory inside the sandbox. Left unset, Modal keeps the image's `WORKDIR`.
 - **`app_name`** / **`port`** / **`env_vars`** - Modal app name, in-sandbox serving port, and extra environment variables.
 
-Compose runs inside a Docker-in-Docker sandbox with a minimum allocation of 4 CPUs and 8192 MiB.
-`env_vars` are merged into the Compose `main` service at acquisition time; they are not written
-into the Compose file or `RuntimeConfig` payload.
+For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
+sandbox in your Modal account and merges `env_vars` into `main` at acquisition
+time. See [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 Requires the `modal` extra and a configured token.
 
@@ -170,9 +167,10 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 
 Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`, a task's `runtime_config.resources` builds a sized variant under a suffixed name (`my-env-4cpu`); without `image`, an already-built snapshot cannot be resized.
 
-For Compose environments, Daytona runs the main service as the rollout sandbox and each sidecar
-as a linked sandbox. Sidecar images are resolved to reusable Daytona snapshots; a Linux-VM runner
-and nested Docker are not required.
+For Compose input, Daytona runs `main` as the rollout sandbox and each sidecar
+as a linked sandbox. Sidecar images resolve to reusable Daytona snapshots.
+Compose authoring conventions are documented in
+[Compose environments](/v6/experimental/compose).
 
 ### `HUDRuntime`
 

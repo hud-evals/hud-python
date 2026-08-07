@@ -1,0 +1,149 @@
+---
+title: "Verifier environments"
+description: "Give authoritative grading its own environment, place the acting and grading substrates independently, and control what crosses the phase boundary."
+icon: "shield-check"
+tag: "Experimental"
+---
+
+A grader is sometimes an environment of its own - a judge that needs services, golden data, or
+credentials the agent must never see. A **verifier environment** makes that structural: the actor
+task owns the environment the agent changes, and its `verifier` field names an agent-less task
+whose grade becomes the run's final reward. The rollout engine (`hud/eval/run.py`) owns the phase
+boundary.
+
+The two tasks can share an environment or name different ones. Different environment names produce
+a **two-substrate rollout**: the engine exits the actor acquisition before opening the verifier's.
+Whether that yields a genuinely separate substrate is the provider's property - fresh-per-rollout
+providers (`DockerRuntime`, `LocalRuntime`) tear down the actor world and provision a new one, so
+grading material and agent state never coexist; a borrowed `Runtime(url)` or a `Shared` scope can
+hand the verifier the same live server.
+
+## Declaring the phases
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">1 · Two ordinary tasks</div>
+
+Both phases are ordinary environment templates and `Task` rows - there is no separate verifier
+API. `Task.verifier` accepts another `Task`; nested verifier tasks are rejected. When the verifier
+requires its own acquisition, the same provider receives the verifier row and can route its
+distinct `env` name and `runtime_config` to different infrastructure; on the same-environment
+reuse path below, the provider is called only once, with the actor row.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">env.py · actor and judge</p>
+
+```python
+from hud import Environment
+
+actor = Environment("workspace")
+verifier = Environment("judge")
+
+@actor.template(id="solve")
+async def solve():
+    answer = yield "Write the secret to the target system."
+    yield 0.0  # the verifier task supplies the authoritative reward
+
+@verifier.template(id="verify")
+async def verify(expected: str):
+    answer = yield ""
+    yield 1.0 if answer == expected else 0.0
+
+task = solve()
+task.verifier = verify(expected="secret")
+```
+
+</div>
+</div>
+
+## Provisioning order
+
+```mermaid
+sequenceDiagram
+    participant Engine as rollout
+    participant Actor as actor substrate
+    participant Agent
+    participant Judge as verifier substrate
+    Engine->>Actor: provision + connect
+    Engine->>Actor: tasks.start(actor)
+    Engine->>Agent: drive Run
+    Agent-->>Engine: final answer in trace.content
+    Engine->>Actor: tasks.grade(actor)
+    Engine->>Actor: close connection + clean up
+    Engine->>Judge: provision + connect
+    Engine->>Judge: tasks.start(verifier)
+    Engine->>Judge: tasks.grade(answer)
+    Judge-->>Engine: authoritative evaluation
+    Engine->>Judge: close connection + clean up
+```
+
+The actor task is graded to complete its generator lifecycle, but that grade is best-effort: when
+the verifier phase begins, the actor grade is cleared, and the verifier evaluation replaces it as
+the run's grade of record. Agent failures and actor-grading failures are recorded on the trace
+while the verifier still runs when the phase boundary can be reached; a verifier provisioning or
+grading failure leaves the run errored and ungraded.
+
+If both rows name the same environment and the verifier has no row-level `runtime_config`, the
+engine keeps the actor connection and substrate alive and starts the verifier task on that control
+channel immediately after the actor task completes. A different environment name or verifier
+runtime configuration forces actor cleanup followed by a fresh provider acquisition.
+
+`HostedRuntime` does not accept verifier task rows; verifier environments run under a
+client-driven provider such as `LocalRuntime`, `DockerRuntime`, or a custom provider.
+
+## What runs where
+
+| Phase | Code that runs | Agent access | Grade status |
+| --- | --- | --- | --- |
+| Actor | Actor environment setup, the agent loop, actor task teardown | Actor capabilities and state | Provisional; retained only when no verifier exists |
+| Verifier | Verifier setup and grading; no agent loop | None through HUD's agent interface | Authoritative |
+
+The engine forwards the final answer (`run.trace.content`) to the verifier. Files, processes,
+sockets, and environment memory do not cross between distinct substrates automatically - any
+graded state transfer is an explicit adapter or provider contract, such as an artifact snapshot,
+object-store reference, or shared service endpoint.
+
+## Harbor verifier environments
+
+Harbor declares a verifier environment with either form:
+
+```toml
+[verifier]
+environment_mode = "separate"
+```
+
+```toml
+[verifier.environment]
+workdir = "/judge"
+network_mode = "no-network"
+```
+
+The adapter requires `tests/Dockerfile` and packages its root filesystem as the build-only
+`hud-verifier` service. The generated actor row points to a verifier task in the same HUD
+environment, allowing one outer Compose runtime to stay alive across both phases. Inside that
+runtime, the phases remain isolated:
+
+- the actor works in the environment image's `Workspace` sandbox;
+- actor sessions are terminated before artifact collection;
+- declared `collect` hooks run against `main` or named Compose services;
+- agent-produced state crosses into the verifier filesystem only through declared absolute
+  artifact paths and `/logs`;
+- `/tests/test.sh` runs from the verifier image with its own user, workdir, environment, network
+  mode, allowlist, and credentials directory; and
+- verifier output is read from `/logs/verifier/reward.json` or `/logs/verifier/reward.txt`.
+
+`compose_service_access=True` gives the generated `main` service access to the runtime's Docker
+socket solely for declared collection from sibling services. The local and hosted socket behavior
+is described in [Compose environments](/v6/experimental/compose#runtime-behavior).
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Task API" icon="list-check" href="/v6/reference/tasks#task" />
+<Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
+<Card title="Harbor interoperability" icon="ship" href="/v6/experimental/harbor" />
+<Card title="Compose environments" icon="cubes" href="/v6/experimental/compose" />
+</CardGroup>
