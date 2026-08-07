@@ -688,6 +688,7 @@ class Workspace:
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
             cwd=self._guest_path,
+            isolation="bwrap" if self.bwrap_available else "none",
         )
 
     @property
