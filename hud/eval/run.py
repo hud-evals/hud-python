@@ -285,6 +285,7 @@ class Run:
 
         try:
             evaluation = await self.client.grade(answer)
+            grade = Grade.from_dict(evaluation)
         except Exception as grade_exc:
             if exc_type is None and not self._best_effort_grade:
                 raise
@@ -294,7 +295,7 @@ class Run:
             self.record(Step(source="system", error=f"[grading] {detail}"))
             return False
 
-        self.grade = Grade.from_dict(evaluation)
+        self.grade = grade
         self.record(
             Step(
                 source="task",

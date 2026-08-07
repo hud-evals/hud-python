@@ -304,6 +304,57 @@ async def test_verifier_remains_authoritative_when_actor_grading_fails(
     assert placements == ["actor", "judge"]
 
 
+async def test_verifier_remains_authoritative_when_actor_grade_is_scoreless(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.clients import HudClient
+
+    actor_env = Environment("actor")
+    verifier_env = Environment("judge")
+    placements: list[str] = []
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @verifier_env.template()
+    async def verify():
+        answer = yield ""
+        yield 1.0 if answer == "secret" else 0.0
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.env)
+        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+            yield runtime
+
+    original_grade = HudClient.grade
+    grade_calls = 0
+
+    async def return_scoreless_actor_grade(
+        self: HudClient, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        nonlocal grade_calls
+        grade_calls += 1
+        if grade_calls == 1:
+            return {"reward": 1.0}
+        return await original_grade(self, payload)
+
+    monkeypatch.setattr(HudClient, "grade", return_scoreless_actor_grade)
+    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
+
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
+    job = Job(id="actor-scoreless", name="actor-scoreless", runs=[run])
+
+    assert run.trace.is_error
+    assert "numeric 'score'" in (run.trace.error or "")
+    assert run.reward == 1.0
+    assert run.grade.raw["score"] == 1.0
+    assert placements == ["actor", "judge"]
+    assert job.errors == []
+
+
 async def test_verifier_provisioning_failure_leaves_the_run_ungraded() -> None:
     actor_env = Environment("actor")
 
