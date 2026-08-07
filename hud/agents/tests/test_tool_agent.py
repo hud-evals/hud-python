@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
+from unittest.mock import AsyncMock
 
 import fastmcp
 import mcp.types as mcp_types
@@ -19,9 +20,11 @@ from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.tools.base import AgentToolSpec
 from hud.agents.tools.rfb import RFBTool
+from hud.agents.tools.ssh import SSHInfrastructureErrorResult
 from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
 from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
+from hud.capabilities.ssh import SSHConnectionError
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 if TYPE_CHECKING:
@@ -368,6 +371,19 @@ async def test_dispatch_unparsed_arguments_returns_error_result() -> None:
     assert '{"command": "' in content.text  # the raw prefix re-anchors the model
 
 
+async def test_dispatch_marks_exhausted_ssh_reconnect_as_infrastructure_error() -> None:
+    agent = DictAgent([])
+    tool = SimpleNamespace(
+        execute=AsyncMock(side_effect=SSHConnectionError("SSH reconnect failed after 3 attempts"))
+    )
+    state: RunState[_Msg] = RunState(tools={"bash": cast("Any", tool)})
+
+    result = await agent._dispatch_call(MCPToolCall(name="bash"), state)
+
+    assert result.isError is True
+    assert isinstance(result, SSHInfrastructureErrorResult)
+
+
 async def test_loop_finishes_on_done_response() -> None:
     agent = DictAgent([AgentStep(content="final answer", done=True)])
     run = cast("Run", _FakeRun())
@@ -408,6 +424,35 @@ async def test_loop_dispatches_tool_calls_then_finishes() -> None:
     assert tool_step.call.name == "ghost"
     assert tool_step.result is not None
     assert tool_step.result.isError is True  # unknown tool → error result
+
+
+async def test_loop_resets_infrastructure_error_count_after_other_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turns = [
+        AgentStep(content="", done=False, tool_calls=[MCPToolCall(name="bash")]) for _ in range(5)
+    ]
+    agent = DictAgent(turns)
+    infrastructure_error = SSHInfrastructureErrorResult(content=[], isError=True)
+    ordinary_error = MCPToolResult(content=[], isError=True)
+    dispatch = AsyncMock(
+        side_effect=[
+            infrastructure_error,
+            ordinary_error,
+            infrastructure_error,
+            infrastructure_error,
+            infrastructure_error,
+        ]
+    )
+    monkeypatch.setattr(agent, "_dispatch_call", dispatch)
+    run = cast("Run", _FakeRun())
+
+    await agent._loop(run, RunState(), max_steps=10)
+
+    assert dispatch.await_count == 5
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason is None
+    assert run.trace.error == ("SSH tool failure limit reached after 3 consecutive errors")
 
 
 async def test_loop_max_steps_is_normal_termination() -> None:

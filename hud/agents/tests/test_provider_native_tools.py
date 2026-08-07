@@ -7,6 +7,7 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
+import asyncio
 import shlex
 from typing import Any, cast
 
@@ -19,9 +20,12 @@ from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
+from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
+from hud.agents.tools.ssh import SSHInfrastructureErrorResult, bound_shell_output
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, SSHClient
+from hud.types import MCPToolCall
 
 
 class _Completed:
@@ -36,6 +40,9 @@ class _Conn:
         self._completed = completed
         self._store = store
         self.commands: list[str] = []
+
+    def is_closed(self) -> bool:
+        return False
 
     async def run(
         self,
@@ -91,6 +98,36 @@ class _Conn:
             return _Completed(exit_status=0)
         return self._completed
 
+    async def create_process(self, command: str, **kwargs: Any) -> _Process:
+        return _Process(await self.run(command, **kwargs))
+
+
+class _Process:
+    def __init__(self, completed: _Completed) -> None:
+        self.completed = completed
+        self.closed = False
+
+    async def wait(self, *, check: bool, timeout: float) -> _Completed:  # noqa: ASYNC109
+        del timeout
+        if check and self.completed.exit_status:
+            raise asyncssh.ProcessError(
+                env=None,
+                command=None,
+                subsystem=None,
+                exit_status=self.completed.exit_status,
+                exit_signal=None,
+                returncode=self.completed.exit_status,
+                stdout=self.completed.stdout,
+                stderr=self.completed.stderr,
+            )
+        return self.completed
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        pass
+
 
 class _FakeSSH(SSHClient):
     """SSH client with an in-memory exec-channel filesystem."""
@@ -116,6 +153,20 @@ class _FakeSSH(SSHClient):
                 ),
             ),
         )
+
+
+class _TimedSSH:
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+
+    async def run(self, command: str, **kwargs: Any) -> _Completed:
+        self.timeouts.append(kwargs["timeout"])
+        await asyncio.sleep(0.01)
+        return _Completed(exit_status=1 if command.startswith("test ") else 0)
+
+    async def write_text(self, path: str, content: str, *, timeout_s: float) -> None:
+        del path, content
+        self.timeouts.append(timeout_s)
 
 
 def _ssh(**kwargs: Any) -> SSHClient:
@@ -154,34 +205,32 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
     assert _commands(tool) == ["echo a", "echo b"]
 
 
-async def test_openai_shell_bounds_large_output_in_every_result_field() -> None:
-    limit = 20_000
-    stderr_prefix = "stderr-start\n"
-    stderr_suffix = "\nstderr-end"
-    stderr = (
-        stderr_prefix + "x" * (10_523_560 - len(stderr_prefix) - len(stderr_suffix)) + stderr_suffix
-    )
-    tool = OpenAIShellTool(
-        spec=OpenAIShellTool.default_spec("gpt-5.5"),
-        client=_ssh(stderr=stderr, exit_status=1),
+async def test_openai_shell_shares_timeout_across_command_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    timeouts: list[float] = []
+
+    async def run(*args: object, **kwargs: Any) -> _Completed:
+        del args
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, float)
+        timeouts.append(timeout)
+        await asyncio.sleep(0.01)
+        return _Completed()
+
+    monkeypatch.setattr(tool.client, "run", run)
+    agent = _OpenAIChatAgentForTest(
+        OpenAIChatConfig(model="test", model_client=cast("Any", object()))
     )
 
-    result = await tool.execute({"commands": ["noisy-command"], "max_output_length": limit})
+    await agent._dispatch_call(
+        MCPToolCall(name="shell", arguments={"commands": ["echo a", "echo b"]}),
+        RunState(tools={"shell": tool}),
+    )
 
-    assert result.structuredContent is not None
-    assert result.structuredContent["max_output_length"] == limit
-    output = result.structuredContent["output"][0]
-    assert len(output["stdout"]) + len(output["stderr"]) == limit
-    assert output["stderr"].startswith(stderr_prefix)
-    assert output["stderr"].endswith(stderr_suffix)
-    assert "[truncated]" in output["stderr"]
-    text_blocks = [
-        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
-    ]
-    assert len(text_blocks) == 1
-    assert len(text_blocks[0]) == limit
-    assert text_blocks[0] == output["stdout"] + output["stderr"]
-    assert "[truncated]" in text_blocks[0]
+    assert len(timeouts) == 2
+    assert timeouts[0] > timeouts[1]
 
 
 async def test_openai_shell_applies_limit_independently_to_each_command() -> None:
@@ -210,30 +259,12 @@ async def test_openai_shell_applies_limit_independently_to_each_command() -> Non
     assert text_blocks == [output["stdout"] + output["stderr"] for output in outputs]
 
 
-@pytest.mark.parametrize(
-    ("max_output_length", "expected_output"),
-    [(1, "["), (10, "[truncated")],
-)
-async def test_openai_shell_honors_small_positive_output_limits(
-    max_output_length: int,
-    expected_output: str,
+@pytest.mark.parametrize(("limit", "expected"), [(1, "["), (10, "[truncated")])
+def test_shared_output_bound_handles_limits_smaller_than_marker(
+    limit: int,
+    expected: str,
 ) -> None:
-    tool = OpenAIShellTool(
-        spec=OpenAIShellTool.default_spec("gpt-5.5"),
-        client=_ssh(stdout="x" * 100),
-    )
-
-    result = await tool.execute(
-        {"commands": ["noisy-command"], "max_output_length": max_output_length}
-    )
-
-    assert _commands(tool) == ["noisy-command"]
-    assert result.structuredContent is not None
-    assert result.structuredContent["max_output_length"] == max_output_length
-    output = result.structuredContent["output"][0]
-    assert output["stdout"] == expected_output
-    assert output["stderr"] == ""
-    assert result_text(result) == expected_output
+    assert bound_shell_output("x" * 100, "", limit) == (expected, "")
 
 
 @pytest.mark.parametrize("max_output_length", [0, -1, "20000", 20_000.0, True])
@@ -307,6 +338,89 @@ async def test_openai_compatible_bash_uses_workdir_and_timeout() -> None:
     await tool.execute({"command": "echo hi", "workdir": "/tmp/my dir", "timeout": 2500})
 
     assert _commands(tool) == ["cd '/tmp/my dir' && timeout 3s bash -lc 'echo hi'"]
+
+
+async def test_shared_ssh_timeout_returns_infrastructure_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ssh = _ssh()
+
+    async def timeout(*args: object, **kwargs: Any) -> _Completed:
+        del args, kwargs
+        raise TimeoutError
+
+    monkeypatch.setattr(ssh, "run", timeout)
+    tool = BashTool(spec=BashTool.default_spec("qwen"), client=ssh)
+
+    result = await tool.execute({"command": "sleep forever"})
+
+    assert result.isError is True
+    assert isinstance(result, SSHInfrastructureErrorResult)
+    assert result_text(result) == "tool error: command timed out after 300s"
+
+
+async def test_openai_shell_uses_the_same_ssh_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ssh = _ssh()
+
+    async def timeout(*args: object, **kwargs: Any) -> _Completed:
+        del args, kwargs
+        raise TimeoutError
+
+    monkeypatch.setattr(ssh, "run", timeout)
+    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=ssh)
+
+    result = await tool.execute({"commands": ["sleep forever"]})
+
+    assert isinstance(result, SSHInfrastructureErrorResult)
+    assert result.structuredContent is not None
+    assert result.structuredContent["output"][0]["stderr"] == (
+        "tool error: command timed out after 300s"
+    )
+
+
+async def test_composite_ssh_tool_shares_one_operation_deadline() -> None:
+    ssh = _TimedSSH()
+    tool = EditTool(spec=EditTool.default_spec("test"), client=cast("SSHClient", ssh))
+    agent = _OpenAIChatAgentForTest(
+        OpenAIChatConfig(model="test", model_client=cast("Any", object()))
+    )
+
+    result = await agent._dispatch_call(
+        MCPToolCall(
+            name="edit",
+            arguments={"filePath": "/work/f.txt", "oldString": "", "newString": "new"},
+        ),
+        RunState(tools={"edit": tool}),
+    )
+
+    assert result.isError is False
+    assert len(ssh.timeouts) == 3
+    assert ssh.timeouts[0] > ssh.timeouts[1] > ssh.timeouts[2]
+
+
+async def test_shared_ssh_tool_bounds_combined_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hud.agents.tools.ssh.MAX_SHELL_OUTPUT_LENGTH", 80)
+    tool = BashTool(
+        spec=BashTool.default_spec("qwen"),
+        client=_ssh(
+            stdout="stdout-start-" + "a" * 100,
+            stderr="b" * 100 + "-stderr-end",
+        ),
+    )
+
+    result = await tool.execute({"command": "noisy"})
+
+    text = result_text(result)
+    output = text.split("\n", 1)[1].rsplit("\n(exit 0)", 1)[0]
+    stdout, stderr = output.split("\nstderr:\n", 1)
+    assert len(stdout) + len(stderr) == 80
+    assert stdout.startswith("stdout-start-")
+    assert stderr.endswith("-stderr-end")
+    assert "[truncated]" in output
 
 
 async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
