@@ -47,10 +47,14 @@ async def test_serving_publishes_the_workspace_capability(
     from hud.settings import settings
 
     monkeypatch.setattr(settings, "file_tracking_enabled", True)
+    monkeypatch.setattr(workspace_module, "usable_bwrap", lambda: None)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
     async with served(env) as client:
+        assert client.manifest is not None
+        shell = next(cap for cap in client.manifest.bindings if cap.name == "shell")
+        assert shell.params["isolation"] == "none"
         cap = client.binding("shell")
         assert cap.protocol == "ssh/2"
         assert cap.url.startswith("ssh://")
@@ -63,6 +67,23 @@ async def test_serving_publishes_the_workspace_capability(
         }
         # Key material lives outside the served root (the agent's surface).
         assert not (tmp_path / "root" / ".hud").exists()
+
+
+async def test_serving_reports_granted_bwrap_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        workspace_module,
+        "usable_bwrap",
+        lambda: workspace_module.Bubblewrap("/usr/bin/bwrap"),
+    )
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root")
+
+    async with served(env) as client:
+        assert client.manifest is not None
+        shell = next(cap for cap in client.manifest.bindings if cap.name == "shell")
+        assert shell.params["isolation"] == "bwrap"
 
 
 async def test_workspace_file_tracking_can_be_opted_out(

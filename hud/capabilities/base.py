@@ -92,6 +92,7 @@ class Capability:
         client_key_path: str | os.PathLike[str] | None = None,
         shell: str | None = None,
         cwd: str | None = None,
+        isolation: Literal["bwrap", "none"] | None = None,
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
@@ -103,7 +104,8 @@ class Capability:
         from ``sys.platform`` at construction time. Agents read this to
         format commands correctly. ``cwd`` is the absolute path sessions
         start in. Paths are the session namespace's own — clients pass them
-        verbatim, and nothing is anchored or rewritten.
+        verbatim, and nothing is anchored or rewritten. ``isolation`` records
+        the sandbox actually granted to the served workspace.
         """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
@@ -115,6 +117,8 @@ class Capability:
             params["client_key_path"] = os.fspath(client_key_path)
         if cwd is not None:
             params["cwd"] = cwd
+        if isolation is not None:
+            params["isolation"] = isolation
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
 
     @classmethod
