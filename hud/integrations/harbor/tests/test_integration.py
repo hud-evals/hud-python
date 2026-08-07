@@ -52,8 +52,18 @@ class Oracle(Agent):
         self.solutions = solutions
 
     async def __call__(self, run: Run) -> None:
+        setup = next(
+            step.task_call
+            for step in run.trace.steps
+            if step.task_call is not None and step.task_call.phase == "setup"
+        )
+        assert isinstance(setup.arguments, dict)
+        task = setup.arguments.get("task")
+        assert isinstance(task, dict)
+        task_id = task.get("id")
+        assert isinstance(task_id, str)
         ssh = cast("SSHClient", await run.client.open("ssh/2"))
-        if run.task_id == "agent-lifecycle":
+        if task_id == "agent-lifecycle":
             for index in range(40):
                 result = await ssh.conn.run(f"printf '%s' {index}", check=False)
                 assert result.exit_status == 0, f"command session {index} failed: {result.stderr!r}"
@@ -61,7 +71,7 @@ class Oracle(Agent):
             await ssh.conn.run("cat > session-input", input="written", check=True)
             written = await ssh.conn.run("cat session-input", check=True)
             assert written.stdout == "written"
-        if run.task_id == "hello-mcp":
+        if task_id == "hello-mcp":
             mcp = cast("MCPClient", await run.client.open("mcp-server"))
             assert {tool.name for tool in await mcp.list_tools()} == {"get_secret"}
             assert run.client.manifest is not None
@@ -117,7 +127,7 @@ Path("/app/secret.txt").write_text(result["result"]["content"][0]["text"])
                 raise RuntimeError("workspace MCP client closed without an exit status")
             run.trace.content = "called get_secret from inside the workspace"
             return
-        result = await ssh.conn.run(self.solutions[run.task_id], check=False)
+        result = await ssh.conn.run(self.solutions[task_id], check=False)
         if result.exit_status is None:
             run.trace.content = (
                 "solution SSH channel closed without an exit status:\n"
@@ -139,13 +149,13 @@ async def _grade_every_task(dataset: Path, wheel: Path) -> dict[str, Run]:
         }
 
     solutions = await asyncio.to_thread(load_solutions)
-    taskset = await harbor.adapt(dataset, hud_requirement=str(wheel))
+    taskset = harbor.adapt(dataset, hud_requirement=str(wheel))
     job = await taskset.run(
         Oracle(solutions),
         runtime=DockerRuntime(),
         max_concurrent=1,
     )
-    return {run.task_id: run for run in job.runs}
+    return {cast("str", run.slug): run for run in job.runs}
 
 
 @pytest.fixture(scope="module")
@@ -285,7 +295,7 @@ timeout_sec = 30
     (task / "solution" / "solve.sh").write_text("true\n", encoding="utf-8")
 
     async def grade_twice() -> list[Run]:
-        taskset = await harbor.adapt(dataset, hud_requirement=str(wheel))
+        taskset = harbor.adapt(dataset, hud_requirement=str(wheel))
         job = await taskset.run(
             Oracle({"sidecar-reachability": "true"}),
             runtime=Shared(DockerRuntime(), width=1),
@@ -301,7 +311,7 @@ timeout_sec = 30
         assert any(
             step.task_call is not None
             and step.task_call.phase == "evaluate"
-            and step.task_call.name == "sidecar-reachability:verify"
+            and step.task_call.name == "verify"
             for step in run.trace.steps
         )
 

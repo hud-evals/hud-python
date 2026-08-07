@@ -8,8 +8,7 @@ FROM ${BASE_IMAGE} AS runtime
 USER root
 ARG HUD_REQUIREMENT=hud
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /media/hud/bin/uv
-COPY env.py install.sh tasks.json /media/hud/
-COPY tasks /media/hud/tasks
+COPY env.py install.sh config.json image-config.json verifier-image-config.json /media/hud/
 COPY packages /media/hud/packages
 RUN sh /media/hud/install.sh "${HUD_REQUIREMENT}"
 

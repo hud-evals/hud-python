@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 import hud.eval.runtime as runtime_module
-from hud.eval.compose import ComposeHealthcheck, ComposeService, ImageConfig
+from hud.eval.compose import ComposeConfig, ComposeHealthcheck, ComposeService
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -594,6 +594,7 @@ def test_runtime_config_overrides_only_explicit_top_level_fields() -> None:
 
 def test_runtime_config_source_override_is_mutually_exclusive(tmp_path: Path) -> None:
     compose = tmp_path / "compose.yaml"
+    replacement = tmp_path / "replacement.yaml"
 
     assert RuntimeConfig(image="img:default").with_overrides(
         RuntimeConfig(compose=compose)
@@ -601,6 +602,9 @@ def test_runtime_config_source_override_is_mutually_exclusive(tmp_path: Path) ->
     assert RuntimeConfig(compose=compose).with_overrides(
         RuntimeConfig(image="img:task")
     ) == RuntimeConfig(image="img:task")
+    assert RuntimeConfig(compose=compose, compose_project=tmp_path).with_overrides(
+        RuntimeConfig(compose=replacement)
+    ) == RuntimeConfig(compose=replacement)
 
 
 async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
@@ -644,13 +648,18 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         "services:\n  main:\n    image: hud-env:one\n  db:\n    image: postgres:17\n",
         encoding="utf-8",
     )
+    marker = tmp_path / "prepared"
+    (tmp_path / "build.sh").write_text(
+        f"#!/bin/sh\nprintf prepared > {marker}\n",
+        encoding="utf-8",
+    )
 
     async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
         nonlocal port_override
         calls.append(args)
         if args[:2] == ("context", "inspect"):
             return "unix:///Users/test/.docker/run/docker.sock\n", ""
-        if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
+        if args[-4:] == ("up", "--detach", "--no-build", "--remove-orphans"):
             files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
             _, override, ports = files
             rendered.update(json.loads(override.read_text("utf-8")))
@@ -674,6 +683,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         assert runtime.url == "tcp://127.0.0.1:43210"
         assert runtime.config == task.runtime_config
 
+    assert marker.read_text("utf-8") == "prepared"
     assert rendered["services"]["main"] == {
         "security_opt": [
             f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}",
@@ -691,10 +701,46 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     }
     assert 'ports: !override ["127.0.0.1::8765"]' in port_override
     up = next(
-        call for call in calls if call[-4:] == ("up", "--detach", "--build", "--remove-orphans")
+        call for call in calls if call[-4:] == ("up", "--detach", "--no-build", "--remove-orphans")
     )
     assert str(compose.resolve()) in up
     assert calls[-1][-3:] == ("down", "--volumes", "--remove-orphans")
+
+
+async def test_docker_runtime_serializes_shared_compose_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    active = 0
+    peak = 0
+
+    async def prepare(_compose: Path) -> bool:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return True
+
+    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        if args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_prepare_compose_project", prepare)
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(compose=compose))
+    provider = DockerRuntime()
+
+    async def acquire() -> None:
+        async with provider(task):
+            pass
+
+    await asyncio.gather(acquire(), acquire())
+
+    assert peak == 1
 
 
 async def test_docker_runtime_rejects_remote_compose_service_access(
@@ -799,7 +845,8 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
 
     async with ModalRuntime(
-        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True)
+        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+        env_vars={"HUD_API_KEY": "secret"},
     )(_row()) as runtime:
         assert runtime.url == "tcp://modal.host:4567"
 
@@ -808,6 +855,9 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert isinstance(kwargs, dict)
     assert kwargs["experimental_options"] == {"vm_runtime": True}
     assert kwargs["readiness_probe"] is None
+    assert kwargs["cpu"] == 4
+    assert kwargs["memory"] == 8192
+    assert kwargs["image"] == _ModalImageRef("registry", "docker:28.3.3-dind")
     assert calls["uploads"] == [
         ("project.tar.gz", "/hud/project.tar.gz"),
         ("override.json", "/hud/override.json"),
@@ -823,10 +873,12 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
             "target": "/media/hud/docker.sock",
         }
     ]
+    assert override["services"]["main"]["environment"] == {"HUD_API_KEY": "secret"}
     execs = calls["execs"]
     assert isinstance(execs, list)
     assert "docker compose" in execs[0][0][-1]
-    assert "up --detach --build --remove-orphans" in execs[0][0][-1]
+    assert "sh /hud/project/build.sh" in execs[0][0][-1]
+    assert 'up --detach "$BUILD_FLAG" --remove-orphans' in execs[0][0][-1]
     assert "down" in execs[1][0]
 
 
@@ -997,22 +1049,120 @@ async def test_daytona_runtime_rejects_compose(
     assert client.created == []
 
 
-def test_compose_service_applies_image_defaults_once() -> None:
-    image = ImageConfig(
-        Entrypoint=["docker-entrypoint.sh"],
-        Cmd=["redis-server"],
-        WorkingDir="/data",
+def test_compose_config_normalizes_supported_short_syntax(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        """
+services:
+  main:
+    image: example:latest
+    environment:
+      - FIRST=one
+      - EMPTY=
+    entrypoint: /bin/start --flag
+    command: serve --port 8000
+    expose: [8000]
+    ports:
+      - 8000
+      - 127.0.0.1:8080:80/tcp
+""",
+        encoding="utf-8",
     )
 
-    inherited = ComposeService(image="redis:7").with_image("redis:7", image)
-    assert inherited.argv == ["docker-entrypoint.sh", "redis-server"]
-    assert inherited.working_dir == "/data"
+    service = ComposeConfig.from_file(compose).services["main"]
 
-    overridden = ComposeService(
-        image="redis:7",
-        entrypoint=["custom-entrypoint"],
-    ).with_image("redis:7", image)
-    assert overridden.argv == ["custom-entrypoint"]
+    assert service.environment == {"FIRST": "one", "EMPTY": ""}
+    assert service.entrypoint == ["/bin/start", "--flag"]
+    assert service.command == ["serve", "--port", "8000"]
+    assert service.expose == ["8000"]
+    assert [port.model_dump(exclude_none=True) for port in service.ports] == [
+        {"target": 8000, "protocol": "tcp"},
+        {
+            "target": 80,
+            "protocol": "tcp",
+            "published": 8080,
+            "host_ip": "127.0.0.1",
+        },
+    ]
+
+    mapped = ComposeService.model_validate({"environment": {"COUNT": 2, "ENABLED": True}})
+    assert mapped.environment == {"COUNT": "2", "ENABLED": "true"}
+
+
+@pytest.mark.parametrize(
+    "service",
+    [
+        "command: echo $VALUE",
+        "extends: {file: base.yaml, service: base}",
+    ],
+)
+def test_compose_config_rejects_external_resolution(tmp_path: Path, service: str) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(f"services:\n  main:\n    {service}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not support Compose"):
+        ComposeConfig.from_file(compose)
+
+
+def test_compose_config_relocates_project_paths() -> None:
+    compose = ComposeConfig.model_validate(
+        {
+            "services": {
+                "main": {
+                    "build": {
+                        "context": ".",
+                        "additional_contexts": {
+                            "fixture": "./fixture",
+                            "base": "service:base",
+                        },
+                    },
+                    "env_file": [".env", {"path": "./optional.env", "required": False}],
+                    "label_file": "./labels",
+                    "volumes": [
+                        "./data:/data:ro",
+                        "cache:/cache",
+                        {"type": "bind", "source": "./config", "target": "/config"},
+                    ],
+                },
+                "base": {"image": "alpine"},
+            },
+            "configs": {"settings": {"file": "./settings.json"}},
+            "secrets": {"token": {"file": "./token"}},
+        }
+    )
+
+    relocated = compose.with_project_directory("./environment").model_dump(
+        mode="json", exclude_none=True
+    )
+    main = relocated["services"]["main"]
+
+    assert main["build"] == {
+        "context": "./environment",
+        "additional_contexts": {
+            "fixture": "./environment/fixture",
+            "base": "service:base",
+        },
+    }
+    assert main["env_file"] == [
+        "./environment/.env",
+        {"path": "./environment/optional.env", "required": False},
+    ]
+    assert main["label_file"] == "./environment/labels"
+    assert main["volumes"] == [
+        "./environment/data:/data:ro",
+        "cache:/cache",
+        {"type": "bind", "source": "./environment/config", "target": "/config"},
+    ]
+    assert relocated["configs"] == {"settings": {"file": "./environment/settings.json"}}
+    assert relocated["secrets"] == {"token": {"file": "./environment/token"}}
+
+
+@pytest.mark.parametrize("path", ["../data", "./nested/../../data"])
+def test_compose_config_rejects_paths_outside_project(path: str) -> None:
+    compose = ComposeConfig.model_validate({"services": {"main": {"volumes": [f"{path}:/data"]}}})
+
+    with pytest.raises(ValueError, match="escapes its project directory"):
+        compose.with_project_directory("./environment")
 
 
 def test_compose_healthcheck_does_not_invent_duration_values() -> None:

@@ -34,13 +34,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
-import json
 import logging
 import os
 import shlex
 import sys
-import tarfile
-import tempfile
 import uuid
 from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
@@ -58,6 +55,7 @@ from hud.utils.docker import docker as _docker
 from hud.utils.platform import PlatformClient
 from hud.utils.process import ProcessGroup, create_process_group_exec
 
+from .compose import ComposeConfig, ComposeProject, ComposeProjectRef, ComposeSource
 from .run import Grade, Run, rollout
 
 if TYPE_CHECKING:
@@ -78,7 +76,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.eval.runtime")
 
-_COMPOSE_SERVICE_SOCKET = "/media/hud/docker.sock"
+_MODAL_COMPOSE_CPU = 4.0
+_MODAL_COMPOSE_MEMORY_MB = 8192
+
+
+async def _prepare_compose_project(compose: Path) -> bool:
+    script = compose.parent / "build.sh"
+    if not script.is_file():
+        return False
+    process = await create_process_group_exec(
+        "sh",
+        str(script),
+        cwd=str(compose.parent),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    result = await process.complete()
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
+        raise RuntimeError(f"Compose project build failed: {detail}")
+    return True
 
 
 class RuntimeGPU(BaseModel):
@@ -114,12 +131,18 @@ class RuntimeConfig(BaseModel):
 
     ``Task.runtime_config`` is requested construction input. ``Runtime.config``
     is the effective config used to construct a runtime.
+
+    ``compose`` and ``compose_project`` are authored as local paths; platform
+    task records carry them as the serialized compose document and a
+    :class:`ComposeProjectRef`. Both forms validate; only the path form is
+    runnable by local providers.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     image: str | None = Field(default=None, min_length=1)
-    compose: Path | None = None
+    compose: Path | ComposeConfig | None = None
+    compose_project: Path | ComposeProjectRef | None = None
     compose_service_access: bool | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
@@ -128,6 +151,8 @@ class RuntimeConfig(BaseModel):
     def validate_source(self) -> Self:
         if self.image is not None and self.compose is not None:
             raise ValueError("runtime_config accepts either image or compose, not both")
+        if self.compose_project is not None and self.compose is None:
+            raise ValueError("compose_project requires runtime_config.compose")
         if self.compose_service_access and self.compose is None:
             raise ValueError("compose_service_access requires runtime_config.compose")
         return self
@@ -139,13 +164,25 @@ class RuntimeConfig(BaseModel):
         changes = override.model_dump(exclude_unset=True)
         if override.image is not None:
             config["compose"] = None
+            config["compose_project"] = None
             config["compose_service_access"] = None
         elif override.compose is not None:
             config["image"] = None
+            config["compose_project"] = None
         return RuntimeConfig.model_validate(config | changes)
 
     def request_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude_unset=True)
+        payload = self.model_dump(mode="json", exclude_unset=True)
+        source = self.compose_source()
+        if source is not None:
+            payload.update(source.request_payload())
+        return payload
+
+    def compose_source(self) -> ComposeSource | None:
+        """The authored or wire-form Compose source, when configured."""
+        if self.compose is None:
+            return None
+        return ComposeSource(self.compose, self.compose_project)
 
 
 class Provider(Protocol):
@@ -261,64 +298,6 @@ _DOCKER_SECURITY_ARGS = (
     "--security-opt",
     "systempaths=unconfined",
 )
-
-
-def _docker_compose_main(
-    published_port: str,
-    resources: RuntimeResources | None,
-    *,
-    seccomp: str | Path = _DOCKER_SECCOMP_PROFILE,
-    service_socket: str | None = None,
-) -> dict[str, Any]:
-    main: dict[str, Any] = {
-        "ports": [published_port],
-        "security_opt": [f"seccomp={seccomp}", "systempaths=unconfined"],
-    }
-    if service_socket is not None:
-        main["volumes"] = [
-            {
-                "type": "bind",
-                "source": service_socket,
-                "target": _COMPOSE_SERVICE_SOCKET,
-            }
-        ]
-    if resources is None:
-        return main
-    if resources.cpu is not None:
-        main["cpus"] = resources.cpu
-    if resources.memory_mb is not None:
-        main["mem_limit"] = f"{resources.memory_mb}m"
-    if resources.gpu is not None:
-        main["gpus"] = resources.gpu.count
-    return main
-
-
-def _compose_overrides(directory: Path, main: dict[str, Any]) -> tuple[Path, Path]:
-    main = dict(main)
-    (published_port,) = main.pop("ports")
-    override = directory / "override.json"
-    override.write_text(json.dumps({"services": {"main": main}}), encoding="utf-8")
-    ports = directory / "ports.yaml"
-    ports.write_text(
-        f'services:\n  main:\n    ports: !override ["{published_port}"]\n',
-        encoding="utf-8",
-    )
-    return override, ports
-
-
-@contextlib.contextmanager
-def _compose_payload(
-    compose: Path,
-    main: dict[str, Any],
-) -> Iterator[tuple[Path, Path, Path]]:
-    with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
-        root = Path(directory)
-        archive = root / "project.tar.gz"
-        with tarfile.open(archive, "w:gz") as tar:
-            for entry in compose.parent.iterdir():
-                tar.add(entry, arcname=entry.name)
-        override, ports = _compose_overrides(root, main)
-        yield archive, override, ports
 
 
 class LocalRuntime:
@@ -612,16 +591,18 @@ class DockerRuntime:
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
         self.runtime_config = config if config.model_dump(exclude_none=True) else None
+        self._compose_preparation_locks: dict[Path, asyncio.Lock] = {}
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         if config.limits is not None and config.limits.model_dump(exclude_none=True):
             raise ValueError("DockerRuntime does not support runtime_config limits")
-        if config.compose is not None:
+        compose_source = config.compose_source()
+        if compose_source is not None:
             if self.run_args:
                 raise ValueError("DockerRuntime run_args apply only to image environments")
-            compose = config.compose.resolve()
+            compose = compose_source.runnable_path("DockerRuntime")
             resources = config.resources
             if (
                 resources is not None
@@ -647,27 +628,42 @@ class DockerRuntime:
                         f"Docker endpoint, got {endpoint!r}"
                     )
                 service_socket = parsed.path
-            main = _docker_compose_main(
-                f"127.0.0.1::{self.port}",
-                resources,
-                service_socket=service_socket,
-            )
+            project_files = ComposeProject(compose)
             project = f"hud-{uuid.uuid4().hex[:12]}"
-            with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
-                override, ports = _compose_overrides(Path(directory), main)
+            lock = self._compose_preparation_locks.setdefault(compose, asyncio.Lock())
+            async with lock:
+                prepared = await _prepare_compose_project(compose)
+            with project_files.stage(
+                f"127.0.0.1::{self.port}",
+                seccomp=_DOCKER_SECCOMP_PROFILE,
+                service_socket=service_socket,
+                cpu=resources.cpu if resources is not None else None,
+                memory_mb=resources.memory_mb if resources is not None else None,
+                gpu_count=(
+                    resources.gpu.count
+                    if resources is not None and resources.gpu is not None
+                    else None
+                ),
+            ) as files:
                 command = (
                     "compose",
                     "--project-name",
                     project,
                     "--file",
-                    str(compose),
+                    str(files.compose),
                     "--file",
-                    str(override),
+                    str(files.override),
                     "--file",
-                    str(ports),
+                    str(files.ports),
                 )
                 try:
-                    await _docker(*command, "up", "--detach", "--build", "--remove-orphans")
+                    await _docker(
+                        *command,
+                        "up",
+                        "--detach",
+                        "--no-build" if prepared else "--build",
+                        "--remove-orphans",
+                    )
                     mapping, _ = await _docker(*command, "port", "main", str(self.port))
                     if not mapping.strip():
                         logs_out, logs_err = await _docker(
@@ -800,7 +796,10 @@ class ModalRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
-        compose = config.compose.resolve() if config.compose is not None else None
+        compose_source = config.compose_source()
+        compose = (
+            compose_source.runnable_path("ModalRuntime") if compose_source is not None else None
+        )
         modal = cast("ModalModule", importlib.import_module("modal"))
 
         app = None
@@ -826,7 +825,7 @@ class ModalRuntime:
                         await self._image.build.aio(app=app)
                         self._resolved = self._image
             image = self._resolved
-        if self.env_vars:
+        if self.env_vars and compose is None:
             image = image.env(self.env_vars)
 
         if app is None:
@@ -834,10 +833,24 @@ class ModalRuntime:
 
         sandbox_kwargs: dict[str, Any] = {}
         resources = config.resources
-        if resources is not None and resources.cpu is not None:
-            sandbox_kwargs["cpu"] = resources.cpu
-        if resources is not None and resources.memory_mb is not None:
-            sandbox_kwargs["memory"] = resources.memory_mb
+        if compose is not None:
+            sandbox_kwargs["cpu"] = max(
+                resources.cpu if resources is not None and resources.cpu is not None else 0,
+                _MODAL_COMPOSE_CPU,
+            )
+            sandbox_kwargs["memory"] = max(
+                (
+                    resources.memory_mb
+                    if resources is not None and resources.memory_mb is not None
+                    else 0
+                ),
+                _MODAL_COMPOSE_MEMORY_MB,
+            )
+        else:
+            if resources is not None and resources.cpu is not None:
+                sandbox_kwargs["cpu"] = resources.cpu
+            if resources is not None and resources.memory_mb is not None:
+                sandbox_kwargs["memory"] = resources.memory_mb
         if resources is not None and resources.gpu is not None:
             gpu_type = resources.gpu.type or "any"
             gpu = gpu_type if resources.gpu.count == 1 else f"{gpu_type}:{resources.gpu.count}"
@@ -865,22 +878,27 @@ class ModalRuntime:
             if compose is None:
                 await sb.wait_until_ready.aio(timeout=ready_timeout)
             else:
-                main = _docker_compose_main(
+                project = ComposeProject(compose)
+                with project.stage(
                     f"{self.port}:{self.port}",
-                    resources,
                     seccomp="/hud/docker-seccomp.json",
                     service_socket=(
                         "/var/run/docker.sock" if config.compose_service_access else None
                     ),
-                )
-                with _compose_payload(compose, main) as (
-                    archive,
-                    override,
-                    ports,
-                ):
-                    await sb.filesystem.copy_from_local.aio(archive, "/hud/project.tar.gz")
-                    await sb.filesystem.copy_from_local.aio(override, "/hud/override.json")
-                    await sb.filesystem.copy_from_local.aio(ports, "/hud/ports.yaml")
+                    env_vars=self.env_vars,
+                    cpu=resources.cpu if resources is not None else None,
+                    memory_mb=resources.memory_mb if resources is not None else None,
+                    gpu_count=(
+                        resources.gpu.count
+                        if resources is not None and resources.gpu is not None
+                        else None
+                    ),
+                    archive=True,
+                ) as files:
+                    assert files.archive is not None
+                    await sb.filesystem.copy_from_local.aio(files.archive, "/hud/project.tar.gz")
+                    await sb.filesystem.copy_from_local.aio(files.override, "/hud/override.json")
+                    await sb.filesystem.copy_from_local.aio(files.ports, "/hud/ports.yaml")
                     await sb.filesystem.copy_from_local.aio(
                         _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
                     )
@@ -888,10 +906,13 @@ class ModalRuntime:
                     "mkdir -p /hud/project && "
                     "tar -xzf /hud/project.tar.gz -C /hud/project && "
                     "until docker info >/dev/null 2>&1; do sleep 1; done && "
+                    "BUILD_FLAG=--build && "
+                    "if [ -f /hud/project/build.sh ]; then "
+                    "sh /hud/project/build.sh && BUILD_FLAG=--no-build; fi && "
                     "docker compose --project-directory /hud/project "
                     f"--file /hud/project/{shlex.quote(compose.name)} "
                     "--file /hud/override.json --file /hud/ports.yaml "
-                    "up --detach --build --remove-orphans"
+                    'up --detach "$BUILD_FLAG" --remove-orphans'
                 )
                 process = await sb.exec.aio("sh", "-c", command, timeout=ready_timeout)
                 if await process.wait.aio() != 0:

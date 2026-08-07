@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
 from hud.environment import Environment, Mount, Peer, Workspace
-from hud.environment.egress import ANY_HOST
+from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT
 from hud.graders import EvaluationResult
 from hud.utils.process import ProcessResult, create_process_group_exec
 
@@ -33,7 +33,54 @@ AGENT_ANSWER = LOGS / "agent_answer.txt"
 ARTIFACTS = ROOT / "artifacts"
 DOCKER_SOCKET = ROOT / "docker.sock"
 DOCKER = ROOT / "bin" / "docker"
-CONFIG = json.loads((ROOT / "tasks.json").read_text("utf-8"))
+CONFIG = json.loads((ROOT / "config.json").read_text("utf-8"))
+
+
+def load_image_config(name: str) -> dict[str, Any]:
+    value = json.loads((ROOT / name).read_text("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must contain an OCI image config object")
+    return value
+
+
+def image_environment(config: dict[str, Any]) -> dict[str, str]:
+    entries = config.get("Env") or []
+    if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+        raise ValueError("OCI image Env must be a list of strings")
+    return {
+        key: value
+        for entry in entries
+        for key, separator, value in (entry.partition("="),)
+        if separator
+    }
+
+
+IMAGE_CONFIG = load_image_config("image-config.json")
+VERIFIER_IMAGE_CONFIG = load_image_config("verifier-image-config.json")
+CONFIG["image_env"] = image_environment(IMAGE_CONFIG)
+if CONFIG["image_user"] is None:
+    CONFIG["image_user"] = IMAGE_CONFIG.get("User") or None
+if CONFIG["workdir"] is None:
+    CONFIG["workdir"] = IMAGE_CONFIG.get("WorkingDir") or "/"
+if CONFIG["entrypoint"] is None:
+    CONFIG["entrypoint"] = IMAGE_CONFIG.get("Entrypoint") or []
+exposed = IMAGE_CONFIG.get("ExposedPorts") or {}
+if not isinstance(exposed, dict):
+    raise ValueError("OCI image ExposedPorts must be an object")
+CONFIG["ports"] = sorted(
+    {
+        *CONFIG["ports"],
+        *(int(port) for value in exposed if (port := str(value).partition("/")[0]).isdigit()),
+    }
+)
+if conflict := set(CONFIG["ports"]) & {BRIDGE_PORT, VISITOR_PORT, 8765}:
+    raise ValueError(f"Harbor main service port {min(conflict)} conflicts with a HUD reserved port")
+verifier_image = CONFIG["verifier_image"]
+if verifier_image["user"] is None:
+    verifier_image["user"] = VERIFIER_IMAGE_CONFIG.get("User") or None
+if verifier_image["workdir"] is None:
+    verifier_image["workdir"] = VERIFIER_IMAGE_CONFIG.get("WorkingDir") or "/"
+verifier_image["env"] = image_environment(VERIFIER_IMAGE_CONFIG)
 
 os.environ.update(CONFIG["environment"]["env"])
 WORKDIR = Path(CONFIG["workdir"])
@@ -397,56 +444,44 @@ async def collect(task: dict[str, Any]) -> None:
             raise RuntimeError(f"artifact {source} contains a symbolic link")
 
 
-def register(task: dict[str, Any]) -> None:
-    task_dir = ROOT / "tasks" / task["id"]
-
-    @env.template(
-        id=task["id"],
-        description=task["description"] or f"Harbor task {task['id']}",
-    )
-    async def run() -> AsyncGenerator[Any, Any]:
+@env.template(id="run", description="Run a Harbor task")
+async def run(instruction: str, task: dict[str, Any]) -> AsyncGenerator[Any, Any]:
+    clear_grading_files()
+    AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
+    AGENT_ANSWER.touch()
+    entrypoint = None
+    try:
+        entrypoint = await start_entrypoint()
+        await wait_until_healthy(entrypoint)
+        answer = yield instruction
+        if entrypoint is not None and entrypoint.returncode is not None:
+            raise RuntimeError(
+                f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
+            )
+        if task["separate_verifier"]:
+            await workspace.terminate_sessions()
+            await collect(task)
+            yield 0.0
+        else:
+            yield await grade(task["id"], task["verifier_timeout"], answer)
+    finally:
         clear_grading_files()
-        AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
-        AGENT_ANSWER.touch()
-        entrypoint = None
+        await workspace.discard_sandbox()
+        if entrypoint is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(entrypoint.wait(), 10.0)
+
+
+if CONFIG["verifier_root"] is not None:
+
+    @env.template(id="verify", description="Verify a Harbor task")
+    async def verify(task: dict[str, Any]) -> AsyncGenerator[Any, Any]:
+        answer = yield ""
         try:
-            entrypoint = await start_entrypoint()
-            await wait_until_healthy(entrypoint)
-            answer = yield (task_dir / "instruction.md").read_text("utf-8")
-            if entrypoint is not None and entrypoint.returncode is not None:
-                raise RuntimeError(
-                    f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
-                )
-            if task["separate_verifier"]:
-                await workspace.terminate_sessions()
-                await collect(task)
-                yield 0.0
-            else:
-                yield await grade(task_dir, task["verifier_timeout"], answer)
+            yield await grade_separate(task, answer)
         finally:
             clear_grading_files()
-            await workspace.discard_sandbox()
-            if entrypoint is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(entrypoint.wait(), 10.0)
-
-    if task["separate_verifier"]:
-
-        @env.template(
-            id=f"{task['id']}:verify",
-            description=f"Verify Harbor task {task['id']}",
-        )
-        async def verify() -> AsyncGenerator[Any, Any]:
-            answer = yield ""
-            try:
-                yield await grade_separate(task, answer)
-            finally:
-                clear_grading_files()
-                shutil.rmtree(ARTIFACTS, ignore_errors=True)
-
-
-for task_config in CONFIG["tasks"]:
-    register(task_config)
+            shutil.rmtree(ARTIFACTS, ignore_errors=True)
 
 
 def clear(path: Path) -> None:
@@ -473,9 +508,9 @@ def clear_grading_files() -> None:
             AGENT_ANSWER.unlink()
 
 
-async def grade(task_dir: Path, timeout_sec: float, answer: Any) -> EvaluationResult:
+async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResult:
     clear(TESTS)
-    shutil.copytree(task_dir / "tests", TESTS, symlinks=True, dirs_exist_ok=True)
+    shutil.copytree(ROOT / "tests" / task_id, TESTS, symlinks=True, dirs_exist_ok=True)
     test_script = TESTS / "test.sh"
     test_script.chmod(test_script.stat().st_mode | 0o111)
 

@@ -729,15 +729,17 @@ def _spawn_target(source: Path) -> Path:
     return resolved.parent
 
 
-def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
+def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
-    "local" spawns each row's env from the source next to the tasks file;
+    "local" runs each row's env beside the tasks file: rows that declare a
+    container substrate (``runtime_config`` image or compose) get
+    ``DockerRuntime``, otherwise the env source is served in a subprocess;
     "hud" opens the HUD runtime tunnel while keeping the agent loop local;
     ``--remote`` submits every rollout for platform-hosted execution; a
     ``tcp://`` url attaches to an env served elsewhere.
     """
-    from hud.eval import HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime
+    from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
@@ -745,7 +747,18 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None) -> Any:
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
-        return SubprocessRuntime(_spawn_target(source_path))
+        docker = DockerRuntime()
+        subprocess = SubprocessRuntime(_spawn_target(source_path))
+
+        def local(task: Any) -> Any:
+            config = task.runtime_config
+            return (
+                docker(task)
+                if config is not None and (config.image is not None or config.compose is not None)
+                else subprocess(task)
+            )
+
+        return local
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
         return HUDRuntime()
@@ -833,7 +846,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         )
 
     agent = _build_agent(cfg)
-    placement = _resolve_placement(cfg, source_path if is_local else None)
+    placement = _resolve_placement(cfg, source_path if is_local else None, taskset)
 
     job = await taskset.run(
         agent,

@@ -1,4 +1,4 @@
-"""Build context tarball creation for direct deploys."""
+"""Build context tarball creation for the deploy command."""
 
 from __future__ import annotations
 
