@@ -32,7 +32,7 @@ agent = create_agent("claude-sonnet-4-5")   # routed through the gateway
 ```
 
 The HUD gateway is an OpenAI-compatible endpoint (`settings.hud_gateway_url`, default
-`https://inference.beta.hud.ai`) that fronts every provider behind your single `HUD_API_KEY`, so you
+`https://inference.hud.ai`) that fronts every provider behind your single `HUD_API_KEY`, so you
 switch between Claude, GPT, and Gemini by name alone, with unified tracing. `create_agent` accepts any id
 the gateway knows (`claude-...`, `gpt-...`, `gemini-...`); extra kwargs pass through to the agent's
 config.

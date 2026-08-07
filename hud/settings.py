@@ -51,13 +51,13 @@ class Settings(BaseSettings):
         )
 
     hud_telemetry_url: str = Field(
-        default="https://telemetry.beta.hud.ai/v3/api",
-        description="Base URL for the HUD API",
+        default="https://telemetry.hud.ai/v3/api",
+        description="Base URL for HUD telemetry ingestion",
         validation_alias="HUD_TELEMETRY_URL",
     )
 
     hud_api_url: str = Field(
-        default="https://api.beta.hud.ai",
+        default="https://api.hud.ai",
         description="Base URL (origin) for the HUD API server",
         validation_alias="HUD_API_URL",
     )
@@ -69,19 +69,19 @@ class Settings(BaseSettings):
     )
 
     hud_gateway_url: str = Field(
-        default="https://inference.beta.hud.ai",
+        default="https://inference.hud.ai",
         description="Base URL for the HUD inference gateway",
         validation_alias="HUD_GATEWAY_URL",
     )
 
     hud_runtime_url: str = Field(
-        default="https://mcp.beta.hud.ai",
+        default="https://mcp.hud.ai",
         description="Base URL for the HUD runtime tunnel gateway",
         validation_alias="HUD_RUNTIME_URL",
     )
 
     hud_rl_url: str = Field(
-        default="https://rl.beta.hud.ai",
+        default="https://rl.hud.ai",
         description="Base URL for the HUD training (RL) service",
         validation_alias="HUD_RL_URL",
     )
@@ -128,24 +128,6 @@ class Settings(BaseSettings):
         validation_alias="GEMINI_API_KEY",
     )
 
-    openrouter_api_key: str | None = Field(
-        default=None,
-        description="API key for OpenRouter models",
-        validation_alias="OPENROUTER_API_KEY",
-    )
-
-    wandb_api_key: str | None = Field(
-        default=None,
-        description="API key for Weights & Biases",
-        validation_alias="WANDB_API_KEY",
-    )
-
-    prime_api_key: str | None = Field(
-        default=None,
-        description="API key for Prime Intellect",
-        validation_alias="PRIME_API_KEY",
-    )
-
     telemetry_enabled: bool = Field(
         default=True,
         description="Enable telemetry for the HUD SDK",
@@ -173,18 +155,6 @@ class Settings(BaseSettings):
         description="Seconds between rollout-level file-tracking snapshots. Each snapshot "
         "diffs the workspace against the previous one and emits a hud.filetracking.v1 span.",
         validation_alias="HUD_FILE_TRACKING_INTERVAL",
-    )
-
-    hud_logging: bool = Field(
-        default=True,
-        description="Enable fancy logging for the HUD SDK",
-        validation_alias="HUD_LOGGING",
-    )
-
-    log_stream: str = Field(
-        default="stdout",
-        description="Stream to use for logging output: 'stdout' or 'stderr'",
-        validation_alias="HUD_LOG_STREAM",
     )
 
     client_timeout: int = Field(

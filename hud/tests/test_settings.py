@@ -12,15 +12,18 @@ def test_get_settings():
     assert result is settings  # Should be the same singleton instance
 
 
-def test_settings_defaults():
-    """Test that settings have expected default values or env overrides."""
-    s = get_settings()
-    # These URLs may be overridden by environment variables
-    assert s.hud_telemetry_url.endswith("/v3/api")
-    # Default may be overridden in CI; just assert the field exists and is bool
-    assert isinstance(s.telemetry_enabled, bool)
-    assert s.hud_logging is True
-    assert s.log_stream == "stdout"
+def test_service_url_defaults():
+    expected = {
+        "hud_telemetry_url": "https://telemetry.hud.ai/v3/api",
+        "hud_api_url": "https://api.hud.ai",
+        "hud_web_url": "https://hud.ai",
+        "hud_gateway_url": "https://inference.hud.ai",
+        "hud_runtime_url": "https://mcp.hud.ai",
+        "hud_rl_url": "https://rl.hud.ai",
+    }
+
+    for name, default in expected.items():
+        assert Settings.model_fields[name].default == default
 
 
 def test_file_tracking_is_enabled_by_default():
