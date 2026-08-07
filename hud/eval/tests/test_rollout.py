@@ -328,6 +328,123 @@ async def test_verifier_provisioning_failure_leaves_the_run_ungraded() -> None:
     assert run.reward == 0.0
 
 
+async def test_verifier_channel_failure_leaves_the_run_ungraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.clients import HudClient
+
+    env = Environment("reviewed")
+
+    @env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @env.template()
+    async def verify():
+        yield ""
+        yield 1.0
+
+    original_grade = HudClient.grade
+    grade_calls = 0
+
+    async def fail_verifier_grade(self: HudClient, payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal grade_calls
+        grade_calls += 1
+        if grade_calls == 2:
+            raise ConnectionError("channel died after a partial grade frame")
+        return await original_grade(self, payload)
+
+    monkeypatch.setattr(HudClient, "grade", fail_verifier_grade)
+    task = Task(
+        env="reviewed",
+        id="solve",
+        verifier=Task(env="reviewed", id="verify"),
+    )
+
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+    job = Job(id="verify-failed", name="verify-failed", runs=[run])
+
+    assert run.trace.is_error
+    assert "channel died after a partial grade frame" in (run.trace.error or "")
+    assert run.grade.raw == {}
+    assert job.errors == [run]
+
+
+async def test_scoreless_verifier_frame_is_an_ungraded_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.clients import HudClient
+
+    env = Environment("reviewed")
+
+    @env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @env.template()
+    async def verify():
+        yield ""
+        yield 1.0
+
+    original_grade = HudClient.grade
+    grade_calls = 0
+
+    async def return_scoreless_frame(self: HudClient, payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal grade_calls
+        grade_calls += 1
+        if grade_calls == 2:
+            return {"reward": 1.0}
+        return await original_grade(self, payload)
+
+    monkeypatch.setattr(HudClient, "grade", return_scoreless_frame)
+    task = Task(
+        env="reviewed",
+        id="solve",
+        verifier=Task(env="reviewed", id="verify"),
+    )
+
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+    job = Job(id="verify-scoreless", name="verify-scoreless", runs=[run])
+
+    assert run.trace.is_error
+    assert "numeric 'score'" in (run.trace.error or "")
+    assert run.grade.raw == {}
+    assert job.errors == [run]
+
+
+async def test_zero_score_verifier_grade_counts_an_errored_rollout() -> None:
+    env = Environment("reviewed")
+
+    @env.template()
+    async def solve():
+        yield "answer secret"
+        yield 0.25
+
+    @env.template()
+    async def verify():
+        yield ""
+        yield 0.0
+
+    task = Task(
+        env="reviewed",
+        id="solve",
+        verifier=Task(env="reviewed", id="verify"),
+    )
+    run = await rollout(
+        task,
+        _AnswerThenBoomAgent(lambda _prompt: "secret"),
+        runtime=lambda _row: _local(env),
+    )
+    job = Job(id="verify-zero", name="verify-zero", runs=[run])
+
+    assert run.trace.is_error
+    assert run.grade.raw["score"] == 0.0
+    assert job.reward == 0.0
+    assert job.errors == []
+
+
 def _bindings_env(published: Any) -> Environment:
     """An env whose task publishes per-episode binding data alongside the prompt."""
     env = Environment("slots")

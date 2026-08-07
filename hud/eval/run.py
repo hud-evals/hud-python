@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import mcp.types as mcp_types
 
-from hud.clients import connect
+from hud.clients import HudProtocolError, connect
 from hud.graders.results import SubScore
 from hud.telemetry.context import set_trace_context
 from hud.types import Step, TaskCall, Trace
@@ -108,6 +108,9 @@ class Grade:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Grade:
         """Parse the wire grade frame (canonical keys: the server guarantees them)."""
+        score = data.get("score")
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise HudProtocolError(-32603, "tasks.grade: result must include a numeric 'score'")
         raw_info = data.get("info")
         raw = dict(data)
         if isinstance(subscores := data.get("subscores"), list):
@@ -115,7 +118,7 @@ class Grade:
                 SubScore.model_validate(subscore).to_summary() for subscore in subscores
             ]
         return cls(
-            reward=float(data.get("score") or 0.0),
+            reward=float(score),
             done=bool(data.get("done", True)),
             content=data.get("content") if isinstance(data.get("content"), str) else None,
             info=raw_info if isinstance(raw_info, dict) else {},
