@@ -35,7 +35,7 @@ def _assert_stock_compose_complete(compose_path: Path) -> dict[str, Any]:
     assert isinstance(services, dict)
     for name, service in services.items():
         assert isinstance(service, dict)
-        assert service.get("image") or service.get("build"), name
+        assert service.get("image"), name
         for volume in service.get("volumes", []):
             if not isinstance(volume, str):
                 continue
@@ -106,6 +106,7 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert not (context / "Dockerfile").exists()
     assert not any(path.name == ".hud" for path in context.rglob(".hud"))
     assert {entry.name for entry in context.iterdir()} == {
+        "build.sh",
         "compose-project",
         "compose.yaml",
         "env.py",
@@ -128,6 +129,8 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     build_script = (project_root / "build.sh").read_text("utf-8")
     assert "docker image inspect" in build_script
     assert 'docker tag "$(docker compose' in build_script
+    assert "compose-project/build.sh" in (context / "build.sh").read_text("utf-8")
+    subprocess.run(["sh", "-n", context / "build.sh"], check=True)
     subprocess.run(["sh", "-n", project_root / "build.sh"], check=True)
     assert (project_root / "tests" / "task-a" / "test.sh").is_file()
     assert not any(path.name in {"tasks", "tasks.json"} for path in payload.rglob("*"))
@@ -380,6 +383,7 @@ services:
     assert isinstance(compose_path, Path)
     project = json.loads(compose_path.read_text("utf-8"))
     assert project["services"]["database"]["build"]["context"] == ("./environment/database")
+    assert project["services"]["database"]["image"].startswith("hud-harbor-sidecar:")
     assert project["services"]["database"]["env_file"] == "./environment/database/db.env"
     assert project["services"]["database"]["volumes"] == [
         "./environment/database/data:/var/lib/postgresql/data"

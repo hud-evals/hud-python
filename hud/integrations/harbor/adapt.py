@@ -355,6 +355,15 @@ def adapt(
         compose_project = (
             compose.with_project_directory("./environment") if compose is not None else None
         )
+        if compose_project is not None:
+            for service_name, service in compose_project.services.items():
+                if service_name != "main" and service.build is not None and service.image is None:
+                    sidecar_tag = hashlib.sha256(
+                        f"{source.environment_hash}\0{service_name}".encode()
+                    ).hexdigest()[:16]
+                    compose_project.services[service_name] = service.model_copy(
+                        update={"image": f"hud-harbor-sidecar:{sidecar_tag}"}
+                    )
         compose_main = compose.services["main"] if compose is not None else ComposeService()
         dockerfile = source.path / "environment" / "Dockerfile"
         base_image = environment.docker_image or compose_main.image
@@ -789,6 +798,13 @@ fi
         script = project / "build.sh"
         script.write_text(build_script, encoding="utf-8", newline="\n")
         script.chmod(0o755)
+        launcher = context / "build.sh"
+        launcher.write_text(
+            '#!/bin/sh\nset -eu\nexec sh "$(dirname -- "$0")/compose-project/build.sh" "$@"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        launcher.chmod(0o755)
         recipe = compose_project.with_project_directory("./compose-project")
         (context / "compose.yaml").write_text(
             json.dumps(
