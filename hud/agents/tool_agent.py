@@ -30,8 +30,10 @@ from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
+from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient, RFBClient
+from hud.capabilities.ssh import SSHConnectionError
 from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
 
@@ -45,6 +47,7 @@ logger = logging.getLogger(__name__)
 # Output-token-cap finish reasons: OpenAI chat "length", Responses "max_output_tokens",
 # Claude "max_tokens", Gemini "MAX_TOKENS".
 TRUNCATION_FINISH_REASONS = frozenset({"length", "max_output_tokens", "max_tokens", "MAX_TOKENS"})
+MAX_CONSECUTIVE_SSH_FAILURES = 3
 
 MessageT = TypeVar("MessageT")
 ConfigT = TypeVar("ConfigT", bound="AgentConfig")
@@ -221,6 +224,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             step: AgentStep | None = None
             hit_max = False
             stopped: StopCondition | None = None
+            consecutive_ssh_failures = 0
 
             for turn in range(1, max_steps + 1):
                 logger.info("step %d/%d", turn, max_steps)
@@ -258,12 +262,24 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     result = await self._dispatch_call(call, state)
                     run.record(ToolStep(call=call, result=result, started_at=call_started_at))
                     msg = self._format_result(call, result, state)
-                    if msg is None:
-                        continue
                     if isinstance(msg, list):
                         state.messages.extend(msg)
-                    else:
+                    elif msg is not None:
                         state.messages.append(cast("MessageT", msg))
+
+                    if isinstance(result, SSHInfrastructureErrorResult):
+                        consecutive_ssh_failures += 1
+                    else:
+                        consecutive_ssh_failures = 0
+                    if consecutive_ssh_failures >= MAX_CONSECUTIVE_SSH_FAILURES:
+                        error = (
+                            "SSH tool failure limit reached "
+                            f"after {MAX_CONSECUTIVE_SSH_FAILURES} consecutive errors"
+                        )
+                        trace.content = step.content
+                        trace.status = "error"
+                        run.record(Step(source="system", error=error))
+                        return
 
                 if turn == max_steps:
                     hit_max = True
@@ -323,9 +339,17 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             )
         args = call.arguments or {}
         try:
+            if isinstance(tool, SSHTool):
+                return await tool.execute_with_deadline(args)
             return await tool.execute(args)
         except (TimeoutError, asyncio.CancelledError):
             raise
+        except SSHConnectionError as exc:
+            logger.exception("tool %s lost its SSH connection", call.name)
+            return SSHInfrastructureErrorResult(
+                content=[mcp_types.TextContent(type="text", text=f"tool error: {exc}")],
+                isError=True,
+            )
         except Exception as exc:
             logger.exception("tool %s failed", call.name)
             return MCPToolResult(

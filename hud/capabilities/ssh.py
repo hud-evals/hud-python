@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import shlex
 from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
@@ -10,6 +12,14 @@ from urllib.parse import urlsplit
 import asyncssh
 
 from .base import Capability, CapabilityClient
+
+SSH_RECONNECT_ATTEMPTS = 3
+SSH_RECONNECT_BASE_DELAY_S = 0.25
+SSH_SESSION_CLOSE_TIMEOUT_S = 5.0
+
+
+class SSHConnectionError(ConnectionError):
+    """SSH transport was unavailable for an operation."""
 
 
 class SSHClient(CapabilityClient):
@@ -26,9 +36,15 @@ class SSHClient(CapabilityClient):
     def __init__(self, capability: Capability, conn: asyncssh.SSHClientConnection) -> None:
         self.capability = capability
         self._conn = conn
+        self._reconnect_lock = asyncio.Lock()
+        self._closing = False
 
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
+        return cls(cap, await cls._connect(cap))
+
+    @staticmethod
+    async def _connect(cap: Capability) -> asyncssh.SSHClientConnection:
         parts = urlsplit(cap.url)
         if parts.hostname is None or parts.port is None:
             raise ValueError(f"ssh capability missing host or port: {cap.url!r}")
@@ -39,7 +55,7 @@ class SSHClient(CapabilityClient):
             client_keys = [asyncssh.import_private_key(client_key)]
         elif client_key_path := cap.params.get("client_key_path"):
             client_keys = [client_key_path]
-        conn = await asyncssh.connect(
+        return await asyncssh.connect(
             host=parts.hostname,
             port=parts.port,
             username=cap.params.get("user", "agent"),
@@ -48,31 +64,113 @@ class SSHClient(CapabilityClient):
             keepalive_interval=15,
             keepalive_count_max=4,
         )
-        return cls(cap, conn)
 
     @property
     def conn(self) -> asyncssh.SSHClientConnection:
         """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
 
-    async def read_text(self, path: str) -> str:
+    async def run(self, *args: object, **kwargs: Any) -> asyncssh.SSHCompletedProcess:
+        """Run one command, reconnecting first when the transport is closed."""
+        run_kwargs = dict(kwargs)
+        timeout = run_kwargs.pop("timeout", None)
+        check = bool(run_kwargs.pop("check", False))
+        conn: asyncssh.SSHClientConnection | None = None
+        process = None
+        try:
+            if timeout is None:
+                conn = await self._connection()
+                return await conn.run(*args, check=check, **run_kwargs)
+            async with asyncio.timeout(timeout):
+                conn = await self._connection()
+                process = await conn.create_process(*args, **run_kwargs)
+                return await process.wait(check=check, timeout=None)
+        except (TimeoutError, asyncio.CancelledError):
+            if process is not None:
+                process.close()
+                with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
+                    async with asyncio.timeout(SSH_SESSION_CLOSE_TIMEOUT_S):
+                        await process.wait_closed()
+            raise
+        except asyncssh.ChannelOpenError as exc:
+            raise SSHConnectionError("SSH server rejected the session") from exc
+        except asyncssh.ConnectionLost as exc:
+            raise SSHConnectionError("SSH connection lost during operation") from exc
+        except (OSError, asyncssh.Error) as exc:
+            if conn is not None and _is_closed(conn):
+                raise SSHConnectionError("SSH connection lost during operation") from exc
+            raise
+
+    async def _connection(self) -> asyncssh.SSHClientConnection:
+        if self._closing:
+            raise SSHConnectionError("SSH client is closed")
+        if not _is_closed(self._conn):
+            return self._conn
+
+        async with self._reconnect_lock:
+            if self._closing:
+                raise SSHConnectionError("SSH client is closed")
+            if not _is_closed(self._conn):
+                return self._conn
+
+            last_error: Exception | None = None
+            for attempt in range(SSH_RECONNECT_ATTEMPTS):
+                if self._closing:
+                    raise SSHConnectionError("SSH client is closed")
+                try:
+                    conn = await self._connect(self.capability)
+                except (OSError, asyncssh.Error) as exc:
+                    last_error = exc
+                    if self._closing:
+                        raise SSHConnectionError("SSH client is closed") from exc
+                    if attempt + 1 < SSH_RECONNECT_ATTEMPTS:
+                        await asyncio.sleep(SSH_RECONNECT_BASE_DELAY_S * 2**attempt)
+                    continue
+                if self._closing:
+                    conn.close()
+                    await conn.wait_closed()
+                    raise SSHConnectionError("SSH client is closed")
+                self._conn = conn
+                return conn
+            raise SSHConnectionError(
+                f"SSH reconnect failed after {SSH_RECONNECT_ATTEMPTS} attempts"
+            ) from last_error
+
+    async def read_text(self, path: str, *, timeout_s: float | None = None) -> str:
         """Read a UTF-8 text file through the exec channel."""
         if self._is_windows:
             quoted = _powershell_quote(path)
             script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
-            result = await self._conn.run(_powershell(script), check=True)
+            result = await self.run(_powershell(script), check=True, timeout=timeout_s)
             return base64.b64decode(_stdout(result)).decode("utf-8", errors="replace")
         # encoding=None transports raw bytes: a strict connection-level UTF-8
         # decode would raise on files with invalid UTF-8 instead of replacing.
-        result = await self._conn.run(f"cat -- {shlex.quote(path)}", check=True, encoding=None)
+        result = await self.run(
+            f"cat -- {shlex.quote(path)}",
+            check=True,
+            encoding=None,
+            timeout=timeout_s,
+        )
         return _decode(result.stdout)
 
-    async def write_text(self, path: str, content: str) -> None:
+    async def write_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        timeout_s: float | None = None,
+    ) -> None:
         """Write UTF-8 text through the exec channel without command interpolation."""
         if self._is_windows:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout_s if timeout_s is not None else None
+
+            def remaining_timeout() -> float | None:
+                return None if deadline is None else max(0.0, deadline - loop.time())
+
             quoted = _powershell_quote(path)
             truncate = f"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"
-            await self._conn.run(_powershell(truncate), check=True)
+            await self.run(_powershell(truncate), check=True, timeout=remaining_timeout())
             raw = content.encode("utf-8")
             for offset in range(0, len(raw), 6144):
                 payload = base64.b64encode(raw[offset : offset + 6144]).decode("ascii")
@@ -82,19 +180,24 @@ class SSHClient(CapabilityClient):
                     "[IO.FileAccess]::Write,[IO.FileShare]::Read);"
                     "try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"
                 )
-                await self._conn.run(_powershell(script), check=True)
+                await self.run(_powershell(script), check=True, timeout=remaining_timeout())
             return
-        await self._conn.run(f"cat > {shlex.quote(path)}", input=content, check=True)
+        await self.run(
+            f"cat > {shlex.quote(path)}",
+            input=content,
+            check=True,
+            timeout=timeout_s,
+        )
 
-    async def listdir(self, path: str) -> list[str]:
+    async def listdir(self, path: str, *, timeout_s: float | None = None) -> list[str]:
         """List direct children through the exec channel."""
         if self._is_windows:
             script = f"Get-ChildItem -Force -Name -LiteralPath {_powershell_quote(path)}"
-            result = await self._conn.run(_powershell(script), check=True)
+            result = await self.run(_powershell(script), check=True, timeout=timeout_s)
             listing = _stdout(result)
         else:
             command = f"ls -1A -- {shlex.quote(path)}"
-            result = await self._conn.run(command, check=True, encoding=None)
+            result = await self.run(command, check=True, encoding=None, timeout=timeout_s)
             listing = _decode(result.stdout)
         return sorted(line for line in listing.splitlines() if line not in (".", ".."))
 
@@ -103,8 +206,14 @@ class SSHClient(CapabilityClient):
         return self.capability.params.get("shell") in ("cmd", "powershell")
 
     async def close(self) -> None:
-        self._conn.close()
-        await self._conn.wait_closed()
+        self._closing = True
+        async with self._reconnect_lock:
+            self._conn.close()
+            await self._conn.wait_closed()
+
+
+def _is_closed(conn: asyncssh.SSHClientConnection) -> bool:
+    return conn.is_closed()
 
 
 def _powershell(script: str) -> str:

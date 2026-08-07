@@ -152,7 +152,7 @@ class ClaudeSDKAgent(Agent):
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
         logger.info("Full command: %s", full_cmd)
 
-        completed = await self._ssh.conn.run(full_cmd, check=False)
+        completed = await self._ssh.run(full_cmd, check=False)
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
         stderr = completed.stderr if isinstance(completed.stderr, str) else ""
 

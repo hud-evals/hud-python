@@ -55,6 +55,9 @@ class _FakeConn:
         self.ran: list[str] = []
         self.write_commands: list[str] = []
 
+    def is_closed(self) -> bool:
+        return False
+
     async def run(
         self,
         cmd: str,
