@@ -1,16 +1,17 @@
 ---
 title: "Walkthrough"
-description: "A step-through of one HUD run, following the pointer through the real code from Taskset.run to a graded reward."
+description: "A reading tour of one HUD run, following the pointer through the real code from Taskset.run to a graded reward."
 icon: "route"
 mode: "wide"
 ---
 
-This is a step-through of one run, following the pointer through the real code. It starts with what
-is defined at rest, then enters `Taskset.run` and follows every step - into `rollout`, out to the
-env server, through `tasks.start`, into the agent, and back through `tasks.grade` - showing the key
-lines at each stop and where the pointer goes next. Irrelevant branches are trimmed with `# ...`.
+This page is a reading tour of one run through the real code. It begins with the definitions at
+rest, enters `Taskset.run`, and follows the pointer into `rollout`, out to the environment server,
+through `tasks.start`, into the agent, and back through `tasks.grade`. Irrelevant branches are
+trimmed with `# ...`. The primary path has no `Task.verifier`; the optional verifier branch appears
+in [grading and teardown](#grading-and-teardown).
 
-On this page: [What we start with](#what-we-start-with) · [Start point: the scheduler](#start-point-the-scheduler) · [Into the rollout atom](#into-the-rollout-atom) · [Bringing up the server](#bringing-up-the-server) · [Connecting](#connecting) · [Starting the task](#starting-the-task) · [Checkpoint](#checkpoint) · [Driving the agent](#driving-the-agent) · [Grading and teardown](#grading-and-teardown) · [The whole chain](#the-whole-chain) · [Assumptions](#assumptions)
+On this page: [What we start with](#what-we-start-with) · [Start point: the scheduler](#start-point-the-scheduler) · [Into the rollout atom](#into-the-rollout-atom) · [Bringing up the server](#bringing-up-the-server) · [Connecting](#connecting) · [Starting the task](#starting-the-task) · [Checkpoint](#checkpoint) · [Driving the agent](#driving-the-agent) · [Grading and teardown](#grading-and-teardown) · [The whole chain](#the-whole-chain) · [Boundaries](#boundaries)
 
 ## What we start with
 
@@ -456,7 +457,7 @@ port a different way:
 | `HUDRuntime` | a HUD-hosted env | a WebSocket tunnel behind a local TCP listener |
 | `Runtime(url)` | one already served elsewhere | nothing - the url passes straight through |
 
-Whichever provider ran, a `Runtime(url)` now exists and the server is listening. The pointer
+Whichever provider ran, the result is a `Runtime(url)` whose server is listening. The pointer
 returns to `rollout` and enters the second context manager: `connect(addr)`.
 
 ## Connecting
@@ -490,19 +491,23 @@ while True:
         return client
 ```
 
-`hello()` sends the frame and parses the reply into a `Manifest`. Loopback bindings get rewritten
-to local forwarders here (`_reachable`), so every capability url works from this process. An
-optional `session_id` resumes a parked session instead of minting a fresh one - not needed on
-this first connection, but see [the suspended task](/v6/internals/control-channel#the-suspended-task) for
-when it is.
+`hello()` sends the frame and parses the reply into a `Manifest`. It creates a loopback forwarder
+for every binding and records the routed local URL, so all capability traffic returns through the
+control address. An optional `session_id` resumes a parked session instead of minting a fresh one;
+the [suspended task](/v6/internals/control-channel#the-suspended-task) section describes that path.
 
 ```python hud/clients/client.py · HudClient.hello
 async def hello(self, session_id=None):
     params = {} if session_id is None else {"session_id": session_id}
     result = await self._call("hello", params)      # -> server session
-    bindings = [await self._reachable(Capability.from_manifest(b))
-                for b in (result.get("bindings") or [])]
+    bindings = [Capability.from_manifest(b) for b in result["bindings"]]
     self.manifest = Manifest(session_id=result["session_id"], bindings=bindings, ...)
+    for capability in bindings:
+        forwarder = await asyncio.start_server(
+            partial(forward, capability), "127.0.0.1", 0
+        )
+        self._forwarders.append(forwarder)
+        self._routes[capability.name] = ...          # binding() returns the local route
     return self.manifest
 ```
 
@@ -518,7 +523,7 @@ if method == "hello":
                             "bindings": bindings})
 ```
 
-The client now holds the manifest. Back in `rollout`, the pointer builds the `Run` and enters it.
+The client holds the manifest. Back in `rollout`, the pointer builds the `Run` and enters it.
 
 ## Starting the task
 
@@ -570,7 +575,7 @@ The prompt travels back: `TaskRunner.start` -> server reply -> `client.start_tas
 
 ## Checkpoint
 
-The pointer is now back inside `async with live:`, just before `await agent(run)`. At this moment
+The pointer is inside `async with live:`, just before `await agent(run)`. At this moment
 `run` is a `Run` that holds:
 
 <div className="step-list">
@@ -578,7 +583,8 @@ The pointer is now back inside `async with live:`, just before `await agent(run)
 - an attached `client` (`run.client`), which already has the `manifest` and whose server has a
   `TaskRunner` suspended at the task's first yield,
 - the `prompt` the env returned, on `run.prompt`,
-- an empty `run.trace` (a `Trace()`) waiting to be filled.
+- a `run.trace` containing the task setup step and, when a prompt was returned, its opening user
+  step.
 
 </div>
 
@@ -659,7 +665,14 @@ async def grade(self, payload):
 The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> `Grade.from_dict`
 -> `run.grade.reward`.
 
-Now the `AsyncExitStack` unwinds in reverse: `connect` closes the client (forwarders and socket),
+When `task.verifier` is present, the actor grade is provisional. A verifier in the same environment
+with no row-level runtime configuration starts on the existing client. Otherwise the actor client
+and provider exit before the same provider is called with the verifier row. `_verify` starts that
+task without an agent loop and immediately grades it with `run.trace.content`; its evaluation
+replaces the actor grade. The full phase contract is documented in
+[verifier environments](/v6/experimental/verifier-environments#provisioning-order).
+
+The `AsyncExitStack` unwinds in reverse: `connect` closes the client (forwarders and socket),
 then the provider context exits and tears the substrate down - for `LocalRuntime` it cancels the
 in-process server and runs `env.stop()` (`@env.shutdown`); for `SubprocessRuntime` it terminates
 the child, whose `serve` does the same on the way out. Back in `rollout`,
@@ -680,8 +693,9 @@ Every hop above, in order:
 6. `Run.__aenter__` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> `prompt` back on `run.prompt`.
 7. **Checkpoint** - `run` holds a live client (manifest + suspended runner) and the prompt.
 8. `await agent(run)` - agent opens capabilities via `run.client`, loops, fills `run.trace` (answer on `trace.content`).
-9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> `score` -> `run.grade.reward`.
-10. Unwind - close client, the provider stops the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded `Run` to `Taskset.run`.
+9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `run.grade.reward`.
+10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with `trace.content`; replace the actor grade.
+11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded `Run` to `Taskset.run`.
 
 </div>
 
@@ -714,18 +728,15 @@ sequenceDiagram
     Roll-->>Sched: graded Run
 ```
 
-## Assumptions
+## Boundaries
 
-This is one specific shape, and a few assumptions are baked into it. They hold today; they are the
-first things to revisit when the shape needs to grow.
+This reading path exposes the boundaries encoded by the rollout engine.
 
 <div className="step-list">
 
-- **One rollout requests one runtime, and that runtime is one container.** `rollout` acquires a
-  single substrate (`await stack.enter_async_context(runtime(task))`) with a single control-channel
-  `url`, and drives one connection to it. A task needing several coordinated containers has no
-  first-class representation - it would be one env bringing the others up behind its own
-  capabilities, or a future provider yielding more than one address.
+- **Each provider acquisition yields one control-channel address.** The address can represent a
+  process, one container, or a Compose project whose `main` service owns the channel. A verifier in
+  another environment causes a second acquisition after the actor acquisition exits.
 - **A control channel holds one suspended task per session.** A `_ControlChannel` keys its
   suspended `TaskRunner`s by session id, so concurrent sessions each own their own, and a dropped
   connection parks its session's task for a later one to grade (see the

@@ -151,10 +151,10 @@ runtime = lambda task: servers[task.args["task"]](task)
 ```
 
 <Note>
-A control channel now supports concurrent sessions, one suspended task each (see the
-[control channel](/v6/internals/control-channel#the-suspended-task)), so a shared warm server no longer
-serializes its rows. Its substrate is still one resource, so rows that drive a single shared world
-(one sim) must cap concurrency or run sequentially.
+A control channel supports concurrent sessions, one suspended task each (see the
+[control channel](/v6/internals/control-channel#the-suspended-task)). Independent rows can use a
+shared warm server concurrently. Its substrate is one resource, so rows that drive a single shared
+world (one sim) require bounded concurrency or sequential execution.
 </Note>
 
 The [server step of the walkthrough](/v6/internals/walkthrough#bringing-up-the-server) shows where these calls

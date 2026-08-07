@@ -1,0 +1,236 @@
+---
+title: "Compose environments"
+description: "Declare a multi-service environment as a standard Compose project and run it unchanged locally, hosted, or on owned infrastructure."
+icon: "cubes"
+tag: "Experimental"
+---
+
+An environment is rarely one process. A task worth grading tends to be a small world - a database
+the agent may write, an application it may only reach over the network, services with their own
+lifecycles and users. A **Compose environment** declares that world as a standard Compose project:
+the service named `main` runs `hud serve` and carries the control channel (normally port 8765), and
+every other service is exactly what Compose says it is. The boundaries you would otherwise
+hand-build inside one container - privilege drops, hidden paths, scrubbed process environments,
+supervised startup order - are the container boundaries and `depends_on` conditions of the project.
+
+| Concept | What it is |
+| --- | --- |
+| **`main`** | The service that runs `hud serve`; the only service whose control port HUD publishes. |
+| **Compose document** | The parsed recipe (`hud/eval/compose.py`); `RuntimeConfig.compose` selects it. |
+| **Project root** | The directory serialized and uploaded when the project leaves the machine; `RuntimeConfig.compose_project` names it. |
+| **Build-only service** | A service with `scale: 0` that exists as a build input, never a container. |
+| **Named context** | A `build.additional_contexts` entry - `service:<name>` for a build-only image, a path for a local payload. |
+
+## The recipe
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">1 · The document is the contract</div>
+
+A Compose row selects its document with `RuntimeConfig.compose`; `compose_project` names the root
+that travels when the project is serialized and uploaded. Everything the build needs - contexts,
+bind mounts, `env_file`, configs, secrets - must live under that root. Host environment
+interpolation, `include`, and `extends` are not part of the serialized contract: the document that
+uploads is the document that runs.
+
+Every runnable service has an `image`, a `build`, or both; paths are relative to the project. An
+optional `build.sh` beside the document is a preparation hook - it resolves or builds prerequisite
+images before the runtime starts the project.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">a task row selecting a project</p>
+
+```python
+from pathlib import Path
+
+from hud import DockerRuntime, RuntimeConfig, Task
+
+task = Task(
+    env="full-stack",
+    id="repair",
+    runtime_config=RuntimeConfig(
+        compose=Path("compose.yaml"),
+        compose_project=Path("."),
+    ),
+)
+job = await task.run(agent, runtime=DockerRuntime())
+```
+
+</div>
+</div>
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">2 · Build-only services</div>
+
+A project can build a base image without ever starting a base container. `scale: 0` keeps the
+service in the Compose model - so the build graph can see it - while `up` starts no container for
+it. Another service consumes the built image through a `service:` named context, and its Dockerfile
+uses it as an ordinary stage. `docker compose build` builds the base because the graph names it,
+not because it runs. The Harbor adapter uses exactly this pattern for `hud-base` and
+`hud-verifier`.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">compose.yaml · a base image that never runs</p>
+
+```yaml
+services:
+  hud-base:
+    image: acme/hud-base:local
+    build:
+      context: ./base
+    scale: 0
+
+  main:
+    build:
+      context: ./main
+      additional_contexts:
+        hud-base: service:hud-base
+```
+
+```dockerfile
+FROM hud-base AS application
+```
+
+</div>
+</div>
+
+<div className="guide-row">
+<div className="guide-main">
+
+<div className="part-label">3 · Local named contexts</div>
+
+A path-valued named context injects a payload into a build without placing files inside the
+authored context - the consuming Dockerfile reads it with standard BuildKit `COPY --from` syntax.
+This is how generated projects keep SDK payload files out of the authored environment directory:
+nothing is copied into your tree, and your `.dockerignore` rules are never rewritten.
+
+</div>
+<div className="guide-aside">
+
+<p className="aside-label">a payload outside the authored context</p>
+
+```yaml
+services:
+  main:
+    build:
+      context: ./environment
+      dockerfile: ../Dockerfile
+      additional_contexts:
+        hud: ./hud
+```
+
+```dockerfile
+COPY --from=hud env.py install.sh config.json /media/hud/
+COPY --from=hud packages /media/hud/packages
+```
+
+</div>
+</div>
+
+Two consequences do most of the work:
+
+<div className="step-list">
+
+- **The boundary is the container.** The agent's shell lives in `main`'s workspace; sibling
+  services exist for it only as network endpoints. A service the agent may only `curl` needs no
+  permission tricks - its filesystem is simply not there. Access levels inside a reachable service
+  (a database role, an API credential) are that service's own configuration.
+- **The build graph is part of the model.** Base images, verifier filesystems, and injected
+  payloads are all expressed inside the document as build-only services and named contexts, so one
+  `docker compose build` reproduces every image on any BuildKit-capable machine - there is no
+  out-of-band build step to keep in sync.
+
+</div>
+
+## Runtime behavior
+
+**Local `DockerRuntime`** (`hud/eval/runtime.py`) runs `build.sh` when present, stages override
+files for `main`'s security options, resources, and an ephemeral host port, starts the project with
+`docker compose up` (`--no-build` after a successful preparation hook, otherwise `--build`),
+returns the published control-channel address, and removes the project and its volumes when the
+rollout ends.
+
+**Hosted execution** is `HostedRuntime` like any other environment: `hud deploy` uploads the
+project root, the platform builds every service privately from it, and hosted rollouts run the
+stack. Declared `RuntimeResources` apply.
+
+`compose_service_access=True` mounts a Docker socket at `/media/hud/docker.sock` in `main`. It is
+an explicit capability for environment code that must inspect or copy from sibling service
+containers, and what it grants differs by placement:
+
+<Warning>
+Under local `DockerRuntime`, the mounted socket is the **host's own Docker daemon** (remote Docker
+endpoints are rejected). Code in `main` can then control every container on the machine - grant
+this only to environment code you trust. Under hosted execution, the daemon is private to the
+rollout.
+</Warning>
+
+## Build on owned infrastructure
+
+An ordinary Compose project builds with the Compose CLI:
+
+```bash
+docker compose build
+```
+
+A generated Harbor project has a preparation script that resolves base image configuration, builds
+build-only services, and then runs the project build:
+
+```bash
+cd .hud-adapt/<environment>
+sh build.sh registry.example/acme/task:tag
+docker push registry.example/acme/task:tag
+```
+
+For a single-image recipe whose Dockerfile consumes a local `hud` named context, the direct
+BuildKit form is below. The `hud/` directory must contain every file named by the Dockerfile;
+generated Harbor projects use `build.sh` to materialize their image-configuration inputs before
+this build step.
+
+```bash
+cd compose-project
+docker build \
+  --build-context hud=./hud \
+  --file Dockerfile \
+  --tag registry.example/acme/task:tag \
+  ./environment
+```
+
+`service:` additional contexts require the Compose build graph; use `docker compose build` or the
+generated `build.sh` when the project contains build-only services. Both forms require a Docker
+builder with BuildKit named context support.
+
+## Run an image directly
+
+`DockerRuntime` and its Compose override apply the workspace permissions automatically. A direct
+`docker run` must supply the same seccomp profile and system-path setting:
+
+```bash
+HUD_SECCOMP=/path/to/site-packages/hud/eval/docker-seccomp.json
+docker run \
+  --rm \
+  --publish 8765:8765 \
+  --security-opt "seccomp=$HUD_SECCOMP" \
+  --security-opt systempaths=unconfined \
+  registry.example/acme/task:tag
+```
+
+The seccomp profile is default-allow for Docker compatibility and permits the namespace and mount
+syscalls used by HUD's inner `Workspace` sandbox. The `systempaths=unconfined` option lets that
+sandbox replace its own `/proc` and `/dev` mounts.
+
+## See also
+
+<CardGroup cols={2}>
+<Card title="Runtime API" icon="rocket" href="/v6/reference/runtime" />
+<Card title="Harbor interoperability" icon="ship" href="/v6/experimental/harbor" />
+<Card title="Verifier environments" icon="shield-check" href="/v6/experimental/verifier-environments" />
+<Card title="Placement" icon="map-pin" href="/v6/internals/placement" />
+</CardGroup>

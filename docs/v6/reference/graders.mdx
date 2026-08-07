@@ -170,5 +170,7 @@ An `EvaluationResult` is the combined grade payload you can yield from a task:
 
 `EvaluationResult.from_float(value)` wraps a bare reward.
 
-Graders run as the second yield of a [task](/v6/reference/tasks); for choosing a reward that separates
-good work from bad, see [designing tasks](/v6/reference/advice).
+Graders run as the second yield of a [task](/v6/reference/tasks). An
+authoritative grader that needs a distinct environment can run as a
+[`Task.verifier`](/v6/experimental/verifier-environments). For choosing a reward
+that separates good work from bad, see [designing tasks](/v6/reference/advice).

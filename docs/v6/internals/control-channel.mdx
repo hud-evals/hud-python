@@ -1,207 +1,210 @@
 ---
 title: "Control channel"
-description: "How a served environment carries both its JSON-RPC control session and raw capability tunnels over one TCP port - the connection grammar, the suspended task, and tunnel.open."
+description: "The HUD wire contract: JSON-RPC task sessions and raw capability streams multiplexed over one TCP port."
 icon: "network-wired"
 mode: "wide"
 ---
 
-A served environment exposes exactly one address: a single TCP port. Everything a client does to
-it - starting a task, grading it, and driving a real shell or browser inside it - travels through
-that one port. The [walkthrough](/v6/internals/walkthrough#bringing-up-the-server) reaches this port when `bind`
-puts an environment on the wire; this page is the port itself: the two kinds of traffic it carries,
-and how one frame tells them apart. The [protocol](/v6/advanced/protocol) page covers the message
-semantics riding on top; this page covers how the server carries them.
+The control channel is the boundary between the process driving an agent and the
+served environment it acts on. A served environment exposes one TCP address.
+Task setup, grading, session state, and live capability tunnels all pass through
+connections to that address.
+
+Three roles meet at this boundary:
+
+| Role | Wire responsibility |
+| --- | --- |
+| **Agent** | Drives a `Run`, reads the prompt, and opens capabilities through `HudClient`. |
+| **Environment** | Serves task templates and the backing daemons named by its capability bindings. |
+| **Capability** | Describes a live protocol endpoint such as `ssh`, `mcp`, `cdp`, `rfb`, or `robot`. |
+
+The channel contains two related contracts:
 
 | Concept | What it is |
 | --- | --- |
-| **Control channel** | The single TCP server a served env exposes (`hud/environment/server.py`). Every connection to the substrate goes through it. |
-| **Control session** | A JSON-RPC dialogue over one connection: `hello`, `tasks.start`, `tasks.grade`, and friends. |
-| **Capability stream** | A raw byte tunnel over one connection, splicing the client to a **backing daemon** - the real `ssh` / `cdp` / `mcp` server a capability points at. |
-| **Preface frame** | The first frame a connection sends; it decides which of the two that connection becomes. |
+| **Control session** | A framed JSON-RPC dialogue over one connection: `hello`, `tasks.start`, `tasks.grade`, and related methods. |
+| **Capability stream** | A raw byte tunnel over a separate connection, splicing the client to a backing capability daemon. |
+| **Preface frame** | The first frame on a connection; it selects a control session or a capability stream. |
 
-## One port, two kinds of connection
+## The run loop on the wire
 
-A raw TCP connection is one byte pipe with no notion of what it carries. The control port itself
-is an ordinary listening socket, so it accepts as many connections as clients dial - a container
-publishes one port, a hosted sandbox hands back one address, but neither limits how many
-connections reach it. What is scarce is the *address*, not the connection count: an env could
-publish a separate port for its control session and one more per backing daemon, but the
-substrate often cannot expose them. So the env exposes a single control port and every connection
-declares its purpose in its **preface frame** - the first line it sends. That frame is
-transport-level routing, the JSON-RPC analog of an HTTP `CONNECT`, not a session method.
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Env as Environment control channel
+    participant Caps as Capability daemons
+    Agent->>Env: hello
+    Env-->>Agent: session id + env identity + bindings
+    Agent->>Env: tasks.start
+    Env-->>Agent: prompt
+    rect rgb(238,238,238)
+    Note over Agent,Caps: agent work uses separate capability streams
+    Agent->>Caps: shell · browser · tools · robot
+    Caps-->>Agent: observations
+    end
+    Agent->>Env: tasks.grade
+    Env-->>Agent: evaluation
+```
 
-The accept handler reads that one frame and forks on it. A `tunnel.open` frame opens a capability
-stream; anything else begins a control session.
+`hello` creates or resumes a session and returns the environment identity plus
+its capability bindings. `tasks.start` advances one task generator to its first
+yield and returns the prompt. The agent drives the advertised capabilities while
+that generator remains suspended. `tasks.grade` sends the agent's answer into
+the generator and returns its second yield as an evaluation.
+
+The environment defines what can be acted on and how the resulting state is
+graded. The agent harness defines the action loop. Their only shared contract is
+the channel and the capability protocols named by its bindings.
+
+## Session methods
+
+A control session speaks JSON-RPC 2.0 for the connection's lifetime:
+
+| Method | Result |
+| --- | --- |
+| `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session. |
+| `tasks.list` | Registered task metadata for introspection and validation. |
+| `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
+| `tasks.grade` | The selected task's evaluation, including numeric `score`. |
+| `tasks.cancel` | Cancels and removes the session's suspended task. |
+| `bye` | Cancels the task and ends the session. |
+
+Each request and response is one newline-delimited JSON frame. Calls on a
+`HudClient` are serialized, and reply ids must match the corresponding request.
+A malformed or unknown call receives a JSON-RPC error frame.
+
+## One port, two connection types
+
+The TCP listener accepts many connections but publishes only one address. The
+first frame on each connection selects its interpretation. A `tunnel.open`
+preface creates a capability stream; any other first frame begins a control
+session.
 
 ```python hud/environment/server.py · bind
 async def accept(reader, writer):
-    first = await read_frame(reader)                  # the preface frame
+    first = await read_frame(reader)
     if first.get("method") == "tunnel.open":
-        await _stream(env, first, reader, writer)     # raw capability tunnel
+        await _stream(env, first, reader, writer)
     else:
-        await channel.session(first, reader, writer)  # JSON-RPC control session
+        await channel.session(first, reader, writer)
 ```
 
-Everything after the preface is decided by that fork: a control session parses each subsequent
-frame as JSON-RPC, a capability stream stops parsing and moves raw bytes. Because only the preface
-is transport-specific, the same session methods would ride any transport - a WebSocket build would
-tunnel through its native upgrade instead of a `tunnel.open` frame, and the methods below would not
-change.
+The fork is connection-local. Control-session connections continue parsing
+JSON-RPC frames. Capability-stream connections send one JSON-RPC reply and then
+become raw bidirectional byte pipes. Several control sessions and capability
+streams can coexist on the same listening port.
 
-## The control session
-
-A control session is a JSON-RPC dialogue that lasts the connection's lifetime. Its methods are the
-wire protocol an agent and env speak:
-
-| Method | Does |
-| --- | --- |
-| `hello` | Returns the session id, the env identity, and the capability **bindings** (the manifest). Takes an optional `session_id` to resume a parked session instead of opening a fresh one. |
-| `tasks.list` | Lists task metadata, for introspection and validation. |
-| `tasks.start` | Runs the task to its first yield and returns the prompt. |
-| `tasks.grade` | Resumes the task with the agent's answer and returns the score. |
-| `tasks.cancel` | Drops the held task. |
-| `bye` | Ends the session and tears the held task down. |
-
-The [walkthrough](/v6/internals/walkthrough#starting-the-task) follows the `tasks.start` / `tasks.grade` flow
-end to end. What matters here is where the task's state lives between those two calls.
+The session methods are independent of this TCP multiplexing rule. A transport
+with native streams could carry the same methods while expressing capability
+tunnels through its own stream or upgrade mechanism.
 
 ## The suspended task
 
-Between `tasks.start` and `tasks.grade` the task's generator is paused at its first yield, holding
-the whole world it set up. That paused generator lives on the **control channel** itself, not in
-any one connection: `bind` creates one `_ControlChannel` per served env and every control session
-shares it. The channel holds one suspended task per session, keyed by session id, so concurrent
-sessions each own their own - a session's `start` replaces its task, `grade` consumes it, `cancel`
-clears it. It also tracks which session ids currently have a live connection.
+`bind` creates one `_ControlChannel` for the served environment. That channel
+owns one suspended `TaskRunner` per session id. A session's `tasks.start`
+replaces its runner, `tasks.grade` consumes it, and `tasks.cancel` removes it.
 
 ```python hud/environment/server.py · _ControlChannel
 async def start(self, session_id, task_id, args):
-    await self.cancel(session_id)                  # replace this session's task
-    self._runners[session_id] = TaskRunner(self.env.tasks[task_id], args)
-    return await self._runners[session_id].start()
+    await self.cancel(session_id)
+    runner = TaskRunner(self.env.tasks[task_id], args)
+    self._runners[session_id] = runner
+    try:
+        return await runner.start()
+    except BaseException:
+        self._runners.pop(session_id, None)
+        await runner.cancel()
+        raise
 
 async def grade(self, session_id, payload):
-    runner = self._runners.pop(session_id, None)   # this session's task ...
+    runner = self._runners.pop(session_id, None)
     if runner is None:
-        runner = self._adopt_parked()              # ... or the lone parked one
+        _, runner = self._adopt_parked()
     return await runner.grade(payload)
-
-def _adopt_parked(self):                           # claim iff exactly one is parked
-    parked = [s for s in self._runners if s not in self._live]
-    if len(parked) != 1:                           # 0: none; >1: resume by id
-        raise _NoTaskInProgress(...)
-    return self._runners.pop(parked[0])
 ```
 
-Because the task is held on the channel and not the connection, a dropped connection leaves it in
-place: the session's id leaves the live set and its runner is **parked**, still in `_runners` but
-with no live connection, awaiting a later one to grade it. A client can `tasks.start`, disconnect,
-and reconnect to `tasks.grade` the same suspended task - the split start/grade flow behind
-`hud task start` / `hud task grade` and a reconnecting verifier.
+The runner lives on the channel rather than the socket. A dropped connection
+removes its session id from the live set but leaves its runner parked. A later
+connection reaches the same runner in either of two ways:
 
-A later connection reaches a parked session by one of two grade paths. Sending `hello` with its
-`session_id` resumes that exact session, so the connection's next `tasks.grade` lands on the right
-task - the path to use whenever more than one session could be parked. A plain `tasks.grade` with no
-prior resume auto-adopts a parked session only when exactly one is parked; with none it reports no
-task in progress, and with several it refuses and names them, telling the caller to resume one by
-`session_id`.
+- `hello` with its `session_id` resumes that exact parked session.
+- A plain `tasks.grade` adopts a parked runner only when exactly one exists.
 
-## Capability streams and `tunnel.open`
+Zero parked runners produces `no task in progress`; multiple parked runners
+produce an ambiguity error that names their session ids. This is the channel
+mechanism behind split `hud task start` and `hud task grade` invocations.
 
-A capability is not data the env sends over the control session; it is a live daemon the agent
-connects to and drives - a real `sshd`, a browser's `cdp` endpoint. That daemon listens somewhere
-inside the substrate, and the substrate may expose only the control port, so the agent cannot dial
-it directly.
+## Capability streams
 
-The agent reaches it by opening a **second, separate connection** to the control port - not by
-somehow converting its existing control-session connection. That new connection's preface is a
-`tunnel.open` frame naming the capability, which is enough to send it down the raw-splice branch of
-the fork [above](#one-port-two-kinds-of-connection) instead of starting a session. The control
-session that ran `tasks.start` is a different connection entirely, and keeps speaking JSON-RPC the
-whole time; `tasks.grade` later just uses that same connection normally, with nothing to "recover" -
-it was never touched. Because the port accepts unlimited connections, any number of these can be
-open at once: several capability streams alongside one control session, or streams and sessions
-from several clients, all independent of each other and of which session (if any) opened which
-stream.
+A capability binding describes a backing daemon inside the environment's
+substrate. The agent reaches that daemon through a second connection to the
+control address. Its first frame names the capability:
 
 ```mermaid
 sequenceDiagram
     participant Agent
     participant Ctl as Control port
-    participant Sshd as sshd (the "shell" capability)
-    Agent->>Ctl: connection A: hello, tasks.start (JSON-RPC)
-    Note over Agent,Ctl: connection A stays open, still speaking JSON-RPC
+    participant Sshd as sshd backing daemon
+    Agent->>Ctl: connection A: hello, tasks.start
     Agent->>Ctl: connection B: tunnel.open {capability: "shell"}
-    Ctl->>Sshd: dial the backing daemon
-    Ctl-->>Agent: connection B: one reply frame
-    Note over Agent,Sshd: connection B now splices raw bytes, both ways
-    Agent->>Ctl: connection A: tasks.grade (same connection as before, untouched)
+    Ctl->>Sshd: open backing connection
+    Ctl-->>Agent: connection B reply
+    Note over Agent,Sshd: connection B carries raw bytes in both directions
+    Agent->>Ctl: connection A: tasks.grade
 ```
 
-On connection B's `tunnel.open` frame, the server resolves the named capability to its backing
-daemon, dials it, replies once, and only then stops speaking JSON-RPC *on that connection*: it
-splices raw bytes between the client and the daemon until either side hangs up.
+The server resolves the named binding, opens its host and port, sends the one
+reply frame, and splices both byte streams until either side closes:
 
 ```python hud/environment/server.py · _stream
-async def _stream(env, msg, reader, writer):    # this connection's own reader/writer
-    name = msg["params"]["capability"]
-    cap = env.capability(name)                  # the declared capability
-    parts = urlsplit(cap.url)                    # its backing daemon's host:port
-    backend = await asyncio.open_connection(parts.hostname, parts.port)
-    await send_frame(writer, reply(msg_id, {"capability": name}))  # the one reply frame
-    await splice((reader, writer), backend)      # then raw bytes, both ways, until EOF
-```
-
-The splice is the whole point: after that one reply frame, connection B becomes a transparent
-pipe to the daemon, so the substrate needs no second published port - just one more connection to
-the port it already has. One `tunnel.open` connection carries exactly one capability stream, so an
-agent needing a shell and a `cdp` tunnel at once simply opens two.
-
-## Reaching a loopback capability
-
-The manifest a client gets from `hello` carries each capability's url, but a loopback url in it
-(`127.0.0.1`, `localhost`, `::1`) is the *substrate's* loopback, not the client's - the daemon
-lives in the substrate's network namespace, which is not ours when the substrate is a container or
-a hosted sandbox. A non-loopback url is globally reachable and passes through unchanged.
-
-For the loopback case the client runs an `ssh -L` style **forwarder**: a local listener whose every
-accepted connection opens one `tunnel.open` connection to the control port and splices to it. It
-then rewrites the binding's url to point at the forwarder's local port, so the address handed to
-the agent always works from here.
-
-```python hud/clients/client.py · HudClient._reachable
+name = (msg.get("params") or {}).get("capability")
+cap = env.capability(name)
 parts = urlsplit(cap.url)
-if self._endpoint is None or parts.hostname not in ("127.0.0.1", "localhost", "::1"):
-    return cap                                  # globally reachable: pass through
-host, port = self._endpoint                     # the control port
-
-async def forward(reader, writer):              # one accepted local connection
-    up_reader, up_writer = await asyncio.open_connection(host, port)
-    await send_frame(up_writer, {"method": "tunnel.open",
-                                 "params": {"capability": cap.name}, ...})
-    await read_frame(up_reader)                  # the one-line reply
-    await splice((reader, writer), (up_reader, up_writer))
-
-forwarder = await asyncio.start_server(forward, "127.0.0.1", 0)
-return replace(cap, url=...forwarder's local port...)   # rewritten binding
+backend = await asyncio.open_connection(parts.hostname, parts.port)
+if msg_id is not None:
+    await send_frame(writer, reply(msg_id, {"capability": name}))
+await splice((reader, writer), backend)
 ```
 
-So `run.client.open("shell")` connects to a local port that tunnels, frame then raw bytes, all the
-way to the `sshd` inside the substrate:
+One `tunnel.open` connection carries one capability stream. Opening a shell and
+a browser at the same time therefore creates two independent stream
+connections alongside the control-session connection.
 
-```mermaid
-sequenceDiagram
-    participant Agent as Agent · open("shell")
-    participant Fwd as Local forwarder
-    participant Ctl as Control port
-    participant Daemon as sshd (substrate)
-    Agent->>Fwd: connect 127.0.0.1:local
-    Fwd->>Ctl: connect + tunnel.open {capability: "shell"}
-    Ctl->>Daemon: open_connection(host, port)
-    Ctl-->>Fwd: reply {capability: "shell"}
-    Note over Fwd,Daemon: splice raw bytes both ways until EOF
+## Client-side routes
+
+`connect(Runtime(url))` gives `HudClient` the control endpoint. During `hello`,
+the client creates one loopback forwarder for every returned binding. Each
+forwarder accepts local connections, opens a `tunnel.open` connection to the
+control endpoint, and splices the local client to that tunnel.
+
+```python hud/clients/client.py · HudClient.hello
+bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
+
+for capability in bindings:
+    forwarder = await asyncio.start_server(
+        partial(forward, capability), "127.0.0.1", 0
+    )
+    self._forwarders.append(forwarder)
+    local_port = forwarder.sockets[0].getsockname()[1]
+    parts = urlsplit(capability.url)
+    userinfo = f"{parts.username}@" if parts.username else ""
+    self._routes[capability.name] = urlunsplit(
+        (
+            parts.scheme,
+            f"{userinfo}127.0.0.1:{local_port}",
+            parts.path,
+            parts.query,
+            parts.fragment,
+        )
+    )
 ```
 
-The [walkthrough](/v6/internals/walkthrough#connecting) shows where the client runs `hello` and builds these
-forwarders on the pointer's path, and [placement](/v6/internals/placement) covers how the substrate behind this
-port is chosen and brought up.
+`binding(ref)` returns the capability with its routed local URL.
+`open(ref)` resolves that same binding, constructs the registered protocol
+client, and caches it for the life of the `HudClient`. All external capability
+traffic therefore follows the control address even when a manifest binding
+contains a substrate-local or otherwise unreachable address.
+
+The [walkthrough](/v6/internals/walkthrough#connecting) places the handshake and
+forwarders on the execution path. [Placement](/v6/internals/placement) explains
+how the runtime behind the control address is selected and provisioned.
