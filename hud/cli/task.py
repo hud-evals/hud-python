@@ -13,13 +13,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - Typer resolves annotations at runtime
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
 import typer
 
+from hud.cli.task_runtime import (
+    TaskResolutionError,
+    collect_taskset,
+    find_local_env_url,
+    normalize_control_url,
+    parse_task_args,
+    select_local_task,
+    spawn_target,
+)
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -37,23 +44,17 @@ task_app = typer.Typer(
 
 def _parse_args(args: str) -> dict[str, Any]:
     try:
-        parsed = json.loads(args or "{}")
-    except json.JSONDecodeError as exc:
-        hud_console.error(f"--args must be valid JSON: {exc}")
+        return parse_task_args(args)
+    except TaskResolutionError as exc:
+        hud_console.error(str(exc))
         raise typer.Exit(1) from None
-    if not isinstance(parsed, dict):
-        hud_console.error("--args must be a JSON object")
-        raise typer.Exit(1)
-    return parsed
 
 
 def _collect(source: str) -> Any:
     """Collect a Taskset from a source (``.py``/dir or JSON/JSONL), like ``hud eval``."""
-    from hud.eval import Taskset
-
     try:
-        return Taskset.from_file(source)
-    except FileNotFoundError as exc:
+        return collect_taskset(source)
+    except TaskResolutionError as exc:
         hud_console.error(str(exc))
         raise typer.Exit(1) from None
 
@@ -61,19 +62,12 @@ def _collect(source: str) -> Any:
 def _local_env_url(port: int = 8765) -> str | None:
     """Return a control-channel URL if an env is already serving locally on ``port``
     (e.g. ``hud serve``, or a built image whose CMD serves on :8765), else ``None``."""
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.25):
-            return f"tcp://127.0.0.1:{port}"
-    except OSError:
-        return None
+    return find_local_env_url(port)
 
 
 def _spawn_target(source: str) -> Path:
     """The path ``spawn`` serves: ``.py``/dir as-is, JSON/JSONL's parent directory."""
-    resolved = Path(source).resolve()
-    if resolved.is_dir() or resolved.suffix == ".py":
-        return resolved
-    return resolved.parent
+    return spawn_target(source)
 
 
 def _resolve(
@@ -100,26 +94,20 @@ def _resolve(
     if attach is None and source is None:
         attach = _local_env_url()
     if attach is not None:
-        parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
-        endpoint = f"tcp://{parts.hostname or '127.0.0.1'}:{parts.port or 8765}"
+        try:
+            endpoint = normalize_control_url(attach)
+        except TaskResolutionError as exc:
+            hud_console.error(str(exc))
+            raise typer.Exit(1) from None
         return task, args, nullcontext(Runtime(endpoint))
 
-    taskset = _collect(source or ".")
-    if not taskset:
-        hud_console.error(f"No tasks found in {source or '.'}")
-        raise typer.Exit(1)
-    matches = [
-        candidate
-        for index, (slug, candidate) in enumerate(taskset.items())
-        if task in (slug, candidate.id, str(index))
-    ]
-    if not matches:
-        available = ", ".join(sorted({t.id for t in taskset}))
-        hud_console.error(f"No task matching {task!r} (available: {available})")
-        raise typer.Exit(1)
-    selected = matches[0]
+    try:
+        selected, _ = select_local_task(task, source or ".", args)
+    except TaskResolutionError as exc:
+        hud_console.error(str(exc))
+        raise typer.Exit(1) from None
     placement = SubprocessRuntime(_spawn_target(source or "."))(selected)
-    return selected.id, args or selected.args, placement
+    return selected.id, selected.args, placement
 
 
 def _emit(result: dict[str, Any], headline: str, out: Path | None) -> None:

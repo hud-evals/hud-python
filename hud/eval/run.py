@@ -433,9 +433,10 @@ async def rollout(
         async def _drive() -> None:
             nonlocal client, run, _phase
             async with runtime(task) as addr:
-                _phase = "starting task"
+                _phase = "connecting"
                 async with connect(addr) as actor_client:
                     client = actor_client
+                    _phase = "starting task"
                     live = Run(
                         actor_client,
                         task.id,
