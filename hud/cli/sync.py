@@ -427,7 +427,7 @@ def sync_env_command(
         hud_console.info("")
         try:
             selection = input("Select environment number (or paste full name): ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except (EOFError, KeyboardInterrupt, OSError):
             hud_console.info("\nAborted.")
             raise typer.Exit(0) from None
 
