@@ -845,10 +845,15 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
 
     async with ModalRuntime(
-        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+        runtime_config=RuntimeConfig(
+            compose=compose,
+            compose_service_access=True,
+            limits=RuntimeLimits(startup_timeout_s=600),
+        ),
         env_vars={"HUD_API_KEY": "secret"},
     )(_row()) as runtime:
         assert runtime.url == "tcp://modal.host:4567"
+        assert runtime.params == {"provider": "modal", "instance_id": "sb-1", "ready_timeout": 600}
 
     assert calls["registry_image"] == "docker:28.3.3-dind"
     kwargs = calls["sandbox_kwargs"]
@@ -880,6 +885,7 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert "sh /hud/project/build.sh" in execs[0][0][-1]
     assert 'up --detach "$BUILD_FLAG" --remove-orphans' in execs[0][0][-1]
     assert "down" in execs[1][0]
+    assert execs[0][1]["timeout"] == 600
 
 
 async def test_modal_runtime_accepts_modal_image_uri(

@@ -921,7 +921,11 @@ class ModalRuntime:
             host, port = (await sb.tunnels.aio())[self.port].tcp_socket
             yield Runtime(
                 f"tcp://{host}:{port}",
-                params={"provider": "modal", "instance_id": sb.object_id},
+                params={
+                    "provider": "modal",
+                    "instance_id": sb.object_id,
+                    **({"ready_timeout": ready_timeout} if compose is not None else {}),
+                },
                 config=config if config.model_dump(exclude_none=True) else None,
             )
         finally:
