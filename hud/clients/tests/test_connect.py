@@ -10,6 +10,8 @@ handshake EOFs until ``hello`` answers or the deadline passes.
 from __future__ import annotations
 
 import asyncio
+import logging
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -52,6 +54,62 @@ async def test_connect_retries_through_accept_then_eof_until_the_env_serves() ->
         await server.wait_closed()
 
     assert attempts == 3
+
+
+async def test_tunnel_connection_failure_warns_with_peer(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": hello["id"],
+                    "result": {
+                        **HELLO_RESULT,
+                        "bindings": [
+                            {
+                                "name": "shell",
+                                "protocol": "ssh/2",
+                                "url": "ssh://agent@environment:22",
+                            }
+                        ],
+                    },
+                },
+            )
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    open_connection = asyncio.open_connection
+
+    async def fail_tunnel_connection(host: str, peer_port: int):
+        assert (host, peer_port) == ("127.0.0.1", port)
+        raise OSError("peer unavailable")
+
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            route = urlsplit(client.binding("shell").url)
+            monkeypatch.setattr(client_module.asyncio, "open_connection", fail_tunnel_connection)
+            caplog.set_level(logging.WARNING, logger="hud.clients")
+
+            reader, writer = await open_connection(route.hostname, route.port)
+            try:
+                assert await reader.read() == b""
+            finally:
+                writer.close()
+                await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert f"tunnel peer 127.0.0.1:{port} connection failed: peer unavailable" in caplog.messages
 
 
 async def test_heartbeat_serializes_calls_without_aborting_on_protocol_errors(

@@ -174,7 +174,13 @@ class HudClient:
                 try:
                     try:
                         up_reader, up_writer = await asyncio.open_connection(host, port)
-                    except OSError:
+                    except OSError as exc:
+                        LOGGER.warning(
+                            "tunnel peer %s:%d connection failed: %s",
+                            host,
+                            port,
+                            exc,
+                        )
                         writer.close()
                         return
                     await send_frame(
