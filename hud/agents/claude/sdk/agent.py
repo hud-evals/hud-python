@@ -24,6 +24,7 @@ import mcp.types as mcp_types
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, ClaudeSDKConfig, ToolStep, Usage
 from hud.settings import settings
+from hud.telemetry.context import get_current_trace_id
 from hud.types import MCPToolCall, MCPToolResult, Step
 from hud.utils.time import now_iso
 
@@ -450,6 +451,8 @@ class ClaudeSDKAgent(Agent):
         if settings.api_key:
             env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
             env["ANTHROPIC_API_KEY"] = settings.api_key
+            if trace_id := get_current_trace_id():
+                env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
         elif settings.anthropic_api_key:
             env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
 

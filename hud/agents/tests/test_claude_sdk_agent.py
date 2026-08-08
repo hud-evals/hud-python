@@ -23,6 +23,8 @@ from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
 from hud.agents.types import AgentStep, ClaudeSDKConfig, ToolStep
 from hud.capabilities import Capability, RFBClient, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
+from hud.settings import settings
+from hud.telemetry.context import set_trace_context
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
 
@@ -191,6 +193,19 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     assert "install.sh" in conn.ran[0]
     assert "claude" in conn.ran[0]
     assert run.trace.status == "completed"
+
+
+async def test_exec_forwards_current_trace_id_to_hud_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    conn = _FakeConn({}, _FakeProcess(_STREAM_JSON))
+    agent = _agent_with_conn("bash", conn)
+
+    with set_trace_context("trace-123"):
+        await agent._exec(_fake_run(), prompt="build it", max_steps=5)
+
+    assert "ANTHROPIC_CUSTOM_HEADERS='Trace-Id: trace-123'" in conn.ran[0]
 
 
 async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
