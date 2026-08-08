@@ -20,8 +20,30 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
-from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
+from hud.environment.bwrap import Bubblewrap, usable_bwrap
+from hud.environment.egress import (
+    BRIDGE_PORT,
+    VISITOR_PORT,
+    Egress,
+    Peer,
+    bind_addresses,
+    hosts_text,
+    proxy_environment,
+)
+from hud.environment.isolator import (
+    BwrapIsolator,
+    Isolator,
+    SeatbeltIsolator,
+    missing_isolation_error,
+    select_isolator,
+)
 from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
+from hud.environment.seatbelt import (
+    SeatbeltPolicyInputs,
+    generate_seatbelt_profile,
+    policy_params,
+    seatbelt_argv,
+)
 from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -40,95 +62,8 @@ LOGGER = logging.getLogger("hud.environment.workspace")
 
 _COMMAND_TIMEOUT = 3600.0
 
-
-@dataclass(slots=True, frozen=True)
-class Bubblewrap:
-    path: str
-    pid_unshare: str | None = None
-
-
-# Set once the first Workspace probes the substrate (avoid per-instance work).
-_bwrap_usable: Bubblewrap | Literal[False] | None = None
-
-
-def usable_bwrap() -> Bubblewrap | None:
-    """A working bubblewrap launch mode for this substrate, if one exists."""
-    global _bwrap_usable
-    if isinstance(_bwrap_usable, Bubblewrap):
-        return _bwrap_usable
-    if _bwrap_usable is False:
-        return None
-
-    path = shutil.which("bwrap")
-    if path is None:
-        return None
-    probe_binary = shutil.which("true")
-    if probe_binary is None:
-        return None
-
-    direct = Bubblewrap(path)
-    launches = [
-        (
-            direct,
-            [
-                path,
-                "--unshare-user",
-                "--unshare-pid",
-                "--ro-bind",
-                "/",
-                "/",
-                "--proc",
-                "/proc",
-                "--",
-                probe_binary,
-            ],
-        )
-    ]
-    if unshare := shutil.which("unshare"):
-        staged = Bubblewrap(path, pid_unshare=unshare)
-        launches.append(
-            (
-                staged,
-                [
-                    unshare,
-                    "--kill-child=KILL",
-                    "--pid",
-                    "--mount-proc",
-                    path,
-                    "--unshare-user",
-                    "--ro-bind",
-                    "/",
-                    "/",
-                    "--",
-                    probe_binary,
-                ],
-            )
-        )
-
-    failure = "unknown error"
-    for launch, argv in launches:
-        try:
-            probe = subprocess.run(
-                argv,
-                capture_output=True,
-                timeout=15,
-                check=False,
-            )
-            if probe.returncode == 0:
-                _bwrap_usable = launch
-                return launch
-            failure = probe.stderr.decode("utf-8", "replace").strip()[:120]
-        except (OSError, subprocess.SubprocessError):
-            continue
-
-    _bwrap_usable = False
-    LOGGER.warning(
-        "bwrap is installed but cannot create an isolated process namespace (%s); "
-        "sessions will run WITHOUT isolation.",
-        failure,
-    )
-    return None
-
+# Re-export for callers/tests that imported these from workspace.
+__all__ = ("Bubblewrap", "Mount", "MountKind", "Workspace", "usable_bwrap")
 
 _warned_no_bwrap = False
 
@@ -379,12 +314,25 @@ class Workspace:
         self._system_mounts: tuple[Mount, ...] = tuple(
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
         )
-        self._bwrap = usable_bwrap()
-        # Without bwrap there is no `/workspace` mount — the sandbox *is* the real
-        # directory, so address it by its real path. Otherwise `cd /workspace`
-        # lands in a phantom dir and the editor/bash disagree on where files are.
-        # Only override the default; respect an explicit guest_path.
-        if self._bwrap is None and guest_path == "/workspace":
+        self._isolator = select_isolator()
+        # Backing fields kept for existing call sites / tests that reassign them
+        # after construction; prefer reading via ``_active_isolator()``.
+        if isinstance(self._isolator, BwrapIsolator):
+            self._bwrap = self._isolator.backend
+            self._seatbelt = None
+        elif isinstance(self._isolator, SeatbeltIsolator):
+            self._bwrap = None
+            self._seatbelt = self._isolator.backend
+        else:
+            self._bwrap = None
+            self._seatbelt = None
+        # Without a remounting isolator there is no `/workspace` mount — the
+        # sandbox *is* the real directory, so address it by its real path.
+        # Otherwise `cd /workspace` lands in a phantom dir and the editor/bash
+        # disagree on where files are. Only override the default; respect an
+        # explicit guest_path.
+        isolator = self._active_isolator()
+        if (isolator is None or not isolator.remounts_guest_path) and guest_path == "/workspace":
             self._guest_path = self.root.as_posix()
         # ssh config
         self._ssh_host = host
@@ -395,13 +343,8 @@ class Workspace:
         # Whether the root is chowned to the shell identity at start. Off where the
         # image staged it already: whose it is, is the image's statement.
         self._hand_over_root = hand_over_root
-        if require_isolation and self._bwrap is None:
-            raise RuntimeError(
-                "isolation was required but bwrap cannot sandbox here: install "
-                "bubblewrap and use a container runtime that allows unprivileged "
-                "user namespaces. Refusing to serve sessions that would silently "
-                "run unisolated."
-            )
+        if require_isolation and not self.isolation_available:
+            raise RuntimeError(missing_isolation_error())
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
@@ -427,6 +370,9 @@ class Workspace:
         self._sandbox_init: int | None = None
         self._namespace: NamespaceHost | None = None
         self._bridge: NamespaceProcess | None = None
+        # Host-side TCP bridge for Seatbelt (subprocess on host loopback bridging
+        # egress unix sockets as TCP ports reachable by the sandboxed process).
+        self._host_bridge: asyncio.subprocess.Process | None = None
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
@@ -517,7 +463,11 @@ class Workspace:
                 "shell_uid is set and the server is root, but privileges cannot be dropped "
                 "(setpriv is required on Linux). Refusing to serve agent shells as root."
             )
-        if self._bwrap is None and sys.platform != "win32" and shutil.which("bwrap") is None:
+        if (
+            self._active_isolator() is None
+            and sys.platform != "win32"
+            and shutil.which("bwrap") is None
+        ):
             # Once per process: repeating this for every Workspace is noise, and
             # on macOS (no bubblewrap exists) it is an expected state. The
             # present-but-unusable case is diagnosed by usable_bwrap itself.
@@ -680,6 +630,17 @@ class Workspace:
         from hud.capabilities import Capability
 
         key_path = self.ssh_client_key_path
+        isolator = self._active_isolator()
+        isolation: Literal["bwrap", "seatbelt", "none"]
+        if isolator is None:
+            isolation = "none"
+        elif isolator.name == "bwrap":
+            isolation = "bwrap"
+        elif isolator.name == "seatbelt":
+            isolation = "seatbelt"
+        else:
+            # Future backends (e.g. windows) until Capability.ssh grows a label.
+            isolation = "none"
         return Capability.ssh(
             name=name,
             url=self.ssh_url,
@@ -688,7 +649,7 @@ class Workspace:
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
             cwd=self._guest_path,
-            isolation="bwrap" if self.bwrap_available else "none",
+            isolation=isolation,
         )
 
     @property
@@ -868,6 +829,89 @@ class Workspace:
     def bwrap_available(self) -> bool:
         return self._bwrap is not None
 
+    @property
+    def isolation_available(self) -> bool:
+        return self._active_isolator() is not None
+
+    def _active_isolator(self) -> Isolator | None:
+        """Resolve the isolator from current backend fields.
+
+        Tests (and rare callers) may reassign ``_bwrap`` / ``_seatbelt`` after
+        construction; prefer those over the snapshot taken at ``__init__``.
+        """
+        if self._bwrap is not None:
+            return BwrapIsolator(self._bwrap)
+        if self._seatbelt is not None:
+            return SeatbeltIsolator(self._seatbelt)
+        return self._isolator
+
+    def _seatbelt_policy_inputs(
+        self,
+        *,
+        proxy_ports: tuple[int, ...] | None = None,
+        allow_all_network: bool | None = None,
+    ) -> SeatbeltPolicyInputs:
+        """Build Seatbelt policy inputs from this workspace's mounts and network."""
+        if self._seatbelt is None:
+            raise RuntimeError("seatbelt not available on this host")
+
+        unmappable = frozenset({"tmpfs", "proc", "dev", "symlink"})
+        for mount in self.mounts:
+            if mount.kind in unmappable:
+                raise RuntimeError(
+                    f"Seatbelt cannot map Mount(kind={mount.kind!r}, dst={mount.dst!r}); "
+                    "use ro/rw bind mounts only on macOS."
+                )
+
+        writable_roots: tuple[Path, ...] = (self.root,)
+        for mount in self.mounts:
+            if mount.kind == "rw":
+                writable_roots = (*writable_roots, Path(mount.src))
+
+        readable_roots = tuple(Path(mount.src) for mount in self.mounts if mount.kind == "ro")
+
+        if allow_all_network is None:
+            allow_all_network = not self.owns_netns
+
+        proxy_loopback_ports = proxy_ports if proxy_ports is not None else ()
+        if not self.owns_netns:
+            proxy_loopback_ports = ()
+
+        proxy_loopback_endpoints: tuple[tuple[str, int], ...] = ()
+        if proxy_loopback_ports and self.peers:
+            addresses = bind_addresses(self.peers, reserved_ports=self.ports)
+            proxy_loopback_endpoints = tuple(
+                (addresses[peer.name], peer.port)
+                for peer in self.peers
+                if addresses[peer.name] not in ("127.0.0.1", "localhost")
+            )
+
+        return SeatbeltPolicyInputs(
+            writable_roots=writable_roots,
+            readable_roots=readable_roots,
+            allow_all_network=allow_all_network,
+            proxy_loopback_ports=proxy_loopback_ports,
+            proxy_loopback_endpoints=proxy_loopback_endpoints,
+        )
+
+    def seatbelt_wrap_argv(
+        self,
+        command: Sequence[str],
+        *,
+        proxy_ports: tuple[int, ...] = (),
+        allow_all_network: bool | None = None,
+    ) -> list[str]:
+        """Argv that runs ``command`` inside sandbox-exec. Raises if unavailable."""
+        inputs = self._seatbelt_policy_inputs(
+            proxy_ports=proxy_ports,
+            allow_all_network=allow_all_network,
+        )
+        return seatbelt_argv(
+            command,
+            profile=generate_seatbelt_profile(inputs),
+            params=policy_params(inputs),
+        )
+
     def bwrap_argv(
         self,
         command: list[str] | str,
@@ -1043,10 +1087,12 @@ class Workspace:
     async def sandbox_pid(self) -> int | None:
         """The live sandbox's init pid, starting one if none is running.
 
-        ``None`` where bwrap cannot sandbox: sessions then run directly, as
-        they always have, and nothing persists between them beyond the files.
+        ``None`` where no isolator can sandbox: sessions then run directly, and
+        nothing persists between them beyond the files. On Darwin with Seatbelt
+        the holder is a sandbox-exec process; sessions each spawn their own
+        sandbox-exec via shell_argv and share no namespace.
         """
-        if self._bwrap is None:
+        if self._active_isolator() is None:
             return None
         if (live := self._live_sandbox_pid()) is not None:
             return live
@@ -1057,13 +1103,28 @@ class Workspace:
             return await self._start_sandbox()
 
     def _live_sandbox_pid(self) -> int | None:
-        if self._sandbox is None or self._sandbox.returncode is not None:
+        """Return the holder pid only once start has finished publishing it.
+
+        ``_start_*_sandbox`` assigns ``_sandbox`` before ``_sandbox_init``.
+        Concurrent sessions must treat that window as "not ready yet" and wait
+        on ``_sandbox_lock`` — not assert.
+        """
+        if (
+            self._sandbox is None
+            or self._sandbox.returncode is not None
+            or self._sandbox_init is None
+        ):
             return None
-        assert self._sandbox_init is not None
         return self._sandbox_init
 
     async def _start_sandbox(self) -> int:
-        """Start the trusted namespace owner and its agent-visible holder."""
+        """Start the active isolator's long-lived sandbox holder."""
+        isolator = self._active_isolator()
+        assert isolator is not None
+        return await isolator.start_sandbox(self)
+
+    async def _start_bwrap_sandbox(self) -> int:
+        """Start the trusted bwrap namespace owner and its agent-visible holder."""
         bwrap = self._bwrap
         assert bwrap is not None
         try:
@@ -1194,6 +1255,87 @@ class Workspace:
             await self.discard_sandbox()
             raise
 
+    def _seatbelt_proxy_ports(self) -> tuple[int, ...]:
+        """Loopback ports the seatbelt profile must permit outbound connections to.
+
+        Applies only when the workspace owns its network namespace. The host
+        bridge listens on these ports so the sandboxed process can reach the
+        egress proxy and peer services.
+        """
+        if not self.owns_netns:
+            return ()
+        ports: tuple[int, ...] = ()
+        if self.allowed_hosts:
+            ports = (BRIDGE_PORT,)
+        return (*ports, *(peer.port for peer in self.peers))
+
+    async def _start_seatbelt_sandbox(self) -> int:
+        """Start the Darwin Seatbelt holder and (if needed) the host-side egress bridge.
+
+        The holder is a long-running sandbox-exec process that acts as a liveness
+        sentinel: while it runs, the Egress and host bridge stay active. Each SSH
+        session spawns its own sandbox-exec independently via shell_argv — there is
+        no shared process namespace.
+        """
+        assert self._seatbelt is not None
+        try:
+            if self.owns_netns:
+                self._egress = Egress(
+                    self._credentials_dir(),
+                    self.allowed_hosts or (),
+                    self.peers,
+                    local_aliases=self.local_aliases,
+                    reserved_ports=self.ports,
+                )
+                self._egress.start()
+
+            # If there are hosts to allow or peers to bridge, start the host-side TCP
+            # bridge. It runs on the host loopback — outside the sandbox — and forwards
+            # connections from the sandboxed process to the Egress unix sockets.
+            if self.owns_netns and (self.allowed_hosts or self.peers):
+                assert self._egress is not None
+                visitor_socket = self._credentials_dir() / "visitor" / "egress.sock"
+                visitor_socket.parent.mkdir(parents=True, exist_ok=True)
+                bridge_argv, bridge_config = self._egress.bridge_command(
+                    visitor_socket=visitor_socket,
+                )
+                self._host_bridge = await asyncio.create_subprocess_exec(
+                    *bridge_argv,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                assert self._host_bridge.stdin is not None
+                assert self._host_bridge.stdout is not None
+                assert self._host_bridge.stderr is not None
+                self._host_bridge.stdin.write(bridge_config)
+                await self._host_bridge.stdin.drain()
+                if await asyncio.wait_for(self._host_bridge.stdout.readline(), 30.0) != b"ready\n":
+                    detail = (
+                        (await self._host_bridge.stderr.read(2048)).decode(errors="replace").strip()
+                    )
+                    raise RuntimeError(detail or "host Egress bridge did not become ready")
+
+            proxy_ports = self._seatbelt_proxy_ports()
+            holder_argv = self.seatbelt_wrap_argv(_SANDBOX_HOLDER, proxy_ports=proxy_ports)
+            self._sandbox = await asyncio.create_subprocess_exec(
+                *holder_argv,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            assert self._sandbox.stdout is not None
+            ready = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)
+            if ready != _SANDBOX_READY:
+                raise RuntimeError(
+                    f"the seatbelt sandbox never became ready: {await self._sandbox_error()}"
+                )
+            self._sandbox_init = self._sandbox.pid
+            return self._sandbox_init
+        except BaseException:
+            await self.discard_sandbox()
+            raise
+
     async def _sandbox_error(self) -> str:
         """Whatever the sandbox said on the way down, for a failure message."""
         if self._sandbox is None or self._sandbox.stderr is None:
@@ -1212,6 +1354,16 @@ class Workspace:
         every process the agent left behind goes with it — including ones it
         detached. A later session starts a fresh sandbox.
         """
+        # Kill the holder first on both bwrap and Seatbelt backends: collapse
+        # the pid namespace (or drop the long-lived sandbox-exec sentinel) before
+        # tearing down bridge routes the agent may still be using. This order is
+        # intentional on Linux too — not a regression from the Darwin work.
+        sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
+        if sandbox is not None and sandbox.returncode is None:
+            sandbox.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(sandbox.wait(), 10.0)
+        # bwrap: tear down the in-namespace bridge and the namespace host.
         bridge, self._bridge = self._bridge, None
         if bridge is not None:
             with contextlib.suppress(Exception):
@@ -1220,15 +1372,15 @@ class Workspace:
         if namespace is not None:
             with contextlib.suppress(Exception):
                 await namespace.close()
+        # Seatbelt: kill the host-side TCP bridge, then stop Egress.
+        host_bridge, self._host_bridge = self._host_bridge, None
+        if host_bridge is not None and host_bridge.returncode is None:
+            with contextlib.suppress(Exception):
+                host_bridge.kill()
+                await asyncio.wait_for(host_bridge.wait(), 5.0)
         if self._egress is not None:
             self._egress.stop()
             self._egress = None
-        sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
-        if sandbox is None or sandbox.returncode is not None:
-            return
-        sandbox.kill()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(sandbox.wait(), 10.0)
 
     async def terminate_sessions(self) -> None:
         """Kill the agent-visible PID namespace while preserving its environment."""
@@ -1243,7 +1395,7 @@ class Workspace:
         env: Mapping[str, str] | None = None,
         tty: bool = False,
     ) -> list[str]:
-        """Per-session shell argv (bwrap'd if available, else host shell).
+        """Per-session shell argv (isolated if an isolator is available).
 
         With ``shell_uid`` set and the serving process running as root, the
         whole session is wrapped in ``setpriv`` to drop to that uid.
@@ -1257,18 +1409,9 @@ class Workspace:
             if command is not None:
                 return ["cmd.exe", "/c", command]
             return ["cmd.exe"]
-        if self._bwrap is not None:
-            inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
-            if self._drops_privileges():
-                # Don't let bwrap re-inject host secrets via --setenv; feed it
-                # the same minimal environment as the non-bwrap dropped shell,
-                # keeping explicit per-call overrides.
-                walled_env = {**(self._session_env() or {}), **(env or {})}
-                argv = self.bwrap_argv(
-                    inner, cwd=cwd, env=walled_env, inherit_host_env=False, tty=tty
-                )
-            else:
-                argv = self.bwrap_argv(inner, cwd=cwd, env=env, tty=tty)
+        isolator = self._active_isolator()
+        if isolator is not None:
+            argv = isolator.wrap_session(self, command, cwd=cwd, env=env, tty=tty)
         else:
             # The same payload the sandboxed forms run. Built here too rather
             # than left as a bare shell, so that ``env`` and ``tty`` mean the
@@ -1276,9 +1419,47 @@ class Workspace:
             # env reaches the shell only *after* any drop: an LD_PRELOAD in it
             # must never be in the environment of the root-run setpriv.
             argv = _payload_argv(command, self._full_env(env), ctty=tty)
+        # Prefix outside the isolator wrap (setpriv → sandbox-exec / bwrap) so
+        # Seatbelt sessions also drop when shell_uid is configured on Linux.
         if self._drops_privileges():
             argv = [*self._drop_argv(), *argv]
         return argv
+
+    def _bwrap_session_argv(
+        self,
+        command: str | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        tty: bool = False,
+    ) -> list[str]:
+        """Argv for a bwrap-wrapped SSH session (used by :class:`BwrapIsolator`)."""
+        inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
+        if self._drops_privileges():
+            # Don't let bwrap re-inject host secrets via --setenv; feed it
+            # the same minimal environment as the non-bwrap dropped shell,
+            # keeping explicit per-call overrides.
+            walled_env = {**(self._session_env() or {}), **(env or {})}
+            return self.bwrap_argv(inner, cwd=cwd, env=walled_env, inherit_host_env=False, tty=tty)
+        return self.bwrap_argv(inner, cwd=cwd, env=env, tty=tty)
+
+    def _seatbelt_session_argv(
+        self,
+        command: str | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        tty: bool = False,
+    ) -> list[str]:
+        """Argv for a sandbox-exec-wrapped SSH session (used by :class:`SeatbeltIsolator`)."""
+        del cwd  # seatbelt has no --chdir; sessions start in the real workspace root
+        # Each SSH session runs under its own sandbox-exec invocation.
+        # _full_env already injects egress proxy variables when _egress is set.
+        # HOME must point inside the sandbox: bash -l reads ~/.bash_profile and the
+        # host home directory is not in the seatbelt readable set.
+        seatbelt_env = {**self._full_env(env), "HOME": str(self.root)}
+        inner = _payload_argv(command, seatbelt_env, ctty=tty)
+        return self.seatbelt_wrap_argv(inner, proxy_ports=self._seatbelt_proxy_ports())
 
     def session_argv(
         self,
@@ -1289,8 +1470,10 @@ class Workspace:
         tty: bool = False,
     ) -> list[str]:
         """Build a session launched by the namespace host."""
-        if self._bwrap is None:
+        isolator = self._active_isolator()
+        if isolator is None or not isolator.uses_namespace_host:
             return self.shell_argv(command, cwd=cwd, env=env, tty=tty)
+        assert self._bwrap is not None
         target_cwd = cwd if cwd is not None else self._guest_path
         if self._drops_privileges():
             session_env = {**(self._session_env() or {}), **(env or {})}
@@ -1427,10 +1610,14 @@ class Workspace:
             term_type = process.term_type
             wants_tty = bool(term_type)
             session_env = {"TERM": term_type} if term_type else None
+            # Use the namespace (bwrap) path only when a NamespaceHost is available.
+            # Seatbelt: pid is set (holder is alive) but there is no namespace — each
+            # session runs its own sandbox-exec via shell_argv.
+            use_namespace = pid is not None and self._namespace is not None
             argv = (
-                self.shell_argv(process.command, env=session_env, tty=wants_tty)
-                if pid is None
-                else self.session_argv(process.command, env=session_env, tty=wants_tty)
+                self.session_argv(process.command, env=session_env, tty=wants_tty)
+                if use_namespace
+                else self.shell_argv(process.command, env=session_env, tty=wants_tty)
             )
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
@@ -1521,9 +1708,9 @@ class Workspace:
             process.exit(result.returncode)
             return
 
-        pty_pair = _open_pty(process) if wants_tty and pid is None else None
+        pty_pair = _open_pty(process) if wants_tty and not use_namespace else None
         try:
-            if pid is None:
+            if not use_namespace:
                 child_fds: dict[str, Any] = (
                     {
                         "stdin": asyncio.subprocess.PIPE,
@@ -1659,7 +1846,7 @@ class Workspace:
             # abandoned mid-flight, or ran with no sandbox at all, so those
             # are still torn down as a group.
             completed = wait_task.done() and not wait_task.cancelled()
-            if pid is None or timed_out or not completed:
+            if not use_namespace or timed_out or not completed:
                 await sub.terminate()
             stdin_task.cancel()
             wait_task.cancel()

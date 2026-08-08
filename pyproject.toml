@@ -110,6 +110,8 @@ packages = ["hud"]
 [tool.hatch.build.targets.wheel.force-include]
 "hud/py.typed" = "hud/py.typed"
 "hud/eval/docker-seccomp.json" = "hud/eval/docker-seccomp.json"
+"hud/environment/seatbelt_base_policy.sbpl" = "hud/environment/seatbelt_base_policy.sbpl"
+"hud/environment/seatbelt_network_policy.sbpl" = "hud/environment/seatbelt_network_policy.sbpl"
 
 [project.optional-dependencies]
 # AI providers (openai, anthropic, google-genai) are now core dependencies; this
@@ -270,4 +272,5 @@ testpaths = ["hud"]
 addopts = "-m 'not integration'"
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
+    "darwin: requires macOS sandbox-exec",
 ]

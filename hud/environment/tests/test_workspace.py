@@ -1045,6 +1045,7 @@ def test_a_host_is_permitted_by_name_or_as_a_subdomain() -> None:
     assert not permitted(None, {ANY_HOST})
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="setpriv is Linux-only")
 def test_shell_uid_wraps_sessions_in_setpriv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1070,6 +1071,7 @@ def test_shell_uid_wraps_sessions_in_setpriv(
     assert "echo hi" in argv
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="setpriv is Linux-only")
 def test_shell_identity_keeps_the_declared_primary_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1082,6 +1084,7 @@ def test_shell_identity_keeps_the_declared_primary_group(
     assert argv[argv.index("--regid") + 1] == "2000"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="setpriv is Linux-only")
 def test_caller_env_is_injected_only_after_the_drop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1198,17 +1201,17 @@ def test_usable_bwrap_reports_unusable_installs(monkeypatch) -> None:
     """An installed bwrap that cannot create namespaces must not be used."""
     import subprocess
 
-    from hud.environment import workspace as ws
+    from hud.environment import bwrap as bw
 
-    monkeypatch.setattr(ws, "_bwrap_usable", None)
-    monkeypatch.setattr(ws.shutil, "which", lambda _name: "/usr/bin/bwrap")
+    monkeypatch.setattr(bw, "_bwrap_usable", None)
+    monkeypatch.setattr(bw.shutil, "which", lambda _name: "/usr/bin/bwrap")
     monkeypatch.setattr(
-        ws.subprocess,
+        bw.subprocess,
         "run",
         lambda *a, **k: subprocess.CompletedProcess(a[0], 1, b"", b"No permissions"),
     )
 
-    assert ws.usable_bwrap() is None
+    assert bw.usable_bwrap() is None
 
 
 def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
@@ -1216,24 +1219,24 @@ def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
 ) -> None:
     import subprocess
 
-    from hud.environment import workspace as ws
+    from hud.environment import bwrap as bw
 
-    monkeypatch.setattr(ws, "_bwrap_usable", None)
+    monkeypatch.setattr(bw, "_bwrap_usable", None)
     binaries = {
         "bwrap": "/usr/bin/bwrap",
         "unshare": "/usr/bin/unshare",
         "true": "/usr/bin/true",
     }
-    monkeypatch.setattr(ws.shutil, "which", binaries.get)
+    monkeypatch.setattr(bw.shutil, "which", binaries.get)
     calls: list[list[str]] = []
 
     def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, int(len(calls) == 1), b"", b"blocked")
 
-    monkeypatch.setattr(ws.subprocess, "run", run)
+    monkeypatch.setattr(bw.subprocess, "run", run)
 
-    assert ws.usable_bwrap() == Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare")
+    assert bw.usable_bwrap() == Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare")
     assert "--unshare-pid" in calls[0]
     assert calls[1][:4] == [
         "/usr/bin/unshare",
@@ -1278,7 +1281,8 @@ def test_staged_bwrap_keeps_user_isolation_and_uses_the_staged_proc(
 def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> None:
     from hud.environment import workspace as ws
 
-    monkeypatch.setattr(ws, "usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_seatbelt", lambda: None)
 
     with pytest.raises(RuntimeError, match="isolation was required"):
         ws.Workspace(tmp_path, require_isolation=True)

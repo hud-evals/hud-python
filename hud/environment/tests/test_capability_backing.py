@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+import hud.environment.isolator as isolator_module
 import hud.environment.workspace as workspace_module
 from hud.capabilities import Capability
 from hud.environment import Environment
@@ -31,6 +32,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.capabilities.ssh import SSHClient
+
+
+def _disable_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force soft unisolated Workspace (process-lifecycle tests need a plain shell)."""
+    monkeypatch.setattr(isolator_module, "usable_bwrap", lambda: None)
+    monkeypatch.setattr(isolator_module, "usable_seatbelt", lambda: None)
 
 
 def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
@@ -47,7 +54,7 @@ async def test_serving_publishes_the_workspace_capability(
     from hud.settings import settings
 
     monkeypatch.setattr(settings, "file_tracking_enabled", True)
-    monkeypatch.setattr(workspace_module, "usable_bwrap", lambda: None)
+    _disable_isolation(monkeypatch)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
@@ -73,10 +80,11 @@ async def test_serving_reports_granted_bwrap_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        workspace_module,
+        isolator_module,
         "usable_bwrap",
         lambda: workspace_module.Bubblewrap("/usr/bin/bwrap"),
     )
+    monkeypatch.setattr(isolator_module, "usable_seatbelt", lambda: None)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
@@ -292,7 +300,12 @@ async def test_workspace_timeout_reports_exit_after_child_teardown(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX setsid")
-async def test_workspace_command_bounds_detached_output_drain(tmp_path: Path) -> None:
+async def test_workspace_command_bounds_detached_output_drain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Detached process-group bounds need a plain host shell (setsid / kill PPID
+    # behave differently under Seatbelt / bwrap).
+    _disable_isolation(monkeypatch)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root", track_files=False)
     pid: int | None = None
