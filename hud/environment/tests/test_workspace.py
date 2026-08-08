@@ -1201,17 +1201,17 @@ def test_usable_bwrap_reports_unusable_installs(monkeypatch) -> None:
     """An installed bwrap that cannot create namespaces must not be used."""
     import subprocess
 
-    from hud.environment import workspace as ws
+    from hud.environment import isolator as iso
 
-    monkeypatch.setattr(ws, "_bwrap_usable", None)
-    monkeypatch.setattr(ws.shutil, "which", lambda _name: "/usr/bin/bwrap")
+    monkeypatch.setattr(iso, "_bwrap_usable", None)
+    monkeypatch.setattr(iso.shutil, "which", lambda _name: "/usr/bin/bwrap")
     monkeypatch.setattr(
-        ws.subprocess,
+        iso.subprocess,
         "run",
         lambda *a, **k: subprocess.CompletedProcess(a[0], 1, b"", b"No permissions"),
     )
 
-    assert ws.usable_bwrap() is None
+    assert iso.usable_bwrap() is None
 
 
 def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
@@ -1219,24 +1219,24 @@ def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
 ) -> None:
     import subprocess
 
-    from hud.environment import workspace as ws
+    from hud.environment import isolator as iso
 
-    monkeypatch.setattr(ws, "_bwrap_usable", None)
+    monkeypatch.setattr(iso, "_bwrap_usable", None)
     binaries = {
         "bwrap": "/usr/bin/bwrap",
         "unshare": "/usr/bin/unshare",
         "true": "/usr/bin/true",
     }
-    monkeypatch.setattr(ws.shutil, "which", binaries.get)
+    monkeypatch.setattr(iso.shutil, "which", binaries.get)
     calls: list[list[str]] = []
 
     def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, int(len(calls) == 1), b"", b"blocked")
 
-    monkeypatch.setattr(ws.subprocess, "run", run)
+    monkeypatch.setattr(iso.subprocess, "run", run)
 
-    assert ws.usable_bwrap() == Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare")
+    assert iso.usable_bwrap() == Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare")
     assert "--unshare-pid" in calls[0]
     assert calls[1][:4] == [
         "/usr/bin/unshare",
