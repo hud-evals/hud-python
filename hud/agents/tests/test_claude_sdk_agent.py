@@ -141,11 +141,17 @@ def _fake_run() -> Any:
 
 
 _STREAM_JSON = (
-    '{"type":"assistant","message":{"content":[{"type":"text","text":"editing"},'
-    '{"type":"tool_use","id":"tool-1","name":"Write","input":{}}]}}\n'
+    '{"type":"assistant","message":{"id":"msg-1","type":"message",'
+    '"role":"assistant","model":"claude-test","content":[{"type":"text",'
+    '"text":"editing"},{"type":"tool_use","id":"tool-1","name":"Write","input":{}}],'
+    '"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":11,'
+    '"output_tokens":7,"cache_read_input_tokens":3}}}\n'
     '{"type":"user","message":{"content":[{"type":"tool_result",'
     '"tool_use_id":"tool-1","content":"wrote a.txt","is_error":false}]}}\n'
-    '{"type":"assistant","message":{"content":[{"type":"text","text":"finished"}]}}\n'
+    '{"type":"assistant","message":{"id":"msg-2","type":"message",'
+    '"role":"assistant","model":"claude-test","content":[{"type":"text",'
+    '"text":"finished"}],"stop_reason":"end_turn","stop_sequence":null,'
+    '"usage":{"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":3}}}\n'
     '{"type":"result","is_error":false,"result":"finished"}\n'
 )
 

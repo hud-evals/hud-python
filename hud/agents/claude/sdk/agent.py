@@ -20,9 +20,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 import asyncssh
 import mcp.types as mcp_types
+from anthropic.types.beta import BetaMessage
 
 from hud.agents.base import Agent
-from hud.agents.types import AgentStep, ClaudeSDKConfig, ToolStep, Usage
+from hud.agents.claude.agent import ClaudeAgent
+from hud.agents.types import ClaudeSDKConfig, ToolStep
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
 from hud.types import MCPToolCall, MCPToolResult, Step
@@ -66,9 +68,8 @@ class _PendingToolCall:
 class _ClaudeStreamParser:
     """Translate Claude CLI stream messages into canonical HUD steps."""
 
-    def __init__(self, run: Run, *, model: str, started_at: str) -> None:
+    def __init__(self, run: Run, *, started_at: str) -> None:
         self._run = run
-        self._model = model
         self._agent_started_at = started_at
         self._pending_calls: dict[str, _PendingToolCall] = {}
         self._messages: list[dict[str, Any]] = []
@@ -127,50 +128,18 @@ class _ClaudeStreamParser:
             self._record_error(f"claude CLI exited without results for tool calls: {missing}")
 
     def _record_assistant(self, event: dict[str, Any], received_at: str) -> None:
-        message = event.get("message")
-        if not isinstance(message, dict):
-            return
-
-        text_parts: list[str] = []
-        thinking_parts: list[str] = []
-        tool_calls: list[MCPToolCall] = []
-        content = message.get("content")
-        if isinstance(content, list):
-            for raw_block in content:
-                if not isinstance(raw_block, dict):
-                    continue
-                block = cast("dict[str, Any]", raw_block)
-                match block.get("type"):
-                    case "text":
-                        if isinstance(block.get("text"), str):
-                            text_parts.append(block["text"])
-                    case "thinking":
-                        if isinstance(block.get("thinking"), str):
-                            thinking_parts.append(block["thinking"])
-                    case "tool_use":
-                        call = _tool_call(block)
-                        if call is not None:
-                            tool_calls.append(call)
-
-        text = "".join(text_parts)
-        if text:
-            self._last_agent_content = text
-        model = message.get("model")
-        stop_reason = message.get("stop_reason")
-        step = AgentStep(
-            content=text,
-            reasoning="\n".join(thinking_parts) if thinking_parts else None,
-            tool_calls=tool_calls,
-            done=not tool_calls,
-            finish_reason=stop_reason if isinstance(stop_reason, str) else None,
-            model=model if isinstance(model, str) else self._model,
-            usage=_usage(message.get("usage")),
-            started_at=self._agent_started_at,
-            ended_at=received_at,
-            extra=_event_metadata(event, message),
-        )
+        raw_message = event.get("message")
+        if not isinstance(raw_message, dict):
+            raise ValueError("Claude assistant event is missing its message payload")
+        message = BetaMessage.model_validate(raw_message)
+        step = ClaudeAgent._message_to_agent_step(message)
+        step.started_at = self._agent_started_at
+        step.ended_at = received_at
+        step.extra = _event_metadata(event, raw_message)
+        if step.content:
+            self._last_agent_content = step.content
         self._run.record(step)
-        for call in tool_calls:
+        for call in step.tool_calls:
             self._pending_calls[call.id] = _PendingToolCall(call=call, started_at=received_at)
 
     def _record_tool_results(self, event: dict[str, Any], received_at: str) -> None:
@@ -242,22 +211,6 @@ class _ClaudeStreamParser:
         self._error_recorded = True
 
 
-def _tool_call(block: dict[str, Any]) -> MCPToolCall | None:
-    call_id = block.get("id")
-    name = block.get("name")
-    if not isinstance(call_id, str) or not isinstance(name, str):
-        logger.warning("Ignoring malformed Claude tool call")
-        return None
-    raw_arguments = block.get("input")
-    if isinstance(raw_arguments, dict):
-        arguments: dict[str, Any] | str = cast("dict[str, Any]", raw_arguments)
-    elif isinstance(raw_arguments, str):
-        arguments = raw_arguments
-    else:
-        arguments = json.dumps(raw_arguments, ensure_ascii=False)
-    return MCPToolCall(id=call_id, name=name, arguments=arguments)
-
-
 def _tool_result_content(value: Any) -> list[mcp_types.ContentBlock]:
     values = value if isinstance(value, list) else [value]
     content: list[mcp_types.ContentBlock] = []
@@ -278,22 +231,6 @@ def _tool_result_content(value: Any) -> list[mcp_types.ContentBlock]:
                 )
             )
     return content
-
-
-def _usage(value: Any) -> Usage | None:
-    if not isinstance(value, dict):
-        return None
-    usage = cast("dict[str, Any]", value)
-    normalized = Usage(
-        prompt_tokens=_integer(usage.get("input_tokens")),
-        completion_tokens=_integer(usage.get("output_tokens")),
-        cached_tokens=_integer(usage.get("cache_read_input_tokens")),
-    )
-    return normalized if any(v is not None for v in normalized.model_dump().values()) else None
-
-
-def _integer(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _event_metadata(event: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
@@ -411,7 +348,7 @@ class ClaudeSDKAgent(Agent):
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
         logger.info("Full command: %s", full_cmd)
 
-        parser = _ClaudeStreamParser(run, model=self.config.model, started_at=now_iso())
+        parser = _ClaudeStreamParser(run, started_at=now_iso())
         process = await self._ssh.create_process(full_cmd)
         stderr_task = asyncio.create_task(process.stderr.read())
         try:
