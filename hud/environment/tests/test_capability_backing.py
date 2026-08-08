@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+import hud.environment.isolator as isolator_module
 import hud.environment.workspace as workspace_module
 from hud.capabilities import Capability
 from hud.environment import Environment
@@ -35,8 +36,8 @@ if TYPE_CHECKING:
 
 def _disable_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force soft unisolated Workspace (process-lifecycle tests need a plain shell)."""
-    monkeypatch.setattr(workspace_module, "usable_bwrap", lambda: None)
-    monkeypatch.setattr(workspace_module, "usable_seatbelt", lambda: None)
+    monkeypatch.setattr(isolator_module, "usable_bwrap", lambda: None)
+    monkeypatch.setattr(isolator_module, "usable_seatbelt", lambda: None)
 
 
 def test_attaching_a_workspace_writes_nothing(tmp_path: Path) -> None:
@@ -79,10 +80,11 @@ async def test_serving_reports_granted_bwrap_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        workspace_module,
+        isolator_module,
         "usable_bwrap",
         lambda: workspace_module.Bubblewrap("/usr/bin/bwrap"),
     )
+    monkeypatch.setattr(isolator_module, "usable_seatbelt", lambda: None)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 

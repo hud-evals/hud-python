@@ -110,8 +110,8 @@ def test_seatbelt_argv_shape() -> None:
 def test_require_isolation_mentions_seatbelt_on_darwin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
-    monkeypatch.setattr("hud.environment.workspace.usable_seatbelt", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_seatbelt", lambda: None)
     monkeypatch.setattr(sys, "platform", "darwin")
     with pytest.raises(RuntimeError, match=r"[Ss]eatbelt|[Ss]andbox"):
         Workspace(tmp_path / "root", require_isolation=True)
@@ -120,9 +120,9 @@ def test_require_isolation_mentions_seatbelt_on_darwin(
 def test_darwin_selects_seatbelt_when_no_bwrap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     monkeypatch.setattr(sys, "platform", "darwin")
@@ -135,9 +135,9 @@ def test_darwin_selects_seatbelt_when_no_bwrap(
 def test_seatbelt_policy_includes_extra_rw_mount(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     extra = tmp_path / "extra"
@@ -179,9 +179,9 @@ async def test_start_seatbelt_sandbox_wraps_holder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The seatbelt holder is launched under sandbox-exec."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     captured: list[list[str]] = []
@@ -204,9 +204,9 @@ async def test_sandbox_pid_returns_holder_pid_for_seatbelt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """sandbox_pid() starts and returns the holder pid on seatbelt substrates."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
 
@@ -224,9 +224,9 @@ async def test_discard_seatbelt_sandbox_kills_holder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """discard_sandbox() kills the holder and clears sandbox state."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
 
@@ -248,9 +248,9 @@ async def test_shell_argv_wraps_with_seatbelt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """shell_argv() wraps the session payload with sandbox-exec when seatbelt is active."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     ws = Workspace(tmp_path / "root", network=True)
@@ -263,9 +263,9 @@ def test_capability_reports_seatbelt_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """capability() reports isolation='seatbelt' when seatbelt is the sandbox."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     ws = Workspace(tmp_path / "root")
@@ -278,9 +278,9 @@ async def test_start_seatbelt_sandbox_starts_host_bridge_when_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When owns_netns and allowed_hosts, a host-side bridge subprocess is started."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
 
@@ -360,9 +360,9 @@ async def test_seatbelt_proxy_ports_includes_bridge_port_when_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """BRIDGE_PORT appears in proxy ports when allowed_hosts is non-empty."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     ws = Workspace(tmp_path / "root", allowed_hosts={"example.com"})
@@ -375,9 +375,9 @@ async def test_seatbelt_proxy_ports_empty_when_shared_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No proxy ports are needed when the workspace shares the host network."""
-    monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
     monkeypatch.setattr(
-        "hud.environment.workspace.usable_seatbelt",
+        "hud.environment.isolator.usable_seatbelt",
         lambda: Seatbelt("/usr/bin/sandbox-exec"),
     )
     ws = Workspace(tmp_path / "root", network=True)

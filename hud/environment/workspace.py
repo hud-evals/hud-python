@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
+from hud.environment.bwrap import Bubblewrap, usable_bwrap
 from hud.environment.egress import (
     BRIDGE_PORT,
     VISITOR_PORT,
@@ -30,13 +31,11 @@ from hud.environment.egress import (
     proxy_environment,
 )
 from hud.environment.isolator import (
-    Bubblewrap,
     BwrapIsolator,
     Isolator,
     SeatbeltIsolator,
     missing_isolation_error,
     select_isolator,
-    usable_bwrap,
 )
 from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
 from hud.environment.seatbelt import (
@@ -44,7 +43,6 @@ from hud.environment.seatbelt import (
     generate_seatbelt_profile,
     policy_params,
     seatbelt_argv,
-    usable_seatbelt,
 )
 from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
 
@@ -316,9 +314,18 @@ class Workspace:
         self._system_mounts: tuple[Mount, ...] = tuple(
             system_mounts if system_mounts is not None else DEFAULT_SYSTEM_MOUNTS,
         )
-        self._bwrap = usable_bwrap()
-        self._seatbelt = None if self._bwrap is not None else usable_seatbelt()
-        self._isolator = select_isolator(self._bwrap, self._seatbelt)
+        self._isolator = select_isolator()
+        # Backing fields kept for existing call sites / tests that reassign them
+        # after construction; prefer reading via ``_active_isolator()``.
+        if isinstance(self._isolator, BwrapIsolator):
+            self._bwrap = self._isolator.backend
+            self._seatbelt = None
+        elif isinstance(self._isolator, SeatbeltIsolator):
+            self._bwrap = None
+            self._seatbelt = self._isolator.backend
+        else:
+            self._bwrap = None
+            self._seatbelt = None
         # Without a remounting isolator there is no `/workspace` mount — the
         # sandbox *is* the real directory, so address it by its real path.
         # Otherwise `cd /workspace` lands in a phantom dir and the editor/bash

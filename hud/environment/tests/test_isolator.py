@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
+from hud.environment.bwrap import Bubblewrap
 from hud.environment.isolator import (
-    Bubblewrap,
     BwrapIsolator,
     SeatbeltIsolator,
     WindowsIsolator,
@@ -17,23 +17,29 @@ from hud.environment.isolator import (
 from hud.environment.seatbelt import Seatbelt
 
 
-def test_select_isolator_prefers_bwrap() -> None:
+def test_select_isolator_prefers_bwrap(monkeypatch: pytest.MonkeyPatch) -> None:
     bwrap = Bubblewrap("/usr/bin/bwrap")
     seatbelt = Seatbelt("/usr/bin/sandbox-exec")
-    chosen = select_isolator(bwrap, seatbelt)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: bwrap)
+    monkeypatch.setattr("hud.environment.isolator.usable_seatbelt", lambda: seatbelt)
+    chosen = select_isolator()
     assert isinstance(chosen, BwrapIsolator)
     assert chosen.backend is bwrap
 
 
-def test_select_isolator_falls_back_to_seatbelt() -> None:
+def test_select_isolator_falls_back_to_seatbelt(monkeypatch: pytest.MonkeyPatch) -> None:
     seatbelt = Seatbelt("/usr/bin/sandbox-exec")
-    chosen = select_isolator(None, seatbelt)
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_seatbelt", lambda: seatbelt)
+    chosen = select_isolator()
     assert isinstance(chosen, SeatbeltIsolator)
     assert chosen.backend is seatbelt
 
 
-def test_select_isolator_windows_probe_is_none() -> None:
-    assert select_isolator(None, None) is None
+def test_select_isolator_windows_probe_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
+    monkeypatch.setattr("hud.environment.isolator.usable_seatbelt", lambda: None)
+    assert select_isolator() is None
     assert WindowsIsolator.probe() is None
 
 
