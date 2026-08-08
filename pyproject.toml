@@ -270,4 +270,5 @@ testpaths = ["hud"]
 addopts = "-m 'not integration'"
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
+    "darwin: requires macOS sandbox-exec",
 ]

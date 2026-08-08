@@ -1045,6 +1045,7 @@ def test_a_host_is_permitted_by_name_or_as_a_subdomain() -> None:
     assert not permitted(None, {ANY_HOST})
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="setpriv is Linux-only")
 def test_shell_uid_wraps_sessions_in_setpriv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1070,6 +1071,7 @@ def test_shell_uid_wraps_sessions_in_setpriv(
     assert "echo hi" in argv
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="setpriv is Linux-only")
 def test_shell_identity_keeps_the_declared_primary_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1082,6 +1084,7 @@ def test_shell_identity_keeps_the_declared_primary_group(
     assert argv[argv.index("--regid") + 1] == "2000"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="setpriv is Linux-only")
 def test_caller_env_is_injected_only_after_the_drop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1279,6 +1282,7 @@ def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> N
     from hud.environment import workspace as ws
 
     monkeypatch.setattr(ws, "usable_bwrap", lambda: None)
+    monkeypatch.setattr(ws, "usable_seatbelt", lambda: None)
 
     with pytest.raises(RuntimeError, match="isolation was required"):
         ws.Workspace(tmp_path, require_isolation=True)

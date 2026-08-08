@@ -258,8 +258,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install uv   # if your initialize hook calls uv
 ```
 
-`bubblewrap` (`bwrap`) is required for SSH session isolation — without it,
-`env.workspace()` runs unconfined and logs a warning on every task start.
+`bubblewrap` (`bwrap`) isolates SSH sessions on Linux. On macOS, Workspace
+uses `/usr/bin/sandbox-exec` (Seatbelt) with a generated noread-style profile
+when available. Without either, `env.workspace()` runs unconfined and logs a
+warning (or raises if `require_isolation=True`).
+
+**Mac vs Linux:** there is no `/workspace` remount — the guest path is the
+real workspace directory. Network policy is enforced with Seatbelt + the
+existing Egress proxy (policy-equivalent, not a Linux netns). Peer hostname
+resolution may not match Linux on Mac because Seatbelt cannot inject a sandboxed
+`/etc/hosts` — use loopback IPs or the host's `/etc/hosts`.
 
 **Don't traverse parents for local paths.** `Path(__file__).parents[2]` crashes
 when env.py runs at `/app/env.py` (only one parent). Anchor from `_HERE` and
