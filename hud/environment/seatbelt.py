@@ -24,7 +24,7 @@ MACOS_PATH_TO_SEATBELT_EXECUTABLE: str = "/usr/bin/sandbox-exec"
 _POLICY_DIR = Path(__file__).resolve().parent
 
 _TMPDIR_WRITE_PATHS = (
-    "/tmp",
+    "/tmp",  # noqa: S108 — macOS sandbox path literal, not a temp-file API
     "/private/tmp",
     "/var/folders",
     "/private/var/folders",
@@ -84,12 +84,12 @@ def generate_seatbelt_profile(inputs: SeatbeltPolicyInputs) -> str:
         parts.append(f'(allow file-read* (subpath (param "{param}")))')
 
     if inputs.allow_tmpdir_write:
-        for path in _TMPDIR_WRITE_PATHS:
-            # SBPL requires double-quoted string literals; single quotes (from !r)
-            # are rejected by sandbox-exec on macOS 15 (Darwin 25).
-            parts.append(
-                f'(allow file-read* file-write* file-write-create (subpath "{path}"))'
-            )
+        # SBPL requires double-quoted string literals; single quotes (from !r)
+        # are rejected by sandbox-exec on macOS 15 (Darwin 25).
+        parts.extend(
+            f'(allow file-read* file-write* file-write-create (subpath "{path}"))'
+            for path in _TMPDIR_WRITE_PATHS
+        )
 
     if inputs.allow_all_network:
         parts.append("(allow network*)")

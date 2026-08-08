@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,6 +14,9 @@ from hud.environment.seatbelt import (
     seatbelt_argv,
     usable_seatbelt,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = [
     pytest.mark.darwin,

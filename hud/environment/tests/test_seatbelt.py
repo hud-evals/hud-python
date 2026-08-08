@@ -113,7 +113,7 @@ def test_require_isolation_mentions_seatbelt_on_darwin(
     monkeypatch.setattr("hud.environment.workspace.usable_bwrap", lambda: None)
     monkeypatch.setattr("hud.environment.workspace.usable_seatbelt", lambda: None)
     monkeypatch.setattr(sys, "platform", "darwin")
-    with pytest.raises(RuntimeError, match="[Ss]eatbelt|[Ss]andbox"):
+    with pytest.raises(RuntimeError, match=r"[Ss]eatbelt|[Ss]andbox"):
         Workspace(tmp_path / "root", require_isolation=True)
 
 
