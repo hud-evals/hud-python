@@ -92,7 +92,7 @@ class Capability:
         client_key_path: str | os.PathLike[str] | None = None,
         shell: str | None = None,
         cwd: str | None = None,
-        isolation: Literal["bwrap", "none"] | None = None,
+        isolation: Literal["bwrap", "seatbelt", "none"] | None = None,
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 

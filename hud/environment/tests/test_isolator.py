@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,6 +16,9 @@ from hud.environment.isolator import (
     select_isolator,
 )
 from hud.environment.seatbelt import Seatbelt
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_select_isolator_prefers_bwrap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,15 +48,19 @@ def test_select_isolator_windows_probe_is_none(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_windows_isolator_start_and_wrap_raise() -> None:
+async def test_windows_isolator_start_and_wrap_raise(tmp_path: Path) -> None:
+    from hud.environment.workspace import Workspace
+
     win = WindowsIsolator()
     assert win.name == "windows"
     assert win.remounts_guest_path is False
     assert win.uses_namespace_host is False
+    # Any Workspace instance is fine — methods raise before using it.
+    ws = Workspace(tmp_path / "root")
     with pytest.raises(NotImplementedError, match="Windows"):
-        await win.start_sandbox(None)  # type: ignore[arg-type]
+        await win.start_sandbox(ws)
     with pytest.raises(NotImplementedError, match="Windows"):
-        win.wrap_session(None, "true", cwd=None, env=None, tty=False)  # type: ignore[arg-type]
+        win.wrap_session(ws, "true", cwd=None, env=None, tty=False)
 
 
 def test_missing_isolation_error_mentions_platform() -> None:

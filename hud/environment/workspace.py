@@ -630,6 +630,17 @@ class Workspace:
         from hud.capabilities import Capability
 
         key_path = self.ssh_client_key_path
+        isolator = self._active_isolator()
+        isolation: Literal["bwrap", "seatbelt", "none"]
+        if isolator is None:
+            isolation = "none"
+        elif isolator.name == "bwrap":
+            isolation = "bwrap"
+        elif isolator.name == "seatbelt":
+            isolation = "seatbelt"
+        else:
+            # Future backends (e.g. windows) until Capability.ssh grows a label.
+            isolation = "none"
         return Capability.ssh(
             name=name,
             url=self.ssh_url,
@@ -638,9 +649,7 @@ class Workspace:
             client_key=key_path.read_text() if key_path else None,
             client_key_path=key_path,
             cwd=self._guest_path,
-            isolation=(
-                isolator.name if (isolator := self._active_isolator()) is not None else "none"
-            ),
+            isolation=isolation,
         )
 
     @property
@@ -1297,6 +1306,8 @@ class Workspace:
                     stderr=asyncio.subprocess.PIPE,
                 )
                 assert self._host_bridge.stdin is not None
+                assert self._host_bridge.stdout is not None
+                assert self._host_bridge.stderr is not None
                 self._host_bridge.stdin.write(bridge_config)
                 await self._host_bridge.stdin.drain()
                 if await asyncio.wait_for(self._host_bridge.stdout.readline(), 30.0) != b"ready\n":
@@ -1313,6 +1324,7 @@ class Workspace:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            assert self._sandbox.stdout is not None
             ready = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)
             if ready != _SANDBOX_READY:
                 raise RuntimeError(
