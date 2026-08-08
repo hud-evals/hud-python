@@ -1294,8 +1294,8 @@ class Workspace:
                 await self._host_bridge.stdin.drain()
                 if await asyncio.wait_for(self._host_bridge.stdout.readline(), 30.0) != b"ready\n":
                     detail = (
-                        await self._host_bridge.stderr.read(2048)
-                    ).decode(errors="replace").strip()
+                        (await self._host_bridge.stderr.read(2048)).decode(errors="replace").strip()
+                    )
                     raise RuntimeError(detail or "host Egress bridge did not become ready")
 
             proxy_ports = self._seatbelt_proxy_ports()
