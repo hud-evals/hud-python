@@ -10,16 +10,22 @@ Inspired by harbor-framework/harbor's ClaudeCode agent.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+import asyncssh
+import mcp.types as mcp_types
+
 from hud.agents.base import Agent
-from hud.agents.types import AgentStep, ClaudeSDKConfig, Usage
+from hud.agents.types import AgentStep, ClaudeSDKConfig, ToolStep, Usage
 from hud.settings import settings
-from hud.types import Step
+from hud.types import MCPToolCall, MCPToolResult, Step
+from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.capabilities import RFBClient, SSHClient
@@ -34,6 +40,7 @@ _POSIX_INSTALL_CHECK = (
     "{ curl -fsSL https://claude.ai/install.sh | bash -s -- 2>/dev/null; "
     'export PATH="$HOME/.local/bin:$PATH"; }'
 )
+_PROCESS_CLOSE_TIMEOUT_S = 5.0
 
 
 @dataclass(slots=True)
@@ -47,6 +54,257 @@ class RemoteInvocation:
     command: str
     script_name: str | None = None
     script_body: str | None = None
+
+
+@dataclass(slots=True)
+class _PendingToolCall:
+    call: MCPToolCall
+    started_at: str
+
+
+class _ClaudeStreamParser:
+    """Translate Claude CLI stream messages into canonical HUD steps."""
+
+    def __init__(self, run: Run, *, model: str, started_at: str) -> None:
+        self._run = run
+        self._model = model
+        self._agent_started_at = started_at
+        self._pending_calls: dict[str, _PendingToolCall] = {}
+        self._messages: list[dict[str, Any]] = []
+        self._last_agent_content = ""
+        self._saw_result = False
+        self._error_recorded = False
+
+    @property
+    def message_count(self) -> int:
+        return len(self._messages)
+
+    def feed_line(self, line: str) -> None:
+        line = line.strip()
+        if not line:
+            return
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning("Ignoring non-JSON Claude stream output")
+            return
+        if not isinstance(raw, dict):
+            logger.warning("Ignoring non-object Claude stream message")
+            return
+
+        message = cast("dict[str, Any]", raw)
+        self._messages.append(message)
+        received_at = now_iso()
+        match message.get("type"):
+            case "system" if message.get("subtype") == "init":
+                self._agent_started_at = received_at
+            case "assistant":
+                self._record_assistant(message, received_at)
+            case "user":
+                self._record_tool_results(message, received_at)
+            case "result":
+                self._record_result(message, received_at)
+
+    def finish(self, *, exit_status: int, stderr: str) -> None:
+        trace = self._run.trace
+        trace.extra["messages"] = self._messages
+        trace.extra["exit_status"] = exit_status
+        if stderr:
+            trace.extra["stderr"] = stderr
+        if not trace.content and self._last_agent_content:
+            trace.content = self._last_agent_content
+
+        if exit_status != 0:
+            trace.status = "error"
+            self._record_error(stderr or f"claude CLI exited with status {exit_status}")
+        elif not self._saw_result:
+            trace.status = "error"
+            self._record_error("claude CLI exited without a result message")
+        elif self._pending_calls:
+            trace.status = "error"
+            missing = ", ".join(sorted(self._pending_calls))
+            self._record_error(f"claude CLI exited without results for tool calls: {missing}")
+
+    def _record_assistant(self, event: dict[str, Any], received_at: str) -> None:
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return
+
+        text_parts: list[str] = []
+        thinking_parts: list[str] = []
+        tool_calls: list[MCPToolCall] = []
+        content = message.get("content")
+        if isinstance(content, list):
+            for raw_block in content:
+                if not isinstance(raw_block, dict):
+                    continue
+                block = cast("dict[str, Any]", raw_block)
+                match block.get("type"):
+                    case "text":
+                        if isinstance(block.get("text"), str):
+                            text_parts.append(block["text"])
+                    case "thinking":
+                        if isinstance(block.get("thinking"), str):
+                            thinking_parts.append(block["thinking"])
+                    case "tool_use":
+                        call = _tool_call(block)
+                        if call is not None:
+                            tool_calls.append(call)
+
+        text = "".join(text_parts)
+        if text:
+            self._last_agent_content = text
+        model = message.get("model")
+        stop_reason = message.get("stop_reason")
+        step = AgentStep(
+            content=text,
+            reasoning="\n".join(thinking_parts) if thinking_parts else None,
+            tool_calls=tool_calls,
+            done=not tool_calls,
+            finish_reason=stop_reason if isinstance(stop_reason, str) else None,
+            model=model if isinstance(model, str) else self._model,
+            usage=_usage(message.get("usage")),
+            started_at=self._agent_started_at,
+            ended_at=received_at,
+            extra=_event_metadata(event, message),
+        )
+        self._run.record(step)
+        for call in tool_calls:
+            self._pending_calls[call.id] = _PendingToolCall(call=call, started_at=received_at)
+
+    def _record_tool_results(self, event: dict[str, Any], received_at: str) -> None:
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return
+        content = message.get("content")
+        if not isinstance(content, list):
+            return
+
+        saw_result = False
+        for raw_block in content:
+            if not isinstance(raw_block, dict) or raw_block.get("type") != "tool_result":
+                continue
+            block = cast("dict[str, Any]", raw_block)
+            call_id = block.get("tool_use_id")
+            if not isinstance(call_id, str):
+                continue
+            pending = self._pending_calls.pop(call_id, None)
+            if pending is None:
+                logger.warning("Claude returned a result for unknown tool call %s", call_id)
+                continue
+            saw_result = True
+            self._run.record(
+                ToolStep(
+                    call=pending.call,
+                    result=MCPToolResult(
+                        call_id=call_id,
+                        content=_tool_result_content(block.get("content")),
+                        isError=block.get("is_error") is True,
+                    ),
+                    started_at=pending.started_at,
+                    ended_at=received_at,
+                    extra=_event_metadata(event, message),
+                )
+            )
+        if saw_result:
+            self._agent_started_at = received_at
+
+    def _record_result(self, event: dict[str, Any], received_at: str) -> None:
+        self._saw_result = True
+        trace = self._run.trace
+        result = event.get("result")
+        trace.content = result if isinstance(result, str) else self._last_agent_content
+        is_error = event.get("is_error") is True
+        trace.status = "error" if is_error else "completed"
+        for key in (
+            "subtype",
+            "session_id",
+            "duration_ms",
+            "duration_api_ms",
+            "stop_reason",
+            "num_turns",
+            "total_cost_usd",
+        ):
+            value = event.get(key)
+            if value is not None:
+                trace.extra[key] = value
+        if is_error:
+            self._record_error(trace.content or "claude CLI reported an error", received_at)
+
+    def _record_error(self, error: str, at: str | None = None) -> None:
+        if self._error_recorded:
+            return
+        timestamp = at or now_iso()
+        self._run.record(
+            Step(source="system", error=error, started_at=timestamp, ended_at=timestamp)
+        )
+        self._error_recorded = True
+
+
+def _tool_call(block: dict[str, Any]) -> MCPToolCall | None:
+    call_id = block.get("id")
+    name = block.get("name")
+    if not isinstance(call_id, str) or not isinstance(name, str):
+        logger.warning("Ignoring malformed Claude tool call")
+        return None
+    raw_arguments = block.get("input")
+    if isinstance(raw_arguments, dict):
+        arguments: dict[str, Any] | str = cast("dict[str, Any]", raw_arguments)
+    elif isinstance(raw_arguments, str):
+        arguments = raw_arguments
+    else:
+        arguments = json.dumps(raw_arguments, ensure_ascii=False)
+    return MCPToolCall(id=call_id, name=name, arguments=arguments)
+
+
+def _tool_result_content(value: Any) -> list[mcp_types.ContentBlock]:
+    values = value if isinstance(value, list) else [value]
+    content: list[mcp_types.ContentBlock] = []
+    for item in values:
+        if isinstance(item, str):
+            content.append(mcp_types.TextContent(type="text", text=item))
+        elif (
+            isinstance(item, dict)
+            and item.get("type") == "text"
+            and isinstance(item.get("text"), str)
+        ):
+            content.append(mcp_types.TextContent(type="text", text=item["text"]))
+        elif item is not None:
+            content.append(
+                mcp_types.TextContent(
+                    type="text",
+                    text=json.dumps(item, ensure_ascii=False, separators=(",", ":")),
+                )
+            )
+    return content
+
+
+def _usage(value: Any) -> Usage | None:
+    if not isinstance(value, dict):
+        return None
+    usage = cast("dict[str, Any]", value)
+    normalized = Usage(
+        prompt_tokens=_integer(usage.get("input_tokens")),
+        completion_tokens=_integer(usage.get("output_tokens")),
+        cached_tokens=_integer(usage.get("cache_read_input_tokens")),
+    )
+    return normalized if any(v is not None for v in normalized.model_dump().values()) else None
+
+
+def _integer(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _event_metadata(event: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for key in ("session_id", "uuid", "parent_tool_use_id"):
+        value = event.get(key)
+        if value is not None:
+            metadata[key] = value
+    message_id = message.get("id")
+    if message_id is not None:
+        metadata["message_id"] = message_id
+    return metadata
 
 
 def build_remote_invocation(shell: str, run_cmd: str) -> RemoteInvocation:
@@ -152,20 +410,39 @@ class ClaudeSDKAgent(Agent):
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
         logger.info("Full command: %s", full_cmd)
 
-        completed = await self._ssh.run(full_cmd, check=False)
-        stdout = completed.stdout if isinstance(completed.stdout, str) else ""
-        stderr = completed.stderr if isinstance(completed.stderr, str) else ""
+        parser = _ClaudeStreamParser(run, model=self.config.model, started_at=now_iso())
+        process = await self._ssh.create_process(full_cmd)
+        stderr_task = asyncio.create_task(process.stderr.read())
+        try:
+            while line := await process.stdout.readline():
+                parser.feed_line(line if isinstance(line, str) else line.decode(errors="replace"))
+            await process.wait_closed()
+            stderr_output = await stderr_task
+        except BaseException:
+            process.close()
+            stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stderr_task
+            with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
+                async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
+                    await process.wait_closed()
+            raise
 
-        logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
-
-        if completed.exit_status != 0 and not stdout.strip():
-            error = stderr or f"claude CLI exited with status {completed.exit_status}"
-            run.trace.status = "error"
-            run.trace.extra.update({"exit_status": completed.exit_status, "stderr": stderr})
-            run.record(Step(source="system", error=error))
-            return
-
-        self._parse_stream_json(run, stdout, stderr)
+        stderr = (
+            stderr_output
+            if isinstance(stderr_output, str)
+            else stderr_output.decode(errors="replace")
+        )
+        exit_status = process.exit_status
+        if exit_status is None:
+            raise RuntimeError("claude CLI process closed without an exit status")
+        logger.info(
+            "exit=%s messages=%d stderr=%d",
+            exit_status,
+            parser.message_count,
+            len(stderr),
+        )
+        parser.finish(exit_status=exit_status, stderr=stderr)
 
     def _build_env_vars(self) -> dict[str, str]:
         env: dict[str, str] = {}
@@ -257,67 +534,6 @@ class ClaudeSDKAgent(Agent):
         cli_cmd = " ".join(cli_parts)
         env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
         return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli_cmd}'
-
-    def _parse_stream_json(self, run: Run, stdout: str, stderr: str) -> None:
-        messages: list[dict[str, Any]] = []
-        content_parts: list[str] = []
-        is_error = False
-        info: dict[str, Any] = {}
-        cost_usd: float | None = None
-        num_turns: int | None = None
-
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            messages.append(msg)
-            msg_type = msg.get("type")
-
-            if msg_type == "assistant" and isinstance(msg.get("message"), dict):
-                for raw_block in msg["message"].get("content", []):
-                    if not isinstance(raw_block, dict):
-                        continue
-                    block = cast("dict[str, Any]", raw_block)
-                    if block.get("type") == "text" and block.get("text"):
-                        content_parts.append(str(block["text"]))
-
-            elif msg_type == "result":
-                is_error = msg.get("is_error", False)
-                result_text = msg.get("result")
-                if result_text:
-                    content_parts.append(result_text)
-                info["session_id"] = msg.get("session_id")
-                info["duration_ms"] = msg.get("duration_ms")
-                info["stop_reason"] = msg.get("stop_reason")
-                num_turns = msg.get("num_turns")
-                cost_usd = msg.get("total_cost_usd")
-
-        content = "\n".join(content_parts)
-        trace = run.trace
-        trace.status = "error" if is_error else "completed"
-        trace.content = content
-        # Raw CLI stream kept locally; a claude-native serializer can take over
-        # per-turn fidelity later (the CLI session is its own span vocabulary).
-        trace.extra["messages"] = messages
-        if stderr:
-            trace.extra["stderr"] = stderr
-
-        # The CLI run collapses to one coarse agent step with aggregate usage.
-        run.record(
-            AgentStep(
-                content=content,
-                done=True,
-                model=self.config.model,
-                usage=Usage(cost_usd=cost_usd, llm_call_count=num_turns),
-                error=content if is_error else None,
-                extra={k: v for k, v in info.items() if v is not None},
-            ),
-        )
 
 
 __all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig", "RemoteInvocation", "build_remote_invocation"]

@@ -9,6 +9,7 @@ rejected by the remote shell (and silently fails under PowerShell), so the
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import re
 from types import SimpleNamespace
@@ -19,7 +20,7 @@ import pytest
 
 from hud.agents.claude.sdk import computer_mcp
 from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
-from hud.agents.types import ClaudeSDKConfig
+from hud.agents.types import AgentStep, ClaudeSDKConfig, ToolStep
 from hud.capabilities import Capability, RFBClient, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
 
@@ -48,10 +49,50 @@ def test_posix_shell_runs_inline_with_install_check() -> None:
 # ─── _exec end-to-end over a fake SSH workspace ────────────────────────
 
 
+class _FakeProcess:
+    def __init__(
+        self,
+        stdout: str,
+        *,
+        stderr: str = "",
+        exit_status: int = 0,
+        pause_after: int | None = None,
+    ) -> None:
+        self.stdout = self
+        self.stderr = self
+        self._lines = stdout.splitlines(keepends=True)
+        self._stderr = stderr
+        self._pause_after = pause_after
+        self._index = 0
+        self.exit_status = exit_status
+        self.blocked = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def readline(self) -> str:
+        if self._pause_after == self._index:
+            self.blocked.set()
+            await self.release.wait()
+            self._pause_after = None
+        if self._index == len(self._lines):
+            return ""
+        line = self._lines[self._index]
+        self._index += 1
+        return line
+
+    async def read(self) -> str:
+        return self._stderr
+
+    def close(self) -> None:
+        pass
+
+    async def wait_closed(self) -> None:
+        pass
+
+
 class _FakeConn:
-    def __init__(self, sink: dict[str, bytes], result: Any) -> None:
+    def __init__(self, sink: dict[str, bytes], process: _FakeProcess) -> None:
         self._sink = sink
-        self._result = result
+        self._process = process
         self.ran: list[str] = []
         self.write_commands: list[str] = []
 
@@ -83,8 +124,12 @@ class _FakeConn:
             else:
                 self._sink[name] = b""
             return SimpleNamespace(stdout="", stderr="", exit_status=0)
+        raise AssertionError(f"unexpected buffered command: {cmd}")
+
+    async def create_process(self, cmd: str, **kwargs: Any) -> _FakeProcess:
+        assert kwargs == {}
         self.ran.append(cmd)
-        return self._result
+        return self._process
 
 
 def _fake_run() -> Any:
@@ -94,9 +139,12 @@ def _fake_run() -> Any:
 
 
 _STREAM_JSON = (
-    '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n'
-    '{"type":"result","is_error":false,"result":"done","session_id":"s",'
-    '"duration_ms":5,"num_turns":2,"total_cost_usd":0.01}\n'
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"editing"},'
+    '{"type":"tool_use","id":"tool-1","name":"Write","input":{}}]}}\n'
+    '{"type":"user","message":{"content":[{"type":"tool_result",'
+    '"tool_use_id":"tool-1","content":"wrote a.txt","is_error":false}]}}\n'
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"finished"}]}}\n'
+    '{"type":"result","is_error":false,"result":"finished"}\n'
 )
 
 
@@ -115,7 +163,7 @@ def _agent_with_conn(shell: str, conn: _FakeConn) -> ClaudeSDKAgent:
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0))
+    conn = _FakeConn(sink, _FakeProcess(_STREAM_JSON))
     agent = _agent_with_conn("cmd", conn)
 
     run = _fake_run()
@@ -126,12 +174,12 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     assert sink[".hud_run.bat"].startswith(b"@echo off\r\n")
     assert sink[".hud_prompt.txt"] == b"build it"
     assert run.trace.status == "completed"
-    assert "done" in run.trace.content
+    assert run.trace.content == "finished"
 
 
 async def test_exec_on_bash_runs_inline_without_batch() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0))
+    conn = _FakeConn(sink, _FakeProcess(_STREAM_JSON))
     agent = _agent_with_conn("bash", conn)
 
     run = _fake_run()
@@ -147,7 +195,7 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
 
 async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, SimpleNamespace(stdout="", stderr="boom", exit_status=1))
+    conn = _FakeConn(sink, _FakeProcess("", stderr="boom", exit_status=1))
     agent = _agent_with_conn("cmd", conn)
 
     run = _fake_run()
@@ -156,6 +204,35 @@ async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
     assert run.trace.status == "error"
     assert run.trace.extra["exit_status"] == 1
     assert run.steps[0].error == "boom"
+
+
+async def test_exec_records_claude_turn_before_process_exit() -> None:
+    sink: dict[str, bytes] = {}
+    process = _FakeProcess(_STREAM_JSON, pause_after=1)
+    conn = _FakeConn(sink, process)
+    agent = _agent_with_conn("bash", conn)
+    run = _fake_run()
+
+    execution = asyncio.create_task(agent._exec(run, prompt="edit it", max_steps=5))
+    await process.blocked.wait()
+
+    assert not execution.done()
+    assert len(run.steps) == 1
+    first = run.steps[0]
+    assert isinstance(first, AgentStep)
+    assert first.content == "editing"
+    assert first.tool_calls[0].id == "tool-1"
+
+    process.release.set()
+    await execution
+
+    assert [type(step) for step in run.steps] == [AgentStep, ToolStep, AgentStep]
+    tool = cast("ToolStep", run.steps[1])
+    assert tool.started_at == first.ended_at
+    final = cast("AgentStep", run.steps[2])
+    assert final.started_at == tool.ended_at
+    assert run.trace.status == "completed"
+    assert run.trace.content == "finished"
 
 
 @pytest.mark.parametrize(

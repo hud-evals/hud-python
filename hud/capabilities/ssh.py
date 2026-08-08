@@ -101,6 +101,30 @@ class SSHClient(CapabilityClient):
                 raise SSHConnectionError("SSH connection lost during operation") from exc
             raise
 
+    async def create_process(
+        self,
+        *args: object,
+        **kwargs: Any,
+    ) -> asyncssh.SSHClientProcess[Any]:
+        """Start a streaming command, reconnecting first when the transport is closed.
+
+        The caller owns the returned process and must close it when interrupted.
+        Commands are never replayed after the process has been created.
+        """
+        conn: asyncssh.SSHClientConnection | None = None
+        try:
+            conn = await self._connection()
+            assert conn is not None
+            return await conn.create_process(*args, **kwargs)
+        except asyncssh.ChannelOpenError as exc:
+            raise SSHConnectionError("SSH server rejected the session") from exc
+        except asyncssh.ConnectionLost as exc:
+            raise SSHConnectionError("SSH connection lost while opening session") from exc
+        except (OSError, asyncssh.Error) as exc:
+            if conn is not None and _is_closed(conn):
+                raise SSHConnectionError("SSH connection lost while opening session") from exc
+            raise
+
     async def _connection(self) -> asyncssh.SSHClientConnection:
         if self._closing:
             raise SSHConnectionError("SSH client is closed")
