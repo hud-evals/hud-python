@@ -43,8 +43,9 @@ class SeatbeltPolicyInputs:
     allow_tmpdir_write: bool = True
     proxy_loopback_ports: tuple[int, ...] = ()
     #: ``(host, port)`` loopback endpoints beyond ``127.0.0.1`` (e.g. peer
-    #: ``127.0.0.2:5432``). Seatbelt's ``localhost:*`` filter matches only
-    #: ``127.0.0.1`` / ``::1``, not other 127.0.0.0/8 addresses.
+    #: ``127.0.0.2:5432``). Numeric ``127.0.0.0/8`` peers need an explicit
+    #: ``remote ip`` rule; the ``localhost:<port>`` filter only matches
+    #: ``127.0.0.1`` / ``::1`` / the ``localhost`` hostname, not other 127.x.
     proxy_loopback_endpoints: tuple[tuple[str, int], ...] = ()
     allow_all_network: bool = False
 
@@ -94,11 +95,14 @@ def generate_seatbelt_profile(inputs: SeatbeltPolicyInputs) -> str:
     if inputs.allow_all_network:
         parts.append("(allow network*)")
     elif inputs.proxy_loopback_ports:
-        # Restricted network: static loopback allow + per-port / peer endpoints.
+        # Restricted network: per-port / peer endpoints only (no localhost:*).
         parts.append(_load_policy("seatbelt_network_policy.sbpl"))
         for port in inputs.proxy_loopback_ports:
             parts.append(f'(allow network-outbound (remote ip "127.0.0.1:{port}"))')
             parts.append(f'(allow network-outbound (remote ip "[::1]:{port}"))')
+            # Clients that dial the hostname ``localhost`` need this form;
+            # Seatbelt treats it separately from numeric 127.0.0.1 / ::1.
+            parts.append(f'(allow network-outbound (remote ip "localhost:{port}"))')
         for host, port in inputs.proxy_loopback_endpoints:
             parts.append(f'(allow network-outbound (remote ip "{host}:{port}"))')
 

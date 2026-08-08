@@ -1411,12 +1411,7 @@ class Workspace:
             return ["cmd.exe"]
         isolator = self._active_isolator()
         if isolator is not None:
-            # Per-session wrap backends (Seatbelt) return a complete argv; the
-            # namespace-host backends (bwrap) build argv that may still get a
-            # privilege-drop prefix below.
             argv = isolator.wrap_session(self, command, cwd=cwd, env=env, tty=tty)
-            if not isolator.uses_namespace_host:
-                return argv
         else:
             # The same payload the sandboxed forms run. Built here too rather
             # than left as a bare shell, so that ``env`` and ``tty`` mean the
@@ -1424,6 +1419,8 @@ class Workspace:
             # env reaches the shell only *after* any drop: an LD_PRELOAD in it
             # must never be in the environment of the root-run setpriv.
             argv = _payload_argv(command, self._full_env(env), ctty=tty)
+        # Prefix outside the isolator wrap (setpriv → sandbox-exec / bwrap) so
+        # Seatbelt sessions also drop when shell_uid is configured on Linux.
         if self._drops_privileges():
             argv = [*self._drop_argv(), *argv]
         return argv

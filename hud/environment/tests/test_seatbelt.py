@@ -66,7 +66,11 @@ def test_isolated_network_allows_only_proxy_ports() -> None:
     )
     assert "3128" in profile
     assert "6379" in profile
-    assert '(allow network-outbound (remote ip "localhost:*"))' in profile
+    assert '(allow network-outbound (remote ip "127.0.0.1:3128"))' in profile
+    assert '(allow network-outbound (remote ip "[::1]:3128"))' in profile
+    assert '(allow network-outbound (remote ip "localhost:3128"))' in profile
+    # Must not open every loopback port (egress boundary).
+    assert '(allow network-outbound (remote ip "localhost:*"))' not in profile
     # Must not be unrestricted
     assert "(allow network*)" not in profile
 
@@ -257,6 +261,24 @@ async def test_shell_argv_wraps_with_seatbelt(
     argv = ws.shell_argv()
     assert argv[0] == "/usr/bin/sandbox-exec"
     assert "-p" in argv
+
+
+def test_shell_argv_prefixes_setpriv_outside_seatbelt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Privilege drop must wrap sandbox-exec, not be skipped for Seatbelt."""
+    monkeypatch.setattr("hud.environment.isolator.usable_bwrap", lambda: None)
+    monkeypatch.setattr(
+        "hud.environment.isolator.usable_seatbelt",
+        lambda: Seatbelt("/usr/bin/sandbox-exec"),
+    )
+    ws = Workspace(tmp_path / "root", network=True, shell_uid=1000)
+    monkeypatch.setattr(ws, "_drops_privileges", lambda: True)
+    monkeypatch.setattr(ws, "_setpriv", lambda: "/usr/bin/setpriv")
+    argv = ws.shell_argv("true")
+    assert argv[:2] == ["/usr/bin/setpriv", "--reuid"]
+    assert "/usr/bin/sandbox-exec" in argv
+    assert argv.index("/usr/bin/setpriv") < argv.index("/usr/bin/sandbox-exec")
 
 
 def test_capability_reports_seatbelt_isolation(

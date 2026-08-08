@@ -1,5 +1,10 @@
 ; Restricted-network slice for Seatbelt profiles when Workspace owns a
 ; private network and reaches out only through the host Egress bridge.
-; Specific 127.0.0.1 / ::1 ports and other 127.0.0.X peer endpoints are
-; appended by generate_seatbelt_profile.
-(allow network-outbound (remote ip "localhost:*"))
+;
+; Do NOT allow ``localhost:*`` here — that would open every loopback port and
+; defeat ``allowed_hosts`` / per-port egress. Concrete ``127.0.0.1``, ``::1``,
+; ``localhost:<port>``, and peer ``127.0.0.X`` endpoints are appended by
+; ``generate_seatbelt_profile``.
+;
+; This file is intentionally rules-free: loaded for stable structure /
+; documentation next to the base policy.
