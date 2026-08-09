@@ -21,10 +21,11 @@ from hud.eval import (
     RuntimeConfig,
     RuntimeGPU,
     RuntimeResources,
+    RuntimeTPU,
     Task,
     Taskset,
 )
-from hud.eval.compose import ComposeConfig, ComposeProjectRef
+from hud.eval.runtime.compose import ComposeConfig, ComposeProjectRef
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -122,12 +123,20 @@ def test_roundtrip_is_stable_through_plain_pydantic() -> None:
 
 
 def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
+    resources = RuntimeResources(
+        cpu=2,
+        memory_mb=4096,
+        storage_mb=16384,
+        gpu=RuntimeGPU(type=["H100", "A100"]),
+        os="windows",
+        tpu=RuntimeTPU(type="v5", topology="2x2"),
+    )
     original = Task(
         env="browser",
         id="checkout",
         runtime_config=RuntimeConfig(
             image="hud-browser:firefox",
-            resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+            resources=resources,
         ),
     ).model_dump(exclude_none=True)
 
@@ -135,7 +144,7 @@ def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
 
     assert rebuilt.runtime_config == RuntimeConfig(
         image="hud-browser:firefox",
-        resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+        resources=resources,
     )
     assert rebuilt.model_dump(exclude_none=True) == original
 

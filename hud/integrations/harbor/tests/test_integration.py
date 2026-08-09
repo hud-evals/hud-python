@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from hud.agents.base import Agent
-from hud.eval import DockerRuntime, Shared
+from hud.eval import DockerRuntime, Shared, Taskset
 from hud.integrations import harbor
 
 if TYPE_CHECKING:
@@ -31,6 +31,12 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(sys.platform == "win32", reason="adapted images are Linux containers"),
 ]
+
+
+def _adapt(path: Path, *, hud_requirement: str = "hud") -> Taskset:
+    result = harbor.adapt(path, hud_requirement=hud_requirement)
+    assert result.failures == ()
+    return result.taskset
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -149,7 +155,7 @@ async def _grade_every_task(dataset: Path, wheel: Path) -> dict[str, Run]:
         }
 
     solutions = await asyncio.to_thread(load_solutions)
-    taskset = harbor.adapt(dataset, hud_requirement=str(wheel))
+    taskset = _adapt(dataset, hud_requirement=str(wheel))
     job = await taskset.run(
         Oracle(solutions),
         runtime=DockerRuntime(),
@@ -184,7 +190,13 @@ def separately_graded(tmp_path_factory: pytest.TempPathFactory, wheel: Path) -> 
     """Adapt and grade the separate-verifier fixture."""
     dataset = tmp_path_factory.mktemp("harbor-separate") / "harbor-harness"
     dataset.mkdir()
-    shutil.copytree(TASKS / "sidecar-reachability", dataset / "sidecar-reachability")
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    declaration = task / "task.toml"
+    declaration.write_text(
+        declaration.read_text("utf-8") + "\n[verifier.environment]\ncpus = 1\n",
+        encoding="utf-8",
+    )
     return asyncio.run(_grade_every_task(dataset, wheel))
 
 
@@ -219,6 +231,112 @@ def test_harbor_phase_behavior(graded: dict[str, Run], task_id: str) -> None:
 
 def test_separate_verifier_phase_behavior(separately_graded: dict[str, Run]) -> None:
     test_harbor_phase_behavior(separately_graded, "sidecar-reachability")
+
+
+def test_sidecar_ports_are_discovered_from_the_built_image(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-sidecar-ports") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    compose = task / "environment/docker-compose.yaml"
+    authored = compose.read_text("utf-8")
+    inferred = authored.replace(
+        "    image: ${SIDECAR_IMAGE:-python:3.11-alpine}\n",
+        "    build: ./workspace\n",
+    ).replace('    expose: ["5678", "5679"]\n', "")
+    assert inferred != authored
+    compose.write_text(inferred, encoding="utf-8")
+    sidecar = task / "environment/workspace"
+    sidecar.mkdir()
+    (sidecar / "Dockerfile").write_text(
+        "FROM python:3.11-alpine\nEXPOSE 5678 5679\n",
+        encoding="utf-8",
+    )
+
+    runs = asyncio.run(_grade_every_task(dataset, wheel))
+
+    test_harbor_phase_behavior(runs, "sidecar-reachability")
+
+
+def test_separate_verifier_artifact_materialization_is_repeatable(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-verifier-artifacts") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+
+    async def grade_twice() -> list[Run]:
+        taskset = _adapt(dataset, hud_requirement=str(wheel))
+        job = await taskset.run(
+            Oracle({"sidecar-reachability": (task / "solution/solve.sh").read_text("utf-8")}),
+            runtime=Shared(DockerRuntime(), width=1),
+            group=2,
+            max_concurrent=1,
+        )
+        return job.runs
+
+    runs = asyncio.run(grade_twice())
+
+    assert len(runs) == 2
+    assert all(run.reward == 1.0 for run in runs)
+
+
+def test_separate_verifier_artifacts_are_accessible_to_child_user(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-child-user") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    dockerfile = task / "tests/Dockerfile"
+    dockerfile.write_text(
+        dockerfile.read_text("utf-8").replace("USER verifier\n", "USER root\n"),
+        encoding="utf-8",
+    )
+    (task / "tests/test.sh").write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "mkdir -p /logs/verifier\n"
+        "if su verifier -s /bin/sh -c 'test \"$(cat /root/agent-output.txt)\" = private'; then\n"
+        "  echo 1 > /logs/verifier/reward.txt\n"
+        "else\n"
+        "  echo 0 > /logs/verifier/reward.txt\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 1.0
+
+
+def test_fedora_environment_bootstrap(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-fedora") / "harbor-harness"
+    task = dataset / "fedora-bootstrap"
+    (task / "environment").mkdir(parents=True)
+    (task / "tests").mkdir()
+    (task / "solution").mkdir()
+    (task / "task.toml").write_text(
+        '[task]\nname = "fedora-bootstrap"\n\n[verifier]\ntimeout_sec = 30\n',
+        encoding="utf-8",
+    )
+    (task / "instruction.md").write_text("Verify Fedora bootstrap.\n", encoding="utf-8")
+    (task / "environment/Dockerfile").write_text(
+        "FROM fedora:42\nWORKDIR /app\n",
+        encoding="utf-8",
+    )
+    (task / "tests/test.sh").write_text(
+        "#!/bin/bash\necho 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+    (task / "solution/solve.sh").write_text("true\n", encoding="utf-8")
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["fedora-bootstrap"]
+
+    assert run.reward == 1.0
 
 
 def test_separate_verifier_rejects_artifact_symlinks(
@@ -295,7 +413,7 @@ timeout_sec = 30
     (task / "solution" / "solve.sh").write_text("true\n", encoding="utf-8")
 
     async def grade_twice() -> list[Run]:
-        taskset = harbor.adapt(dataset, hud_requirement=str(wheel))
+        taskset = _adapt(dataset, hud_requirement=str(wheel))
         job = await taskset.run(
             Oracle({"sidecar-reachability": "true"}),
             runtime=Shared(DockerRuntime(), width=1),

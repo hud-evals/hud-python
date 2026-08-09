@@ -30,9 +30,10 @@ supervised startup order - are the container boundaries and `depends_on` conditi
 
 A Compose row selects its document with `RuntimeConfig.compose`; `compose_project` names the root
 that travels when the project is serialized and uploaded. Everything the build needs - contexts,
-bind mounts, `env_file`, configs, secrets - must live under that root. Host environment
-interpolation, `include`, and `extends` are not part of the serialized contract: the document that
-uploads is the document that runs.
+bind mounts, `env_file`, configs, secrets - must live under that root. Interpolation resolves from
+the `.env` beside the Compose file and from defaults in the document; HUD does not read values from
+the process environment, so an unbound variable is rejected. `include` and `extends` are not part
+of the serialized contract: the document that uploads is the document that runs.
 
 Every runnable service has an `image`, a `build`, or both; paths are relative to the project. An
 optional `build.sh` beside the document is a preparation hook - it resolves or builds prerequisite

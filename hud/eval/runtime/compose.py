@@ -14,10 +14,125 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+
+
+_COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+class ComposeUnboundVariableError(ValueError):
+    """A Compose variable depends on values outside the packaged project."""
+
+
+def _interpolate_compose_value(value: str, environment: Mapping[str, str]) -> str:
+    result: list[str] = []
+    index = 0
+    while index < len(value):
+        marker = value.find("$", index)
+        if marker < 0:
+            result.append(value[index:])
+            break
+        result.append(value[index:marker])
+        if marker + 1 >= len(value):
+            result.append("$")
+            break
+        following = value[marker + 1]
+        if following == "$":
+            result.append("$$")
+            index = marker + 2
+            continue
+        if following == "{":
+            depth = 1
+            end = marker + 2
+            while end < len(value) and depth:
+                if value.startswith("${", end):
+                    depth += 1
+                    end += 2
+                    continue
+                if value[end] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                end += 1
+            if depth:
+                raise ValueError("invalid Compose interpolation: unclosed variable")
+            expression = value[marker + 2 : end]
+            result.append(_resolve_compose_variable(expression, environment))
+            index = end + 1
+            continue
+        match = _COMPOSE_VARIABLE.match(value, marker + 1)
+        if match is None:
+            result.append("$")
+            index = marker + 1
+            continue
+        name = match.group()
+        if name not in environment:
+            raise ComposeUnboundVariableError(
+                f"Compose variable {name!r} is not set by the project .env"
+            )
+        result.append(environment[name])
+        index = match.end()
+    return "".join(result)
+
+
+def _resolve_compose_variable(expression: str, environment: Mapping[str, str]) -> str:
+    match = _COMPOSE_VARIABLE.match(expression)
+    if match is None:
+        raise ValueError(f"invalid Compose interpolation expression {expression!r}")
+    name = match.group()
+    suffix = expression[match.end() :]
+    value = environment.get(name)
+    if not suffix:
+        if value is None:
+            raise ComposeUnboundVariableError(
+                f"Compose variable {name!r} is not set by the project .env"
+            )
+        return value
+
+    operator = next(
+        (item for item in (":-", ":?", ":+", "-", "?", "+") if suffix.startswith(item)), None
+    )
+    if operator is None:
+        raise ValueError(f"invalid Compose interpolation expression {expression!r}")
+    operand = suffix[len(operator) :]
+    is_set = value is not None
+    is_nonempty = is_set and value != ""
+    if operator == ":-":
+        return value if is_nonempty else _interpolate_compose_value(operand, environment)
+    if operator == "-":
+        return value if is_set else _interpolate_compose_value(operand, environment)
+    if operator == ":+":
+        return _interpolate_compose_value(operand, environment) if is_nonempty else ""
+    if operator == "+":
+        return _interpolate_compose_value(operand, environment) if is_set else ""
+    if (operator == ":?" and not is_nonempty) or (operator == "?" and not is_set):
+        detail = operand or f"Compose variable {name!r} is required"
+        raise ComposeUnboundVariableError(detail)
+    assert value is not None
+    return value
+
+
+def _interpolate_compose_node(
+    node: Node,
+    environment: Mapping[str, str],
+    seen: set[int],
+) -> None:
+    if id(node) in seen:
+        return
+    seen.add(id(node))
+    if isinstance(node, MappingNode):
+        for _, value in node.value:
+            _interpolate_compose_node(value, environment, seen)
+    elif isinstance(node, SequenceNode):
+        for value in node.value:
+            _interpolate_compose_node(value, environment, seen)
+    elif isinstance(node, ScalarNode) and node.tag == "tag:yaml.org,2002:str" and node.style != "'":
+        node.value = _interpolate_compose_value(node.value, environment)
 
 
 class ComposeHealthcheck(BaseModel):
@@ -52,6 +167,7 @@ class ComposeService(BaseModel):
     command: list[str] | None = None
     working_dir: str | None = None
     healthcheck: ComposeHealthcheck | None = None
+    network_mode: str | None = None
     expose: list[str] = Field(default_factory=list)
     ports: list[ComposePort] = Field(default_factory=list)
     volumes: list[str | dict[str, Any]] = Field(default_factory=list)
@@ -126,6 +242,14 @@ class ComposeService(BaseModel):
             raise RuntimeError(f"image defaults were not resolved for {self.image!r}")
         return [*self.entrypoint, *self.command]
 
+    @property
+    def tcp_ports(self) -> set[int]:
+        ports = {
+            int(value) for exposed in self.expose if (value := exposed.partition("/")[0]).isdigit()
+        }
+        ports.update(port.target for port in self.ports if port.protocol == "tcp")
+        return ports
+
     def shell_command(self) -> str:
         command = shlex.join(self.argv)
         if self.working_dir:
@@ -142,13 +266,42 @@ class ComposeConfig(BaseModel):
     services: dict[str, ComposeService]
     networks: dict[str, dict[str, Any] | None] = Field(default_factory=dict)
 
+    def network_owner(self, service: str) -> str:
+        """Service whose network namespace and published ports *service* uses."""
+        seen: set[str] = set()
+        current = service
+        while True:
+            if current in seen:
+                raise ValueError(f"Compose network_mode service cycle includes {current!r}")
+            seen.add(current)
+            try:
+                mode = self.services[current].network_mode
+            except KeyError:
+                raise ValueError(
+                    f"Compose network_mode references unknown service {current!r}"
+                ) from None
+            if mode is None or not mode.startswith("service:"):
+                return current
+            current = mode.removeprefix("service:")
+
     @classmethod
     def from_file(cls, path: Path) -> ComposeConfig:
         """Load a self-contained authored Compose document without Docker."""
         source = path.read_text(encoding="utf-8")
-        if re.search(r"(?<!\$)\$(?:\{|[A-Za-z_])", source):
-            raise ValueError("remote adaptation does not support Compose interpolation")
-        raw = yaml.safe_load(source)
+        environment = {
+            key: value
+            for key, value in dotenv_values(path.parent / ".env", interpolate=False).items()
+            if value is not None
+        }
+        loader = yaml.SafeLoader(source)
+        try:
+            node = loader.get_single_node()
+            if node is None:
+                raise ValueError(f"{path.name} is not a Compose document")
+            _interpolate_compose_node(node, environment, set())
+            raw = loader.construct_document(node)
+        finally:
+            loader.dispose()
         if not isinstance(raw, dict):
             raise ValueError(f"{path.name} is not a Compose document")
         document = raw
@@ -310,6 +463,7 @@ class ComposeProject:
         self,
         published_port: str,
         *,
+        port_service: str = "main",
         seccomp: str | Path,
         service_socket: str | None = None,
         env_vars: Mapping[str, str] | None = None,
@@ -319,7 +473,11 @@ class ComposeProject:
         archive: bool = False,
     ) -> Iterator[ComposeLaunchFiles]:
         main: dict[str, Any] = {
-            "security_opt": [f"seccomp={seccomp}", "systempaths=unconfined"],
+            "security_opt": [
+                f"seccomp={seccomp}",
+                "systempaths=unconfined",
+                "apparmor=unconfined",
+            ],
         }
         if service_socket is not None:
             main["volumes"] = [
@@ -347,7 +505,7 @@ class ComposeProject:
             )
             ports = root / "ports.yaml"
             ports.write_text(
-                f'services:\n  main:\n    ports: !override ["{published_port}"]\n',
+                f'services:\n  {port_service}:\n    ports: !override ["{published_port}"]\n',
                 encoding="utf-8",
             )
             archive_path = None

@@ -8,6 +8,7 @@ import itertools
 import json
 import os
 import shutil
+import signal
 import socket
 import sys
 import tempfile
@@ -25,7 +26,7 @@ import pytest
 from hud.capabilities import SSHClient
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
-from hud.environment.egress import Peer, _field, _Unrelayable
+from hud.environment.egress import Peer, _field, _UnixServer, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessResult
 
@@ -448,6 +449,50 @@ async def test_run_uses_fresh_mounts_and_shared_network_with_visitor_egress(
 
 
 @pytest.mark.asyncio
+async def test_run_uses_a_disposable_writable_hosts_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "hosts"
+    source.write_text("127.0.0.1 localhost\n", encoding="utf-8")
+    ws = Workspace(tmp_path / "root")
+    ws._hosts_path = source
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+
+    @contextlib.asynccontextmanager
+    async def visiting(allowed):
+        assert allowed == ()
+        yield {}
+
+    mounted: Path | None = None
+
+    async def spawn(argv: list[str], **kwargs: Any) -> Any:
+        nonlocal mounted
+        del kwargs
+        hosts_index = argv.index("/etc/hosts")
+        assert argv[hosts_index - 2] == "--bind"
+        mounted = Path(argv[hosts_index - 1])
+        assert mounted.read_text("utf-8") == source.read_text("utf-8")
+        assert mounted.parent.stat().st_mode & 0o777 == 0o711
+        mounted.write_text("127.0.0.1 verifier-added\n", encoding="utf-8")
+        return SimpleNamespace(complete=AsyncMock(return_value=ProcessResult(0, b"passed", b"")))
+
+    monkeypatch.setattr(ws, "visiting", visiting)
+    ws._namespace = cast("Any", SimpleNamespace(spawn=spawn))
+
+    result = await ws.run(["test.sh"], identity=None, writable_hosts=True)
+
+    assert result.stdout == b"passed"
+    assert mounted is not None and not await asyncio.to_thread(mounted.exists)
+    assert not mounted.parent.exists()
+    assert await asyncio.to_thread(source.read_text, "utf-8") == "127.0.0.1 localhost\n"
+
+
+def test_peer_forwarders_use_the_substrate_listen_backlog() -> None:
+    assert _UnixServer.request_queue_size == socket.SOMAXCONN
+
+
+@pytest.mark.asyncio
 async def test_visiting_none_uses_the_workspace_egress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -459,6 +504,10 @@ async def test_visiting_none_uses_the_workspace_egress(
     )
 
     async with ws.visiting(None) as environment:
+        assert environment == {"HTTPS_PROXY": "http://workspace"}
+
+    ws.allowed_hosts = frozenset({"pypi.org"})
+    async with ws.visiting({"pypi.org"}) as environment:
         assert environment == {"HTTPS_PROXY": "http://workspace"}
 
 
@@ -561,6 +610,59 @@ async def test_terminate_sessions_preserves_the_namespace_host(tmp_path: Path) -
 
     terminate_sessions.assert_awaited_once_with()
     assert ws._namespace is not None
+
+
+@pytest.mark.asyncio
+async def test_namespace_management_does_not_share_process_connections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = namespace_mod.NamespaceHost(tmp_path / "namespace.sock")
+    process_connection = SimpleNamespace(run=AsyncMock())
+    host._connection = cast("Any", process_connection)
+    management = SimpleNamespace(
+        run=AsyncMock(return_value=SimpleNamespace(returncode=0)),
+        close=Mock(),
+        wait_closed=AsyncMock(),
+    )
+    open_connection = AsyncMock(return_value=management)
+    monkeypatch.setattr(host, "_open_connection", open_connection)
+
+    await host.terminate_sessions()
+
+    open_connection.assert_awaited_once_with()
+    process_connection.run.assert_not_awaited()
+    management.close.assert_called_once_with()
+    management.wait_closed.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_namespace_host_only_terminates_a_used_session_holder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = namespace_mod._NamespaceHost(
+        tmp_path / "namespace.sock",
+        setup_loopback=False,
+        holder_argv=[],
+        bwrap="bwrap",
+        launcher_depth=0,
+        map_identities=False,
+        ports=frozenset(),
+    )
+    holder = AsyncMock()
+    host.holders["session"] = (holder, 7)
+    kill = Mock()
+    monkeypatch.setattr(os, "kill", kill)
+
+    await host._terminate_sessions()
+    holder.terminate.assert_not_awaited()
+    kill.assert_not_called()
+
+    host.session_used = True
+    await host._terminate_sessions()
+    kill.assert_called_once_with(7, signal.SIGKILL)
+    holder.wait.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -753,8 +855,17 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
     proxies = bind_addresses([Peer("agent", 3128), Peer("verifier", 3129)])
     assert proxies == {"agent": "127.0.0.2", "verifier": "127.0.0.2"}
 
-    with pytest.raises(ValueError, match="two peers are called"):
-        bind_addresses([Peer("db", 5432), Peer("db", 6379)])
+    service = bind_addresses([Peer("db", 5432), Peer("db", 6379)])
+    assert service == {"db": "127.0.0.1"}
+
+    service_with_reserved_port = bind_addresses(
+        [Peer("db", 5432), Peer("db", 6379)],
+        reserved_ports={5432},
+    )
+    assert service_with_reserved_port == {"db": "127.0.0.2"}
+
+    with pytest.raises(ValueError, match="declares port 5432 twice"):
+        bind_addresses([Peer("db", 5432), Peer("db", 5432)])
 
 
 def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
@@ -771,6 +882,12 @@ def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing
     assert "::1\tip6-localhost" in text
     assert "127.0.0.1\tmain" in text
     assert text.endswith("127.0.0.1\tdb\n")
+
+    same_service = hosts_text(
+        [Peer("db", 5432), Peer("db", 6379)],
+        "",
+    )
+    assert same_service == "127.0.0.1\tdb\n"
 
 
 @pytest.mark.asyncio
@@ -811,6 +928,23 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
 
     await ws.stop()
     await sharing.stop()
+
+
+def test_private_workspace_preserves_localhost_without_peers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hosts = tmp_path / "hosts"
+    ws = Workspace(
+        tmp_path / "root",
+        allowed_hosts=set(),
+        hosts_path=hosts,
+    )
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
+
+    ws._prepare_runtime()
+
+    assert "/etc/hosts" in ws.bwrap_argv(["true"])
+    assert "localhost" in hosts.read_text("utf-8")
 
 
 def test_a_peer_is_reached_directly_rather_than_through_the_proxy() -> None:
@@ -1389,3 +1523,40 @@ def test_the_proxy_refuses_to_relay_a_header_it_cannot_represent() -> None:
     ):
         with pytest.raises(_Unrelayable):
             _field(name, value)
+
+
+def test_private_workspace_maps_its_own_hostname_to_loopback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(socket, "gethostname", lambda: "container-self")
+    ws = Workspace(
+        tmp_path / "root",
+        allowed_hosts=set(),
+        local_aliases=["main"],
+        credentials_dir=tmp_path / "keys",
+        hosts_path=tmp_path / "hosts",
+    )
+
+    generated = ws._write_hosts().read_text("utf-8")
+
+    assert "127.0.0.1\tmain" in generated
+    assert "127.0.0.1\tcontainer-self" in generated
+
+
+def test_child_pid_discovery_falls_back_to_proc_stat(monkeypatch: pytest.MonkeyPatch) -> None:
+    entries = [Path("/proc/101"), Path("/proc/102"), Path("/proc/self")]
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == "children":
+            raise OSError("unavailable")
+        if str(path) == "/proc/101/stat":
+            return "101 (child one) S 100 0 0 0"
+        if str(path) == "/proc/102/stat":
+            return "102 (other) S 99 0 0 0"
+        raise OSError("gone")
+
+    monkeypatch.setattr(Path, "iterdir", lambda path: iter(entries))
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    assert namespace_mod._child_pids(100) == [101]

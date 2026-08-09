@@ -12,10 +12,20 @@
         "perf_event_open",
         "process_vm_readv",
         "process_vm_writev",
-        "ptrace",
         "userfaultfd"
       ],
       "action": "SCMP_ACT_ERRNO"
+    },
+    {
+      "names": [
+        "ptrace"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "excludes": {
+        "caps": [
+          "CAP_SYS_PTRACE"
+        ]
+      }
     }
   ]
 }

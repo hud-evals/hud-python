@@ -57,15 +57,21 @@ Compose project, hardware, and timeouts. Set it on the runtime (`runtime_config=
 supports.
 
 ```python
-from hud.eval import RuntimeConfig, RuntimeResources, RuntimeGPU, RuntimeLimits
+from hud.eval import RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU
 
 RuntimeConfig(
     image="my-env",
-    resources=RuntimeResources(cpu=4, memory_mb=8192, gpu=RuntimeGPU(type="A100", count=1)),
+    resources=RuntimeResources(
+        cpu=4,
+        memory_mb=8192,
+        storage_mb=32768,
+        gpu=RuntimeGPU(type=["H100", "A100"], count=1),
+    ),
     limits=RuntimeLimits(startup_timeout_s=300, run_timeout_s=1800),
 )
 
 RuntimeConfig(compose="./compose.yaml")
+RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2")))
 ```
 
 | Field | Description |
@@ -74,12 +80,15 @@ RuntimeConfig(compose="./compose.yaml")
 | `compose` | Local path to a Compose file, or its serialized `ComposeConfig`. Mutually exclusive with `image`. |
 | `compose_project` | Local project root for upload, or a serialized `ComposeProjectRef`. Requires `compose`. |
 | `compose_service_access` | Mount the runtime's Docker socket into Compose `main` at `/media/hud/docker.sock`. Requires `compose`. |
-| `resources` | `RuntimeResources(cpu, memory_mb, gpu=RuntimeGPU(type, count))`. |
+| `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
-Support differs per runtime: `DockerRuntime`, `ModalRuntime`, and `DaytonaRuntime` accept it (Docker
-ignores `limits`; Daytona ignores `run_timeout_s` and resource overrides when booting from a snapshot).
-`LocalRuntime` and `HUDRuntime` reject a per-task `runtime_config`.
+Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
+is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
+enough whole GiB, while providers without disk sizing proceed with their default capacity.
+Daytona accepts a list of GPU alternatives. Docker ignores `limits`; Daytona rejects
+`run_timeout_s` and resource overrides when booting from an already-built snapshot. `LocalRuntime`
+rejects a per-task `runtime_config`.
 
 ## Runtime directory
 

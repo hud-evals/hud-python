@@ -26,12 +26,13 @@ from typing import TYPE_CHECKING, Any
 
 import mcp.types as mcp_types
 import pytest
+from pydantic import BaseModel
 
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.environment import Environment
-from hud.eval import Job, SubprocessRuntime, Task, Taskset
+from hud.environment import Answer, Environment
+from hud.eval import Job, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
 from hud.eval.runtime import _local
 
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from hud.eval.runtime import Runtime
     from hud.eval.task import Task as TaskRow
 
 _SUMS_ENV = """\
@@ -175,13 +175,13 @@ async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> N
     async def solve():
         answer = yield "answer secret"
         completed.append(f"actor:{answer}")
-        yield 0.25
+        yield {"score": 0.25, "answer": answer}
 
     @env.template()
     async def verify(expected: str):
-        answer = yield ""
-        completed.append(f"verifier:{answer}")
-        yield 1.0 if answer == expected else 0.0
+        result = yield ""
+        completed.append(f"verifier:{result['answer']}")
+        yield 1.0 if result["answer"] == expected else 0.0
 
     task = Task(
         env="reviewed",
@@ -200,6 +200,88 @@ async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> N
     assert evaluations == ["solve", "verify"]
 
 
+async def test_actor_result_is_forwarded_to_the_verifier() -> None:
+    env = Environment("reviewed")
+    received: list[tuple[str, str]] = []
+
+    class ActorResult(BaseModel):
+        score: float
+        answer: str
+        handoff: str
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.0, "answer": answer, "handoff": "token"}
+
+    @env.template(returns=ActorResult)
+    async def verify():
+        answer = yield ""
+        assert isinstance(answer, Answer)
+        assert isinstance(answer.content, ActorResult)
+        received.append((answer.content.answer, answer.content.handoff))
+        yield 1.0
+
+    task = Task(
+        env="reviewed",
+        id="solve",
+        verifier=Task(env="reviewed", id="verify"),
+    )
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+
+    assert run.reward == 1.0
+    assert received == [("secret", "token")]
+
+
+async def test_independent_verifier_receives_runtime_handoff() -> None:
+    actor_env = Environment("actor")
+    verifier_env = Environment("judge")
+    transfers: list[str] = []
+
+    @actor_env.template()
+    async def solve():
+        yield "answer secret"
+        yield {"score": 0.0, "handoff": "token"}
+
+    @verifier_env.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["handoff"] == "token" else 0.0
+
+    class ActorHandoff:
+        async def export_to(self, destination: Path) -> None:
+            await asyncio.to_thread(destination.write_text, "files", encoding="utf-8")
+            transfers.append("export")
+
+        async def import_from(self, source: Path) -> None:
+            raise AssertionError("actor imported a handoff")
+
+    class VerifierHandoff:
+        async def export_to(self, destination: Path) -> None:
+            raise AssertionError("verifier exported a handoff")
+
+        async def import_from(self, source: Path) -> None:
+            assert await asyncio.to_thread(source.read_text, "utf-8") == "files"
+            transfers.append("import")
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        env = actor_env if row.env == "actor" else verifier_env
+        endpoint = ActorHandoff() if row.env == "actor" else VerifierHandoff()
+        async with _local(env) as runtime:
+            yield Runtime(runtime.url, handoff=endpoint)
+
+    task = Task(
+        env="actor",
+        id="solve",
+        verifier=Task(env="judge", id="verify", requires_handoff=True),
+    )
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
+
+    assert run.reward == 1.0
+    assert transfers == ["export", "import"]
+
+
 async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> None:
     actor_env = Environment("actor")
     verifier_env = Environment("judge")
@@ -207,13 +289,13 @@ async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> 
 
     @actor_env.template()
     async def solve():
-        yield "answer secret"
-        yield 0.25
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @verifier_env.template()
     async def verify():
-        answer = yield ""
-        yield 1.0 if answer == "secret" else 0.0
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -239,13 +321,13 @@ async def test_verifier_remains_authoritative_after_an_agent_error() -> None:
 
     @actor_env.template()
     async def solve():
-        yield "answer secret"
-        yield 0.25
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @verifier_env.template()
     async def verify():
-        answer = yield ""
-        yield 1.0 if answer == "secret" else 0.0
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -281,8 +363,8 @@ async def test_verifier_remains_authoritative_when_actor_grading_fails(
 
     @verifier_env.template()
     async def verify():
-        answer = yield ""
-        yield 1.0 if answer == "secret" else 0.0
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -315,13 +397,13 @@ async def test_verifier_remains_authoritative_when_actor_grade_is_scoreless(
 
     @actor_env.template()
     async def solve():
-        yield "answer secret"
-        yield 0.25
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @verifier_env.template()
     async def verify():
-        answer = yield ""
-        yield 1.0 if answer == "secret" else 0.0
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -360,8 +442,8 @@ async def test_verifier_provisioning_failure_leaves_the_run_ungraded() -> None:
 
     @actor_env.template()
     async def solve():
-        yield "answer secret"
-        yield 0.25
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -878,8 +960,8 @@ async def test_timeout_during_actor_cleanup_does_not_start_the_verifier() -> Non
 
     @actor_env.template()
     async def solve():
-        yield "answer secret"
-        yield 0.25
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -920,13 +1002,13 @@ async def test_timeout_does_not_cancel_verifier_provider_cleanup() -> None:
 
     @actor_env.template()
     async def solve():
-        yield "answer secret"
-        yield 0.25
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @verifier_env.template()
     async def verify():
-        answer = yield ""
-        yield 1.0 if answer == "secret" else 0.0
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:

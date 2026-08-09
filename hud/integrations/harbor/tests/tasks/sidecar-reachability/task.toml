@@ -1,8 +1,12 @@
 artifacts = [
   { source = "/app/sidecar.html", service = "main" },
   { source = "/app/main.html", service = "main" },
+  { source = "/app/results", destination = "results", exclude = ["*.tmp"] },
+  { source = "/app/binary", service = "main" },
+  { source = "/opt/result", service = "main" },
+  { source = "/root/agent-output.txt", service = "main" },
   { source = "/tmp/main.txt", service = "main" },
-  { source = "/tmp/sidecar.txt", service = "web" },
+  { source = "/tmp/sidecar.txt", service = "workspace" },
 ]
 
 [task]
@@ -17,10 +21,10 @@ timeout_sec = 30
 
 [[verifier.collect]]
 service = "main"
-command = "head -c 1 /dev/urandom >/dev/null && echo collected-from-main > /tmp/main.txt && sleep 0.2"
+command = "curl -fsS --max-time 10 http://127.0.0.1:8080/ >/dev/null && head -c 1 /dev/urandom >/dev/null && echo collected-from-main > /tmp/main.txt && sleep 0.2"
 timeout_sec = 10
 
 [[verifier.collect]]
-service = "web"
+service = "workspace"
 command = "echo collected-from-sidecar > /tmp/sidecar.txt"
 timeout_sec = 10

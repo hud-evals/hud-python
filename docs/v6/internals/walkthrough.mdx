@@ -668,7 +668,7 @@ The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> 
 When `task.verifier` is present, the actor grade is provisional. A verifier in the same environment
 with no row-level runtime configuration starts on the existing client. Otherwise the actor client
 and provider exit before the same provider is called with the verifier row. `_verify` starts that
-task without an agent loop and immediately grades it with `run.trace.content`; its evaluation
+task without an agent loop and immediately grades it with the actor result frame; its evaluation
 replaces the actor grade. The full phase contract is documented in
 [verifier environments](/v6/experimental/verifier-environments#provisioning-order).
 
@@ -694,7 +694,7 @@ Every hop above, in order:
 7. **Checkpoint** - `run` holds a live client (manifest + suspended runner) and the prompt.
 8. `await agent(run)` - agent opens capabilities via `run.client`, loops, fills `run.trace` (answer on `trace.content`).
 9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `run.grade.reward`.
-10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with `trace.content`; replace the actor grade.
+10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with the actor result; replace the actor grade.
 11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded `Run` to `Taskset.run`.
 
 </div>

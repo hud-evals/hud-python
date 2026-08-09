@@ -31,6 +31,7 @@ class TestInitModule:
             "RuntimeGPU",
             "RuntimeLimits",
             "RuntimeResources",
+            "RuntimeTPU",
             "LocalRuntime",
             "SubprocessRuntime",
             "SyncPlan",

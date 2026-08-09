@@ -7,7 +7,7 @@ self-contained Compose projects for the selected runtime to build.
 This API may change between minor releases while the integration is experimental.
 """
 
-from .adapt import adapt
+from .adapt import AdaptFailure, AdaptFinding, AdaptResult, adapt
 from .export import export
 
-__all__ = ["adapt", "export"]
+__all__ = ["AdaptFailure", "AdaptFinding", "AdaptResult", "adapt", "export"]

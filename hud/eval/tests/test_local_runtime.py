@@ -199,12 +199,12 @@ verifier = Environment("{verifier_name}")
 @actor.template(id="solve")
 async def solve():
     answer = yield "answer"
-    yield 0.25
+    yield {{"score": 0.25, "answer": answer}}
 
 @verifier.template(id="verify")
 async def verify():
-    answer = yield ""
-    yield 1.0 if answer == "secret" else 0.0
+    result = yield ""
+    yield 1.0 if result["answer"] == "secret" else 0.0
 """,
         encoding="utf-8",
     )

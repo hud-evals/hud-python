@@ -193,7 +193,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         ]
     )
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     hosted = HostedRuntime(poll_interval=0.0)
@@ -246,7 +246,7 @@ async def test_run_preserves_runtime_config_null_override(
 ) -> None:
     platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     await HostedRuntime(poll_interval=0.0).run(
@@ -278,7 +278,7 @@ async def test_run_submits_compose_document(
     )
     platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     await HostedRuntime(poll_interval=0.0).run(
@@ -302,7 +302,7 @@ async def test_run_submits_compose_document(
 async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform([{"status": "running"}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     hosted = HostedRuntime(poll_interval=0.0, run_timeout=0.001)
@@ -330,7 +330,7 @@ async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.Monke
 
     platform = _StuckSubmitPlatform([])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     run = await HostedRuntime(run_timeout=0.001).run(
@@ -348,7 +348,7 @@ async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.Monke
 async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform([{"status": "completed", "reward": 1.0, "error": None}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     task = Task(env="sums", id="add", args={"a": 2, "b": 3})
@@ -367,7 +367,7 @@ async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> N
 async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform([{"status": "error", "reward": None, "error": "env exploded"}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     task = Task(env="sums", id="add", args={})
@@ -384,7 +384,7 @@ async def test_run_keeps_a_grade_from_an_errored_hosted_trace(
 ) -> None:
     platform = _FakePlatform([{"status": "error", "reward": 0.75, "error": "agent timed out"}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     task = Task(env="sums", id="add", args={})
@@ -408,7 +408,7 @@ async def test_run_folds_ungraded_cancellation_as_an_error(
 ) -> None:
     platform = _FakePlatform([{"status": "cancelled", "reward": None, "error": None}])
     monkeypatch.setattr(
-        "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
     task = Task(env="sums", id="add", args={})
@@ -482,7 +482,7 @@ async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch)
         run.trace.status = "completed"
         return run
 
-    monkeypatch.setattr("hud.eval.runtime.rollout", fake_rollout)
+    monkeypatch.setattr("hud.eval.runtime.hud.rollout", fake_rollout)
 
     runtime = HUDRuntime(run_timeout=90.0)
     job_id = uuid.uuid4().hex
@@ -501,6 +501,16 @@ async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch)
     assert seen["group_id"] == "g1"
     assert seen["trace_id"] == trace_id
     assert seen["rollout_timeout"] == 90.0
+
+    with pytest.raises(ValueError, match="placement requirements"):
+        async with runtime(
+            Task(
+                env="e",
+                id="x",
+                runtime_config=RuntimeConfig(resources=RuntimeResources(gpu=RuntimeGPU())),
+            )
+        ):
+            pass
 
 
 @pytest.mark.asyncio
@@ -530,7 +540,7 @@ async def test_runtime_session_create_payload_omits_trace_id(
             posts.append({"path": path, "headers": headers, "json": json})
             return _FakeResponse({"id": session_id})
 
-    monkeypatch.setattr("hud.eval.runtime.httpx.AsyncClient", _RecordingAsyncClient)
+    monkeypatch.setattr("hud.eval.runtime.hud.httpx.AsyncClient", _RecordingAsyncClient)
 
     created = await HUDRuntime()._create_runtime_session(
         "https://mcp.hud.ai",
@@ -576,7 +586,7 @@ async def test_runtime_session_create_payload_includes_current_trace_id(
             posts.append({"path": path, "headers": headers, "json": json})
             return _FakeResponse({"id": session_id})
 
-    monkeypatch.setattr("hud.eval.runtime.httpx.AsyncClient", _RecordingAsyncClient)
+    monkeypatch.setattr("hud.eval.runtime.hud.httpx.AsyncClient", _RecordingAsyncClient)
 
     with set_trace_context(trace_id):
         created = await HUDRuntime()._create_runtime_session(
@@ -644,7 +654,7 @@ async def test_runtime_session_sets_runtime_connection_params(
         deleted.append((runtime_url, api_key, session))
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
-    monkeypatch.setattr("hud.eval.runtime.asyncio.start_server", fake_start_server)
+    monkeypatch.setattr("hud.eval.runtime.hud.asyncio.start_server", fake_start_server)
     monkeypatch.setattr(HUDRuntime, "_create_runtime_session", fake_create_runtime_session)
     monkeypatch.setattr(HUDRuntime, "_delete_runtime_session", fake_delete_runtime_session)
 

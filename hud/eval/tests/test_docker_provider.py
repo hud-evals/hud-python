@@ -21,8 +21,7 @@ from typing import Any
 
 import pytest
 
-import hud.eval.runtime as runtime_module
-from hud.eval.compose import ComposeConfig, ComposeHealthcheck, ComposeService
+import hud.eval.runtime.docker as runtime_module
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -32,6 +31,12 @@ from hud.eval.runtime import (
     RuntimeLimits,
     RuntimeResources,
 )
+from hud.eval.runtime.compose import (
+    ComposeConfig,
+    ComposeHealthcheck,
+    ComposeProject,
+    ComposeService,
+)
 from hud.eval.task import Task
 
 FAKE_DOCKER_SH = """\
@@ -40,6 +45,10 @@ echo "$@" >> "$DOCKER_LOG"
 case "$1" in
   run) echo cid-42 ;;
   port) {port_behavior} ;;
+  exec) if [ "$3" = "df" ]; then
+    printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+    printf 'overlay 4194304 0 4194304 0%% /\n'
+  fi ;;
   logs) echo "ImportError: boom" ;;
 esac
 """
@@ -105,7 +114,7 @@ def _install_fake_docker(
         exe.write_text(
             FAKE_DOCKER_CMD.format(port_behavior=_port_behavior_for_windows(port_behavior))
         )
-        import hud.eval.runtime as runtime_module
+        import hud.eval.runtime.docker as runtime_module
 
         async def _docker(*args: str, check: bool = True) -> tuple[str, str]:
             return await _docker_via(exe, *args, check=check)
@@ -150,7 +159,8 @@ class _FakeModalSandbox:
         self.tunnels = SimpleNamespace(aio=self._tunnels)
         self.terminate = SimpleNamespace(aio=self._terminate)
         self.filesystem = SimpleNamespace(
-            copy_from_local=SimpleNamespace(aio=self._copy_from_local)
+            copy_from_local=SimpleNamespace(aio=self._copy_from_local),
+            copy_to_local=SimpleNamespace(aio=self._copy_to_local),
         )
         self.exec = SimpleNamespace(aio=self._exec)
 
@@ -171,12 +181,20 @@ class _FakeModalSandbox:
             content = await asyncio.to_thread(source.read_text, "utf-8")
             self._calls["compose_override"] = json.loads(content)
 
+    async def _copy_to_local(self, source: str, target: Path) -> None:
+        downloads = self._calls.setdefault("downloads", [])
+        assert isinstance(downloads, list)
+        downloads.append((source, target.name))
+
     async def _exec(self, *args: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("execs", [])
         assert isinstance(commands, list)
         commands.append((args, kwargs))
 
         async def wait() -> int:
+            wait_event = self._calls.pop("exec_wait", None)
+            if isinstance(wait_event, asyncio.Event):
+                await wait_event.wait()
             return 0
 
         async def read() -> str:
@@ -266,6 +284,7 @@ class _DaytonaImage:
 class _DaytonaResources:
     cpu: float | None = None
     memory: int | None = None
+    disk: int | None = None
     gpu: int | None = None
     gpu_type: list[object] | None = None
 
@@ -515,6 +534,32 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
     assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
 
 
+async def test_docker_handoff_archives_inside_the_container(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    async def fake_docker(*args: str, check: bool = True) -> tuple[str, str]:
+        calls.append((args, check))
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    destination = tmp_path / "handoff.tar.gz"
+
+    await runtime_module._DockerHandoff("cid-42").export_to(destination)
+
+    export, copy, cleanup = calls
+    assert export[0][:6] == ("exec", "--user", "0", "cid-42", "python3", "-c")
+    assert "runtime handoff contains a symbolic link" in export[0][6]
+    archive = export[0][7]
+    assert copy == (("cp", f"cid-42:{archive}", str(destination)), True)
+    assert cleanup == (
+        ("exec", "--user", "0", "cid-42", "rm", "-f", archive),
+        False,
+    )
+
+
 async def test_runtime_config_supplies_image_and_resources(
     tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -569,7 +614,7 @@ def test_runtime_config_overrides_only_explicit_top_level_fields() -> None:
         resources=RuntimeResources(
             cpu=2,
             memory_mb=4096,
-            gpu=RuntimeGPU(type="A10G", count=2),
+            gpu=RuntimeGPU(type=["A10G", "L4"], count=2),
         ),
         limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
     )
@@ -579,7 +624,7 @@ def test_runtime_config_overrides_only_explicit_top_level_fields() -> None:
         resources=RuntimeResources(
             cpu=2,
             memory_mb=4096,
-            gpu=RuntimeGPU(type="A10G", count=2),
+            gpu=RuntimeGPU(type=["A10G", "L4"], count=2),
         ),
         limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
     )
@@ -688,6 +733,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         "security_opt": [
             f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}",
             "systempaths=unconfined",
+            "apparmor=unconfined",
         ],
         "cpus": 2.0,
         "mem_limit": "4096m",
@@ -751,7 +797,7 @@ async def test_docker_runtime_rejects_remote_compose_service_access(
     compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
     monkeypatch.setenv("DOCKER_HOST", "tcp://docker.example:2376")
 
-    with pytest.raises(ValueError, match="requires a local Unix Docker endpoint"):
+    with pytest.raises(ValueError, match="requires compose_service_socket"):
         async with DockerRuntime()(
             Task(
                 env="any-env",
@@ -763,6 +809,42 @@ async def test_docker_runtime_rejects_remote_compose_service_access(
             )
         ):
             pass
+
+
+async def test_docker_runtime_mounts_the_daemon_visible_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    monkeypatch.setenv("DOCKER_HOST", "tcp://docker.example:2376")
+    rendered: dict[str, Any] = {}
+
+    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
+            files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
+            rendered.update(json.loads(files[1].read_text("utf-8")))
+        if args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    task = Task(
+        env="any-env",
+        id="t",
+        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+    )
+
+    async with DockerRuntime(compose_service_socket="/vm/run/docker.sock")(task):
+        pass
+
+    assert rendered["services"]["main"]["volumes"] == [
+        {
+            "type": "bind",
+            "source": "/vm/run/docker.sock",
+            "target": "/media/hud/docker.sock",
+        }
+    ]
 
 
 def test_docker_runtime_accepts_only_one_environment_definition(tmp_path: Path) -> None:
@@ -807,7 +889,7 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
         resources=RuntimeResources(
             cpu=2,
             memory_mb=4096,
-            gpu=RuntimeGPU(type="A10G", count=2),
+            gpu=RuntimeGPU(type=["A10G", "L4"], count=2),
         ),
         limits=RuntimeLimits(startup_timeout_s=30, run_timeout_s=120),
     )
@@ -854,6 +936,8 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     )(_row()) as runtime:
         assert runtime.url == "tcp://modal.host:4567"
         assert runtime.params == {"provider": "modal", "instance_id": "sb-1", "ready_timeout": 600}
+        assert runtime.handoff is not None
+        await runtime.handoff.export_to(tmp_path / "handoff.tar.gz")
 
     assert calls["registry_image"] == "docker:28.3.3-dind"
     kwargs = calls["sandbox_kwargs"]
@@ -884,8 +968,31 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert "docker compose" in execs[0][0][-1]
     assert "sh /hud/project/build.sh" in execs[0][0][-1]
     assert 'up --detach "$BUILD_FLAG" --remove-orphans' in execs[0][0][-1]
-    assert "down" in execs[1][0]
+    assert any("runtime handoff contains an unsupported entry" in call[0][-1] for call in execs)
+    assert "down" in execs[-1][0]
     assert execs[0][1]["timeout"] == 600
+    assert calls["downloads"] == [("/media/hud/handoff.tar.gz", "handoff.tar.gz")]
+
+
+async def test_modal_runtime_bounds_compose_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    calls["exec_wait"] = asyncio.Event()
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+
+    with pytest.raises(TimeoutError, match="Modal Compose startup timed out after 1 seconds"):
+        async with ModalRuntime(
+            runtime_config=RuntimeConfig(
+                compose=compose,
+                limits=RuntimeLimits(startup_timeout_s=1),
+            )
+        )(_row()):
+            pytest.fail("runtime should not become ready")
+
+    assert calls["terminated"] is True
 
 
 async def test_modal_runtime_accepts_modal_image_uri(
@@ -967,7 +1074,7 @@ async def test_modal_runtime_can_override_workdir(
     assert sandbox_kwargs["workdir"] == "/app"
 
 
-async def test_modal_runtime_applies_env_vars_to_image(
+async def test_modal_runtime_passes_env_vars_to_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_modal(monkeypatch)
@@ -979,11 +1086,8 @@ async def test_modal_runtime_applies_env_vars_to_image(
 
     sandbox_kwargs = calls["sandbox_kwargs"]
     assert isinstance(sandbox_kwargs, dict)
-    assert sandbox_kwargs["image"] == _ModalImageRef(
-        "registry",
-        "img:tag",
-        {"TOKEN": "secret"},
-    )
+    assert sandbox_kwargs["image"] == _ModalImageRef("registry", "img:tag")
+    assert sandbox_kwargs["env"] == {"TOKEN": "secret"}
 
 
 async def test_daytona_runtime_config_flows_into_daytona_sdk(
@@ -995,7 +1099,7 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
         resources=RuntimeResources(
             cpu=2,
             memory_mb=4096,
-            gpu=RuntimeGPU(type="H100", count=2),
+            gpu=RuntimeGPU(type=["H100", "A100"], count=2),
         ),
         limits=RuntimeLimits(startup_timeout_s=45),
     )
@@ -1017,7 +1121,7 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
             cpu=2,
             memory=4,
             gpu=2,
-            gpu_type=[_DaytonaGpuType("H100")],
+            gpu_type=[_DaytonaGpuType("H100"), _DaytonaGpuType("A100")],
         ),
     )
     assert create_timeout == 45
@@ -1098,7 +1202,6 @@ services:
 @pytest.mark.parametrize(
     "service",
     [
-        "command: echo $VALUE",
         "extends: {file: base.yaml, service: base}",
     ],
 )
@@ -1107,6 +1210,55 @@ def test_compose_config_rejects_external_resolution(tmp_path: Path, service: str
     compose.write_text(f"services:\n  main:\n    {service}\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="does not support Compose"):
+        ComposeConfig.from_file(compose)
+
+
+def test_compose_config_interpolates_only_artifact_supplied_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOST_ONLY", "secret")
+    (tmp_path / ".env").write_text("IMAGE=example:1\nEMPTY=\n", encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        """
+services:
+  main:
+    image: ${IMAGE}
+    command: "${EMPTY:-serve} $$HOME ${MISSING-default} $? $"
+    environment:
+      LITERAL: '$HOST_ONLY'
+""",
+        encoding="utf-8",
+    )
+
+    service = ComposeConfig.from_file(compose).services["main"]
+
+    assert service.image == "example:1"
+    assert service.command == ["serve", "$$HOME", "default", "$?", "$"]
+    assert service.environment == {"LITERAL": "$HOST_ONLY"}
+
+
+@pytest.mark.parametrize(
+    ("image", "message"),
+    [
+        ("$HOST_ONLY", r"HOST_ONLY.*not set by the project \.env"),
+        ("${IMAGE:?set IMAGE in .env}", r"set IMAGE in \.env"),
+    ],
+)
+def test_compose_config_rejects_unbound_variables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv("HOST_ONLY", "secret")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        f"services:\n  main:\n    image: {image}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
         ComposeConfig.from_file(compose)
 
 
@@ -1311,6 +1463,54 @@ async def test_daytona_rejects_a_fractional_cpu_request(monkeypatch: pytest.Monk
             pass
 
 
+async def test_daytona_rounds_minimum_storage_up_to_gibibytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daytona = _install_fake_daytona(monkeypatch)
+    config = RuntimeConfig(image="img:tag", resources=RuntimeResources(storage_mb=1025))
+
+    async with DaytonaRuntime(runtime_config=config)(_row()):
+        pass
+
+    assert daytona.created[-1].resources.disk == 2
+
+
+async def test_modal_accepts_best_effort_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = RuntimeConfig(image="img:tag", resources=RuntimeResources(storage_mb=1024))
+    calls = _install_fake_modal(monkeypatch)
+
+    async with ModalRuntime(runtime_config=config)(_row()):
+        pass
+
+    assert calls["sandbox_kwargs"] == {
+        "app": "app",
+        "image": _ModalImageRef("registry", "img:tag"),
+        "workdir": None,
+        "unencrypted_ports": [8765],
+        "readiness_probe": ("tcp", 8765),
+        "timeout": 3600,
+    }
+
+
+async def test_docker_admits_minimum_free_disk(
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_docker(
+        tmp_path,
+        port_behavior="echo 127.0.0.1:43210",
+        monkeypatch=monkeypatch,
+    )
+    config = RuntimeConfig(image="img:tag", resources=RuntimeResources(storage_mb=1024))
+
+    async with DockerRuntime(runtime_config=config)(_row()):
+        pass
+
+    calls = await _docker_calls(docker_log)
+    assert "exec cid-42 df -Pk /" in calls
+
+
 async def test_daytona_names_a_sandbox_it_could_not_delete(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -1408,6 +1608,7 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
 def test_docker_profile_allows_workspace_namespace_syscalls() -> None:
     profile = json.loads(runtime_module._DOCKER_SECCOMP_PROFILE.read_text())
     denied = {name for rule in profile["syscalls"] for name in rule["names"]}
+    ptrace = next(rule for rule in profile["syscalls"] if "ptrace" in rule["names"])
 
     assert profile["defaultAction"] == "SCMP_ACT_ALLOW"
     assert {
@@ -1425,6 +1626,7 @@ def test_docker_profile_allows_workspace_namespace_syscalls() -> None:
         "ptrace",
         "userfaultfd",
     } <= denied
+    assert ptrace["excludes"] == {"caps": ["CAP_SYS_PTRACE"]}
 
 
 async def test_docker_runtime_always_prepares_for_workspace_isolation(
@@ -1439,3 +1641,68 @@ async def test_docker_runtime_always_prepares_for_workspace_isolation(
     assert f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}" in calls[0]
     assert "seccomp=unconfined" not in calls[0]
     assert "systempaths=unconfined" in calls[0]
+    assert "apparmor=unconfined" in calls[0]
+
+
+def test_compose_network_owner_follows_service_chains_and_stages_its_port(
+    tmp_path: Path,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        "services:\n"
+        "  main:\n    image: hud:latest\n    network_mode: service:relay\n"
+        "  relay:\n    image: relay:latest\n    network_mode: service:gateway\n"
+        "  gateway:\n    image: gateway:latest\n",
+        encoding="utf-8",
+    )
+    config = ComposeConfig.from_file(compose)
+
+    assert config.network_owner("main") == "gateway"
+    with ComposeProject(compose).stage(
+        "127.0.0.1::8765",
+        port_service=config.network_owner("main"),
+        seccomp="profile.json",
+    ) as files:
+        assert "  gateway:" in files.ports.read_text("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("services", "message"),
+    [
+        (
+            {
+                "main": {"network_mode": "service:relay"},
+                "relay": {"network_mode": "service:main"},
+            },
+            "cycle",
+        ),
+        ({"main": {"network_mode": "service:missing"}}, "unknown service"),
+    ],
+)
+def test_compose_network_owner_rejects_invalid_graphs(
+    services: dict[str, dict[str, str]],
+    message: str,
+) -> None:
+    config = ComposeConfig.model_validate({"services": services})
+
+    with pytest.raises(ValueError, match=message):
+        config.network_owner("main")
+
+
+async def test_docker_rejects_insufficient_free_disk(
+    tmp_path: Path,
+    docker_log: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_docker(
+        tmp_path,
+        port_behavior="echo 127.0.0.1:43210",
+        monkeypatch=monkeypatch,
+    )
+    config = RuntimeConfig(image="img:tag", resources=RuntimeResources(storage_mb=8192))
+
+    with pytest.raises(RuntimeError, match=r"requires 8192 MB.*has 4096 MB"):
+        async with DockerRuntime(runtime_config=config)(_row()):
+            pass
+
+    assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
