@@ -196,7 +196,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HostedRuntime(poll_interval=0.0)
+    hosted = HostedRuntime(poll_interval=0.0, lazy_load=True)
     trace_id = uuid.uuid4().hex
     job_id = uuid.uuid4().hex
     task = Task(
@@ -229,6 +229,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["task"] == "add"
     assert payload["slug"] == "sums-add"
     assert payload["args"] == {"a": 1, "b": 2}
+    assert payload["lazy_load"] is True
     assert payload["runtime_config"] == {
         "image": "registry.example/sums:latest",
         "resources": {"cpu": 2.0, "gpu": {"type": "L4", "count": 1}},

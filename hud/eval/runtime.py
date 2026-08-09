@@ -1482,9 +1482,11 @@ class HostedRuntime:
         *,
         poll_interval: float = 5.0,
         run_timeout: float = 3600.0,
+        lazy_load: bool = False,
     ) -> None:
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
+        self.lazy_load = lazy_load
         self._cancellations: set[asyncio.Task[None]] = set()
 
     async def run(
@@ -1568,6 +1570,7 @@ class HostedRuntime:
             "task": task.id,
             "slug": task.slug,
             "args": task.args,
+            "lazy_load": self.lazy_load,
             "agent": spec,
         }
         if group_id is not None:

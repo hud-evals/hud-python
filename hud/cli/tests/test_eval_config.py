@@ -144,9 +144,14 @@ def test_resolve_placement_remote_uses_hosted_runtime(
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
 
-    placement = eval_mod._resolve_placement(EvalConfig(remote=True), tmp_path, [])
+    placement = eval_mod._resolve_placement(
+        EvalConfig(remote=True, lazy_load=True),
+        tmp_path,
+        [],
+    )
 
     assert isinstance(placement, HostedRuntime)
+    assert placement.lazy_load is True
 
 
 def test_resolve_placement_routes_each_local_row(
@@ -186,6 +191,16 @@ def test_runtime_cli_override_clears_config_remote() -> None:
 def test_runtime_cli_rejects_remote_flag_conflict() -> None:
     with pytest.raises(ValueError, match="--runtime and --remote are mutually exclusive"):
         EvalConfig().merge_cli(runtime="hud", remote=True)
+
+
+def test_lazy_load_cli_override_and_placement_validation() -> None:
+    cfg = EvalConfig().merge_cli(lazy_load=True)
+    assert cfg.lazy_load is True
+
+    with pytest.raises(ValueError, match="requires remote platform execution"):
+        EvalConfig(runtime="local", lazy_load=True).validate_placement()
+
+    EvalConfig(remote=True, lazy_load=True).validate_placement()
 
 
 def test_load_missing_writes_template(tmp_path: Path) -> None:

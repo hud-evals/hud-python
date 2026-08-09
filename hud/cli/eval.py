@@ -170,6 +170,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # gateway = false  # Route LLM API calls through HUD Gateway
 # runtime = "local"  # local, hud, or tcp://host:port
 # remote = false  # Run the whole rollout remotely on HUD
+# lazy_load = false  # Lazily load the remote environment filesystem
 
 [claude]
 # model = "claude-sonnet-4-6"
@@ -267,6 +268,7 @@ class EvalConfig(BaseModel):
         "gateway",
         "runtime",
         "remote",
+        "lazy_load",
     }
     source: str | None = None
     agent_type: AgentType | None = None
@@ -287,6 +289,8 @@ class EvalConfig(BaseModel):
     runtime: str | None = None
     #: Run the whole rollout remotely on the HUD platform.
     remote: bool = False
+    #: Lazily load the environment filesystem for remote platform execution.
+    lazy_load: bool = False
 
     agent_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -397,6 +401,11 @@ class EvalConfig(BaseModel):
         if not settings.api_key:
             hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
 
+    def validate_placement(self) -> None:
+        """Validate options that depend on the resolved execution placement."""
+        if self.lazy_load and not self.remote:
+            raise ValueError("--lazy-load requires remote platform execution")
+
     def get_agent_kwargs(self) -> dict[str, Any]:
         """Build agent kwargs from config.
 
@@ -505,6 +514,7 @@ class EvalConfig(BaseModel):
         task_ids: str | None = None,
         runtime: str | None = None,
         remote: bool = False,
+        lazy_load: bool = False,
     ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
         if runtime is not None and remote:
@@ -549,6 +559,7 @@ class EvalConfig(BaseModel):
             "auto_respond": auto_respond,
             "gateway": gateway,
             "remote": remote,
+            "lazy_load": lazy_load,
         }.items():
             if value:
                 overrides[key] = True
@@ -626,6 +637,7 @@ class EvalConfig(BaseModel):
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
         if self.remote:
             table.add_row("remote", "[bold green]True[/bold green]")
+        table.add_row("lazy_load", str(self.lazy_load))
 
         if self.agent_type:
             table.add_row("", "")
@@ -743,7 +755,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
-        return HostedRuntime()
+        return HostedRuntime(lazy_load=cfg.lazy_load)
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
@@ -913,6 +925,11 @@ def eval_command(
         "--remote",
         help="Run the whole rollout remotely on the HUD platform",
     ),
+    lazy_load: bool = typer.Option(
+        False,
+        "--lazy-load",
+        help="Lazily load the remote environment filesystem",
+    ),
 ) -> None:
     """Run evaluation on datasets or individual tasks with agents.
 
@@ -954,6 +971,7 @@ def eval_command(
             gateway=gateway,
             runtime=runtime,
             remote=remote,
+            lazy_load=lazy_load,
         )
     except ValueError as e:
         hud_console.error(str(e))
@@ -973,6 +991,11 @@ def eval_command(
 
     cfg = cfg.resolve_agent_interactive()
     cfg = cfg.resolve_runtime()
+    try:
+        cfg.validate_placement()
+    except ValueError as e:
+        hud_console.error(str(e))
+        raise typer.Exit(1) from None
 
     if cfg.very_verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
