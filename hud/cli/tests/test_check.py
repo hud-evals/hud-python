@@ -571,6 +571,8 @@ async def test_agent_rollout_preserves_trace_and_attributes_grader_failure() -> 
         ("starting task", "task_startup"),
         ("grading", "grader_execution"),
         ("verifying", "grader_execution"),
+        ("provisioning verifier", "grader_execution"),
+        ("cleanup", "grader_execution"),
         ("agent loop", "oracle_or_agent_reward"),
     ],
 )

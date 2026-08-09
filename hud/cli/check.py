@@ -332,8 +332,7 @@ def _error_phase(detail: str) -> str:
             "grading",
             "verifying",
             "provisioning verifier",
-            "connecting verifier",
-            "verifier cleanup",
+            "cleanup",
         }
     ):
         return "grader_execution"
