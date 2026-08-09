@@ -41,6 +41,7 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from types import TracebackType
 
     from hud.agents.base import Agent
@@ -371,6 +372,8 @@ async def rollout(
     group_id: str | None = None,
     trace_id: str | None = None,
     rollout_timeout: float | None = None,
+    before_agent: Callable[[Run], Awaitable[None]] | None = None,
+    after_agent: Callable[[Run], Awaitable[None]] | None = None,
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
@@ -445,6 +448,9 @@ async def rollout(
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes
+                        if before_agent is not None:
+                            _phase = "pre-agent checkpoint"
+                            await before_agent(live)
                         _phase = "agent loop"
                         try:
                             async with file_tracking_observer(actor_client):
@@ -470,6 +476,9 @@ async def rollout(
                             logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                             run.trace.status = "error"
                             run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                        if after_agent is not None:
+                            _phase = "post-agent checkpoint"
+                            await after_agent(live)
                         _phase = "grading"
 
                     verifier = task.verifier
