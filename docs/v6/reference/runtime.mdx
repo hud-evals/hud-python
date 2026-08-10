@@ -187,12 +187,17 @@ The SDK leases your deployed env by name and tunnels to its control channel; the
 ### `HostedRuntime`
 
 ```python
-HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
+from hud.eval import HostedRuntime, StorageProfile
+
+HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0, storage_profile=StorageProfile.EAGER)
 ```
 
 - **`poll_interval`** - seconds between trace-status polls while the rollout runs remotely.
 - **`run_timeout`** - hard deadline including submission, provisioning, queueing,
   and execution. A timeout requests cancellation and returns an errored `Run`.
+- **`storage_profile`** - how the hosted instance receives the environment filesystem:
+  `EAGER`, `OVERLAYBD`, `NYDUS_EROFS`, `NYDUS_FUSE`, or `FSX_OPENZFS`. The default
+  is `EAGER`.
 
 Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
 **whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and

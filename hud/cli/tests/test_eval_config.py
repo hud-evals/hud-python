@@ -139,19 +139,19 @@ def test_resolve_placement_remote_uses_hosted_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from hud.eval import HostedRuntime
+    from hud.eval import HostedRuntime, StorageProfile
     from hud.settings import settings
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
 
     placement = eval_mod._resolve_placement(
-        EvalConfig(remote=True, lazy_load=True),
+        EvalConfig(remote=True, storage_profile=StorageProfile.NYDUS_EROFS),
         tmp_path,
         [],
     )
 
     assert isinstance(placement, HostedRuntime)
-    assert placement.lazy_load is True
+    assert placement.storage_profile is StorageProfile.NYDUS_EROFS
 
 
 def test_resolve_placement_routes_each_local_row(
@@ -193,14 +193,39 @@ def test_runtime_cli_rejects_remote_flag_conflict() -> None:
         EvalConfig().merge_cli(runtime="hud", remote=True)
 
 
-def test_lazy_load_cli_override_and_placement_validation() -> None:
-    cfg = EvalConfig().merge_cli(lazy_load=True)
-    assert cfg.lazy_load is True
+def test_storage_profile_cli_override_and_placement_validation() -> None:
+    from hud.eval import StorageProfile
+
+    cfg = EvalConfig().merge_cli(storage_profile=StorageProfile.OVERLAYBD)
+    assert cfg.storage_profile is StorageProfile.OVERLAYBD
 
     with pytest.raises(ValueError, match="requires remote platform execution"):
-        EvalConfig(runtime="local", lazy_load=True).validate_placement()
+        EvalConfig(
+            runtime="local",
+            storage_profile=StorageProfile.OVERLAYBD,
+        ).validate_placement()
 
-    EvalConfig(remote=True, lazy_load=True).validate_placement()
+    EvalConfig(remote=True, storage_profile=StorageProfile.OVERLAYBD).validate_placement()
+
+
+def test_load_parses_storage_profile(tmp_path: Path) -> None:
+    """TOML uses the same storage-profile vocabulary as the SDK and CLI."""
+    from hud.eval import StorageProfile
+
+    path = tmp_path / ".hud_eval.toml"
+    path.write_text(
+        '[eval]\nremote = true\nstorage_profile = "fsx-openzfs"\n',
+        encoding="utf-8",
+    )
+
+    cfg = EvalConfig.load(str(path))
+
+    assert cfg.storage_profile is StorageProfile.FSX_OPENZFS
+
+
+def test_invalid_storage_profile_is_rejected() -> None:
+    with pytest.raises(ValueError, match="storage_profile"):
+        EvalConfig.model_validate({"storage_profile": "lazy"})
 
 
 def test_load_missing_writes_template(tmp_path: Path) -> None:

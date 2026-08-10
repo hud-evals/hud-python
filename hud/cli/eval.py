@@ -25,6 +25,7 @@ from rich.table import Table
 
 from hud.cli.utils.api import require_api_key
 from hud.cli.utils.config import parse_key_value
+from hud.eval.runtime import StorageProfile
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
@@ -170,7 +171,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # gateway = false  # Route LLM API calls through HUD Gateway
 # runtime = "local"  # local, hud, or tcp://host:port
 # remote = false  # Run the whole rollout remotely on HUD
-# lazy_load = false  # Lazily load the remote environment filesystem
+# storage_profile = "eager"  # eager, overlaybd, nydus-erofs, nydus-fuse, fsx-openzfs
 
 [claude]
 # model = "claude-sonnet-4-6"
@@ -268,7 +269,7 @@ class EvalConfig(BaseModel):
         "gateway",
         "runtime",
         "remote",
-        "lazy_load",
+        "storage_profile",
     }
     source: str | None = None
     agent_type: AgentType | None = None
@@ -289,8 +290,8 @@ class EvalConfig(BaseModel):
     runtime: str | None = None
     #: Run the whole rollout remotely on the HUD platform.
     remote: bool = False
-    #: Lazily load the environment filesystem for remote platform execution.
-    lazy_load: bool = False
+    #: Filesystem delivery strategy for remote platform execution.
+    storage_profile: StorageProfile = StorageProfile.EAGER
 
     agent_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -403,8 +404,8 @@ class EvalConfig(BaseModel):
 
     def validate_placement(self) -> None:
         """Validate options that depend on the resolved execution placement."""
-        if self.lazy_load and not self.remote:
-            raise ValueError("--lazy-load requires remote platform execution")
+        if self.storage_profile is not StorageProfile.EAGER and not self.remote:
+            raise ValueError("--storage-profile requires remote platform execution")
 
     def get_agent_kwargs(self) -> dict[str, Any]:
         """Build agent kwargs from config.
@@ -514,7 +515,7 @@ class EvalConfig(BaseModel):
         task_ids: str | None = None,
         runtime: str | None = None,
         remote: bool = False,
-        lazy_load: bool = False,
+        storage_profile: StorageProfile | None = None,
     ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
         if runtime is not None and remote:
@@ -529,6 +530,7 @@ class EvalConfig(BaseModel):
                 "max_steps": max_steps,
                 "group_size": group_size,
                 "runtime": runtime,
+                "storage_profile": storage_profile,
             }.items()
             if value is not None
         }
@@ -559,7 +561,6 @@ class EvalConfig(BaseModel):
             "auto_respond": auto_respond,
             "gateway": gateway,
             "remote": remote,
-            "lazy_load": lazy_load,
         }.items():
             if value:
                 overrides[key] = True
@@ -637,7 +638,7 @@ class EvalConfig(BaseModel):
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
         if self.remote:
             table.add_row("remote", "[bold green]True[/bold green]")
-        table.add_row("lazy_load", str(self.lazy_load))
+        table.add_row("storage_profile", self.storage_profile.value)
 
         if self.agent_type:
             table.add_row("", "")
@@ -755,7 +756,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
-        return HostedRuntime(lazy_load=cfg.lazy_load)
+        return HostedRuntime(storage_profile=cfg.storage_profile)
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
@@ -925,10 +926,10 @@ def eval_command(
         "--remote",
         help="Run the whole rollout remotely on the HUD platform",
     ),
-    lazy_load: bool = typer.Option(
-        False,
-        "--lazy-load",
-        help="Lazily load the remote environment filesystem",
+    storage_profile: StorageProfile | None = typer.Option(  # noqa: B008
+        None,
+        "--storage-profile",
+        help="Hosted filesystem strategy",
     ),
 ) -> None:
     """Run evaluation on datasets or individual tasks with agents.
@@ -971,7 +972,7 @@ def eval_command(
             gateway=gateway,
             runtime=runtime,
             remote=remote,
-            lazy_load=lazy_load,
+            storage_profile=storage_profile,
         )
     except ValueError as e:
         hud_console.error(str(e))
