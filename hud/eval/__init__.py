@@ -47,6 +47,7 @@ from .runtime import (
     RuntimeLimits,
     RuntimeResources,
     Shared,
+    StorageProfile,
     SubprocessRuntime,
 )
 from .sync import SyncPlan
@@ -71,6 +72,7 @@ __all__ = [
     "RuntimeLimits",
     "RuntimeResources",
     "Shared",
+    "StorageProfile",
     "SubprocessRuntime",
     "SyncPlan",
     "Task",

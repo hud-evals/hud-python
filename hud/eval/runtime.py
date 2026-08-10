@@ -42,6 +42,7 @@ import uuid
 from collections import deque
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 from urllib.parse import urlsplit, urlunsplit
@@ -1459,6 +1460,16 @@ class HUDRuntime:
                     await writer.wait_closed()
 
 
+class StorageProfile(StrEnum):
+    """Filesystem delivery strategy for a platform-hosted rollout."""
+
+    EAGER = "eager"
+    OVERLAYBD = "overlaybd"
+    NYDUS_EROFS = "nydus-erofs"
+    NYDUS_FUSE = "nydus-fuse"
+    FSX_OPENZFS = "fsx-openzfs"
+
+
 class HostedRuntime:
     """HUD-hosted placement: runs the rollout on a leased box and returns its ``Run``.
 
@@ -1482,11 +1493,11 @@ class HostedRuntime:
         *,
         poll_interval: float = 5.0,
         run_timeout: float = 3600.0,
-        lazy_load: bool = False,
+        storage_profile: StorageProfile = StorageProfile.EAGER,
     ) -> None:
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
-        self.lazy_load = lazy_load
+        self.storage_profile = StorageProfile(storage_profile)
         self._cancellations: set[asyncio.Task[None]] = set()
 
     async def run(
@@ -1570,7 +1581,7 @@ class HostedRuntime:
             "task": task.id,
             "slug": task.slug,
             "args": task.args,
-            "lazy_load": self.lazy_load,
+            "storage_profile": self.storage_profile.value,
             "agent": spec,
         }
         if group_id is not None:
@@ -1691,5 +1702,6 @@ __all__ = [
     "RuntimeLimits",
     "RuntimeResources",
     "Shared",
+    "StorageProfile",
     "SubprocessRuntime",
 ]
