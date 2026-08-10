@@ -25,7 +25,7 @@ from rich.table import Table
 
 from hud.cli.utils.api import require_api_key
 from hud.cli.utils.config import parse_key_value
-from hud.eval.runtime import StorageProfile
+from hud.eval.runtime import RootfsProfile, StorageConfig, WorkspaceProfile
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
@@ -171,7 +171,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # gateway = false  # Route LLM API calls through HUD Gateway
 # runtime = "local"  # local, hud, or tcp://host:port
 # remote = false  # Run the whole rollout remotely on HUD
-# storage_profile = "eager"  # eager, overlaybd, nydus-erofs, nydus-fuse, fsx-openzfs
+# storage = { rootfs = "eager", workspace = "image" }
 
 [claude]
 # model = "claude-sonnet-4-6"
@@ -269,7 +269,7 @@ class EvalConfig(BaseModel):
         "gateway",
         "runtime",
         "remote",
-        "storage_profile",
+        "storage",
     }
     source: str | None = None
     agent_type: AgentType | None = None
@@ -290,8 +290,8 @@ class EvalConfig(BaseModel):
     runtime: str | None = None
     #: Run the whole rollout remotely on the HUD platform.
     remote: bool = False
-    #: Filesystem delivery strategy for remote platform execution.
-    storage_profile: StorageProfile = StorageProfile.EAGER
+    #: Root filesystem and workspace delivery for remote platform execution.
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
     agent_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -404,17 +404,8 @@ class EvalConfig(BaseModel):
 
     def validate_placement(self) -> None:
         """Validate options that depend on the resolved execution placement."""
-        if (
-            self.storage_profile is not StorageProfile.EAGER
-            and not self.remote
-            and self.runtime != "hud"
-        ):
-            raise ValueError("--storage-profile requires remote or HUD runtime execution")
-        if self.runtime == "hud" and self.storage_profile not in (
-            StorageProfile.EAGER,
-            StorageProfile.FSX_OPENZFS,
-        ):
-            raise ValueError("HUD runtime supports eager and fsx-openzfs storage profiles")
+        if self.storage != StorageConfig() and not self.remote and self.runtime != "hud":
+            raise ValueError("non-default storage requires remote or HUD runtime execution")
 
     def get_agent_kwargs(self) -> dict[str, Any]:
         """Build agent kwargs from config.
@@ -524,7 +515,8 @@ class EvalConfig(BaseModel):
         task_ids: str | None = None,
         runtime: str | None = None,
         remote: bool = False,
-        storage_profile: StorageProfile | None = None,
+        rootfs_profile: RootfsProfile | None = None,
+        workspace_profile: WorkspaceProfile | None = None,
     ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
         if runtime is not None and remote:
@@ -539,10 +531,16 @@ class EvalConfig(BaseModel):
                 "max_steps": max_steps,
                 "group_size": group_size,
                 "runtime": runtime,
-                "storage_profile": storage_profile,
             }.items()
             if value is not None
         }
+        if rootfs_profile is not None or workspace_profile is not None:
+            overrides["storage"] = self.storage.model_copy(
+                update={
+                    **({"rootfs": rootfs_profile} if rootfs_profile is not None else {}),
+                    **({"workspace": workspace_profile} if workspace_profile is not None else {}),
+                }
+            )
         if agent is not None:
             try:
                 AgentType(agent)
@@ -647,7 +645,8 @@ class EvalConfig(BaseModel):
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
         if self.remote:
             table.add_row("remote", "[bold green]True[/bold green]")
-        table.add_row("storage_profile", self.storage_profile.value)
+        table.add_row("rootfs", self.storage.rootfs.value)
+        table.add_row("workspace", self.storage.workspace.value)
 
         if self.agent_type:
             table.add_row("", "")
@@ -765,7 +764,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
-        return HostedRuntime(storage_profile=cfg.storage_profile)
+        return HostedRuntime(storage=cfg.storage)
     if cfg.runtime == "local":
         if source_path is None:
             raise ValueError("local placement requires a local source path")
@@ -783,7 +782,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
         return local
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
-        return HUDRuntime(storage_profile=cfg.storage_profile)
+        return HUDRuntime(storage=cfg.storage)
     if cfg.runtime is not None and cfg.runtime.startswith("tcp://"):
         return Runtime(cfg.runtime)
     hud_console.error(
@@ -935,10 +934,15 @@ def eval_command(
         "--remote",
         help="Run the whole rollout remotely on the HUD platform",
     ),
-    storage_profile: StorageProfile | None = typer.Option(  # noqa: B008
+    rootfs_profile: RootfsProfile | None = typer.Option(  # noqa: B008
         None,
-        "--storage-profile",
-        help="Hosted filesystem strategy",
+        "--rootfs-profile",
+        help="Hosted root filesystem delivery",
+    ),
+    workspace_profile: WorkspaceProfile | None = typer.Option(  # noqa: B008
+        None,
+        "--workspace-profile",
+        help="Hosted workspace delivery",
     ),
 ) -> None:
     """Run evaluation on datasets or individual tasks with agents.
@@ -981,7 +985,8 @@ def eval_command(
             gateway=gateway,
             runtime=runtime,
             remote=remote,
-            storage_profile=storage_profile,
+            rootfs_profile=rootfs_profile,
+            workspace_profile=workspace_profile,
         )
     except ValueError as e:
         hud_console.error(str(e))

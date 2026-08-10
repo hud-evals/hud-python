@@ -30,11 +30,32 @@ def test_normalize_runtime_rejects_internal_provider_name() -> None:
         _normalize_runtime("ec2", HUDConsole())
 
 
+def test_parse_storage_variant_composes_rootfs_and_workspace() -> None:
+    from hud.cli.deploy import _parse_storage_variant
+    from hud.eval import RootfsProfile, StorageConfig, WorkspaceProfile
+
+    assert _parse_storage_variant("nydus-fuse+fsx-openzfs") == StorageConfig(
+        rootfs=RootfsProfile.NYDUS_FUSE,
+        workspace=WorkspaceProfile.FSX_OPENZFS,
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["fsx-openzfs", "lazy+fsx-openzfs", "nydus-fuse+nas", "eager+image+extra"],
+)
+def test_parse_storage_variant_rejects_invalid_values(value: str) -> None:
+    from hud.cli.deploy import _parse_storage_variant
+
+    with pytest.raises(ValueError, match="Invalid storage variant"):
+        _parse_storage_variant(value)
+
+
 @pytest.mark.asyncio
 async def test_trigger_build_requests_fsx_preparation() -> None:
     """Deploy forwards explicitly requested storage artifacts to the Build API."""
     from hud.cli.deploy import _DeployPlan, _trigger_build
-    from hud.eval.runtime import StorageProfile
+    from hud.eval.runtime import RootfsProfile, StorageConfig, WorkspaceProfile
 
     platform = AsyncMock(spec=PlatformClient)
     platform.apost.return_value = {"id": "build-1", "registry_id": "registry-1"}
@@ -46,15 +67,20 @@ async def test_trigger_build_requests_fsx_preparation() -> None:
         env_vars={},
         build_args={},
         build_secrets={},
-        prepare_storage_profiles=(StorageProfile.FSX_OPENZFS,),
+        prepare_storage_variants=(
+            StorageConfig(
+                rootfs=RootfsProfile.NYDUS_FUSE,
+                workspace=WorkspaceProfile.FSX_OPENZFS,
+            ),
+        ),
     )
 
     assert await _trigger_build(platform, build_id="build-1", plan=plan, no_cache=False) == (
         "build-1",
         "registry-1",
     )
-    assert platform.apost.await_args.kwargs["json"]["prepare_storage_profiles"] == [
-        "fsx-openzfs",
+    assert platform.apost.await_args.kwargs["json"]["prepare_storage_variants"] == [
+        {"rootfs": "nydus-fuse", "workspace": "fsx-openzfs"},
     ]
 
 
