@@ -80,6 +80,10 @@ hud sync tasks my-taskset
 hud eval my-taskset --remote
 ```
 
+To prepare an FSx OpenZFS workspace artifact in addition to the ordinary image,
+deploy with `hud deploy --prepare-storage-profile fsx-openzfs`, then select
+`fsx-openzfs` as the remote evaluation storage profile.
+
 For local iteration, the same protocol works against a container on your laptop:
 
 ```bash
