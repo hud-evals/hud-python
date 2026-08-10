@@ -106,7 +106,8 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--very-verbose`, `-vv` | Debug-level logs. |
 | `--runtime` | Placement: `local` (a child process per rollout, serving the env source — `SubprocessRuntime`), `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
 | `--remote` | Run the whole rollout remotely on the HUD platform. |
-| `--storage-profile` | Hosted filesystem strategy: `eager`, `overlaybd`, `nydus-erofs`, `nydus-fuse`, or `fsx-openzfs`. Requires remote execution unless `eager`. |
+| `--rootfs-profile` | Hosted root filesystem delivery: `eager`, `overlaybd`, `nydus-erofs`, or `nydus-fuse`. |
+| `--workspace-profile` | Hosted workspace delivery: `image` or `fsx-openzfs`. Non-default storage requires remote or HUD runtime execution. |
 | `--yes`, `-y` | Skip confirmation prompt. |
 
 ## Run a packaged image

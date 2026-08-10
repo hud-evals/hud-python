@@ -21,7 +21,7 @@ from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
-from hud.eval.runtime import RuntimeConfig, StorageProfile
+from hud.eval.runtime import RootfsProfile, RuntimeConfig, StorageConfig, WorkspaceProfile
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
@@ -46,7 +46,7 @@ class _DeployPlan:
     env_vars: dict[str, str]
     build_args: dict[str, str]
     build_secrets: dict[str, str]
-    prepare_storage_profiles: tuple[StorageProfile, ...] = ()
+    prepare_storage_variants: tuple[StorageConfig, ...] = ()
 
 
 def _peek_env_keys(env_path: Path) -> list[str]:
@@ -85,6 +85,20 @@ def _normalize_runtime(runtime: str | None, console: HUDConsole) -> str | None:
         f"Invalid runtime {runtime!r}; expected one of: {', '.join(sorted(_VALID_RUNTIMES))}"
     )
     raise typer.Exit(1)
+
+
+def _parse_storage_variant(value: str) -> StorageConfig:
+    """Parse the CLI's compact ``ROOTFS+WORKSPACE`` storage variant."""
+    rootfs, separator, workspace = value.partition("+")
+    if not separator or not rootfs or not workspace or "+" in workspace:
+        raise ValueError(f"Invalid storage variant {value!r}; expected ROOTFS+WORKSPACE")
+    try:
+        return StorageConfig(
+            rootfs=RootfsProfile(rootfs),
+            workspace=WorkspaceProfile(workspace),
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid storage variant {value!r}: {exc}") from None
 
 
 def _compose_recipe(context: Path) -> Path | None:
@@ -379,7 +393,7 @@ def _prepare_deploy_plan(
     verbose: bool,
     platform: PlatformClient,
     console: HUDConsole,
-    prepare_storage_profiles: list[StorageProfile] | None = None,
+    prepare_storage_variants: list[StorageConfig] | None = None,
 ) -> _DeployPlan:
     source_config = env_source.load_config()
     resolved_name = _resolve_environment_name(
@@ -443,7 +457,7 @@ def _prepare_deploy_plan(
         env_vars=env_vars,
         build_args=build_args_dict,
         build_secrets=_collect_build_secrets(build_secrets, env_dir=env_dir, console=console),
-        prepare_storage_profiles=tuple(prepare_storage_profiles or ()),
+        prepare_storage_variants=tuple(prepare_storage_variants or ()),
     )
 
 
@@ -459,7 +473,7 @@ def deploy_environment(
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
     runtime_config: str | None = None,
-    prepare_storage_profiles: list[StorageProfile] | None = None,
+    prepare_storage_variants: list[StorageConfig] | None = None,
 ) -> None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
@@ -498,7 +512,7 @@ def deploy_environment(
         build_secrets=build_secrets,
         runtime=runtime,
         runtime_config=runtime_config,
-        prepare_storage_profiles=prepare_storage_profiles,
+        prepare_storage_variants=prepare_storage_variants,
         verbose=verbose,
         platform=platform,
         console=hud_console,
@@ -568,8 +582,8 @@ async def _trigger_build(
                 ("build_args", plan.build_args),
                 ("build_secrets", plan.build_secrets),
                 (
-                    "prepare_storage_profiles",
-                    [profile.value for profile in plan.prepare_storage_profiles],
+                    "prepare_storage_variants",
+                    [variant.model_dump(mode="json") for variant in plan.prepare_storage_variants],
                 ),
             )
             if value
@@ -725,7 +739,7 @@ def deploy_all(
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
     runtime_config: str | None = None,
-    prepare_storage_profiles: list[StorageProfile] | None = None,
+    prepare_storage_variants: list[StorageConfig] | None = None,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -766,7 +780,7 @@ def deploy_all(
                 build_secrets=build_secrets,
                 runtime=runtime,
                 runtime_config=runtime_config,
-                prepare_storage_profiles=prepare_storage_profiles,
+                prepare_storage_variants=prepare_storage_variants,
             )
             succeeded.append(env_dir.name)
         except (typer.Exit, SystemExit):
@@ -851,10 +865,10 @@ def deploy_command(
         "--runtime-config",
         help="Path to a JSON RuntimeConfig for hosted runs",
     ),
-    prepare_storage_profiles: list[StorageProfile] | None = typer.Option(  # noqa: B008
+    prepare_storage_variants: list[str] | None = typer.Option(  # noqa: B008
         None,
-        "--prepare-storage-profile",
-        help="Prepare an additional runtime artifact (repeatable)",
+        "--prepare-storage-variant",
+        help="Prepare ROOTFS+WORKSPACE, for example nydus-fuse+fsx-openzfs (repeatable)",
     ),
 ) -> None:
     """Deploy HUD environment to the platform.
@@ -876,7 +890,9 @@ def deploy_command(
             build_secrets=secrets,
             runtime=runtime,
             runtime_config=runtime_config,
-            prepare_storage_profiles=prepare_storage_profiles,
+            prepare_storage_variants=[
+                _parse_storage_variant(value) for value in prepare_storage_variants or ()
+            ],
         )
         return
 
@@ -892,5 +908,7 @@ def deploy_command(
         build_secrets=secrets,
         runtime=runtime,
         runtime_config=runtime_config,
-        prepare_storage_profiles=prepare_storage_profiles,
+        prepare_storage_variants=[
+            _parse_storage_variant(value) for value in prepare_storage_variants or ()
+        ],
     )

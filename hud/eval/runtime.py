@@ -1320,14 +1320,11 @@ class HUDRuntime:
         *,
         run_timeout: float = 3600.0,
         runtime_url: str | None = None,
-        storage_profile: StorageProfile | str = "eager",
+        storage: StorageConfig | None = None,
     ) -> None:
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
-        resolved_storage_profile = StorageProfile(storage_profile)
-        if resolved_storage_profile not in (StorageProfile.EAGER, StorageProfile.FSX_OPENZFS):
-            raise ValueError("HUDRuntime supports eager and fsx-openzfs storage profiles")
-        self.storage_profile = resolved_storage_profile
+        self.storage = storage or StorageConfig()
         self._warned_unsupported_config = False
 
     async def run(
@@ -1419,7 +1416,7 @@ class HUDRuntime:
     async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
         payload: dict[str, Any] = {
             "environment": task.env,
-            "storage_profile": self.storage_profile.value,
+            "storage": self.storage.model_dump(mode="json"),
         }
         trace_id = get_current_trace_id()
         if trace_id is not None:
@@ -1473,14 +1470,29 @@ class HUDRuntime:
                     await writer.wait_closed()
 
 
-class StorageProfile(StrEnum):
-    """Filesystem delivery strategy for a platform-hosted rollout."""
+class RootfsProfile(StrEnum):
+    """Delivery strategy for the environment image root filesystem."""
 
     EAGER = "eager"
     OVERLAYBD = "overlaybd"
     NYDUS_EROFS = "nydus-erofs"
     NYDUS_FUSE = "nydus-fuse"
+
+
+class WorkspaceProfile(StrEnum):
+    """Delivery strategy for the environment workspace."""
+
+    IMAGE = "image"
     FSX_OPENZFS = "fsx-openzfs"
+
+
+class StorageConfig(BaseModel):
+    """Independent root filesystem and workspace delivery configuration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rootfs: RootfsProfile = RootfsProfile.EAGER
+    workspace: WorkspaceProfile = WorkspaceProfile.IMAGE
 
 
 class HostedRuntime:
@@ -1506,11 +1518,11 @@ class HostedRuntime:
         *,
         poll_interval: float = 5.0,
         run_timeout: float = 3600.0,
-        storage_profile: StorageProfile = StorageProfile.EAGER,
+        storage: StorageConfig | None = None,
     ) -> None:
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
-        self.storage_profile = StorageProfile(storage_profile)
+        self.storage = storage or StorageConfig()
         self._cancellations: set[asyncio.Task[None]] = set()
 
     async def run(
@@ -1594,7 +1606,7 @@ class HostedRuntime:
             "task": task.id,
             "slug": task.slug,
             "args": task.args,
-            "storage_profile": self.storage_profile.value,
+            "storage": self.storage.model_dump(mode="json"),
             "agent": spec,
         }
         if group_id is not None:
@@ -1709,12 +1721,14 @@ __all__ = [
     "LocalRuntime",
     "ModalRuntime",
     "Provider",
+    "RootfsProfile",
     "Runtime",
     "RuntimeConfig",
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
     "Shared",
-    "StorageProfile",
+    "StorageConfig",
     "SubprocessRuntime",
+    "WorkspaceProfile",
 ]

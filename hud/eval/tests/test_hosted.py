@@ -25,12 +25,14 @@ from hud.eval.run import Run
 from hud.eval.runtime import (
     HostedRuntime,
     HUDRuntime,
+    RootfsProfile,
     Runtime,
     RuntimeConfig,
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
-    StorageProfile,
+    StorageConfig,
+    WorkspaceProfile,
     _splice_websocket,
 )
 from hud.eval.task import Task
@@ -43,13 +45,16 @@ from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 
 
-def test_storage_profile_wire_values_are_stable() -> None:
+def test_storage_config_wire_values_are_stable() -> None:
     """Public enum values match the platform submission contract."""
-    assert [profile.value for profile in StorageProfile] == [
+    assert [profile.value for profile in RootfsProfile] == [
         "eager",
         "overlaybd",
         "nydus-erofs",
         "nydus-fuse",
+    ]
+    assert [profile.value for profile in WorkspaceProfile] == [
+        "image",
         "fsx-openzfs",
     ]
 
@@ -208,7 +213,13 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "hud.eval.runtime.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
 
-    hosted = HostedRuntime(poll_interval=0.0, storage_profile=StorageProfile.FSX_OPENZFS)
+    hosted = HostedRuntime(
+        poll_interval=0.0,
+        storage=StorageConfig(
+            rootfs=RootfsProfile.NYDUS_FUSE,
+            workspace=WorkspaceProfile.FSX_OPENZFS,
+        ),
+    )
     trace_id = uuid.uuid4().hex
     job_id = uuid.uuid4().hex
     task = Task(
@@ -241,7 +252,10 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["task"] == "add"
     assert payload["slug"] == "sums-add"
     assert payload["args"] == {"a": 1, "b": 2}
-    assert payload["storage_profile"] == "fsx-openzfs"
+    assert payload["storage"] == {
+        "rootfs": "nydus-fuse",
+        "workspace": "fsx-openzfs",
+    }
     assert payload["runtime_config"] == {
         "image": "registry.example/sums:latest",
         "resources": {"cpu": 2.0, "gpu": {"type": "L4", "count": 1}},
@@ -556,7 +570,10 @@ async def test_runtime_session_create_payload_omits_trace_id(
         {
             "path": "https://mcp.hud.ai/runtime/sessions",
             "headers": {"Authorization": "Bearer sk-hud-test"},
-                "json": {"environment": "e", "storage_profile": "eager"},
+            "json": {
+                "environment": "e",
+                "storage": {"rootfs": "eager", "workspace": "image"},
+            },
         }
     ]
 
@@ -603,11 +620,11 @@ async def test_runtime_session_create_payload_includes_current_trace_id(
         {
             "path": "https://mcp.hud.ai/runtime/sessions",
             "headers": {"Authorization": "Bearer sk-hud-test"},
-                "json": {
-                    "environment": "e",
-                    "storage_profile": "eager",
-                    "trace_id": str(uuid.UUID(trace_id)),
-                },
+            "json": {
+                "environment": "e",
+                "storage": {"rootfs": "eager", "workspace": "image"},
+                "trace_id": str(uuid.UUID(trace_id)),
+            },
         }
     ]
 
