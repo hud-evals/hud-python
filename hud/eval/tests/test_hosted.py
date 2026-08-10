@@ -556,7 +556,7 @@ async def test_runtime_session_create_payload_omits_trace_id(
         {
             "path": "https://mcp.hud.ai/runtime/sessions",
             "headers": {"Authorization": "Bearer sk-hud-test"},
-            "json": {"environment": "e"},
+                "json": {"environment": "e", "storage_profile": "eager"},
         }
     ]
 
@@ -603,7 +603,11 @@ async def test_runtime_session_create_payload_includes_current_trace_id(
         {
             "path": "https://mcp.hud.ai/runtime/sessions",
             "headers": {"Authorization": "Bearer sk-hud-test"},
-            "json": {"environment": "e", "trace_id": str(uuid.UUID(trace_id))},
+                "json": {
+                    "environment": "e",
+                    "storage_profile": "eager",
+                    "trace_id": str(uuid.UUID(trace_id)),
+                },
         }
     ]
 

@@ -199,7 +199,7 @@ def test_storage_profile_cli_override_and_placement_validation() -> None:
     cfg = EvalConfig().merge_cli(storage_profile=StorageProfile.OVERLAYBD)
     assert cfg.storage_profile is StorageProfile.OVERLAYBD
 
-    with pytest.raises(ValueError, match="requires remote platform execution"):
+    with pytest.raises(ValueError, match="requires remote or HUD runtime execution"):
         EvalConfig(
             runtime="local",
             storage_profile=StorageProfile.OVERLAYBD,

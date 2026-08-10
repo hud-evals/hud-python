@@ -404,8 +404,17 @@ class EvalConfig(BaseModel):
 
     def validate_placement(self) -> None:
         """Validate options that depend on the resolved execution placement."""
-        if self.storage_profile is not StorageProfile.EAGER and not self.remote:
-            raise ValueError("--storage-profile requires remote platform execution")
+        if (
+            self.storage_profile is not StorageProfile.EAGER
+            and not self.remote
+            and self.runtime != "hud"
+        ):
+            raise ValueError("--storage-profile requires remote or HUD runtime execution")
+        if self.runtime == "hud" and self.storage_profile not in (
+            StorageProfile.EAGER,
+            StorageProfile.FSX_OPENZFS,
+        ):
+            raise ValueError("HUD runtime supports eager and fsx-openzfs storage profiles")
 
     def get_agent_kwargs(self) -> dict[str, Any]:
         """Build agent kwargs from config.
@@ -774,7 +783,7 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
         return local
     if cfg.runtime == "hud":
         require_api_key("run HUD runtime tunnel evals")
-        return HUDRuntime()
+        return HUDRuntime(storage_profile=cfg.storage_profile)
     if cfg.runtime is not None and cfg.runtime.startswith("tcp://"):
         return Runtime(cfg.runtime)
     hud_console.error(
