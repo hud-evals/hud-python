@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -478,8 +479,19 @@ async def rollout(
                             run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         finally:
                             if after_agent is not None:
+                                phase_before_hook = _phase
+                                pending_exception = sys.exc_info()[1]
                                 _phase = "post-agent checkpoint"
-                                await after_agent(live)
+                                try:
+                                    await after_agent(live)
+                                except Exception:
+                                    # Preserve an agent failure when both the
+                                    # agent and checkpoint fail; the checkpoint
+                                    # must not replace the primary error.
+                                    if pending_exception is None:
+                                        raise
+                                finally:
+                                    _phase = phase_before_hook
                         _phase = "grading"
 
                     verifier = task.verifier
