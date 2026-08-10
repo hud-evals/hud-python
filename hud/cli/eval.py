@@ -551,6 +551,7 @@ class EvalConfig(BaseModel):
 
         if runtime is not None:
             overrides["remote"] = False
+            overrides["lazy_load"] = False
 
         for key, value in {
             "all": all,
