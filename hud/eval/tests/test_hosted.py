@@ -50,7 +50,6 @@ def test_storage_config_wire_values_are_stable() -> None:
     assert [profile.value for profile in RootfsProfile] == [
         "eager",
         "overlaybd",
-        "nydus-erofs",
         "nydus-fuse",
     ]
     assert [profile.value for profile in WorkspaceProfile] == [

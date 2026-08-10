@@ -1475,7 +1475,6 @@ class RootfsProfile(StrEnum):
 
     EAGER = "eager"
     OVERLAYBD = "overlaybd"
-    NYDUS_EROFS = "nydus-erofs"
     NYDUS_FUSE = "nydus-fuse"
 
 

@@ -205,7 +205,7 @@ HostedRuntime(
 - **`run_timeout`** - hard deadline including submission, provisioning, queueing,
   and execution. A timeout requests cancellation and returns an errored `Run`.
 - **`storage`** - independent root filesystem and workspace delivery. Rootfs
-  choices are `EAGER`, `OVERLAYBD`, `NYDUS_EROFS`, and `NYDUS_FUSE`; workspace
+  choices are `EAGER`, `OVERLAYBD`, and `NYDUS_FUSE`; workspace
   choices are `IMAGE` and `FSX_OPENZFS`. The default is eager rootfs with the
   workspace embedded in the image.
 
