@@ -488,9 +488,13 @@ async def rollout(
                                     # Preserve an agent failure when both the
                                     # agent and checkpoint fail; the checkpoint
                                     # must not replace the primary error.
-                                    if pending_exception is None:
+                                    if pending_exception is not None:
+                                        _phase = phase_before_hook
+                                    else:
+                                        # Keep "post-agent checkpoint" for
+                                        # outer error attribution.
                                         raise
-                                finally:
+                                else:
                                     _phase = phase_before_hook
                         _phase = "grading"
 

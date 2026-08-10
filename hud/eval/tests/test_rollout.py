@@ -666,6 +666,23 @@ async def test_after_agent_runs_when_agent_raises(env_file: Path) -> None:
     assert run.trace.is_error
 
 
+async def test_after_agent_failure_attributes_post_agent_phase(env_file: Path) -> None:
+    async def after_agent(_run: Run) -> None:
+        raise RuntimeError("checkpoint exploded")
+
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        after_agent=after_agent,
+    )
+
+    assert run.trace.is_error
+    assert "[post-agent checkpoint]" in (run.trace.error or "")
+    assert "checkpoint exploded" in (run.trace.error or "")
+    assert "[agent loop]" not in (run.trace.error or "")
+
+
 async def test_agent_hooks_wrap_agent_before_grading(env_file: Path) -> None:
     calls: list[str] = []
 
