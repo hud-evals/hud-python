@@ -69,7 +69,7 @@ class _FakeConn:
         self,
         cmd: str,
         *,
-        input: str | None = None,
+        input: str | bytes | None = None,
         check: bool = True,
         encoding: str | None = "utf-8",
     ) -> Any:
@@ -84,7 +84,7 @@ class _FakeConn:
                 if path in script
             )
             if input is not None:
-                self._sink[name] = input.encode()
+                self._sink[name] = input.encode() if isinstance(input, str) else input
             elif match := re.search(r"FromBase64String\('([^']+)'\)", script):
                 self._sink[name] += base64.b64decode(match.group(1))
             else:
@@ -129,6 +129,20 @@ _STREAM_JSON = (
 )
 
 
+class _FakeFileSSH(SSHClient):
+    async def write_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        timeout_s: float | None = None,
+    ) -> None:
+        del timeout_s
+        connection = self.conn
+        assert isinstance(connection, _FakeConn)
+        connection._sink[path] = content.encode()
+
+
 def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
     capability = Capability(
         name="shell",
@@ -136,7 +150,8 @@ def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
         url="ssh://localhost:22",
         params={"shell": shell},
     )
-    return SSHClient(capability, cast("Any", conn))
+    client_type = SSHClient if shell in {"cmd", "powershell"} else _FakeFileSSH
+    return client_type(capability, cast("Any", conn))
 
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
@@ -172,7 +187,7 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="build it", max_steps=5)
 
     assert ".hud_run.bat" not in sink
-    assert conn.write_commands == ["cat > .hud_prompt.txt"]
+    assert sink[".hud_prompt.txt"] == b"build it"
     assert len(conn.ran) == 1
     assert "install.sh" in conn.ran[0]
     assert "claude" in conn.ran[0]

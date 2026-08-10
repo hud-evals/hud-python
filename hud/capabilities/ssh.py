@@ -5,13 +5,21 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import posixpath
+import secrets
 import shlex
-from typing import Any, ClassVar, Self
+import stat
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 from urllib.parse import urlsplit
 
 import asyncssh
+from asyncssh.constants import FXF_WRITE
+from asyncssh.sftp import start_sftp_client
 
 from .base import Capability, CapabilityClient
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 SSH_RECONNECT_ATTEMPTS = 3
 SSH_RECONNECT_BASE_DELAY_S = 0.25
@@ -169,12 +177,15 @@ class SSHClient(CapabilityClient):
             ) from last_error
 
     async def read_text(self, path: str, *, timeout_s: float | None = None) -> str:
-        """Read a UTF-8 text file through the exec channel."""
+        """Read a UTF-8 text file through SFTP or a command-only endpoint."""
         if self._is_windows:
             quoted = _powershell_quote(path)
             script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
             result = await self.run(_powershell(script), check=True, timeout=timeout_s)
             return base64.b64decode(_stdout(result)).decode("utf-8", errors="replace")
+        if self._sftp_subsystem is not None:
+            async with self._sftp(timeout_s) as sftp, sftp.open(path, "rb") as remote:
+                return (await remote.read()).decode("utf-8", errors="replace")
         # encoding=None transports raw bytes: a strict connection-level UTF-8
         # decode would raise on files with invalid UTF-8 instead of replacing.
         result = await self.run(
@@ -192,7 +203,8 @@ class SSHClient(CapabilityClient):
         *,
         timeout_s: float | None = None,
     ) -> None:
-        """Write UTF-8 text through the exec channel without command interpolation."""
+        """Atomically write UTF-8 text through SFTP on POSIX."""
+        payload = content.encode("utf-8")
         if self._is_windows:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout_s if timeout_s is not None else None
@@ -203,35 +215,133 @@ class SSHClient(CapabilityClient):
             quoted = _powershell_quote(path)
             truncate = f"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"
             await self.run(_powershell(truncate), check=True, timeout=remaining_timeout())
-            raw = content.encode("utf-8")
-            for offset in range(0, len(raw), 6144):
-                payload = base64.b64encode(raw[offset : offset + 6144]).decode("ascii")
+            for offset in range(0, len(payload), 6144):
+                encoded = base64.b64encode(payload[offset : offset + 6144]).decode("ascii")
                 script = (
-                    f"$b=[Convert]::FromBase64String('{payload}');"
+                    f"$b=[Convert]::FromBase64String('{encoded}');"
                     f"$f=[IO.File]::Open({quoted},[IO.FileMode]::Append,"
                     "[IO.FileAccess]::Write,[IO.FileShare]::Read);"
                     "try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"
                 )
                 await self.run(_powershell(script), check=True, timeout=remaining_timeout())
             return
-        await self.run(
-            f"cat > {shlex.quote(path)}",
-            input=content,
-            check=True,
-            timeout=timeout_s,
+        if self._sftp_subsystem is not None:
+            async with self._sftp(timeout_s) as sftp:
+                await self._write_text_sftp(sftp, path, payload)
+            return
+        raise RuntimeError(
+            "atomic file writes require an SFTP subsystem with the OpenSSH posix-rename extension"
         )
 
     async def listdir(self, path: str, *, timeout_s: float | None = None) -> list[str]:
-        """List direct children through the exec channel."""
+        """List direct children through SFTP or a command-only endpoint."""
         if self._is_windows:
             script = f"Get-ChildItem -Force -Name -LiteralPath {_powershell_quote(path)}"
             result = await self.run(_powershell(script), check=True, timeout=timeout_s)
             listing = _stdout(result)
+        elif self._sftp_subsystem is not None:
+            async with self._sftp(timeout_s) as sftp:
+                return sorted(
+                    str(name)
+                    for name in await sftp.listdir(path)
+                    if name not in (".", "..", b".", b"..")
+                )
         else:
             command = f"ls -1A -- {shlex.quote(path)}"
             result = await self.run(command, check=True, encoding=None, timeout=timeout_s)
             listing = _decode(result.stdout)
         return sorted(line for line in listing.splitlines() if line not in (".", ".."))
+
+    @property
+    def _sftp_subsystem(self) -> str | None:
+        subsystem = self.capability.params.get("sftp_subsystem")
+        if subsystem is not None and not isinstance(subsystem, str):
+            raise ValueError("ssh capability sftp_subsystem must be a string")
+        return subsystem
+
+    async def _start_sftp(self) -> asyncssh.SFTPClient:
+        subsystem = self._sftp_subsystem
+        if subsystem is None:
+            raise RuntimeError("ssh capability does not advertise an SFTP subsystem")
+        try:
+            conn = await self._connection()
+            writer, reader, _ = await conn.open_session(subsystem=subsystem, encoding=None)
+            return await start_sftp_client(
+                conn,
+                asyncio.get_running_loop(),
+                "strict",
+                reader,
+                writer,
+                "utf-8",
+                "strict",
+                3,
+            )
+        except asyncssh.ChannelOpenError as exc:
+            raise SSHConnectionError("SSH server rejected the SFTP subsystem") from exc
+        except asyncssh.ConnectionLost as exc:
+            raise SSHConnectionError("SSH connection lost while opening SFTP") from exc
+
+    @contextlib.asynccontextmanager
+    async def _sftp(self, timeout_s: float | None) -> AsyncIterator[asyncssh.SFTPClient]:
+        sftp: asyncssh.SFTPClient | None = None
+        try:
+            async with asyncio.timeout(timeout_s):
+                sftp = await self._start_sftp()
+                yield sftp
+        except (asyncssh.SFTPConnectionLost, asyncssh.SFTPNoConnection) as exc:
+            if _is_closed(self._conn):
+                raise SSHConnectionError("SSH connection lost during file operation") from exc
+            raise
+        finally:
+            if sftp is not None:
+                sftp.exit()
+
+    async def _write_text_sftp(
+        self,
+        sftp: asyncssh.SFTPClient,
+        path: str,
+        payload: bytes,
+    ) -> None:
+        resolved = await sftp.realpath(path)
+        if not isinstance(resolved, str):
+            raise TypeError("SFTP returned a non-text destination path")
+
+        metadata: asyncssh.SFTPAttrs | None = None
+        with contextlib.suppress(asyncssh.SFTPNoSuchFile):
+            metadata = await sftp.stat(resolved)
+        if metadata is not None:
+            permissions = metadata.permissions
+            if permissions is None or not stat.S_ISREG(permissions):
+                raise OSError("destination is not a regular file")
+            async with sftp.open(resolved, FXF_WRITE):
+                pass
+
+        directory = posixpath.dirname(resolved) or "."
+        staged = posixpath.join(directory, f".hud-write.{secrets.token_hex(16)}")
+        committed = False
+        try:
+            async with sftp.open(staged, "xb") as remote:
+                await remote.write(payload)
+                if metadata is not None:
+                    if metadata.uid is None or metadata.gid is None or metadata.permissions is None:
+                        raise OSError("destination metadata is incomplete")
+                    await remote.setstat(
+                        asyncssh.SFTPAttrs(
+                            uid=metadata.uid,
+                            gid=metadata.gid,
+                            permissions=metadata.permissions,
+                        )
+                    )
+            await sftp.posix_rename(staged, resolved)
+            committed = True
+        finally:
+            if not committed:
+                with contextlib.suppress(
+                    asyncssh.SFTPConnectionLost,
+                    asyncssh.SFTPNoConnection,
+                    asyncssh.SFTPNoSuchFile,
+                ):
+                    await sftp.remove(staged)
 
     @property
     def _is_windows(self) -> bool:

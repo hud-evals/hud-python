@@ -50,6 +50,7 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
 
     dockerfile = (target / "Dockerfile.hud").read_text()
     assert 'CMD ["uv", "run", "hud", "serve"' in dockerfile
+    assert "openssh-sftp-server" in dockerfile
     assert '"dev"' not in dockerfile
 
 

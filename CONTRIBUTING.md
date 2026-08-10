@@ -28,7 +28,9 @@ git config core.hooksPath .githooks
 uv run pytest -q
 ```
 
-Tests run on Python 3.11 and 3.12 in CI.
+Tests run on Python 3.11 and 3.12 in CI. Workspace's native SSH contracts also
+run on macOS so Darwin shell and filesystem behavior is tested on the operating
+system that owns it.
 
 Integration tests are excluded by default because they may use external
 services, network access, or container builds. Run them explicitly:

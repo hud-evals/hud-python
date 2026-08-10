@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import shutil
 import socket
 import struct
@@ -336,6 +337,24 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
 
 
 _DEFAULT_USER = "agent"
+# AsyncSSH reserves the standard name for its in-process SFTP server. This
+# distinct subsystem goes through ``process_factory`` and the session wall.
+_SFTP_SUBSYSTEM = "hud-sftp"
+_SFTP_SERVER_PATHS = (
+    "/usr/lib/openssh/sftp-server",
+    "/usr/lib/ssh/sftp-server",
+    "/usr/libexec/sftp-server",
+)
+
+
+def _sftp_server_path() -> str | None:
+    if sys.platform == "win32":
+        return None
+    return next(
+        (path for path in _SFTP_SERVER_PATHS if Path(path).is_file() and os.access(path, os.X_OK)),
+        None,
+    )
+
 
 #: What the sandbox runs so it stays alive between sessions. It must outlast
 #: every rollout without waking (a sandbox is discarded, never expired) and
@@ -660,6 +679,11 @@ class Workspace:
         """Materialize filesystem credentials and bind the SSH socket."""
         if self._sock is not None:
             return
+        if sys.platform != "win32" and _sftp_server_path() is None:
+            raise RuntimeError(
+                "POSIX Workspace filesystem access requires OpenSSH sftp-server; "
+                "install openssh-sftp-server"
+            )
         if self._shell_uid is not None and _is_root() and not self._drops_privileges():
             # Fail closed: serving as root while unable to drop would run every
             # agent shell as root, exactly what shell_uid exists to prevent.
@@ -830,6 +854,7 @@ class Workspace:
             client_key_path=key_path,
             cwd=self._guest_path,
             isolation="bwrap" if self.bwrap_available else "none",
+            sftp_subsystem=_SFTP_SUBSYSTEM if sys.platform != "win32" else None,
         )
 
     @property
@@ -1378,7 +1403,7 @@ class Workspace:
 
     def shell_argv(
         self,
-        command: str | None = None,
+        command: str | list[str] | None = None,
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
@@ -1395,11 +1420,16 @@ class Workspace:
         root, the same path ``_guest_path`` takes when bwrap is unavailable.
         """
         if sys.platform == "win32":
+            if isinstance(command, list):
+                return command
             if command is not None:
                 return ["cmd.exe", "/c", command]
             return ["cmd.exe"]
         if self._bwrap is not None:
-            inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
+            if isinstance(command, list):
+                inner: list[str] | str = command
+            else:
+                inner = ["bash", "-lc", command] if command else ["bash", "-l"]
             if self._drops_privileges():
                 # Don't let bwrap re-inject host secrets via --setenv; feed it
                 # the same minimal environment as the non-bwrap dropped shell,
@@ -1423,7 +1453,7 @@ class Workspace:
 
     def session_argv(
         self,
-        command: str | None = None,
+        command: str | list[str] | None = None,
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
@@ -1565,13 +1595,21 @@ class Workspace:
             # Sessions start from an exact environment, so a terminal's TERM has to
             # be put there deliberately: without it curses and tput have no
             # terminal description and fall back or fail outright.
+            command = process.command
+            if process.subsystem is not None:
+                if process.subsystem != _SFTP_SUBSYSTEM:
+                    raise ValueError(f"unsupported SSH subsystem {process.subsystem!r}")
+                sftp_server = _sftp_server_path()
+                if sftp_server is None:
+                    raise RuntimeError("OpenSSH sftp-server is not installed")
+                command = [sftp_server]
             term_type = process.term_type
             wants_tty = bool(term_type)
             session_env = {"TERM": term_type} if term_type else None
             argv = (
-                self.shell_argv(process.command, env=session_env, tty=wants_tty)
+                self.shell_argv(command, env=session_env, tty=wants_tty)
                 if pid is None
-                else self.session_argv(process.command, env=session_env, tty=wants_tty)
+                else self.session_argv(command, env=session_env, tty=wants_tty)
             )
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
@@ -1606,7 +1644,6 @@ class Workspace:
             # Additionally, cmd.exe launched via CreateProcess does NOT search the
             # CWD for batch files (only PATH), so relative .bat paths are resolved
             # to absolute below.
-            import shlex
             import subprocess as _subprocess
 
             if process.command:

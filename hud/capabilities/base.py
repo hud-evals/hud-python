@@ -93,6 +93,7 @@ class Capability:
         shell: str | None = None,
         cwd: str | None = None,
         isolation: Literal["bwrap", "none"] | None = None,
+        sftp_subsystem: str | None = "sftp",
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
@@ -106,6 +107,8 @@ class Capability:
         start in. Paths are the session namespace's own — clients pass them
         verbatim, and nothing is anchored or rewritten. ``isolation`` records
         the sandbox actually granted to the served workspace.
+        ``sftp_subsystem`` names the SSH subsystem used for file operations;
+        pass ``None`` for command-only endpoints.
         """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
@@ -119,6 +122,8 @@ class Capability:
             params["cwd"] = cwd
         if isolation is not None:
             params["isolation"] = isolation
+        if sftp_subsystem is not None:
+            params["sftp_subsystem"] = sftp_subsystem
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
 
     @classmethod

@@ -49,7 +49,7 @@ class _Conn:
         self,
         command: str,
         *,
-        input: str | None = None,
+        input: str | bytes | None = None,
         check: bool = False,
         encoding: str | None = "utf-8",
     ) -> _Completed:
@@ -72,9 +72,10 @@ class _Conn:
                     stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1
                 )
             return _Completed(stdout=self._store[parts[2]].decode())
-        if len(parts) == 3 and parts[:2] == ["cat", ">"]:
-            assert input is not None
-            self._store[parts[2]] = input.encode()
+        if input is not None and command.startswith("d=") and ".hud-write.XXXXXX" in command:
+            assignment = command.removeprefix("d=").partition(";n=0;")[0]
+            path = shlex.split(assignment)[0]
+            self._store[path] = input.encode() if isinstance(input, str) else input
             return _Completed()
         if len(parts) == 4 and parts[:3] == ["ls", "-1A", "--"]:
             prefix = parts[3].rstrip("/")
@@ -134,7 +135,7 @@ class _Process:
 
 
 class _FakeSSH(SSHClient):
-    """SSH client with an in-memory exec-channel filesystem."""
+    """SSH client with an in-memory filesystem."""
 
     def __init__(
         self,
@@ -157,6 +158,16 @@ class _FakeSSH(SSHClient):
                 ),
             ),
         )
+
+    async def write_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        timeout_s: float | None = None,
+    ) -> None:
+        del timeout_s
+        self.files[path] = content.encode()
 
 
 def _ssh(**kwargs: Any) -> SSHClient:
@@ -409,7 +420,7 @@ async def test_shared_ssh_tool_bounds_combined_output(
     assert "[truncated]" in output
 
 
-async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
+async def test_openai_compatible_write_stores_file_via_ssh() -> None:
     ssh = _FakeSSH()
     tool = WriteTool(spec=WriteTool.default_spec("qwen"), client=cast("SSHClient", ssh))
 

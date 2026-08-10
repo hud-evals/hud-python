@@ -47,7 +47,7 @@ Bind every daemon to `127.0.0.1`: the environment exposes a single control port,
 ### `ssh` - a sandboxed shell
 
 ```text
-Capability.ssh(*, name="shell", url, user="agent", host_pubkey, client_key=None, client_key_path=None, shell=None, cwd=None)
+Capability.ssh(*, name="shell", url, user="agent", host_pubkey, client_key=None, client_key_path=None, shell=None, cwd=None, sftp_subsystem="sftp")
 ```
 
 The shell case is built in via [`Workspace`](#workspace), so you rarely call this factory directly. [`env.workspace(root)`](/v6/reference/environment#methods) starts a workspace, publishes its `ssh` capability, and stops it with the env.
@@ -61,7 +61,10 @@ The shell case is built in via [`Workspace`](#workspace), so you rarely call thi
 | `client_key` | `str \| None` | Private key *content*; authenticates across a container boundary. |
 | `client_key_path` | `str \| None` | Path to a key file; only works when client and daemon share a filesystem. |
 | `shell` | `str \| None` | Remote shell type (`bash` / `powershell` / `cmd`); auto-detected from `sys.platform`. |
-| `cwd` | `str \| None` | Absolute path sessions start in (the served workspace). File helpers anchor absolute paths to it. |
+| `cwd` | `str \| None` | Absolute path sessions start in (the served workspace). Relative paths resolve there; absolute paths pass through verbatim. |
+| `sftp_subsystem` | `str \| None` | SFTP subsystem used for file operations. Defaults to `"sftp"`; pass `None` only for command-only SSH endpoints. Atomic writes require the OpenSSH `posix-rename` extension. |
+
+On POSIX, `Workspace` runs SFTP as an isolated SSH session so filesystem operations have the same namespace and identity as shell commands. Install the `openssh-sftp-server` OS package when constructing an environment image; the `hud init` Dockerfile includes it. Workspace startup fails explicitly when it is unavailable. Windows workspaces retain their PowerShell file path and do not require this package.
 
 ### `mcp` - your own tools
 
@@ -271,7 +274,7 @@ The bundled provider agents open these automatically based on which capabilities
 
 A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for agent access and, when enabled, file tracking for rollout telemetry. For `mcp`, `cdp`, and `rfb` you stand up the daemon yourself.
 
-Concretely it's a directory plus a `bwrap`-isolated SSH exec server. Shell commands and file operations run through the same exec channel. [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
+Concretely it's a directory plus a `bwrap`-isolated SSH server. Shell commands use SSH exec channels; filesystem operations use an SFTP server launched through the same session boundary. [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
 
 ```python
 from hud.environment import Environment, Workspace

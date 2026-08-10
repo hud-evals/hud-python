@@ -52,6 +52,16 @@ async def _connect(ws: Workspace) -> asyncssh.SSHClientConnection:
     )
 
 
+async def test_workspace_requires_an_isolated_sftp_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(workspace_mod, "_SFTP_SERVER_PATHS", ())
+
+    with pytest.raises(RuntimeError, match="install openssh-sftp-server"):
+        await Workspace(tmp_path / "root").start()
+
+
 @pytest.mark.asyncio
 async def test_start_waits_until_the_ssh_acceptor_is_ready(
     tmp_path: Path,
@@ -103,7 +113,7 @@ async def test_credentials_live_outside_the_served_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sftp_subsystem_is_not_served(tmp_path: Path) -> None:
+async def test_in_process_sftp_subsystem_is_not_served(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "root")
     await ws.start()
     try:
@@ -115,12 +125,13 @@ async def test_sftp_subsystem_is_not_served(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_file_operations_use_the_exec_channel(tmp_path: Path) -> None:
+async def test_file_operations_use_the_isolated_sftp_subsystem(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "root")
     await ws.start()
     try:
         async with await _connect(ws) as conn:
             client = SSHClient(ws.capability(), conn)
+            assert client.capability.params["sftp_subsystem"] == "hud-sftp"
             await client.write_text("hello world.txt", "héllo\n")
             assert await client.read_text("hello world.txt") == "héllo\n"
             assert await client.listdir(".") == ["hello world.txt"]
@@ -1527,7 +1538,7 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
     ws = Workspace(tmp_path / "root")
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
     ws._namespace = cast("Any", SimpleNamespace(spawn=capture_spawn))
-    process = SimpleNamespace(term_type=None, command="true")
+    process = SimpleNamespace(term_type=None, command="true", subsystem=None)
 
     with pytest.raises(SpawnCaptured) as captured:
         await ws._handle_process(cast("Any", process))
@@ -1565,6 +1576,7 @@ async def test_namespace_wait_status_is_forwarded_to_ssh_client(
     process = SimpleNamespace(
         term_type=None,
         command="true",
+        subsystem=None,
         stdin=SimpleNamespace(read=AsyncMock(return_value=b"")),
         stdout=SimpleNamespace(write=Mock(), drain=AsyncMock()),
         stderr=SimpleNamespace(write=Mock(), drain=AsyncMock()),
@@ -1695,6 +1707,7 @@ async def test_windows_channel_close_terminates_the_process_job(
     process = SimpleNamespace(
         term_type=None,
         command="cmd /c echo hello",
+        subsystem=None,
         channel=channel,
         stdout=SimpleNamespace(write=Mock()),
         stderr=SimpleNamespace(write=Mock()),

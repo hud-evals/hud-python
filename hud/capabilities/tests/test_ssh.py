@@ -325,6 +325,13 @@ async def test_windows_write_uses_one_timeout_budget(
     assert timeouts[0] > timeouts[1] > timeouts[2]
 
 
+async def test_posix_write_requires_an_sftp_subsystem() -> None:
+    client = _client(_Connection())
+
+    with pytest.raises(RuntimeError, match="atomic file writes require an SFTP subsystem"):
+        await client.write_text("target.txt", "héllo", timeout_s=1)
+
+
 async def test_close_during_reconnect_discards_the_replacement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
