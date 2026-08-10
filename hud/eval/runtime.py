@@ -1315,9 +1315,19 @@ class HUDRuntime:
     atom drive it from this process.
     """
 
-    def __init__(self, *, run_timeout: float = 3600.0, runtime_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        run_timeout: float = 3600.0,
+        runtime_url: str | None = None,
+        storage_profile: StorageProfile | str = "eager",
+    ) -> None:
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
+        resolved_storage_profile = StorageProfile(storage_profile)
+        if resolved_storage_profile not in (StorageProfile.EAGER, StorageProfile.FSX_OPENZFS):
+            raise ValueError("HUDRuntime supports eager and fsx-openzfs storage profiles")
+        self.storage_profile = resolved_storage_profile
         self._warned_unsupported_config = False
 
     async def run(
@@ -1407,7 +1417,10 @@ class HUDRuntime:
             await self._delete_runtime_session(runtime_url, api_key, session_id)
 
     async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
-        payload: dict[str, Any] = {"environment": task.env}
+        payload: dict[str, Any] = {
+            "environment": task.env,
+            "storage_profile": self.storage_profile.value,
+        }
         trace_id = get_current_trace_id()
         if trace_id is not None:
             with contextlib.suppress(ValueError):
