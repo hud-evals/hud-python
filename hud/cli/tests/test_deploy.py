@@ -30,6 +30,34 @@ def test_normalize_runtime_rejects_internal_provider_name() -> None:
         _normalize_runtime("ec2", HUDConsole())
 
 
+@pytest.mark.asyncio
+async def test_trigger_build_requests_fsx_preparation() -> None:
+    """Deploy forwards explicitly requested storage artifacts to the Build API."""
+    from hud.cli.deploy import _DeployPlan, _trigger_build
+    from hud.eval.runtime import StorageProfile
+
+    platform = AsyncMock(spec=PlatformClient)
+    platform.apost.return_value = {"id": "build-1", "registry_id": "registry-1"}
+    plan = _DeployPlan(
+        name="protonmail",
+        registry_id=None,
+        runtime=None,
+        runtime_config=None,
+        env_vars={},
+        build_args={},
+        build_secrets={},
+        prepare_storage_profiles=(StorageProfile.FSX_OPENZFS,),
+    )
+
+    assert await _trigger_build(platform, build_id="build-1", plan=plan, no_cache=False) == (
+        "build-1",
+        "registry-1",
+    )
+    assert platform.apost.await_args.kwargs["json"]["prepare_storage_profiles"] == [
+        "fsx-openzfs",
+    ]
+
+
 class TestResolveEnvironmentName:
     """Tests for code-authoritative environment name resolution."""
 
