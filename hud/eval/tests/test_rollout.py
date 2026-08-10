@@ -646,6 +646,48 @@ async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Pat
     assert run.reward == 0.0  # graded best-effort, but the agent never answered → 0.0
 
 
+async def test_after_agent_runs_when_agent_raises(env_file: Path) -> None:
+    calls: list[Run] = []
+
+    def boom(prompt: str) -> str:
+        raise RuntimeError("agent exploded")
+
+    async def after_agent(run: Run) -> None:
+        calls.append(run)
+
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(boom),
+        runtime=SubprocessRuntime(env_file),
+        after_agent=after_agent,
+    )
+
+    assert calls == [run]
+    assert run.trace.is_error
+
+
+async def test_agent_hooks_wrap_agent_before_grading(env_file: Path) -> None:
+    calls: list[str] = []
+
+    async def before_agent(_run: Run) -> None:
+        calls.append("before")
+
+    async def after_agent(run: Run) -> None:
+        calls.append("after")
+        run.trace.content = "5"
+
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(lambda _prompt: "wrong"),
+        runtime=SubprocessRuntime(env_file),
+        before_agent=before_agent,
+        after_agent=after_agent,
+    )
+
+    assert calls == ["before", "after"]
+    assert run.reward == 1.0
+
+
 class _AnswerThenBoomAgent(Agent):
     """Records a correct answer, then raises — a mid-run failure after the env
     already has a gradable answer in hand."""

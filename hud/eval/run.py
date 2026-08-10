@@ -476,9 +476,10 @@ async def rollout(
                             logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                             run.trace.status = "error"
                             run.record(Step(source="system", error=f"[{_phase}] {detail}"))
-                        if after_agent is not None:
-                            _phase = "post-agent checkpoint"
-                            await after_agent(live)
+                        finally:
+                            if after_agent is not None:
+                                _phase = "post-agent checkpoint"
+                                await after_agent(live)
                         _phase = "grading"
 
                     verifier = task.verifier
