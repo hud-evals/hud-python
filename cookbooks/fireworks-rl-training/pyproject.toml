@@ -1,19 +1,21 @@
 [project]
 name = "fireworks-rl-training"
 version = "0.1.0"
-description = "Direct Fireworks Training API RL loop over HUD-style arithmetic tasks"
+description = "Train on HUD rewards with Fireworks Serverless RL"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "fireworks-ai[training]",
     "hud",
-    "matplotlib",
     "python-dotenv",
-    "torch>=2",
-    "transformers>=4.55",
+    "tinker",
+    "tinker-cookbook",
 ]
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = ["pytest"]
 
 [tool.uv.sources]
 hud = { path = "../..", editable = true }
