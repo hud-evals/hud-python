@@ -222,12 +222,20 @@ class ClaudeComputerTool(RFBTool):
                 await self.type_text(text)
 
             case "key":
-                keys = _split_keys(arguments.get("text"))
-                if not keys:
+                text = arguments.get("text")
+                # xdotool syntax: space-separated sequential presses, + binds a chord
+                chords = (
+                    [chord for part in text.split() if (chord := _split_keys(part))]
+                    if isinstance(text, str)
+                    else []
+                )
+                if not chords:
                     return tool_err("`text` (key chord) is required for key")
                 repeat = arguments.get("repeat")
                 count = repeat if isinstance(repeat, int) and repeat > 0 else 1
-                await self.press_keys(keys, count=min(count, 100))
+                for _ in range(min(count, 100)):
+                    for chord in chords:
+                        await self.press_keys(chord)
 
             case "hold_key":
                 keys = _split_keys(arguments.get("text"))
