@@ -251,6 +251,23 @@ async def test_workspace_channel_close_during_teardown_keeps_connection_usable(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_workspace_client_timeout_keeps_connection_usable(tmp_path: Path) -> None:
+    env = Environment("ws-env")
+    env.workspace(tmp_path / "root", track_files=False)
+
+    async with served(env) as client:
+        ssh = cast("SSHClient", await client.open("shell"))
+        started = asyncio.get_running_loop().time()
+
+        with pytest.raises(TimeoutError):
+            await ssh.run("sleep 120", timeout=0.1)
+
+        assert asyncio.get_running_loop().time() - started < 2.0
+        completed = await ssh.run("printf healthy", check=True, timeout=5.0)
+        assert completed.stdout == "healthy"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
 async def test_workspace_timeout_reports_exit_after_child_teardown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

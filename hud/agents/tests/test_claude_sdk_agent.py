@@ -82,9 +82,31 @@ class _FakeConn:
                 self._sink[name] += base64.b64decode(match.group(1))
             else:
                 self._sink[name] = b""
-            return SimpleNamespace(stdout="", stderr="", exit_status=0)
+            return SimpleNamespace(stdout="", stderr="", exit_status=0, returncode=0)
         self.ran.append(cmd)
         return self._result
+
+    async def create_process(self, cmd: str, **kwargs: Any) -> _FakeProcess:
+        return _FakeProcess(await self.run(cmd, **kwargs))
+
+
+class _FakeProcess:
+    def __init__(self, result: Any) -> None:
+        self._result = result
+
+    async def wait(self, *, check: bool, **kwargs: Any) -> Any:
+        del check
+        assert kwargs == {"timeout": None}
+        return self._result
+
+    def terminate(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    async def wait_closed(self) -> None:
+        pass
 
 
 def _fake_run() -> Any:
@@ -115,7 +137,10 @@ def _agent_with_conn(shell: str, conn: _FakeConn) -> ClaudeSDKAgent:
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0))
+    conn = _FakeConn(
+        sink,
+        SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0, returncode=0),
+    )
     agent = _agent_with_conn("cmd", conn)
 
     run = _fake_run()
@@ -131,7 +156,10 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
 
 async def test_exec_on_bash_runs_inline_without_batch() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0))
+    conn = _FakeConn(
+        sink,
+        SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0, returncode=0),
+    )
     agent = _agent_with_conn("bash", conn)
 
     run = _fake_run()
@@ -147,15 +175,34 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
 
 async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, SimpleNamespace(stdout="", stderr="boom", exit_status=1))
+    conn = _FakeConn(
+        sink,
+        SimpleNamespace(stdout="", stderr="boom", exit_status=1, returncode=1),
+    )
     agent = _agent_with_conn("cmd", conn)
 
     run = _fake_run()
     await agent._exec(run, prompt="x", max_steps=1)
 
     assert run.trace.status == "error"
-    assert run.trace.extra["exit_status"] == 1
+    assert run.trace.extra["returncode"] == 1
     assert run.steps[0].error == "boom"
+
+
+async def test_exec_signal_exit_records_the_returncode() -> None:
+    sink: dict[str, bytes] = {}
+    conn = _FakeConn(
+        sink,
+        SimpleNamespace(stdout="", stderr="", exit_status=None, returncode=-15),
+    )
+    agent = _agent_with_conn("bash", conn)
+
+    run = _fake_run()
+    await agent._exec(run, prompt="x", max_steps=1)
+
+    assert run.trace.status == "error"
+    assert run.trace.extra["returncode"] == -15
+    assert run.steps[0].error == "claude CLI exited with return code -15"
 
 
 @pytest.mark.parametrize(
