@@ -248,7 +248,9 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
         )
     )
 
-    assert execute.await_args.kwargs["mcp_servers"] == {
+    await_args = execute.await_args
+    assert await_args is not None
+    assert await_args.kwargs["mcp_servers"] == {
         "database": {"type": claude_type, "url": "http://database:8000/mcp"}
     }
     execute.assert_awaited_once()
@@ -288,7 +290,9 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     )
 
     assert opened == ["ssh"]
-    server = execute.await_args.kwargs["mcp_servers"]["computer-use"]
+    await_args = execute.await_args
+    assert await_args is not None
+    server = await_args.kwargs["mcp_servers"]["computer-use"]
     assert server == {
         "type": "stdio",
         "command": "python",
