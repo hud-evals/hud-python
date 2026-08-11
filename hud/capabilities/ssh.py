@@ -78,14 +78,10 @@ class SSHClient(CapabilityClient):
         conn: asyncssh.SSHClientConnection | None = None
         process = None
         try:
-            if timeout is None:
+            async with asyncio.timeout(timeout):
                 conn = await self._connection()
-                completed = await conn.run(*args, check=check, **run_kwargs)
-            else:
-                async with asyncio.timeout(timeout):
-                    conn = await self._connection()
-                    process = await conn.create_process(*args, **run_kwargs)
-                    completed = await process.wait(check=check, timeout=None)
+                process = await conn.create_process(*args, **run_kwargs)
+                completed = await process.wait(check=check, timeout=None)
             if completed.returncode is None:
                 conn.close()
                 raise SSHConnectionError("SSH command ended without an exit status")

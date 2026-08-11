@@ -86,6 +86,28 @@ class _FakeConn:
         self.ran.append(cmd)
         return self._result
 
+    async def create_process(self, cmd: str, **kwargs: Any) -> _FakeProcess:
+        return _FakeProcess(await self.run(cmd, **kwargs))
+
+
+class _FakeProcess:
+    def __init__(self, result: Any) -> None:
+        self._result = result
+
+    async def wait(self, *, check: bool, **kwargs: Any) -> Any:
+        del check
+        assert kwargs == {"timeout": None}
+        return self._result
+
+    def terminate(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    async def wait_closed(self) -> None:
+        pass
+
 
 def _fake_run() -> Any:
     trace = SimpleNamespace(status="", content="", extra={})

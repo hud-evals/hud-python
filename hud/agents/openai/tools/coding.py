@@ -73,16 +73,13 @@ class OpenAIShellTool(SSHTool):
         outputs: list[dict[str, Any]] = []
         display_outputs: list[str] = []
         is_error = False
-        env_arguments: dict[str, Any] = {}
+        timeout_seconds: float | None = None
         timeout_ms = arguments.get("timeout_ms")
         if isinstance(timeout_ms, int):
-            env_arguments["timeout_seconds"] = timeout_ms / 1000.0
+            timeout_seconds = timeout_ms / 1000.0
 
         for command in command_list:
-            if env_arguments.get("timeout_seconds"):
-                full_cmd = f"timeout {int(env_arguments['timeout_seconds'])} {command}"
-            else:
-                full_cmd = command
+            full_cmd = f"timeout {timeout_seconds:g}s {command}" if timeout_seconds else command
             completed = await self.client.run(full_cmd, check=False)
             stdout = completed.stdout if isinstance(completed.stdout, str) else ""
             stderr = completed.stderr if isinstance(completed.stderr, str) else ""
