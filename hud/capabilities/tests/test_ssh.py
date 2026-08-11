@@ -18,15 +18,24 @@ class _Completed:
     stdout = "ok"
     stderr = ""
     exit_status = 0
+    returncode: int | None = 0
 
 
 class _Process:
-    def __init__(self, *, wait_error: BaseException | None = None, block: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        completed: _Completed | None = None,
+        wait_error: BaseException | None = None,
+        block: bool = False,
+    ) -> None:
+        self.completed = completed or _Completed()
         self.wait_error = wait_error
         self.block = block
         self.on_wait: Callable[[], None] | None = None
         self.started = asyncio.Event()
         self.closed = False
+        self.terminated = False
         self.waited_closed = False
 
     async def wait(self, *, check: bool, **kwargs: Any) -> _Completed:
@@ -39,10 +48,13 @@ class _Process:
             await asyncio.Event().wait()
         if self.wait_error is not None:
             raise self.wait_error
-        return _Completed()
+        return self.completed
 
     def close(self) -> None:
         self.closed = True
+
+    def terminate(self) -> None:
+        self.terminated = True
 
     async def wait_closed(self) -> None:
         self.waited_closed = True
@@ -208,7 +220,7 @@ async def test_run_preserves_timeout_when_the_connection_closes() -> None:
         await client.run("echo never", timeout=1)
 
 
-async def test_run_cancellation_closes_the_remote_process() -> None:
+async def test_run_cancellation_terminates_the_remote_process() -> None:
     connection = _Connection(process=_Process(block=True))
     client = _client(connection)
     run = asyncio.create_task(client.run("echo never", timeout=300))
@@ -218,8 +230,21 @@ async def test_run_cancellation_closes_the_remote_process() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await run
-    assert connection.process.closed is True
+    assert connection.process.terminated is True
+    assert connection.process.closed is False
     assert connection.process.waited_closed is True
+
+
+async def test_run_rejects_a_completed_process_without_a_returncode() -> None:
+    completed = _Completed()
+    completed.returncode = None
+    connection = _Connection(process=_Process(completed=completed))
+    client = _client(connection)
+
+    with pytest.raises(SSHConnectionError, match="without an exit status"):
+        await client.run("echo incomplete", timeout=1)
+
+    assert connection.closed is True
 
 
 async def test_windows_write_uses_one_timeout_budget(

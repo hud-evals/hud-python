@@ -1600,6 +1600,8 @@ class Workspace:
                         break
                     stdin_writer.write(chunk)
                     await stdin_writer.drain()
+            except asyncssh.SignalReceived:
+                await sub.terminate()
             except (asyncssh.Error, BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:

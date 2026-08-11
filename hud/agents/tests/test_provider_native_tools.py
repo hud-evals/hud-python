@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+from types import SimpleNamespace
 from typing import Any, cast
 
 import asyncssh
@@ -33,6 +34,7 @@ class _Completed:
         self.stdout = stdout
         self.stderr = stderr
         self.exit_status = exit_status
+        self.returncode = exit_status
 
 
 class _Conn:
@@ -123,6 +125,9 @@ class _Process:
         return self.completed
 
     def close(self) -> None:
+        self.closed = True
+
+    def terminate(self) -> None:
         self.closed = True
 
     async def wait_closed(self) -> None:
@@ -357,6 +362,29 @@ async def test_shared_ssh_timeout_returns_infrastructure_error(
     assert result.isError is True
     assert isinstance(result, SSHInfrastructureErrorResult)
     assert result_text(result) == "tool error: command timed out after 300s"
+
+
+async def test_shared_ssh_tool_reports_a_signal_returncode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ssh = _ssh()
+
+    async def signaled(*args: object, **kwargs: Any) -> SimpleNamespace:
+        del args, kwargs
+        return SimpleNamespace(
+            stdout="",
+            stderr="terminated",
+            exit_status=None,
+            returncode=-15,
+        )
+
+    monkeypatch.setattr(ssh, "run", signaled)
+    tool = BashTool(spec=BashTool.default_spec("qwen"), client=ssh)
+
+    result = await tool.execute({"command": "sleep forever"})
+
+    assert result.isError is True
+    assert result_text(result).endswith("(exit -15)")
 
 
 async def test_openai_shell_uses_the_same_ssh_timeout(

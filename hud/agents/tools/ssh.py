@@ -73,10 +73,10 @@ class SSHTool(AgentTool[SSHClient]):
         body = f"$ {command}\n{stdout}"
         if stderr:
             body += f"\nstderr:\n{stderr}"
-        body += f"\n(exit {completed.exit_status})"
+        body += f"\n(exit {completed.returncode})"
         return MCPToolResult(
             content=[mcp_types.TextContent(type="text", text=body)],
-            isError=bool(completed.exit_status),
+            isError=completed.returncode != 0,
         )
 
     async def file_read(self, path: str) -> MCPToolResult:

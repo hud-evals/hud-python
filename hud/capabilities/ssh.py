@@ -80,22 +80,37 @@ class SSHClient(CapabilityClient):
         try:
             if timeout is None:
                 conn = await self._connection()
-                return await conn.run(*args, check=check, **run_kwargs)
-            async with asyncio.timeout(timeout):
-                conn = await self._connection()
-                process = await conn.create_process(*args, **run_kwargs)
-                return await process.wait(check=check, timeout=None)
+                completed = await conn.run(*args, check=check, **run_kwargs)
+            else:
+                async with asyncio.timeout(timeout):
+                    conn = await self._connection()
+                    process = await conn.create_process(*args, **run_kwargs)
+                    completed = await process.wait(check=check, timeout=None)
+            if completed.returncode is None:
+                conn.close()
+                raise SSHConnectionError("SSH command ended without an exit status")
+            return completed
         except (TimeoutError, asyncio.CancelledError):
             if process is not None:
-                process.close()
-                with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
+                try:
+                    process.terminate()
+                except (OSError, asyncssh.Error):
+                    process.close()
+                try:
                     async with asyncio.timeout(SSH_SESSION_CLOSE_TIMEOUT_S):
                         await process.wait_closed()
+                except (OSError, TimeoutError, asyncssh.Error):
+                    process.close()
+                    with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
+                        async with asyncio.timeout(SSH_SESSION_CLOSE_TIMEOUT_S):
+                            await process.wait_closed()
             raise
         except asyncssh.ChannelOpenError as exc:
             raise SSHConnectionError("SSH server rejected the session") from exc
         except asyncssh.ConnectionLost as exc:
             raise SSHConnectionError("SSH connection lost during operation") from exc
+        except SSHConnectionError:
+            raise
         except (OSError, asyncssh.Error) as exc:
             if conn is not None and _is_closed(conn):
                 raise SSHConnectionError("SSH connection lost during operation") from exc
