@@ -80,8 +80,7 @@ class SSHClient(CapabilityClient):
         try:
             if timeout is None:
                 conn = await self._connection()
-                process = await conn.create_process(*args, **run_kwargs)
-                completed = await process.wait(check=check, timeout=None)
+                completed = await conn.run(*args, check=check, **run_kwargs)
             else:
                 async with asyncio.timeout(timeout):
                     conn = await self._connection()

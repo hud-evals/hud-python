@@ -97,8 +97,7 @@ class _Connection:
         return _Completed()
 
     async def create_process(self, *args: object, **kwargs: Any) -> _Process:
-        del kwargs
-        self.commands.append(str(args[0]))
+        del args, kwargs
         if self.stall_open:
             try:
                 await asyncio.Event().wait()
@@ -107,10 +106,6 @@ class _Connection:
                 raise
         if self.open_error is not None:
             raise self.open_error
-        if self.run_error is not None:
-            if isinstance(self.run_error, asyncssh.ConnectionLost):
-                self.closed = True
-            raise self.run_error
         return self.process
 
 
@@ -225,13 +220,10 @@ async def test_run_preserves_timeout_when_the_connection_closes() -> None:
         await client.run("echo never", timeout=1)
 
 
-@pytest.mark.parametrize("command_timeout", [None, 300])
-async def test_run_cancellation_terminates_the_remote_process(
-    command_timeout: float | None,
-) -> None:
+async def test_run_cancellation_terminates_the_remote_process() -> None:
     connection = _Connection(process=_Process(block=True))
     client = _client(connection)
-    run = asyncio.create_task(client.run("echo never", timeout=command_timeout))
+    run = asyncio.create_task(client.run("echo never", timeout=300))
     await connection.process.started.wait()
 
     run.cancel()

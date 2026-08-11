@@ -30,7 +30,7 @@ from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
-from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
+from hud.agents.tools.ssh import SSHInfrastructureErrorResult
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient, RFBClient
 from hud.capabilities.ssh import SSHConnectionError
@@ -339,8 +339,6 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             )
         args = call.arguments or {}
         try:
-            if isinstance(tool, SSHTool):
-                return await tool.execute_with_deadline(args)
             return await tool.execute(args)
         except (TimeoutError, asyncio.CancelledError):
             raise

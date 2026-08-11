@@ -7,12 +7,7 @@ from typing import Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.ssh import (
-    DEFAULT_SSH_COMMAND_TIMEOUT_S,
-    MAX_SHELL_OUTPUT_LENGTH,
-    SSHInfrastructureErrorResult,
-    bound_shell_output,
-)
+from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH, bound_shell_output
 from hud.types import MCPToolResult
 
 from .base import OpenAIToolSpec
@@ -88,28 +83,11 @@ class OpenAIShellTool(SSHTool):
                 full_cmd = f"timeout {int(env_arguments['timeout_seconds'])} {command}"
             else:
                 full_cmd = command
-            try:
-                completed = await self.client.run(
-                    full_cmd,
-                    check=False,
-                    timeout=self._remaining_timeout(),
-                )
-            except TimeoutError:
-                text = f"tool error: command timed out after {DEFAULT_SSH_COMMAND_TIMEOUT_S:g}s"
-                outputs.append(shell_output("", text, 1))
-                display_outputs.append(text)
-                return _shell_result(
-                    display_outputs,
-                    is_error=True,
-                    infrastructure_error=True,
-                    structured={
-                        "output": outputs,
-                        "max_output_length": max_output_length,
-                    },
-                )
+            completed = await self.client.run(full_cmd, check=False)
             stdout = completed.stdout if isinstance(completed.stdout, str) else ""
             stderr = completed.stderr if isinstance(completed.stderr, str) else ""
-            exit_code = completed.exit_status if completed.exit_status is not None else 1
+            exit_code = completed.returncode
+            assert exit_code is not None
             stdout, stderr = bound_shell_output(stdout, stderr, max_output_length)
             outputs.append(shell_output(stdout, stderr, exit_code))
             display_outputs.append(stdout + stderr)
@@ -129,12 +107,10 @@ def _shell_result(
     texts: list[str],
     *,
     is_error: bool = False,
-    infrastructure_error: bool = False,
     structured: dict[str, Any] | None = None,
 ) -> MCPToolResult:
     payload = {"provider_tool": "shell", **(structured or {})}
-    result_type = SSHInfrastructureErrorResult if infrastructure_error else MCPToolResult
-    return result_type(
+    return MCPToolResult(
         content=[mcp_types.TextContent(type="text", text=text) for text in texts if text],
         isError=is_error,
         structuredContent=payload,
