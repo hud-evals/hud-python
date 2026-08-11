@@ -225,7 +225,9 @@ class ClaudeComputerTool(RFBTool):
                 text = arguments.get("text")
                 # xdotool syntax: space-separated sequential presses, + binds a chord
                 chords = (
-                    [_split_keys(part) for part in text.split()] if isinstance(text, str) else []
+                    [chord for part in text.split() if (chord := _split_keys(part))]
+                    if isinstance(text, str)
+                    else []
                 )
                 if not chords:
                     return tool_err("`text` (key chord) is required for key")
