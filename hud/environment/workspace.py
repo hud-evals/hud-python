@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.workspace")
 
-_COMMAND_TIMEOUT = 3600.0
+_PROCESS_CLOSE_TIMEOUT_S = 5.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -1454,7 +1454,7 @@ class Workspace:
             # after the subprocess coroutine has already returned (a race that can
             # happen even when communicate() calls wait() internally), it corrupts
             # asyncssh's IOCP state and permanently breaks the SSH session.
-            # Running subprocess.run() in a thread-pool executor sidesteps IOCP
+            # Running a blocking subprocess in a worker thread sidesteps IOCP
             # entirely: the blocking WaitForSingleObject in the worker thread drains
             # the process exit before the Future resolves, leaving no pending events.
             #
@@ -1489,36 +1489,55 @@ class Workspace:
 
             try:
                 loop = asyncio.get_running_loop()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        functools.partial(
-                            _subprocess.run,
-                            win_argv,
-                            stdin=_subprocess.DEVNULL,
-                            stdout=_subprocess.PIPE,
-                            stderr=_subprocess.PIPE,
-                            cwd=str(self.root),
-                            env=proc_env,
-                            timeout=3600,
-                        ),
+                child = await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        _subprocess.Popen,
+                        win_argv,
+                        stdin=_subprocess.DEVNULL,
+                        stdout=_subprocess.PIPE,
+                        stderr=_subprocess.PIPE,
+                        cwd=str(self.root),
+                        env=proc_env,
                     ),
-                    timeout=3660.0,
                 )
             except FileNotFoundError as exc:
                 process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
                 process.exit(127)
                 return
-            except (TimeoutError, _subprocess.TimeoutExpired):
-                process.stderr.write(b"workspace: command timed out after 3600s\n")
-                process.exit(1)
-                return
 
-            if result.stdout:
-                process.stdout.write(result.stdout)
-            if result.stderr:
-                process.stderr.write(result.stderr)
-            process.exit(result.returncode)
+            communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
+            channel_closed_task = asyncio.create_task(process.channel.wait_closed())
+            try:
+                done, _ = await asyncio.wait(
+                    (communicate_task, channel_closed_task),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if channel_closed_task in done and not communicate_task.done():
+                    return
+                stdout, stderr = await communicate_task
+            finally:
+                if not communicate_task.done():
+                    with contextlib.suppress(OSError):
+                        child.terminate()
+                    try:
+                        async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
+                            await asyncio.shield(communicate_task)
+                    except TimeoutError:
+                        with contextlib.suppress(OSError):
+                            child.kill()
+                        await communicate_task
+                channel_closed_task.cancel()
+                await asyncio.gather(channel_closed_task, return_exceptions=True)
+
+            if process.channel.is_closing():
+                return
+            if stdout:
+                process.stdout.write(stdout)
+            if stderr:
+                process.stderr.write(stderr)
+            assert child.returncode is not None
+            process.exit(child.returncode)
             return
 
         pty_pair = _open_pty(process) if wants_tty and pid is None else None
@@ -1618,9 +1637,8 @@ class Workspace:
             """Forward the child's output as it is produced.
 
             Streamed, not accumulated: an agent watching a build wants the
-            lines while it runs, a session that never exits would otherwise
-            say nothing at all, and a command killed at the timeout still
-            keeps whatever it managed to print.
+            lines while it runs, and a session that never exits would otherwise
+            say nothing at all.
             """
             try:
                 while chunk := await reader.read(65536):
@@ -1638,18 +1656,15 @@ class Workspace:
             output_tasks.append(asyncio.create_task(relay_output(stderr_reader, process.stderr)))
         wait_task = asyncio.create_task(sub.wait())
         channel_closed_task = asyncio.create_task(process.channel.wait_closed())
-        timed_out = False
+        returncode: int | None = None
         try:
-            async with asyncio.timeout(_COMMAND_TIMEOUT):
-                done, _ = await asyncio.wait(
-                    (wait_task, channel_closed_task),
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if channel_closed_task in done and not wait_task.done():
-                    return
-                await wait_task
-        except TimeoutError:
-            timed_out = True
+            done, _ = await asyncio.wait(
+                (wait_task, channel_closed_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if channel_closed_task in done and not wait_task.done():
+                return
+            returncode = await wait_task
         finally:
             # A command that ran to completion inside the sandbox keeps its
             # process group: `some-server &` is how an agent starts something
@@ -1657,11 +1672,10 @@ class Workspace:
             # here would take it down with the shell that launched it. The
             # sandbox is the lifetime boundary instead — discarding it at the
             # end of the rollout collapses the pid namespace and everything
-            # left in it. Nothing bounds a command that timed out, was
-            # abandoned mid-flight, or ran with no sandbox at all, so those
-            # are still torn down as a group.
+            # left in it. An abandoned command or one running without a
+            # sandbox is still torn down as a group.
             completed = wait_task.done() and not wait_task.cancelled()
-            if pid is None or timed_out or not completed:
+            if pid is None or not completed:
                 await sub.terminate()
             stdin_task.cancel()
             wait_task.cancel()
@@ -1679,15 +1693,8 @@ class Workspace:
 
         if process.channel.is_closing():
             return
-        if timed_out:
-            # Whatever ran before the deadline has already been relayed; this
-            # only says why it stopped.
-            process.stderr.write(
-                f"workspace: command timed out after {_COMMAND_TIMEOUT:g}s\n".encode()
-            )
-            process.exit(1)
-            return
-        process.exit(sub.returncode if sub.returncode is not None else 0)
+        assert returncode is not None
+        process.exit(returncode)
 
 
 __all__ = [

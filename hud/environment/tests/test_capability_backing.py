@@ -268,44 +268,22 @@ async def test_workspace_client_timeout_keeps_connection_usable(tmp_path: Path) 
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
-async def test_workspace_timeout_reports_exit_after_child_teardown(
+async def test_workspace_shell_replaces_invalid_utf8_without_losing_transport(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(workspace_module, "_COMMAND_TIMEOUT", 0.5)
     env = Environment("ws-env")
     env.workspace(tmp_path / "root", track_files=False)
-    pid: int | None = None
 
-    try:
-        async with served(env) as client:
-            ssh = cast("SSHClient", await client.open("shell"))
-            remote = await ssh.conn.create_process(
-                "trap '' TERM; sleep 120 & echo $! > timeout-child.pid; wait"
-            )
-            try:
-                result = await asyncio.wait_for(
-                    ssh.conn.run(
-                        "while [ ! -s timeout-child.pid ]; do sleep 0.01; done; "
-                        "cat timeout-child.pid",
-                        check=True,
-                    ),
-                    5.0,
-                )
-                assert isinstance(result.stdout, str)
-                pid = int(result.stdout)
-                assert _pid_is_running(pid)
+    async with served(env) as client:
+        ssh = cast("SSHClient", await client.open("shell"))
+        connection = ssh.conn
 
-                completed = await remote.wait(timeout=5.0)
-                assert completed.exit_status == 1
-                assert not _pid_is_running(pid)
-            finally:
-                remote.close()
-                await asyncio.wait_for(remote.wait_closed(), 5.0)
-    finally:
-        if pid is not None and _pid_is_running(pid):
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
+        completed = await ssh.run("printf '\\226\\214 split-utf8'", check=True)
+
+        assert completed.stdout == "�� split-utf8"
+        assert completed.returncode == 0
+        assert ssh.conn is connection
+        assert not connection.is_closed()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX setsid")

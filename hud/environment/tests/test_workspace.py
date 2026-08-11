@@ -167,26 +167,6 @@ async def test_a_resize_does_not_cost_the_session_its_keyboard(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_a_timed_out_command_keeps_what_it_printed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The output is the evidence of how far it got — reporting only that the
-    deadline passed throws that away."""
-    monkeypatch.setattr(workspace_mod, "_COMMAND_TIMEOUT", 1.0)
-    ws = Workspace(tmp_path / "root")
-    await ws.start()
-    try:
-        async with await _connect(ws) as conn:
-            result = await conn.run("echo progress-so-far; sleep 30", check=False)
-    finally:
-        await ws.stop()
-
-    assert "progress-so-far" in str(result.stdout)
-    assert "timed out" in str(result.stderr)
-    assert result.exit_status == 1
-
-
-@pytest.mark.asyncio
 async def test_session_setup_failure_is_reported_to_the_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1169,6 +1149,52 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
         await ws._handle_process(cast("Any", process))
 
     assert captured.value.env == {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+
+
+@pytest.mark.asyncio
+async def test_namespace_wait_status_is_forwarded_to_ssh_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def wait_until_cancelled() -> None:
+        await asyncio.Event().wait()
+
+    def empty_reader() -> asyncio.StreamReader:
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        return reader
+
+    child_channel = SimpleNamespace(close=Mock(), wait_closed=AsyncMock())
+    child_process = SimpleNamespace(
+        stdin=SimpleNamespace(write_eof=Mock()),
+        stdout=empty_reader(),
+        stderr=empty_reader(),
+        wait=AsyncMock(return_value=SimpleNamespace(returncode=None)),
+        returncode=None,
+        channel=child_channel,
+    )
+    child = namespace_mod.NamespaceProcess(cast("Any", child_process))
+    namespace = SimpleNamespace(spawn=AsyncMock(return_value=child))
+    channel = SimpleNamespace(
+        wait_closed=wait_until_cancelled,
+        is_closing=Mock(return_value=False),
+    )
+    process = SimpleNamespace(
+        term_type=None,
+        command="true",
+        stdin=SimpleNamespace(read=AsyncMock(return_value=b"")),
+        stdout=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+        stderr=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+        channel=channel,
+        exit=Mock(),
+    )
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    ws._namespace = cast("Any", namespace)
+
+    await ws._handle_process(cast("Any", process))
+
+    process.exit.assert_called_once_with(255)
+    child_channel.close.assert_not_called()
 
 
 @pytest.mark.asyncio

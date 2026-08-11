@@ -9,18 +9,20 @@ rejected by the remote shell (and silently fails under PowerShell), so the
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 import re
 from types import SimpleNamespace
 from typing import Any, Literal, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from hud.agents.claude.sdk import computer_mcp
 from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
 from hud.agents.types import ClaudeSDKConfig
-from hud.capabilities import Capability, RFBClient, SSHClient
+from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
@@ -122,17 +124,14 @@ _STREAM_JSON = (
 )
 
 
-def _agent_with_conn(shell: str, conn: _FakeConn) -> ClaudeSDKAgent:
-    agent = ClaudeSDKAgent()
+def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
     capability = Capability(
         name="shell",
         protocol="ssh/2",
         url="ssh://localhost:22",
         params={"shell": shell},
     )
-    agent._ssh = SSHClient(capability, cast("Any", conn))
-    agent._shell = shell
-    return agent
+    return SSHClient(capability, cast("Any", conn))
 
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
@@ -141,10 +140,11 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
         sink,
         SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0, returncode=0),
     )
-    agent = _agent_with_conn("cmd", conn)
+    agent = ClaudeSDKAgent()
+    ssh = _ssh_with_conn("cmd", conn)
 
     run = _fake_run()
-    await agent._exec(run, prompt="build it", max_steps=5)
+    await agent._exec(run, ssh=ssh, shell="cmd", mcp_servers={}, prompt="build it", max_steps=5)
 
     assert conn.ran == ["cmd /c .hud_run.bat"]
     assert all(command.startswith("powershell ") for command in conn.write_commands)
@@ -160,10 +160,11 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
         sink,
         SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0, returncode=0),
     )
-    agent = _agent_with_conn("bash", conn)
+    agent = ClaudeSDKAgent()
+    ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
-    await agent._exec(run, prompt="build it", max_steps=5)
+    await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="build it", max_steps=5)
 
     assert ".hud_run.bat" not in sink
     assert conn.write_commands == ["cat > .hud_prompt.txt"]
@@ -179,10 +180,11 @@ async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
         sink,
         SimpleNamespace(stdout="", stderr="boom", exit_status=1, returncode=1),
     )
-    agent = _agent_with_conn("cmd", conn)
+    agent = ClaudeSDKAgent()
+    ssh = _ssh_with_conn("cmd", conn)
 
     run = _fake_run()
-    await agent._exec(run, prompt="x", max_steps=1)
+    await agent._exec(run, ssh=ssh, shell="cmd", mcp_servers={}, prompt="x", max_steps=1)
 
     assert run.trace.status == "error"
     assert run.trace.extra["returncode"] == 1
@@ -195,10 +197,11 @@ async def test_exec_signal_exit_records_the_returncode() -> None:
         sink,
         SimpleNamespace(stdout="", stderr="", exit_status=None, returncode=-15),
     )
-    agent = _agent_with_conn("bash", conn)
+    agent = ClaudeSDKAgent()
+    ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
-    await agent._exec(run, prompt="x", max_steps=1)
+    await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x", max_steps=1)
 
     assert run.trace.status == "error"
     assert run.trace.extra["returncode"] == -15
@@ -245,7 +248,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
         )
     )
 
-    assert agent._mcp_servers == {
+    assert execute.await_args.kwargs["mcp_servers"] == {
         "database": {"type": claude_type, "url": "http://database:8000/mcp"}
     }
     execute.assert_awaited_once()
@@ -262,20 +265,20 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     )
     screen = Capability.rfb(name="screen", url="rfb://localhost:5900", display=0)
     ssh = SSHClient(shell, cast("Any", object()))
-    rfb = object.__new__(RFBClient)
+    opened: list[str] = []
 
     class Client:
         manifest = SimpleNamespace(bindings=[shell, screen])
 
-        async def open(self, ref: str) -> Any:
-            return ssh if ref == "ssh" else rfb
+        async def open(self, ref: str) -> SSHClient:
+            opened.append(ref)
+            assert ref == "ssh"
+            return ssh
 
     encoding = WebPScreenshotEncoding(quality=42)
     agent = ClaudeSDKAgent(ClaudeSDKConfig(screenshot_encoding=encoding))
     execute = AsyncMock()
-    serve = AsyncMock(return_value=8765)
     monkeypatch.setattr(agent, "_exec", execute)
-    monkeypatch.setattr(computer_mcp, "serve_computer_mcp", serve)
 
     await agent(
         cast(
@@ -284,8 +287,100 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
         )
     )
 
-    serve.assert_awaited_once_with(rfb, encoding)
-    assert agent._mcp_servers["computer-use"] == {
-        "type": "http",
-        "url": "http://127.0.0.1:8765/mcp",
+    assert opened == ["ssh"]
+    server = execute.await_args.kwargs["mcp_servers"]["computer-use"]
+    assert server == {
+        "type": "stdio",
+        "command": "python",
+        "args": ["-m", "hud.agents.claude.sdk.computer_mcp"],
+        "env": {
+            computer_mcp.RFB_CAPABILITY_ENV: json.dumps(
+                screen.to_manifest(), separators=(",", ":")
+            ),
+            computer_mcp.SCREENSHOT_ENCODING_ENV: encoding.model_dump_json(),
+        },
     }
+
+
+async def test_computer_mcp_stdio_owns_rfb_lifetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screen = Capability.rfb(name="screen", url="rfb://localhost:5900", display=0)
+    encoding = WebPScreenshotEncoding(quality=42)
+    rfb = SimpleNamespace(close=AsyncMock())
+    connect = AsyncMock(return_value=rfb)
+    server = SimpleNamespace(run_async=AsyncMock())
+    create = Mock(return_value=server)
+    monkeypatch.setattr(computer_mcp.RFBClient, "connect", connect)
+    monkeypatch.setattr(computer_mcp, "create_computer_mcp", create)
+
+    await computer_mcp.run_computer_mcp(
+        {
+            computer_mcp.RFB_CAPABILITY_ENV: json.dumps(screen.to_manifest()),
+            computer_mcp.SCREENSHOT_ENCODING_ENV: encoding.model_dump_json(),
+        }
+    )
+
+    connect.assert_awaited_once_with(screen)
+    create.assert_called_once_with(rfb, encoding)
+    server.run_async.assert_awaited_once_with(transport="stdio", show_banner=False)
+    rfb.close.assert_awaited_once()
+
+
+async def test_concurrent_runs_keep_their_ssh_state_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell_a = Capability(
+        name="shell-a",
+        protocol="ssh/2",
+        url="ssh://a:22",
+        params={"shell": "bash"},
+    )
+    shell_b = Capability(
+        name="shell-b",
+        protocol="ssh/2",
+        url="ssh://b:22",
+        params={"shell": "powershell"},
+    )
+    ssh_a = SSHClient(shell_a, cast("Any", object()))
+    ssh_b = SSHClient(shell_b, cast("Any", object()))
+
+    class Client:
+        def __init__(self, shell: Capability, ssh: SSHClient) -> None:
+            self.manifest = SimpleNamespace(bindings=[shell])
+            self.ssh = ssh
+
+        async def open(self, ref: str) -> SSHClient:
+            assert ref == "ssh"
+            return self.ssh
+
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    seen: list[tuple[Any, SSHClient, str]] = []
+
+    async def execute(
+        run: Any,
+        *,
+        ssh: SSHClient,
+        shell: str,
+        mcp_servers: dict[str, dict[str, Any]],
+        **_: Any,
+    ) -> None:
+        assert mcp_servers == {}
+        seen.append((run, ssh, shell))
+        if run.prompt_text == "first":
+            first_entered.set()
+            await release_first.wait()
+
+    agent = ClaudeSDKAgent()
+    monkeypatch.setattr(agent, "_exec", execute)
+    run_a = SimpleNamespace(client=Client(shell_a, ssh_a), prompt_text="first")
+    run_b = SimpleNamespace(client=Client(shell_b, ssh_b), prompt_text="second")
+
+    first = asyncio.create_task(agent(cast("Any", run_a)))
+    await first_entered.wait()
+    await agent(cast("Any", run_b))
+    release_first.set()
+    await first
+
+    assert seen == [(run_a, ssh_a, "bash"), (run_b, ssh_b, "powershell")]

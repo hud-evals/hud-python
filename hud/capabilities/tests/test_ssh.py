@@ -143,6 +143,7 @@ async def test_connect_keeps_tunneled_connection_active(monkeypatch: pytest.Monk
         username="agent",
         client_keys=None,
         known_hosts=None,
+        errors="replace",
         keepalive_interval=15,
         keepalive_count_max=4,
     )

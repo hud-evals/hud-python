@@ -7,21 +7,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 import fastmcp
+from pydantic import TypeAdapter
 
-from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
+from hud.capabilities import Capability
+from hud.capabilities.rfb import RFBClient, ScreenshotEncoding, WebPScreenshotEncoding
 
 if TYPE_CHECKING:
-    from hud.capabilities.rfb import RFBClient
+    from collections.abc import Mapping
 
-logger = logging.getLogger(__name__)
-
-#: Keep references to background server tasks so they aren't garbage-collected.
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 _DEFAULT_SCREENSHOT_ENCODING = WebPScreenshotEncoding()
+RFB_CAPABILITY_ENV = "HUD_RFB_CAPABILITY"
+SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"
 
 
 def create_computer_mcp(
@@ -114,34 +114,42 @@ def create_computer_mcp(
     return mcp
 
 
-async def serve_computer_mcp(
-    rfb: RFBClient,
-    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
-    host: str = "127.0.0.1",
-    port: int = 0,
-) -> int:
-    """Start the computer-use MCP server in the background, return the port."""
-    if port == 0:
-        srv = await asyncio.get_event_loop().create_server(lambda: asyncio.Protocol(), host, 0)
-        port = srv.sockets[0].getsockname()[1]
-        srv.close()
-
-    mcp = create_computer_mcp(rfb, screenshot_encoding)
-    task = asyncio.create_task(_run(mcp, host, port))
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
-    await asyncio.sleep(0.5)
-    logger.info("computer-use MCP server on %s:%d", host, port)
-    return port
-
-
-async def _run(mcp: fastmcp.FastMCP, host: str, port: int) -> None:
+def _required_env(environ: Mapping[str, str], name: str) -> str:
     try:
-        await mcp.run_http_async(host=host, port=port)
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.exception("computer-use MCP server crashed")
+        return environ[name]
+    except KeyError as exc:
+        raise RuntimeError(f"missing required environment variable {name}") from exc
 
 
-__all__ = ["create_computer_mcp", "serve_computer_mcp"]
+async def run_computer_mcp(environ: Mapping[str, str] = os.environ) -> None:
+    """Run computer-use over stdio for the lifetime of the invoking Claude CLI."""
+    raw_manifest = json.loads(_required_env(environ, RFB_CAPABILITY_ENV))
+    if not isinstance(raw_manifest, dict):
+        raise ValueError(f"{RFB_CAPABILITY_ENV} must contain a JSON object")
+    capability = Capability.from_manifest(raw_manifest)
+    if capability.protocol.split("/", 1)[0] != "rfb":
+        raise ValueError(f"{RFB_CAPABILITY_ENV} must describe an RFB capability")
+    screenshot_encoding = TypeAdapter(ScreenshotEncoding).validate_json(
+        _required_env(environ, SCREENSHOT_ENCODING_ENV)
+    )
+
+    rfb = await RFBClient.connect(capability)
+    try:
+        await create_computer_mcp(rfb, screenshot_encoding).run_async(
+            transport="stdio",
+            show_banner=False,
+        )
+    finally:
+        await rfb.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(run_computer_mcp())
+
+
+__all__ = [
+    "RFB_CAPABILITY_ENV",
+    "SCREENSHOT_ENCODING_ENV",
+    "create_computer_mcp",
+    "run_computer_mcp",
+]

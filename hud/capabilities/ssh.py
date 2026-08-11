@@ -61,6 +61,7 @@ class SSHClient(CapabilityClient):
             username=cap.params.get("user", "agent"),
             client_keys=client_keys,
             known_hosts=None,
+            errors="replace",
             keepalive_interval=15,
             keepalive_count_max=4,
         )
