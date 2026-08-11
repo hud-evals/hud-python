@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Any, cast
 
 import mcp.types as mcp_types
@@ -79,7 +80,11 @@ class OpenAIShellTool(SSHTool):
             timeout_seconds = timeout_ms / 1000.0
 
         for command in command_list:
-            full_cmd = f"timeout {timeout_seconds:g}s {command}" if timeout_seconds else command
+            full_cmd = (
+                f"timeout {timeout_seconds:g}s bash -lc {shlex.quote(command)}"
+                if timeout_seconds
+                else command
+            )
             completed = await self.client.run(full_cmd, check=False)
             stdout = completed.stdout if isinstance(completed.stdout, str) else ""
             stderr = completed.stderr if isinstance(completed.stderr, str) else ""

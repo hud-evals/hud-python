@@ -176,16 +176,25 @@ class _OpenAIChatAgentForTest(OpenAIChatAgent):
 
 
 @pytest.mark.parametrize(
-    ("timeout_ms", "expected"),
-    [(2500, "timeout 2.5s pwd"), (500, "timeout 0.5s pwd")],
+    ("command", "timeout_ms", "expected"),
+    [
+        ("pwd", 2500, "timeout 2.5s bash -lc pwd"),
+        ("pwd", 500, "timeout 0.5s bash -lc pwd"),
+        (
+            "echo ready; sleep infinity",
+            500,
+            "timeout 0.5s bash -lc 'echo ready; sleep infinity'",
+        ),
+    ],
 )
-async def test_openai_shell_preserves_requested_timeout(
+async def test_openai_shell_applies_requested_timeout_to_entire_command(
+    command: str,
     timeout_ms: int,
     expected: str,
 ) -> None:
     tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
 
-    result = await tool.execute({"commands": ["pwd"], "timeout_ms": timeout_ms})
+    result = await tool.execute({"commands": [command], "timeout_ms": timeout_ms})
 
     assert _commands(tool) == [expected]
     assert result.isError is False
