@@ -155,13 +155,14 @@ class ClaudeSDKAgent(Agent):
         completed = await self._ssh.run(full_cmd, check=False)
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
         stderr = completed.stderr if isinstance(completed.stderr, str) else ""
+        returncode = completed.returncode
 
-        logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
+        logger.info("returncode=%s stdout=%d stderr=%d", returncode, len(stdout), len(stderr))
 
-        if completed.exit_status != 0 and not stdout.strip():
-            error = stderr or f"claude CLI exited with status {completed.exit_status}"
+        if returncode != 0 and not stdout.strip():
+            error = stderr or f"claude CLI exited with return code {returncode}"
             run.trace.status = "error"
-            run.trace.extra.update({"exit_status": completed.exit_status, "stderr": stderr})
+            run.trace.extra.update({"returncode": returncode, "stderr": stderr})
             run.record(Step(source="system", error=error))
             return
 
