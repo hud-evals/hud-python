@@ -186,6 +186,18 @@ async def test_create_process_reconnects_before_opening_channel(
     assert replacement.commands == ["bridge"]
 
 
+async def test_create_process_preserves_reconnect_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client(_Connection(closed=True))
+    reconnect = AsyncMock(side_effect=OSError("unreachable"))
+    monkeypatch.setattr(client, "_connect", reconnect)
+    monkeypatch.setattr("hud.capabilities.ssh.asyncio.sleep", AsyncMock())
+
+    with pytest.raises(SSHConnectionError, match="reconnect failed after 3 attempts"):
+        await client.create_process("bridge")
+
+
 async def test_run_classifies_rejected_session_as_connection_error() -> None:
     connection = _Connection(
         open_error=asyncssh.ChannelOpenError(asyncssh.OPEN_RESOURCE_SHORTAGE, "busy")

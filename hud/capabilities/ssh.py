@@ -80,6 +80,8 @@ class SSHClient(CapabilityClient):
             raise SSHConnectionError("SSH server rejected the session") from exc
         except asyncssh.ConnectionLost as exc:
             raise SSHConnectionError("SSH connection lost while opening the session") from exc
+        except SSHConnectionError:
+            raise
         except (OSError, asyncssh.Error) as exc:
             if _is_closed(self._conn):
                 raise SSHConnectionError("SSH connection lost while opening the session") from exc
