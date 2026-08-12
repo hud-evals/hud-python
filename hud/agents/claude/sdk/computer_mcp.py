@@ -173,10 +173,7 @@ async def bridge_computer_mcp(
     token = secrets.token_hex(16)
     request_path = str(_REMOTE_TMP / f"hud-computer-{token}.request")
     response_path = str(_REMOTE_TMP / f"hud-computer-{token}.response")
-    bridge = await ssh.conn.create_process(
-        _bridge_command(request_path, response_path),
-        encoding=None,
-    )
+    bridge = await ssh.create_process(_bridge_command(request_path, response_path))
     local: asyncio.subprocess.Process | None = None
     tasks: list[asyncio.Task[None]] = []
     try:

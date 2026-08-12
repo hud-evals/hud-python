@@ -40,8 +40,12 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.environment.workspace")
 
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
+_CREATE_SUSPENDED = 0x00000004
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_THREAD_SUSPEND_RESUME = 0x0002
+_TH32CS_SNAPTHREAD = 0x00000004
+_INVALID_DWORD = 0xFFFFFFFF
 
 
 class _WindowsJob:
@@ -83,10 +87,45 @@ class _WindowsJob:
                 ("peak_job_memory_used", ctypes.c_size_t),
             ]
 
+        class ThreadEntry(ctypes.Structure):
+            _fields_ = [
+                ("size", wintypes.DWORD),
+                ("usage_count", wintypes.DWORD),
+                ("thread_id", wintypes.DWORD),
+                ("owner_process_id", wintypes.DWORD),
+                ("base_priority", wintypes.LONG),
+                ("priority_delta", wintypes.LONG),
+                ("flags", wintypes.DWORD),
+            ]
+
         if kernel32 is None:
             win_dll = ctypes.__dict__["WinDLL"]
             kernel32 = win_dll("kernel32")
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+        kernel32.Thread32First.restype = wintypes.BOOL
+        kernel32.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+        kernel32.Thread32Next.restype = wintypes.BOOL
+        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+        kernel32.ResumeThread.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         self._kernel32 = kernel32
+        self._thread_entry_type = ThreadEntry
         handle = kernel32.CreateJobObjectW(None, None)
         if not handle:
             raise OSError(int(kernel32.GetLastError()), "CreateJobObjectW failed")
@@ -111,6 +150,37 @@ class _WindowsJob:
             process_handle,
         ):
             raise OSError(int(self._kernel32.GetLastError()), "AssignProcessToJobObject failed")
+
+    def resume(self, process: subprocess.Popen[bytes]) -> None:
+        """Resume the primary thread of a process created with CREATE_SUSPENDED."""
+        snapshot = self._kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise OSError(int(self._kernel32.GetLastError()), "thread snapshot failed")
+        thread_handle: Any | None = None
+        try:
+            entry = self._thread_entry_type()
+            entry.size = ctypes.sizeof(entry)
+            if not self._kernel32.Thread32First(snapshot, ctypes.byref(entry)):
+                raise OSError(int(self._kernel32.GetLastError()), "thread enumeration failed")
+            while True:
+                if entry.owner_process_id == process.pid:
+                    thread_handle = self._kernel32.OpenThread(
+                        _THREAD_SUSPEND_RESUME,
+                        False,
+                        entry.thread_id,
+                    )
+                    if not thread_handle:
+                        raise OSError(int(self._kernel32.GetLastError()), "OpenThread failed")
+                    break
+                if not self._kernel32.Thread32Next(snapshot, ctypes.byref(entry)):
+                    raise OSError(0, f"no thread found for suspended process {process.pid}")
+
+            if self._kernel32.ResumeThread(thread_handle) == _INVALID_DWORD:
+                raise OSError(int(self._kernel32.GetLastError()), "ResumeThread failed")
+        finally:
+            if thread_handle is not None:
+                self._kernel32.CloseHandle(thread_handle)
+            self._kernel32.CloseHandle(snapshot)
 
     def close(self) -> None:
         handle, self._handle = self._handle, None
@@ -1573,9 +1643,11 @@ class Workspace:
                         stderr=_subprocess.PIPE,
                         cwd=str(self.root),
                         env=proc_env,
+                        creationflags=_CREATE_SUSPENDED,
                     )
                     try:
                         job.assign(child)
+                        job.resume(child)
                     except BaseException:
                         child.kill()
                         child.wait()

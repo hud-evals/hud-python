@@ -71,6 +71,20 @@ class SSHClient(CapabilityClient):
         """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
 
+    async def create_process(self, command: str) -> asyncssh.SSHClientProcess[bytes]:
+        """Open a binary exec channel after restoring a dropped SSH transport."""
+        try:
+            conn = await self._connection()
+            return await conn.create_process(command, encoding=None)
+        except asyncssh.ChannelOpenError as exc:
+            raise SSHConnectionError("SSH server rejected the session") from exc
+        except asyncssh.ConnectionLost as exc:
+            raise SSHConnectionError("SSH connection lost while opening the session") from exc
+        except (OSError, asyncssh.Error) as exc:
+            if _is_closed(self._conn):
+                raise SSHConnectionError("SSH connection lost while opening the session") from exc
+            raise
+
     async def run(self, *args: object, **kwargs: Any) -> asyncssh.SSHCompletedProcess:
         """Run one command, reconnecting first when the transport is closed."""
         run_kwargs = dict(kwargs)

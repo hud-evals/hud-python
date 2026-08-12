@@ -1238,17 +1238,28 @@ def test_usable_bwrap_reports_unusable_installs(monkeypatch) -> None:
 
 
 def test_windows_job_owns_the_process_tree() -> None:
+    def first_thread(_snapshot: int, entry_pointer: Any) -> bool:
+        entry_pointer._obj.owner_process_id = 123
+        entry_pointer._obj.thread_id = 456
+        return True
+
     kernel32 = SimpleNamespace(
         CreateJobObjectW=Mock(return_value=42),
         SetInformationJobObject=Mock(return_value=True),
         AssignProcessToJobObject=Mock(return_value=True),
+        CreateToolhelp32Snapshot=Mock(return_value=43),
+        Thread32First=Mock(side_effect=first_thread),
+        Thread32Next=Mock(return_value=False),
+        OpenThread=Mock(return_value=44),
+        ResumeThread=Mock(return_value=1),
         CloseHandle=Mock(return_value=True),
         GetLastError=Mock(return_value=0),
     )
     job = workspace_mod._WindowsJob(kernel32)
-    child = SimpleNamespace(_handle=99)
+    child = SimpleNamespace(_handle=99, pid=123)
 
     job.assign(cast("Any", child))
+    job.resume(cast("Any", child))
     job.close()
     job.close()
 
@@ -1259,7 +1270,10 @@ def test_windows_job_owns_the_process_tree() -> None:
         == workspace_mod._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     )
     kernel32.AssignProcessToJobObject.assert_called_once_with(42, 99)
-    kernel32.CloseHandle.assert_called_once_with(42)
+    kernel32.CreateToolhelp32Snapshot.assert_called_once_with(workspace_mod._TH32CS_SNAPTHREAD, 0)
+    kernel32.OpenThread.assert_called_once_with(workspace_mod._THREAD_SUSPEND_RESUME, False, 456)
+    kernel32.ResumeThread.assert_called_once_with(44)
+    assert [call.args[0] for call in kernel32.CloseHandle.call_args_list] == [44, 43, 42]
 
 
 @pytest.mark.asyncio
@@ -1287,6 +1301,7 @@ async def test_windows_channel_close_terminates_the_process_job(
     child = Child()
     job = SimpleNamespace(
         assign=Mock(),
+        resume=Mock(),
         close=Mock(side_effect=exited.set),
     )
     channel = SimpleNamespace(
@@ -1302,15 +1317,18 @@ async def test_windows_channel_close_terminates_the_process_job(
         exit=Mock(),
     )
     ws = Workspace(tmp_path / "root")
+    popen = Mock(return_value=child)
     monkeypatch.setattr(workspace_mod.sys, "platform", "win32")
     monkeypatch.setattr(workspace_mod, "_WindowsJob", Mock(return_value=job))
-    monkeypatch.setattr(workspace_mod.subprocess, "Popen", Mock(return_value=child))
+    monkeypatch.setattr(workspace_mod.subprocess, "Popen", popen)
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=None))
 
     await ws._handle_process(cast("Any", process))
 
     job.assign.assert_called_once_with(child)
+    job.resume.assert_called_once_with(child)
     job.close.assert_called_once()
+    assert popen.call_args.kwargs["creationflags"] == workspace_mod._CREATE_SUSPENDED
     process.exit.assert_not_called()
 
 

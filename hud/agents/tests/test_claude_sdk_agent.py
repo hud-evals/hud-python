@@ -486,7 +486,7 @@ async def test_computer_mcp_bridge_uses_controller_python_and_owns_resources(
         wait_closed=AsyncMock(),
     )
     connection = SimpleNamespace(create_process=AsyncMock(return_value=bridge))
-    ssh = SimpleNamespace(conn=connection)
+    ssh = SimpleNamespace(create_process=connection.create_process)
     local = _LocalComputerProcess()
     spawn = AsyncMock(return_value=local)
     monkeypatch.setattr(computer_mcp.asyncio, "create_subprocess_exec", spawn)
@@ -537,7 +537,7 @@ async def test_computer_mcp_bridge_uses_controller_python_and_owns_resources(
 
 async def test_computer_mcp_bridge_rejects_windows_before_starting_resources() -> None:
     screen = Capability.rfb(name="screen", url="rfb://127.0.0.1:41000", display=0)
-    ssh = SimpleNamespace(conn=SimpleNamespace(create_process=AsyncMock()))
+    ssh = SimpleNamespace(create_process=AsyncMock())
 
     with pytest.raises(RuntimeError, match="requires a POSIX workspace"):
         async with computer_mcp.bridge_computer_mcp(
@@ -547,7 +547,7 @@ async def test_computer_mcp_bridge_rejects_windows_before_starting_resources() -
         ):
             pass
 
-    ssh.conn.create_process.assert_not_awaited()
+    ssh.create_process.assert_not_awaited()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO relay")
