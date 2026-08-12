@@ -6,22 +6,37 @@ Single tool ``computer`` backed by ``ClaudeComputerTool`` / ``RFBTool``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import os
+import secrets
+import shlex
+import sys
+from contextlib import asynccontextmanager
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+import asyncssh
 import fastmcp
+from pydantic import TypeAdapter
 
-from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
+from hud.capabilities import Capability
+from hud.capabilities.rfb import RFBClient, ScreenshotEncoding, WebPScreenshotEncoding
 
 if TYPE_CHECKING:
-    from hud.capabilities.rfb import RFBClient
+    from collections.abc import AsyncIterator, Mapping
+
+    from hud.capabilities import SSHClient
+
+_DEFAULT_SCREENSHOT_ENCODING = WebPScreenshotEncoding()
+RFB_CAPABILITY_ENV = "HUD_RFB_CAPABILITY"
+SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"
+_PROCESS_CLOSE_TIMEOUT_S = 5.0
+_BRIDGE_READY_TIMEOUT_S = 5.0
+_REMOTE_TMP = PurePosixPath("/") / "tmp"
 
 logger = logging.getLogger(__name__)
-
-#: Keep references to background server tasks so they aren't garbage-collected.
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
-_DEFAULT_SCREENSHOT_ENCODING = WebPScreenshotEncoding()
 
 
 def create_computer_mcp(
@@ -114,34 +129,154 @@ def create_computer_mcp(
     return mcp
 
 
-async def serve_computer_mcp(
-    rfb: RFBClient,
-    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
-    host: str = "127.0.0.1",
-    port: int = 0,
-) -> int:
-    """Start the computer-use MCP server in the background, return the port."""
-    if port == 0:
-        srv = await asyncio.get_event_loop().create_server(lambda: asyncio.Protocol(), host, 0)
-        port = srv.sockets[0].getsockname()[1]
-        srv.close()
-
-    mcp = create_computer_mcp(rfb, screenshot_encoding)
-    task = asyncio.create_task(_run(mcp, host, port))
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
-    await asyncio.sleep(0.5)
-    logger.info("computer-use MCP server on %s:%d", host, port)
-    return port
-
-
-async def _run(mcp: fastmcp.FastMCP, host: str, port: int) -> None:
+def _required_env(environ: Mapping[str, str], name: str) -> str:
     try:
-        await mcp.run_http_async(host=host, port=port)
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.exception("computer-use MCP server crashed")
+        return environ[name]
+    except KeyError as exc:
+        raise RuntimeError(f"missing required environment variable {name}") from exc
 
 
-__all__ = ["create_computer_mcp", "serve_computer_mcp"]
+async def run_computer_mcp(environ: Mapping[str, str] = os.environ) -> None:
+    """Run computer-use over stdio in a controller-side child process."""
+    raw_manifest = json.loads(_required_env(environ, RFB_CAPABILITY_ENV))
+    if not isinstance(raw_manifest, dict):
+        raise ValueError(f"{RFB_CAPABILITY_ENV} must contain a JSON object")
+    capability = Capability.from_manifest(raw_manifest)
+    if capability.protocol.split("/", 1)[0] != "rfb":
+        raise ValueError(f"{RFB_CAPABILITY_ENV} must describe an RFB capability")
+    screenshot_encoding = TypeAdapter(ScreenshotEncoding).validate_json(
+        _required_env(environ, SCREENSHOT_ENCODING_ENV)
+    )
+
+    rfb = await RFBClient.connect(capability)
+    try:
+        await create_computer_mcp(rfb, screenshot_encoding).run_async(
+            transport="stdio",
+            show_banner=False,
+        )
+    finally:
+        await rfb.close()
+
+
+@asynccontextmanager
+async def bridge_computer_mcp(
+    ssh: SSHClient,
+    capability: Capability,
+    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
+    *,
+    shell: str,
+) -> AsyncIterator[dict[str, Any]]:
+    """Bridge a controller-side computer MCP process into a remote POSIX shell."""
+    if shell in {"cmd", "powershell"}:
+        raise RuntimeError("ClaudeSDKAgent computer use requires a POSIX workspace")
+
+    token = secrets.token_hex(16)
+    request_path = str(_REMOTE_TMP / f"hud-computer-{token}.request")
+    response_path = str(_REMOTE_TMP / f"hud-computer-{token}.response")
+    bridge = await ssh.create_process(_bridge_command(request_path, response_path))
+    local: asyncio.subprocess.Process | None = None
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        ready = await asyncio.wait_for(bridge.stderr.readline(), _BRIDGE_READY_TIMEOUT_S)
+        if ready != b"ready\n":
+            detail = ready.decode("utf-8", "replace").strip()
+            raise RuntimeError(detail or "computer MCP SSH bridge did not become ready")
+
+        environ = {
+            **os.environ,
+            RFB_CAPABILITY_ENV: json.dumps(capability.to_manifest(), separators=(",", ":")),
+            SCREENSHOT_ENCODING_ENV: screenshot_encoding.model_dump_json(),
+        }
+        local = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "hud.agents.claude.sdk.computer_mcp",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environ,
+        )
+        assert local.stdin is not None
+        assert local.stdout is not None
+        assert local.stderr is not None
+        tasks = [
+            asyncio.create_task(_copy_stream(bridge.stdout, local.stdin)),
+            asyncio.create_task(_copy_stream(local.stdout, bridge.stdin)),
+            asyncio.create_task(_log_stream(bridge.stderr, "SSH bridge")),
+            asyncio.create_task(_log_stream(local.stderr, "computer MCP")),
+        ]
+        yield _relay_config(request_path, response_path)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        bridge.stdin.close()
+        bridge.channel.close()
+        with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
+            await asyncio.wait_for(bridge.wait_closed(), _PROCESS_CLOSE_TIMEOUT_S)
+        if local is not None:
+            if local.stdin is not None:
+                local.stdin.close()
+            if local.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    local.terminate()
+            try:
+                await asyncio.wait_for(local.wait(), _PROCESS_CLOSE_TIMEOUT_S)
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    local.kill()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(local.wait(), _PROCESS_CLOSE_TIMEOUT_S)
+
+
+def _bridge_command(request_path: str, response_path: str) -> str:
+    request = shlex.quote(request_path)
+    response = shlex.quote(response_path)
+    cleanup = shlex.quote(f"rm -f -- {request} {response}")
+    return (
+        "set -eu; umask 077; "
+        f"rm -f -- {request} {response}; mkfifo -- {request} {response}; "
+        f"trap {cleanup} EXIT HUP INT TERM; "
+        "printf 'ready\\n' >&2; "
+        f"cat {request} & reader=$!; cat > {response}; wait $reader"
+    )
+
+
+def _relay_config(request_path: str, response_path: str) -> dict[str, Any]:
+    request = shlex.quote(request_path)
+    response = shlex.quote(response_path)
+    script = f"cat {response} & reader=$!; cat > {request}; wait $reader"
+    return {"type": "stdio", "command": "sh", "args": ["-c", script]}
+
+
+async def _copy_stream(
+    reader: asyncio.StreamReader | asyncssh.SSHReader[bytes],
+    writer: asyncio.StreamWriter | asyncssh.SSHWriter[bytes],
+) -> None:
+    try:
+        while chunk := await reader.read(65536):
+            writer.write(chunk)
+            await writer.drain()
+    finally:
+        writer.close()
+
+
+async def _log_stream(
+    reader: asyncio.StreamReader | asyncssh.SSHReader[bytes],
+    source: str,
+) -> None:
+    while line := await reader.readline():
+        logger.warning("%s: %s", source, line.decode("utf-8", "replace").rstrip())
+
+
+if __name__ == "__main__":
+    asyncio.run(run_computer_mcp())
+
+
+__all__ = [
+    "RFB_CAPABILITY_ENV",
+    "SCREENSHOT_ENCODING_ENV",
+    "bridge_computer_mcp",
+    "create_computer_mcp",
+    "run_computer_mcp",
+]

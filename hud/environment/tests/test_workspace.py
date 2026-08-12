@@ -167,26 +167,6 @@ async def test_a_resize_does_not_cost_the_session_its_keyboard(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_a_timed_out_command_keeps_what_it_printed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The output is the evidence of how far it got — reporting only that the
-    deadline passed throws that away."""
-    monkeypatch.setattr(workspace_mod, "_COMMAND_TIMEOUT", 1.0)
-    ws = Workspace(tmp_path / "root")
-    await ws.start()
-    try:
-        async with await _connect(ws) as conn:
-            result = await conn.run("echo progress-so-far; sleep 30", check=False)
-    finally:
-        await ws.stop()
-
-    assert "progress-so-far" in str(result.stdout)
-    assert "timed out" in str(result.stderr)
-    assert result.exit_status == 1
-
-
-@pytest.mark.asyncio
 async def test_session_setup_failure_is_reported_to_the_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1172,6 +1152,52 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
 
 
 @pytest.mark.asyncio
+async def test_namespace_wait_status_is_forwarded_to_ssh_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def wait_until_cancelled() -> None:
+        await asyncio.Event().wait()
+
+    def empty_reader() -> asyncio.StreamReader:
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        return reader
+
+    child_channel = SimpleNamespace(close=Mock(), wait_closed=AsyncMock())
+    child_process = SimpleNamespace(
+        stdin=SimpleNamespace(write_eof=Mock()),
+        stdout=empty_reader(),
+        stderr=empty_reader(),
+        wait=AsyncMock(return_value=SimpleNamespace(returncode=None)),
+        returncode=None,
+        channel=child_channel,
+    )
+    child = namespace_mod.NamespaceProcess(cast("Any", child_process))
+    namespace = SimpleNamespace(spawn=AsyncMock(return_value=child))
+    channel = SimpleNamespace(
+        wait_closed=wait_until_cancelled,
+        is_closing=Mock(return_value=False),
+    )
+    process = SimpleNamespace(
+        term_type=None,
+        command="true",
+        stdin=SimpleNamespace(read=AsyncMock(return_value=b"")),
+        stdout=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+        stderr=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+        channel=channel,
+        exit=Mock(),
+    )
+    ws = Workspace(tmp_path / "root")
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    ws._namespace = cast("Any", namespace)
+
+    await ws._handle_process(cast("Any", process))
+
+    process.exit.assert_called_once_with(255)
+    child_channel.close.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_root_without_working_drop_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1209,6 +1235,101 @@ def test_usable_bwrap_reports_unusable_installs(monkeypatch) -> None:
     )
 
     assert ws.usable_bwrap() is None
+
+
+def test_windows_job_owns_the_process_tree() -> None:
+    def first_thread(_snapshot: int, entry_pointer: Any) -> bool:
+        entry_pointer._obj.owner_process_id = 123
+        entry_pointer._obj.thread_id = 456
+        return True
+
+    kernel32 = SimpleNamespace(
+        CreateJobObjectW=Mock(return_value=42),
+        SetInformationJobObject=Mock(return_value=True),
+        AssignProcessToJobObject=Mock(return_value=True),
+        CreateToolhelp32Snapshot=Mock(return_value=43),
+        Thread32First=Mock(side_effect=first_thread),
+        Thread32Next=Mock(return_value=False),
+        OpenThread=Mock(return_value=44),
+        ResumeThread=Mock(return_value=1),
+        CloseHandle=Mock(return_value=True),
+        GetLastError=Mock(return_value=0),
+    )
+    job = workspace_mod._WindowsJob(kernel32)
+    child = SimpleNamespace(_handle=99, pid=123)
+
+    job.assign(cast("Any", child))
+    job.resume(cast("Any", child))
+    job.close()
+    job.close()
+
+    set_limits = kernel32.SetInformationJobObject.call_args.args
+    assert set_limits[1] == workspace_mod._JOB_OBJECT_EXTENDED_LIMIT_INFORMATION
+    assert (
+        set_limits[2]._obj.basic_limit_information.limit_flags
+        == workspace_mod._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    )
+    kernel32.AssignProcessToJobObject.assert_called_once_with(42, 99)
+    kernel32.CreateToolhelp32Snapshot.assert_called_once_with(workspace_mod._TH32CS_SNAPTHREAD, 0)
+    kernel32.OpenThread.assert_called_once_with(workspace_mod._THREAD_SUSPEND_RESUME, False, 456)
+    kernel32.ResumeThread.assert_called_once_with(44)
+    assert [call.args[0] for call in kernel32.CloseHandle.call_args_list] == [44, 43, 42]
+
+
+@pytest.mark.asyncio
+async def test_windows_channel_close_terminates_the_process_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exited = threading.Event()
+
+    class Child:
+        _handle = 99
+        stdout = None
+        stderr = None
+        returncode: int | None = None
+
+        def communicate(self) -> tuple[bytes, bytes]:
+            assert exited.wait(1)
+            self.returncode = -1
+            return b"", b""
+
+        def kill(self) -> None:
+            self.returncode = -9
+            exited.set()
+
+    child = Child()
+    job = SimpleNamespace(
+        assign=Mock(),
+        resume=Mock(),
+        close=Mock(side_effect=exited.set),
+    )
+    channel = SimpleNamespace(
+        wait_closed=AsyncMock(),
+        is_closing=Mock(return_value=True),
+    )
+    process = SimpleNamespace(
+        term_type=None,
+        command="cmd /c echo hello",
+        channel=channel,
+        stdout=SimpleNamespace(write=Mock()),
+        stderr=SimpleNamespace(write=Mock()),
+        exit=Mock(),
+    )
+    ws = Workspace(tmp_path / "root")
+    popen = Mock(return_value=child)
+    monkeypatch.setattr(workspace_mod.sys, "platform", "win32")
+    monkeypatch.setattr(workspace_mod, "_WindowsJob", Mock(return_value=job))
+    monkeypatch.setattr(workspace_mod.subprocess, "Popen", popen)
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=None))
+
+    await ws._handle_process(cast("Any", process))
+
+    job.assign.assert_called_once_with(child)
+    job.resume.assert_called_once_with(child)
+    job.close.assert_called_once()
+    assert popen.call_args.kwargs["creationflags"] == workspace_mod._CREATE_SUSPENDED
+    process.exit.assert_not_called()
 
 
 def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(

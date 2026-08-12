@@ -143,6 +143,7 @@ async def test_connect_keeps_tunneled_connection_active(monkeypatch: pytest.Monk
         username="agent",
         client_keys=None,
         known_hosts=None,
+        errors="replace",
         keepalive_interval=15,
         keepalive_count_max=4,
     )
@@ -166,6 +167,35 @@ async def test_run_does_not_replay_a_command_lost_in_flight(
     await client.run("next-command")
     reconnect.assert_awaited_once_with(client.capability)
     assert replacement.commands == ["next-command"]
+
+
+async def test_create_process_reconnects_before_opening_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dropped = _Connection(closed=True)
+    replacement = _Connection()
+    client = _client(dropped)
+    reconnect = AsyncMock(return_value=replacement)
+    monkeypatch.setattr(client, "_connect", reconnect)
+
+    process = await client.create_process("bridge")
+
+    assert process is replacement.process
+    reconnect.assert_awaited_once_with(client.capability)
+    assert dropped.commands == []
+    assert replacement.commands == ["bridge"]
+
+
+async def test_create_process_preserves_reconnect_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client(_Connection(closed=True))
+    reconnect = AsyncMock(side_effect=OSError("unreachable"))
+    monkeypatch.setattr(client, "_connect", reconnect)
+    monkeypatch.setattr("hud.capabilities.ssh.asyncio.sleep", AsyncMock())
+
+    with pytest.raises(SSHConnectionError, match="reconnect failed after 3 attempts"):
+        await client.create_process("bridge")
 
 
 async def test_run_classifies_rejected_session_as_connection_error() -> None:
