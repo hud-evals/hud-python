@@ -13,8 +13,10 @@ import asyncio
 import base64
 import json
 import re
+import sys
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -24,6 +26,9 @@ from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
 from hud.agents.types import ClaudeSDKConfig
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
 
@@ -266,8 +271,10 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
         params={"shell": "bash"},
     )
     screen = Capability.rfb(name="screen", url="rfb://localhost:5900", display=0)
+    routed = Capability.rfb(name="screen", url="rfb://127.0.0.1:41000", display=0)
     ssh = SSHClient(shell, cast("Any", object()))
     opened: list[str] = []
+    bridge_active = False
 
     class Client:
         manifest = SimpleNamespace(bindings=[shell, screen])
@@ -277,10 +284,38 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
             assert ref == "ssh"
             return ssh
 
+        def binding(self, ref: str) -> Capability:
+            assert ref == "screen"
+            return routed
+
+    @asynccontextmanager
+    async def bridge(
+        bridge_ssh: SSHClient,
+        capability: Capability,
+        screenshot_encoding: WebPScreenshotEncoding,
+        *,
+        shell: str,
+    ) -> Any:
+        nonlocal bridge_active
+        assert bridge_ssh is ssh
+        assert capability == routed
+        assert screenshot_encoding == encoding
+        assert shell == "bash"
+        bridge_active = True
+        try:
+            yield {"type": "stdio", "command": "sh", "args": ["-c", "relay"]}
+        finally:
+            bridge_active = False
+
     encoding = WebPScreenshotEncoding(quality=42)
     agent = ClaudeSDKAgent(ClaudeSDKConfig(screenshot_encoding=encoding))
-    execute = AsyncMock()
-    monkeypatch.setattr(agent, "_exec", execute)
+
+    async def execute(*_args: Any, **_kwargs: Any) -> None:
+        assert bridge_active
+
+    execute_mock = AsyncMock(side_effect=execute)
+    monkeypatch.setattr(computer_mcp, "bridge_computer_mcp", bridge)
+    monkeypatch.setattr(agent, "_exec", execute_mock)
 
     await agent(
         cast(
@@ -290,20 +325,88 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     )
 
     assert opened == ["ssh"]
-    await_args = execute.await_args
+    await_args = execute_mock.await_args
     assert await_args is not None
     server = await_args.kwargs["mcp_servers"]["computer-use"]
     assert server == {
         "type": "stdio",
-        "command": "python",
-        "args": ["-m", "hud.agents.claude.sdk.computer_mcp"],
-        "env": {
-            computer_mcp.RFB_CAPABILITY_ENV: json.dumps(
-                screen.to_manifest(), separators=(",", ":")
-            ),
-            computer_mcp.SCREENSHOT_ENCODING_ENV: encoding.model_dump_json(),
-        },
+        "command": "sh",
+        "args": ["-c", "relay"],
     }
+    assert not bridge_active
+
+
+async def test_remote_claude_preserves_multiple_rfb_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell = Capability(
+        name="shell",
+        protocol="ssh/2",
+        url="ssh://localhost:22",
+        params={"shell": "bash"},
+    )
+    screens = [
+        Capability.rfb(name="screen-0", url="rfb://display-0:5900", display=0),
+        Capability.rfb(name="screen-1", url="rfb://display-1:5901", display=1),
+    ]
+    routed = {
+        cap.name: Capability.rfb(
+            name=cap.name,
+            url=f"rfb://127.0.0.1:{41000 + index}",
+            display=index,
+        )
+        for index, cap in enumerate(screens)
+    }
+    ssh = SSHClient(shell, cast("Any", object()))
+    bridged: list[str] = []
+
+    class Client:
+        manifest = SimpleNamespace(bindings=[shell, *screens])
+
+        async def open(self, ref: str) -> SSHClient:
+            assert ref == "ssh"
+            return ssh
+
+        def binding(self, ref: str) -> Capability:
+            return routed[ref]
+
+    @asynccontextmanager
+    async def bridge(
+        _ssh: SSHClient,
+        capability: Capability,
+        _encoding: WebPScreenshotEncoding,
+        *,
+        shell: str,
+    ) -> Any:
+        assert shell == "bash"
+        bridged.append(capability.name)
+        try:
+            yield {"type": "stdio", "command": "sh", "args": ["-c", capability.name]}
+        finally:
+            bridged.remove(capability.name)
+
+    async def execute(*_args: Any, **kwargs: Any) -> None:
+        assert bridged == ["screen-0", "screen-1"]
+        assert kwargs["mcp_servers"] == {
+            "computer-use-screen-0": {
+                "type": "stdio",
+                "command": "sh",
+                "args": ["-c", "screen-0"],
+            },
+            "computer-use-screen-1": {
+                "type": "stdio",
+                "command": "sh",
+                "args": ["-c", "screen-1"],
+            },
+        }
+
+    agent = ClaudeSDKAgent()
+    monkeypatch.setattr(computer_mcp, "bridge_computer_mcp", bridge)
+    monkeypatch.setattr(agent, "_exec", execute)
+
+    await agent(cast("Any", SimpleNamespace(client=Client(), prompt_text="use both screens")))
+
+    assert bridged == []
 
 
 async def test_computer_mcp_stdio_owns_rfb_lifetime(
@@ -329,6 +432,173 @@ async def test_computer_mcp_stdio_owns_rfb_lifetime(
     create.assert_called_once_with(rfb, encoding)
     server.run_async.assert_awaited_once_with(transport="stdio", show_banner=False)
     rfb.close.assert_awaited_once()
+
+
+class _ByteWriter:
+    def __init__(self) -> None:
+        self.closed = False
+        self.data = bytearray()
+
+    def write(self, data: bytes) -> None:
+        self.data.extend(data)
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _LocalComputerProcess:
+    def __init__(self) -> None:
+        self.stdin = _ByteWriter()
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.returncode: int | None = None
+        self.terminated = False
+        self.killed = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self) -> int:
+        assert self.returncode is not None
+        return self.returncode
+
+
+async def test_computer_mcp_bridge_uses_controller_python_and_owns_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge_stdout = asyncio.StreamReader()
+    bridge_stderr = asyncio.StreamReader()
+    bridge_stderr.feed_data(b"ready\n")
+    bridge_stdin = _ByteWriter()
+    bridge = SimpleNamespace(
+        stdin=bridge_stdin,
+        stdout=bridge_stdout,
+        stderr=bridge_stderr,
+        channel=SimpleNamespace(close=Mock()),
+        wait_closed=AsyncMock(),
+    )
+    connection = SimpleNamespace(create_process=AsyncMock(return_value=bridge))
+    ssh = SimpleNamespace(conn=connection)
+    local = _LocalComputerProcess()
+    spawn = AsyncMock(return_value=local)
+    monkeypatch.setattr(computer_mcp.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(computer_mcp.secrets, "token_hex", lambda _length: "bridge-token")
+    screen = Capability.rfb(name="screen", url="rfb://127.0.0.1:41000", display=0)
+    encoding = WebPScreenshotEncoding(quality=42)
+
+    async with computer_mcp.bridge_computer_mcp(
+        cast("Any", ssh),
+        screen,
+        encoding,
+        shell="bash",
+    ) as config:
+        assert config == {
+            "type": "stdio",
+            "command": "sh",
+            "args": [
+                "-c",
+                "cat /tmp/hud-computer-bridge-token.response & reader=$!; "
+                "cat > /tmp/hud-computer-bridge-token.request; wait $reader",
+            ],
+        }
+        assert not bridge_stdin.closed
+        assert not local.stdin.closed
+
+    bridge_command = connection.create_process.await_args.args[0]
+    assert "mkfifo -- /tmp/hud-computer-bridge-token.request" in bridge_command
+    assert "printf 'ready\\n' >&2" in bridge_command
+    spawn.assert_awaited_once()
+    spawn_call = spawn.await_args
+    assert spawn_call is not None
+    spawn_args = spawn_call.args
+    assert spawn_args[:3] == (
+        sys.executable,
+        "-m",
+        "hud.agents.claude.sdk.computer_mcp",
+    )
+    environ = spawn_call.kwargs["env"]
+    assert json.loads(environ[computer_mcp.RFB_CAPABILITY_ENV]) == screen.to_manifest()
+    assert environ[computer_mcp.SCREENSHOT_ENCODING_ENV] == encoding.model_dump_json()
+    bridge.channel.close.assert_called_once()
+    bridge.wait_closed.assert_awaited_once()
+    assert bridge_stdin.closed
+    assert local.stdin.closed
+    assert local.terminated
+    assert not local.killed
+
+
+async def test_computer_mcp_bridge_rejects_windows_before_starting_resources() -> None:
+    screen = Capability.rfb(name="screen", url="rfb://127.0.0.1:41000", display=0)
+    ssh = SimpleNamespace(conn=SimpleNamespace(create_process=AsyncMock()))
+
+    with pytest.raises(RuntimeError, match="requires a POSIX workspace"):
+        async with computer_mcp.bridge_computer_mcp(
+            cast("Any", ssh),
+            screen,
+            shell="powershell",
+        ):
+            pass
+
+    ssh.conn.create_process.assert_not_awaited()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO relay")
+async def test_computer_mcp_fifo_relay_is_bidirectional(tmp_path: Path) -> None:
+    request_path = str(tmp_path / "request")
+    response_path = str(tmp_path / "response")
+    bridge = await asyncio.create_subprocess_shell(
+        computer_mcp._bridge_command(request_path, response_path),
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    relay: asyncio.subprocess.Process | None = None
+    try:
+        assert bridge.stderr is not None
+        assert await asyncio.wait_for(bridge.stderr.readline(), 2) == b"ready\n"
+        config = computer_mcp._relay_config(request_path, response_path)
+        relay = await asyncio.create_subprocess_exec(
+            config["command"],
+            *config["args"],
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        assert relay.stdin is not None and relay.stdout is not None
+        assert bridge.stdin is not None and bridge.stdout is not None
+
+        relay.stdin.write(b'{"method":"tools/list"}\n')
+        await relay.stdin.drain()
+        assert await asyncio.wait_for(bridge.stdout.readline(), 2) == (
+            b'{"method":"tools/list"}\n'
+        )
+
+        bridge.stdin.write(b'{"result":{"tools":[]}}\n')
+        await bridge.stdin.drain()
+        assert await asyncio.wait_for(relay.stdout.readline(), 2) == b'{"result":{"tools":[]}}\n'
+    finally:
+        for process in (relay, bridge):
+            if process is not None and process.stdin is not None:
+                process.stdin.close()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(process.wait() for process in (relay, bridge) if process is not None),
+                    return_exceptions=True,
+                ),
+                2,
+            )
+        except TimeoutError:
+            for process in (relay, bridge):
+                if process is not None and process.returncode is None:
+                    process.kill()
 
 
 async def test_concurrent_runs_keep_their_ssh_state_isolated(

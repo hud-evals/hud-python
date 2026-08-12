@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
 import json
 import logging
 import os
@@ -39,6 +40,82 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.environment.workspace")
 
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+
+class _WindowsJob:
+    """Windows Job Object which owns a subprocess and all of its descendants."""
+
+    def __init__(self, kernel32: Any | None = None) -> None:
+        from ctypes import wintypes
+
+        class BasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("per_process_user_time_limit", ctypes.c_longlong),
+                ("per_job_user_time_limit", ctypes.c_longlong),
+                ("limit_flags", wintypes.DWORD),
+                ("minimum_working_set_size", ctypes.c_size_t),
+                ("maximum_working_set_size", ctypes.c_size_t),
+                ("active_process_limit", wintypes.DWORD),
+                ("affinity", ctypes.c_size_t),
+                ("priority_class", wintypes.DWORD),
+                ("scheduling_class", wintypes.DWORD),
+            ]
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("read_operation_count", ctypes.c_ulonglong),
+                ("write_operation_count", ctypes.c_ulonglong),
+                ("other_operation_count", ctypes.c_ulonglong),
+                ("read_transfer_count", ctypes.c_ulonglong),
+                ("write_transfer_count", ctypes.c_ulonglong),
+                ("other_transfer_count", ctypes.c_ulonglong),
+            ]
+
+        class ExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("basic_limit_information", BasicLimitInformation),
+                ("io_info", IoCounters),
+                ("process_memory_limit", ctypes.c_size_t),
+                ("job_memory_limit", ctypes.c_size_t),
+                ("peak_process_memory_used", ctypes.c_size_t),
+                ("peak_job_memory_used", ctypes.c_size_t),
+            ]
+
+        if kernel32 is None:
+            win_dll = ctypes.__dict__["WinDLL"]
+            kernel32 = win_dll("kernel32")
+        self._kernel32 = kernel32
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise OSError(int(kernel32.GetLastError()), "CreateJobObjectW failed")
+        self._handle: Any | None = handle
+        limits = ExtendedLimitInformation()
+        limits.basic_limit_information.limit_flags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            handle,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
+            self.close()
+            raise OSError(int(kernel32.GetLastError()), "SetInformationJobObject failed")
+
+    def assign(self, process: subprocess.Popen[bytes]) -> None:
+        if self._handle is None:
+            raise RuntimeError("Windows Job Object is closed")
+        process_handle = getattr(process, "_handle", None)
+        if process_handle is None or not self._kernel32.AssignProcessToJobObject(
+            self._handle,
+            process_handle,
+        ):
+            raise OSError(int(self._kernel32.GetLastError()), "AssignProcessToJobObject failed")
+
+    def close(self) -> None:
+        handle, self._handle = self._handle, None
+        if handle is not None:
+            self._kernel32.CloseHandle(handle)
 
 
 @dataclass(slots=True, frozen=True)
@@ -1465,7 +1542,6 @@ class Workspace:
             # Additionally, cmd.exe launched via CreateProcess does NOT search the
             # CWD for batch files (only PATH), so relative .bat paths are resolved
             # to absolute below.
-            import functools
             import shlex
             import subprocess as _subprocess
 
@@ -1487,23 +1563,38 @@ class Workspace:
             else:
                 win_argv = ["cmd.exe"]
 
-            try:
-                loop = asyncio.get_running_loop()
-                child = await loop.run_in_executor(
-                    None,
-                    functools.partial(
-                        _subprocess.Popen,
+            def spawn() -> tuple[_subprocess.Popen[bytes], _WindowsJob]:
+                job = _WindowsJob()
+                try:
+                    child = _subprocess.Popen(
                         win_argv,
                         stdin=_subprocess.DEVNULL,
                         stdout=_subprocess.PIPE,
                         stderr=_subprocess.PIPE,
                         cwd=str(self.root),
                         env=proc_env,
-                    ),
-                )
+                    )
+                    try:
+                        job.assign(child)
+                    except BaseException:
+                        child.kill()
+                        child.wait()
+                        raise
+                except BaseException:
+                    job.close()
+                    raise
+                return child, job
+
+            try:
+                loop = asyncio.get_running_loop()
+                child, job = await loop.run_in_executor(None, spawn)
             except FileNotFoundError as exc:
                 process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
                 process.exit(127)
+                return
+            except OSError as exc:
+                process.stderr.write(f"workspace: cannot own shell process tree: {exc}\n".encode())
+                process.exit(1)
                 return
 
             communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
@@ -1518,15 +1609,23 @@ class Workspace:
                 stdout, stderr = await communicate_task
             finally:
                 if not communicate_task.done():
-                    with contextlib.suppress(OSError):
-                        child.terminate()
+                    job.close()
                     try:
                         async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
                             await asyncio.shield(communicate_task)
                     except TimeoutError:
-                        with contextlib.suppress(OSError):
-                            child.kill()
-                        await communicate_task
+                        for pipe in (child.stdout, child.stderr):
+                            if pipe is not None:
+                                with contextlib.suppress(OSError):
+                                    pipe.close()
+                        communicate_task.cancel()
+                        with contextlib.suppress(TimeoutError):
+                            await asyncio.wait_for(
+                                asyncio.gather(communicate_task, return_exceptions=True),
+                                _PROCESS_CLOSE_TIMEOUT_S,
+                            )
+                else:
+                    job.close()
                 channel_closed_task.cancel()
                 await asyncio.gather(channel_closed_task, return_exceptions=True)
 

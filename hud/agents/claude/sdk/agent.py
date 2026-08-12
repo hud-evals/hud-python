@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -71,8 +72,8 @@ class ClaudeSDKAgent(Agent):
     """Runs ``claude`` CLI over SSH inside the env workspace.
 
     Stateless w.r.t. the env: driven by ``await agent(run)``. SSH is opened
-    live off the run; MCP and RFB servers are read as raw bindings and written
-    into the CLI's MCP config so remote child processes own those connections.
+    live off the run. Environment MCP bindings are used directly; computer MCP
+    servers are bridged over the run's SSH connection.
     """
 
     config: ClaudeSDKConfig
@@ -91,42 +92,46 @@ class ClaudeSDKAgent(Agent):
         ssh = cast("SSHClient", await run.client.open("ssh"))
         shell = ssh.capability.params.get("shell", "bash")
 
-        for cap in bindings:
-            family = cap.protocol.split("/", 1)[0]
-            if family == "mcp":
-                token = cap.params.get("auth_token")
-                transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
-                server_config: dict[str, Any] = {"type": transport, "url": cap.url}
-                if token:
-                    server_config["headers"] = {"Authorization": f"Bearer {token}"}
-                mcp_servers[cap.name] = server_config
-            elif family == "rfb":
-                from hud.agents.claude.sdk.computer_mcp import (
-                    RFB_CAPABILITY_ENV,
-                    SCREENSHOT_ENCODING_ENV,
-                )
+        rfb_bindings = [cap for cap in bindings if cap.protocol.split("/", 1)[0] == "rfb"]
+        async with AsyncExitStack() as resources:
+            for cap in bindings:
+                family = cap.protocol.split("/", 1)[0]
+                if family == "mcp":
+                    token = cap.params.get("auth_token")
+                    transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
+                    server_config: dict[str, Any] = {"type": transport, "url": cap.url}
+                    if token:
+                        server_config["headers"] = {"Authorization": f"Bearer {token}"}
+                    if cap.name in mcp_servers:
+                        raise RuntimeError(f"duplicate MCP server name {cap.name!r}")
+                    mcp_servers[cap.name] = server_config
+                elif family == "rfb":
+                    from hud.agents.claude.sdk.computer_mcp import bridge_computer_mcp
 
-                mcp_servers["computer-use"] = {
-                    "type": "stdio",
-                    "command": "python",
-                    "args": ["-m", "hud.agents.claude.sdk.computer_mcp"],
-                    "env": {
-                        RFB_CAPABILITY_ENV: json.dumps(cap.to_manifest(), separators=(",", ":")),
-                        SCREENSHOT_ENCODING_ENV: (
-                            self.config.screenshot_encoding.model_dump_json()
-                        ),
-                    },
-                }
+                    server_name = (
+                        "computer-use" if len(rfb_bindings) == 1 else f"computer-use-{cap.name}"
+                    )
+                    if server_name in mcp_servers:
+                        raise RuntimeError(f"duplicate MCP server name {server_name!r}")
+                    routed = run.client.binding(cap.name)
+                    mcp_servers[server_name] = await resources.enter_async_context(
+                        bridge_computer_mcp(
+                            ssh,
+                            routed,
+                            self.config.screenshot_encoding,
+                            shell=shell,
+                        )
+                    )
 
-        await self._exec(
-            run,
-            ssh=ssh,
-            shell=shell,
-            mcp_servers=mcp_servers,
-            prompt=run.prompt_text,
-            max_steps=self.config.max_steps,
-            system_prompt=self.config.system_prompt,
-        )
+            await self._exec(
+                run,
+                ssh=ssh,
+                shell=shell,
+                mcp_servers=mcp_servers,
+                prompt=run.prompt_text,
+                max_steps=self.config.max_steps,
+                system_prompt=self.config.system_prompt,
+            )
 
     async def _exec(
         self,
