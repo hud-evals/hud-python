@@ -576,9 +576,7 @@ async def test_computer_mcp_fifo_relay_is_bidirectional(tmp_path: Path) -> None:
 
         relay.stdin.write(b'{"method":"tools/list"}\n')
         await relay.stdin.drain()
-        assert await asyncio.wait_for(bridge.stdout.readline(), 2) == (
-            b'{"method":"tools/list"}\n'
-        )
+        assert await asyncio.wait_for(bridge.stdout.readline(), 2) == (b'{"method":"tools/list"}\n')
 
         bridge.stdin.write(b'{"result":{"tools":[]}}\n')
         await bridge.stdin.drain()
