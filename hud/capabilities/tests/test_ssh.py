@@ -149,6 +149,16 @@ async def test_connect_keeps_tunneled_connection_active(monkeypatch: pytest.Monk
     )
 
 
+async def test_connect_classifies_a_lost_handshake_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connect = AsyncMock(side_effect=asyncssh.ConnectionLost("dropped"))
+    monkeypatch.setattr(SSHClient, "_connect", connect)
+
+    with pytest.raises(SSHConnectionError, match="failed during handshake"):
+        await SSHClient.connect(_capability())
+
+
 async def test_run_does_not_replay_a_command_lost_in_flight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

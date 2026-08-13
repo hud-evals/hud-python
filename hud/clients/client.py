@@ -37,11 +37,27 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
 _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
+_CAPABILITY_CONNECT_ATTEMPTS = 3
+_CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 
 #: protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
     cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
 }
+
+
+async def _connect_capability(
+    client_cls: type[CapabilityClient],
+    capability: Capability,
+) -> CapabilityClient:
+    for attempt in range(_CAPABILITY_CONNECT_ATTEMPTS):
+        try:
+            return await client_cls.connect(capability)
+        except ConnectionError:
+            if attempt + 1 == _CAPABILITY_CONNECT_ATTEMPTS:
+                raise
+            await asyncio.sleep(_CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
+    raise RuntimeError("capability connect attempts must be positive")
 
 
 class HudProtocolError(RuntimeError):
@@ -277,7 +293,7 @@ class HudClient:
                     f"no client registered for protocol {cap.protocol!r}; "
                     f"use binding({ref!r}) for raw access",
                 )
-            cap_client = await client_cls.connect(cap)
+            cap_client = await _connect_capability(client_cls, cap)
             self._opened[cap.name] = cap_client
         return cap_client
 

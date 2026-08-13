@@ -11,16 +11,76 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import ClassVar
 from urllib.parse import urlsplit
 
 import pytest
 
 import hud.clients.client as client_module
+from hud.capabilities import Capability, CapabilityClient
 from hud.clients import connect
 from hud.environment.utils import read_frame, send_frame
 from hud.eval.runtime import Runtime
 
 HELLO_RESULT = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
+
+
+async def test_open_retries_transient_capability_connection_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RetryingClient(CapabilityClient):
+        protocol: ClassVar[str] = "test/1"
+        attempts = 0
+
+        @classmethod
+        async def connect(cls, cap: Capability) -> RetryingClient:
+            del cap
+            cls.attempts += 1
+            if cls.attempts < 3:
+                raise ConnectionError("connection reset")
+            return cls()
+
+        async def close(self) -> None:
+            pass
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": hello["id"],
+                    "result": {
+                        **HELLO_RESULT,
+                        "bindings": [
+                            {
+                                "name": "test",
+                                "protocol": RetryingClient.protocol,
+                                "url": "tcp://environment:1234",
+                            }
+                        ],
+                    },
+                },
+            )
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    monkeypatch.setitem(client_module._CLIENT_REGISTRY, RetryingClient.protocol, RetryingClient)
+    monkeypatch.setattr(client_module, "_CAPABILITY_CONNECT_BASE_DELAY_SECONDS", 0)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            opened = await client.open("test")
+            assert await client.open("test") is opened
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert RetryingClient.attempts == 3
 
 
 async def test_connect_retries_through_accept_then_eof_until_the_env_serves() -> None:

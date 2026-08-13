@@ -46,6 +46,36 @@ async def _connect(ws: Workspace) -> asyncssh.SSHClientConnection:
 
 
 @pytest.mark.asyncio
+async def test_start_waits_until_the_ssh_acceptor_is_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listen_started = asyncio.Event()
+    allow_listen = asyncio.Event()
+    listen = asyncssh.listen
+
+    async def delayed_listen(*args: Any, **kwargs: Any) -> asyncssh.SSHAcceptor:
+        listen_started.set()
+        await allow_listen.wait()
+        return await listen(*args, **kwargs)
+
+    monkeypatch.setattr(asyncssh, "listen", delayed_listen)
+    ws = Workspace(tmp_path / "root", track_files=False)
+    start = asyncio.create_task(ws.start())
+    await asyncio.wait_for(listen_started.wait(), 1.0)
+
+    assert not start.done()
+
+    allow_listen.set()
+    await start
+    try:
+        async with await _connect(ws) as conn:
+            assert (await conn.run("echo ready")).stdout == "ready\n"
+    finally:
+        await ws.stop()
+
+
+@pytest.mark.asyncio
 async def test_credentials_live_outside_the_served_root(tmp_path: Path) -> None:
     """The agent's shell root must not contain its SSH key material."""
     ws = Workspace(tmp_path / "root")
