@@ -1,133 +1,135 @@
 # RL Training
 
-On-policy reinforcement learning with the HUD SDK. The loop is the classic
-one: roll out a taskset with the current weights, train on the trajectories
-that come back, and let the updated weights serve the next rollout. What
-makes it clean here is that all of this happens under one model string.
+This cookbook shows how to train a HUD gateway model on trajectories from a
+HUD taskset. Each iteration collects grouped rollouts, grades them in the
+environment, and updates the model behind the same gateway identifier.
+Subsequent rollouts therefore use the latest weights.
 
-`hud.TrainingClient` targets a trainable gateway model. Training advances
-the weights behind that string in place (the HUD training service
-checkpoints and promotes them), so the model you sample with is the same
-model you train, and every `optim_step` closes the on-policy loop.
+Two implementations are included. `simple_train.py` uses a built-in
+server-side loss, while `ppo_custom_loss.py` defines the policy-gradient
+loss in PyTorch and sends the resulting per-token gradients to the training
+service.
 
-| File | What it does |
-|------|--------------|
-| `env.py` | A tiny verifiable env: ask for `a + b`, reward 1.0 if correct (quickstart fallback) |
-| `common.py` | Resolves the rollout source: a deployed taskset on remote boxes, or the local env |
-| `simple_train.py` | The loop with a built-in server-side loss (`importance_sampling`) |
-| `ppo_custom_loss.py` | The loop with a client-side custom loss (GLM-5.2 double-sided IS) |
+| File | Purpose |
+|------|---------|
+| `env.py` | Local arithmetic environment used by the example |
+| `common.py` | Selects a deployed taskset or the local environment |
+| `simple_train.py` | On-policy training with a built-in loss |
+| `ppo_custom_loss.py` | On-policy training with a custom double-sided importance-sampling loss |
+
+## Setup
+
+Set `HUD_API_KEY` in the environment or in a local `.env` file. Then list
+the gateway models available to the account:
+
+```bash
+hud models list
+```
+
+Choose a model marked **Trainable** and assign its identifier to `MODEL` in
+the training script.
 
 ## Run
 
-You need a `HUD_API_KEY`, either in your environment or in a `.env` file.
-List the gateway models on your account, pick one marked trainable, and set
-it as the `MODEL` constant at the top of `simple_train.py` or
-`ppo_custom_loss.py`:
-
-```bash
-hud models list          # Name | Model (API) | ID | Provider | Agent | Trainable
-```
-
-The real flow is training on a deployed taskset. You have built a taskset
-and pushed it with `hud deploy` and `hud sync`, and now you want to train on
-it. Set the `TASKSET` constant in `common.py` to its name or id, and the
-rollouts run on remote HUD boxes with nothing executing locally:
+The default configuration uses the arithmetic taskset in `env.py` and runs
+it through `LocalRuntime`:
 
 ```bash
 uv run simple_train.py --steps 10
+```
+
+To train on a deployed taskset, set `TASKSET` in `common.py` to the taskset
+name or id. `load_taskset_and_runtime()` will load it with
+`Taskset.from_api(...)` and execute rollouts through `HUDRuntime`. The
+training command remains the same:
+
+```bash
+uv run simple_train.py --steps 10
+```
+
+The custom-loss example uses the same task and rollout configuration:
+
+```bash
 uv run ppo_custom_loss.py --steps 10
 ```
 
-If you just want to see the loop move, leave `TASKSET` empty and a tiny
-local arithmetic taskset runs against the bundled `env.py`:
+Both scripts accept `--group`, `--learning-rate`, and `--max-concurrent`.
+The defaults are a group size of 8, a learning rate of `1e-5`, and at most
+8 concurrent rollouts.
 
-```bash
-uv run simple_train.py --steps 10
-```
+## Training flow
 
-The swap between the two lives in `common.py`'s `load_taskset_and_runtime()`:
-`Taskset.from_api(name)` with `HUDRuntime()` for the deployed case, and
-`Taskset(...)` with `LocalRuntime("env.py")` for the local one. The training
-code does not change either way.
-
-## The loop
-
-Both scripts are the same five lines, and the only difference between them
-is the training call:
+A `Job` spans the training session and accumulates its runs. Each iteration
+selects the runs added by the latest rollout and trains on that batch:
 
 ```python
-taskset, runtime = load_taskset_and_runtime()   # deployed+remote, or local
-session = await Job.start("rl", group=8)         # one job spans the session
-for step in range(steps):
-    start = len(session.runs)
-    await taskset.run(agent, runtime=runtime, job=session)   # roll out current weights
-    batch = session.runs[start:]                             # this step's runs
-    await trainer.step(batch, learning_rate=1e-5, group_size=8)   # train + promote
+batch_start = len(session.runs)
+await taskset.run(agent, runtime=runtime, job=session)
+batch = session.runs[batch_start:]
+
+await trainer.step(batch, learning_rate=1e-5, group_size=8)
 ```
 
-The loop only ever touches `job.runs`, so it does not care whether the
-rollouts executed on a leased remote box or on your laptop. Passing the
-`Run` is enough in both cases, but what travels with it differs:
+`trainer.step(...)` performs `forward_backward` followed by `optim_step`.
+The optimizer step checkpoints and promotes the updated weights behind the
+gateway model, so the next call to `taskset.run(...)` samples the new policy.
 
-- Remote (`HUDRuntime`) runs fold back only the reward and a `trace_id`. The
-  full token-level trajectory lives on the platform, collected server-side
-  during the rollout, and the training service resolves the trajectory and
-  reward from the `trace_id` the client sends.
-- Local (`LocalRuntime`) runs carry the token-level `Sample` on each agent
-  turn in `run.trace`, so the client sends the trajectory inline. This works
-  even with telemetry off.
+The trajectory representation depends on the runtime:
 
-You can also pass `trace_id` strings directly, and mix them with `Run`s.
+| Runtime | Data sent to training |
+|---------|-----------------------|
+| `HUDRuntime` | Reward and `trace_id`; the training service resolves the token-level trajectory stored by the platform |
+| `LocalRuntime` | Reward and the token-level `Sample` recorded on each agent turn in `run.trace` |
 
-## Two loss tiers
+`TrainingClient` also accepts `trace_id` strings directly. A training batch
+may contain `Run` objects, trace ids, or both.
 
-`simple_train.py` uses a built-in loss. `trainer.step(...)` is one
-`forward_backward` with a server-side loss followed by one `optim_step`, and
-the client stays dependency-light (no torch). The `loss_fn` menu mirrors
-Tinker's native set: `cross_entropy` for supervised data, then
-`importance_sampling`, `ppo`, `cispo`, and `dro` for RL. The policy-gradient
-ones compute advantages from rewards server-side, GRPO-style over each
-`group_size` chunk.
+## Built-in losses
 
-`ppo_custom_loss.py` writes the loss by hand.
-`trainer.forward_backward_custom(batch, loss_fn)` splits the step so the
-loss math runs on your machine:
+`simple_train.py` calls `forward_backward` with
+`loss_fn="importance_sampling"`. The available server-side losses are:
 
-1. The service runs the current-policy forward pass and returns per-token
-   tensors (`DatumTensors`: current-policy logprobs, rollout logprobs, the
-   action mask, reward, group index).
-2. Your `loss_fn` builds a differentiable loss over those logprobs, in torch
-   here.
-3. The service applies the resulting per-token gradients on the backward
-   pass.
+| Loss | Use |
+|------|-----|
+| `cross_entropy` | Supervised training |
+| `importance_sampling` | Group-relative policy-gradient training |
+| `ppo` | PPO objective |
+| `cispo` | CISPO objective |
+| `dro` | Distributionally robust objective |
 
-This mirrors Tinker's `forward_backward_custom` and its
-`weights = -dC/dlogprobs` convention, split across the service boundary. One
-thing to watch: build the loss out of the logprob tensors the service hands
-you rather than re-wrapping them from `.data`, or gradients will not flow.
+For the policy-gradient losses, the service computes group-relative
+advantages from rewards using each consecutive `group_size` set of
+trajectories. The built-in path does not require PyTorch on the client.
 
-## What this supports (and what it doesn't)
+## Custom loss
 
-The custom path covers token-level methods whose only moving part is the
-advantage and loss math over per-token tensors:
+`ppo_custom_loss.py` uses `forward_backward_custom` to implement GLM-5.2
+direct double-sided importance sampling. The computation is split across
+the client and training service:
 
-- The worked example is GLM-5.2's direct double-sided importance sampling:
-  reuse the rollout logprobs as the behavior proxy, form the ratio
-  `r = exp(logπ_θ − logπ_rollout)`, hard-mask tokens outside
-  `[1 − ε_l, 1 + ε_h]`, and normalize at the token level.
-- Compaction comes for free. A rollout is a variable-length list of
-  variable-length turns, and training puts no constraint on how many turns a
-  trajectory has or how long each one is, since every turn's `Sample` is a
-  trainable unit.
-- Critic-free credit assignment (TEMPO-style tree TD, MemPO per-segment
-  advantages, broadcast-advantage with a token-level loss) is all advantage
-  math you can write inside `loss_fn`.
+1. The service runs the current-policy forward pass and returns
+   `DatumTensors`, including policy logprobs, rollout logprobs, action masks,
+   rewards, and group indices.
+2. The client computes a differentiable PyTorch loss from the policy
+   logprobs.
+3. The service applies the per-token gradients, after which `optim_step`
+   updates and promotes the model.
 
-The one thing the Tinker backend cannot do natively is train a value
-network, because its loss API is over logprobs rather than a value head.
-GLM-5.2's critic exists only to produce token-level advantages, and
-advantages are an input here, so true critic-PPO means hosting a decoupled
-critic in the training service (a value model with GAE feeding the
-`advantages` input, where dependencies beyond `tinker`, like a small value
-model, are expected) rather than on Tinker. The examples here use a
-critic-free group baseline as the stand-in.
+The example uses the rollout logprobs as the behavior-policy proxy, computes
+`r = exp(logπ_θ - logπ_rollout)`, masks tokens outside
+`[1 - ε_l, 1 + ε_h]`, and normalizes by the number of trained tokens.
+The loss must use the policy logprob tensors returned by the service.
+Constructing new tensors from `.data` disconnects the computation graph.
+
+### Scope
+
+The custom API supports objectives defined from per-token logprobs, masks,
+rewards, group membership, and externally supplied advantages. It supports
+variable-length, multi-turn trajectories because each turn's `Sample` is an
+independent training datum. Critic-free methods such as grouped baselines,
+tree-based credit assignment, and per-segment advantages can be expressed
+in the client loss.
+
+The backend does not train a value head. A critic-based PPO implementation
+must run the value model separately and pass its token-level advantages into
+the policy loss. The included example uses a group-mean baseline instead.
