@@ -552,7 +552,6 @@ class Workspace:
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
-        self._serve_task: asyncio.Task[None] | None = None
         self._client_key_path: Path | None = None
         self._host_key: asyncssh.SSHKey | None = None
         self._host_pubkey_str: str | None = None
@@ -709,35 +708,31 @@ class Workspace:
 
     # ─── lifecycle ────────────────────────────────────────────────────
 
-    async def _serve(self) -> None:
-        """Run the asyncssh accept loop on the pre-bound socket."""
-        self._prepare_runtime()
-        assert self._sock is not None
-        assert self._host_key is not None
-        assert self._authorized_keys_path is not None
-        self._acceptor = await asyncssh.listen(
-            sock=self._sock,
-            server_host_keys=[self._host_key],
-            authorized_client_keys=str(self._authorized_keys_path),
-            process_factory=self._handle_process,
-            line_editor=False,
-            keepalive_interval=30,
-            encoding=None,
-        )
-
     async def start(self) -> None:
         """Ensure the SSH accept loop is running. Idempotent.
 
-        The first start prepares credentials and binds the socket, then ensures
-        the async acceptor exists.
+        Returns only after every published workspace service is accepting clients.
         """
-        self._prepare_runtime()
-        if self._serve_task is None and self._acceptor is None:
-            self._serve_task = asyncio.get_event_loop().create_task(self._serve())
-        # Yield so the acceptor binds before first use.
-        await asyncio.sleep(0)
-        if self._track_files and self._ft_server is None:
-            await self._start_file_tracking()
+        try:
+            self._prepare_runtime()
+            if self._acceptor is None:
+                assert self._sock is not None
+                assert self._host_key is not None
+                assert self._authorized_keys_path is not None
+                self._acceptor = await asyncssh.listen(
+                    sock=self._sock,
+                    server_host_keys=[self._host_key],
+                    authorized_client_keys=str(self._authorized_keys_path),
+                    process_factory=self._handle_process,
+                    line_editor=False,
+                    keepalive_interval=30,
+                    encoding=None,
+                )
+            if self._track_files and self._ft_server is None:
+                await self._start_file_tracking()
+        except BaseException:
+            await self.stop()
+            raise
 
     async def _start_file_tracking(self) -> None:
         """Take the baseline snapshot and bind the filetracking/1 server."""
@@ -764,11 +759,6 @@ class Workspace:
             self._ft_server = None
             self._ft_host = self._ft_port = None
             self._file_tracker = None
-        if self._serve_task is not None:
-            self._serve_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._serve_task
-            self._serve_task = None
         if self._acceptor is not None:
             self._acceptor.close()
             # close() initiates shutdown; wait_closed() can hang on Windows when a

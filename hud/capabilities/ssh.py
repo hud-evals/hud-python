@@ -41,7 +41,11 @@ class SSHClient(CapabilityClient):
 
     @classmethod
     async def connect(cls, cap: Capability) -> Self:
-        return cls(cap, await cls._connect(cap))
+        try:
+            connection = await cls._connect(cap)
+        except (ConnectionError, asyncssh.ConnectionLost) as exc:
+            raise SSHConnectionError("SSH connection failed during handshake") from exc
+        return cls(cap, connection)
 
     @staticmethod
     async def _connect(cap: Capability) -> asyncssh.SSHClientConnection:
