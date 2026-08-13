@@ -639,6 +639,41 @@ gpu_types = ["H100"]
     assert row.runtime_config.resources.gpu.type == "H100"
 
 
+def test_env_templates_are_persisted_verbatim_not_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Host values must never be baked into the content-hashed image payload
+    or the persisted task rows; ``${VAR}`` templates resolve at runtime."""
+    monkeypatch.setenv("HARBOR_JUDGE_KEY", "sk-live-secret")
+    task = make_harbor_task(tmp_path, "templated")
+    (task / "task.toml").write_text(
+        """
+[environment.env]
+JUDGE_KEY = "${HARBOR_JUDGE_KEY}"
+MODEL = "${HARBOR_JUDGE_MODEL:-gpt-4o}"
+
+[verifier]
+timeout_sec = 60
+
+[verifier.env]
+VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"
+""",
+        encoding="utf-8",
+    )
+
+    harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "compose-project" / "hud" / "config.json").read_text("utf-8"))
+    assert manifest["environment"]["env"] == {
+        "JUDGE_KEY": "${HARBOR_JUDGE_KEY}",
+        "MODEL": "${HARBOR_JUDGE_MODEL:-gpt-4o}",
+    }
+    assert manifest["verifier"]["env"] == {"VERIFIER_KEY": "${HARBOR_JUDGE_KEY}"}
+    for persisted in sorted(path for path in context.rglob("*") if path.is_file()):
+        assert b"sk-live-secret" not in persisted.read_bytes(), persisted
+
+
 def test_prebuilt_harbor_image_is_inspected_by_the_project_build(
     tmp_path: Path,
 ) -> None:

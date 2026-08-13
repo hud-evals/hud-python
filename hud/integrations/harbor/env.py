@@ -9,6 +9,7 @@ import json
 import math
 import os
 import pwd
+import re
 import shutil
 import socket
 import tempfile
@@ -82,6 +83,36 @@ if verifier_image["workdir"] is None:
     verifier_image["workdir"] = VERIFIER_IMAGE_CONFIG.get("WorkingDir") or "/"
 verifier_image["env"] = image_environment(VERIFIER_IMAGE_CONFIG)
 
+# Harbor's host-side env template contract (harbor/utils/env.py): a value that
+# is exactly ``${VAR}`` or ``${VAR:-default}`` resolves from the environment at
+# startup; anything else, including embedded templates, stays literal. Here the
+# source is this process's environment, which the runtime provider populates
+# from the host via ``env_vars`` (secrets never enter the content-hashed image).
+ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
+
+
+def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for key, value in env.items():
+        match = ENV_TEMPLATE.fullmatch(value)
+        if match is None:
+            resolved[key] = value
+            continue
+        name, default = match.group(1), match.group(2)
+        if name in os.environ:
+            resolved[key] = os.environ[name]
+        elif default is not None:
+            resolved[key] = default
+        else:
+            raise ValueError(
+                f"Harbor env template for {key!r} needs {name!r}; "
+                "pass it through the runtime's env_vars"
+            )
+    return resolved
+
+
+for policy in (CONFIG["environment"], CONFIG["agent"], CONFIG["verifier"]):
+    policy["env"] = resolve_env_templates(policy["env"])
 os.environ.update(CONFIG["environment"]["env"])
 WORKDIR = Path(CONFIG["workdir"])
 os.chdir(WORKDIR)
