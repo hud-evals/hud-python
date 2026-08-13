@@ -465,9 +465,11 @@ async def collect(task: dict[str, Any]) -> None:
                 continue
         else:
             copy_artifact(Path(source), target)
+        if target.is_symlink():
+            raise RuntimeError(f"artifact {source} contains a symbolic link")
         if artifact["exclude"] and target.is_dir():
             prune_excluded(target, artifact["exclude"])
-        if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
+        if any(path.is_symlink() for path in target.rglob("*")):
             raise RuntimeError(f"artifact {source} contains a symbolic link")
 
 

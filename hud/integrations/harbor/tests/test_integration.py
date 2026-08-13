@@ -241,6 +241,38 @@ def test_separate_verifier_rejects_artifact_symlinks(
     assert "artifact /app/main.html is a symbolic link" in (run.trace.error or "")
 
 
+def test_separate_verifier_rejects_sidecar_symlink_artifact_roots(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-sidecar-symlink") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    (task / "task.toml").write_text(
+        """\
+artifacts = [{ source = "/link", service = "web", exclude = ["main.html"] }]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+
+[[verifier.collect]]
+service = "web"
+command = "ln -sfn /app /link"
+timeout_sec = 10
+""",
+        encoding="utf-8",
+    )
+    (task / "solution" / "solve.sh").write_text("true\n", encoding="utf-8")
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 0.0
+    assert "artifact /link contains a symbolic link" in (run.trace.error or "")
+
+
 def test_separate_verifier_sees_directory_artifacts_without_excluded_entries(
     tmp_path_factory: pytest.TempPathFactory, wheel: Path
 ) -> None:
