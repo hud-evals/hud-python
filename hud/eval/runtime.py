@@ -584,9 +584,11 @@ class DockerRuntime:
         port: int = 8765,
         run_args: Sequence[str] = (),
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+        env_vars: Mapping[str, str] | None = None,
     ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
+        self.env_vars = dict(env_vars or {})
         config = RuntimeConfig(image=image) if image is not None else RuntimeConfig()
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
@@ -637,6 +639,7 @@ class DockerRuntime:
                 f"127.0.0.1::{self.port}",
                 seccomp=_DOCKER_SECCOMP_PROFILE,
                 service_socket=service_socket,
+                env_vars=self.env_vars,
                 cpu=resources.cpu if resources is not None else None,
                 memory_mb=resources.memory_mb if resources is not None else None,
                 gpu_count=(
@@ -709,10 +712,14 @@ class DockerRuntime:
                     raise ValueError("DockerRuntime cannot select GPUs by type")
                 resource_args.extend(("--gpus", str(resources.gpu.count)))
 
+        env_args: list[str] = []
+        for key, value in self.env_vars.items():
+            env_args.extend(("--env", f"{key}={value}"))
         out, _ = await _docker(
             "run",
             "--detach",
             *self.run_args,
+            *env_args,
             *resource_args,
             *_DOCKER_SECURITY_ARGS,
             "--publish",
