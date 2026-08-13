@@ -343,12 +343,7 @@ def copy_artifact(source: Path, target: Path) -> None:
         raise RuntimeError(f"artifact {source} has a symbolic link in its path")
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
-        for root, directories, files in os.walk(source, followlinks=False):
-            for name in (*directories, *files):
-                entry = Path(root, name)
-                if entry.is_symlink():
-                    raise RuntimeError(f"artifact {source} contains symbolic link {entry}")
-        shutil.copytree(source, target)
+        shutil.copytree(source, target, symlinks=True)
     elif source.exists() or source.is_symlink():
         shutil.copy2(source, target, follow_symlinks=False)
 
@@ -370,8 +365,12 @@ def prune_excluded(target: Path, patterns: list[str]) -> None:
 
     for root, directories, files in os.walk(target, topdown=True):
         for name in list(directories):
-            if excluded(Path(root, name)):
-                shutil.rmtree(Path(root, name))
+            entry = Path(root, name)
+            if excluded(entry):
+                if entry.is_symlink():
+                    entry.unlink()
+                else:
+                    shutil.rmtree(entry)
                 directories.remove(name)
         for name in files:
             if excluded(Path(root, name)):
@@ -466,10 +465,10 @@ async def collect(task: dict[str, Any]) -> None:
                 continue
         else:
             copy_artifact(Path(source), target)
-        if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
-            raise RuntimeError(f"artifact {source} contains a symbolic link")
         if artifact["exclude"] and target.is_dir():
             prune_excluded(target, artifact["exclude"])
+        if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
+            raise RuntimeError(f"artifact {source} contains a symbolic link")
 
 
 @env.template(id="run", description="Run a Harbor task")
