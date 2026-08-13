@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import grp
 import json
 import math
@@ -352,6 +353,31 @@ def copy_artifact(source: Path, target: Path) -> None:
         shutil.copy2(source, target, follow_symlinks=False)
 
 
+def prune_excluded(target: Path, patterns: list[str]) -> None:
+    """Drop staged entries matching Harbor exclude patterns (GNU tar semantics).
+
+    A pattern excludes an entry when it matches any run of trailing path
+    components; matching a directory prunes its whole subtree.
+    """
+
+    def excluded(entry: Path) -> bool:
+        parts = entry.relative_to(target).as_posix().split("/")
+        return any(
+            fnmatch.fnmatch("/".join(parts[start:]), pattern)
+            for pattern in patterns
+            for start in range(len(parts))
+        )
+
+    for root, directories, files in os.walk(target, topdown=True):
+        for name in list(directories):
+            if excluded(Path(root, name)):
+                shutil.rmtree(Path(root, name))
+                directories.remove(name)
+        for name in files:
+            if excluded(Path(root, name)):
+                Path(root, name).unlink()
+
+
 async def collect(task: dict[str, Any]) -> None:
     clear(ARTIFACTS)
     services: dict[str, str] = {}
@@ -442,6 +468,8 @@ async def collect(task: dict[str, Any]) -> None:
             copy_artifact(Path(source), target)
         if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
             raise RuntimeError(f"artifact {source} contains a symbolic link")
+        if artifact["exclude"] and target.is_dir():
+            prune_excluded(target, artifact["exclude"])
 
 
 @env.template(id="run", description="Run a Harbor task")

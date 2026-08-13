@@ -49,6 +49,8 @@ class Artifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: str = Field(pattern=r"^/")
+    destination: str | None = None
+    exclude: list[str] = Field(default_factory=list)
     service: str = Field(default="main", min_length=1)
 
     @model_validator(mode="before")
@@ -63,6 +65,21 @@ class Artifact(BaseModel):
         if len(path.parts) == 1 or ".." in path.parts:
             raise ValueError("artifact source must name a path beneath /")
         return str(path)
+
+    @field_validator("destination")
+    @classmethod
+    def normalize_destination(cls, value: str | None) -> str | None:
+        """Harbor host placement: a relative path beneath the trial's artifacts dir."""
+        if not value:
+            return None
+        if "\\" in value:
+            raise ValueError("artifact destination must use forward slashes")
+        path = PurePosixPath(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("artifact destination must be a relative path without '..'")
+        if value.rstrip("/") == "manifest.json":
+            raise ValueError("artifact destination 'manifest.json' is reserved by Harbor")
+        return value
 
 
 class Collect(BaseModel):

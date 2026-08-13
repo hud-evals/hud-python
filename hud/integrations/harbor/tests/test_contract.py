@@ -595,7 +595,7 @@ timeout_sec = 30
     assert taskset["build-pmars"].agent_config == {"timeout_seconds": 45.0}
     assert taskset["build-pmars"].args["task"]["verifier_timeout"] == 30.0
     assert taskset["build-pmars"].args["task"]["artifacts"] == [
-        {"service": "main", "source": "/tmp/result"}
+        {"service": "main", "source": "/tmp/result", "destination": None, "exclude": []}
     ]
 
 
@@ -883,7 +883,9 @@ timeout_sec = 10
     }
     assert "tasks" not in manifest
     assert row.args["task"] == {
-        "artifacts": [{"service": "main", "source": "/tmp/agent.patch"}],
+        "artifacts": [
+            {"service": "main", "source": "/tmp/agent.patch", "destination": None, "exclude": []}
+        ],
         "collect": [{"command": "redis-cli save", "service": "redis", "timeout_sec": 10.0}],
         "description": "",
         "id": "separate",
@@ -992,6 +994,52 @@ def test_artifacts_must_name_normalized_paths_beneath_root(
     (task / "task.toml").write_text(f'artifacts = ["{source}"]\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="artifact source must name a path beneath /"):
+        harbor.adapt(tmp_path)
+
+
+def test_artifacts_keep_harbor_destination_and_exclude(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        """\
+[[artifacts]]
+source = "/app/outputs"
+destination = "results/outputs"
+exclude = ["*.tmp", "cache"]
+""",
+        encoding="utf-8",
+    )
+
+    taskset = harbor.adapt(tmp_path)
+
+    assert taskset["task-a"].args["task"]["artifacts"] == [
+        {
+            "service": "main",
+            "source": "/app/outputs",
+            "destination": "results/outputs",
+            "exclude": ["*.tmp", "cache"],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "destination",
+    ["/absolute/path", "results/../../escape", "results\\\\windows", "manifest.json"],
+)
+def test_artifact_destinations_harbor_rejects_fail_adaptation(
+    tmp_path: Path,
+    destination: str,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        f"""\
+[[artifacts]]
+source = "/app/out.json"
+destination = "{destination}"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="not a valid Harbor task"):
         harbor.adapt(tmp_path)
 
 

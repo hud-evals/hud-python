@@ -241,6 +241,63 @@ def test_separate_verifier_rejects_artifact_symlinks(
     assert "artifact /app/main.html is a symbolic link" in (run.trace.error or "")
 
 
+def test_separate_verifier_sees_directory_artifacts_without_excluded_entries(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-artifact-exclude") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    (task / "task.toml").write_text(
+        """\
+artifacts = [
+  { source = "/app/outputs", destination = "results", exclude = ["*.tmp", "cache"] },
+]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+""",
+        encoding="utf-8",
+    )
+    (task / "solution" / "solve.sh").write_text(
+        """\
+#!/bin/sh
+set -eu
+mkdir -p /app/outputs/cache/nested /app/outputs/logs
+echo keep > /app/outputs/keep.txt
+echo junk > /app/outputs/junk.tmp
+echo junk > /app/outputs/logs/nested.tmp
+echo junk > /app/outputs/cache/nested/blob
+""",
+        encoding="utf-8",
+    )
+    (task / "tests" / "test.sh").write_text(
+        """\
+#!/bin/sh
+set -u
+mkdir -p /logs/verifier
+if [ "$(cat /app/outputs/keep.txt 2>/dev/null)" = "keep" ] \\
+  && [ -d /app/outputs/logs ] \\
+  && [ ! -e /app/outputs/junk.tmp ] \\
+  && [ ! -e /app/outputs/logs/nested.tmp ] \\
+  && [ ! -e /app/outputs/cache ]; then
+  echo 1 > /logs/verifier/reward.txt
+else
+  echo "excluded artifact entries leaked into the verifier" >&2
+  echo 0 > /logs/verifier/reward.txt
+fi
+""",
+        encoding="utf-8",
+    )
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 1.0, run.trace.error
+
+
 def test_separate_verifier_rejects_artifacts_beneath_symlinks(
     tmp_path_factory: pytest.TempPathFactory, wheel: Path
 ) -> None:
