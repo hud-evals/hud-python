@@ -87,6 +87,19 @@ class Task(BaseModel):
             raise ValueError("nested verifier tasks are not supported")
         return verifier
 
+    def wire_payload(self) -> dict[str, Any]:
+        """Serialize the task for platform transport."""
+        payload = self.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude={"runtime_config", "verifier"},
+        )
+        if self.runtime_config is not None:
+            payload["runtime_config"] = self.runtime_config.request_payload()
+        if self.verifier is not None:
+            payload["verifier"] = self.verifier.wire_payload()
+        return payload
+
     # ─── execution ────────────────────────────────────────────────────
 
     async def run(

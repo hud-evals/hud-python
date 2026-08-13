@@ -166,7 +166,7 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
     if task.runtime_config is not None:
         payload["runtime_config"] = task.runtime_config.request_payload()
     if task.verifier is not None:
-        payload["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
+        payload["verifier"] = task.verifier.wire_payload()
     return payload
 
 
@@ -181,7 +181,7 @@ def _task_signature(task: Task) -> str:
     if task.runtime_config is not None:
         sig_data["runtime_config"] = task.runtime_config.request_payload()
     if task.verifier is not None:
-        sig_data["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
+        sig_data["verifier"] = task.verifier.wire_payload()
     return f"{task.id}|" + json.dumps(
         sig_data,
         sort_keys=True,

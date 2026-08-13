@@ -234,6 +234,11 @@ class ModalRuntime:
         compose = (
             compose_source.runnable_path("ModalRuntime") if compose_source is not None else None
         )
+        if compose is not None and resources is not None and resources.gpu is not None:
+            raise ValueError(
+                "ModalRuntime cannot attach GPUs to services inside Docker-in-Docker; "
+                "use a materialized image or omit runtime_config.compose"
+            )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
         modal = cast("ModalModule", importlib.import_module("modal"))
 

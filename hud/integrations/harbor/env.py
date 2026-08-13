@@ -706,10 +706,28 @@ def materialized_artifacts(
     artifacts: Path,
     verifier_identity: tuple[int, int] | None,
 ) -> Iterator[list[Mount]]:
+    driver_files = (
+        {
+            path
+            for root in (Path("/usr/lib"), Path("/usr/lib64"))
+            if root.is_dir()
+            for path in root.rglob("*.so*")
+            if path.name.startswith(("libcuda.so", "libnvidia-"))
+            and (path.is_file() or path.is_symlink())
+        }
+        | {
+            path
+            for path in Path("/usr/bin").glob("nvidia-*")
+            if path.is_file() or path.is_symlink()
+        }
+        if Path("/dev/nvidiactl").exists()
+        else set()
+    )
     mounts = [
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
         Mount("rw", src=str(LOGS), dst="/logs"),
+        *(Mount("ro", src=str(path), dst=str(path)) for path in sorted(driver_files)),
     ]
     with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=ROOT) as directory:
         backup_root = Path(directory)

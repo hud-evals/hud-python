@@ -1027,6 +1027,7 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         encoding="utf-8",
     )
     (task / "task.toml").write_text(
+        '[environment]\nbuild_timeout_sec = 300\n\n'
         '[verifier]\nenvironment_mode = "separate"\n',
         encoding="utf-8",
     )
@@ -1034,7 +1035,10 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
     (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
+    assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=300)
     assert row.runtime_config.compose_service_access is None
+    assert row.verifier is not None
+    assert row.verifier.runtime_config is None
     assert isinstance(row.runtime_config.compose, Path)
     project = _assert_stock_compose_complete(row.runtime_config.compose)
     assert set(project["services"]) == {"main", "hud-verifier"}

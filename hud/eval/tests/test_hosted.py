@@ -168,19 +168,30 @@ async def test_run_rejects_non_gateway_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_rejects_verifier_tasks_until_hosted_supports_both_phases() -> None:
+@pytest.mark.parametrize(
+    "verifier",
+    [
+        Task(env="judge", id="verify"),
+        Task(
+            env="actor",
+            id="verify",
+            runtime_config=RuntimeConfig(image="judge:latest"),
+        ),
+    ],
+)
+async def test_run_rejects_verifier_that_requires_another_runtime(verifier: Task) -> None:
     run = await HostedRuntime(poll_interval=0.0).run(
         Task(
             env="actor",
             id="solve",
-            verifier=Task(env="judge", id="verify"),
+            verifier=verifier,
         ),
         _agent(),
         job_id="j",
     )
 
     assert run.trace.is_error
-    assert "does not support verifier tasks" in (run.trace.error or "")
+    assert "must reuse the actor runtime" in (run.trace.error or "")
 
 
 @pytest.mark.asyncio
@@ -210,6 +221,12 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
             resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4", count=1)),
             limits=RuntimeLimits(startup_timeout_s=120, run_timeout_s=900),
         ),
+        verifier=Task(
+            env="sums",
+            id="verify",
+            args={"expected": 3},
+            requires_handoff=True,
+        ),
     )
 
     run = await hosted.run(task, _agent(), job_id=job_id, group_id="g1", trace_id=trace_id)
@@ -233,6 +250,13 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "image": "registry.example/sums:latest",
         "resources": {"cpu": 2.0, "gpu": {"type": "L4", "count": 1}},
         "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
+    }
+    assert payload["verifier"] == {
+        "env": "sums",
+        "id": "verify",
+        "args": {"expected": 3},
+        "slug": "verify-5579a3e5",
+        "requires_handoff": True,
     }
     assert payload["group_id"] == "g1"
     assert payload["agent"]["type"] == "openai_compatible"

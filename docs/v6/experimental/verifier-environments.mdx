@@ -92,8 +92,9 @@ engine keeps the actor connection and substrate alive and starts the verifier ta
 channel immediately after the actor task completes. A different environment name or verifier
 runtime configuration forces actor cleanup followed by a fresh provider acquisition.
 
-`HostedRuntime` does not accept verifier task rows; verifier environments run under a
-client-driven provider such as `LocalRuntime`, `DockerRuntime`, or a custom provider.
+`HostedRuntime` supports the same-environment form without a verifier `runtime_config`, keeping
+both phases inside one hosted acquisition. Verifiers that require another runtime remain
+client-driven through `LocalRuntime`, `DockerRuntime`, or a custom provider.
 
 ## What runs where
 

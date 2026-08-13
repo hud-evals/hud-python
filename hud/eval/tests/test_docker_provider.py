@@ -995,6 +995,22 @@ async def test_modal_runtime_bounds_compose_startup(
     assert calls["terminated"] is True
 
 
+async def test_modal_runtime_rejects_gpu_inside_compose_dind(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(
+            compose=compose,
+            resources=RuntimeResources(gpu=RuntimeGPU(type="H100")),
+        )
+    )
+
+    with pytest.raises(ValueError, match=r"cannot attach GPUs.*Docker-in-Docker"):
+        async with provider(_row()):
+            pass
+
+
 async def test_modal_runtime_accepts_modal_image_uri(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -193,23 +193,31 @@ def test_task_upload_payload_preserves_runtime_config_null_override() -> None:
     assert payload["runtime_config"] == {"resources": None}
 
 
-def test_task_upload_payload_includes_verifier_task() -> None:
+def test_task_upload_payload_includes_verifier_task(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.json"
+    compose.write_text(
+        json.dumps({"services": {"main": {"image": "judge:latest"}}}),
+        encoding="utf-8",
+    )
     task = Task(
         env="actor",
         id="solve",
         verifier=Task(
             env="judge",
             id="verify",
-            runtime_config=RuntimeConfig(image="judge:latest"),
+            runtime_config=RuntimeConfig(compose=compose),
         ),
     )
 
     payload = task_upload_payload(task)
 
-    assert payload["verifier"] == {
+    verifier = payload["verifier"]
+    runtime_config = verifier.pop("runtime_config")
+    assert verifier == {
         "env": "judge",
         "id": "verify",
         "args": {},
         "slug": "verify",
-        "runtime_config": {"image": "judge:latest"},
     }
+    assert runtime_config["compose"]["services"]["main"]["image"] == "judge:latest"
+    assert str(compose) not in json.dumps(runtime_config)

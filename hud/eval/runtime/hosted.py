@@ -68,10 +68,12 @@ class HostedRuntime:
         """
         trace_id = trace_id or uuid.uuid4().hex
         try:
-            if task.verifier is not None:
+            if task.verifier is not None and (
+                task.verifier.env != task.env or task.verifier.runtime_config is not None
+            ):
                 raise ValueError(
-                    "HostedRuntime does not support verifier tasks until hosted rollouts "
-                    "can keep both phases in one runtime scope"
+                    "hosted verifier tasks must reuse the actor runtime: verifier.env must "
+                    "match task.env and verifier.runtime_config must be omitted"
                 )
             async with asyncio.timeout(self.run_timeout):
                 state = await self._submit_and_await(
@@ -137,6 +139,8 @@ class HostedRuntime:
             runtime_config = task.runtime_config.request_payload()
             if runtime_config:
                 payload["runtime_config"] = runtime_config
+        if task.verifier is not None:
+            payload["verifier"] = task.verifier.wire_payload()
         await platform.apost("/rollouts/submit", json=payload)
         return await self._await_terminal(platform, payload["trace_id"])
 

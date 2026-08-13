@@ -1073,7 +1073,11 @@ fi
                 if config.verifier.environment is not None
                 else None
             )
-            verifier_limits = _runtime_limits(config.verifier.environment or config.environment)
+            verifier_limits = (
+                _runtime_limits(config.verifier.environment)
+                if config.verifier.environment is not None
+                else None
+            )
             needs_service_access = any(
                 item.service != "main" for item in (*config.verifier.collect, *config.artifacts)
             ) or bool(healthy_services)

@@ -159,7 +159,9 @@ ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", 
 
 For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
 sandbox in your Modal account and merges `env_vars` into `main` at acquisition
-time. See [Compose environments](/v6/experimental/compose#runtime-behavior).
+time. GPU requests require a plain or platform-materialized image; Modal Compose
+rejects them because its nested Docker daemon cannot receive the sandbox GPU.
+See [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 Requires the `modal` extra and a configured token.
 
