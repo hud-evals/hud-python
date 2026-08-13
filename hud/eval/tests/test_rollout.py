@@ -599,17 +599,21 @@ async def test_tool_agent_timeout_stops_running_workspace_command_before_grading
         started.unlink(missing_ok=True)
         late.unlink(missing_ok=True)
 
+    # Timing contract, sized to survive loaded CI: the command must start
+    # within the 2s agent budget, still be running when that budget expires
+    # (it sleeps 3s), and the grading delay must outlast the sleep so a
+    # command that survived the timeout provably leaves `late` behind.
     @env.template()
     async def wait_for_cleanup():
         yield "Start the requested command."
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(4.0)
         yield 1.0 if started.exists() and not late.exists() else 0.0
 
     model_client = _FakeOpenAI(
         [
             _chat_response(
                 "",
-                [_tool_call("bash", '{"command":"touch started; sleep 1; touch late"}')],
+                [_tool_call("bash", '{"command":"touch started; sleep 3; touch late"}')],
             ),
         ]
     )
@@ -618,7 +622,7 @@ async def test_tool_agent_timeout_stops_running_workspace_command_before_grading
             model="qwen3.6-plus",
             model_client=model_client,
             max_steps=2,
-            timeout_seconds=0.5,
+            timeout_seconds=2.0,
         )
     )
 
@@ -630,9 +634,9 @@ async def test_tool_agent_timeout_stops_running_workspace_command_before_grading
 
     assert run.trace.status == "error"
     assert run.trace.stop_reason == "timeout"
-    assert run.reward == 1.0
     assert started.exists()
     assert not late.exists()
+    assert run.reward == 1.0
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")

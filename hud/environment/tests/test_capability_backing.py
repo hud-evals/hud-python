@@ -218,10 +218,15 @@ async def test_workspace_channel_close_during_teardown_keeps_connection_usable(
     try:
         async with served(env) as client:
             ssh = cast("SSHClient", await client.open("shell"))
+            # The pid file doubles as the child's readiness signal: it is
+            # written after the TERM trap is installed, and teardown's TERM
+            # only fires once the foreground command exits. Exiting before
+            # the child is ready would kill it while still untrapped.
             remote = await ssh.conn.create_process(
                 "sh -c 'trap \"echo started > teardown-started; "
                 'while :; do sleep 1; done" TERM; '
                 "echo $$ > close-race-child.pid; while :; do sleep 1; done' & "
+                "while [ ! -s close-race-child.pid ]; do sleep 0.01; done; "
                 "printf output"
             )
             try:
