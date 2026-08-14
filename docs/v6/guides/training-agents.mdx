@@ -175,3 +175,29 @@ hud models head arith-rl --set <id>   # roll back or branch from an earlier poin
 
 The [training reference](/v6/reference/training) covers the `TrainingClient` API, the built-in and
 custom losses, and the checkpoint tree in full.
+
+## Use HUD environments with Fireworks
+
+A training service can update model weights, but it still needs a repeatable task and a reliable
+reward. HUD packages those pieces as an environment: the prompt, tools, state, and grader live
+together, and the same taskset can be used for evaluation or training.
+
+The managed loop above uses `TrainingClient`. In the one-turn Fireworks cookbook, HUD still runs and
+grades each rollout; a Fireworks sampler produces the model tokens, and the Fireworks Training API
+applies the update.
+
+| HUD provides | Fireworks provides |
+| --- | --- |
+| Task definitions and grouped tasksets | LoRA training on the serverless shared pool |
+| Local or hosted environment execution | Sampling from the current adapter |
+| Grading, rewards, and traces | Training and sampler checkpoints |
+| Portable environment and task interfaces | Forward, backward, and optimizer operations |
+
+HUD can also represent browser, coding, and multi-turn tool environments. Those tasks require a
+Fireworks agent adapter and batch builder that record every trainable assistant turn; they are not
+drop-in inputs to the one-turn example.
+
+<Card title="Fireworks Serverless RL" icon={<svg className="size-6 m-0! shrink-0 bg-primary dark:bg-primary-light" aria-hidden="true" style={{ maskImage: "url(/logo/fireworks.svg)", maskRepeat: "no-repeat", maskPosition: "center", maskSize: "contain", WebkitMaskImage: "url(/logo/fireworks.svg)", WebkitMaskRepeat: "no-repeat", WebkitMaskPosition: "center", WebkitMaskSize: "contain" }} />} href="/v6/cookbooks/fireworks-rl-training">
+  Train a Fireworks LoRA adapter on HUD-graded rollouts, including reward calibration,
+  group-relative updates, checkpoints, evaluation, and the path to hosted tasksets.
+</Card>
