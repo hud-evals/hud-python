@@ -14,6 +14,10 @@ training service.
 
 ## Setup
 
+Install Git, Python 3.11 or 3.12, and
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/). Run all
+commands in this README from `cookbooks/fireworks-rl-training`.
+
 Set `FIREWORKS_API_KEY` in the environment or in a local `.env` file. The
 key must have access to Fireworks Serverless Training.
 
@@ -31,27 +35,45 @@ reasoning without producing the final answer expected by the grader.
 
 ## Run
 
-Start with a bounded one-step run:
+Calibrate the default task before taking an optimizer step:
+
+```bash
+uv run train.py \
+  --calibrate \
+  --tasks-per-step 6 \
+  --group-size 6 \
+  --max-tokens 512 \
+  --debug-samples 4
+```
+
+If the output shows useful reward spread, run one bounded training step:
 
 ```bash
 uv run train.py \
   --steps 1 \
   --tasks-per-step 2 \
   --group-size 4 \
-  --max-tokens 256 \
-  --eval-tasks 4
+  --max-tokens 512 \
+  --eval-tasks 4 \
+  --require-update
 ```
 
-This verifies authentication, sampling, HUD grading, one optimizer update,
-checkpoint creation, and evaluation.
+`--require-update` fails if every group has identical rewards and the script
+cannot apply an optimizer update. A successful command verifies
+authentication, sampling, HUD grading, one update, checkpoint creation, and
+evaluation.
 
-The default command runs 30 optimizer steps with 8 task groups per step,
-8 rollouts per group, and up to 1,024 generated tokens per rollout:
+The default command requests 30 training steps with 8 task groups per step,
+8 rollouts per group, and up to 1,024 generated tokens per rollout. A step
+with no reward variation skips its optimizer update. The run still collects
+1,920 paid training rollouts, followed by 16 evaluation rollouts. Fireworks
+meters prompt prefill, sampled output, and training tokens separately.
 
 ```bash
 uv run train.py
 ```
 
+See [Serverless Training pricing](https://docs.fireworks.ai/fine-tuning/training-api/serverless#pricing).
 Metrics are written to `runs/fireworks-serverless/metrics.jsonl`. The unit
 tests do not require an API key:
 
@@ -89,7 +111,9 @@ The command reports:
 
 `--debug-samples N` prints the reward, output-token count, and text for the
 first N rollouts. During training, the within-group statistic is stored as
-`reward_std_within_group`.
+`reward_std_within_group`. A positive value confirms reward variation in at
+least one group. Inspect the sample text to verify that the rewards track
+answer quality.
 
 If groups are uniformly correct, increase the task difficulty with
 `--min-a`, `--max-a`, `--min-b`, and `--max-b`. If groups are uniformly
@@ -99,7 +123,9 @@ incorrect samples with the 9B model.
 
 ## Training flow
 
-Each optimizer step uses a sampler snapshot of the current adapter:
+Each training step uses a sampler snapshot of the current adapter:
+
+_Conceptual excerpt from `train.py`; this is not standalone code._
 
 ```python
 snapshot = training_client.save_weights_for_sampler(f"policy-{step}").result()
@@ -110,13 +136,14 @@ sampler = service.create_sampling_client(
 
 job = await taskset.run(
     agent,
-    runtime=LocalRuntime("env.py"),
+    runtime=runtime,
     group=8,
 )
 
 datums, kept_groups = make_training_batch(job.runs)
-training_client.forward_backward(datums, "importance_sampling").result()
-training_client.optim_step(adam).result()
+if datums:
+    training_client.forward_backward(datums, "importance_sampling").result()
+    training_client.optim_step(adam).result()
 ```
 
 `FireworksAgent` records prompt tokens, output tokens, and sampling
@@ -167,9 +194,36 @@ uv run train.py --resume-from "<account>/<run-id>/state-0005"
 
 Resume creates a new Fireworks run, appends metrics to the existing
 `metrics.jsonl`, and restarts local step numbering at 1. Sampler checkpoints
-are session-scoped. Promote the selected sampler checkpoint before the
-session is removed if the adapter must remain deployable. See
-[Saving and loading checkpoints](https://docs.fireworks.ai/fine-tuning/training-api/serverless#saving-and-loading-checkpoints).
+are session-scoped. The script prints the final `Sampler checkpoint` path.
+Use it to identify and
+[promote the checkpoint](https://docs.fireworks.ai/fine-tuning/training-api/serverless#promote-a-sampler-checkpoint-to-a-model)
+before the session is removed.
+
+## Other HUD tasks
+
+For a local one-turn environment, pass both its task source and environment
+source:
+
+```bash
+uv run train.py \
+  --tasks-file "../my-environment/tasks.py" \
+  --env-path "../my-environment/env.py" \
+  --calibrate
+```
+
+For an environment and taskset already deployed to HUD, set `HUD_API_KEY`
+and pass its name or id:
+
+```bash
+uv run train.py --taskset "my-taskset" --calibrate
+```
+
+Calibration needs at least `--tasks-per-step` tasks. A training run needs
+`--tasks-per-step + --eval-tasks`; the script creates deterministic,
+disjoint training and evaluation subsets. The included `FireworksAgent` and
+batch builder support one generated assistant response per HUD Run.
+Multi-turn and tool-using environments need a different agent adapter and
+batch construction.
 
 ## Serverless and dedicated training
 
@@ -219,20 +273,11 @@ training reward increased from 0.13 to approximately 0.52 in fewer than
 20 optimizer steps. These results validate the environment and reward
 design; they are not a Fireworks serverless benchmark.
 
-A deployed taskset is loaded with `Taskset.from_api(...)` and executed using
-`HUDRuntime`:
-
-```python
-taskset = Taskset.from_api("bfcl-multi-turn-base")
-runtime = HUDRuntime()
-```
-
-These lines change the task source only. The `FireworksAgent` in this
-cookbook handles one-turn text generation. Running BFCL requires a
-multi-turn agent adapter that renders tool schemas, executes tool calls,
-returns tool results to the sampler, and records token ids and logprobs for
-each assistant turn. The advantage and training-batch code can remain
-unchanged.
+BFCL is not a drop-in input to this cookbook. `--taskset` can select the
+hosted taskset and runtime, but the included adapter cannot execute the tool
+loop and the batch builder keeps only one assistant turn. See the
+[HUD RL training cookbook](https://github.com/hud-evals/hud-python/tree/main/cookbooks/rl-training)
+for a runnable multi-turn implementation.
 
 ## References
 

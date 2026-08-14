@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from fireworks.training.sdk import FiretitanServiceClient
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, Sample, Usage
-from hud.eval import LocalRuntime, Taskset
+from hud.eval import HUDRuntime, LocalRuntime, Provider, Taskset
 from hud.eval.run import Run
 from tinker_cookbook.renderers import get_renderer, get_text_content
 from tinker_cookbook.tokenizer_utils import get_tokenizer
@@ -101,11 +101,92 @@ def make_taskset(*, count: int, seed: int, a: tuple[int, int], b: tuple[int, int
     # The default 3-digit x 3-digit lands mid-difficulty for the 9B model:
     # right often but not always, so groups keep the reward spread GRPO
     # trains on. Tune the ranges with --min-a/--max-a/--min-b/--max-b.
-    rng = random.Random(seed)
+    a_count = a[1] - a[0] + 1
+    b_count = b[1] - b[0] + 1
+    population = a_count * b_count
+    if count > population:
+        raise ValueError(
+            f"requested {count} arithmetic tasks, but the operand ranges contain "
+            f"only {population} unique pairs"
+        )
+
+    indices = random.Random(seed).sample(range(population), count)
     return Taskset(
         f"arithmetic-{seed}",
-        [multiply(a=rng.randint(*a), b=rng.randint(*b)) for _ in range(count)],
+        [
+            multiply(
+                a=a[0] + index // b_count,
+                b=b[0] + index % b_count,
+            )
+            for index in indices
+        ],
     )
+
+
+def split_taskset(
+    source: Taskset,
+    *,
+    train_count: int,
+    eval_count: int,
+    seed: int,
+) -> tuple[Taskset, Taskset]:
+    """Create deterministic, disjoint train and evaluation subsets."""
+    tasks = list(source)
+    required = train_count + eval_count
+    if len(tasks) < required:
+        raise ValueError(
+            f"task source {source.name!r} has {len(tasks)} tasks; "
+            f"need at least {required} for {train_count} training and {eval_count} evaluation tasks"
+        )
+
+    random.Random(seed).shuffle(tasks)
+    train = Taskset(f"{source.name}-train", tasks[:train_count], origin=source.origin)
+    evaluation = Taskset(
+        f"{source.name}-eval",
+        tasks[train_count:required],
+        origin=source.origin,
+    )
+    return train, evaluation
+
+
+def resolve_rollout_source(
+    args: argparse.Namespace,
+) -> tuple[Taskset, Taskset, Provider | HUDRuntime]:
+    """Resolve bundled, local-file, or hosted HUD tasks and their runtime."""
+    eval_count = 0 if getattr(args, "calibrate", False) else args.eval_tasks
+    if args.taskset:
+        source = Taskset.from_api(args.taskset)
+        train, evaluation = split_taskset(
+            source,
+            train_count=args.tasks_per_step,
+            eval_count=eval_count,
+            seed=args.seed,
+        )
+        return train, evaluation, HUDRuntime()
+
+    if args.tasks_file:
+        source = Taskset.from_file(args.tasks_file)
+        train, evaluation = split_taskset(
+            source,
+            train_count=args.tasks_per_step,
+            eval_count=eval_count,
+            seed=args.seed,
+        )
+        return train, evaluation, LocalRuntime(str(Path(args.env_path).resolve()))
+
+    source = make_taskset(
+        count=args.tasks_per_step + eval_count,
+        seed=args.seed,
+        a=(args.min_a, args.max_a),
+        b=(args.min_b, args.max_b),
+    )
+    train, evaluation = split_taskset(
+        source,
+        train_count=args.tasks_per_step,
+        eval_count=eval_count,
+        seed=args.seed,
+    )
+    return train, evaluation, LocalRuntime(str(HERE / "env.py"))
 
 
 class FireworksAgent(Agent):
@@ -272,6 +353,7 @@ async def run_rollouts(
     renderer: Any,
     snapshot_name: str,
     taskset: Taskset,
+    runtime: Provider | HUDRuntime,
     group_size: int,
     max_concurrent: int,
     max_tokens: int,
@@ -296,7 +378,7 @@ async def run_rollouts(
         )
         job = await taskset.run(
             agent,
-            runtime=LocalRuntime(str(HERE / "env.py")),
+            runtime=runtime,
             group=group_size,
             max_concurrent=max_concurrent,
         )
@@ -323,6 +405,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--min-a/--min-b must not exceed --max-a/--max-b")
     if args.debug_samples < 0:
         raise SystemExit("--debug-samples must be at least 0")
+    if args.tasks_file and not args.env_path:
+        raise SystemExit("--tasks-file requires --env-path")
+    if args.env_path and not args.tasks_file:
+        raise SystemExit("--env-path requires --tasks-file")
 
 
 async def train(args: argparse.Namespace) -> None:
@@ -332,6 +418,11 @@ async def train(args: argparse.Namespace) -> None:
         raise SystemExit("Set FIREWORKS_API_KEY before running this cookbook.")
 
     validate_args(args)
+    try:
+        taskset, eval_taskset, runtime = resolve_rollout_source(args)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / "metrics.jsonl"
@@ -363,13 +454,6 @@ async def train(args: argparse.Namespace) -> None:
     )
 
     try:
-        taskset = make_taskset(
-            count=args.tasks_per_step,
-            seed=args.seed,
-            a=(args.min_a, args.max_a),
-            b=(args.min_b, args.max_b),
-        )
-
         if args.calibrate:
             runs, _ = await run_rollouts(
                 service=service,
@@ -378,6 +462,7 @@ async def train(args: argparse.Namespace) -> None:
                 renderer=renderer,
                 snapshot_name="calibrate",
                 taskset=taskset,
+                runtime=runtime,
                 group_size=args.group_size,
                 max_concurrent=args.max_concurrent,
                 max_tokens=args.max_tokens,
@@ -397,6 +482,7 @@ async def train(args: argparse.Namespace) -> None:
                 renderer=renderer,
                 snapshot_name=f"policy-{step:04d}",
                 taskset=taskset,
+                runtime=runtime,
                 group_size=args.group_size,
                 max_concurrent=args.max_concurrent,
                 max_tokens=args.max_tokens,
@@ -406,6 +492,7 @@ async def train(args: argparse.Namespace) -> None:
             )
             datums, kept_groups = make_training_batch(runs)
             loss = None
+            updated = False
             if datums:
                 backward = training_client.forward_backward(datums, args.loss_fn).result()
                 loss = mean_loss(backward)
@@ -418,6 +505,12 @@ async def train(args: argparse.Namespace) -> None:
                         weight_decay=0.0,
                     )
                 ).result()
+                updated = True
+            elif args.require_update:
+                raise RuntimeError(
+                    "no rollout group had reward variation, so no optimizer update was applied; "
+                    "run --calibrate, adjust task difficulty, and retry"
+                )
 
             if step % args.checkpoint_every == 0:
                 training_client.save_state(f"state-{step:04d}").result()
@@ -434,6 +527,7 @@ async def train(args: argparse.Namespace) -> None:
                 "valid_rollouts": len(completed),
                 "kept_groups": kept_groups,
                 "training_datums": len(datums),
+                "updated": updated,
                 "loss": loss,
                 "snapshot": snapshot,
                 "seconds": time.perf_counter() - started,
@@ -442,7 +536,8 @@ async def train(args: argparse.Namespace) -> None:
             print(
                 f"step {step:02d}/{args.steps} reward={mean_reward:.3f} "
                 f"kept_groups={kept_groups}/{args.tasks_per_step} "
-                f"datums={len(datums)} loss={loss if loss is not None else 'n/a'} "
+                f"datums={len(datums)} updated={updated} "
+                f"loss={loss if loss is not None else 'n/a'} "
                 f"elapsed={metric['seconds']:.1f}s",
                 flush=True,
             )
@@ -454,12 +549,8 @@ async def train(args: argparse.Namespace) -> None:
             tokenizer=tokenizer,
             renderer=renderer,
             snapshot_name="final",
-            taskset=make_taskset(
-                count=args.eval_tasks,
-                seed=args.seed + 1,
-                a=(args.min_a, args.max_a),
-                b=(args.min_b, args.max_b),
-            ),
+            taskset=eval_taskset,
+            runtime=runtime,
             group_size=1,
             max_concurrent=args.max_concurrent,
             max_tokens=args.max_tokens,
@@ -536,6 +627,19 @@ def parse_args() -> argparse.Namespace:
         default="runs/fireworks-serverless",
         help="where metrics.jsonl is written",
     )
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--taskset",
+        help="hosted HUD taskset name or id; uses HUDRuntime and requires HUD_API_KEY",
+    )
+    source.add_argument(
+        "--tasks-file",
+        help="local HUD task source (.py, directory, .json, or .jsonl); requires --env-path",
+    )
+    parser.add_argument(
+        "--env-path",
+        help="local HUD environment source used with --tasks-file",
+    )
     parser.add_argument("--steps", type=int, default=30, help="optimizer steps")
     parser.add_argument(
         "--tasks-per-step", type=int, default=8, help="task groups sampled per step"
@@ -558,6 +662,11 @@ def parse_args() -> argparse.Namespace:
         "--calibrate",
         action="store_true",
         help="roll out one batch from the untrained adapter, report reward spread, and exit",
+    )
+    parser.add_argument(
+        "--require-update",
+        action="store_true",
+        help="fail if a training step has no reward variation and cannot apply an optimizer update",
     )
     parser.add_argument(
         "--debug-samples",

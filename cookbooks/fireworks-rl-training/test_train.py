@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from argparse import Namespace
+
 import pytest
 from hud.agents.types import AgentStep, Sample
+from hud.eval import HUDRuntime, LocalRuntime, Taskset
 from hud.eval.run import Run
 
 from train import (
     group_relative_advantages,
+    make_taskset,
     make_training_batch,
+    resolve_rollout_source,
     serverless_url,
+    split_taskset,
     within_group_reward_std,
 )
 
@@ -70,3 +76,64 @@ def test_training_batch_keeps_only_groups_with_reward_spread() -> None:
         assert len(datum.loss_fn_inputs["target_tokens"].data) == 3
         assert len(datum.loss_fn_inputs["logprobs"].data) == 3
         assert len(datum.loss_fn_inputs["advantages"].data) == 3
+
+
+def test_split_taskset_creates_disjoint_deterministic_subsets() -> None:
+    source = make_taskset(count=8, seed=0, a=(10, 99), b=(10, 99))
+
+    train, evaluation = split_taskset(source, train_count=5, eval_count=3, seed=7)
+    train_again, evaluation_again = split_taskset(source, train_count=5, eval_count=3, seed=7)
+
+    train_slugs = [task.slug for task in train]
+    evaluation_slugs = [task.slug for task in evaluation]
+    assert train_slugs == [task.slug for task in train_again]
+    assert evaluation_slugs == [task.slug for task in evaluation_again]
+    assert set(train_slugs).isdisjoint(evaluation_slugs)
+
+
+def test_make_taskset_rejects_more_tasks_than_unique_operand_pairs() -> None:
+    with pytest.raises(ValueError, match="only 4 unique pairs"):
+        make_taskset(count=5, seed=0, a=(1, 2), b=(1, 2))
+
+
+def test_resolve_rollout_source_supports_hosted_and_local_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = make_taskset(count=4, seed=0, a=(10, 99), b=(10, 99))
+    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda cls, name: source))
+    monkeypatch.setattr(Taskset, "from_file", classmethod(lambda cls, path: source))
+    common = {
+        "tasks_per_step": 2,
+        "eval_tasks": 2,
+        "seed": 0,
+    }
+
+    _, _, hosted_runtime = resolve_rollout_source(
+        Namespace(taskset="demo", tasks_file=None, env_path=None, **common)
+    )
+    _, _, local_runtime = resolve_rollout_source(
+        Namespace(taskset=None, tasks_file="tasks.py", env_path="env.py", **common)
+    )
+
+    assert isinstance(hosted_runtime, HUDRuntime)
+    assert isinstance(local_runtime, LocalRuntime)
+
+
+def test_default_rollout_source_has_disjoint_evaluation_tasks() -> None:
+    train, evaluation, runtime = resolve_rollout_source(
+        Namespace(
+            taskset=None,
+            tasks_file=None,
+            env_path=None,
+            tasks_per_step=5,
+            eval_tasks=3,
+            seed=0,
+            min_a=10,
+            max_a=99,
+            min_b=10,
+            max_b=99,
+        )
+    )
+
+    assert {task.slug for task in train}.isdisjoint(task.slug for task in evaluation)
+    assert isinstance(runtime, LocalRuntime)
