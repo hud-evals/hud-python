@@ -34,15 +34,39 @@ change the definition of success.
 ## Architecture
 
 ```mermaid
-flowchart LR
-    taskset["HUD taskset"] --> environment["HUD runtime<br/>task + tools + grader"]
-    environment -- prompt --> agent["Cookbook FireworksAgent adapter"]
-    sampler["Fireworks sampler<br/>LoRA snapshot"] <--> agent
-    agent -- response --> environment
-    environment --> runs["Grouped HUD Runs<br/>tokens + logprobs + rewards"]
-    runs --> datums["Cookbook advantage<br/>and datum builder"]
-    datums --> training["Fireworks Serverless Training"]
-    training --> sampler
+%%{init: {'flowchart': {'padding': 24, 'nodeSpacing': 48, 'rankSpacing': 56}, 'themeVariables': {'fontSize': '17px'}}}%%
+flowchart TD
+    subgraph hud["HUD"]
+        direction TB
+        taskset["Taskset"]
+        env["Environment<br/>task · tools · grader"]
+        taskset --> env
+    end
+    subgraph cookbook["Cookbook"]
+        direction TB
+        agent["FireworksAgent"]
+        batch["Advantages → datums"]
+    end
+    subgraph fireworks["Fireworks"]
+        direction TB
+        sampler["Sampler<br/>LoRA snapshot"]
+        trainer["Serverless Training"]
+    end
+    env <-->|prompt · response| agent
+    agent <-->|sample request · response| sampler
+    env -->|graded Runs| batch
+    batch -->|training datums| trainer
+    trainer -->|save updated snapshot| sampler
+
+    classDef hudNode fill:#eaf4ff,stroke:#2563eb,stroke-width:2px,color:#172033;
+    classDef cookbookNode fill:#f3efff,stroke:#7c3aed,stroke-width:2px,color:#24143d;
+    classDef fireworksNode fill:#fff0e5,stroke:#f97316,stroke-width:2px,color:#3d1f0c;
+    class taskset,env hudNode;
+    class agent,batch cookbookNode;
+    class sampler,trainer fireworksNode;
+    style hud fill:#f8fbff,stroke:#60a5fa,stroke-width:2px,color:#172033;
+    style cookbook fill:#fbf9ff,stroke:#a78bfa,stroke-width:2px,color:#24143d;
+    style fireworks fill:#fffaf5,stroke:#fb923c,stroke-width:2px,color:#3d1f0c;
 ```
 
 The guide uses a few HUD terms:
