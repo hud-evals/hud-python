@@ -106,8 +106,13 @@ class DockerRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
-        if config.limits is not None and config.limits.model_dump(exclude_none=True):
-            raise ValueError("DockerRuntime does not support runtime_config limits")
+        if config.limits is not None and config.limits.run_timeout_s is not None:
+            raise ValueError("DockerRuntime does not support runtime_config.limits.run_timeout_s")
+        params = (
+            {"ready_timeout": config.limits.startup_timeout_s}
+            if config.limits is not None and config.limits.startup_timeout_s is not None
+            else {}
+        )
         resources = config.resources
         if resources is not None:
             resources._require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
@@ -201,6 +206,7 @@ class DockerRuntime:
                     await handoff.prepare()
                     yield Runtime(
                         f"tcp://127.0.0.1:{host_port}",
+                        params=params,
                         config=config if config.model_dump(exclude_none=True) else None,
                         handoff=handoff,
                     )
@@ -260,7 +266,12 @@ class DockerRuntime:
             host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
             handoff = _DockerHandoff(container)
             await handoff.prepare()
-            yield Runtime(f"tcp://127.0.0.1:{host_port}", config=config, handoff=handoff)
+            yield Runtime(
+                f"tcp://127.0.0.1:{host_port}",
+                params=params,
+                config=config,
+                handoff=handoff,
+            )
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.

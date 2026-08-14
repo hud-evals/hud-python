@@ -1527,6 +1527,31 @@ async def test_docker_admits_minimum_free_disk(
     assert "exec cid-42 df -Pk /" in calls
 
 
+async def test_docker_honors_startup_timeout(
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_docker(
+        tmp_path,
+        port_behavior="echo 127.0.0.1:43210",
+        monkeypatch=monkeypatch,
+    )
+    config = RuntimeConfig(image="img:tag", limits=RuntimeLimits(startup_timeout_s=300))
+
+    async with DockerRuntime(runtime_config=config)(_row()) as runtime:
+        assert runtime.params == {"ready_timeout": 300}
+
+
+async def test_docker_rejects_run_timeout(
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
+    config = RuntimeConfig(image="img:tag", limits=RuntimeLimits(run_timeout_s=300))
+
+    with pytest.raises(ValueError, match=r"runtime_config\.limits\.run_timeout_s"):
+        async with DockerRuntime(runtime_config=config)(_row()):
+            pass
+
+
 async def test_daytona_names_a_sandbox_it_could_not_delete(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
