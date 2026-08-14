@@ -22,15 +22,23 @@ construction between them.
 ## Architecture
 
 ```mermaid
-flowchart LR
-    taskset["HUD taskset"] --> env["HUD runtime<br/>task + tools + grader"]
-    env -- prompt --> agent["Cookbook FireworksAgent adapter"]
-    sampler["Fireworks sampler<br/>current LoRA snapshot"] <--> agent
-    agent -- response --> env
-    env --> run["Grouped HUD Runs<br/>tokens + logprobs + rewards"]
-    run --> batch["Cookbook advantage<br/>and datum builder"]
-    batch --> trainer["Fireworks Serverless Training<br/>forward + backward + optimizer"]
-    trainer --> sampler
+flowchart TD
+    subgraph hud [HUD]
+        env["Environment<br/>task + tools + grader"]
+    end
+    subgraph cookbook [Cookbook]
+        agent["FireworksAgent"]
+        batch["advantages → datums"]
+    end
+    subgraph fireworks [Fireworks]
+        sampler["Sampler<br/>LoRA snapshot"]
+        trainer["Serverless Training"]
+    end
+    env <-- "prompt / response" --> agent
+    agent <-- sample --> sampler
+    env -- "graded runs" --> batch
+    batch -- "training datums" --> trainer
+    trainer -- "updated snapshot" --> sampler
 ```
 
 The boundary between the two systems is explicit:
