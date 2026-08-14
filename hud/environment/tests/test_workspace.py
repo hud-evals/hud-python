@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import itertools
 import json
 import os
 import shutil
 import socket
+import struct
+import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 from unittest.mock import AsyncMock, Mock
 
@@ -28,6 +32,9 @@ from hud.environment import workspace as workspace_mod
 from hud.environment.egress import Peer, _field, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessResult
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
 
@@ -498,6 +505,105 @@ async def test_visiting_uses_the_reserved_workspace_bridge(
 
 
 @pytest.mark.asyncio
+async def test_overlapping_runs_keep_their_visitor_policies_and_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.environment import egress as egress_mod
+
+    credentials = Path(tempfile.mkdtemp(prefix="hud-visitors-", dir="/tmp"))
+    ws = Workspace(tmp_path / "root", credentials_dir=credentials)
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap"))
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+
+    def unavailable(*_args: object, **_kwargs: object) -> socket.socket:
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(egress_mod, "_connect_public", unavailable)
+    started = {host: asyncio.Event() for host in ("first.example", "second.example")}
+    release = {host: asyncio.Event() for host in started}
+    environments: dict[str, Mapping[str, str]] = {}
+
+    class VisitorProcess:
+        def __init__(self, host: str, environment: Mapping[str, str]) -> None:
+            self.host = host
+            self.environment = environment
+
+        async def complete(self, *, max_wait: float | None = None) -> ProcessResult:
+            environments[self.host] = self.environment
+            started[self.host].set()
+            await release[self.host].wait()
+            return ProcessResult(0, b"", b"")
+
+    async def launch(
+        command: list[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        **_kwargs: object,
+    ) -> VisitorProcess:
+        assert env is not None
+        return VisitorProcess(command[0], env)
+
+    def proxy_response(
+        environment: Mapping[str, str],
+        host: str,
+        *,
+        credentials_from: Mapping[str, str] | None = None,
+    ) -> bytes:
+        proxy = urllib.parse.urlsplit((credentials_from or environment)["http_proxy"])
+        assert proxy.username == "hud" and proxy.password is not None
+        token = urllib.parse.unquote(proxy.password)
+        authorization = base64.b64encode(f"hud:{token}".encode()).decode()
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(credentials / "visitor" / "egress.sock"))
+        try:
+            client.sendall(
+                (
+                    f"GET http://{host}/ HTTP/1.1\r\n"
+                    f"Host: {host}\r\n"
+                    f"Proxy-Authorization: Basic {authorization}\r\n\r\n"
+                ).encode()
+            )
+            return client.recv(4096)
+        finally:
+            client.close()
+
+    monkeypatch.setattr(ws, "launch", launch)
+    tasks = [
+        asyncio.create_task(
+            ws.run(["first.example"], allowed_hosts={"first.example"}, identity=None)
+        )
+    ]
+    try:
+        await asyncio.wait_for(started["first.example"].wait(), 1)
+        tasks.append(
+            asyncio.create_task(
+                ws.run(["second.example"], allowed_hosts={"second.example"}, identity=None)
+            )
+        )
+        await asyncio.sleep(0)
+        assert not started["second.example"].is_set()
+
+        first = environments["first.example"]
+        assert b"502" in proxy_response(first, "first.example")
+        assert b"403" in proxy_response(first, "second.example")
+        release["first.example"].set()
+        assert (await tasks[0]).returncode == 0
+
+        await asyncio.wait_for(started["second.example"].wait(), 1)
+        second = environments["second.example"]
+        assert first["http_proxy"] != second["http_proxy"]
+        assert b"502" in proxy_response(second, "second.example")
+        assert b"403" in proxy_response(second, "first.example")
+        assert b"407" in proxy_response(second, "second.example", credentials_from=first)
+    finally:
+        for event in release.values():
+            event.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        shutil.rmtree(credentials, ignore_errors=True)
+
+
+@pytest.mark.asyncio
 async def test_staged_verifier_is_launched_by_the_namespace_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -859,6 +965,254 @@ def test_bridge_socket_paths_are_configuration_not_process_arguments() -> None:
     routes = json.loads(config)
     assert ["127.0.0.1", 3129, str(visitor)] in routes
     assert ["127.0.0.2", 5432, "/media/hud/session-keys/peer-0.sock"] in routes
+
+
+def test_bridge_ignores_workspace_imports_and_closes_reset_connections(tmp_path: Path) -> None:
+    from hud.environment.egress import Egress
+
+    workspace = tmp_path / "workspace"
+    package = workspace / "hud" / "environment"
+    package.mkdir(parents=True)
+    (workspace / "hud" / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("")
+    marker = workspace / "imported"
+    (package / "utils.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('imported')\n"
+    )
+
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {"example.com"})
+    upstream_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    upstream_listener.bind(str(egress.socket_path))
+    upstream_listener.listen()
+    upstream_listener.settimeout(5)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as port_holder:
+        port_holder.bind(("127.0.0.1", 0))
+        port = port_holder.getsockname()[1]
+    argv, config = egress.bridge_command(port=port)
+    process = subprocess.Popen(
+        argv,
+        cwd=workspace,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    client: socket.socket | None = None
+    upstream: socket.socket | None = None
+    try:
+        assert process.stdin is not None and process.stdout is not None
+        process.stdin.write(config)
+        process.stdin.flush()
+        assert process.stdout.readline() == b"ready\n"
+        assert not marker.exists()
+
+        client = socket.create_connection(("127.0.0.1", port), timeout=5)
+        upstream, _ = upstream_listener.accept()
+        upstream.settimeout(1)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        client.close()
+        client = None
+
+        assert upstream.recv(1) == b""
+    finally:
+        if client is not None:
+            client.close()
+        if upstream is not None:
+            upstream.close()
+        upstream_listener.close()
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+        shutil.rmtree(sockets, ignore_errors=True)
+
+
+def test_bridge_drains_reverse_direction_after_half_close(tmp_path: Path) -> None:
+    from hud.environment.egress import Egress
+
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {"example.com"})
+    upstream_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    upstream_listener.bind(str(egress.socket_path))
+    upstream_listener.listen()
+    upstream_listener.settimeout(5)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as port_holder:
+        port_holder.bind(("127.0.0.1", 0))
+        port = port_holder.getsockname()[1]
+    argv, config = egress.bridge_command(port=port)
+    process = subprocess.Popen(
+        argv,
+        cwd=tmp_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    client: socket.socket | None = None
+    upstream: socket.socket | None = None
+    try:
+        assert process.stdin is not None and process.stdout is not None
+        process.stdin.write(config)
+        process.stdin.flush()
+        assert process.stdout.readline() == b"ready\n"
+
+        client = socket.create_connection(("127.0.0.1", port), timeout=5)
+        client.settimeout(5)
+        upstream, _ = upstream_listener.accept()
+        upstream.settimeout(5)
+
+        request = b"complete request"
+        client.sendall(request)
+        client.shutdown(socket.SHUT_WR)
+        assert upstream.recv(65536) == request
+        assert upstream.recv(1) == b""
+
+        response = b"complete response" * 4096
+        upstream.sendall(response)
+        upstream.shutdown(socket.SHUT_WR)
+        received = bytearray()
+        while chunk := client.recv(65536):
+            received.extend(chunk)
+        assert received == response
+    finally:
+        if client is not None:
+            client.close()
+        if upstream is not None:
+            upstream.close()
+        upstream_listener.close()
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+        shutil.rmtree(sockets, ignore_errors=True)
+
+
+def _half_close_backend(
+    response: bytes,
+) -> tuple[socket.socket, threading.Thread, int, list[bytes]]:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(5)
+    port = listener.getsockname()[1]
+    requests: list[bytes] = []
+
+    def serve() -> None:
+        with listener:
+            connection, _ = listener.accept()
+            with connection:
+                chunks: list[bytes] = []
+                while chunk := connection.recv(65536):
+                    chunks.append(chunk)
+                requests.append(b"".join(chunks))
+                connection.sendall(response)
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    return listener, thread, port, requests
+
+
+def test_relay_drains_reverse_direction_when_write_shutdown_fails() -> None:
+    from hud.environment.egress import _relay
+
+    class ShutdownErrorSocket(socket.socket):
+        def shutdown(self, how: int) -> None:
+            raise OSError("injected shutdown failure")
+
+    one, one_peer = socket.socketpair()
+    other_socket, other_peer = socket.socketpair()
+    other = ShutdownErrorSocket(fileno=other_socket.detach())
+    one_peer.settimeout(5)
+    relay_thread = threading.Thread(target=_relay, args=(one, other, 1.0))
+    relay_thread.start()
+    try:
+        one_peer.shutdown(socket.SHUT_WR)
+        response = b"complete response" * 64
+        other_peer.sendall(response)
+        other_peer.shutdown(socket.SHUT_WR)
+
+        received = bytearray()
+        while len(received) < len(response):
+            received.extend(one_peer.recv(65536))
+        assert received == response
+    finally:
+        one.close()
+        one_peer.close()
+        other.close()
+        other_peer.close()
+        relay_thread.join(5)
+    assert not relay_thread.is_alive()
+
+
+def test_connect_tunnel_drains_response_after_client_half_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.environment import egress as egress_mod
+    from hud.environment.egress import Egress
+
+    response = b"complete response" * 32768
+    listener, thread, port, requests = _half_close_backend(response)
+
+    def connect(_host: str, _port: int, timeout: float) -> socket.socket:
+        return socket.create_connection(("127.0.0.1", port), timeout)
+
+    monkeypatch.setattr(egress_mod, "_connect_public", connect)
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, {"example.com"})
+    egress.start()
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(egress.socket_path))
+        client.sendall(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+        established = b""
+        while b"\r\n\r\n" not in established:
+            established += client.recv(4096)
+        assert b"200 Connection established" in established
+
+        request = b"request body"
+        client.sendall(request)
+        client.shutdown(socket.SHUT_WR)
+        received = b""
+        while chunk := client.recv(65536):
+            received += chunk
+        client.close()
+    finally:
+        egress.stop()
+        listener.close()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+    thread.join(5)
+    assert not thread.is_alive()
+    assert requests == [request]
+    assert received == response
+
+
+def test_peer_forward_drains_response_after_client_half_close() -> None:
+    from hud.environment.egress import Egress
+
+    response = b"complete response" * 32768
+    listener, thread, port, requests = _half_close_backend(response)
+    sockets = Path(tempfile.mkdtemp(dir="/tmp"))
+    egress = Egress(sockets, set(), [Peer("service", port)])
+    egress.start()
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(sockets / "peer-0.sock"))
+        request = b"request body"
+        client.sendall(request)
+        client.shutdown(socket.SHUT_WR)
+        received = b""
+        while chunk := client.recv(65536):
+            received += chunk
+        client.close()
+    finally:
+        egress.stop()
+        listener.close()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+    thread.join(5)
+    assert not thread.is_alive()
+    assert requests == [request]
+    assert received == response
 
 
 def test_the_proxy_normalizes_http_framing_in_both_directions(

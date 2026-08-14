@@ -576,6 +576,9 @@ class Workspace:
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
+        # The bridge has one fixed visitor route, so its socket and policy have
+        # one owner for the full lifetime of each visiting command.
+        self._visitor_lock = asyncio.Lock()
 
     @contextlib.asynccontextmanager
     async def visiting(self, allowed: Collection[str] | None) -> AsyncIterator[dict[str, str]]:
@@ -602,21 +605,22 @@ class Workspace:
         if not allowed:
             yield {}
             return
-        token = secrets.token_urlsafe(32)
-        egress = Egress(self._credentials_dir() / "visitor", allowed, token=token)
-        egress.start()
-        try:
-            # The peers are the workspace's, bound by its own bridge: a visitor
-            # reaches them at those addresses, so they stay out of its proxy.
-            yield proxy_environment(
-                VISITOR_PORT,
-                self.peers,
-                local_aliases=self.local_aliases,
-                reserved_ports=self.ports,
-                token=token,
-            )
-        finally:
-            egress.stop()
+        async with self._visitor_lock:
+            token = secrets.token_urlsafe(32)
+            egress = Egress(self._credentials_dir() / "visitor", allowed, token=token)
+            egress.start()
+            try:
+                # The peers are the workspace's, bound by its own bridge: a visitor
+                # reaches them at those addresses, so they stay out of its proxy.
+                yield proxy_environment(
+                    VISITOR_PORT,
+                    self.peers,
+                    local_aliases=self.local_aliases,
+                    reserved_ports=self.ports,
+                    token=token,
+                )
+            finally:
+                egress.stop()
 
     @property
     def owns_netns(self) -> bool:
