@@ -9,6 +9,8 @@ jobs:
     if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -23,3 +25,8 @@ jobs:
         run: |
           uv build
           uv publish
+
+      # docs.hud.ai builds the SDK tab from the docs branch.
+      - name: Point docs at this release
+        run: |
+          git push --force origin "${GITHUB_SHA}:refs/heads/docs"
