@@ -309,7 +309,7 @@ class EvalConfig(BaseModel):
                         "against a deployed environment on the platform — "
                         "`hud eval <env-name> integration_test --task-ids "
                         "<slug> -y` — it is not available with --runtime local."
-                    )
+                    ) from None
                 valid = [e.value for e in AgentType]
                 raise ValueError(
                     f"Invalid agent: {v}. Must be one of: {', '.join(valid)}"
