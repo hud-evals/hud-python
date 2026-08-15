@@ -189,6 +189,13 @@ class TaskConfig(BaseModel):
     steps: list[dict[str, Any]] | None = None
 
 
+# The Harbor task schema this build adapts. export() stamps the same value
+# into generated task.toml files so round-tripped tasks validate; a task that
+# declares any other schema_version was authored against a different adapter
+# and must fail loudly rather than adapt with silently wrong semantics.
+HARBOR_SCHEMA_VERSION = "1.0"
+
+
 @dataclass(frozen=True, slots=True)
 class HarborTask:
     path: Path
@@ -238,6 +245,12 @@ def adapt(
             raise ValueError(
                 f"{task_dir.name}/task.toml is not a valid Harbor task: {error}"
             ) from error
+        if config.schema_version is not None and config.schema_version != HARBOR_SCHEMA_VERSION:
+            raise ValueError(
+                f"{task_dir.name}/task.toml declares unsupported Harbor schema "
+                f"{config.schema_version!r} — this HUD build adapts schema "
+                f"{HARBOR_SCHEMA_VERSION!r}"
+            )
         unsupported = []
         if config.environment.os != "linux":
             unsupported.append(f"os={config.environment.os!r}")
