@@ -21,7 +21,7 @@ from .compose import ComposeConfig, ComposeProject
 from .core import Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator, Mapping, Sequence
 
     from hud.eval.task import Task
 
@@ -91,9 +91,11 @@ class DockerRuntime:
         run_args: Sequence[str] = (),
         compose_service_socket: str | Path | None = None,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
+        env_vars: Mapping[str, str] | None = None,
     ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
+        self.env_vars = dict(env_vars or {})
         self.compose_service_socket = (
             str(Path(compose_service_socket)) if compose_service_socket is not None else None
         )
@@ -159,6 +161,7 @@ class DockerRuntime:
                 port_service=port_service,
                 seccomp=_DOCKER_SECCOMP_PROFILE,
                 service_socket=service_socket,
+                env_vars=self.env_vars,
                 cpu=resources.cpu if resources is not None else None,
                 memory_mb=resources.memory_mb if resources is not None else None,
                 gpu_count=(
@@ -241,10 +244,14 @@ class DockerRuntime:
                     raise ValueError("DockerRuntime cannot select GPUs by type")
                 resource_args.extend(("--gpus", str(resources.gpu.count)))
 
+        env_args: list[str] = []
+        for key, value in self.env_vars.items():
+            env_args.extend(("--env", f"{key}={value}"))
         out, _ = await _docker(
             "run",
             "--detach",
             *self.run_args,
+            *env_args,
             *resource_args,
             *_DOCKER_SECURITY_ARGS,
             "--publish",

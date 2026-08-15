@@ -20,6 +20,8 @@ from hud.agents.base import Agent
 from hud.eval import DockerRuntime, Shared, Taskset
 from hud.integrations import harbor
 
+from .conftest import make_harbor_task
+
 if TYPE_CHECKING:
     from hud.capabilities import MCPClient, SSHClient
     from hud.eval.run import Run
@@ -557,3 +559,121 @@ Path("/logs/verifier/reward.txt").write_text("1")
     run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
 
     assert run.reward == 1.0
+
+
+def test_env_templates_resolve_from_runtime_env_vars(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    """``${VAR}``/``${VAR:-default}`` env values resolve exactly like Harbor's
+    host-side resolution, sourced from the runtime's ``env_vars``."""
+    dataset = tmp_path_factory.mktemp("harbor-env-templates") / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "env-templates",
+        task_toml="""\
+[metadata]
+category = "systems"
+
+[environment.env]
+GREETING = "${HARBOR_GREETING:-hello}"
+JUDGE_KEY = "${HARBOR_JUDGE_KEY}"
+EMBEDDED = "Bearer ${HARBOR_JUDGE_KEY}"
+
+[verifier]
+timeout_sec = 120
+
+[verifier.env]
+VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"
+EMPTY_DEFAULT = "${HARBOR_UNSET:-}"
+""",
+    )
+    (task / "tests" / "test.sh").write_text(
+        """\
+#!/bin/bash
+fail() { echo "unexpected $1"; echo "0.0" > /logs/verifier/reward.txt; exit 0; }
+[ "$GREETING" = "hello" ] || fail "GREETING=$GREETING"
+[ "$JUDGE_KEY" = "judge-secret" ] || fail "JUDGE_KEY=$JUDGE_KEY"
+[ "$EMBEDDED" = 'Bearer ${HARBOR_JUDGE_KEY}' ] || fail "EMBEDDED=$EMBEDDED"
+[ "$VERIFIER_KEY" = "judge-secret" ] || fail "VERIFIER_KEY=$VERIFIER_KEY"
+[ "${EMPTY_DEFAULT-unset}" = "" ] || fail "EMPTY_DEFAULT=${EMPTY_DEFAULT-unset}"
+echo "1.0" > /logs/verifier/reward.txt
+""",
+        encoding="utf-8",
+    )
+    solution = '[ "$JUDGE_KEY" = "judge-secret" ] && [ "$GREETING" = "hello" ]'
+
+    async def grade() -> Run:
+        taskset = harbor.adapt(dataset, hud_requirement=str(wheel)).taskset
+        job = await taskset.run(
+            Oracle({"env-templates": solution}),
+            runtime=DockerRuntime(env_vars={"HARBOR_JUDGE_KEY": "judge-secret"}),
+            max_concurrent=1,
+        )
+        (run,) = job.runs
+        return run
+
+    run = asyncio.run(grade())
+
+    evaluation = run.evaluation
+    info = evaluation.get("info") or {}
+    detail = "\n".join(
+        filter(
+            None,
+            (
+                run.trace.content,
+                run.trace.error,
+                evaluation.get("content") or "",
+                info.get("stdout"),
+                info.get("stderr"),
+            ),
+        )
+    )
+    assert run.reward == 1.0, f"env-templates scored {run.reward}; the verifier reported:\n{detail}"
+
+
+def test_missing_env_template_aborts_startup(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    """A required ``${VAR}`` with no default and no runtime value must abort
+    environment startup with an error naming the variable, like Harbor."""
+    dataset = tmp_path_factory.mktemp("harbor-env-missing") / "harbor-harness"
+    make_harbor_task(
+        dataset,
+        "env-missing",
+        task_toml="""\
+[metadata]
+category = "systems"
+
+[environment.env]
+API_KEY = "${HARBOR_MISSING_KEY}"
+
+[verifier]
+timeout_sec = 120
+""",
+    )
+
+    taskset = harbor.adapt(dataset, hud_requirement=str(wheel)).taskset
+    task = next(iter(taskset))
+    assert task.runtime_config is not None
+    source = task.runtime_config.compose_source()
+    assert source is not None
+    compose = source.runnable_path("test")
+    # Providers yield as soon as the published port exists, before the serve
+    # process proves itself, so an early abort is only observable from the
+    # adapted artifact: run its main service in the foreground.
+    subprocess.run(
+        ["sh", "build.sh"], cwd=compose.parent, check=True, capture_output=True, timeout=600
+    )
+    command = ["docker", "compose", "--file", str(compose), "run", "--rm", "main"]
+    try:
+        serve = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("main service kept serving despite an unresolvable env template")
+    finally:
+        subprocess.run(
+            ["docker", "compose", "--file", str(compose), "down", "--volumes", "--remove-orphans"],
+            capture_output=True,
+            check=False,
+        )
+    assert serve.returncode != 0
+    assert "HARBOR_MISSING_KEY" in serve.stdout + serve.stderr

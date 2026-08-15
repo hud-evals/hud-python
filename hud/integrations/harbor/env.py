@@ -10,6 +10,7 @@ import json
 import math
 import os
 import pwd
+import re
 import shlex
 import shutil
 import socket
@@ -107,6 +108,31 @@ if verifier_image["workdir"] is None:
     verifier_image["workdir"] = VERIFIER_IMAGE_CONFIG.get("WorkingDir") or "/"
 verifier_image["env"] = image_environment(VERIFIER_IMAGE_CONFIG)
 
+ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
+
+
+def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for key, value in env.items():
+        match = ENV_TEMPLATE.fullmatch(value)
+        if match is None:
+            resolved[key] = value
+            continue
+        name, default = match.group(1), match.group(2)
+        if name in os.environ:
+            resolved[key] = os.environ[name]
+        elif default is not None:
+            resolved[key] = default
+        else:
+            raise ValueError(
+                f"Harbor env template for {key!r} needs {name!r}; "
+                "the runtime environment must provide it"
+            )
+    return resolved
+
+
+for policy in (CONFIG["environment"], CONFIG["agent"], CONFIG["verifier"]):
+    policy["env"] = resolve_env_templates(policy["env"])
 os.environ.update(CONFIG["environment"]["env"])
 WORKDIR = Path(CONFIG["workdir"])
 os.chdir(WORKDIR)

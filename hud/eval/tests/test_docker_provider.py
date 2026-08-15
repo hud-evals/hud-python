@@ -753,6 +753,49 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     assert calls[-1][-3:] == ("down", "--volumes", "--remove-orphans")
 
 
+async def test_docker_runtime_passes_env_vars_to_docker_run(
+    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
+
+    provider = DockerRuntime("img:tag", env_vars={"OPENAI_API_KEY": "sk-test"})
+    async with provider(_row()) as runtime:
+        assert runtime.url == "tcp://127.0.0.1:43210"
+
+    calls = await _docker_calls(docker_log)
+    assert calls[0] == (
+        f"run --detach --env OPENAI_API_KEY=sk-test {_docker_security_args()} "
+        "--publish 127.0.0.1::8765 img:tag"
+    )
+
+
+async def test_docker_runtime_stages_env_vars_into_the_compose_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered: dict[str, Any] = {}
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+
+    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        if "up" in args:
+            files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
+            _, override, _ = files
+            rendered.update(json.loads(override.read_text("utf-8")))
+        if args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    task = Task(env="any-env", id="t", runtime_config=RuntimeConfig(compose=compose))
+    provider = DockerRuntime(env_vars={"OPENAI_API_KEY": "sk-test"})
+
+    async with provider(task):
+        pass
+
+    assert rendered["services"]["main"]["environment"] == {"OPENAI_API_KEY": "sk-test"}
+
+
 async def test_docker_runtime_serializes_shared_compose_preparation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
