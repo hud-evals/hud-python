@@ -25,6 +25,13 @@ def test_is_bedrock_arn() -> None:
     assert _is_bedrock_arn(None) is False
 
 
+def test_parse_agent_type_accepts_integration_test() -> None:
+    from hud.types import AgentType
+
+    cfg = EvalConfig(agent_type="integration_test")
+    assert cfg.agent_type is AgentType.INTEGRATION_TEST
+
+
 def test_parse_agent_type_accepts_known_value() -> None:
     cfg = EvalConfig(agent_type="openai")
     assert cfg.agent_type is not None
@@ -352,3 +359,29 @@ def test_spawn_target_json_uses_parent_directory(tmp_path: Path) -> None:
 
 def test_spawn_target_directory_is_served_as_is(tmp_path: Path) -> None:
     assert eval_mod._spawn_target(tmp_path) == tmp_path.resolve()
+
+
+def test_integration_test_reward_gate_enforces_one_point_zero(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import typer
+
+    from hud.cli.eval import _enforce_integration_test_reward
+
+    def run(reward: float, is_error: bool = False) -> SimpleNamespace:
+        r = SimpleNamespace()
+        r.slug = "my-task"
+        r.reward = reward
+        r.grade = SimpleNamespace(is_error=is_error, info={}, raw={"score": reward})
+        return r
+
+    # Reward 1.0 passes.
+    _enforce_integration_test_reward([run(1.0)])
+
+    # Reward < 1.0 exits non-zero.
+    with pytest.raises(typer.Exit):
+        _enforce_integration_test_reward([run(0.5)])
+
+    # Grading errors exit non-zero too.
+    with pytest.raises(typer.Exit):
+        _enforce_integration_test_reward([run(0.0, is_error=True)])
