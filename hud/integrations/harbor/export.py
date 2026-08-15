@@ -7,6 +7,8 @@ import json
 import shlex
 import shutil
 from pathlib import Path
+
+from hud.integrations.harbor.adapt import HARBOR_SCHEMA_VERSION
 from typing import Any
 
 from hud.environment import Environment, load_environment
@@ -162,6 +164,7 @@ async def export(
             args_json = json.dumps(task.args)
             (task_dir / "task.toml").write_text(
                 'version = "1.0"\n'
+                f'schema_version = "{HARBOR_SCHEMA_VERSION}"\n'
                 f"name = {json.dumps(slug)}\n"
                 "\n[metadata]\n"
                 f"hud_task = {json.dumps(task.id)}\n"
