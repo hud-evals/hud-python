@@ -301,6 +301,10 @@ class EvalConfig(BaseModel):
             try:
                 return AgentType(v)
             except ValueError:
+                if v == "integration_test":
+                    # Local implementation: pre-stages Task.validation and
+                    # lets the scenario graders run. No LLM calls.
+                    return AgentType.INTEGRATION_TEST
                 valid = [e.value for e in AgentType]
                 raise ValueError(
                     f"Invalid agent: {v}. Must be one of: {', '.join(valid)}"
@@ -686,6 +690,25 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
+def _enforce_integration_test_reward(runs: list[Any]) -> None:
+    """The authoring gate: every grader must return Reward 1.0.
+
+    A lower score means the golden solution does not pass the task's own
+    hidden graders — the task is not shippable. Surface the failing grades
+    and exit non-zero so the authoring loop fails loudly.
+    """
+    bad = []
+    for run in runs:
+        if run.grade.is_error:
+            bad.append(f"{run.slug or run.trace.trace_id}: grading errored ({run.grade.info})")
+        elif run.reward < 1.0:
+            raw_grade = run.grade.raw
+            bad.append(f"{run.slug or run.trace.trace_id}: reward {run.reward:g} (raw={raw_grade})")
+    if bad:
+        hud_console.error("integration_test: golden must score 1.0 — " + "; ".join(bad))
+        raise typer.Exit(1)
+
+
 def _python_defines_environment(path: Path) -> bool:
     """Return True when ``path`` constructs a v6 :class:`~hud.environment.Environment`."""
     try:
@@ -1004,3 +1027,6 @@ def eval_command(
         from hud.cli.utils.display import display_runs
 
         display_runs(runs, name=cfg.source or "", elapsed=elapsed)
+
+        if cfg.agent_type is AgentType.INTEGRATION_TEST:
+            _enforce_integration_test_reward(runs)

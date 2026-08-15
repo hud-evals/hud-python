@@ -46,13 +46,22 @@ if TYPE_CHECKING:
 
     from hud.agents.claude import ClaudeAgent
     from hud.agents.gemini import GeminiAgent
+    from hud.agents.integration_test import IntegrationTestAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
-    from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+    from hud.agents.types import (
+        ClaudeConfig,
+        GeminiConfig,
+        IntegrationTestConfig,
+        OpenAIChatConfig,
+        OpenAIConfig,
+    )
 
-    AgentClass: TypeAlias = type[ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent]
+    AgentClass: TypeAlias = type[
+        ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent | IntegrationTestAgent
+    ]
     AgentConfigClass: TypeAlias = type[
-        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
+        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig | IntegrationTestConfig
     ]
 
 T = TypeVar("T")
@@ -63,6 +72,7 @@ class AgentType(StrEnum):
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
+    INTEGRATION_TEST = "integration_test"
 
     @property
     def cls(self) -> AgentClass:
@@ -83,11 +93,21 @@ class AgentType(StrEnum):
                 from hud.agents import OpenAIChatAgent
 
                 return OpenAIChatAgent
+            case AgentType.INTEGRATION_TEST:
+                from hud.agents.integration_test import IntegrationTestAgent
+
+                return IntegrationTestAgent
 
     @property
     def config_cls(self) -> AgentConfigClass:
         """Get config class without importing agent (avoids SDK dependency)."""
-        from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+        from hud.agents.types import (
+            ClaudeConfig,
+            GeminiConfig,
+            IntegrationTestConfig,
+            OpenAIChatConfig,
+            OpenAIConfig,
+        )
 
         match self:
             case AgentType.CLAUDE:
@@ -98,6 +118,10 @@ class AgentType(StrEnum):
                 return GeminiConfig
             case AgentType.OPENAI_COMPATIBLE:
                 return OpenAIChatConfig
+            case AgentType.INTEGRATION_TEST:
+                return IntegrationTestConfig
+            case _:
+                raise ValueError(f"no config class for agent type {self!r}")
 
     @property
     def gateway_provider(self) -> str:
@@ -111,6 +135,9 @@ class AgentType(StrEnum):
                 return "gemini"
             case AgentType.OPENAI_COMPATIBLE:
                 return "openai"
+            case AgentType.INTEGRATION_TEST:
+                # Not a gateway shortcut: the authoring agent makes no LLM calls.
+                raise ValueError("integration_test is not a gateway agent")
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:

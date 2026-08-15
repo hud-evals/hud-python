@@ -112,7 +112,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     kwargs.setdefault("model", model_id)
     # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
-    return agent_type.cls(cast("Any", config))
+    return cast("GatewayAgent", agent_type.cls(cast("Any", config)))
 
 
 _LAZY_EXPORTS = {
