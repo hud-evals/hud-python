@@ -1118,6 +1118,29 @@ def test_artifact_paths_stay_beneath_their_roots(tmp_path: Path, artifact: str) 
     assert [finding.code for finding in failure.findings] == ["harbor.invalid.task_config"]
 
 
+def test_artifacts_keep_harbor_destination_and_exclude(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        """\
+[[artifacts]]
+source = "/app/outputs"
+destination = "results/outputs"
+exclude = ["*.tmp", "cache"]
+""",
+        encoding="utf-8",
+    )
+
+    taskset = _adapt(tmp_path)
+
+    assert taskset["task-a"].args["task"]["artifacts"] == [
+        {
+            "service": "main",
+            "source": "/app/outputs",
+            "destination": "results/outputs",
+            "exclude": ["*.tmp", "cache"],
+        }
+    ]
+
 def test_agent_timeout_becomes_per_task_agent_policy(
     tmp_path: Path,
 ) -> None:

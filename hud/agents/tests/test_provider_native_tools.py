@@ -7,8 +7,8 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
-import asyncio
 import shlex
+from types import SimpleNamespace
 from typing import Any, cast
 
 import asyncssh
@@ -22,7 +22,7 @@ from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
 from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
-from hud.agents.tools.ssh import SSHInfrastructureErrorResult, bound_shell_output
+from hud.agents.tools.ssh import bound_shell_output
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, SSHClient
 from hud.types import MCPToolCall
@@ -33,6 +33,7 @@ class _Completed:
         self.stdout = stdout
         self.stderr = stderr
         self.exit_status = exit_status
+        self.returncode = exit_status
 
 
 class _Conn:
@@ -125,6 +126,9 @@ class _Process:
     def close(self) -> None:
         self.closed = True
 
+    def terminate(self) -> None:
+        self.closed = True
+
     async def wait_closed(self) -> None:
         pass
 
@@ -155,20 +159,6 @@ class _FakeSSH(SSHClient):
         )
 
 
-class _TimedSSH:
-    def __init__(self) -> None:
-        self.timeouts: list[float] = []
-
-    async def run(self, command: str, **kwargs: Any) -> _Completed:
-        self.timeouts.append(kwargs["timeout"])
-        await asyncio.sleep(0.01)
-        return _Completed(exit_status=1 if command.startswith("test ") else 0)
-
-    async def write_text(self, path: str, content: str, *, timeout_s: float) -> None:
-        del path, content
-        self.timeouts.append(timeout_s)
-
-
 def _ssh(**kwargs: Any) -> SSHClient:
     return cast("SSHClient", _FakeSSH(**kwargs))
 
@@ -185,12 +175,28 @@ class _OpenAIChatAgentForTest(OpenAIChatAgent):
 # ─── OpenAI shell ─────────────────────────────────────────────────────
 
 
-async def test_openai_shell_wraps_command_with_timeout() -> None:
+@pytest.mark.parametrize(
+    ("command", "timeout_ms", "expected"),
+    [
+        ("pwd", 2500, "timeout 2.5s bash -lc pwd"),
+        ("pwd", 500, "timeout 0.5s bash -lc pwd"),
+        (
+            "echo ready; sleep infinity",
+            500,
+            "timeout 0.5s bash -lc 'echo ready; sleep infinity'",
+        ),
+    ],
+)
+async def test_openai_shell_applies_requested_timeout_to_entire_command(
+    command: str,
+    timeout_ms: int,
+    expected: str,
+) -> None:
     tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
 
-    result = await tool.execute({"commands": ["pwd"], "timeout_ms": 2500})
+    result = await tool.execute({"commands": [command], "timeout_ms": timeout_ms})
 
-    assert _commands(tool) == ["timeout 2 pwd"]
+    assert _commands(tool) == [expected]
     assert result.isError is False
     assert result.structuredContent is not None
     assert result.structuredContent["provider_tool"] == "shell"
@@ -205,18 +211,15 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
     assert _commands(tool) == ["echo a", "echo b"]
 
 
-async def test_openai_shell_shares_timeout_across_command_batch(
+async def test_openai_shell_has_no_hidden_timeout_across_command_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
-    timeouts: list[float] = []
+    calls: list[dict[str, Any]] = []
 
     async def run(*args: object, **kwargs: Any) -> _Completed:
         del args
-        timeout = kwargs["timeout"]
-        assert isinstance(timeout, float)
-        timeouts.append(timeout)
-        await asyncio.sleep(0.01)
+        calls.append(kwargs)
         return _Completed()
 
     monkeypatch.setattr(tool.client, "run", run)
@@ -229,8 +232,8 @@ async def test_openai_shell_shares_timeout_across_command_batch(
         RunState(tools={"shell": tool}),
     )
 
-    assert len(timeouts) == 2
-    assert timeouts[0] > timeouts[1]
+    assert len(calls) == 2
+    assert all("timeout" not in kwargs for kwargs in calls)
 
 
 async def test_openai_shell_applies_limit_independently_to_each_command() -> None:
@@ -340,64 +343,47 @@ async def test_openai_compatible_bash_uses_workdir_and_timeout() -> None:
     assert _commands(tool) == ["cd '/tmp/my dir' && timeout 3s bash -lc 'echo hi'"]
 
 
-async def test_shared_ssh_timeout_returns_infrastructure_error(
+async def test_shared_ssh_tool_has_no_hidden_command_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ssh = _ssh()
+    seen_kwargs: dict[str, Any] = {}
+
+    async def run(*args: object, **kwargs: Any) -> _Completed:
+        del args
+        seen_kwargs.update(kwargs)
+        return _Completed()
+
+    monkeypatch.setattr(ssh, "run", run)
+    tool = BashTool(spec=BashTool.default_spec("qwen"), client=ssh)
+
+    result = await tool.execute({"command": "sleep forever"})
+
+    assert result.isError is False
+    assert "timeout" not in seen_kwargs
+
+
+async def test_shared_ssh_tool_reports_a_signal_returncode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ssh = _ssh()
 
-    async def timeout(*args: object, **kwargs: Any) -> _Completed:
+    async def signaled(*args: object, **kwargs: Any) -> SimpleNamespace:
         del args, kwargs
-        raise TimeoutError
+        return SimpleNamespace(
+            stdout="",
+            stderr="terminated",
+            exit_status=None,
+            returncode=-15,
+        )
 
-    monkeypatch.setattr(ssh, "run", timeout)
+    monkeypatch.setattr(ssh, "run", signaled)
     tool = BashTool(spec=BashTool.default_spec("qwen"), client=ssh)
 
     result = await tool.execute({"command": "sleep forever"})
 
     assert result.isError is True
-    assert isinstance(result, SSHInfrastructureErrorResult)
-    assert result_text(result) == "tool error: command timed out after 300s"
-
-
-async def test_openai_shell_uses_the_same_ssh_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ssh = _ssh()
-
-    async def timeout(*args: object, **kwargs: Any) -> _Completed:
-        del args, kwargs
-        raise TimeoutError
-
-    monkeypatch.setattr(ssh, "run", timeout)
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=ssh)
-
-    result = await tool.execute({"commands": ["sleep forever"]})
-
-    assert isinstance(result, SSHInfrastructureErrorResult)
-    assert result.structuredContent is not None
-    assert result.structuredContent["output"][0]["stderr"] == (
-        "tool error: command timed out after 300s"
-    )
-
-
-async def test_composite_ssh_tool_shares_one_operation_deadline() -> None:
-    ssh = _TimedSSH()
-    tool = EditTool(spec=EditTool.default_spec("test"), client=cast("SSHClient", ssh))
-    agent = _OpenAIChatAgentForTest(
-        OpenAIChatConfig(model="test", model_client=cast("Any", object()))
-    )
-
-    result = await agent._dispatch_call(
-        MCPToolCall(
-            name="edit",
-            arguments={"filePath": "/work/f.txt", "oldString": "", "newString": "new"},
-        ),
-        RunState(tools={"edit": tool}),
-    )
-
-    assert result.isError is False
-    assert len(ssh.timeouts) == 3
-    assert ssh.timeouts[0] > ssh.timeouts[1] > ssh.timeouts[2]
+    assert result_text(result).endswith("(exit -15)")
 
 
 async def test_shared_ssh_tool_bounds_combined_output(

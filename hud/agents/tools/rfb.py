@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal
 
@@ -29,6 +30,9 @@ if TYPE_CHECKING:
 Button = Literal["left", "middle", "right"]
 _BUTTON_INDEX: dict[Button, int] = {"left": 0, "middle": 1, "right": 2}
 _DEFAULT_SCREENSHOT_ENCODING = PngScreenshotEncoding()
+#: Keysym names for control characters missing from asyncvnc's char keymap.
+_KEY_FOR_CHAR: dict[str, str] = {"\n": "Return", "\r": "Return", "\t": "Tab"}
+_KEY_CHAR_SPLIT = re.compile(r"([\n\r\t])")
 
 
 class RFBTool(AgentTool[RFBClient]):
@@ -140,23 +144,48 @@ class RFBTool(AgentTool[RFBClient]):
         button: Button = "left",
         hold_keys: Iterable[str] | None = None,
     ) -> None:
-        """Press ``button`` at path[0], move through every subsequent point, then release."""
+        """Press ``button`` at path[0], move through every subsequent point, then release.
+
+        Interpolated and paced: a press/move/release burst within one frame
+        reads as a click to pages that sample pointer state per frame.
+        """
         if len(path) < 2:
             raise ValueError("drag requires at least 2 points")
         mouse = self.client.conn.mouse
         index = _BUTTON_INDEX[button]
         async with self._with_keys(hold_keys):
-            mouse.move(int(path[0][0]), int(path[0][1]))
+            x, y = int(path[0][0]), int(path[0][1])
+            mouse.move(x, y)
+            await self.client.drain()
+            await asyncio.sleep(0.2)
             with mouse.hold(index):
-                for x, y in path[1:]:
-                    mouse.move(int(x), int(y))
+                await self.client.drain()
+                # The page must see the press for a frame before movement
+                # starts; environments render at low frame rates.
+                await asyncio.sleep(0.2)
+                for px, py in path[1:]:
+                    nx, ny = int(px), int(py)
+                    steps = max(1, min(24, max(abs(nx - x), abs(ny - y)) // 16))
+                    for i in range(1, steps + 1):
+                        mouse.move(x + (nx - x) * i // steps, y + (ny - y) * i // steps)
+                        await self.client.drain()
+                        await asyncio.sleep(0.025)
+                    x, y = nx, ny
+                await asyncio.sleep(0.2)
         await self.client.drain()
 
     # ─── keyboard ────────────────────────────────────────────────────
 
     async def type_text(self, text: str) -> None:
         """Type a literal string, one key at a time."""
-        self.client.conn.keyboard.write(text)
+        keyboard = self.client.conn.keyboard
+        for chunk in _KEY_CHAR_SPLIT.split(text.replace("\r\n", "\n")):
+            if not chunk:
+                continue
+            if chunk in _KEY_FOR_CHAR:
+                keyboard.press(_KEY_FOR_CHAR[chunk])
+            else:
+                keyboard.write(chunk)
         await self.client.drain()
 
     async def press_keys(self, keys: Iterable[str], *, count: int = 1) -> None:

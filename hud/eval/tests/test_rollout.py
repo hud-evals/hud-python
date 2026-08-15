@@ -666,6 +666,57 @@ async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) 
     ]
 
 
+async def test_tool_agent_timeout_stops_running_workspace_command_before_grading(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    started = workspace / "started"
+    late = workspace / "late"
+    env = Environment("timeout_cleanup")
+    env.workspace(workspace, guest_path=str(workspace))
+
+    @env.initialize
+    async def seed() -> None:
+        workspace.mkdir(parents=True, exist_ok=True)
+        started.unlink(missing_ok=True)
+        late.unlink(missing_ok=True)
+
+    @env.template()
+    async def wait_for_cleanup():
+        yield "Start the requested command."
+        await asyncio.sleep(1.2)
+        yield 1.0 if started.exists() and not late.exists() else 0.0
+
+    model_client = _FakeOpenAI(
+        [
+            _chat_response(
+                "",
+                [_tool_call("bash", '{"command":"touch started; sleep 1; touch late"}')],
+            ),
+        ]
+    )
+    agent = OpenAIChatAgent(
+        OpenAIChatConfig(
+            model="qwen3.6-plus",
+            model_client=model_client,
+            max_steps=2,
+            timeout_seconds=0.5,
+        )
+    )
+
+    run = await rollout(
+        Task(env="timeout_cleanup", id="wait_for_cleanup"),
+        agent,
+        runtime=lambda _task: _local(env),
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == "timeout"
+    assert run.reward == 1.0
+    assert started.exists()
+    assert not late.exists()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
 async def test_local_runtime_startup_failure_kills_spawned_children(tmp_path: Path) -> None:
     env_file = tmp_path / "env.py"

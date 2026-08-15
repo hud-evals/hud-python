@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,7 +23,7 @@ from hud.settings import settings
 from hud.types import Step
 
 if TYPE_CHECKING:
-    from hud.capabilities import RFBClient, SSHClient
+    from hud.capabilities import SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
@@ -70,98 +71,112 @@ def build_remote_invocation(shell: str, run_cmd: str) -> RemoteInvocation:
 class ClaudeSDKAgent(Agent):
     """Runs ``claude`` CLI over SSH inside the env workspace.
 
-    Stateless w.r.t. the env: driven by ``await agent(run)``. SSH and RFB are
-    opened live off the run (we
-    drive them); MCP servers are read as raw bindings and written into the CLI's
-    MCP config (the CLI connects to them itself).
+    Stateless w.r.t. the env: driven by ``await agent(run)``. SSH is opened
+    live off the run. Environment MCP bindings are used directly; computer MCP
+    servers are bridged over the run's SSH connection.
     """
 
     config: ClaudeSDKConfig
 
     def __init__(self, config: ClaudeSDKConfig | None = None) -> None:
         self.config = config or ClaudeSDKConfig()
-        self._ssh: SSHClient | None = None
-        self._mcp_servers: dict[str, dict[str, Any]] = {}
-        self._shell = "bash"
 
     async def __call__(self, run: Run) -> None:
-        self._mcp_servers = {}
+        mcp_servers: dict[str, dict[str, Any]] = {}
         manifest = run.client.manifest
         bindings = manifest.bindings if manifest is not None else []
         families = {c.protocol.split("/", 1)[0] for c in bindings}
 
         if "ssh" not in families:
             raise RuntimeError("ClaudeSDKAgent requires an SSH capability")
-        self._ssh = cast("SSHClient", await run.client.open("ssh"))
-        self._shell = self._ssh.capability.params.get("shell", "bash")
+        ssh = cast("SSHClient", await run.client.open("ssh"))
+        shell = ssh.capability.params.get("shell", "bash")
 
-        for cap in bindings:
-            family = cap.protocol.split("/", 1)[0]
-            if family == "mcp":
-                token = cap.params.get("auth_token")
-                transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
-                server_config: dict[str, Any] = {"type": transport, "url": cap.url}
-                if token:
-                    server_config["headers"] = {"Authorization": f"Bearer {token}"}
-                self._mcp_servers[cap.name] = server_config
-            elif family == "rfb":
-                from hud.agents.claude.sdk.computer_mcp import serve_computer_mcp
+        rfb_bindings = [cap for cap in bindings if cap.protocol.split("/", 1)[0] == "rfb"]
+        async with AsyncExitStack() as resources:
+            for cap in bindings:
+                family = cap.protocol.split("/", 1)[0]
+                if family == "mcp":
+                    token = cap.params.get("auth_token")
+                    transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
+                    server_config: dict[str, Any] = {"type": transport, "url": cap.url}
+                    if token:
+                        server_config["headers"] = {"Authorization": f"Bearer {token}"}
+                    if cap.name in mcp_servers:
+                        raise RuntimeError(f"duplicate MCP server name {cap.name!r}")
+                    mcp_servers[cap.name] = server_config
+                elif family == "rfb":
+                    from hud.agents.claude.sdk.computer_mcp import bridge_computer_mcp
 
-                rfb = cast("RFBClient", await run.client.open("rfb"))
-                port = await serve_computer_mcp(rfb, self.config.screenshot_encoding)
-                self._mcp_servers["computer-use"] = {
-                    "type": "http",
-                    "url": f"http://127.0.0.1:{port}/mcp",
-                }
+                    server_name = (
+                        "computer-use" if len(rfb_bindings) == 1 else f"computer-use-{cap.name}"
+                    )
+                    if server_name in mcp_servers:
+                        raise RuntimeError(f"duplicate MCP server name {server_name!r}")
+                    routed = run.client.binding(cap.name)
+                    mcp_servers[server_name] = await resources.enter_async_context(
+                        bridge_computer_mcp(
+                            ssh,
+                            routed,
+                            self.config.screenshot_encoding,
+                            shell=shell,
+                        )
+                    )
 
-        await self._exec(
-            run,
-            prompt=run.prompt_text,
-            max_steps=self.config.max_steps,
-            system_prompt=self.config.system_prompt,
-        )
+            await self._exec(
+                run,
+                ssh=ssh,
+                shell=shell,
+                mcp_servers=mcp_servers,
+                prompt=run.prompt_text,
+                max_steps=self.config.max_steps,
+                system_prompt=self.config.system_prompt,
+            )
 
     async def _exec(
         self,
         run: Run,
         *,
+        ssh: SSHClient,
+        shell: str,
+        mcp_servers: dict[str, dict[str, Any]],
         prompt: str,
         max_steps: int = -1,
         system_prompt: str | None = None,
     ) -> None:
-        assert self._ssh is not None
+        mcp_config_path = await self._write_mcp_config(ssh, mcp_servers)
 
-        mcp_config_path = await self._write_mcp_config()
-
-        await self._ssh.write_text(".hud_prompt.txt", prompt)
+        await ssh.write_text(".hud_prompt.txt", prompt)
 
         run_cmd = self._build_cli_command(
+            shell=shell,
             prompt=prompt,
             max_steps=max_steps,
             system_prompt=system_prompt,
             mcp_config_path=mcp_config_path,
         )
 
-        invocation = build_remote_invocation(self._shell, run_cmd)
+        invocation = build_remote_invocation(shell, run_cmd)
         if invocation.script_name is not None:
             assert invocation.script_body is not None
             # cmd.exe mangles inline quotes, so the command rides a batch file.
-            await self._ssh.write_text(invocation.script_name, invocation.script_body)
+            await ssh.write_text(invocation.script_name, invocation.script_body)
 
         full_cmd = invocation.command
         logger.info("SSH exec claude CLI (%d chars)", len(full_cmd))
         logger.info("Full command: %s", full_cmd)
 
-        completed = await self._ssh.run(full_cmd, check=False)
+        completed = await ssh.run(full_cmd, check=False)
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
         stderr = completed.stderr if isinstance(completed.stderr, str) else ""
+        returncode = completed.returncode
 
-        logger.info("exit=%s stdout=%d stderr=%d", completed.exit_status, len(stdout), len(stderr))
+        logger.info("returncode=%s stdout=%d stderr=%d", returncode, len(stdout), len(stderr))
 
-        if completed.exit_status != 0 and not stdout.strip():
-            error = stderr or f"claude CLI exited with status {completed.exit_status}"
+        if returncode != 0 and not stdout.strip():
+            error = stderr or f"claude CLI exited with return code {returncode}"
             run.trace.status = "error"
-            run.trace.extra.update({"exit_status": completed.exit_status, "stderr": stderr})
+            run.trace.extra.update({"returncode": returncode, "stderr": stderr})
             run.record(Step(source="system", error=error))
             return
 
@@ -192,27 +207,31 @@ class ClaudeSDKAgent(Agent):
 
         return env
 
-    async def _write_mcp_config(self) -> str | None:
+    async def _write_mcp_config(
+        self,
+        ssh: SSHClient,
+        mcp_servers: dict[str, dict[str, Any]],
+    ) -> str | None:
         """Write MCP config into the workspace and return its path."""
-        if not self._mcp_servers or self._ssh is None:
+        if not mcp_servers:
             return None
-        mcp_json = json.dumps({"mcpServers": self._mcp_servers}, indent=2)
+        mcp_json = json.dumps({"mcpServers": mcp_servers}, indent=2)
         path = ".hud_mcp_config.json"
-        await self._ssh.write_text(path, mcp_json)
+        await ssh.write_text(path, mcp_json)
         logger.info("Wrote MCP config")
         return path
 
     def _build_cli_command(
         self,
         *,
+        shell: str,
         prompt: str,
         max_steps: int,
         system_prompt: str | None,
         mcp_config_path: str | None = None,
     ) -> str:
         env_vars = self._build_env_vars()
-        is_win = self._shell in WINDOWS_SHELLS
-        self._win_redirect = False
+        is_win = shell in WINDOWS_SHELLS
 
         # Raw args list (no shell quoting) — used directly for Windows Python launcher.
         base_args: list[str] = [

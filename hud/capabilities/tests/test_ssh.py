@@ -18,15 +18,24 @@ class _Completed:
     stdout = "ok"
     stderr = ""
     exit_status = 0
+    returncode: int | None = 0
 
 
 class _Process:
-    def __init__(self, *, wait_error: BaseException | None = None, block: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        completed: _Completed | None = None,
+        wait_error: BaseException | None = None,
+        block: bool = False,
+    ) -> None:
+        self.completed = completed or _Completed()
         self.wait_error = wait_error
         self.block = block
         self.on_wait: Callable[[], None] | None = None
         self.started = asyncio.Event()
         self.closed = False
+        self.terminated = False
         self.waited_closed = False
 
     async def wait(self, *, check: bool, **kwargs: Any) -> _Completed:
@@ -39,10 +48,13 @@ class _Process:
             await asyncio.Event().wait()
         if self.wait_error is not None:
             raise self.wait_error
-        return _Completed()
+        return self.completed
 
     def close(self) -> None:
         self.closed = True
+
+    def terminate(self) -> None:
+        self.terminated = True
 
     async def wait_closed(self) -> None:
         self.waited_closed = True
@@ -85,7 +97,8 @@ class _Connection:
         return _Completed()
 
     async def create_process(self, *args: object, **kwargs: Any) -> _Process:
-        del args, kwargs
+        del kwargs
+        self.commands.append(str(args[0]))
         if self.stall_open:
             try:
                 await asyncio.Event().wait()
@@ -94,6 +107,10 @@ class _Connection:
                 raise
         if self.open_error is not None:
             raise self.open_error
+        if self.run_error is not None:
+            if isinstance(self.run_error, asyncssh.ConnectionLost):
+                self.closed = True
+            raise self.run_error
         return self.process
 
 
@@ -126,9 +143,20 @@ async def test_connect_keeps_tunneled_connection_active(monkeypatch: pytest.Monk
         username="agent",
         client_keys=None,
         known_hosts=None,
+        errors="replace",
         keepalive_interval=15,
         keepalive_count_max=4,
     )
+
+
+async def test_connect_classifies_a_lost_handshake_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connect = AsyncMock(side_effect=asyncssh.ConnectionLost("dropped"))
+    monkeypatch.setattr(SSHClient, "_connect", connect)
+
+    with pytest.raises(SSHConnectionError, match="failed during handshake"):
+        await SSHClient.connect(_capability())
 
 
 async def test_run_does_not_replay_a_command_lost_in_flight(
@@ -149,6 +177,35 @@ async def test_run_does_not_replay_a_command_lost_in_flight(
     await client.run("next-command")
     reconnect.assert_awaited_once_with(client.capability)
     assert replacement.commands == ["next-command"]
+
+
+async def test_create_process_reconnects_before_opening_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dropped = _Connection(closed=True)
+    replacement = _Connection()
+    client = _client(dropped)
+    reconnect = AsyncMock(return_value=replacement)
+    monkeypatch.setattr(client, "_connect", reconnect)
+
+    process = await client.create_process("bridge")
+
+    assert process is replacement.process
+    reconnect.assert_awaited_once_with(client.capability)
+    assert dropped.commands == []
+    assert replacement.commands == ["bridge"]
+
+
+async def test_create_process_preserves_reconnect_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client(_Connection(closed=True))
+    reconnect = AsyncMock(side_effect=OSError("unreachable"))
+    monkeypatch.setattr(client, "_connect", reconnect)
+    monkeypatch.setattr("hud.capabilities.ssh.asyncio.sleep", AsyncMock())
+
+    with pytest.raises(SSHConnectionError, match="reconnect failed after 3 attempts"):
+        await client.create_process("bridge")
 
 
 async def test_run_classifies_rejected_session_as_connection_error() -> None:
@@ -208,18 +265,34 @@ async def test_run_preserves_timeout_when_the_connection_closes() -> None:
         await client.run("echo never", timeout=1)
 
 
-async def test_run_cancellation_closes_the_remote_process() -> None:
+@pytest.mark.parametrize("command_timeout", [None, 300])
+async def test_run_cancellation_terminates_the_remote_process(
+    command_timeout: float | None,
+) -> None:
     connection = _Connection(process=_Process(block=True))
     client = _client(connection)
-    run = asyncio.create_task(client.run("echo never", timeout=300))
+    run = asyncio.create_task(client.run("echo never", timeout=command_timeout))
     await connection.process.started.wait()
 
     run.cancel()
 
     with pytest.raises(asyncio.CancelledError):
         await run
-    assert connection.process.closed is True
+    assert connection.process.terminated is True
+    assert connection.process.closed is False
     assert connection.process.waited_closed is True
+
+
+async def test_run_rejects_a_completed_process_without_a_returncode() -> None:
+    completed = _Completed()
+    completed.returncode = None
+    connection = _Connection(process=_Process(completed=completed))
+    client = _client(connection)
+
+    with pytest.raises(SSHConnectionError, match="without an exit status"):
+        await client.run("echo incomplete", timeout=1)
+
+    assert connection.closed is True
 
 
 async def test_windows_write_uses_one_timeout_budget(

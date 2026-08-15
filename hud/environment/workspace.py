@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
 import json
 import logging
 import os
@@ -38,7 +39,153 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.workspace")
 
-_COMMAND_TIMEOUT = 3600.0
+_PROCESS_CLOSE_TIMEOUT_S = 5.0
+_CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_THREAD_SUSPEND_RESUME = 0x0002
+_TH32CS_SNAPTHREAD = 0x00000004
+_INVALID_DWORD = 0xFFFFFFFF
+
+
+class _WindowsJob:
+    """Windows Job Object which owns a subprocess and all of its descendants."""
+
+    def __init__(self, kernel32: Any | None = None) -> None:
+        from ctypes import wintypes
+
+        class BasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("per_process_user_time_limit", ctypes.c_longlong),
+                ("per_job_user_time_limit", ctypes.c_longlong),
+                ("limit_flags", wintypes.DWORD),
+                ("minimum_working_set_size", ctypes.c_size_t),
+                ("maximum_working_set_size", ctypes.c_size_t),
+                ("active_process_limit", wintypes.DWORD),
+                ("affinity", ctypes.c_size_t),
+                ("priority_class", wintypes.DWORD),
+                ("scheduling_class", wintypes.DWORD),
+            ]
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("read_operation_count", ctypes.c_ulonglong),
+                ("write_operation_count", ctypes.c_ulonglong),
+                ("other_operation_count", ctypes.c_ulonglong),
+                ("read_transfer_count", ctypes.c_ulonglong),
+                ("write_transfer_count", ctypes.c_ulonglong),
+                ("other_transfer_count", ctypes.c_ulonglong),
+            ]
+
+        class ExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("basic_limit_information", BasicLimitInformation),
+                ("io_info", IoCounters),
+                ("process_memory_limit", ctypes.c_size_t),
+                ("job_memory_limit", ctypes.c_size_t),
+                ("peak_process_memory_used", ctypes.c_size_t),
+                ("peak_job_memory_used", ctypes.c_size_t),
+            ]
+
+        class ThreadEntry(ctypes.Structure):
+            _fields_ = [
+                ("size", wintypes.DWORD),
+                ("usage_count", wintypes.DWORD),
+                ("thread_id", wintypes.DWORD),
+                ("owner_process_id", wintypes.DWORD),
+                ("base_priority", wintypes.LONG),
+                ("priority_delta", wintypes.LONG),
+                ("flags", wintypes.DWORD),
+            ]
+
+        if kernel32 is None:
+            win_dll = ctypes.__dict__["WinDLL"]
+            kernel32 = win_dll("kernel32")
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+        kernel32.Thread32First.restype = wintypes.BOOL
+        kernel32.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+        kernel32.Thread32Next.restype = wintypes.BOOL
+        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+        kernel32.ResumeThread.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        self._kernel32 = kernel32
+        self._thread_entry_type = ThreadEntry
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise OSError(int(kernel32.GetLastError()), "CreateJobObjectW failed")
+        self._handle: Any | None = handle
+        limits = ExtendedLimitInformation()
+        limits.basic_limit_information.limit_flags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            handle,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
+            self.close()
+            raise OSError(int(kernel32.GetLastError()), "SetInformationJobObject failed")
+
+    def assign(self, process: subprocess.Popen[bytes]) -> None:
+        if self._handle is None:
+            raise RuntimeError("Windows Job Object is closed")
+        process_handle = getattr(process, "_handle", None)
+        if process_handle is None or not self._kernel32.AssignProcessToJobObject(
+            self._handle,
+            process_handle,
+        ):
+            raise OSError(int(self._kernel32.GetLastError()), "AssignProcessToJobObject failed")
+
+    def resume(self, process: subprocess.Popen[bytes]) -> None:
+        """Resume the primary thread of a process created with CREATE_SUSPENDED."""
+        snapshot = self._kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise OSError(int(self._kernel32.GetLastError()), "thread snapshot failed")
+        thread_handle: Any | None = None
+        try:
+            entry = self._thread_entry_type()
+            entry.size = ctypes.sizeof(entry)
+            if not self._kernel32.Thread32First(snapshot, ctypes.byref(entry)):
+                raise OSError(int(self._kernel32.GetLastError()), "thread enumeration failed")
+            while True:
+                if entry.owner_process_id == process.pid:
+                    thread_handle = self._kernel32.OpenThread(
+                        _THREAD_SUSPEND_RESUME,
+                        False,
+                        entry.thread_id,
+                    )
+                    if not thread_handle:
+                        raise OSError(int(self._kernel32.GetLastError()), "OpenThread failed")
+                    break
+                if not self._kernel32.Thread32Next(snapshot, ctypes.byref(entry)):
+                    raise OSError(0, f"no thread found for suspended process {process.pid}")
+
+            if self._kernel32.ResumeThread(thread_handle) == _INVALID_DWORD:
+                raise OSError(int(self._kernel32.GetLastError()), "ResumeThread failed")
+        finally:
+            if thread_handle is not None:
+                self._kernel32.CloseHandle(thread_handle)
+            self._kernel32.CloseHandle(snapshot)
+
+    def close(self) -> None:
+        handle, self._handle = self._handle, None
+        if handle is not None:
+            self._kernel32.CloseHandle(handle)
 
 
 @dataclass(slots=True, frozen=True)
@@ -405,7 +552,6 @@ class Workspace:
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
-        self._serve_task: asyncio.Task[None] | None = None
         self._client_key_path: Path | None = None
         self._host_key: asyncssh.SSHKey | None = None
         self._host_pubkey_str: str | None = None
@@ -562,35 +708,31 @@ class Workspace:
 
     # ─── lifecycle ────────────────────────────────────────────────────
 
-    async def _serve(self) -> None:
-        """Run the asyncssh accept loop on the pre-bound socket."""
-        self._prepare_runtime()
-        assert self._sock is not None
-        assert self._host_key is not None
-        assert self._authorized_keys_path is not None
-        self._acceptor = await asyncssh.listen(
-            sock=self._sock,
-            server_host_keys=[self._host_key],
-            authorized_client_keys=str(self._authorized_keys_path),
-            process_factory=self._handle_process,
-            line_editor=False,
-            keepalive_interval=30,
-            encoding=None,
-        )
-
     async def start(self) -> None:
         """Ensure the SSH accept loop is running. Idempotent.
 
-        The first start prepares credentials and binds the socket, then ensures
-        the async acceptor exists.
+        Returns only after every published workspace service is accepting clients.
         """
-        self._prepare_runtime()
-        if self._serve_task is None and self._acceptor is None:
-            self._serve_task = asyncio.get_event_loop().create_task(self._serve())
-        # Yield so the acceptor binds before first use.
-        await asyncio.sleep(0)
-        if self._track_files and self._ft_server is None:
-            await self._start_file_tracking()
+        try:
+            self._prepare_runtime()
+            if self._acceptor is None:
+                assert self._sock is not None
+                assert self._host_key is not None
+                assert self._authorized_keys_path is not None
+                self._acceptor = await asyncssh.listen(
+                    sock=self._sock,
+                    server_host_keys=[self._host_key],
+                    authorized_client_keys=str(self._authorized_keys_path),
+                    process_factory=self._handle_process,
+                    line_editor=False,
+                    keepalive_interval=30,
+                    encoding=None,
+                )
+            if self._track_files and self._ft_server is None:
+                await self._start_file_tracking()
+        except BaseException:
+            await self.stop()
+            raise
 
     async def _start_file_tracking(self) -> None:
         """Take the baseline snapshot and bind the filetracking/1 server."""
@@ -617,11 +759,6 @@ class Workspace:
             self._ft_server = None
             self._ft_host = self._ft_port = None
             self._file_tracker = None
-        if self._serve_task is not None:
-            self._serve_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._serve_task
-            self._serve_task = None
         if self._acceptor is not None:
             self._acceptor.close()
             # close() initiates shutdown; wait_closed() can hang on Windows when a
@@ -1492,7 +1629,7 @@ class Workspace:
             # after the subprocess coroutine has already returned (a race that can
             # happen even when communicate() calls wait() internally), it corrupts
             # asyncssh's IOCP state and permanently breaks the SSH session.
-            # Running subprocess.run() in a thread-pool executor sidesteps IOCP
+            # Running a blocking subprocess in a worker thread sidesteps IOCP
             # entirely: the blocking WaitForSingleObject in the worker thread drains
             # the process exit before the Future resolves, leaving no pending events.
             #
@@ -1503,7 +1640,6 @@ class Workspace:
             # Additionally, cmd.exe launched via CreateProcess does NOT search the
             # CWD for batch files (only PATH), so relative .bat paths are resolved
             # to absolute below.
-            import functools
             import shlex
             import subprocess as _subprocess
 
@@ -1525,38 +1661,82 @@ class Workspace:
             else:
                 win_argv = ["cmd.exe"]
 
+            def spawn() -> tuple[_subprocess.Popen[bytes], _WindowsJob]:
+                job = _WindowsJob()
+                try:
+                    child = _subprocess.Popen(
+                        win_argv,
+                        stdin=_subprocess.DEVNULL,
+                        stdout=_subprocess.PIPE,
+                        stderr=_subprocess.PIPE,
+                        cwd=str(self.root),
+                        env=proc_env,
+                        creationflags=_CREATE_SUSPENDED,
+                    )
+                    try:
+                        job.assign(child)
+                        job.resume(child)
+                    except BaseException:
+                        child.kill()
+                        child.wait()
+                        raise
+                except BaseException:
+                    job.close()
+                    raise
+                return child, job
+
             try:
                 loop = asyncio.get_running_loop()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        functools.partial(
-                            _subprocess.run,
-                            win_argv,
-                            stdin=_subprocess.DEVNULL,
-                            stdout=_subprocess.PIPE,
-                            stderr=_subprocess.PIPE,
-                            cwd=str(self.root),
-                            env=proc_env,
-                            timeout=3600,
-                        ),
-                    ),
-                    timeout=3660.0,
-                )
+                child, job = await loop.run_in_executor(None, spawn)
             except FileNotFoundError as exc:
                 process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
                 process.exit(127)
                 return
-            except (TimeoutError, _subprocess.TimeoutExpired):
-                process.stderr.write(b"workspace: command timed out after 3600s\n")
+            except OSError as exc:
+                process.stderr.write(f"workspace: cannot own shell process tree: {exc}\n".encode())
                 process.exit(1)
                 return
 
-            if result.stdout:
-                process.stdout.write(result.stdout)
-            if result.stderr:
-                process.stderr.write(result.stderr)
-            process.exit(result.returncode)
+            communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
+            channel_closed_task = asyncio.create_task(process.channel.wait_closed())
+            try:
+                done, _ = await asyncio.wait(
+                    (communicate_task, channel_closed_task),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if channel_closed_task in done and not communicate_task.done():
+                    return
+                stdout, stderr = await communicate_task
+            finally:
+                if not communicate_task.done():
+                    job.close()
+                    try:
+                        async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
+                            await asyncio.shield(communicate_task)
+                    except TimeoutError:
+                        for pipe in (child.stdout, child.stderr):
+                            if pipe is not None:
+                                with contextlib.suppress(OSError):
+                                    pipe.close()
+                        communicate_task.cancel()
+                        with contextlib.suppress(TimeoutError):
+                            await asyncio.wait_for(
+                                asyncio.gather(communicate_task, return_exceptions=True),
+                                _PROCESS_CLOSE_TIMEOUT_S,
+                            )
+                else:
+                    job.close()
+                channel_closed_task.cancel()
+                await asyncio.gather(channel_closed_task, return_exceptions=True)
+
+            if process.channel.is_closing():
+                return
+            if stdout:
+                process.stdout.write(stdout)
+            if stderr:
+                process.stderr.write(stderr)
+            assert child.returncode is not None
+            process.exit(child.returncode)
             return
 
         pty_pair = _open_pty(process) if wants_tty and pid is None else None
@@ -1638,6 +1818,8 @@ class Workspace:
                         break
                     stdin_writer.write(chunk)
                     await stdin_writer.drain()
+            except asyncssh.SignalReceived:
+                await sub.terminate()
             except (asyncssh.Error, BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
@@ -1654,9 +1836,8 @@ class Workspace:
             """Forward the child's output as it is produced.
 
             Streamed, not accumulated: an agent watching a build wants the
-            lines while it runs, a session that never exits would otherwise
-            say nothing at all, and a command killed at the timeout still
-            keeps whatever it managed to print.
+            lines while it runs, and a session that never exits would otherwise
+            say nothing at all.
             """
             try:
                 while chunk := await reader.read(65536):
@@ -1674,18 +1855,15 @@ class Workspace:
             output_tasks.append(asyncio.create_task(relay_output(stderr_reader, process.stderr)))
         wait_task = asyncio.create_task(sub.wait())
         channel_closed_task = asyncio.create_task(process.channel.wait_closed())
-        timed_out = False
+        returncode: int | None = None
         try:
-            async with asyncio.timeout(_COMMAND_TIMEOUT):
-                done, _ = await asyncio.wait(
-                    (wait_task, channel_closed_task),
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if channel_closed_task in done and not wait_task.done():
-                    return
-                await wait_task
-        except TimeoutError:
-            timed_out = True
+            done, _ = await asyncio.wait(
+                (wait_task, channel_closed_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if channel_closed_task in done and not wait_task.done():
+                return
+            returncode = await wait_task
         finally:
             # A command that ran to completion inside the sandbox keeps its
             # process group: `some-server &` is how an agent starts something
@@ -1693,11 +1871,10 @@ class Workspace:
             # here would take it down with the shell that launched it. The
             # sandbox is the lifetime boundary instead — discarding it at the
             # end of the rollout collapses the pid namespace and everything
-            # left in it. Nothing bounds a command that timed out, was
-            # abandoned mid-flight, or ran with no sandbox at all, so those
-            # are still torn down as a group.
+            # left in it. An abandoned command or one running without a
+            # sandbox is still torn down as a group.
             completed = wait_task.done() and not wait_task.cancelled()
-            if pid is None or timed_out or not completed:
+            if pid is None or not completed:
                 await sub.terminate()
             stdin_task.cancel()
             wait_task.cancel()
@@ -1715,15 +1892,8 @@ class Workspace:
 
         if process.channel.is_closing():
             return
-        if timed_out:
-            # Whatever ran before the deadline has already been relayed; this
-            # only says why it stopped.
-            process.stderr.write(
-                f"workspace: command timed out after {_COMMAND_TIMEOUT:g}s\n".encode()
-            )
-            process.exit(1)
-            return
-        process.exit(sub.returncode if sub.returncode is not None else 0)
+        assert returncode is not None
+        process.exit(returncode)
 
 
 __all__ = [
