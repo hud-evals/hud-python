@@ -369,7 +369,7 @@ def test_separate_verifier_rejects_sidecar_symlink_artifact_roots(
     shutil.copytree(TASKS / "sidecar-reachability", task)
     (task / "task.toml").write_text(
         """\
-artifacts = [{ source = "/link", service = "web", exclude = ["main.html"] }]
+artifacts = [{ source = "/link", service = "workspace", exclude = ["main.html"] }]
 
 [task]
 name = "sidecar-reachability"
@@ -379,7 +379,7 @@ environment_mode = "separate"
 timeout_sec = 30
 
 [[verifier.collect]]
-service = "web"
+service = "workspace"
 command = "ln -sfn /app /link"
 timeout_sec = 10
 """,

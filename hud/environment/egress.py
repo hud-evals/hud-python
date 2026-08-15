@@ -121,18 +121,24 @@ VISITOR_PORT = 3129
 _BRIDGE = """
 import asyncio, json, sys
 
-async def splice(reader, writer):
+async def pump(reader, writer):
+    while chunk := await reader.read(65536):
+        writer.write(chunk)
+        await writer.drain()
+    if writer.can_write_eof():
+        try:
+            writer.write_eof()
+        except OSError:
+            pass
+
+async def splice(a, b):
     try:
-        while chunk := await reader.read(65536):
-            writer.write(chunk)
-            await writer.drain()
-    except Exception:
+        await asyncio.gather(pump(a[0], b[1]), pump(b[0], a[1]))
+    except OSError:
         pass
     finally:
-        try:
-            writer.close()
-        except Exception:
-            pass
+        a[1].close()
+        b[1].close()
 
 def bridged(path):
     async def handle(reader, writer):
@@ -141,7 +147,7 @@ def bridged(path):
         except OSError:
             writer.close()
             return
-        await asyncio.gather(splice(reader, up_writer), splice(up_reader, writer))
+        await splice((reader, writer), (up_reader, up_writer))
     return handle
 
 async def main():
@@ -309,17 +315,24 @@ def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
 
 
 def _relay(one: socket.socket, other: socket.socket, timeout: float = 300.0) -> None:
-    """Copy bytes between two connected sockets until either end is done."""
-    while True:
-        ready, _, _ = select.select([one, other], [], [], timeout)
+    """Copy bytes until both directions reach EOF, error, or the connection stalls."""
+    readers = [one, other]
+    while readers:
+        ready, _, _ = select.select(readers, [], [], timeout)
         if not ready:
             return
         for source in ready:
             target = other if source is one else one
             try:
                 data = source.recv(65536)
-                if not data:
-                    return
+            except OSError:
+                return
+            if not data:
+                readers.remove(source)
+                with contextlib.suppress(OSError):
+                    target.shutdown(socket.SHUT_WR)
+                continue
+            try:
                 target.sendall(data)
             except OSError:
                 return
