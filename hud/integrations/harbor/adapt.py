@@ -245,10 +245,7 @@ def adapt(
             raise ValueError(
                 f"{task_dir.name}/task.toml is not a valid Harbor task: {error}"
             ) from error
-        if (
-            config.schema_version is not None
-            and config.schema_version != HARBOR_SCHEMA_VERSION
-        ):
+        if config.schema_version is not None and config.schema_version != HARBOR_SCHEMA_VERSION:
             raise ValueError(
                 f"{task_dir.name}/task.toml declares unsupported Harbor schema "
                 f"{config.schema_version!r} — this HUD build adapts schema "
