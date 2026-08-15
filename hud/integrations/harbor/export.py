@@ -7,13 +7,12 @@ import json
 import shlex
 import shutil
 from pathlib import Path
-
-from hud.integrations.harbor.adapt import HARBOR_SCHEMA_VERSION
 from typing import Any
 
 from hud.environment import Environment, load_environment
 from hud.environment.server import TaskRunner
 from hud.eval import Taskset
+from hud.integrations.harbor.adapt import HARBOR_SCHEMA_VERSION
 from hud.utils.naming import normalize_environment_name
 
 ALLOWED_PROTOCOLS = ("ssh", "mcp")

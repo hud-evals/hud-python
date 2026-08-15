@@ -1080,5 +1080,5 @@ def test_supported_schema_version_adapts(tmp_path: Path) -> None:
 
 def test_absent_schema_version_still_adapts(tmp_path: Path) -> None:
     """Unversioned tasks (the historical export shape) keep adapting."""
-    task = make_harbor_task(tmp_path, "task-a")
+    make_harbor_task(tmp_path, "task-a")
     assert len(list(harbor.adapt(tmp_path))) == 1
