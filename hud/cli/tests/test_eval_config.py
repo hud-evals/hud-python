@@ -25,6 +25,11 @@ def test_is_bedrock_arn() -> None:
     assert _is_bedrock_arn(None) is False
 
 
+def test_parse_agent_type_points_integration_test_to_the_platform() -> None:
+    with pytest.raises(ValueError, match="integration_test is the platform"):
+        EvalConfig(agent_type="integration_test")
+
+
 def test_parse_agent_type_accepts_known_value() -> None:
     cfg = EvalConfig(agent_type="openai")
     assert cfg.agent_type is not None
