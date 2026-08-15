@@ -1062,9 +1062,7 @@ def test_public_surface_is_only_the_two_real_operations() -> None:
 
 def test_unknown_schema_version_fails_loudly(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "task.toml").write_text(
-        'schema_version = "99.9"\n', encoding="utf-8"
-    )
+    (task / "task.toml").write_text('schema_version = "99.9"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="unsupported Harbor schema"):
         harbor.adapt(tmp_path)
