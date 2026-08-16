@@ -301,6 +301,15 @@ class EvalConfig(BaseModel):
             try:
                 return AgentType(v)
             except ValueError:
+                if v == "integration_test":
+                    raise ValueError(
+                        "integration_test is the platform's authoring agent: "
+                        "it pre-stages the golden solution (Task.validation) "
+                        "and runs the graders expecting Reward 1.0. Run it "
+                        "against a deployed environment on the platform — "
+                        "`hud eval <env-name> integration_test --task-ids "
+                        "<slug> -y` — it is not available with --runtime local."
+                    ) from None
                 valid = [e.value for e in AgentType]
                 raise ValueError(
                     f"Invalid agent: {v}. Must be one of: {', '.join(valid)}"

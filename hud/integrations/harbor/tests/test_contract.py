@@ -12,6 +12,7 @@ import pytest
 
 from hud.eval import Task
 from hud.integrations import harbor
+from hud.integrations.harbor.adapt import HARBOR_SCHEMA_VERSION
 
 from .conftest import make_harbor_task, make_multi_step_task
 
@@ -1057,3 +1058,27 @@ def test_authored_runtime_assets_are_valid_source() -> None:
 
 def test_public_surface_is_only_the_two_real_operations() -> None:
     assert harbor.__all__ == ["adapt", "export"]
+
+
+def test_unknown_schema_version_fails_loudly(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text('schema_version = "99.9"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported Harbor schema"):
+        harbor.adapt(tmp_path)
+
+
+def test_supported_schema_version_adapts(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        f'schema_version = "{HARBOR_SCHEMA_VERSION}"\n', encoding="utf-8"
+    )
+
+    taskset = harbor.adapt(tmp_path)
+    assert len(list(taskset)) == 1
+
+
+def test_absent_schema_version_still_adapts(tmp_path: Path) -> None:
+    """Unversioned tasks (the historical export shape) keep adapting."""
+    make_harbor_task(tmp_path, "task-a")
+    assert len(list(harbor.adapt(tmp_path))) == 1
