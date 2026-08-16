@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.base import Agent
 from hud.agents.types import IntegrationTestConfig, ToolStep
-from hud.capabilities import MCPClient
+from hud.capabilities import MCPClient, SSHClient
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils.time import now_iso
 
@@ -47,15 +47,16 @@ class IntegrationTestAgent(Agent):
             logger.warning("integration_test: task has no Task.validation — nothing staged")
             return
 
-        connections: dict[str, MCPClient] = {}
+        connections: dict[str, MCPClient | SSHClient] = {}
         manifest = run.client.manifest
         if manifest is not None:
             for cap in manifest.bindings:
-                if cap.protocol != MCPClient.protocol:
+                if cap.protocol not in (MCPClient.protocol, SSHClient.protocol):
                     continue
                 opened = await run.client.open(cap.name)
-                if isinstance(opened, MCPClient):
-                    connections[cap.name] = opened
+                # open() resolves through the capability registry, so the
+                # client type matches the protocol we filtered on above.
+                connections[cap.name] = cast("MCPClient | SSHClient", opened)
 
         if not connections:
             logger.warning(
@@ -92,7 +93,7 @@ class IntegrationTestAgent(Agent):
 
     async def _dispatch(
         self,
-        connections: dict[str, MCPClient],
+        connections: dict[str, MCPClient | SSHClient],
         call: MCPToolCall,
     ) -> MCPToolResult:
         """Run one validation tool call against whichever capability serves it.
@@ -100,6 +101,8 @@ class IntegrationTestAgent(Agent):
         Most tasks declare a single MCP capability (``bash``); try each
         connected client in turn and stop at the first non-"unknown tool"
         result so a task with several capabilities still routes correctly.
+        SSH-published workspaces (protocol ``ssh/2``) run the same golden
+        ``bash`` steps via ``bash -lc`` over the SSH connection.
         """
         from mcp.types import TextContent
 
@@ -121,7 +124,10 @@ class IntegrationTestAgent(Agent):
         last: MCPToolResult | None = None
         for name, client in connections.items():
             try:
-                result = await client.call_tool(call.name, args)
+                if isinstance(client, SSHClient):
+                    result = await self._run_over_ssh(client, call)
+                else:
+                    result = await client.call_tool(call.name, args)
             except Exception as exc:
                 logger.warning(
                     "integration_test: capability %r failed for %r: %s",
@@ -150,8 +156,38 @@ class IntegrationTestAgent(Agent):
             content=[
                 TextContent(
                     type="text",
-                    text=(f"unknown tool: {call.name!r} — no connected MCP capability serves it"),
+                    text=(
+                        f"unknown tool: {call.name!r} — no connected MCP "
+                        "or SSH capability serves it"
+                    ),
                 )
             ],
             isError=True,
+        )
+
+    @staticmethod
+    async def _run_over_ssh(client: SSHClient, call: MCPToolCall) -> MCPToolResult:
+        from mcp.types import TextContent
+
+        raw_args = call.arguments or {}
+        command = raw_args.get("command") if isinstance(raw_args, dict) else None
+        if not isinstance(command, str):
+            return MCPToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"validation step {call.name!r} has no bash command to run",
+                    )
+                ],
+                isError=True,
+            )
+        completed = await client.run("bash", "-lc", command)
+        output_parts = [p for p in (completed.stdout, completed.stderr) if p]
+        output = "".join(
+            p.decode("utf-8", errors="replace") if isinstance(p, bytes) else str(p)
+            for p in output_parts
+        )
+        return MCPToolResult(
+            content=[TextContent(type="text", text=output.strip() or "(no output)")],
+            isError=completed.returncode != 0,
         )
