@@ -106,7 +106,7 @@ def _fake_run_ssh(*, validation: list[Any]) -> Any:
         async def run(self, *args: object, **kwargs: Any) -> Any:
             from types import SimpleNamespace
 
-            assert args[:3] == ("bash", "-lc", "echo 'golden' > answer.txt")
+            assert args == ("bash -lc echo 'golden' > answer.txt",)
             return SimpleNamespace(stdout=b"staged\n", stderr=b"", returncode=0)
 
     run = _fake_run(validation=validation, tools={})
