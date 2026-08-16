@@ -503,40 +503,92 @@ class _NamespaceHost:
             *command_prefix,
             *request["argv"],
         ]
+        process: ProcessGroup | None = None
         if channel.term_type:
-            master_fd, slave_fd = pty.openpty()
-            process = await create_process_group_exec(
-                *argv,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=request["cwd"],
-                env=request["env"],
-            )
-            os.close(slave_fd)
-            await channel.redirect(
-                stdin=os.dup(master_fd),
-                stdout=os.dup(master_fd),
-                send_eof=False,
-            )
-            os.close(master_fd)
+            master_fd = slave_fd = stdin_fd = stdout_fd = -1
+            try:
+                master_fd, slave_fd = pty.openpty()
+                process = await create_process_group_exec(
+                    *argv,
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    cwd=request["cwd"],
+                    env=request["env"],
+                )
+                os.close(slave_fd)
+                slave_fd = -1
+                stdin_fd = os.dup(master_fd)
+                stdout_fd = os.dup(master_fd)
+                os.close(master_fd)
+                master_fd = -1
+
+                descriptor, stdin_fd = stdin_fd, -1
+                await channel.redirect_stdin(descriptor)
+                descriptor, stdout_fd = stdout_fd, -1
+                await channel.redirect_stdout(descriptor, send_eof=False)
+            except BaseException as exc:
+                if process is not None:
+                    try:
+                        await process.terminate()
+                    except Exception as cleanup_exc:
+                        exc.add_note(f"failed to terminate spawned process: {cleanup_exc}")
+                raise
+            finally:
+                for descriptor in (master_fd, slave_fd, stdin_fd, stdout_fd):
+                    if descriptor != -1:
+                        os.close(descriptor)
         else:
-            process = await create_process_group_exec(
-                *argv,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=request["cwd"],
-                env=request["env"],
-            )
-            assert process.process.stdin is not None
-            assert process.stdout is not None and process.stderr is not None
-            await channel.redirect(
-                stdin=process.process.stdin,
-                stdout=process.stdout,
-                stderr=process.stderr,
-                send_eof=False,
-            )
+            stdin_read = stdin_write = -1
+            stdout_read = stdout_write = -1
+            stderr_read = stderr_write = -1
+            try:
+                # AsyncSSH closes raw pipe transports with the channel, even
+                # when a background descendant retains the child end.
+                stdin_read, stdin_write = os.pipe()
+                stdout_read, stdout_write = os.pipe()
+                stderr_read, stderr_write = os.pipe()
+                process = await create_process_group_exec(
+                    *argv,
+                    stdin=stdin_read,
+                    stdout=stdout_write,
+                    stderr=stderr_write,
+                    cwd=request["cwd"],
+                    env=request["env"],
+                )
+
+                os.close(stdin_read)
+                stdin_read = -1
+                os.close(stdout_write)
+                stdout_write = -1
+                os.close(stderr_write)
+                stderr_write = -1
+
+                descriptor, stdin_write = stdin_write, -1
+                await channel.redirect_stdin(descriptor)
+                descriptor, stdout_read = stdout_read, -1
+                await channel.redirect_stdout(descriptor, send_eof=False)
+                descriptor, stderr_read = stderr_read, -1
+                await channel.redirect_stderr(descriptor, send_eof=False)
+            except BaseException as exc:
+                if process is not None:
+                    try:
+                        await process.terminate()
+                    except Exception as cleanup_exc:
+                        exc.add_note(f"failed to terminate spawned process: {cleanup_exc}")
+                raise
+            finally:
+                for descriptor in (
+                    stdin_read,
+                    stdin_write,
+                    stdout_read,
+                    stdout_write,
+                    stderr_read,
+                    stderr_write,
+                ):
+                    if descriptor != -1:
+                        os.close(descriptor)
+        assert process is not None
         wait_task = asyncio.create_task(process.wait())
         closed_task = asyncio.create_task(channel.channel.wait_closed())
         try:
@@ -550,6 +602,12 @@ class _NamespaceHost:
             if not request["persistent"]:
                 await process.terminate()
             return returncode
+        except BaseException as exc:
+            try:
+                await process.terminate()
+            except Exception as cleanup_exc:
+                exc.add_note(f"failed to terminate spawned process: {cleanup_exc}")
+            raise
         finally:
             wait_task.cancel()
             closed_task.cancel()
