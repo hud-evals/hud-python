@@ -92,3 +92,68 @@ async def test_invalid_entries_are_skipped_without_crashing() -> None:
     await agent(run)
 
     assert len(run.recorded) == 1
+
+
+def _fake_run_ssh(*, validation: list[Any]) -> Any:
+    """Run stand-in whose workspace is published over SSH (ssh/2)."""
+
+    from hud.capabilities import SSHClient
+
+    class FakeSSHClient(SSHClient):
+        def __init__(self) -> None:
+            pass
+
+        async def run(self, *args: object, **kwargs: Any) -> Any:
+            from types import SimpleNamespace
+
+            assert args[:3] == ("bash", "-lc", "echo 'golden' > answer.txt")
+            return SimpleNamespace(stdout=b"staged\n", stderr=b"", returncode=0)
+
+    run = _fake_run(validation=validation, tools={})
+    run.client.manifest = SimpleNamespace(
+        bindings=[SimpleNamespace(name="workspace", protocol="ssh/2")]
+    )
+    run.client.open = AsyncMock(return_value=FakeSSHClient())
+    return run
+
+
+@pytest.mark.asyncio
+async def test_dispatches_validation_over_ssh_workspace() -> None:
+    from hud.agents.types import ToolStep
+
+    agent = IntegrationTestAgent(IntegrationTestConfig())
+    run = _fake_run_ssh(
+        validation=[MCPToolCall(name="bash", arguments={"command": "echo 'golden' > answer.txt"})]
+    )
+
+    await agent(run)
+
+    assert len(run.recorded) == 1
+    step = run.recorded[0]
+    assert isinstance(step, ToolStep)
+    assert step.result.isError is False
+    assert step.result.content[0].text == "staged"
+
+
+@pytest.mark.asyncio
+async def test_ssh_failure_surfaces_as_error_result() -> None:
+    from types import SimpleNamespace
+
+    from hud.capabilities import SSHClient
+
+    class FailingSSHClient(SSHClient):
+        def __init__(self) -> None:
+            pass
+
+        async def run(self, *args: object, **kwargs: Any) -> Any:
+            return SimpleNamespace(stdout=b"", stderr=b"no such file", returncode=127)
+
+    run = _fake_run(validation=[MCPToolCall(name="bash", arguments={"command": "nope"})], tools={})
+    run.client.manifest = SimpleNamespace(
+        bindings=[SimpleNamespace(name="workspace", protocol="ssh/2")]
+    )
+    run.client.open = AsyncMock(return_value=FailingSSHClient())
+
+    await IntegrationTestAgent(IntegrationTestConfig())(run)
+
+    assert run.recorded[0].result.isError is True
