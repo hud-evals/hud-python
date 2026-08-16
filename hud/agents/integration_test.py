@@ -181,7 +181,10 @@ class IntegrationTestAgent(Agent):
                 ],
                 isError=True,
             )
-        completed = await client.run("bash", "-lc", command)
+        # Single remote command string: asyncssh shlex-splits it, preserving
+        # the command's own quoting, and ships `command` to `bash -lc` as one
+        # argument (the codebase idiom; avoids multi-arg space-join hazards).
+        completed = await client.run(f"bash -lc {command}")
         output_parts = [p for p in (completed.stdout, completed.stderr) if p]
         output = "".join(
             p.decode("utf-8", errors="replace") if isinstance(p, bytes) else str(p)
