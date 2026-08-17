@@ -825,13 +825,12 @@ class ModalRuntime:
                         await self._image.build.aio(app=app)
                         self._resolved = self._image
             image = self._resolved
-        if self.env_vars and compose is None:
-            image = image.env(self.env_vars)
-
         if app is None:
             app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
 
         sandbox_kwargs: dict[str, Any] = {}
+        if self.env_vars and compose is None:
+            sandbox_kwargs["env"] = self.env_vars
         resources = config.resources
         if compose is not None:
             sandbox_kwargs["cpu"] = max(

@@ -863,6 +863,7 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert kwargs["cpu"] == 4
     assert kwargs["memory"] == 8192
     assert kwargs["image"] == _ModalImageRef("registry", "docker:28.3.3-dind")
+    assert "env" not in kwargs
     assert calls["uploads"] == [
         ("project.tar.gz", "/hud/project.tar.gz"),
         ("override.json", "/hud/override.json"),
@@ -967,7 +968,7 @@ async def test_modal_runtime_can_override_workdir(
     assert sandbox_kwargs["workdir"] == "/app"
 
 
-async def test_modal_runtime_applies_env_vars_to_image(
+async def test_modal_runtime_passes_env_vars_to_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_modal(monkeypatch)
@@ -979,11 +980,8 @@ async def test_modal_runtime_applies_env_vars_to_image(
 
     sandbox_kwargs = calls["sandbox_kwargs"]
     assert isinstance(sandbox_kwargs, dict)
-    assert sandbox_kwargs["image"] == _ModalImageRef(
-        "registry",
-        "img:tag",
-        {"TOKEN": "secret"},
-    )
+    assert sandbox_kwargs["image"] == _ModalImageRef("registry", "img:tag")
+    assert sandbox_kwargs["env"] == {"TOKEN": "secret"}
 
 
 async def test_daytona_runtime_config_flows_into_daytona_sdk(
