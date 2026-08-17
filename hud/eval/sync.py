@@ -135,12 +135,16 @@ def upload_taskset(
     platform: PlatformClient,
     name: str,
     tasks: list[Task],
+    *,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """Upload tasks to a platform taskset, creating it if needed."""
     payload: dict[str, Any] = {
         "taskset_name": name,
         "tasks": [task_upload_payload(task) for task in tasks],
     }
+    if project_id:
+        payload["project_id"] = project_id
     data = platform.post("/tasks/upload", json=payload)
     return data if isinstance(data, dict) else {}
 
