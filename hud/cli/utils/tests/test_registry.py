@@ -18,13 +18,18 @@ if TYPE_CHECKING:
 
 def test_from_record_maps_registry_detail_response() -> None:
     env = RegistryEnvironment.from_record(
-        {"id": "abc123456", "name": "my-env", "latest_build": {"version": 2}}
+        {
+            "id": "abc123456",
+            "name": "my-env",
+            "latest_build": {"version": 2, "manifest": {"tasks": [{"id": "solve"}]}},
+        }
     )
 
     assert env.id == "abc123456"
     assert env.name == "my-env"
     assert env.short_id == "abc12345"
     assert env.version_label == " v2"
+    assert env.manifest == {"tasks": [{"id": "solve"}]}
 
 
 def test_resolve_accepts_uuid_without_lookup() -> None:

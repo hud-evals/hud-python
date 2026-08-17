@@ -172,6 +172,85 @@ def _warn_on_linked_environment_mismatch(
         )
 
 
+def _resolve_registry_environment_detail(
+    platform: PlatformClient,
+    ref: str,
+) -> tuple[RegistryEnvironment | None, str | None]:
+    matches = [
+        env
+        for env in resolve_registry_environments(platform, ref)
+        if env.name == ref or env.id == ref
+    ]
+    if not matches:
+        return None, f"environment {ref!r} is not deployed"
+    if len(matches) > 1:
+        return None, f"environment name {ref!r} is ambiguous"
+    registry_env = get_registry_environment(platform, matches[0].id)
+    if registry_env is None:
+        return None, f"environment {ref!r} is not deployed"
+    return registry_env, None
+
+
+def _validate_task_manifests(
+    taskset: Taskset,
+    platform: PlatformClient,
+    console: HUDConsole,
+) -> None:
+    """Fail before upload when a deployed environment cannot expose a task."""
+    errors: list[str] = []
+    for env_name in sorted(taskset.environment_names()):
+        try:
+            registry_env, error = _resolve_registry_environment_detail(platform, env_name)
+        except (HudException, ValueError) as exc:
+            errors.append(f"could not validate environment {env_name!r}: {exc}")
+            continue
+        if error is not None:
+            errors.append(error)
+            continue
+        assert registry_env is not None
+        manifest = registry_env.manifest
+        raw_tasks = manifest.get("tasks") if manifest is not None else None
+        if not isinstance(raw_tasks, list):
+            errors.append(f"environment {env_name!r} has no successful build manifest")
+            continue
+        exposed = {
+            task["id"]
+            for task in raw_tasks
+            if isinstance(task, dict) and isinstance(task.get("id"), str)
+        }
+        required = {task.id for task in taskset if task.env == env_name}
+        required.update(
+            task.verifier.id
+            for task in taskset
+            if task.verifier is not None and task.verifier.env == env_name
+        )
+        missing = sorted(required - exposed)
+        if missing:
+            errors.append(f"environment {env_name!r} does not expose task(s): {', '.join(missing)}")
+
+    if errors:
+        console.error("Task validation failed:")
+        for error in errors:
+            console.error(f"  {error}")
+        console.hint("Deploy the environment or fix the task ids before syncing.")
+        raise typer.Exit(1)
+    console.success("Task environment manifests validated")
+
+
+def _validate_source_fixtures(source: str, console: HUDConsole) -> None:
+    errors = [
+        issue
+        for issue in EnvironmentSource.open(source).validate_fixture_quality()
+        if issue.severity == "error"
+    ]
+    if not errors:
+        return
+    console.error("Source fixture validation failed:")
+    for issue in errors:
+        console.error(f"  {issue.message} ({issue.file})")
+    raise typer.Exit(1)
+
+
 def _fetch_remote_taskset(
     platform: PlatformClient,
     target_ref: str,
@@ -310,6 +389,8 @@ def sync_tasks_command(
         exclude=exclude,
         console=hud_console,
     )
+    _validate_source_fixtures(source, hud_console)
+    _validate_task_manifests(local_taskset, platform, hud_console)
     _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console)
 
     # Creating a new taskset is only allowed when targeting an explicit name

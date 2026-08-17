@@ -310,6 +310,17 @@ def test_no_dockerfile_is_clean(tmp_path: Path) -> None:
     assert EnvironmentSource.open(tmp_path).validate_dockerfile() == []
 
 
+def test_fixture_validation_rejects_host_junk_and_broken_links(tmp_path: Path) -> None:
+    metadata = tmp_path / "__MACOSX"
+    metadata.mkdir()
+    _write(tmp_path / ".DS_Store", "finder")
+    (tmp_path / "missing-link").symlink_to(tmp_path / "missing")
+
+    issues = EnvironmentSource.open(tmp_path).validate_fixture_quality()
+
+    assert {issue.file for issue in issues} == {"__MACOSX", ".DS_Store", "missing-link"}
+
+
 def test_validate_environment_aggregates(tmp_path: Path) -> None:
     _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\nlicense = {file = "LICENSE"}\n')
     _write(

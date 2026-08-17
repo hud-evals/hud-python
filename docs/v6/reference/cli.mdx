@@ -110,19 +110,24 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 
 ## Run a packaged image
 
-`hud task start` / `hud task grade` attach to an env already serving locally (e.g. inside a built image, or alongside `hud serve`), or load one from source with `--source`. `hud task list` always reads from source (default `.`) - it doesn't attach.
+`hud task start` / `hud task grade` attach to an env already serving locally (e.g. inside a built image, or alongside `hud serve`), or load one from source with `--source`. Both verify that the live environment exposes the requested task before running it.
 
 ```bash
 hud task list                          # what tasks are exposed
+hud task list --env browser-v2         # boot a deployed env and read its live manifest
 hud task start fix_bug                 # -> the prompt (stdout)
 hud task grade fix_bug --answer "..."  # -> the reward (stdout)
+hud task grade fix_bug --dry-run       # start + empty-answer grade, no agent rollout
+hud task grade task/fix_bug --env env/browser-v2 --dry-run  # check a deployed env
 ```
+
+`--dry-run` reports the environment, task, grader, and reward-shape phases separately. A valid low reward passes: the check verifies that grading works and returns finite values in the supported range, not that an empty answer solves the task.
 
 | Command | Key options |
 |---------|-------------|
-| `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o` |
-| `hud task grade <task>` | `--answer`, `--answer-file`, `--source`, `--args`, `--url`, `--out` |
-| `hud task list` | `--source`/`-s` |
+| `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--env`, `--out`/`-o` |
+| `hud task grade <task>` | `--answer`, `--answer-file`, `--dry-run`, `--timeout`, `--source`, `--args`, `--url`, `--env`, `--out` |
+| `hud task list` | `--source`/`-s`, `--env`, `--url`/`-u` |
 
 ## Platform
 
@@ -130,6 +135,8 @@ hud task grade fix_bug --answer "..."  # -> the reward (stdout)
 hud sync tasks my-taskset      # publish tasks as a named taskset
 hud sync env                   # sync environment metadata
 ```
+
+Before uploading tasks, `hud sync tasks` rejects macOS archive metadata, broken links, and references to deployed environments or task ids that do not exist. `hud deploy` runs the same source-fixture checks before building.
 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).
