@@ -10,10 +10,14 @@ import pytest
 import typer
 
 from hud.cli.deploy import _resolve_environment_name
+from hud.cli.utils.project import Placement, Project, ProjectSource
 from hud.cli.utils.registry import RegistryEnvironment
 from hud.cli.utils.source import EnvironmentSource
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+
+# Deploys that accept the team's default Project send no project_id.
+_UNPLACED = Placement(project=None, source=ProjectSource.TEAM_DEFAULT)
 
 
 @pytest.mark.parametrize(("value", "expected"), [("HUD", "hud"), ("modal", "modal")])
@@ -232,6 +236,7 @@ class TestRuntimeConfigFile:
             env_file=None,
             no_env=True,
             registry_id=None,
+            project=None,
             build_args=None,
             build_secrets=None,
             runtime=None,
@@ -331,6 +336,7 @@ class TestRuntimeConfigFile:
                 env_file=None,
                 no_env=True,
                 registry_id=None,
+                project=None,
                 build_args=None,
                 build_secrets=None,
                 runtime=None,
@@ -450,6 +456,7 @@ class TestDeployAsync:
                 plan=_DeployPlan(
                     name="test-env",
                     registry_id=None,
+                    placement=_UNPLACED,
                     runtime=None,
                     runtime_config=None,
                     env_vars={},
@@ -481,6 +488,7 @@ class TestDeployAsync:
                 plan=_DeployPlan(
                     name="test-env",
                     registry_id=None,
+                    placement=_UNPLACED,
                     runtime=None,
                     runtime_config=None,
                     env_vars={},
@@ -492,6 +500,90 @@ class TestDeployAsync:
             )
 
         assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_trigger_build_sends_resolved_project(self) -> None:
+        """A resolved placement reaches the platform as project_id."""
+        from hud.cli.deploy import _DeployPlan, _trigger_build
+        from hud.utils.platform import PlatformClient
+
+        class FakePlatform(PlatformClient):
+            payload: dict[str, object] | None = None
+
+            async def apost(
+                self,
+                path: str,
+                *,
+                json: object | None = None,
+            ) -> dict[str, object]:
+                object.__setattr__(self, "payload", json)
+                return {"id": "build-1", "registry_id": "registry-1"}
+
+        platform = FakePlatform("https://api.example", "key")
+        await _trigger_build(
+            platform,
+            build_id="build-1",
+            plan=_DeployPlan(
+                name="test-env",
+                registry_id=None,
+                placement=Placement(
+                    project=Project(
+                        id="project-1",
+                        name="browser-evals",
+                        is_default=False,
+                        can_create=True,
+                    ),
+                    source=ProjectSource.FLAG,
+                ),
+                runtime=None,
+                runtime_config=None,
+                env_vars={},
+                build_args={},
+                build_secrets={},
+            ),
+            no_cache=False,
+        )
+
+        assert platform.payload is not None
+        assert platform.payload["project_id"] == "project-1"
+
+    @pytest.mark.asyncio
+    async def test_trigger_build_omits_project_for_the_team_default(self) -> None:
+        """The zero-config deploy stays byte-identical to before projects existed."""
+        from hud.cli.deploy import _DeployPlan, _trigger_build
+        from hud.utils.platform import PlatformClient
+
+        class FakePlatform(PlatformClient):
+            payload: dict[str, object] | None = None
+
+            async def apost(
+                self,
+                path: str,
+                *,
+                json: object | None = None,
+            ) -> dict[str, object]:
+                object.__setattr__(self, "payload", json)
+                return {"id": "build-1", "registry_id": "registry-1"}
+
+        platform = FakePlatform("https://api.example", "key")
+        await _trigger_build(
+            platform,
+            build_id="build-1",
+            plan=_DeployPlan(
+                name="test-env",
+                registry_id=None,
+                placement=_UNPLACED,
+                runtime=None,
+                runtime_config=None,
+                env_vars={},
+                build_args={},
+                build_secrets={},
+            ),
+            no_cache=False,
+        )
+
+        assert platform.payload is not None
+        assert "project_id" not in platform.payload
 
 
 class TestSaveDeployLink:
