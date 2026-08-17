@@ -37,10 +37,12 @@ hud set HUD_API_KEY=your-key-here
 # or: export HUD_API_KEY=your-key-here
 ```
 
-Then scaffold your first environment:
+Then start from the coding environment, or choose another example environment:
 
 ```bash
 hud init my-env
+hud init my-desktop-env --template cua
+hud init my-custom-env --template blank
 ```
 
 ![Agent running on SheetBench](docs/src/images/trace_sheet.gif)
