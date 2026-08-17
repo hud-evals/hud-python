@@ -1,19 +1,26 @@
 """File templates written by ``hud init``."""
 
 DOCKERFILE_HUD = """\
-FROM python:3.11-slim
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl \\
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
+WORKDIR /hud
 COPY pyproject.toml uv.lock* ./
-RUN pip install uv && uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --no-dev --no-install-project
 COPY . .
 
-# Serve the Environment's control channel (tcp JSON-RPC) on 8765.
 EXPOSE 8765
-CMD ["uv", "run", "hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["/usr/local/venv/bin/hud", "serve", "/hud/env.py", "--host", "0.0.0.0", "--port", "8765"]
+"""
+
+DOCKERIGNORE = """\
+.env
+.git
+.hud
+.hud_eval.toml
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
 """
 
 # fmt: off
@@ -119,7 +126,7 @@ if __name__ == "__main__":
 TASKS_PY = '''\
 """Tasks for {env_name} — run with: hud eval tasks.py <agent>   (e.g. claude)."""
 
-from env import count
+from env import count, env as env
 
 # ``hud eval`` collects these Tasks — each is the ``count`` task bound to
 # concrete args. Add your own, or build them in a loop.
