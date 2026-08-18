@@ -13,7 +13,9 @@ import pytest
 
 from hud.clients import HudProtocolError, connect
 from hud.environment import Environment
-from hud.eval.runtime import _local
+from hud.eval import LocalRuntime, Task
+
+_SESSION = Task(env="sessions", id="echo")
 
 
 def _env() -> Environment:
@@ -28,7 +30,11 @@ def _env() -> Environment:
 
 
 async def test_concurrent_sessions_grade_their_own_tasks() -> None:
-    async with _local(_env()) as runtime, connect(runtime) as a, connect(runtime) as b:
+    async with (
+        LocalRuntime(_env())(_SESSION) as runtime,
+        connect(runtime) as a,
+        connect(runtime) as b,
+    ):
         await a.start_task("echo", {"tag": "a"})
         await b.start_task("echo", {"tag": "b"})  # must not disturb a's task
         assert (await a.grade({"answer": "x"}))["tag"] == "a"
@@ -36,7 +42,11 @@ async def test_concurrent_sessions_grade_their_own_tasks() -> None:
 
 
 async def test_restart_replaces_only_the_sessions_own_task() -> None:
-    async with _local(_env()) as runtime, connect(runtime) as a, connect(runtime) as b:
+    async with (
+        LocalRuntime(_env())(_SESSION) as runtime,
+        connect(runtime) as a,
+        connect(runtime) as b,
+    ):
         await b.start_task("echo", {"tag": "b"})
         await a.start_task("echo", {"tag": "first"})
         await a.start_task("echo", {"tag": "second"})
@@ -45,7 +55,7 @@ async def test_restart_replaces_only_the_sessions_own_task() -> None:
 
 
 async def test_disconnect_parks_the_task_for_a_later_connection() -> None:
-    async with _local(_env()) as runtime:
+    async with LocalRuntime(_env())(_SESSION) as runtime:
         async with connect(runtime) as first:
             await first.start_task("echo", {"tag": "parked"})
         async with connect(runtime) as later:
@@ -53,7 +63,7 @@ async def test_disconnect_parks_the_task_for_a_later_connection() -> None:
 
 
 async def test_grade_with_multiple_parked_sessions_errors_loudly() -> None:
-    async with _local(_env()) as runtime:
+    async with LocalRuntime(_env())(_SESSION) as runtime:
         for tag in ("one", "two"):
             async with connect(runtime) as client:
                 await client.start_task("echo", {"tag": tag})
@@ -63,7 +73,7 @@ async def test_grade_with_multiple_parked_sessions_errors_loudly() -> None:
 
 
 async def test_hello_resumes_a_parked_session_by_id() -> None:
-    async with _local(_env()) as runtime:
+    async with LocalRuntime(_env())(_SESSION) as runtime:
         ids: dict[str, str] = {}
         for tag in ("one", "two"):
             async with connect(runtime) as client:
@@ -76,13 +86,17 @@ async def test_hello_resumes_a_parked_session_by_id() -> None:
 
 
 async def test_hello_with_an_unknown_session_id_errors() -> None:
-    async with _local(_env()) as runtime, connect(runtime) as client:
+    async with LocalRuntime(_env())(_SESSION) as runtime, connect(runtime) as client:
         with pytest.raises(HudProtocolError, match="unknown session"):
             await client.hello(session_id="sess-nope")
 
 
 async def test_hello_cannot_resume_a_live_session() -> None:
-    async with _local(_env()) as runtime, connect(runtime) as a, connect(runtime) as b:
+    async with (
+        LocalRuntime(_env())(_SESSION) as runtime,
+        connect(runtime) as a,
+        connect(runtime) as b,
+    ):
         assert a.manifest is not None
         await a.start_task("echo", {"tag": "a"})
         with pytest.raises(HudProtocolError, match="live connection"):

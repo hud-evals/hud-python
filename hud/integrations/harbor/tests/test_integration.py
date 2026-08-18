@@ -606,7 +606,9 @@ echo "1.0" > /logs/verifier/reward.txt
         taskset = harbor.adapt(dataset, hud_requirement=str(wheel)).taskset
         job = await taskset.run(
             Oracle({"env-templates": solution}),
-            runtime=DockerRuntime(env_vars={"HARBOR_JUDGE_KEY": "judge-secret"}),
+            runtime=DockerRuntime(
+                env_vars={"HARBOR_GREETING": "", "HARBOR_JUDGE_KEY": "judge-secret"}
+            ),
             max_concurrent=1,
         )
         (run,) = job.runs
@@ -655,9 +657,9 @@ timeout_sec = 120
     taskset = harbor.adapt(dataset, hud_requirement=str(wheel)).taskset
     task = next(iter(taskset))
     assert task.runtime_config is not None
-    source = task.runtime_config.compose_source()
-    assert source is not None
-    compose = source.runnable_path("test")
+    assert task.runtime_config.compose is not None
+    compose = task.runtime_config.compose.document
+    assert isinstance(compose, Path)
     # Providers yield as soon as the published port exists, before the serve
     # process proves itself, so an early abort is only observable from the
     # adapted artifact: run its main service in the foreground.

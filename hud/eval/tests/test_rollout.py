@@ -32,9 +32,9 @@ from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.environment import Answer, Environment
-from hud.eval import Job, Runtime, SubprocessRuntime, Task, Taskset
+from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
-from hud.eval.runtime import _local
+from hud.eval.runtime import RuntimeSession
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -188,7 +188,7 @@ async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> N
         id="solve",
         verifier=Task(env="reviewed", id="verify", args={"expected": "secret"}),
     )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
 
     assert run.reward == 1.0
     assert completed == ["actor:secret", "verifier:secret"]
@@ -202,24 +202,23 @@ async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> N
 
 async def test_actor_result_is_forwarded_to_the_verifier() -> None:
     env = Environment("reviewed")
-    received: list[tuple[str, str]] = []
+    received: list[str] = []
 
     class ActorResult(BaseModel):
         score: float
         answer: str
-        handoff: str
 
     @env.template()
     async def solve():
         answer = yield "answer secret"
-        yield {"score": 0.0, "answer": answer, "handoff": "token"}
+        yield {"score": 0.0, "answer": answer}
 
     @env.template(returns=ActorResult)
     async def verify():
         answer = yield ""
         assert isinstance(answer, Answer)
         assert isinstance(answer.content, ActorResult)
-        received.append((answer.content.answer, answer.content.handoff))
+        received.append(answer.content.answer)
         yield 1.0
 
     task = Task(
@@ -227,59 +226,106 @@ async def test_actor_result_is_forwarded_to_the_verifier() -> None:
         id="solve",
         verifier=Task(env="reviewed", id="verify"),
     )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
 
     assert run.reward == 1.0
-    assert received == [("secret", "token")]
+    assert received == ["secret"]
 
 
-async def test_independent_verifier_receives_runtime_handoff() -> None:
+async def test_malformed_subscores_fail_inside_the_rollout_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.clients import HudClient
+
+    env = Environment("malformed-grade")
+
+    @env.template()
+    async def solve():
+        yield "answer"
+        yield 1.0
+
+    async def malformed_grade(
+        _client: HudClient,
+        _payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {"score": 1.0, "subscores": [{"name": "missing-value"}]}
+
+    reported: list[dict[str, Any]] = []
+
+    async def report(run: Run) -> None:
+        reported.append(run.evaluation)
+
+    monkeypatch.setattr(HudClient, "grade", malformed_grade)
+    monkeypatch.setattr("hud.eval.run.trace_exit", report)
+
+    run = await rollout(
+        Task(env="malformed-grade", id="solve"),
+        _FnAgent(lambda _prompt: "done"),
+        runtime=LocalRuntime(env),
+    )
+
+    assert run.trace.is_error
+    assert "value" in (run.trace.error or "")
+    assert reported == [{}]
+
+
+async def test_independent_verifier_receives_runtime_session_files(tmp_path: Path) -> None:
     actor_env = Environment("actor")
     verifier_env = Environment("judge")
-    transfers: list[str] = []
+    transfers: list[tuple[str, str]] = []
 
     @actor_env.template()
     async def solve():
         yield "answer secret"
-        yield {"score": 0.0, "handoff": "token"}
+        yield {"score": 0.0}
 
     @verifier_env.template()
     async def verify():
-        result = yield ""
-        yield 1.0 if result["handoff"] == "token" else 0.0
+        yield ""
+        yield 1.0
 
-    class ActorHandoff:
-        async def export_to(self, destination: Path) -> None:
-            await asyncio.to_thread(destination.write_text, "files", encoding="utf-8")
-            transfers.append("export")
+    class ActorSession(RuntimeSession):
+        @asynccontextmanager
+        async def snapshot(self) -> AsyncIterator[Path | None]:
+            destination = tmp_path / "session.tar.gz"
+            await asyncio.to_thread(destination.write_text, self.session_id, encoding="utf-8")
+            transfers.append(("actor", self.session_id))
+            yield destination
 
-        async def import_from(self, source: Path) -> None:
-            raise AssertionError("actor imported a handoff")
+    class VerifierSession(RuntimeSession):
+        async def restore(self, source: Path) -> None:
+            content = await asyncio.to_thread(source.read_text, encoding="utf-8")
+            assert content.startswith("sess-")
+            transfers.append(("verifier", self.session_id))
 
-    class VerifierHandoff:
-        async def export_to(self, destination: Path) -> None:
-            raise AssertionError("verifier exported a handoff")
+    class ActorRuntime(Runtime):
+        def session(self, session_id: str) -> RuntimeSession:
+            return ActorSession(session_id)
 
-        async def import_from(self, source: Path) -> None:
-            assert await asyncio.to_thread(source.read_text, "utf-8") == "files"
-            transfers.append("import")
+    class VerifierRuntime(Runtime):
+        def session(self, session_id: str) -> RuntimeSession:
+            return VerifierSession(session_id)
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
         env = actor_env if row.env == "actor" else verifier_env
-        endpoint = ActorHandoff() if row.env == "actor" else VerifierHandoff()
-        async with _local(env) as runtime:
-            yield Runtime(runtime.url, handoff=endpoint)
+        async with LocalRuntime(env)(row) as runtime:
+            yield (
+                ActorRuntime(runtime.url) if row.env == "actor" else VerifierRuntime(runtime.url)
+            )
 
     task = Task(
         env="actor",
         id="solve",
-        verifier=Task(env="judge", id="verify", requires_handoff=True),
+        verifier=Task(env="judge", id="verify"),
     )
     run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
 
     assert run.reward == 1.0
-    assert transfers == ["export", "import"]
+    assert [runtime for runtime, _ in transfers] == ["actor", "verifier"]
+    assert transfers[0][1].startswith("sess-")
+    assert transfers[1][1].startswith("sess-")
+    assert transfers[0][1] != transfers[1][1]
 
 
 async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> None:
@@ -299,9 +345,14 @@ async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> 
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.env)
-        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
-            yield runtime
+        placements.append(f"start:{row.env}")
+        try:
+            async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(
+                row
+            ) as runtime:
+                yield runtime
+        finally:
+            placements.append(f"stop:{row.env}")
 
     task = Task(
         env="actor",
@@ -311,7 +362,7 @@ async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> 
     run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
 
     assert run.reward == 1.0
-    assert placements == ["actor", "judge"]
+    assert placements == ["start:actor", "stop:actor", "start:judge", "stop:judge"]
 
 
 async def test_verifier_remains_authoritative_after_an_agent_error() -> None:
@@ -332,7 +383,7 @@ async def test_verifier_remains_authoritative_after_an_agent_error() -> None:
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
         placements.append(row.env)
-        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+        async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(row) as runtime:
             yield runtime
 
     task = Task(
@@ -369,7 +420,7 @@ async def test_verifier_remains_authoritative_when_actor_grading_fails(
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
         placements.append(row.env)
-        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+        async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(row) as runtime:
             yield runtime
 
     task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
@@ -408,7 +459,7 @@ async def test_verifier_remains_authoritative_when_actor_grade_is_scoreless(
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
         placements.append(row.env)
-        async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+        async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(row) as runtime:
             yield runtime
 
     original_grade = HudClient.grade
@@ -449,7 +500,7 @@ async def test_verifier_provisioning_failure_leaves_the_run_ungraded() -> None:
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
         if row.env == "judge":
             raise RuntimeError("verifier unavailable")
-        async with _local(actor_env) as runtime:
+        async with LocalRuntime(actor_env)(row) as runtime:
             yield runtime
 
     task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
@@ -495,7 +546,7 @@ async def test_verifier_channel_failure_leaves_the_run_ungraded(
         verifier=Task(env="reviewed", id="verify"),
     )
 
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
     job = Job(id="verify-failed", name="verify-failed", runs=[run])
 
     assert run.trace.is_error
@@ -538,7 +589,7 @@ async def test_scoreless_verifier_frame_is_an_ungraded_error(
         verifier=Task(env="reviewed", id="verify"),
     )
 
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=lambda _row: _local(env))
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
     job = Job(id="verify-scoreless", name="verify-scoreless", runs=[run])
 
     assert run.trace.is_error
@@ -568,7 +619,7 @@ async def test_zero_score_verifier_grade_counts_an_errored_rollout() -> None:
     run = await rollout(
         task,
         _AnswerThenBoomAgent(lambda _prompt: "secret"),
-        runtime=lambda _row: _local(env),
+        runtime=LocalRuntime(env),
     )
     job = Job(id="verify-zero", name="verify-zero", runs=[run])
 
@@ -598,9 +649,7 @@ async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
             seen.update(run.bindings)
 
     env = _bindings_env({"robot": {"token": "slot-2"}})
-    run = await rollout(
-        Task(env="slots", id="claim"), _Claiming(), runtime=lambda _task: _local(env)
-    )
+    run = await rollout(Task(env="slots", id="claim"), _Claiming(), runtime=LocalRuntime(env))
 
     # Episode-scoped connection data reaches the agent by capability name,
     # without reading it back off the recorded setup step.
@@ -611,7 +660,7 @@ async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
 async def test_a_malformed_bindings_frame_fails_the_rollout_loudly() -> None:
     env = _bindings_env({"robot": "slot-2"})  # capability data must be an object
     run = await rollout(
-        Task(env="slots", id="claim"), _FnAgent(lambda _p: ""), runtime=lambda _task: _local(env)
+        Task(env="slots", id="claim"), _FnAgent(lambda _p: ""), runtime=LocalRuntime(env)
     )
 
     assert run.trace.status == "error"
@@ -650,7 +699,7 @@ async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) 
     run = await rollout(
         Task(env="opencode_report", id="write_report"),
         agent,
-        runtime=lambda _task: _local(env),
+        runtime=LocalRuntime(env),
     )
 
     assert run.reward == 1.0
@@ -711,7 +760,7 @@ async def test_tool_agent_timeout_stops_running_workspace_command_before_grading
     run = await rollout(
         Task(env="timeout_cleanup", id="wait_for_cleanup"),
         agent,
-        runtime=lambda _task: _local(env),
+        runtime=LocalRuntime(env),
     )
 
     assert run.trace.status == "error"
@@ -839,7 +888,7 @@ async def test_agent_loop_timeout_is_an_explicit_failure() -> None:
     run = await rollout(
         _add_task(2, 3),
         agent,
-        runtime=lambda _row: _local(env),
+        runtime=LocalRuntime(env),
         rollout_timeout=0.2,
     )
 
@@ -862,7 +911,7 @@ async def test_task_agent_timeout_still_grades_completed_work() -> None:
     agent = _SlowAgent(_solve_add)
     task = _add_task(2, 3).model_copy(update={"agent_config": {"timeout_seconds": 0.05}})
 
-    run = await rollout(task, agent, runtime=lambda _row: _local(env))
+    run = await rollout(task, agent, runtime=LocalRuntime(env))
 
     assert run.reward == 1.0
     assert run.trace.status == "error"
@@ -891,7 +940,7 @@ async def test_agent_timeout_error_is_not_the_phase_deadline(agent_timeout: floa
     task = _add_task(2, 3).model_copy(
         update={"agent_config": {"timeout_seconds": agent_timeout} if agent_timeout else None}
     )
-    run = await rollout(task, TimeoutAgent(), runtime=lambda _row: _local(env))
+    run = await rollout(task, TimeoutAgent(), runtime=LocalRuntime(env))
 
     assert run.reward == 1.0
     assert run.trace.status == "error"
@@ -917,7 +966,7 @@ async def test_timeout_includes_grading() -> None:
     run = await rollout(
         _add_task(2, 3),
         _FnAgent(_solve_add),
-        runtime=lambda _row: _local(env),
+        runtime=LocalRuntime(env),
         rollout_timeout=0.2,
     )
 
@@ -956,7 +1005,7 @@ async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPa
     run = await rollout(
         _add_task(2, 3),
         _SlowAgent(_solve_add),
-        runtime=lambda _row: _local(env),
+        runtime=LocalRuntime(env),
         rollout_timeout=0.2,
     )
     elapsed = loop.time() - started
@@ -982,7 +1031,7 @@ async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
     @asynccontextmanager
     async def provider(_task: TaskRow) -> AsyncIterator[Runtime]:
         try:
-            async with _local(env) as runtime:
+            async with LocalRuntime(env)(_task) as runtime:
                 yield runtime
         finally:
             cleanup_started.set()
@@ -1024,7 +1073,7 @@ async def test_timeout_during_actor_cleanup_does_not_start_the_verifier() -> Non
         if row.env == "judge":
             raise AssertionError("verifier started after the rollout returned")
         try:
-            async with _local(actor_env) as runtime:
+            async with LocalRuntime(actor_env)(row) as runtime:
                 yield runtime
         finally:
             cleanup_started.set()
@@ -1068,7 +1117,9 @@ async def test_timeout_does_not_cancel_verifier_provider_cleanup() -> None:
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
         try:
-            async with _local(actor_env if row.env == "actor" else verifier_env) as runtime:
+            async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(
+                row
+            ) as runtime:
                 yield runtime
         finally:
             if row.env == "judge":

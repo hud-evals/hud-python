@@ -29,7 +29,6 @@ from hud.agents.robot import Adapter, Model, RobotAgent
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
-from hud.eval.runtime import _local
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Provider
-    from hud.eval.runtime import Runtime
 
 #: Ticks a stub sim runs before terminating — every gate here is a whole rollout.
 EPISODE_TICKS = 3
@@ -134,13 +132,7 @@ async def _sim_env(sim: RobotBridge) -> AsyncIterator[tuple[Environment, RobotEn
 
 def _serving(env: Environment) -> Provider:
     """Placement that serves this one env — the substrate a vectorized sim shares."""
-
-    @asynccontextmanager
-    async def provider(task: Task) -> AsyncIterator[Runtime]:
-        async with _local(env) as runtime:
-            yield runtime
-
-    return provider
+    return LocalRuntime(env)
 
 
 # ─── the agent side ────────────────────────────────────────────────────

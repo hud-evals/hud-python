@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from hud.eval import Task, Taskset
-from hud.eval.runtime import RuntimeConfig
+from hud.eval.runtime import ComposeProject, RuntimeConfig
 from hud.eval.sync import (
     diff,
     fetch_taskset_tasks,
@@ -171,13 +171,16 @@ def test_task_upload_payload_embeds_compose_document(tmp_path: Path) -> None:
     task = Task(
         env="e",
         id="solve",
-        runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose, service_access=True)),
     )
 
     payload = task_upload_payload(task)
 
-    assert payload["runtime_config"]["compose"]["services"]["database"]["image"] == "postgres:16"
-    assert payload["runtime_config"]["compose_service_access"] is True
+    assert (
+        payload["runtime_config"]["compose"]["document"]["services"]["database"]["image"]
+        == "postgres:16"
+    )
+    assert payload["runtime_config"]["compose"]["service_access"] is True
     assert str(compose) not in json.dumps(payload)
 
 
@@ -205,7 +208,7 @@ def test_task_upload_payload_includes_verifier_task(tmp_path: Path) -> None:
         verifier=Task(
             env="judge",
             id="verify",
-            runtime_config=RuntimeConfig(compose=compose),
+            runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
         ),
     )
 
@@ -219,5 +222,5 @@ def test_task_upload_payload_includes_verifier_task(tmp_path: Path) -> None:
         "args": {},
         "slug": "verify",
     }
-    assert runtime_config["compose"]["services"]["main"]["image"] == "judge:latest"
+    assert runtime_config["compose"]["document"]["services"]["main"]["image"] == "judge:latest"
     assert str(compose) not in json.dumps(runtime_config)

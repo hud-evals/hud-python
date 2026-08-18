@@ -23,6 +23,7 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval.job import Job
 from hud.eval.run import Run
 from hud.eval.runtime import (
+    ComposeProject,
     HostedRuntime,
     HUDRuntime,
     Runtime,
@@ -30,8 +31,8 @@ from hud.eval.runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
-    _splice_websocket,
 )
+from hud.eval.runtime.hud import _splice_websocket
 from hud.eval.task import Task
 
 if TYPE_CHECKING:
@@ -225,7 +226,6 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
             env="sums",
             id="verify",
             args={"expected": 3},
-            requires_handoff=True,
         ),
     )
 
@@ -256,7 +256,6 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "id": "verify",
         "args": {"expected": 3},
         "slug": "verify-5579a3e5",
-        "requires_handoff": True,
     }
     assert payload["group_id"] == "g1"
     assert payload["agent"]["type"] == "openai_compatible"
@@ -309,7 +308,9 @@ async def test_run_submits_compose_document(
         Task(
             env="harbor",
             id="solve",
-            runtime_config=RuntimeConfig(compose=compose, compose_service_access=True),
+            runtime_config=RuntimeConfig(
+                compose=ComposeProject(document=compose, service_access=True)
+            ),
         ),
         _agent(),
         job_id=uuid.uuid4().hex,
@@ -317,8 +318,8 @@ async def test_run_submits_compose_document(
     )
 
     runtime_config = platform.posts[0][1]["runtime_config"]
-    assert runtime_config["compose"]["services"]["database"]["image"] == "postgres:16"
-    assert runtime_config["compose_service_access"] is True
+    assert runtime_config["compose"]["document"]["services"]["database"]["image"] == "postgres:16"
+    assert runtime_config["compose"]["service_access"] is True
     assert str(compose) not in json.dumps(runtime_config)
 
 

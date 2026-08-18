@@ -24,6 +24,7 @@ from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeRe
 from hud.eval.runtime.compose import (
     ComposeConfig,
     ComposeHealthcheck,
+    ComposeProject,
     ComposeService,
     ComposeUnboundVariableError,
 )
@@ -1099,9 +1100,11 @@ fi
                 ),
                 columns=columns or None,
                 runtime_config=RuntimeConfig(
-                    compose=context / "compose-project" / "compose.json",
-                    compose_project=context,
-                    compose_service_access=(True if needs_service_access else None),
+                    compose=ComposeProject(
+                        document=context / "compose-project" / "compose.json",
+                        root=context,
+                        service_access=(True if needs_service_access else None),
+                    ),
                     resources=task.resources,
                     limits=_runtime_limits(config.environment),
                 ),
@@ -1111,11 +1114,12 @@ fi
                         id="verify",
                         args={"task": task_config},
                         slug=f"{task.path.name}:verify",
-                        requires_handoff=True,
                         runtime_config=(
                             RuntimeConfig(
-                                compose=context / "compose-project" / "compose.json",
-                                compose_project=context,
+                                compose=ComposeProject(
+                                    document=context / "compose-project" / "compose.json",
+                                    root=context,
+                                ),
                                 resources=verifier_resources,
                                 limits=verifier_limits,
                             )
@@ -1133,6 +1137,6 @@ fi
 
     LOGGER.info("adapted %d Harbor project(s)", len({task.env for task in rows}))
     return AdaptResult(
-        taskset=Taskset(dataset.name, rows, origin=f"harbor:{dataset}"),
+        taskset=Taskset(dataset.name, rows),
         failures=tuple(failures),
     )

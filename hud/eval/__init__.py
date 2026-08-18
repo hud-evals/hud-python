@@ -34,6 +34,7 @@ from .chat import Chat
 from .job import Job
 from .run import Grade, Run, rollout
 from .runtime import (
+    ComposeProject,
     DaytonaRuntime,
     DockerRuntime,
     HostedRuntime,
@@ -56,6 +57,7 @@ from .taskset import Taskset
 
 __all__ = [
     "Chat",
+    "ComposeProject",
     "DaytonaRuntime",
     "DockerRuntime",
     "Grade",

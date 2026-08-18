@@ -478,7 +478,7 @@ class _NamespaceHost:
             holder, holder_pid = held
             with contextlib.suppress(ProcessLookupError):
                 os.kill(holder_pid, signal.SIGKILL)
-            await holder.wait()
+            await holder.terminate()
 
     async def _spawn(
         self,

@@ -136,9 +136,9 @@ runtime, the phases remain isolated:
   mode, allowlist, and credentials directory; and
 - verifier output is read from `/logs/verifier/reward.json` or `/logs/verifier/reward.txt`.
 
-`compose_service_access=True` gives the generated `main` service access to the runtime's Docker
-socket solely for declared collection from sibling services. The local and hosted socket behavior
-is described in [Compose environments](/v6/experimental/compose#runtime-behavior).
+`RuntimeConfig.compose.service_access=True` gives the generated `main` service access to the
+runtime's Docker socket solely for declared collection from sibling services. The local and hosted
+socket behavior is described in [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 ## See also
 

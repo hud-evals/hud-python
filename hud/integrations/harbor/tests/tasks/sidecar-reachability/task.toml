@@ -21,7 +21,7 @@ timeout_sec = 30
 
 [[verifier.collect]]
 service = "main"
-command = "curl -fsS --max-time 10 http://127.0.0.1:8080/ >/dev/null && head -c 1 /dev/urandom >/dev/null && echo collected-from-main > /tmp/main.txt && sleep 0.2"
+command = "test -s /app/actor.pid && ! kill -0 \"$(cat /app/actor.pid)\" 2>/dev/null && curl -fsS --max-time 10 http://127.0.0.1:8080/ >/dev/null && head -c 1 /dev/urandom >/dev/null && echo collected-from-main > /tmp/main.txt && sleep 0.2"
 timeout_sec = 10
 
 [[verifier.collect]]

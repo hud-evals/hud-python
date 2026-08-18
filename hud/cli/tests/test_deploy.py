@@ -242,9 +242,9 @@ class TestRuntimeConfigFile:
         )
 
         assert plan.runtime_config is not None
-        payload = plan.runtime_config.request_payload()
-        assert payload["compose_project"] == {"compose_path": filename}
-        assert set(payload["compose"]["services"]) == {"main", "redis"}
+        payload = plan.runtime_config.model_dump(mode="json", exclude_unset=True)
+        assert payload["compose"]["root"] == {"compose_path": filename}
+        assert set(payload["compose"]["document"]["services"]) == {"main", "redis"}
 
     def test_load_runtime_config_uses_sdk_shape(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _load_runtime_config
@@ -263,7 +263,7 @@ class TestRuntimeConfigFile:
 
         config = _load_runtime_config(str(config_path), HUDConsole())
         assert config is not None
-        assert config.request_payload() == {
+        assert config.model_dump(mode="json", exclude_unset=True) == {
             "resources": {"gpu": {"type": "A10G", "count": 2}},
             "limits": {"startup_timeout_s": 300},
         }
@@ -277,7 +277,7 @@ class TestRuntimeConfigFile:
 
         config = _load_runtime_config(str(config_path), HUDConsole())
         assert config is not None
-        assert config.request_payload() == {"resources": None}
+        assert config.model_dump(mode="json", exclude_unset=True) == {"resources": None}
 
     def test_load_runtime_config_resolves_compose_project_from_config_directory(
         self,
@@ -290,12 +290,12 @@ class TestRuntimeConfigFile:
         compose = project / "compose.json"
         compose.write_text('{"services":{"main":{"image":"postgres:16"}}}')
         config_path = tmp_path / "runtime.json"
-        config_path.write_text('{"compose":"project/compose.json","compose_project":"."}')
+        config_path.write_text('{"compose":{"document":"project/compose.json","root":"."}}')
 
         config = _load_runtime_config(str(config_path), HUDConsole())
 
         assert config is not None
-        assert config.request_payload()["compose_project"] == {
+        assert config.model_dump(mode="json", exclude_unset=True)["compose"]["root"] == {
             "compose_path": "project/compose.json"
         }
 

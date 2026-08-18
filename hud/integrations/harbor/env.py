@@ -15,16 +15,14 @@ import shlex
 import shutil
 import socket
 import tempfile
-import uuid
 from collections.abc import AsyncGenerator, Iterator  # noqa: TC003
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
-
 from hud.capabilities import Capability
-from hud.environment import Answer, Environment, Mount, Peer, Workspace
+from hud.environment import Environment, Mount, Peer, Workspace
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT
+from hud.environment.env import current_session_id
 from hud.graders import EvaluationResult
 from hud.utils.process import ProcessResult, create_process_group_exec
 
@@ -36,9 +34,9 @@ TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
-HANDOFFS = ROOT / "handoffs"
-HANDOFF_ANSWER = "agent-answer.txt"
-HANDOFF_ERROR = "error.txt"
+SESSIONS = ROOT / "sessions"
+SESSION_ANSWER = "agent-answer.txt"
+SESSION_ERROR = "error.txt"
 DOCKER_SOCKET = ROOT / "docker.sock"
 DOCKER = ROOT / "bin" / "docker"
 CONFIG = json.loads((ROOT / "config.json").read_text("utf-8"))
@@ -119,8 +117,9 @@ def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
             resolved[key] = value
             continue
         name, default = match.group(1), match.group(2)
-        if name in os.environ:
-            resolved[key] = os.environ[name]
+        runtime_value = os.environ.get(name)
+        if runtime_value is not None and (runtime_value or default is None):
+            resolved[key] = runtime_value
         elif default is not None:
             resolved[key] = default
         else:
@@ -317,6 +316,7 @@ async def start_entrypoint() -> NamespaceProcess | None:
         inherit_workspace_env=False,
         no_new_privs=False,
         persistent=True,
+        scope="environment",
     )
     await asyncio.sleep(0)
     if process.returncode is not None:
@@ -478,10 +478,6 @@ def copy_artifact(source: Path, target: Path, exclude: list[str]) -> None:
         shutil.copy2(source, target, follow_symlinks=False)
 
 
-class ActorHandoff(BaseModel):
-    handoff: str
-
-
 def artifact_path(artifact: dict[str, Any], artifacts: Path) -> Path:
     relative = artifact.get("destination") or artifact["source"].lstrip("/").rstrip("/")
     return artifacts / relative
@@ -573,28 +569,29 @@ async def run(instruction: str, task: dict[str, Any]) -> AsyncGenerator[Any, Any
                 f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
             )
         if task["separate_verifier"]:
-            token = uuid.uuid4().hex
-            handoff = HANDOFFS / token
-            artifacts = handoff / "artifacts"
-            handoff.mkdir(parents=True)
-            (handoff / HANDOFF_ANSWER).write_text(
+            session_id = current_session_id.get()
+            if session_id is None:
+                raise RuntimeError("Harbor actor is not running in an environment session")
+            session = SESSIONS / session_id
+            clear(session)
+            artifacts = session / "artifacts"
+            (session / SESSION_ANSWER).write_text(
                 "" if answer is None else str(answer),
                 encoding="utf-8",
             )
+            await workspace.terminate_sessions()
             try:
                 await collect(task, artifacts)
             except Exception as error:
                 detail = str(error)
-                (handoff / HANDOFF_ERROR).write_text(detail, encoding="utf-8")
+                (session / SESSION_ERROR).write_text(detail, encoding="utf-8")
                 result = {
                     "score": 0.0,
-                    "handoff": token,
                     "content": detail,
                     "isError": True,
                 }
             else:
-                result = {"score": 0.0, "handoff": token}
-            await workspace.terminate_sessions()
+                result = {"score": 0.0}
             yield result
         else:
             yield await grade(task["id"], task["verifier_timeout"], answer)
@@ -608,24 +605,22 @@ async def run(instruction: str, task: dict[str, Any]) -> AsyncGenerator[Any, Any
 
 if CONFIG["verifier_root"] is not None:
 
-    @env.template(id="verify", description="Verify a Harbor task", returns=ActorHandoff)
+    @env.template(id="verify", description="Verify a Harbor task")
     async def verify(task: dict[str, Any]) -> AsyncGenerator[Any, Any]:
-        received = yield ""
-        if not isinstance(received, Answer) or not isinstance(received.content, ActorHandoff):
-            raise ValueError("Harbor verifier requires an actor handoff")
-        token = received.content.handoff
-        if len(token) != 32 or not token.isalnum():
-            raise ValueError("Harbor verifier received an invalid actor handoff")
-        handoff = HANDOFFS / token
-        if not handoff.is_dir():
-            raise ValueError("Harbor actor handoff is unavailable in this runtime")
+        yield ""
+        session_id = current_session_id.get()
+        if session_id is None:
+            raise RuntimeError("Harbor verifier is not running in an environment session")
+        session = SESSIONS / session_id
+        if not session.is_dir():
+            raise ValueError("Harbor actor session files are unavailable in this runtime")
         try:
-            if (error := handoff / HANDOFF_ERROR).is_file():
+            if (error := session / SESSION_ERROR).is_file():
                 raise RuntimeError(error.read_text("utf-8"))
-            yield await grade_separate(task, handoff)
+            yield await grade_separate(task, session)
         finally:
             clear_grading_files()
-            shutil.rmtree(handoff, ignore_errors=True)
+            shutil.rmtree(session, ignore_errors=True)
 
 
 def clear(path: Path) -> None:
@@ -813,7 +808,7 @@ def materialized_artifacts(
 
 async def grade_separate(
     task: dict[str, Any],
-    handoff: Path,
+    session: Path,
 ) -> EvaluationResult:
     async with verifier_lock:
         verifier_root = Path(CONFIG["verifier_root"])
@@ -825,7 +820,7 @@ async def grade_separate(
         await asyncio.to_thread(LOGS.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(
             AGENT_ANSWER.write_bytes,
-            (handoff / HANDOFF_ANSWER).read_bytes(),
+            (session / SESSION_ANSWER).read_bytes(),
         )
 
         try:
@@ -842,7 +837,7 @@ async def grade_separate(
             with materialized_artifacts(
                 task,
                 verifier_root,
-                handoff / "artifacts",
+                session / "artifacts",
                 verifier_identity,
             ) as mounts:
                 verifier_mounts = tuple(mounts)

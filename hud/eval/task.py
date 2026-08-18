@@ -1,22 +1,4 @@
-"""Task: one task row — an env name, a task id, bound args, and metadata.
-
-``foo(x, y)`` (an ``@env.template`` factory call) returns one of these. ``env``
-is the environment's *name*: the join key between the data plane (rows) and
-whatever placement can bring that environment up. Running a task never needs
-a live env — the prompt and grading arrive over the wire from the substrate
-the placement brought up — so the row holds the reference explicitly instead
-of wrapping it in an :class:`~hud.environment.Environment` object.
-
-The model *is* the row: field names are the wire keys, so plain pydantic
-(``Task.model_validate(entry)`` / ``task.model_dump()``) is the whole codec —
-there is no bespoke serialization layer.
-
-Placement is ``runtime: Provider | HostedRuntime | None`` (see :mod:`.runtime`).
-Execution lives entirely in :mod:`.rollout` and scheduling in
-:mod:`.taskset` — :meth:`Task.run` is the single-task form of
-``Taskset.run``, so the row is always an argument to the engine, never a
-participant in it. Platform sync lives in :mod:`hud.eval.sync`.
-"""
+"""Portable task rows and single-task execution."""
 
 from __future__ import annotations
 
@@ -24,7 +6,17 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    SerializationInfo,
+    field_serializer,
+    field_validator,
+)
+
+from hud.environment.env import Environment
 
 from .runtime import RuntimeConfig
 
@@ -35,34 +27,35 @@ if TYPE_CHECKING:
     from .runtime import HostedRuntime, Provider
 
 
-def _default_slug(data: dict[str, Any]) -> str:
-    task_id = data.get("id")
-    if not isinstance(task_id, str):
-        return ""
-    args = data.get("args")
-    if not isinstance(args, dict) or not args:
-        return task_id
-    digest = hashlib.sha1(  # noqa: S324 - non-crypto, stable disambiguator
-        json.dumps(args, sort_keys=True, default=str).encode("utf-8"),
-    ).hexdigest()[:8]
-    return f"{task_id}-{digest}"
-
-
 class Task(BaseModel):
     """One concrete task: an env name plus data (id, args, metadata).
 
-    Pure data — holds no execution state, so one ``Task`` can drive many
-    concurrent rollouts. ``run`` it for a graded :class:`~hud.eval.job.Job`;
-    placement comes from ``runtime=`` (a provider), else the HUD runtime
-    tunnel by ``env`` name.
+    Its fields are pure data, so one ``Task`` can drive many concurrent
+    rollouts. ``run`` it for a graded :class:`~hud.eval.job.Job`; placement
+    comes from ``runtime=`` or the environment that created it.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
+    _env: Environment | None = PrivateAttr(default=None)
+
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)
     args: dict[str, Any] = Field(default_factory=dict)
-    slug: str = Field(default_factory=_default_slug, min_length=1)
+    slug: str = Field(
+        default_factory=lambda data: (
+            str(data.get("id", ""))
+            + (
+                "-"
+                + hashlib.sha1(  # noqa: S324 - stable non-cryptographic suffix
+                    json.dumps(args, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()[:8]
+                if (args := data.get("args"))
+                else ""
+            )
+        ),
+        min_length=1,
+    )
     validation: list[dict[str, Any]] | None = None
     agent_config: dict[str, Any] | None = None
     #: Arbitrary metadata fields surfaced as filterable columns / leaderboard
@@ -71,9 +64,6 @@ class Task(BaseModel):
     #: Optional row-level runtime construction input. Runtime adapters apply the
     #: supported subset into their native launch shape or reject it.
     runtime_config: RuntimeConfig | None = None
-    #: The verifier consumes files produced by the actor acquisition. Providers
-    #: transfer the runtime handoff namespace when placement cannot be reused.
-    requires_handoff: bool | None = None
     #: Optional agent-less task whose evaluation is the grade of record. The
     #: rollout completes this task first, then starts and grades the verifier
     #: with the same answer. Placement may reuse the live substrate when both
@@ -87,18 +77,17 @@ class Task(BaseModel):
             raise ValueError("nested verifier tasks are not supported")
         return verifier
 
-    def wire_payload(self) -> dict[str, Any]:
-        """Serialize the task for platform transport."""
-        payload = self.model_dump(
-            mode="json",
-            exclude_none=True,
-            exclude={"runtime_config", "verifier"},
+    @field_serializer("runtime_config")
+    def _serialize_runtime_config(
+        self,
+        config: RuntimeConfig | None,
+        info: SerializationInfo,
+    ) -> dict[str, Any] | None:
+        return (
+            config.model_dump(mode=info.mode, exclude_unset=True, context=info.context)
+            if config is not None
+            else None
         )
-        if self.runtime_config is not None:
-            payload["runtime_config"] = self.runtime_config.request_payload()
-        if self.verifier is not None:
-            payload["verifier"] = self.verifier.wire_payload()
-        return payload
 
     # ─── execution ────────────────────────────────────────────────────
 
@@ -117,9 +106,9 @@ class Task(BaseModel):
         Identical scheduling semantics — one HUD job as the receipt (or an
         open ``job`` from :meth:`Job.start` to accumulate into), ``group``
         repeats sharing a group_id, ``max_concurrent`` capping parallelism —
-        over a taskset of one. ``runtime`` is the placement; left unset it
-        falls back to the HUD runtime tunnel by ``env`` name. For a local
-        run, pass one explicitly (``runtime=LocalRuntime("env.py")``).
+        over a taskset of one. A task created by ``@env.template`` runs against
+        that environment by default. Other rows require an explicit placement,
+        such as ``runtime=LocalRuntime("env.py")``.
         """
         from .taskset import Taskset  # circular: taskset -> sync -> task
 

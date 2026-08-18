@@ -148,8 +148,9 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert (project_root / "tests" / "task-a" / "test.sh").is_file()
     assert not any(path.name in {"tasks", "tasks.json"} for path in payload.rglob("*"))
     assert not (context / "compose.json").exists()
-    assert task.runtime_config.compose == context / "compose-project" / "compose.json"
-    assert task.runtime_config.compose_project == context
+    assert task.runtime_config.compose is not None
+    assert task.runtime_config.compose.document == context / "compose-project" / "compose.json"
+    assert task.runtime_config.compose.root == context
     compose_path = context / "compose-project" / "compose.json"
     project = _assert_stock_compose_complete(compose_path)
     assert set(project["services"]) == {"main"}
@@ -173,22 +174,24 @@ def test_task_content_changes_do_not_rebuild_the_environment(tmp_path: Path) -> 
 
     (before,) = list(_adapt(tmp_path))
     assert before.runtime_config is not None
-    assert isinstance(before.runtime_config.compose, Path)
-    before_compose = json.loads(before.runtime_config.compose.read_text("utf-8"))
+    assert before.runtime_config.compose is not None
+    assert isinstance(before.runtime_config.compose.document, Path)
+    before_compose = json.loads(before.runtime_config.compose.document.read_text("utf-8"))
     before_image = before_compose["services"]["main"]["image"]
 
     (task_dir / "instruction.md").write_text("Second instruction", encoding="utf-8")
     (task_dir / "tests" / "test.sh").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     (after,) = list(_adapt(tmp_path))
     assert after.runtime_config is not None
-    assert isinstance(after.runtime_config.compose, Path)
-    after_compose = json.loads(after.runtime_config.compose.read_text("utf-8"))
+    assert after.runtime_config.compose is not None
+    assert isinstance(after.runtime_config.compose.document, Path)
+    after_compose = json.loads(after.runtime_config.compose.document.read_text("utf-8"))
 
     assert after_compose["services"]["main"]["image"] == before_image
     assert after.args["instruction"] == "Second instruction"
-    assert (after.runtime_config.compose.parent / "tests" / "task-a" / "test.sh").read_text(
-        "utf-8"
-    ) == "#!/bin/sh\nexit 1\n"
+    assert (
+        after.runtime_config.compose.document.parent / "tests" / "task-a" / "test.sh"
+    ).read_text("utf-8") == "#!/bin/sh\nexit 1\n"
 
 
 def test_image_task_keeps_non_recipe_compose_names_as_context_files(tmp_path: Path) -> None:
@@ -298,7 +301,8 @@ services:
     (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
-    compose_path = row.runtime_config.compose
+    assert row.runtime_config.compose is not None
+    compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = _assert_stock_compose_complete(compose_path)
     base = project["services"]["hud-base"]
@@ -346,12 +350,13 @@ services:
 
     assert row.runtime_config is not None
     assert row.runtime_config.image is None
-    assert row.runtime_config.compose_service_access is True
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is True
     (context,) = (tmp_path / ".hud-adapt").iterdir()
-    assert row.runtime_config.compose == context / "compose-project" / "compose.json"
-    assert row.runtime_config.compose_project == context
+    assert row.runtime_config.compose.document == context / "compose-project" / "compose.json"
+    assert row.runtime_config.compose.root == context
     assert not (context / "compose.json").exists()
-    compose_path = row.runtime_config.compose
+    compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = _assert_stock_compose_complete(compose_path)
     assert project["services"]["redis"]["image"] == "redis:7-alpine"
@@ -442,7 +447,8 @@ services:
     (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
-    compose_path = row.runtime_config.compose
+    assert row.runtime_config.compose is not None
+    compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = json.loads(compose_path.read_text("utf-8"))
     assert project["services"]["database"]["build"]["context"] == ("./environment/database")
@@ -685,7 +691,8 @@ gpu_types = ["H100"]
     assert row.columns == {"difficulty": "hard"}
     assert row.runtime_config is not None
     assert row.runtime_config.image is None
-    assert isinstance(row.runtime_config.compose, Path)
+    assert row.runtime_config.compose is not None
+    assert isinstance(row.runtime_config.compose.document, Path)
     assert row.runtime_config.resources is not None
     assert row.runtime_config.resources.cpu == 4
     assert row.runtime_config.resources.memory_mb == 8192
@@ -940,7 +947,8 @@ def test_adapt_accepts_explicit_shared_verifier_mode(tmp_path: Path) -> None:
 
     assert row.verifier is None
     assert row.runtime_config is not None
-    assert row.runtime_config.compose_service_access is None
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is None
 
 
 def test_adapt_builds_a_separate_verifier_with_its_own_placement(
@@ -1010,11 +1018,13 @@ timeout_sec = 10
         tpu=RuntimeTPU(type="v5", topology="2x2"),
     )
     assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=601)
-    assert row.runtime_config.compose_service_access is True
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is True
     assert row.verifier is not None
-    assert row.verifier.requires_handoff is True
     assert row.verifier.runtime_config is not None
-    assert row.verifier.runtime_config.compose == row.runtime_config.compose
+    assert row.verifier.runtime_config.compose is not None
+    assert row.verifier.runtime_config.compose.document == row.runtime_config.compose.document
+    assert row.verifier.runtime_config.compose.root == row.runtime_config.compose.root
     assert row.verifier.runtime_config.resources == RuntimeResources(
         cpu=4,
         memory_mb=1024,
@@ -1062,8 +1072,7 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         encoding="utf-8",
     )
     (task / "task.toml").write_text(
-        '[environment]\nbuild_timeout_sec = 300\n\n'
-        '[verifier]\nenvironment_mode = "separate"\n',
+        '[environment]\nbuild_timeout_sec = 300\n\n[verifier]\nenvironment_mode = "separate"\n',
         encoding="utf-8",
     )
 
@@ -1071,11 +1080,12 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
 
     assert row.runtime_config is not None
     assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=300)
-    assert row.runtime_config.compose_service_access is None
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is None
     assert row.verifier is not None
     assert row.verifier.runtime_config is None
-    assert isinstance(row.runtime_config.compose, Path)
-    project = _assert_stock_compose_complete(row.runtime_config.compose)
+    assert isinstance(row.runtime_config.compose.document, Path)
+    project = _assert_stock_compose_complete(row.runtime_config.compose.document)
     assert set(project["services"]) == {"main", "hud-verifier"}
     assert project["services"]["main"]["build"] == {
         "additional_contexts": {
@@ -1086,7 +1096,7 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         "dockerfile": "../Dockerfile",
     }
     assert project["services"]["hud-verifier"]["scale"] == 0
-    combined = (row.runtime_config.compose.parent / "Dockerfile").read_text("utf-8")
+    combined = (row.runtime_config.compose.document.parent / "Dockerfile").read_text("utf-8")
     assert "FROM hud-verifier AS hud-verifier-root" in combined
     assert "COPY --from=hud-verifier-root / /media/hud/verifier" in combined
 
@@ -1110,7 +1120,8 @@ def test_separate_verifier_groups_have_distinct_environment_names(
         compose
         for row in rows
         if row.runtime_config is not None
-        and isinstance((compose := row.runtime_config.compose), Path)
+        and row.runtime_config.compose is not None
+        and isinstance((compose := row.runtime_config.compose.document), Path)
     }
     assert len(compose_paths) == 2
     assert all(path.is_file() for path in compose_paths)
@@ -1175,6 +1186,7 @@ exclude = ["*.tmp", "cache"]
             "exclude": ["*.tmp", "cache"],
         }
     ]
+
 
 def test_agent_timeout_becomes_per_task_agent_policy(
     tmp_path: Path,
@@ -1256,7 +1268,8 @@ def test_portless_sidecar_ports_are_resolved_from_its_built_image(tmp_path: Path
 
     (row,) = list(_adapt(tmp_path))
     assert row.runtime_config is not None
-    context = row.runtime_config.compose_project
+    assert row.runtime_config.compose is not None
+    context = row.runtime_config.compose.root
     assert isinstance(context, Path)
     manifest = _environment_config(context)
     assert manifest["peers"] == []
@@ -1288,7 +1301,8 @@ def test_completed_compose_dependencies_are_not_routed_as_peers(tmp_path: Path) 
 
     (row,) = list(_adapt(tmp_path))
     assert row.runtime_config is not None
-    context = row.runtime_config.compose_project
+    assert row.runtime_config.compose is not None
+    context = row.runtime_config.compose.root
     assert isinstance(context, Path)
     manifest = _environment_config(context)
     assert manifest["peers"] == []

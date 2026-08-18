@@ -136,11 +136,11 @@ class HostedRuntime:
         if group_id is not None:
             payload["group_id"] = group_id
         if task.runtime_config is not None:
-            runtime_config = task.runtime_config.request_payload()
+            runtime_config = task.runtime_config.model_dump(mode="json", exclude_unset=True)
             if runtime_config:
                 payload["runtime_config"] = runtime_config
         if task.verifier is not None:
-            payload["verifier"] = task.verifier.wire_payload()
+            payload["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
         await platform.apost("/rollouts/submit", json=payload)
         return await self._await_terminal(platform, payload["trace_id"])
 

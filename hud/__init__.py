@@ -11,6 +11,7 @@ from .clients import connect
 from .environment import Environment
 from .eval import (
     Chat,
+    ComposeProject,
     DockerRuntime,
     Grade,
     HostedRuntime,
@@ -36,6 +37,7 @@ from .version import __version__
 
 __all__ = [
     "Chat",
+    "ComposeProject",
     "DockerRuntime",
     "Environment",
     "Grade",

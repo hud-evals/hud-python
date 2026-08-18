@@ -778,7 +778,8 @@ async def test_namespace_host_only_terminates_a_used_session_holder(
     host.session_used = True
     await host._terminate_sessions()
     kill.assert_called_once_with(7, signal.SIGKILL)
-    holder.wait.assert_awaited_once_with()
+    holder.terminate.assert_awaited_once_with()
+    holder.wait.assert_not_awaited()
 
 
 @pytest.mark.asyncio

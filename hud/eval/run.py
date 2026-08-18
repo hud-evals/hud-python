@@ -24,11 +24,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import tempfile
 import traceback
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import mcp.types as mcp_types
@@ -49,6 +47,7 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
 
     from .runtime import Provider
+    from .runtime.core import RuntimeSession
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -106,6 +105,14 @@ class Grade:
     info: dict[str, Any] = field(default_factory=dict)
     is_error: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
+    evaluation: dict[str, Any] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.evaluation = dict(self.raw)
+        if isinstance(subscores := self.evaluation.get("subscores"), list):
+            self.evaluation["subscores"] = [
+                SubScore.model_validate(subscore).to_summary() for subscore in subscores
+            ]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Grade:
@@ -193,12 +200,7 @@ class Run:
     @property
     def evaluation(self) -> dict[str, Any]:
         """A persistence-safe view of the task's evaluation result."""
-        evaluation = dict(self.grade.raw)
-        if isinstance(subscores := evaluation.get("subscores"), list):
-            evaluation["subscores"] = [
-                SubScore.model_validate(subscore).to_summary() for subscore in subscores
-            ]
-        return evaluation
+        return dict(self.grade.evaluation)
 
     @property
     def trace_id(self) -> str | None:
@@ -451,91 +453,105 @@ async def rollout(
         async def _drive() -> None:
             nonlocal client, run, _phase
             actor_result: dict[str, Any] = {}
+            actor_session: RuntimeSession | None = None
             verifier = task.verifier
             shared_verifier = (
                 verifier is not None
                 and verifier.env == task.env
                 and verifier.runtime_config is None
             )
-            transfer_handoff = verifier is not None and verifier.requires_handoff
-            with tempfile.TemporaryDirectory(prefix="hud-handoff-") as directory:
-                handoff = Path(directory) / "handoff.tar.gz"
-                async with runtime(task) as addr:
-                    if transfer_handoff and not shared_verifier and addr.handoff is None:
-                        raise ValueError("the actor runtime cannot transfer verifier handoff files")
-                    _phase = "starting task"
-                    async with connect(addr) as actor_client:
-                        client = actor_client
-                        live = Run(
-                            actor_client,
-                            task.id,
-                            task.args,
-                            best_effort_grade=task.verifier is not None,
-                        )
-                        live._runtime = addr.url  # the placement record for the receipt
-                        async with live:  # start on enter; complete on exit
-                            run = live  # bound only once live: an earlier failure synthesizes
-                            _phase = "agent loop"
-                            try:
-                                async with file_tracking_observer(actor_client):
-                                    if agent_timeout is None:
-                                        await agent(run)
-                                    else:
-                                        deadline = asyncio.timeout(agent_timeout)
-                                        try:
-                                            async with deadline:
-                                                await agent(run)
-                                        except TimeoutError:
-                                            if not deadline.expired():
-                                                raise
-                                            detail = f"agent timed out after {agent_timeout:g}s"
-                                            logger.warning(detail)
-                                            run.trace.status = "error"
-                                            run.trace.stop_reason = "timeout"
-                                            run.record(Step(source="system", error=detail))
-                            except Exception as exc:
-                                if task.verifier is None:
-                                    raise
-                                detail = "".join(traceback.format_exception_only(exc)).strip()
-                                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
-                                run.trace.status = "error"
-                                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
-                            _phase = "grading"
+            async with contextlib.AsyncExitStack() as scope:
+                actor = contextlib.AsyncExitStack()
+                await actor.__aenter__()
 
-                        if verifier is not None:
-                            actor_result = live.grade.raw
-                            # The verifier is authoritative. Once its phase begins,
-                            # an actor-side grade must not survive a verifier failure.
-                            live.grade = Grade()
-                        if shared_verifier:
-                            assert verifier is not None
-                            _phase = "verifying"
-                            await _verify(live, actor_client, verifier, actor_result)
-                            _phase = "cleanup"
-                            return
+                async def close_actor() -> None:
+                    cleanup = asyncio.create_task(actor.aclose())
+                    cleanup.add_done_callback(_consume_task_result)
+                    await asyncio.shield(cleanup)
 
-                    _phase = "actor cleanup"
-                    if transfer_handoff:
-                        assert addr.handoff is not None
-                        await addr.handoff.export_to(handoff)
+                scope.push_async_callback(close_actor)
+                addr = await actor.enter_async_context(runtime(task))
+                _phase = "starting task"
+                async with connect(addr) as actor_client:
+                    client = actor_client
+                    live = Run(
+                        actor_client,
+                        task.id,
+                        task.args,
+                        best_effort_grade=task.verifier is not None,
+                    )
+                    live._runtime = addr.url  # the placement record for the receipt
+                    async with live:  # start on enter; complete on exit
+                        run = live  # bound only once live: an earlier failure synthesizes
+                        _phase = "agent loop"
+                        try:
+                            async with file_tracking_observer(actor_client):
+                                if agent_timeout is None:
+                                    await agent(run)
+                                else:
+                                    deadline = asyncio.timeout(agent_timeout)
+                                    try:
+                                        async with deadline:
+                                            await agent(run)
+                                    except TimeoutError:
+                                        if not deadline.expired():
+                                            raise
+                                        detail = f"agent timed out after {agent_timeout:g}s"
+                                        logger.warning(detail)
+                                        run.trace.status = "error"
+                                        run.trace.stop_reason = "timeout"
+                                        run.record(Step(source="system", error=detail))
+                        except Exception as exc:
+                            if task.verifier is None:
+                                raise
+                            detail = "".join(traceback.format_exception_only(exc)).strip()
+                            logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
+                            run.trace.status = "error"
+                            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                        _phase = "grading"
+
+                    if verifier is not None:
+                        actor_result = live.grade.raw
+                        assert actor_client.manifest is not None
+                        actor_session = addr.session(actor_client.manifest.session_id)
+                        # The verifier is authoritative. Once its phase begins,
+                        # an actor-side grade must not survive a verifier failure.
+                        live.grade = Grade()
+                    if shared_verifier:
+                        assert verifier is not None
+                        _phase = "verifying"
+                        await _verify(live, actor_client, verifier, actor_result)
+                        _phase = "cleanup"
+                        return
 
                 if rollout_expired:
                     return
-                if verifier is not None:
+                if verifier is None:
+                    _phase = "actor cleanup"
+                    await actor.aclose()
+                    _phase = "cleanup"
+                    return
+
+                assert actor_session is not None
+                _phase = "snapshotting actor"
+                async with actor_session.snapshot() as archive:
+                    _phase = "actor cleanup"
+                    await actor.aclose()
+                    client = None
+                    if rollout_expired:
+                        return
                     _phase = "provisioning verifier"
-                    async with runtime(verifier) as verifier_addr:
-                        if transfer_handoff and verifier_addr.handoff is None:
-                            raise ValueError(
-                                "the verifier runtime cannot receive actor handoff files"
-                            )
-                        if transfer_handoff:
-                            assert verifier_addr.handoff is not None
-                            await verifier_addr.handoff.import_from(handoff)
-                        async with connect(verifier_addr) as verifier_client:
-                            client = verifier_client
-                            _phase = "verifying"
-                            await _verify(live, verifier_client, verifier, actor_result)
-                            _phase = "cleanup"
+                    verifier_addr = await scope.enter_async_context(runtime(verifier))
+                    verifier_client = await scope.enter_async_context(connect(verifier_addr))
+                    if archive is not None:
+                        assert verifier_client.manifest is not None
+                        await verifier_addr.session(verifier_client.manifest.session_id).restore(
+                            archive
+                        )
+                    client = verifier_client
+                    _phase = "verifying"
+                    await _verify(live, verifier_client, verifier, actor_result)
+                _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
         try:

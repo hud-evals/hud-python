@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import posixpath
 import re
 import shlex
@@ -15,7 +16,16 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 if TYPE_CHECKING:
@@ -29,7 +39,12 @@ class ComposeUnboundVariableError(ValueError):
     """A Compose variable depends on values outside the packaged project."""
 
 
-def _interpolate_compose_value(value: str, environment: Mapping[str, str]) -> str:
+def _interpolate_compose_value(
+    value: str,
+    environment: Mapping[str, str],
+    *,
+    escape_dollars: bool = True,
+) -> str:
     result: list[str] = []
     index = 0
     while index < len(value):
@@ -39,7 +54,7 @@ def _interpolate_compose_value(value: str, environment: Mapping[str, str]) -> st
             break
         result.append(value[index:marker])
         if marker + 1 >= len(value):
-            result.append("$")
+            result.append("$$")
             break
         following = value[marker + 1]
         if following == "$":
@@ -67,7 +82,7 @@ def _interpolate_compose_value(value: str, environment: Mapping[str, str]) -> st
             continue
         match = _COMPOSE_VARIABLE.match(value, marker + 1)
         if match is None:
-            result.append("$")
+            result.append("$$")
             index = marker + 1
             continue
         name = match.group()
@@ -75,9 +90,10 @@ def _interpolate_compose_value(value: str, environment: Mapping[str, str]) -> st
             raise ComposeUnboundVariableError(
                 f"Compose variable {name!r} is not set by the project .env"
             )
-        result.append(environment[name])
+        result.append(environment[name].replace("$", "$$"))
         index = match.end()
-    return "".join(result)
+    resolved = "".join(result)
+    return resolved if escape_dollars else resolved.replace("$$", "$")
 
 
 def _resolve_compose_variable(expression: str, environment: Mapping[str, str]) -> str:
@@ -87,12 +103,13 @@ def _resolve_compose_variable(expression: str, environment: Mapping[str, str]) -
     name = match.group()
     suffix = expression[match.end() :]
     value = environment.get(name)
+    escaped = value.replace("$", "$$") if value is not None else ""
     if not suffix:
         if value is None:
             raise ComposeUnboundVariableError(
                 f"Compose variable {name!r} is not set by the project .env"
             )
-        return value
+        return escaped
 
     operator = next(
         (item for item in (":-", ":?", ":+", "-", "?", "+") if suffix.startswith(item)), None
@@ -103,9 +120,9 @@ def _resolve_compose_variable(expression: str, environment: Mapping[str, str]) -
     is_set = value is not None
     is_nonempty = is_set and value != ""
     if operator == ":-":
-        return value if is_nonempty else _interpolate_compose_value(operand, environment)
+        return escaped if is_nonempty else _interpolate_compose_value(operand, environment)
     if operator == "-":
-        return value if is_set else _interpolate_compose_value(operand, environment)
+        return escaped if is_set else _interpolate_compose_value(operand, environment)
     if operator == ":+":
         return _interpolate_compose_value(operand, environment) if is_nonempty else ""
     if operator == "+":
@@ -113,8 +130,7 @@ def _resolve_compose_variable(expression: str, environment: Mapping[str, str]) -
     if (operator == ":?" and not is_nonempty) or (operator == "?" and not is_set):
         detail = operand or f"Compose variable {name!r} is required"
         raise ComposeUnboundVariableError(detail)
-    assert value is not None
-    return value
+    return escaped
 
 
 def _interpolate_compose_node(
@@ -131,8 +147,12 @@ def _interpolate_compose_node(
     elif isinstance(node, SequenceNode):
         for value in node.value:
             _interpolate_compose_node(value, environment, seen)
-    elif isinstance(node, ScalarNode) and node.tag == "tag:yaml.org,2002:str" and node.style != "'":
-        node.value = _interpolate_compose_value(node.value, environment)
+    elif isinstance(node, ScalarNode) and node.tag == "tag:yaml.org,2002:str":
+        node.value = (
+            node.value.replace("$", "$$")
+            if node.style == "'"
+            else _interpolate_compose_value(node.value, environment)
+        )
 
 
 class ComposeHealthcheck(BaseModel):
@@ -244,9 +264,11 @@ class ComposeService(BaseModel):
 
     @property
     def tcp_ports(self) -> set[int]:
-        ports = {
-            int(value) for exposed in self.expose if (value := exposed.partition("/")[0]).isdigit()
-        }
+        ports: set[int] = set()
+        for exposed in self.expose:
+            value, _, protocol = exposed.partition("/")
+            if value.isdigit() and protocol in {"", "tcp"}:
+                ports.add(int(value))
         ports.update(port.target for port in self.ports if port.protocol == "tcp")
         return ports
 
@@ -288,11 +310,14 @@ class ComposeConfig(BaseModel):
     def from_file(cls, path: Path) -> ComposeConfig:
         """Load a self-contained authored Compose document without Docker."""
         source = path.read_text(encoding="utf-8")
-        environment = {
-            key: value
-            for key, value in dotenv_values(path.parent / ".env", interpolate=False).items()
-            if value is not None
-        }
+        environment: dict[str, str] = {}
+        for key, value in dotenv_values(path.parent / ".env", interpolate=False).items():
+            if value is not None:
+                environment[key] = _interpolate_compose_value(
+                    value,
+                    environment,
+                    escape_dollars=False,
+                )
         loader = yaml.SafeLoader(source)
         try:
             node = loader.get_single_node()
@@ -410,53 +435,74 @@ class ComposeProjectRef(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
-class ComposeSource:
-    """One authored or platform-wire Compose runtime source."""
-
-    document: Path | ComposeConfig
-    project: Path | ComposeProjectRef | None = None
-
-    def request_payload(self) -> dict[str, Any]:
-        if isinstance(self.document, Path):
-            document = ComposeConfig.from_file(self.document)
-        else:
-            document = self.document
-        payload: dict[str, Any] = {
-            "compose": document.model_dump(mode="json", exclude_none=True),
-        }
-        if isinstance(self.project, Path):
-            if not isinstance(self.document, Path):
-                raise ValueError("compose_project as a path requires compose as a path")
-            try:
-                compose_path = (
-                    self.document.resolve().relative_to(self.project.resolve()).as_posix()
-                )
-            except ValueError:
-                raise ValueError("runtime_config.compose must be inside compose_project") from None
-            payload["compose_project"] = {"compose_path": compose_path}
-        elif self.project is not None:
-            payload["compose_project"] = self.project.model_dump(mode="json")
-        return payload
-
-    def runnable_path(self, provider: str) -> Path:
-        if not isinstance(self.document, Path):
-            raise ValueError(f"{provider} requires runtime_config.compose as a local file path")
-        return self.document.resolve()
-
-
-@dataclass(frozen=True, slots=True)
 class ComposeLaunchFiles:
     compose: Path
+    project_directory: Path
     override: Path
     ports: Path
     archive: Path | None
 
 
-@dataclass(frozen=True, slots=True)
-class ComposeProject:
-    """A local Compose project staged with HUD's main-service overrides."""
+class ComposeProject(BaseModel):
+    """A Compose recipe and the project data it may need at runtime."""
 
-    compose: Path
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document: Path | ComposeConfig
+    root: Path | ComposeProjectRef | None = None
+    service_access: bool | None = None
+
+    @field_validator("document", "root", mode="before")
+    @classmethod
+    def resolve_local_path(cls, value: Any, info: ValidationInfo) -> Any:
+        base = (info.context or {}).get("base_path")
+        if isinstance(value, str) and isinstance(base, Path):
+            return (base / value).resolve()
+        return value
+
+    @model_validator(mode="after")
+    def validate_source(self) -> ComposeProject:
+        if self.root is None:
+            return self
+        if isinstance(self.root, Path) != isinstance(self.document, Path):
+            raise ValueError("Compose source and project root must use the same form")
+        if isinstance(self.root, Path):
+            assert isinstance(self.document, Path)
+            try:
+                self.document.resolve().relative_to(self.root.resolve())
+            except ValueError:
+                raise ValueError("Compose file must be inside its project root") from None
+        return self
+
+    @field_serializer("document", when_used="json")
+    def serialize_document(
+        self,
+        document: Path | ComposeConfig,
+        info: SerializationInfo,
+    ) -> dict[str, Any] | str:
+        base = (info.context or {}).get("base_path")
+        if isinstance(document, Path) and isinstance(base, Path):
+            return os.path.relpath(document.resolve(), base)
+        config = ComposeConfig.from_file(document) if isinstance(document, Path) else document
+        return config.model_dump(mode="json", exclude_none=True)
+
+    @field_serializer("root", when_used="json")
+    def serialize_root(
+        self,
+        root: Path | ComposeProjectRef | None,
+        info: SerializationInfo,
+    ) -> dict[str, str] | str | None:
+        if root is None:
+            return None
+        if isinstance(root, ComposeProjectRef):
+            return root.model_dump(mode="json")
+        base = (info.context or {}).get("base_path")
+        if isinstance(base, Path):
+            return os.path.relpath(root.resolve(), base)
+        assert isinstance(self.document, Path)
+        return {
+            "compose_path": self.document.resolve().relative_to(root.resolve()).as_posix(),
+        }
 
     @contextlib.contextmanager
     def stage(
@@ -472,6 +518,9 @@ class ComposeProject:
         gpu_count: int | None = None,
         archive: bool = False,
     ) -> Iterator[ComposeLaunchFiles]:
+        if not isinstance(self.document, Path):
+            raise ValueError("Compose project is not available on the local filesystem")
+        compose = self.document.resolve()
         main: dict[str, Any] = {
             "security_opt": [
                 f"seccomp={seccomp}",
@@ -498,6 +547,13 @@ class ComposeProject:
 
         with tempfile.TemporaryDirectory(prefix="hud-compose-") as directory:
             root = Path(directory)
+            normalized = root / "compose.json"
+            normalized.write_text(
+                json.dumps(
+                    ComposeConfig.from_file(compose).model_dump(mode="json", exclude_none=True)
+                ),
+                encoding="utf-8",
+            )
             override = root / "override.json"
             override.write_text(
                 json.dumps({"services": {"main": main}}),
@@ -511,11 +567,21 @@ class ComposeProject:
             archive_path = None
             if archive:
                 archive_path = root / "project.tar.gz"
+                project_root = (
+                    self.root.resolve() if isinstance(self.root, Path) else compose.parent
+                )
+                compose_path = compose.relative_to(project_root).as_posix()
+
+                def omit_authored_compose(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+                    return None if info.name == compose_path else info
+
                 with tarfile.open(archive_path, "w:gz") as tar:
-                    for entry in self.compose.parent.iterdir():
-                        tar.add(entry, arcname=entry.name)
+                    for entry in project_root.iterdir():
+                        tar.add(entry, arcname=entry.name, filter=omit_authored_compose)
+                    tar.add(normalized, arcname=compose_path)
             yield ComposeLaunchFiles(
-                compose=self.compose,
+                compose=normalized,
+                project_directory=compose.parent,
                 override=override,
                 ports=ports,
                 archive=archive_path,
@@ -529,5 +595,4 @@ __all__ = [
     "ComposeProject",
     "ComposeProjectRef",
     "ComposeService",
-    "ComposeSource",
 ]

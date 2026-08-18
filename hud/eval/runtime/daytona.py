@@ -3,157 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
 
 from .core import Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Sequence
-    from pathlib import Path
+    from collections.abc import AsyncIterator
+
+    from daytona import Image as DaytonaImage
+    from daytona.common.snapshot import Snapshot as DaytonaSnapshot
 
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
-
-
-class DaytonaContextEntry(Protocol):
-    @property
-    def source_path(self) -> str | Path: ...
-
-    @property
-    def archive_path(self) -> str | Path: ...
-
-
-class DaytonaImage(Protocol):
-    @property
-    def _context_list(self) -> Sequence[DaytonaContextEntry]: ...
-
-    def dockerfile(self) -> str: ...
-
-
-class _DaytonaBuildInfo(Protocol):
-    dockerfile_content: str
-    context_hashes: Sequence[str] | None
-
-
-class DaytonaSnapshot(Protocol):
-    image_name: str
-    build_info: _DaytonaBuildInfo | None
-
-
-class ObjectStorage(Protocol):
-    async def _compute_hash_for_path_md5(
-        self,
-        source_path: str | Path,
-        archive_path: str | Path,
-    ) -> str: ...
-
-
-class ObjectStorageModule(Protocol):
-    AsyncObjectStorage: type[ObjectStorage]
-
-
-class _DaytonaResources(Protocol):
-    cpu: int | None
-    memory: int | None
-    gpu: int | None
-    gpu_type: Sequence[object] | None
-
-
-class _DaytonaSessionCommand(Protocol):
-    cmd_id: str
-
-
-class _DaytonaSessionLogs(Protocol):
-    stderr: str | None
-    output: str | None
-    stdout: str | None
-
-
-class _DaytonaProcess(Protocol):
-    async def create_session(self, session: str) -> object: ...
-
-    async def execute_session_command(
-        self,
-        session: str,
-        request: object,
-    ) -> _DaytonaSessionCommand: ...
-
-    async def get_session_command_logs(
-        self,
-        session: str,
-        command_id: str,
-    ) -> _DaytonaSessionLogs: ...
-
-
-class _DaytonaSshAccess(Protocol):
-    token: str
-
-
-class _DaytonaSandbox(Protocol):
-    id: str
-    process: _DaytonaProcess
-
-    async def create_ssh_access(self, *, expires_in_minutes: int) -> _DaytonaSshAccess: ...
-
-
-class _DaytonaSnapshotClient(Protocol):
-    async def get(self, name: str) -> DaytonaSnapshot: ...
-
-    async def delete(self, snapshot: DaytonaSnapshot) -> object: ...
-
-    async def create(self, params: object) -> object: ...
-
-
-class _DaytonaCreate(Protocol):
-    def __call__(
-        self,
-        params: object,
-        *,
-        timeout: int,
-    ) -> Awaitable[_DaytonaSandbox]: ...
-
-
-class _DaytonaClient(Protocol):
-    snapshot: _DaytonaSnapshotClient
-    create: _DaytonaCreate
-
-    async def delete(self, sandbox: _DaytonaSandbox) -> object: ...
-
-
-class _DaytonaFactory(Protocol):
-    def __call__(self) -> AbstractAsyncContextManager[_DaytonaClient]: ...
-
-
-class _ObjectFactory(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> object: ...
-
-
-class _ResourcesFactory(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> _DaytonaResources: ...
-
-
-class _GpuTypeFactory(Protocol):
-    def __call__(self, value: str) -> object: ...
-
-
-class _DaytonaImageFactory(Protocol):
-    def base(self, image: str) -> object: ...
-
-
-class DaytonaModule(Protocol):
-    AsyncDaytona: _DaytonaFactory
-    CreateSandboxFromImageParams: _ObjectFactory
-    CreateSandboxFromSnapshotParams: _ObjectFactory
-    CreateSnapshotParams: _ObjectFactory
-    DaytonaNotFoundError: type[Exception]
-    GpuType: _GpuTypeFactory
-    Image: _DaytonaImageFactory
-    Resources: _ResourcesFactory
-    SessionExecuteRequest: _ObjectFactory
 
 
 async def _snapshot_is_current(
@@ -173,11 +37,7 @@ async def _snapshot_is_current(
     build = snapshot.build_info
     if build is None:
         return False
-    object_storage = cast(
-        "ObjectStorageModule",
-        importlib.import_module("daytona._async.object_storage"),
-    )
-    AsyncObjectStorage = object_storage.AsyncObjectStorage
+    from daytona._async.object_storage import AsyncObjectStorage
 
     # The hasher is an instance method only for code organization; credentials
     # are needed to upload, not to hash, so skip the credentialed __init__.
@@ -249,17 +109,17 @@ class DaytonaRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         import asyncssh
-
-        daytona_sdk = cast("DaytonaModule", importlib.import_module("daytona"))
-        AsyncDaytona = daytona_sdk.AsyncDaytona
-        CreateSandboxFromImageParams = daytona_sdk.CreateSandboxFromImageParams
-        CreateSandboxFromSnapshotParams = daytona_sdk.CreateSandboxFromSnapshotParams
-        CreateSnapshotParams = daytona_sdk.CreateSnapshotParams
-        DaytonaNotFoundError = daytona_sdk.DaytonaNotFoundError
-        GpuType = daytona_sdk.GpuType
-        Image = daytona_sdk.Image
-        Resources = daytona_sdk.Resources
-        SessionExecuteRequest = daytona_sdk.SessionExecuteRequest
+        from daytona import (
+            AsyncDaytona,
+            CreateSandboxFromImageParams,
+            CreateSandboxFromSnapshotParams,
+            CreateSnapshotParams,
+            DaytonaNotFoundError,
+            GpuType,
+            Image,
+            Resources,
+            SessionExecuteRequest,
+        )
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)

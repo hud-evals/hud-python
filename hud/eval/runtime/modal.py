@@ -4,165 +4,117 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib
 import logging
 import shlex
+import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any
 
-from .compose import ComposeConfig, ComposeProject
-from .core import Runtime, RuntimeConfig
+from .compose import ComposeConfig
+from .core import Runtime, RuntimeConfig, RuntimeSession
 from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
-    from pathlib import Path
+
+    import modal
 
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
 
-T_co = TypeVar("T_co", covariant=True)
-
-
-class AioMethod(Protocol[T_co]):
-    async def aio(self, *args: object, **kwargs: object) -> T_co: ...
-
-
-class ModalImage(Protocol):
-    build: AioMethod[None]
-
-    def env(self, variables: Mapping[str, str]) -> ModalImage: ...
-
-
-class _ModalImageFactory(Protocol):
-    def from_id(self, image_id: str) -> ModalImage: ...
-
-    def from_registry(self, image: str) -> ModalImage: ...
-
-    def from_name(self, name: str) -> ModalImage: ...
-
-
-class _ModalAppFactory(Protocol):
-    lookup: AioMethod[object]
-
-
-class _ModalStream(Protocol):
-    read: AioMethod[str]
-
-
-class _ModalProcess(Protocol):
-    wait: AioMethod[int]
-    stderr: _ModalStream
-
-
-class _ModalFilesystem(Protocol):
-    copy_from_local: AioMethod[None]
-    copy_to_local: AioMethod[None]
-
-
-class _ModalTunnel(Protocol):
-    tcp_socket: tuple[str, int]
-
-
-class ModalSandbox(Protocol):
-    object_id: str
-    wait_until_ready: AioMethod[None]
-    filesystem: _ModalFilesystem
-    exec: AioMethod[_ModalProcess]
-    tunnels: AioMethod[dict[int, _ModalTunnel]]
-    terminate: AioMethod[None]
-
-
-class _ModalSandboxFactory(Protocol):
-    create: AioMethod[ModalSandbox]
-
-
-class _ModalProbeFactory(Protocol):
-    def with_tcp(self, port: int) -> object: ...
-
-
-class ModalModule(Protocol):
-    Image: _ModalImageFactory
-    App: _ModalAppFactory
-    Sandbox: _ModalSandboxFactory
-    Probe: _ModalProbeFactory
-
-
 _MODAL_COMPOSE_CPU = 4.0
 _MODAL_COMPOSE_MEMORY_MB = 8192
 
 
-def _modal_image_from_uri(modal: ModalModule, image_uri: str) -> ModalImage:
-    modal_uri_prefix = "modal://"
-    if image_uri.startswith(modal_uri_prefix):
-        return modal.Image.from_id(image_uri.removeprefix(modal_uri_prefix))
-    return modal.Image.from_registry(image_uri)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ModalEndpoint(Runtime):
+    sandbox: modal.Sandbox
+    compose: str | None
+
+    def session(self, session_id: str) -> RuntimeSession:
+        return _ModalSession(
+            session_id=session_id,
+            sandbox=self.sandbox,
+            compose=self.compose,
+        )
 
 
-@dataclass(frozen=True, slots=True)
-class _ModalHandoff:
-    sandbox: ModalSandbox
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ModalSession(RuntimeSession):
+    sandbox: modal.Sandbox
     compose: str | None
 
     def _container(self) -> str:
         if self.compose is None:
             return ""
         compose = shlex.quote(self.compose)
+        project_directory = shlex.quote(str(PurePosixPath(self.compose).parent))
         return (
-            "CONTAINER=$(docker compose --project-directory /hud/project "
-            f"--file /hud/project/{compose} --file /hud/override.json "
+            f"CONTAINER=$(docker compose --project-directory {project_directory} "
+            f"--file {compose} --file /hud/override.json "
             "--file /hud/ports.yaml ps --quiet main); "
         )
 
-    async def _exec(self, command: str) -> None:
+    async def _exec(self, command: str) -> str:
         process = await self.sandbox.exec.aio("sh", "-c", command)
-        if await process.wait.aio() != 0:
+        returncode = await process.wait.aio()
+        stdout = await process.stdout.read.aio()
+        if returncode != 0:
             raise RuntimeError((await process.stderr.read.aio()).strip())
+        return stdout
 
-    async def prepare(self) -> None:
-        if self.compose is None:
-            await self._exec("mkdir -p /media/hud/handoffs")
-        else:
-            await self._exec(
-                self._container() + 'test -n "$CONTAINER" && docker exec "$CONTAINER" '
-                "mkdir -p /media/hud/handoffs"
+    @asynccontextmanager
+    async def snapshot(self) -> AsyncIterator[Path | None]:
+        with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
+            destination = Path(directory) / "session.tar.gz"
+            session = f"/media/hud/sessions/{self.session_id}"
+            if self.compose is None:
+                root = session
+                command = ""
+                check = f"if [ -d {root} ]; then printf 1; fi"
+            else:
+                root = "/media/hud/session-export"
+                command = (
+                    self._container()
+                    + f"rm -rf {root} && mkdir -p {root} && "
+                    + f'docker cp "$CONTAINER":{session}/. {root} && '
+                )
+                check = (
+                    self._container()
+                    + f'docker exec "$CONTAINER" test -d {session} && printf 1 || true'
+                )
+            if not (await self._exec(check)).strip():
+                yield None
+                return
+            command += (
+                f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
+                "then echo 'runtime session contains an unsupported entry' >&2; exit 1; fi; "
+                f"tar -czf /media/hud/session.tar.gz -C {root} ."
             )
+            await self._exec(command)
+            await self.sandbox.filesystem.copy_to_local.aio(
+                "/media/hud/session.tar.gz", destination
+            )
+            yield destination
 
-    async def export_to(self, destination: Path) -> None:
+    async def restore(self, source: Path) -> None:
+        session = f"/media/hud/sessions/{self.session_id}"
+        await self.sandbox.filesystem.copy_from_local.aio(source, "/media/hud/session.tar.gz")
         if self.compose is None:
-            root = "/media/hud/handoffs"
-            command = ""
+            command = (
+                f"rm -rf {session} && mkdir -p {session} && "
+                f"tar -xzf /media/hud/session.tar.gz -C {session}"
+            )
         else:
-            root = "/media/hud/handoff-export"
             command = (
                 self._container()
-                + f"rm -rf {root} && mkdir -p {root} && "
-                + f'docker cp "$CONTAINER":/media/hud/handoffs/. {root} && '
-            )
-        command += (
-            f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
-            "then echo 'runtime handoff contains an unsupported entry' >&2; exit 1; fi; "
-            f"tar -czf /media/hud/handoff.tar.gz -C {root} ."
-        )
-        await self._exec(command)
-        await self.sandbox.filesystem.copy_to_local.aio("/media/hud/handoff.tar.gz", destination)
-
-    async def import_from(self, source: Path) -> None:
-        await self.sandbox.filesystem.copy_from_local.aio(source, "/media/hud/handoff.tar.gz")
-        if self.compose is None:
-            command = (
-                "mkdir -p /media/hud/handoffs && "
-                "tar -xzf /media/hud/handoff.tar.gz -C /media/hud/handoffs"
-            )
-        else:
-            command = (
-                self._container()
-                + "rm -rf /tmp/hud-handoff && mkdir -p /tmp/hud-handoff && "
-                + "tar -xzf /media/hud/handoff.tar.gz -C /tmp/hud-handoff && "
-                + 'docker exec "$CONTAINER" mkdir -p /media/hud/handoffs && '
-                + 'docker cp /tmp/hud-handoff/. "$CONTAINER":/media/hud/handoffs'
+                + "rm -rf /tmp/hud-session && mkdir -p /tmp/hud-session && "
+                + "tar -xzf /media/hud/session.tar.gz -C /tmp/hud-session && "
+                + f'docker exec "$CONTAINER" sh -c "rm -rf {session} && mkdir -p {session}" && '
+                + f'docker cp /tmp/hud-session/. "$CONTAINER":{session}'
             )
         await self._exec(command)
 
@@ -186,7 +138,7 @@ class ModalRuntime:
         self,
         image_name: str | None = None,
         *,
-        image: ModalImage | None = None,
+        image: modal.Image | None = None,
         command: Sequence[str] | None = None,
         app_name: str = "hud-envs",
         workdir: str | None = None,
@@ -221,32 +173,41 @@ class ModalRuntime:
         # Resolved (named) or built-once (from Dockerfile) image, behind a lock so
         # concurrent first acquisitions build/look up exactly once.
         self._image = image
-        self._resolved: ModalImage | None = None
+        self._resolved: modal.Image | None = None
         self._image_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        import modal
+
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         resources = config.resources
         if resources is not None:
             resources._require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
-        compose_source = config.compose_source()
-        compose = (
-            compose_source.runnable_path("ModalRuntime") if compose_source is not None else None
-        )
+            if resources.gpu is not None and len(resources.gpu.acceptable_types) > 1:
+                raise ValueError("ModalRuntime does not support alternative GPU types")
+        project = config.compose
+        compose = None
+        if project is not None:
+            compose = project.document
+            if not isinstance(compose, Path):
+                raise ValueError("ModalRuntime requires compose as a local file path")
+            compose = compose.resolve()
         if compose is not None and resources is not None and resources.gpu is not None:
             raise ValueError(
                 "ModalRuntime cannot attach GPUs to services inside Docker-in-Docker; "
                 "use a materialized image or omit runtime_config.compose"
             )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
-        modal = cast("ModalModule", importlib.import_module("modal"))
-
         app = None
         if compose is not None:
             image = modal.Image.from_registry("docker:28.3.3-dind")
         elif config.image is not None:
-            image = _modal_image_from_uri(modal, config.image)
+            image = (
+                modal.Image.from_id(config.image.removeprefix("modal://"))
+                if config.image.startswith("modal://")
+                else modal.Image.from_registry(config.image)
+            )
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
         elif self._image is None:
@@ -313,18 +274,23 @@ class ModalRuntime:
             **({"experimental_options": {"vm_runtime": True}} if compose is not None else {}),
             **sandbox_kwargs,
         )
+        compose_path: str | None = None
         try:
-            if compose is None:
+            if project is None:
                 await sb.wait_until_ready.aio(timeout=ready_timeout)
             else:
-                project = ComposeProject(compose)
+                assert compose is not None
+                project_root = project.root if isinstance(project.root, Path) else compose.parent
+                compose_path = str(
+                    PurePosixPath("/hud/project")
+                    / compose.relative_to(project_root.resolve()).as_posix()
+                )
+                project_directory = str(PurePosixPath(compose_path).parent)
                 with project.stage(
                     f"{self.port}:{self.port}",
                     port_service=port_service,
                     seccomp="/hud/docker-seccomp.json",
-                    service_socket=(
-                        "/var/run/docker.sock" if config.compose_service_access else None
-                    ),
+                    service_socket=("/var/run/docker.sock" if project.service_access else None),
                     env_vars=self.env_vars,
                     cpu=resources.cpu if resources is not None else None,
                     memory_mb=resources.memory_mb if resources is not None else None,
@@ -349,8 +315,8 @@ class ModalRuntime:
                     "BUILD_FLAG=--build && "
                     "if [ -f /hud/project/build.sh ]; then "
                     "sh /hud/project/build.sh && BUILD_FLAG=--no-build; fi && "
-                    "docker compose --project-directory /hud/project "
-                    f"--file /hud/project/{shlex.quote(compose.name)} "
+                    f"docker compose --project-directory {shlex.quote(project_directory)} "
+                    f"--file {shlex.quote(compose_path)} "
                     "--file /hud/override.json --file /hud/ports.yaml "
                     'up --detach "$BUILD_FLAG" --remove-orphans'
                 )
@@ -366,29 +332,28 @@ class ModalRuntime:
                     error = (await process.stderr.read.aio()).strip()
                     raise RuntimeError(f"Modal Compose startup failed: {error}")
             host, port = (await sb.tunnels.aio())[self.port].tcp_socket
-            handoff = _ModalHandoff(sb, compose.name if compose is not None else None)
-            await handoff.prepare()
-            yield Runtime(
-                f"tcp://{host}:{port}",
+            yield _ModalEndpoint(
+                url=f"tcp://{host}:{port}",
                 params={
                     "provider": "modal",
                     "instance_id": sb.object_id,
                     **({"ready_timeout": ready_timeout} if compose is not None else {}),
                 },
                 config=config if config.model_dump(exclude_none=True) else None,
-                handoff=handoff,
+                sandbox=sb,
+                compose=compose_path,
             )
         finally:
             # check-free teardown: never shadow the run's own error.
-            if compose is not None:
+            if compose_path is not None:
                 with contextlib.suppress(Exception):
                     process = await sb.exec.aio(
                         "docker",
                         "compose",
                         "--project-directory",
-                        "/hud/project",
+                        str(PurePosixPath(compose_path).parent),
                         "--file",
-                        f"/hud/project/{compose.name}",
+                        compose_path,
                         "--file",
                         "/hud/override.json",
                         "--file",
