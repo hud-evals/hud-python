@@ -115,12 +115,12 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 
 ## Run a packaged image
 
-`hud task start` / `hud task grade` attach to an env already serving locally (e.g. inside a built image, or alongside `hud serve`), or load one from source with `--source`. `hud task list` always reads from source (default `.`) - it doesn't attach.
+`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD also spawns that source locally. With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`) - it doesn't attach.
 
 ```bash
-hud task list                          # what tasks are exposed
-hud task start fix_bug                 # -> the prompt (stdout)
-hud task grade fix_bug --answer "..."  # -> the reward (stdout)
+hud task list
+hud task start fix_bug --source tasks.py --url tcp://127.0.0.1:8765
+hud task grade fix_bug --source tasks.py --url tcp://127.0.0.1:8765 --answer "..."
 ```
 
 | Command | Key options |
