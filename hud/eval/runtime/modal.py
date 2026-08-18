@@ -140,12 +140,15 @@ class ModalRuntime:
         *,
         image: modal.Image | None = None,
         command: Sequence[str] | None = None,
-        app_name: str = "hud-envs",
+        app: modal.App | None = None,
+        app_name: str | None = None,
         workdir: str | None = None,
         port: int = 8765,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
     ) -> None:
+        if app is not None and app_name is not None:
+            raise ValueError("ModalRuntime accepts either app or app_name, not both")
         self.image_name = image_name
         self.port = port
         self.env_vars = dict(env_vars or {})
@@ -165,7 +168,8 @@ class ModalRuntime:
                 str(port),
             )
         )
-        self.app_name = app_name
+        self.app = app
+        self.app_name = "hud-envs" if app_name is None else app_name
         config = None
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
@@ -199,7 +203,6 @@ class ModalRuntime:
                 "use a materialized image or omit runtime_config.compose"
             )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
-        app = None
         if compose is not None:
             image = modal.Image.from_registry("docker:28.3.3-dind")
         elif config.image is not None:
@@ -216,18 +219,19 @@ class ModalRuntime:
                 "or runtime_config.compose"
             )
         else:
+            image = self._resolved
+
+        app = self.app
+        if app is None:
+            app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
+        if image is None:
+            assert self._image is not None
             if self._resolved is None:
                 async with self._image_lock:
                     if self._resolved is None:
-                        app = await modal.App.lookup.aio(
-                            self.app_name,
-                            create_if_missing=True,
-                        )
                         await self._image.build.aio(app=app)
                         self._resolved = self._image
-            image = self._resolved
-        if app is None:
-            app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
+            image = self._image
 
         sandbox_kwargs: dict[str, Any] = {}
         if compose is not None:
