@@ -24,7 +24,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Run tests
-        run: uv run --python ${{ matrix.python-version }} --with=".[dev]" pytest --cov --cov-report=''
+        run: uv run --python ${{ matrix.python-version }} --all-extras pytest --cov --cov-report=''
 
   lint-ruff:
     runs-on: ubuntu-latest
