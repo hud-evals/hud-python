@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [coding, cua]
+        template: [blank, coding, cua]
 
     steps:
       - name: Check out code
@@ -40,18 +40,50 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install template with the SDK from this checkout
-        working-directory: environments/${{ matrix.template }}
+      - name: Create example environment
+        run: uv run hud init "${{ runner.temp }}/${{ matrix.template }}" --template "${{ matrix.template }}"
+
+      - name: Install example with the SDK from this checkout
+        working-directory: ${{ runner.temp }}/${{ matrix.template }}
         run: |
           uv sync --all-extras
-          uv pip install -e ../..
+          uv pip install -e "$GITHUB_WORKSPACE"
 
-      - name: Run template checks
-        working-directory: environments/${{ matrix.template }}
+      - name: Run example checks
+        working-directory: ${{ runner.temp }}/${{ matrix.template }}
         run: |
-          uv run --no-sync ruff format . --check
-          uv run --no-sync ruff check .
-          uv run --no-sync pytest -q
+          uv run --no-sync hud task list --source .
+          if [ -d tests ]; then
+            uv run --no-sync ruff format . --check
+            uv run --no-sync ruff check .
+            uv run --no-sync pytest -q
+          fi
+
+      - name: Build example image
+        working-directory: ${{ runner.temp }}/${{ matrix.template }}
+        run: docker build --file Dockerfile.hud --tag "hud-example:${{ matrix.template }}" .
+
+      - name: Start example image
+        run: |
+          docker run --detach --name hud-example --publish 8765:8765 --shm-size 2g \
+            "hud-example:${{ matrix.template }}"
+
+      - name: Inspect example image
+        working-directory: ${{ runner.temp }}/${{ matrix.template }}
+        run: |
+          for attempt in {1..60}; do
+            if (echo > /dev/tcp/127.0.0.1/8765) 2>/dev/null; then
+              uv run --no-sync hud client info --url tcp://127.0.0.1:8765
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs hud-example
+          exit 1
+
+      - name: Stop example image
+        if: always()
+        run: docker rm --force hud-example || true
 
   lint-ruff:
     runs-on: ubuntu-latest
