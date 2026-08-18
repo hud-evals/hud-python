@@ -126,9 +126,9 @@
     "discord": "https://discord.gg/wkjtmHYYjm",
     "x": "https://x.com/hud_evals"
   },
-  "analytics": {
-    "ga4": {
-      "measurementId": "G-XXXXXXXXXX"
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_Y0O4R6an6XCDwoGLKvGiazyd1C1UdYQKCXFYSrqVzDJ"
     }
   },
   "seo": {
