@@ -138,14 +138,16 @@ security override are documented in
 ### `ModalRuntime`
 
 ```python
-ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", workdir=None, port=8765, runtime_config=None, env_vars=None)
+ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None)
 ```
 
 - **`image_name`** - published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
 - **`image`** - an `Image` to build lazily on first use, as an escape hatch.
 - **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint).
 - **`workdir`** - working directory inside the sandbox. Left unset, Modal keeps the image's `WORKDIR`.
-- **`app_name`** / **`port`** / **`env_vars`** - Modal app name, in-sandbox serving port, and extra environment variables.
+- **`app`** - an already-running, caller-owned Modal app. `ModalRuntime` does not manage its lifecycle.
+- **`app_name`** - a Modal app to look up. Defaults to `hud-envs` when `app` is not supplied; `app` and `app_name` are mutually exclusive.
+- **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables.
 
 For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
 sandbox in your Modal account and merges `env_vars` into `main` at acquisition

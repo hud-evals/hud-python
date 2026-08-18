@@ -1025,6 +1025,31 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
     assert calls["terminated"] is True
 
 
+async def test_modal_runtime_uses_caller_owned_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    app = object()
+
+    async def build(*, app: object) -> None:
+        calls["image_build_app"] = app
+
+    image = SimpleNamespace(build=SimpleNamespace(aio=build))
+    provider = ModalRuntime(app=cast("Any", app), image=cast("Any", image))
+
+    async with provider(_row()):
+        pass
+
+    assert "app_lookup" not in calls
+    assert calls["image_build_app"] is app
+    assert calls["sandbox_kwargs"]["app"] is app
+
+
+def test_modal_runtime_rejects_app_and_app_name() -> None:
+    with pytest.raises(ValueError, match="either app or app_name"):
+        ModalRuntime(app=cast("Any", object()), app_name="hud-envs")
+
+
 async def test_modal_runtime_rejects_gpu_alternatives() -> None:
     provider = ModalRuntime(
         runtime_config=RuntimeConfig(
