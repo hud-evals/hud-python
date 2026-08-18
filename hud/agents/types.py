@@ -71,6 +71,24 @@ class AgentConfig(BaseModel):
 
 
 # -----------------------------------------------------------------------------
+# Integration test
+# -----------------------------------------------------------------------------
+
+
+class IntegrationTestConfig(AgentConfig):
+    """Configuration for the local authoring agent.
+
+    No model: the agent pre-stages the golden solution (``Task.validation``)
+    through the task's own MCP capabilities and lets the environment's
+    scenario graders run on completion. ``timeout_seconds`` bounds the whole
+    staging pass.
+    """
+
+    model_name: str = "Integration Test"
+    model: str = "integration_test"
+
+
+# -----------------------------------------------------------------------------
 # Claude
 # -----------------------------------------------------------------------------
 

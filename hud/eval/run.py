@@ -166,6 +166,10 @@ class Run:
         #: The task slug this run came from (set by the rollout engine). Lets
         #: ``Job.results`` key runs back to their task without positional zip.
         self.slug: str | None = None
+        #: The task's golden pre-staging steps (``Task.validation``). The
+        #: ``integration_test`` authoring agent replays them through the task's
+        #: own capabilities before the scenario graders run.
+        self.validation: list[Any] | None = None
         # Written by :func:`rollout` once placement is acquired.
         self._runtime: str | None = None
 
@@ -442,6 +446,7 @@ async def rollout(
                         task.args,
                         best_effort_grade=task.verifier is not None,
                     )
+                    live.validation = task.validation
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes

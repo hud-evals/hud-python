@@ -109,10 +109,16 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
             )
             raise ValueError(f"Model {requested_model!r} not found in {source}.{hint}")
 
+    if agent_type is AgentType.INTEGRATION_TEST:
+        raise ValueError(
+            "integration_test is the local authoring agent, not a gateway model: "
+            "it makes no LLM calls. Run it with `hud eval <taskset> integration_test`."
+        )
+
     kwargs.setdefault("model", model_id)
     # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
-    return agent_type.cls(cast("Any", config))
+    return cast("GatewayAgent", agent_type.cls(cast("Any", config)))
 
 
 _LAZY_EXPORTS = {

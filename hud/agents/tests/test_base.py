@@ -83,6 +83,12 @@ def gateway_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
 
 
+def test_create_agent_rejects_integration_test() -> None:
+    # The authoring agent is not a gateway shortcut; it makes no LLM calls.
+    with pytest.raises(ValueError, match="local authoring agent"):
+        create_agent("integration_test")
+
+
 def test_create_agent_unknown_model_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     # No gateway models available -> a bare unknown model can't be resolved.
     monkeypatch.setattr("hud.agents.list_gateway_models", list)
