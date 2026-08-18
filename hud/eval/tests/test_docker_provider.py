@@ -1069,6 +1069,7 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert kwargs["cpu"] == 4
     assert kwargs["memory"] == 8192
     assert kwargs["image"] == _ModalImageRef("registry", "docker:28.3.3-dind")
+    assert "env" not in kwargs
     assert calls["uploads"] == [
         ("project.tar.gz", "/hud/project.tar.gz"),
         ("override.json", "/hud/override.json"),

@@ -32,10 +32,10 @@ from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import Peer, _field, _UnixServer, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
-from hud.utils.process import ProcessResult
+from hud.utils.process import ProcessGroup, ProcessResult
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import AsyncIterator, Mapping
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
 
@@ -51,6 +51,67 @@ async def _connect(ws: Workspace) -> asyncssh.SSHClientConnection:
         client_keys=[str(key_path)],
         known_hosts=None,
     )
+
+
+@contextlib.asynccontextmanager
+async def _connected_namespace_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[namespace_mod.NamespaceHost]:
+    socket_dir = tempfile.TemporaryDirectory(prefix="hud-namespace-", dir="/tmp")
+    socket_path = Path(socket_dir.name) / "host.sock"
+    server_host = namespace_mod._NamespaceHost(
+        socket_path,
+        setup_loopback=False,
+        holder_argv=[],
+        bwrap="",
+        launcher_depth=0,
+        map_identities=False,
+        ports=frozenset(),
+    )
+    holders = [SimpleNamespace(terminate=AsyncMock()) for _ in range(2)]
+    monkeypatch.setattr(
+        server_host,
+        "_start_holder",
+        AsyncMock(side_effect=[(holder, os.getpid()) for holder in holders]),
+    )
+
+    create_process_group_exec = namespace_mod.create_process_group_exec
+
+    async def spawn_without_nsenter(*argv: str, **kwargs: Any) -> ProcessGroup:
+        command = argv[argv.index("--") + 1 :]
+        return await create_process_group_exec(*command, **kwargs)
+
+    monkeypatch.setattr(namespace_mod, "create_process_group_exec", spawn_without_nsenter)
+    listen = asyncssh.listen
+    listening = asyncio.Event()
+
+    async def listen_and_signal(*args: Any, **kwargs: Any) -> asyncssh.SSHAcceptor:
+        server = await listen(*args, **kwargs)
+        listening.set()
+        return server
+
+    monkeypatch.setattr(asyncssh, "listen", listen_and_signal)
+    serve_task = asyncio.create_task(server_host.serve())
+    client: namespace_mod.NamespaceHost | None = None
+    try:
+        await asyncio.wait_for(listening.wait(), 1.0)
+        client = namespace_mod.NamespaceHost(socket_path)
+        await client.connect()
+        yield client
+    finally:
+        if client is not None:
+            await client.close()
+        serve_task.cancel()
+        await asyncio.gather(serve_task, return_exceptions=True)
+        socket_dir.cleanup()
+
+
+def _wait_for_path(path: Path, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not path.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"timed out waiting for {path}")
+        time.sleep(0.01)
 
 
 @pytest.mark.asyncio
@@ -155,6 +216,94 @@ async def test_output_arrives_while_the_command_is_still_running(tmp_path: Path)
     assert first.strip() == "first"
     # Held until exit it would take the full sleep; the point is that it does not.
     assert elapsed < 2.0, f"first line took {elapsed:.1f}s — output is not streaming"
+
+
+@pytest.mark.parametrize(
+    ("command", "marker"),
+    [
+        (
+            "sh -c 'sleep .1; exec >/dev/null 2>&1; : > silent-done' & printf started",
+            "silent-done",
+        ),
+        (
+            "sh -c \"sleep .1; trap '' PIPE; printf late-out || :; "
+            "printf late-err >&2 || :; exec >/dev/null 2>&1; "
+            ': > late-done" & printf started',
+            "late-done",
+        ),
+        (
+            "cd . && nohup sh -c 'sleep .1' "
+            "</dev/null >stdin.log 2>&1 && exec >/dev/null 2>&1 && "
+            ": > stdin-done & printf started",
+            "stdin-done",
+        ),
+        (
+            "(cd . && exec sh -c 'sleep .1; : > redirected-done') "
+            "</dev/null >redirected.log 2>&1 & printf started",
+            "redirected-done",
+        ),
+    ],
+    ids=("inherited-eof", "late-output", "stdin-detached", "fully-redirected"),
+)
+@pytest.mark.asyncio
+async def test_background_completion_preserves_subsequent_namespace_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    marker: str,
+) -> None:
+    shell = shutil.which("bash") or "sh"
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        launched = await namespace.spawn(
+            [shell, "-c", command],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        launch_result = await asyncio.wait_for(launched.complete(), 5.0)
+
+        assert launch_result.returncode == 0
+        assert launch_result.stdout == b"started"
+
+        await asyncio.to_thread(_wait_for_path, tmp_path / marker)
+        await asyncio.sleep(0)
+
+        probe = await namespace.spawn(
+            [shell, "-c", "printf healthy"],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        probe_result = await asyncio.wait_for(probe.complete(), 5.0)
+
+    assert probe_result.returncode == 0
+    assert probe_result.stdout == b"healthy"
+
+
+@pytest.mark.asyncio
+async def test_namespace_process_forwards_standard_streams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell = shutil.which("bash") or "sh"
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        process = await namespace.spawn(
+            [
+                shell,
+                "-c",
+                "IFS= read -r line; printf 'out:%s' \"$line\"; printf err >&2",
+            ],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        process.stdin.write(b"input\n")
+        process.stdin.write_eof()
+        result = await asyncio.wait_for(process.complete(), 5.0)
+
+    assert result.returncode == 0
+    assert result.stdout == b"out:input"
+    assert result.stderr == b"err"
 
 
 @pytest.mark.asyncio
