@@ -3,8 +3,8 @@
 The model is the row: plain pydantic (``model_validate``/``model_dump``) is the
 whole codec for ``hud sync`` and the JSON/JSONL taskset path. ``env`` is carried
 as its name, the join key to whatever placement can bring that environment up.
-Placement is never part of the row — without an ``runtime=`` provider, execution
-defaults to the HUD runtime tunnel by env name.
+Placement is never part of the row. Factory-created tasks can run locally;
+portable rows require a provider or source placement.
 """
 
 from __future__ import annotations
@@ -21,10 +21,11 @@ from hud.eval import (
     RuntimeConfig,
     RuntimeGPU,
     RuntimeResources,
+    RuntimeTPU,
     Task,
     Taskset,
 )
-from hud.eval.compose import ComposeConfig, ComposeProjectRef
+from hud.eval.runtime.compose import ComposeConfig, ComposeProject, ComposeProjectRef
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -122,12 +123,20 @@ def test_roundtrip_is_stable_through_plain_pydantic() -> None:
 
 
 def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
+    resources = RuntimeResources(
+        cpu=2,
+        memory_mb=4096,
+        storage_mb=16384,
+        gpu=RuntimeGPU(type=["H100", "A100"]),
+        os="windows",
+        tpu=RuntimeTPU(type="v5", topology="2x2"),
+    )
     original = Task(
         env="browser",
         id="checkout",
         runtime_config=RuntimeConfig(
             image="hud-browser:firefox",
-            resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+            resources=resources,
         ),
     ).model_dump(exclude_none=True)
 
@@ -135,7 +144,7 @@ def test_runtime_config_roundtrips_as_part_of_task_row() -> None:
 
     assert rebuilt.runtime_config == RuntimeConfig(
         image="hud-browser:firefox",
-        resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU()),
+        resources=resources,
     )
     assert rebuilt.model_dump(exclude_none=True) == original
 
@@ -194,32 +203,46 @@ def test_runtime_config_rejects_unknown_fields() -> None:
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
 
 
-def test_compose_runtime_config_serializes_as_task_data(tmp_path: Path) -> None:
+def test_compose_runtime_config_serializes_by_task_dump_mode(tmp_path: Path) -> None:
     compose = tmp_path / "compose.json"
     compose.write_text(
         json.dumps({"services": {"main": {"image": "hud-env:latest"}}}),
         encoding="utf-8",
     )
-    config = RuntimeConfig(compose=compose)
+    config = RuntimeConfig(compose=ComposeProject(document=compose))
     task = Task(env="database", id="cutover", runtime_config=config)
 
-    rebuilt = Task.model_validate(task.model_dump())
+    payload = task.model_dump(exclude_none=True)
+    rebuilt = Task.model_validate(payload)
 
-    assert rebuilt.runtime_config == config
-    assert config.request_payload() == {
+    assert payload["runtime_config"] == {"compose": {"document": compose}}
+    assert rebuilt.runtime_config is not None
+    assert rebuilt.runtime_config.compose is not None
+    assert rebuilt.runtime_config.compose.document == compose
+
+    payload = task.model_dump(mode="json", exclude_none=True)
+    rebuilt = Task.model_validate(payload)
+
+    assert payload["runtime_config"] == {
         "compose": {
-            "services": {
-                "main": {
-                    "image": "hud-env:latest",
-                    "environment": {},
-                    "expose": [],
-                    "ports": [],
-                    "volumes": [],
-                }
+            "document": {
+                "services": {
+                    "main": {
+                        "image": "hud-env:latest",
+                        "environment": {},
+                        "expose": [],
+                        "ports": [],
+                        "volumes": [],
+                    }
+                },
+                "networks": {},
             },
-            "networks": {},
         }
     }
+    assert rebuilt.runtime_config is not None
+    assert rebuilt.runtime_config.compose is not None
+    assert isinstance(rebuilt.runtime_config.compose.document, ComposeConfig)
+    assert str(compose) not in json.dumps(payload)
 
 
 def test_compose_project_serializes_document_location_not_author_path(tmp_path: Path) -> None:
@@ -241,28 +264,34 @@ def test_compose_project_serializes_document_location_not_author_path(tmp_path: 
         encoding="utf-8",
     )
 
-    payload = RuntimeConfig(compose=compose, compose_project=project).request_payload()
+    payload = RuntimeConfig(compose=ComposeProject(document=compose, root=project)).model_dump(
+        mode="json",
+        exclude_unset=True,
+    )
 
-    assert payload["compose_project"] == {"compose_path": "compose-project/compose.json"}
+    assert payload["compose"]["root"] == {"compose_path": "compose-project/compose.json"}
     assert str(tmp_path) not in json.dumps(payload)
 
 
 def test_compose_runtime_config_round_trips_platform_records() -> None:
     record = {
         "compose": {
-            "services": {"main": {"image": "hud-harbor:local"}},
-            "networks": {},
+            "document": {
+                "services": {"main": {"image": "hud-harbor:local"}},
+                "networks": {},
+            },
+            "root": {"compose_path": "compose-project/compose.json"},
         },
-        "compose_project": {"compose_path": "compose-project/compose.json"},
     }
 
     config = RuntimeConfig.model_validate(record)
 
-    assert isinstance(config.compose, ComposeConfig)
-    assert isinstance(config.compose_project, ComposeProjectRef)
-    payload = config.request_payload()
-    assert payload["compose"]["services"]["main"]["image"] == "hud-harbor:local"
-    assert payload["compose_project"] == {"compose_path": "compose-project/compose.json"}
+    assert config.compose is not None
+    assert isinstance(config.compose.document, ComposeConfig)
+    assert isinstance(config.compose.root, ComposeProjectRef)
+    payload = config.model_dump(mode="json", exclude_unset=True)
+    assert payload["compose"]["document"]["services"]["main"]["image"] == "hud-harbor:local"
+    assert payload["compose"]["root"] == {"compose_path": "compose-project/compose.json"}
     assert RuntimeConfig.model_validate(payload) == config
 
 
@@ -295,7 +324,7 @@ async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.Monk
     monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
 
     task = Task(env="hosted-env", id="solve", args={"n": 1})
-    taskset = taskset_mod.Taskset("hosted", [task], origin="api:ts_123")
+    taskset = taskset_mod.Taskset("hosted", [task], taskset_id="ts_123")
     job = await taskset.run(cast("Agent", object()))
 
     (run,) = job.runs
@@ -317,12 +346,16 @@ def test_taskset_is_ordered_and_keyed_by_slug() -> None:
         verifier=Task(env="judge", id="verify"),
     )
 
-    tasks = Taskset("demo", [first, second])
+    tasks = Taskset("demo", [first, second], taskset_id="ts_123")
 
     assert list(tasks) == [first, second]
     assert tasks["first"] is first
-    assert list(tasks.filter(["second"])) == [second]
-    assert list(tasks.exclude(["first"])) == [second]
+    filtered = tasks.filter(["second"])
+    excluded = tasks.exclude(["first"])
+    assert list(filtered) == [second]
+    assert list(excluded) == [second]
+    assert filtered.taskset_id == "ts_123"
+    assert excluded.taskset_id == "ts_123"
     assert list(tasks.items()) == [("first", first), ("second", second)]
     assert tasks.environment_names() == {"e", "judge"}
 
@@ -354,6 +387,35 @@ def test_file_roundtrip_keeps_rows_and_env_names(tmp_path) -> None:
     assert [t.slug for t in loaded] == ["one", "two"]
     assert all(t.env == "authored" for t in loaded)
     assert list(loaded) == authored  # rows survive the file intact (value equality)
+
+
+def test_taskset_file_preserves_local_compose_project(tmp_path: Path) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: alpine:3.21\n", encoding="utf-8")
+    output = Taskset(
+        "compose",
+        [
+            Task(
+                env="compose",
+                id="solve",
+                runtime_config=RuntimeConfig(
+                    compose=ComposeProject(document=compose, root=tmp_path),
+                ),
+            ),
+        ],
+    ).to_file(tmp_path / "tasks.json")
+
+    row = json.loads(output.read_text(encoding="utf-8"))[0]
+    assert row["runtime_config"]["compose"] == {
+        "document": "compose.yaml",
+        "root": ".",
+    }
+    loaded = next(iter(Taskset.from_file(output)))
+    assert loaded.runtime_config is not None
+    assert loaded.runtime_config.compose == ComposeProject(
+        document=compose.resolve(),
+        root=tmp_path.resolve(),
+    )
 
 
 def test_taskset_to_file_writes_json_and_jsonl(tmp_path) -> None:
@@ -418,6 +480,7 @@ def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -
     taskset = Taskset.from_api("demo")
 
     assert taskset.name == "Demo"
+    assert taskset.taskset_id == "ts_123"
     assert taskset["one"].id == "solve"
     assert taskset["one"].env == "e"
     assert taskset["one"].args == {"n": 1}

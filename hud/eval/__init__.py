@@ -34,6 +34,7 @@ from .chat import Chat
 from .job import Job
 from .run import Grade, Run, rollout
 from .runtime import (
+    ComposeProject,
     DaytonaRuntime,
     DockerRuntime,
     HostedRuntime,
@@ -46,6 +47,7 @@ from .runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    RuntimeTPU,
     Shared,
     SubprocessRuntime,
 )
@@ -55,6 +57,7 @@ from .taskset import Taskset
 
 __all__ = [
     "Chat",
+    "ComposeProject",
     "DaytonaRuntime",
     "DockerRuntime",
     "Grade",
@@ -70,6 +73,7 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "RuntimeTPU",
     "Shared",
     "SubprocessRuntime",
     "SyncPlan",

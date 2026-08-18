@@ -11,6 +11,7 @@ from .clients import connect
 from .environment import Environment
 from .eval import (
     Chat,
+    ComposeProject,
     DockerRuntime,
     Grade,
     HostedRuntime,
@@ -23,6 +24,7 @@ from .eval import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    RuntimeTPU,
     SubprocessRuntime,
     SyncPlan,
     Task,
@@ -35,6 +37,7 @@ from .version import __version__
 
 __all__ = [
     "Chat",
+    "ComposeProject",
     "DockerRuntime",
     "Environment",
     "Grade",
@@ -48,6 +51,7 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
+    "RuntimeTPU",
     "SubprocessRuntime",
     "SyncPlan",
     "Task",

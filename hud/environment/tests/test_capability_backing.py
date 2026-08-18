@@ -103,14 +103,14 @@ async def test_workspace_file_tracking_can_be_opted_out(
 
 async def test_reconnecting_reuses_the_same_workspace(tmp_path: Path) -> None:
     from hud.clients import connect
-    from hud.eval.runtime import _local
+    from hud.eval import LocalRuntime, Task
 
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
 
     # Client-side urls are per-connection (forwarded); the daemon's identity
     # is its host key, which only stays stable if the workspace is reused.
-    async with _local(env) as runtime:
+    async with LocalRuntime(env)(Task(env=env.name, id="test")) as runtime:
         async with connect(runtime) as client:
             first = client.binding("shell").params["host_pubkey"]
         async with connect(runtime) as client:

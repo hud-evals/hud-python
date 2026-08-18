@@ -86,7 +86,7 @@ class _TaskFactory(Generic[P]):
     binds a runnable :class:`~hud.eval.Task`::
 
         task = fix_bug(difficulty=3)  # -> Task
-        job = await task.run(agent, runtime=LocalRuntime("env.py"))
+        job = await task.run(agent)
     """
 
     def __init__(
@@ -123,14 +123,13 @@ class _TaskFactory(Generic[P]):
         return entry
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> EvalTask:
-        # The one sanctioned upward import: eval sits above environment and
-        # agents and imports both; neither imports eval. Calling a declaration
-        # is where env hands the row to eval, and the import stays local to
-        # break the load-time cycle. Don't add more edges like this.
+        # Avoid the environment -> eval import cycle.
         from hud.eval.task import Task
 
         bound = self.sig.bind(*args, **kwargs)
-        return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
+        task = Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
+        task._env = self.env
+        return task
 
 
 class Environment:

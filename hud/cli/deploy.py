@@ -21,7 +21,7 @@ from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
-from hud.eval.runtime import RuntimeConfig
+from hud.eval.runtime import ComposeProject, RuntimeConfig
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
@@ -109,11 +109,15 @@ def _load_runtime_config(path: str | None, console: HUDConsole) -> RuntimeConfig
         raw = json.loads(config_path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
             raw_config = cast("dict[str, Any]", raw)
-            for field in ("compose", "compose_project"):
-                value = raw_config.get(field)
-                if isinstance(value, str):
+            compose = raw_config.get("compose")
+            if isinstance(compose, dict):
+                compose_config = cast("dict[str, Any]", compose)
+                for field in ("document", "root"):
+                    value = compose_config.get(field)
+                    if not isinstance(value, str):
+                        continue
                     candidate = Path(value).expanduser()
-                    raw_config[field] = str(
+                    compose_config[field] = str(
                         candidate
                         if candidate.is_absolute()
                         else (config_path.parent / candidate).resolve()
@@ -415,9 +419,7 @@ def _prepare_deploy_plan(
     recipe = _compose_recipe(env_dir)
     if recipe is not None:
         if loaded_runtime_config is not None and (
-            loaded_runtime_config.image is not None
-            or loaded_runtime_config.compose is not None
-            or loaded_runtime_config.compose_project is not None
+            loaded_runtime_config.image is not None or loaded_runtime_config.compose is not None
         ):
             console.error("--runtime-config cannot set image or Compose for a Compose context")
             raise typer.Exit(1)
@@ -428,8 +430,7 @@ def _prepare_deploy_plan(
                     if loaded_runtime_config is not None
                     else {}
                 ),
-                "compose": recipe,
-                "compose_project": env_dir,
+                "compose": ComposeProject(document=recipe, root=env_dir),
             }
         )
 
@@ -557,7 +558,9 @@ async def _trigger_build(
                 ("runtime_provider", plan.runtime),
                 (
                     "runtime_config",
-                    plan.runtime_config.request_payload() if plan.runtime_config else None,
+                    plan.runtime_config.model_dump(mode="json", exclude_unset=True)
+                    if plan.runtime_config
+                    else None,
                 ),
                 ("environment_variables", plan.env_vars),
                 ("build_args", plan.build_args),

@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
 
     from .runtime import Provider
+    from .runtime.core import RuntimeSession
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -104,6 +105,14 @@ class Grade:
     info: dict[str, Any] = field(default_factory=dict)
     is_error: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
+    evaluation: dict[str, Any] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.evaluation = dict(self.raw)
+        if isinstance(subscores := self.evaluation.get("subscores"), list):
+            self.evaluation["subscores"] = [
+                SubScore.model_validate(subscore).to_summary() for subscore in subscores
+            ]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Grade:
@@ -113,10 +122,6 @@ class Grade:
             raise HudProtocolError(-32603, "tasks.grade: result must include a numeric 'score'")
         raw_info = data.get("info")
         raw = dict(data)
-        if isinstance(subscores := data.get("subscores"), list):
-            raw["subscores"] = [
-                SubScore.model_validate(subscore).to_summary() for subscore in subscores
-            ]
         return cls(
             reward=float(score),
             done=bool(data.get("done", True)),
@@ -194,8 +199,8 @@ class Run:
 
     @property
     def evaluation(self) -> dict[str, Any]:
-        """The persistence-safe evaluation dict (``grade.raw``)."""
-        return self.grade.raw
+        """A persistence-safe view of the task's evaluation result."""
+        return dict(self.grade.evaluation)
 
     @property
     def trace_id(self) -> str | None:
@@ -291,6 +296,16 @@ class Run:
                 raise
             detail = "".join(traceback.format_exception_only(grade_exc)).strip()
             logger.warning("best-effort grade failed: %s", detail)
+            self.grade = Grade(
+                content=detail,
+                is_error=True,
+                raw={
+                    "score": 0.0,
+                    "answer": self.trace.content,
+                    "content": detail,
+                    "isError": True,
+                },
+            )
             self.trace.status = "error"
             self.record(Step(source="system", error=f"[grading] {detail}"))
             return False
@@ -326,7 +341,12 @@ class Run:
         return run
 
 
-async def _verify(run: Run, client: HudClient, task: Task) -> None:
+async def _verify(
+    run: Run,
+    client: HudClient,
+    task: Task,
+    actor_result: dict[str, Any],
+) -> None:
     """Run an agent-less verifier task and make its evaluation authoritative."""
     started_at = now_iso()
     started = await client.start_task(task.id, task.args)
@@ -343,7 +363,7 @@ async def _verify(run: Run, client: HudClient, task: Task) -> None:
         )
     )
 
-    answer = {"answer": run.trace.content}
+    answer = {"answer": actor_result}
     started_at = now_iso()
     evaluation = await client.grade(answer)
     run.grade = Grade.from_dict(evaluation)
@@ -432,7 +452,25 @@ async def rollout(
 
         async def _drive() -> None:
             nonlocal client, run, _phase
-            async with runtime(task) as addr:
+            actor_result: dict[str, Any] = {}
+            actor_session: RuntimeSession | None = None
+            verifier = task.verifier
+            shared_verifier = (
+                verifier is not None
+                and verifier.env == task.env
+                and verifier.runtime_config is None
+            )
+            async with contextlib.AsyncExitStack() as scope:
+                actor = contextlib.AsyncExitStack()
+                await actor.__aenter__()
+
+                async def close_actor() -> None:
+                    cleanup = asyncio.create_task(actor.aclose())
+                    cleanup.add_done_callback(_consume_task_result)
+                    await asyncio.shield(cleanup)
+
+                scope.push_async_callback(close_actor)
+                addr = await actor.enter_async_context(runtime(task))
                 _phase = "starting task"
                 async with connect(addr) as actor_client:
                     client = actor_client
@@ -472,36 +510,48 @@ async def rollout(
                             run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         _phase = "grading"
 
-                    verifier = task.verifier
                     if verifier is not None:
+                        actor_result = live.grade.raw
+                        assert actor_client.manifest is not None
+                        actor_session = addr.session(actor_client.manifest.session_id)
                         # The verifier is authoritative. Once its phase begins,
                         # an actor-side grade must not survive a verifier failure.
                         live.grade = Grade()
-                    if (
-                        verifier is not None
-                        and verifier.env == task.env
-                        and verifier.runtime_config is None
-                    ):
+                    if shared_verifier:
+                        assert verifier is not None
                         _phase = "verifying"
-                        await _verify(live, actor_client, verifier)
+                        await _verify(live, actor_client, verifier, actor_result)
                         _phase = "cleanup"
                         return
 
-                _phase = "actor cleanup"
+                if rollout_expired:
+                    return
+                if verifier is None:
+                    _phase = "actor cleanup"
+                    await actor.aclose()
+                    _phase = "cleanup"
+                    return
 
-            if rollout_expired:
-                return
-            verifier = task.verifier
-            if verifier is not None:
-                _phase = "provisioning verifier"
-                async with (
-                    runtime(verifier) as verifier_addr,
-                    connect(verifier_addr) as verifier_client,
-                ):
+                assert actor_session is not None
+                _phase = "snapshotting actor"
+                async with actor_session.snapshot() as archive:
+                    _phase = "actor cleanup"
+                    await actor.aclose()
+                    client = None
+                    if rollout_expired:
+                        return
+                    _phase = "provisioning verifier"
+                    verifier_addr = await scope.enter_async_context(runtime(verifier))
+                    verifier_client = await scope.enter_async_context(connect(verifier_addr))
+                    if archive is not None:
+                        assert verifier_client.manifest is not None
+                        await verifier_addr.session(verifier_client.manifest.session_id).restore(
+                            archive
+                        )
                     client = verifier_client
                     _phase = "verifying"
-                    await _verify(live, verifier_client, verifier)
-                    _phase = "cleanup"
+                    await _verify(live, verifier_client, verifier, actor_result)
+                _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
         try:

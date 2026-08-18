@@ -9,6 +9,7 @@ USER root
 ARG HUD_REQUIREMENT=hud
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /media/hud/bin/uv
 COPY env.py install.sh config.json image-config.json verifier-image-config.json /media/hud/
+COPY peer-image-configs /media/hud/peer-image-configs
 COPY packages /media/hud/packages
 RUN sh /media/hud/install.sh "${HUD_REQUIREMENT}"
 
@@ -19,6 +20,8 @@ CMD ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py", "--host", "0.0.0.0
 
 FROM runtime AS plain
 
-FROM runtime AS verifier
+FROM runtime AS service-access
 COPY --from=docker-cli /usr/local/bin/docker /media/hud/bin/docker
+
+FROM service-access AS verifier
 COPY --from=verifier-root / /media/hud/verifier

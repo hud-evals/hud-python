@@ -28,8 +28,6 @@ from .runtime import (
     HostedRuntime,
     HUDRuntime,
     LocalRuntime,
-    _declared_env,
-    _declared_names,
 )
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
@@ -60,22 +58,11 @@ class Taskset:
         name: str | None = None,
         tasks: Iterable[Task] = (),
         *,
-        origin: str | None = None,
+        taskset_id: str | None = None,
     ) -> None:
         self.name = name or "taskset"
-        self.origin = origin
+        self.taskset_id = taskset_id
         self.tasks: dict[str, Task] = self._index_by_slug(list(tasks))
-
-    @property
-    def api_id(self) -> str | None:
-        """The platform taskset id when loaded via :meth:`from_api`, else None.
-
-        Threaded into the job so a remote run of a synced taskset links to it;
-        ad-hoc/file/module tasksets have none and create no taskset.
-        """
-        if self.origin and self.origin.startswith("api:"):
-            return self.origin[len("api:") :]
-        return None
 
     @classmethod
     def from_file(cls, path: str | Path) -> Taskset:
@@ -86,7 +73,7 @@ class Taskset:
         """
         source = Path(path)
         if source.suffix in {".json", ".jsonl"}:
-            return cls(source.stem, cls._load_tasks_json(source), origin=f"file:{source}")
+            return cls(source.stem, cls._load_tasks_json(source))
         if source.suffix == ".py" or source.is_dir():
             return cls.from_module(source)
         raise ValueError(f"unsupported taskset source: {source}")
@@ -97,11 +84,7 @@ class Taskset:
 
         path = Path(source).resolve()
         found = [task for module in iter_modules(path) for task in cls._scan_tasks(module)]
-        return cls(
-            path.stem if path.is_file() else path.name,
-            found,
-            origin=f"module:{path}",
-        )
+        return cls(path.stem if path.is_file() else path.name, found)
 
     @classmethod
     def from_api(cls, name: str) -> Taskset:
@@ -111,7 +94,7 @@ class Taskset:
         if not taskset_id:
             raise ValueError(f"taskset not found: {name}")
         fetched_display, tasks = fetch_taskset_tasks(platform, taskset_id)
-        return cls(fetched_display or display, tasks, origin=f"api:{taskset_id}")
+        return cls(fetched_display or display, tasks, taskset_id=taskset_id)
 
     def to_file(self, path: str | Path) -> Path:
         """Write this taskset's portable rows to JSON or JSONL."""
@@ -119,7 +102,8 @@ class Taskset:
         target.parent.mkdir(parents=True, exist_ok=True)
         suffix = target.suffix.lower()
         # Compact rows: unset metadata is omitted (defaults restore it on load).
-        data = [task.model_dump(exclude_none=True) for task in self]
+        context = {"base_path": target.parent.resolve()}
+        data = [task.model_dump(mode="json", exclude_none=True, context=context) for task in self]
 
         if suffix == ".json":
             target.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
@@ -167,7 +151,7 @@ class Taskset:
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ValueError(f"{path}: each task entry must be an object")
-            tasks.append(Task.model_validate(entry))
+            tasks.append(Task.model_validate(entry, context={"base_path": path.parent.resolve()}))
         return tasks
 
     @staticmethod
@@ -200,7 +184,7 @@ class Taskset:
         return Taskset(
             self.name,
             (task for slug, task in self.tasks.items() if slug in selected),
-            origin=self.origin,
+            taskset_id=self.taskset_id,
         )
 
     def exclude(self, slugs: Iterable[str]) -> Taskset:
@@ -208,7 +192,7 @@ class Taskset:
         return Taskset(
             self.name,
             (task for slug, task in self.tasks.items() if slug not in excluded),
-            origin=self.origin,
+            taskset_id=self.taskset_id,
         )
 
     def environment_names(self) -> set[str]:
@@ -217,35 +201,24 @@ class Taskset:
             task.verifier.env for task in self if task.verifier is not None
         }
 
-    def _resolve_placement(self) -> Provider | HUDRuntime:
-        if self.origin and self.origin.startswith("module:"):
-            # The origin claims the rows only if it actually declares their
-            # envs (a tasks-only module importing its envs from elsewhere
-            # does not) — and it serves as the exact path, so a same-named
-            # variant in a sibling file is never dragged in.
-            source = Path(self.origin[len("module:") :])
-            if self.environment_names() <= _declared_names(source):
-                return LocalRuntime(source)
-        if self.origin and self.origin.startswith("api:"):
+    def _resolve_placement(self) -> Provider:
+        if self.taskset_id is not None:
             return HUDRuntime()
-        declared = {name: _declared_env(name) for name in self.environment_names()}
-        if declared and all(declared.values()):
-            providers = {
-                name: LocalRuntime(env) for name, env in declared.items() if env is not None
-            }
-            logger.info(
-                "no runtime given: serving %s fresh from their declaring modules",
-                ", ".join(sorted(providers)),
-            )
-            return lambda task: providers[task.env](task)
-        missing = sorted(name for name, env in declared.items() if env is None)
+        rows = list(self)
+        rows.extend(task.verifier for task in self if task.verifier is not None)
+        if rows and all(task._env is not None for task in rows):
+            providers: dict[int, LocalRuntime] = {}
+            for task in rows:
+                env = task._env
+                assert env is not None
+                if id(env) not in providers:
+                    providers[id(env)] = LocalRuntime(env)
+            return lambda task: providers[id(task._env)](task)
         raise ValueError(
-            f"no placement for env(s) {', '.join(missing) or '<none>'}: pass runtime= — "
+            "no placement: pass runtime= — "
             'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
             "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
-            "(a served substrate), or HUDRuntime() (your deployed env). A row taken "
-            "from a loaded taskset keeps its placement when run through it: "
-            'taskset.filter(["slug"]).run(...)'
+            "(a served substrate), or HUDRuntime() (your deployed env)"
         )
 
     async def run(
@@ -264,14 +237,12 @@ class Taskset:
         placement: a :class:`~hud.eval.runtime.Provider` (the env served
         somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
         or :class:`~hud.eval.runtime.HostedRuntime` to run each rollout remotely
-        on the platform. Left unset, what is already known decides: a
-        taskset loaded from local ``.py`` source serves that source's
-        directory; a platform taskset runs on the platform; rows naming envs
-        declared in imported modules serve each fresh from its file; anything
-        else raises, naming the forms to pass. One provider serves a
-        mixed-env
-        taskset and can size each substrate per row. Registers one HUD job as
-        the platform receipt and reports each run's trace under it — or, given
+        on the platform. Left unset, a platform taskset runs on the platform,
+        tasks created by a live environment run against that environment, and
+        portable rows require an explicit placement. One provider serves a
+        mixed-env taskset and can size each substrate per row.
+        Registers one HUD job as the platform receipt and reports each run's
+        trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
         instead, so a longer arc (a training session) spans many calls under
         one id. Returned ``job.runs`` preserves expansion order (task-major,
@@ -292,14 +263,6 @@ class Taskset:
             raise ValueError("max_concurrent must be >= 1")
 
         task_list = list(self)
-        # Placement is chosen once for the batch: HostedRuntime delegates the
-        # whole rollout to the platform, anything else is a Provider driven
-        # locally by rollout(). No runtime: what the taskset or this process
-        # already knows decides (rows never carry placement) — a loaded
-        # taskset runs where it came from; rows naming envs declared in
-        # imported modules serve each fresh from its file; anything else is
-        # an error naming the forms to pass.
-        # An empty taskset schedules nothing, so it needs no placement.
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
         group = group or (job.group if job else 1)
         if group < 1:
@@ -317,9 +280,9 @@ class Taskset:
                 id=uuid.uuid4().hex,
                 name=_job_name(self.name, task_list, group),
                 group=group,
-                taskset_id=self.api_id,
+                taskset_id=self.taskset_id,
             )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.api_id)
+            await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
         timeout = (

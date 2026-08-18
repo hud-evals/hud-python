@@ -45,12 +45,12 @@ verifier = Environment("judge")
 @actor.template(id="solve")
 async def solve():
     answer = yield "Write the secret to the target system."
-    yield 0.0  # the verifier task supplies the authoritative reward
+    yield {"score": 0.0, "answer": answer}
 
 @verifier.template(id="verify")
 async def verify(expected: str):
-    answer = yield ""
-    yield 1.0 if answer == expected else 0.0
+    actor_result = yield ""
+    yield 1.0 if actor_result["answer"] == expected else 0.0
 
 task = solve()
 task.verifier = verify(expected="secret")
@@ -75,24 +75,26 @@ sequenceDiagram
     Engine->>Actor: close connection + clean up
     Engine->>Judge: provision + connect
     Engine->>Judge: tasks.start(verifier)
-    Engine->>Judge: tasks.grade(answer)
+    Engine->>Judge: tasks.grade(actor result)
     Judge-->>Engine: authoritative evaluation
     Engine->>Judge: close connection + clean up
 ```
 
-The actor task is graded to complete its generator lifecycle, but that grade is best-effort: when
-the verifier phase begins, the actor grade is cleared, and the verifier evaluation replaces it as
-the run's grade of record. Agent failures and actor-grading failures are recorded on the trace
-while the verifier still runs when the phase boundary can be reached; a verifier provisioning or
-grading failure leaves the run errored and ungraded.
+The actor task is graded to complete its generator lifecycle. Its full result frame is sent to the
+verifier, whose evaluation replaces it as the run's grade of record. An actor result must include
+the numeric `score` required of every task result plus whatever fields its verifier consumes. If
+actor grading fails, the engine supplies an error result containing the submitted `answer` so an
+authoritative verifier can still run. A verifier provisioning or grading failure leaves the run
+errored and ungraded.
 
 If both rows name the same environment and the verifier has no row-level `runtime_config`, the
 engine keeps the actor connection and substrate alive and starts the verifier task on that control
 channel immediately after the actor task completes. A different environment name or verifier
 runtime configuration forces actor cleanup followed by a fresh provider acquisition.
 
-`HostedRuntime` does not accept verifier task rows; verifier environments run under a
-client-driven provider such as `LocalRuntime`, `DockerRuntime`, or a custom provider.
+`HostedRuntime` supports the same-environment form without a verifier `runtime_config`, keeping
+both phases inside one hosted acquisition. Verifiers that require another runtime remain
+client-driven through `LocalRuntime`, `DockerRuntime`, or a custom provider.
 
 ## What runs where
 
@@ -101,10 +103,9 @@ client-driven provider such as `LocalRuntime`, `DockerRuntime`, or a custom prov
 | Actor | Actor environment setup, the agent loop, actor task teardown | Actor capabilities and state | Provisional; retained only when no verifier exists |
 | Verifier | Verifier setup and grading; no agent loop | None through HUD's agent interface | Authoritative |
 
-The engine forwards the final answer (`run.trace.content`) to the verifier. Files, processes,
-sockets, and environment memory do not cross between distinct substrates automatically - any
-graded state transfer is an explicit adapter or provider contract, such as an artifact snapshot,
-object-store reference, or shared service endpoint.
+The engine forwards the actor task's result to the verifier unchanged. Files, processes, sockets,
+and environment memory do not cross between distinct substrates automatically - the actor result
+must carry any artifact reference, object-store key, or shared service endpoint the verifier needs.
 
 ## Harbor verifier environments
 
@@ -135,9 +136,9 @@ runtime, the phases remain isolated:
   mode, allowlist, and credentials directory; and
 - verifier output is read from `/logs/verifier/reward.json` or `/logs/verifier/reward.txt`.
 
-`compose_service_access=True` gives the generated `main` service access to the runtime's Docker
-socket solely for declared collection from sibling services. The local and hosted socket behavior
-is described in [Compose environments](/v6/experimental/compose#runtime-behavior).
+`RuntimeConfig.compose.service_access=True` gives the generated `main` service access to the
+runtime's Docker socket solely for declared collection from sibling services. The local and hosted
+socket behavior is described in [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 ## See also
 

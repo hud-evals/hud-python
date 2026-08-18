@@ -10,6 +10,7 @@ import logging
 import os
 import pty
 import shutil
+import signal
 import socket
 import struct
 import sys
@@ -41,6 +42,25 @@ async def read_bwrap_pid(info_read: int) -> int:
     return int(document["child-pid"])
 
 
+def _child_pids(pid: int) -> list[int]:
+    children_file = Path(f"/proc/{pid}/task/{pid}/children")
+    try:
+        return [int(child) for child in children_file.read_text().split()]
+    except OSError:
+        children = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                _, separator, suffix = (entry / "stat").read_text().rpartition(")")
+                fields = suffix.split()
+                if separator and int(fields[1]) == pid:
+                    children.append(int(entry.name))
+            except (OSError, IndexError, ValueError):
+                continue
+        return sorted(children)
+
+
 async def install_identity_map(
     info_read: int,
     block_write: int,
@@ -53,11 +73,10 @@ async def install_identity_map(
     if launcher_pid is not None:
         pid = launcher_pid
         for _ in range(launcher_depth):
-            children_file = Path(f"/proc/{pid}/task/{pid}/children")
-            children = (await asyncio.to_thread(children_file.read_text)).split()
+            children = await asyncio.to_thread(_child_pids, pid)
             if len(children) != 1:
                 raise RuntimeError(f"sandbox launcher {pid} has {len(children)} children")
-            pid = int(children[0])
+            pid = children[0]
     await asyncio.to_thread(_map_identities, pid)
     await asyncio.to_thread(os.write, block_write, b"\n")
     return pid
@@ -134,11 +153,14 @@ class NamespaceHost:
     async def connect(self) -> None:
         if self._connection is not None:
             return
+        self._connection = await self._open_connection()
+
+    async def _open_connection(self) -> asyncssh.SSHClientConnection:
         sock = socket.socket(socket.AF_UNIX)
         sock.setblocking(False)
         try:
             await asyncio.get_running_loop().sock_connect(sock, str(self.socket_path))
-            self._connection = await asyncssh.connect(
+            return await asyncssh.connect(
                 sock=sock,
                 username="hud",
                 known_hosts=None,
@@ -220,12 +242,16 @@ class NamespaceHost:
         return NamespaceProcess(process)
 
     async def terminate_sessions(self) -> None:
-        connection = self._require_connection()
-        result = await connection.run(
-            json.dumps({"operation": "terminate_sessions"}),
-            check=False,
-            encoding=None,
-        )
+        connection = await self._open_connection()
+        try:
+            result = await connection.run(
+                json.dumps({"operation": "terminate_sessions"}),
+                check=False,
+                encoding=None,
+            )
+        finally:
+            connection.close()
+            await connection.wait_closed()
         if result.returncode != 0:
             stderr = result.stderr or b""
             assert isinstance(stderr, bytes)
@@ -295,6 +321,7 @@ class _NamespaceHost:
         self.map_identities = map_identities
         self.ports = ports
         self.holders: dict[Literal["session", "environment"], tuple[ProcessGroup, int]] = {}
+        self.session_used = False
         self.forwarders: list[asyncio.AbstractServer] = []
 
     async def serve(self) -> None:
@@ -368,7 +395,7 @@ class _NamespaceHost:
             else:
                 process.exit(await self._spawn(request, process))
         except Exception as exc:
-            process.stderr.write(str(exc).encode())
+            process.stderr.write(f"{type(exc).__name__}: {exc}".encode())
             process.exit(1)
         await process.wait_closed()
 
@@ -443,9 +470,14 @@ class _NamespaceHost:
         return detail.decode(errors="replace").strip() or "sandbox holder did not become ready"
 
     async def _terminate_sessions(self) -> None:
+        if not self.session_used:
+            return
+        self.session_used = False
         held = self.holders.pop("session", None)
         if held is not None:
-            holder, _ = held
+            holder, holder_pid = held
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(holder_pid, signal.SIGKILL)
             await holder.terminate()
 
     async def _spawn(
@@ -589,6 +621,8 @@ class _NamespaceHost:
                     if descriptor != -1:
                         os.close(descriptor)
         assert process is not None
+        if scope == "session":
+            self.session_used = True
         wait_task = asyncio.create_task(process.wait())
         closed_task = asyncio.create_task(channel.channel.wait_closed())
         try:
