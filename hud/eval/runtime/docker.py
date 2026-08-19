@@ -77,6 +77,27 @@ async def _prepare_compose_project(compose: Path, max_wait: float | None) -> boo
     return True
 
 
+@asynccontextmanager
+async def _docker_deadline(
+    seconds: float | None,
+    teardown: tuple[str, ...],
+) -> AsyncIterator[None]:
+    if seconds is None:
+        yield
+        return
+
+    async def expire() -> None:
+        await asyncio.sleep(seconds)
+        await _docker(*teardown, check=False)
+
+    expiry = asyncio.create_task(expire())
+    try:
+        yield
+    finally:
+        expiry.cancel()
+        await asyncio.gather(expiry, return_exceptions=True)
+
+
 class DockerRuntime:
     """Start a HUD environment from an image or a Docker Compose file.
 
@@ -183,6 +204,7 @@ class DockerRuntime:
                     "--file",
                     str(files.ports),
                 )
+                teardown = (*command, "down", "--volumes", "--remove-orphans")
                 try:
                     await _docker(
                         *command,
@@ -209,7 +231,7 @@ class DockerRuntime:
                         )
                     host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
                     container, _ = await _docker(*command, "ps", "--quiet", "main")
-                    async with asyncio.timeout(run_timeout):
+                    async with _docker_deadline(run_timeout, teardown):
                         yield _DockerEndpoint(
                             f"tcp://127.0.0.1:{host_port}",
                             params=params,
@@ -217,13 +239,7 @@ class DockerRuntime:
                             container=container.strip(),
                         )
                 finally:
-                    await _docker(
-                        *command,
-                        "down",
-                        "--volumes",
-                        "--remove-orphans",
-                        check=False,
-                    )
+                    await _docker(*teardown, check=False)
             return
         if config.image is None:
             raise ValueError(
@@ -263,6 +279,7 @@ class DockerRuntime:
             deadline=startup_timeout,
         )
         container = out.strip()
+        teardown = ("rm", "--force", container)
         try:
             if resources is not None and resources.storage_mb is not None:
                 free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
@@ -275,7 +292,7 @@ class DockerRuntime:
                     f"{self.port}:\n{(logs_err or logs_out).strip()}",
                 )
             host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-            async with asyncio.timeout(run_timeout):
+            async with _docker_deadline(run_timeout, teardown):
                 yield _DockerEndpoint(
                     f"tcp://127.0.0.1:{host_port}",
                     params=params,
@@ -285,7 +302,7 @@ class DockerRuntime:
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.
-            await _docker("rm", "--force", container, check=False)
+            await _docker(*teardown, check=False)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

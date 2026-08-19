@@ -1072,7 +1072,24 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         encoding="utf-8",
     )
     (task / "task.toml").write_text(
-        '[environment]\nbuild_timeout_sec = 300\n\n[verifier]\nenvironment_mode = "separate"\n',
+        """
+[environment]
+build_timeout_sec = 300
+cpus = 4
+memory_mb = 14336
+gpus = 1
+gpu_types = ["H100"]
+
+[verifier]
+environment_mode = "separate"
+
+[verifier.environment]
+build_timeout_sec = 300
+cpus = 4
+memory_mb = 14336
+gpus = 1
+gpu_types = ["H100"]
+""",
         encoding="utf-8",
     )
 

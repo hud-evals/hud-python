@@ -180,22 +180,6 @@ async def test_run_rejects_non_gateway_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_rejects_verifier_from_another_environment() -> None:
-    run = await HostedRuntime(poll_interval=0.0).run(
-        Task(
-            env="actor",
-            id="solve",
-            verifier=Task(env="judge", id="verify"),
-        ),
-        _agent(),
-        job_id="j",
-    )
-
-    assert run.trace.is_error
-    assert "must use the actor environment" in (run.trace.error or "")
-
-
-@pytest.mark.asyncio
 async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform(
         [
@@ -223,7 +207,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
             limits=RuntimeLimits(startup_timeout_s=120, run_timeout_s=900),
         ),
         verifier=Task(
-            env="sums",
+            env="judge",
             id="verify",
             args={"expected": 3},
             runtime_config=RuntimeConfig(resources=RuntimeResources(memory_mb=4096)),
@@ -253,7 +237,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
     }
     assert payload["verifier"] == {
-        "env": "sums",
+        "env": "judge",
         "id": "verify",
         "args": {"expected": 3},
         "slug": "verify-5579a3e5",
