@@ -36,6 +36,15 @@ def test_file_tracking_can_be_disabled_by_env(monkeypatch):
     assert Settings().file_tracking_enabled is False
 
 
+def test_cli_analytics_is_independent_of_trace_telemetry(monkeypatch):
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "true")
+    monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "false")
+    configured = Settings()
+
+    assert configured.telemetry_enabled is True
+    assert configured.cli_analytics_enabled is False
+
+
 def test_settings_singleton():
     """Test that settings is a singleton."""
     s1 = get_settings()
