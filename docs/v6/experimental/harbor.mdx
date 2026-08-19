@@ -5,6 +5,9 @@ icon: "ship"
 tag: "Experimental"
 ---
 
+Its behavior is part of the SDK contract; its documentation path, naming, and organization may
+change without a major version.
+
 The **Harbor adapter** (`hud/integrations/harbor/`) translates between Harbor
 task directories and HUD's native `Environment`, `Task`, and `Taskset`
 contracts. `adapt()` packages Harbor tasks without building or publishing
@@ -33,6 +36,11 @@ The row's Compose path points into a generated project under `.hud-adapt/`.
 Tasks that cannot be adapted appear in `result.failures`, with every detectable
 finding classified by a stable code. Other tasks in the dataset are still
 packaged.
+
+`AdaptResult.taskset` contains the successfully adapted rows. `AdaptResult.failures` is a tuple of
+`AdaptFailure(task, path, findings)` records, where each finding is an
+`AdaptFinding(code, kind, message)` and `kind` is `contract` or `invalid`. `adapt()` raises
+`ValueError` when the source contains no Harbor task directories.
 
 ```text
 .hud-adapt/<environment>/
@@ -167,7 +175,7 @@ covers that review.
 
 | Function | Contract |
 | --- | --- |
-| `harbor.adapt(path, *, hud_requirement="hud") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. |
+| `harbor.adapt(path, *, hud_requirement="hud") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. Raises `ValueError` when no task directories exist. |
 | `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
 
 <CardGroup cols={2}>

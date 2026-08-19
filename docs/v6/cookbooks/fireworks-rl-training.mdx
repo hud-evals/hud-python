@@ -245,23 +245,6 @@ Metrics are written to `runs/fireworks-serverless/metrics.jsonl`. Each row inclu
 within-group reward spread, valid rollout count, retained groups, training datums, whether an update
 was applied, loss, snapshot, and step duration.
 
-## Choose a loss
-
-The cookbook exposes three server-side policy-gradient objectives:
-
-| `--loss-fn` | Description |
-| --- | --- |
-| `importance_sampling` | Importance-sampling objective; default |
-| `ppo` | PPO objective |
-| `cispo` | CISPO objective |
-
-While comparing objectives, append `--loss-fn ppo` or `--loss-fn cispo` to the bounded command
-rather than launching the full 30-step recipe.
-
-All three consume the same target tokens, rollout logprobs, and token-level advantages. Fireworks
-also supports SFT, DPO, gradient accumulation, and client-defined losses; those paths use different
-data or control flow and are not implemented in this example.
-
 ## Save and resume
 
 Sampling and training checkpoints serve different purposes:
@@ -316,51 +299,8 @@ A hosted run executes the environment and grader on HUD while the cookbook's `Fi
 continues to call the Fireworks sampler from the training process.
 
 The included `FireworksAgent` and batch builder support one generated assistant response per Run.
-Tool-using and multi-turn environments require an adapter that executes each tool turn and a batch
-builder that combines every trainable assistant turn while masking user and tool-result tokens.
-
-## Example: BFCL multi-turn
-
-HUD can package agent tasks whose reward depends on the final state of an interaction. In the HUD
-version of the
-[Berkeley Function-Calling Leaderboard](https://gorilla.cs.berkeley.edu/leaderboard.html), each
-task starts fresh stateful backends, exposes the entry's functions as MCP tools, advances through
-scripted user turns, and grades the resulting calls with BFCL's own state and response checkers.
-
-| Component | BFCL environment |
-| --- | --- |
-| Task | One multi-turn BFCL entry |
-| State | Fresh file-system, trading, social, or other backends per rollout |
-| Tools | Entry-specific functions exposed through MCP |
-| Reward | Fraction of leading turns that pass the official checks |
-| Evaluation | Strict all-turns-pass result stored separately |
-
-In a separate validation run using HUD's managed training service, a Qwen3.5-4B policy trained on
-the 200-entry `multi_turn_base` taskset with groups of 8 and an importance-sampling loss. Mean
-training reward increased from 0.13 to approximately 0.52 in fewer than 20 optimizer steps. This
-result validates the environment and reward design; it is not a Fireworks serverless benchmark.
-
-BFCL is not a drop-in input to this Fireworks cookbook. `--taskset` can select its hosted tasks and
-runtime, but the included adapter cannot execute the tool loop and the batch builder keeps only one
-assistant turn. Use the
-[HUD RL training cookbook](https://github.com/hud-evals/hud-python/tree/main/cookbooks/rl-training)
-as a runnable reference for multi-turn rollout and batch construction.
-
-## Serverless and dedicated Fireworks training
-
-This example uses Serverless Training. Fireworks also supports dedicated trainers and inference
-deployments:
-
-| | Serverless | Dedicated |
-| --- | --- | --- |
-| Training | LoRA on a shared pool | LoRA or full-parameter on provisioned resources |
-| Sampling | In-session sampler snapshots | Inference deployment with snapshot refresh |
-| Lifecycle | Managed by Fireworks | Explicit trainer and deployment lifecycle |
-| Best fit | Short or variable per-token workloads | Sustained runs or broader model and method support |
-
-The HUD environment and rollout structure can be reused with either path. For dedicated training,
-start from the Fireworks `rl_loop.py` or `async_rl_loop.py` recipes and replace the arithmetic
-rollout source with a HUD taskset.
+Use a different agent adapter and batch builder for tool-using or multi-turn environments so every
+trainable assistant turn is recorded and user and tool-result tokens remain masked.
 
 ## See also
 
