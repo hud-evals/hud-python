@@ -1072,7 +1072,24 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         encoding="utf-8",
     )
     (task / "task.toml").write_text(
-        '[environment]\nbuild_timeout_sec = 300\n\n[verifier]\nenvironment_mode = "separate"\n',
+        """
+[environment]
+build_timeout_sec = 300
+cpus = 4
+memory_mb = 14336
+gpus = 1
+gpu_types = ["H100"]
+
+[verifier]
+environment_mode = "separate"
+
+[verifier.environment]
+build_timeout_sec = 300
+cpus = 4
+memory_mb = 14336
+gpus = 1
+gpu_types = ["H100"]
+""",
         encoding="utf-8",
     )
 
@@ -1307,5 +1324,6 @@ def test_completed_compose_dependencies_are_not_routed_as_peers(tmp_path: Path) 
     manifest = _environment_config(context)
     assert manifest["peers"] == []
     assert manifest["peer_image_configs"] == {}
+    assert (context / "compose-project" / "main" / "peer-image-configs" / ".keep").is_file()
     script = (context / "compose-project" / "build.sh").read_text("utf-8")
     assert script.count("inspect_peer") == 1

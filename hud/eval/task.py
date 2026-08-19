@@ -84,7 +84,11 @@ class Task(BaseModel):
         info: SerializationInfo,
     ) -> dict[str, Any] | None:
         return (
-            config.model_dump(mode=info.mode, exclude_unset=True, context=info.context)
+            config.model_dump(
+                mode=info.mode,
+                exclude_unset=True,
+                context=info.context,
+            )
             if config is not None
             else None
         )

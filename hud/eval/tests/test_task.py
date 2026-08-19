@@ -203,6 +203,27 @@ def test_runtime_config_rejects_unknown_fields() -> None:
         RuntimeConfig.model_validate({"image": "img:tag", "provider_config": {}})
 
 
+def test_runtime_config_omits_null_resource_fields() -> None:
+    task = Task(
+        env="database",
+        id="cutover",
+        runtime_config=RuntimeConfig(
+            resources=RuntimeResources(
+                cpu=1,
+                memory_mb=None,
+                storage_mb=None,
+                gpu=None,
+                os=None,
+                tpu=None,
+            ),
+        ),
+    )
+
+    assert task.model_dump(mode="json", exclude_none=True)["runtime_config"] == {
+        "resources": {"cpu": 1.0}
+    }
+
+
 def test_compose_runtime_config_serializes_by_task_dump_mode(tmp_path: Path) -> None:
     compose = tmp_path / "compose.json"
     compose.write_text(

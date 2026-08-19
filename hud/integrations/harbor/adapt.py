@@ -676,6 +676,7 @@ def adapt(
         (payload / "packages").mkdir(parents=True)
         if compose is not None:
             (payload / "peer-image-configs").mkdir()
+            (payload / "peer-image-configs" / ".keep").touch()
         shutil.copy2(ASSETS / "install.sh", payload / "install.sh")
         if compose is not None:
             shutil.copy2(ASSETS / "Dockerfile", payload / "Dockerfile")
@@ -1082,6 +1083,10 @@ fi
             needs_service_access = any(
                 item.service != "main" for item in (*config.verifier.collect, *config.artifacts)
             ) or bool(healthy_services)
+            runtime_limits = _runtime_limits(config.environment)
+            verifier_uses_actor = (
+                verifier_resources == task.resources and verifier_limits == runtime_limits
+            )
             columns = dict(config.metadata)
             if config.task.keywords:
                 columns.setdefault("keywords", config.task.keywords)
@@ -1106,7 +1111,7 @@ fi
                         service_access=(True if needs_service_access else None),
                     ),
                     resources=task.resources,
-                    limits=_runtime_limits(config.environment),
+                    limits=runtime_limits,
                 ),
                 verifier=(
                     Task(
@@ -1123,7 +1128,8 @@ fi
                                 resources=verifier_resources,
                                 limits=verifier_limits,
                             )
-                            if verifier_resources is not None or verifier_limits is not None
+                            if not verifier_uses_actor
+                            and (verifier_resources is not None or verifier_limits is not None)
                             else None
                         ),
                     )

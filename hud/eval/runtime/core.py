@@ -9,7 +9,14 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    field_serializer,
+    model_validator,
+)
 
 from .compose import ComposeProject
 
@@ -89,6 +96,21 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+
+    @field_serializer("resources", "limits", when_used="json")
+    def _serialize_options(
+        self,
+        value: RuntimeResources | RuntimeLimits | None,
+        info: SerializationInfo,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return value.model_dump(
+            mode=info.mode,
+            exclude_none=True,
+            exclude_unset=True,
+            context=info.context,
+        )
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:
@@ -180,10 +202,11 @@ class Runtime:
 class Shared:
     """Lease provider: at most ``width`` rollouts share each task placement.
 
-    Each environment and runtime configuration boots lazily on its first lease
-    and lives for the enclosing ``async with`` scope. ``width`` is a substrate's
-    capacity (e.g. a vectorized sim's slot count): lease ``width + 1`` waits
-    for a slot instead of erroring, so the scheduler needs no pairing —
+    Each environment and runtime configuration boots lazily on its first lease.
+    It lives for the enclosing ``async with`` scope unless its run timeout
+    expires, in which case the next lease boots a fresh substrate. ``width`` is
+    a substrate's capacity (e.g. a vectorized sim's slot count): an excess lease
+    waits for a slot instead of erroring, so the scheduler needs no pairing —
     ``group`` and ``max_concurrent`` keep their ordinary meanings.
 
     ``Taskset.run`` scopes a context-manager placement to the call, so
@@ -202,7 +225,8 @@ class Shared:
         self._boot = asyncio.Lock()
         self._semaphores: dict[tuple[str, str], asyncio.Semaphore] = {}
         self._addresses: dict[tuple[str, str], Runtime] = {}
-        self._stack: contextlib.AsyncExitStack | None = None
+        self._contexts: dict[tuple[str, str], contextlib.AsyncExitStack] = {}
+        self._deadlines: dict[tuple[str, str], float] = {}
         self._opens = 0
 
     async def __aenter__(self) -> Self:
@@ -211,10 +235,14 @@ class Shared:
 
     async def __aexit__(self, *exc: object) -> None:
         self._opens -= 1
-        if self._opens == 0 and self._stack is not None:
-            stack, self._stack = self._stack, None
+        if self._opens == 0:
+            contexts, self._contexts = self._contexts, {}
             self._addresses.clear()
+            self._deadlines.clear()
             self._semaphores.clear()
+            stack = contextlib.AsyncExitStack()
+            for context in contexts.values():
+                stack.push_async_callback(context.aclose)
             await stack.aclose()
 
     @asynccontextmanager
@@ -237,12 +265,26 @@ class Shared:
         semaphore = self._semaphores.setdefault(key, asyncio.Semaphore(self.width))
         async with semaphore:
             async with self._boot:
+                deadline = self._deadlines.get(key)
+                if deadline is not None and deadline <= asyncio.get_running_loop().time():
+                    self._addresses.pop(key)
+                    self._deadlines.pop(key)
+                    await self._contexts.pop(key).aclose()
                 if key not in self._addresses:
                     # First leaseholder boots. A failed boot fails only its own
-                    # rollout (nothing entered the stack); the next lease retries.
-                    if self._stack is None:
-                        self._stack = contextlib.AsyncExitStack()
-                    self._addresses[key] = await self._stack.enter_async_context(self.inner(task))
+                    # rollout (nothing is retained); the next lease retries.
+                    config = resolve_runtime_config(self.inner, task)
+                    run_timeout = (
+                        config.limits.run_timeout_s
+                        if config is not None and config.limits is not None
+                        else None
+                    )
+                    context = contextlib.AsyncExitStack()
+                    address = await context.enter_async_context(self.inner(task))
+                    self._contexts[key] = context
+                    self._addresses[key] = address
+                    if run_timeout is not None:
+                        self._deadlines[key] = asyncio.get_running_loop().time() + run_timeout
                 addr = self._addresses[key]
             yield addr
 

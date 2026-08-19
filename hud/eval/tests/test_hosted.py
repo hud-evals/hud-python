@@ -180,33 +180,6 @@ async def test_run_rejects_non_gateway_agent() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "verifier",
-    [
-        Task(env="judge", id="verify"),
-        Task(
-            env="actor",
-            id="verify",
-            runtime_config=RuntimeConfig(image="judge:latest"),
-        ),
-    ],
-)
-async def test_run_rejects_verifier_that_requires_another_runtime(verifier: Task) -> None:
-    run = await HostedRuntime(poll_interval=0.0).run(
-        Task(
-            env="actor",
-            id="solve",
-            verifier=verifier,
-        ),
-        _agent(),
-        job_id="j",
-    )
-
-    assert run.trace.is_error
-    assert "must reuse the actor runtime" in (run.trace.error or "")
-
-
-@pytest.mark.asyncio
 async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakePlatform(
         [
@@ -234,9 +207,10 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
             limits=RuntimeLimits(startup_timeout_s=120, run_timeout_s=900),
         ),
         verifier=Task(
-            env="sums",
+            env="judge",
             id="verify",
             args={"expected": 3},
+            runtime_config=RuntimeConfig(resources=RuntimeResources(memory_mb=4096)),
         ),
     )
 
@@ -263,10 +237,11 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
     }
     assert payload["verifier"] == {
-        "env": "sums",
+        "env": "judge",
         "id": "verify",
         "args": {"expected": 3},
         "slug": "verify-5579a3e5",
+        "runtime_config": {"resources": {"memory_mb": 4096}},
     }
     assert payload["group_id"] == "g1"
     assert payload["agent"]["type"] == "openai_compatible"

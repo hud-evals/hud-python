@@ -81,13 +81,6 @@ class HostedRuntime:
             ),
         )
         try:
-            if task.verifier is not None and (
-                task.verifier.env != task.env or task.verifier.runtime_config is not None
-            ):
-                raise ValueError(
-                    "hosted verifier tasks must reuse the actor runtime: verifier.env must "
-                    "match task.env and verifier.runtime_config must be omitted"
-                )
             if timeout is None:
                 state = await self._submit_and_await(
                     task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id

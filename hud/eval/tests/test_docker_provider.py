@@ -31,6 +31,7 @@ from hud.eval.runtime import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    Shared,
 )
 from hud.eval.runtime.compose import (
     ComposeConfig,
@@ -671,7 +672,7 @@ def test_runtime_config_source_override_is_mutually_exclusive(tmp_path: Path) ->
     ) == RuntimeConfig(compose=ComposeProject(document=replacement))
 
 
-async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
+async def test_runtime_config_rejects_typed_docker_gpu() -> None:
     with pytest.raises(ValueError, match="GPU"):
         async with DockerRuntime()(
             Task(
@@ -680,19 +681,6 @@ async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
                 runtime_config=RuntimeConfig(
                     image="img",
                     resources=RuntimeResources(gpu=RuntimeGPU(type="L40S")),
-                ),
-            )
-        ):
-            pass
-
-    with pytest.raises(ValueError, match="limits"):
-        async with DockerRuntime()(
-            Task(
-                env="any-env",
-                id="t",
-                runtime_config=RuntimeConfig(
-                    image="img",
-                    limits=RuntimeLimits(run_timeout_s=60),
                 ),
             )
         ):
@@ -1732,15 +1720,53 @@ async def test_docker_honors_startup_timeout(
     assert calls[0][1]["deadline"] == 300
 
 
-async def test_docker_rejects_run_timeout(
-    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("compose", [False, True])
+async def test_docker_run_timeout_owns_shared_substrate_lifetime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    compose: bool,
 ) -> None:
-    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
-    config = RuntimeConfig(image="img:tag", limits=RuntimeLimits(run_timeout_s=300))
+    torn_down = asyncio.Event()
+    teardown_calls: list[tuple[str, ...]] = []
+    provisions = 0
 
-    with pytest.raises(ValueError, match=r"runtime_config\.limits\.run_timeout_s"):
-        async with DockerRuntime(runtime_config=config)(_row()):
+    async def fake_docker(*args: str, **kwargs: Any) -> tuple[str, str]:
+        nonlocal provisions
+        if args[0] == "run":
+            provisions += 1
+            return "cid-42\n", ""
+        if "up" in args:
+            provisions += 1
+        if args[0] == "port" or args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        if args[-3:] == ("ps", "--quiet", "main"):
+            return "cid-42\n", ""
+        if args[:2] == ("rm", "--force") or "down" in args:
+            teardown_calls.append(args)
+            torn_down.set()
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+
+    limits = RuntimeLimits(run_timeout_s=1)
+    if compose:
+        compose_file = tmp_path / "compose.yaml"
+        compose_file.write_text("services:\n  main:\n    image: img:tag\n")
+        source = RuntimeConfig(compose=ComposeProject(document=compose_file), limits=limits)
+    else:
+        source = RuntimeConfig(image="img:tag", limits=limits)
+
+    async with Shared(DockerRuntime(runtime_config=source), width=2) as runtime:
+        async with runtime(_row()):
             pass
+        async with runtime(_row()):
+            await asyncio.wait_for(torn_down.wait(), 2)
+        async with runtime(_row()):
+            pass
+
+    assert teardown_calls
+    assert provisions == 2
 
 
 async def test_daytona_names_a_sandbox_it_could_not_delete(
