@@ -1,0 +1,53 @@
+---
+title: "Telemetry"
+description: "What the HUD SDK sends, when, and how to turn it off."
+icon: "satellite-dish"
+---
+
+The SDK sends two kinds of telemetry. Both are disabled by the same switch:
+
+```bash
+hud set HUD_TELEMETRY_ENABLED=0
+```
+
+or set `HUD_TELEMETRY_ENABLED=0` in your environment.
+
+## Eval trace telemetry
+
+When you run evaluations with an API key configured, the SDK uploads trace
+spans (steps, tool calls, timings) to your team's traces on the HUD platform.
+This is the product feature that powers the trace viewer — it is scoped to
+your team and requires your API key.
+
+- **No API key (the default):** spans are not uploaded anywhere.
+- **`HUD_TELEMETRY_LOCAL_DIR=./spans`:** spans are also written to local
+  files. Works without an API key, and keeps working with telemetry disabled.
+- **Fully local:** `HUD_TELEMETRY_ENABLED=0` plus `HUD_TELEMETRY_LOCAL_DIR`
+  keeps every span on your machine and sends nothing.
+
+## Anonymous CLI usage events
+
+Each CLI invocation sends one small event recording which command ran and
+how it exited, so HUD can improve the commands people actually use and fix
+the ones that fail. The payload is a fixed allowlist:
+
+| Field | Example |
+| --- | --- |
+| command, subcommand | `eval`, `models list` |
+| exit code and error class | `1`, `HudException` |
+| duration | `1500` (ms) |
+| SDK, Python version, OS | `0.6.13`, `3.12.9`, `darwin` |
+| CI flag | `true` in CI environments |
+| install id | random UUID, stored in `~/.hud/.env` |
+
+Never sent: command arguments, file paths or contents, error messages,
+environment variables, or API keys. A token from the command line is recorded
+only when it names a command registered on the CLI itself — anything else, a
+task file, a trace id, a typo, is recorded as `other` or omitted, so positional
+input is never transmitted. The install id is a random identifier for one
+machine — it is not tied to your account.
+
+Events are sent in the background and abandoned after about a second, so a
+slow or failed send can never break a command and adds at most that bound to
+its exit. A one-time notice is printed the first time the install id is
+created.
