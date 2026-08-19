@@ -1,18 +1,21 @@
 ---
-title: "Telemetry"
-description: "What the HUD SDK sends, when, and how to turn it off."
+title: "Telemetry and analytics"
+description: "What the HUD SDK sends and how to turn it off."
 icon: "satellite-dish"
 ---
 
-The SDK sends two kinds of telemetry. Both are disabled by the same switch:
+The SDK sends eval trace telemetry and anonymous CLI usage analytics. They are
+independent and have separate controls.
+
+## Eval trace telemetry
+
+Disable trace uploads with:
 
 ```bash
 hud set HUD_TELEMETRY_ENABLED=0
 ```
 
 or set `HUD_TELEMETRY_ENABLED=0` in your environment.
-
-## Eval trace telemetry
 
 When you run evaluations with an API key configured, the SDK uploads trace
 spans (steps, tool calls, timings) to your team's traces on the HUD platform.
@@ -26,6 +29,14 @@ your team and requires your API key.
   keeps every span on your machine and sends nothing.
 
 ## Anonymous CLI usage events
+
+Disable CLI usage events with:
+
+```bash
+hud set HUD_CLI_ANALYTICS_ENABLED=0
+```
+
+or set `HUD_CLI_ANALYTICS_ENABLED=0` in your environment.
 
 Each CLI invocation sends one small event recording which command ran and
 how it exited, so HUD can improve the commands people actually use and fix

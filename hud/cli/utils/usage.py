@@ -3,8 +3,7 @@
 The payload is a strict allowlist — never arguments, paths, error messages, or
 env values, which can carry secrets. A token from argv is recorded only when
 it names a command registered on the CLI itself, so positional user input
-(task files, trace ids) can never be transmitted. ``HUD_TELEMETRY_ENABLED=0``
-disables sending.
+(task files, trace ids) can never be transmitted.
 """
 
 from __future__ import annotations
@@ -38,7 +37,8 @@ _CI_ENV_VARS = (
 
 _FIRST_RUN_NOTICE = (
     "hud collects anonymous usage data (command names and outcomes; never "
-    "arguments, file contents, or keys). Disable with: hud set HUD_TELEMETRY_ENABLED=0\n"
+    "arguments, file contents, or keys). Disable with: "
+    "hud set HUD_CLI_ANALYTICS_ENABLED=0\n"
     "Details: https://docs.hud.ai/v6/reference/telemetry"
 )
 
@@ -69,20 +69,15 @@ def _registered_commands() -> dict[str, frozenset[str]]:
     real command tree; groups invoked via callback (``hud trace <id>``) have no
     subcommands, so their positional arguments never match.
     """
-    try:
-        import typer
+    import typer
 
-        from hud.cli import app
+    from hud.cli import app
 
-        group = typer.main.get_group(app)
-        # Duck-typed on ``commands``: isinstance(click.Group) breaks when
-        # tests mock or reload click.
-        return {
-            name: frozenset(getattr(command, "commands", {}))
-            for name, command in group.commands.items()
-        }
-    except Exception:  # conservative: unknown registry records nothing specific
-        return {}
+    group = typer.main.get_group(app)
+    return {
+        name: frozenset(getattr(command, "commands", {}))
+        for name, command in group.commands.items()
+    }
 
 
 def _command_tokens(argv: list[str]) -> tuple[str, str | None]:
@@ -118,7 +113,7 @@ def _classify(error: BaseException) -> tuple[int, str | None]:
 def _post(url: str, payload: dict[str, object]) -> None:
     import httpx  # lazy: keeps CLI startup light
 
-    # Telemetry must never surface a failure.
+    # Analytics must never surface a failure.
     with contextlib.suppress(Exception):
         httpx.post(url, json=payload, timeout=httpx.Timeout(1.0, connect=0.5))
 
@@ -129,17 +124,14 @@ def record_invocation(
     exit_code: int,
     error_class: str | None,
     duration_ms: int,
-) -> threading.Thread | None:
-    """Send one usage event in a background thread; returns it for a bounded join.
-
-    Returns ``None`` (and sends nothing) when telemetry is disabled.
-    """
+) -> None:
+    """Send one usage event without delaying CLI exit beyond the join timeout."""
     try:
         from hud.settings import Settings
 
         settings = Settings()
-        if not settings.telemetry_enabled:
-            return None
+        if not settings.cli_analytics_enabled:
+            return
         from hud import __version__
 
         command, subcommand = _command_tokens(argv)
@@ -159,12 +151,12 @@ def record_invocation(
                 }
             ]
         }
-        url = f"{settings.hud_telemetry_url.rstrip('/')}/v2/sdk-events/cli"
+        url = f"{settings.hud_telemetry_url.rstrip('/')}/sdk-events/cli"
         thread = threading.Thread(target=_post, args=(url, payload), daemon=True)
         thread.start()
-    except Exception:  # telemetry must never break a command
-        return None
-    return thread
+        thread.join(timeout=_JOIN_TIMEOUT_S)
+    except Exception:
+        return
 
 
 @contextlib.contextmanager
@@ -179,11 +171,9 @@ def recorded_invocation(argv: list[str]) -> Iterator[None]:
         exit_code, error_class = _classify(error)
         raise
     finally:
-        sender = record_invocation(
+        record_invocation(
             argv,
             exit_code=exit_code,
             error_class=error_class,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        if sender is not None:
-            sender.join(timeout=_JOIN_TIMEOUT_S)

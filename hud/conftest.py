@@ -27,6 +27,6 @@ def _isolate_hud_settings(request: pytest.FixtureRequest) -> None:
     mp = pytest.MonkeyPatch()
     request.addfinalizer(mp.undo)
     mp.setattr(settings, "telemetry_enabled", False)
-    mp.setenv("HUD_TELEMETRY_ENABLED", "0")
+    mp.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
     mp.setattr(settings, "api_key", None)
     mp.setattr(settings, "telemetry_local_dir", None)

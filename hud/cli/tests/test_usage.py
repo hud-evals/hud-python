@@ -87,40 +87,33 @@ class TestInstallId:
 
 class TestRecordInvocation:
     def test_opt_out_applies_immediately(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The opt-out is re-read at send time, so it applies to the very
-        invocation that set it — even though the import-time settings
-        singleton still says enabled."""
-        from hud.settings import settings
+        monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
+        sent: list[dict[str, object]] = []
+        monkeypatch.setattr(usage, "_post", lambda _url, payload: sent.append(payload))
 
-        monkeypatch.setattr(settings, "telemetry_enabled", True)
-        monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "0")
+        usage.record_invocation(["hud", "eval"], exit_code=0, error_class=None, duration_ms=10)
 
-        assert (
-            usage.record_invocation(["hud", "eval"], exit_code=0, error_class=None, duration_ms=10)
-            is None
-        )
+        assert sent == []
 
     def test_payload_is_the_allowlist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The sent payload holds command facts only — no argv, paths, or messages."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "1")
-        monkeypatch.setenv("HUD_TELEMETRY_URL", "https://t.example.test/v3/api")
+        monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "1")
+        monkeypatch.setenv("HUD_TELEMETRY_URL", "https://telemetry.example.test/v3/api")
         sent: list[tuple[str, dict[str, Any]]] = []
         monkeypatch.setattr(usage, "_post", lambda url, payload: sent.append((url, payload)))
 
-        thread = usage.record_invocation(
+        usage.record_invocation(
             ["hud", "serve", "my_env.py"],
             exit_code=1,
             error_class="HudException",
             duration_ms=42,
         )
 
-        assert thread is not None
-        thread.join(timeout=5)
         (url, payload) = sent[0]
-        assert url == "https://t.example.test/v3/api/v2/sdk-events/cli"
+        assert url == "https://telemetry.example.test/v3/api/sdk-events/cli"
         (event,) = payload["events"]
         assert event["command"] == "serve"
         assert event["subcommand"] is None  # my_env.py must not appear
