@@ -80,17 +80,21 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
 is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
 enough whole GiB, while providers without disk sizing proceed with their default capacity.
-Daytona accepts a list of GPU alternatives; Modal accepts one GPU type. Docker ignores `limits`;
-Daytona rejects `run_timeout_s` and resource overrides when booting from an already-built snapshot.
-`LocalRuntime` rejects a per-task `runtime_config`.
+`HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
+or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
+alternatives; Modal accepts one GPU type. Docker ignores `limits`; Daytona rejects `run_timeout_s`
+and resource overrides when booting from an already-built snapshot. `LocalRuntime` rejects a
+per-task `runtime_config`.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
-The optional `rollout_timeout` passed to `Task.run` or `Taskset.run` bounds submission, queueing,
-provisioning, the agent, and grading together. When both are set, `run_timeout_s` and other known
-phase limits must be less than `rollout_timeout`; an agent timeout must also be less than the
-actor environment's `run_timeout_s`. Contradictory values fail before execution. When
-`rollout_timeout` is omitted, the SDK adds no overall deadline; configured phase limits and limits
-imposed by the selected runtime still apply.
+The optional `rollout_timeout` passed to `Task.run` or `Taskset.run` is the execution deadline
+through grading, including submission, queueing, and provisioning. It is not an upper bound on
+method-return latency: cancellation and trace reporting still run after expiry, and `Taskset.run`
+then flushes telemetry. When both are set, `run_timeout_s` and other known phase limits must be less
+than `rollout_timeout`; an agent timeout must also be less than the actor environment's
+`run_timeout_s`. Contradictory values fail before execution. When `rollout_timeout` is omitted, the
+SDK adds no overall deadline; configured phase limits and limits imposed by the selected runtime
+still apply.
 
 ## Runtime directory
 
@@ -112,8 +116,9 @@ Runs an environment in this process. `source` can be:
   envs), called fresh per rollout with the placed row.
 
 `ready_timeout` bounds `@env.initialize` startup. Paths and constructors create a fresh environment
-per rollout. Env hooks share this process and event loop; use `SubprocessRuntime` or
-`DockerRuntime` when rollouts need process isolation.
+per rollout. A live `Environment` instance is shared and guarded by a lock, so acquisitions through
+that `LocalRuntime` are serialized. Env hooks share this process and event loop; use
+`SubprocessRuntime` or `DockerRuntime` when rollouts need process isolation.
 
 ### `SubprocessRuntime`
 
