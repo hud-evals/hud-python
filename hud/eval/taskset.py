@@ -23,12 +23,13 @@ from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
-from .run import rollout
+from .run import rollout, validate_rollout_timeouts
 from .runtime import (
     HostedRuntime,
     HUDRuntime,
     LocalRuntime,
 )
+from .runtime.core import resolve_runtime_config
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -253,11 +254,11 @@ class Taskset:
         substrate (:class:`~hud.eval.runtime.Shared`) bounds its own occupancy
         and is scoped to this call when not already open.
 
-        ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for the
-        local (Provider) path: a rollout that exceeds it is cancelled and recorded
-        as a failed/errored run so one wedged rollout (e.g. a stuck sampling
-        stream) cannot stall the whole batch. ``HUDRuntime`` carries its own
-        ``run_timeout`` instead.
+        ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for
+        every placement: a rollout that exceeds it is cancelled and recorded as
+        a failed/errored run so one wedged rollout (e.g. a stuck sampling stream)
+        cannot stall the whole batch. When omitted, the SDK adds no overall
+        deadline; configured phase and runtime limits still apply.
         """
         if max_concurrent is not None and max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
@@ -267,6 +268,30 @@ class Taskset:
         group = group or (job.group if job else 1)
         if group < 1:
             raise ValueError("group must be >= 1")
+        timeout = rollout_timeout
+        if timeout is None and isinstance(placement, (HUDRuntime, HostedRuntime)):
+            timeout = placement.run_timeout
+        for task in task_list:
+            if isinstance(placement, HostedRuntime):
+                actor_runtime_config = task.runtime_config
+                verifier_runtime_config = (
+                    task.verifier.runtime_config if task.verifier is not None else None
+                )
+            else:
+                assert placement is not None
+                actor_runtime_config = resolve_runtime_config(placement, task)
+                verifier_runtime_config = (
+                    resolve_runtime_config(placement, task.verifier)
+                    if task.verifier is not None
+                    else None
+                )
+            validate_rollout_timeouts(
+                task,
+                agent,
+                timeout,
+                actor_runtime_config=actor_runtime_config,
+                verifier_runtime_config=verifier_runtime_config,
+            )
 
         # Tasks are pure rows, shared across rollouts; the ``group`` repeats of
         # one task share a group_id (the GRPO group).
@@ -285,16 +310,19 @@ class Taskset:
             await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
-        timeout = (
-            placement.run_timeout
-            if rollout_timeout is None and isinstance(placement, HUDRuntime)
-            else rollout_timeout
-        )
 
         async def _run(task: Task, group_id: str) -> list[Run]:
             assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
-                return [await placement.run(task, agent, job_id=job_id, group_id=group_id)]
+                return [
+                    await placement.run(
+                        task,
+                        agent,
+                        job_id=job_id,
+                        group_id=group_id,
+                        rollout_timeout=timeout,
+                    )
+                ]
             return [
                 await rollout(
                     task,

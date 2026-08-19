@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+import warnings
 from typing import TYPE_CHECKING, Any
 
-from hud.eval.run import Grade, Run
+from hud.eval.run import Grade, Run, validate_rollout_timeouts
 from hud.types import Step
 from hud.utils.platform import PlatformClient
 
@@ -21,29 +22,32 @@ _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
 
 
 class HostedRuntime:
-    """HUD-hosted placement: runs the rollout on a leased box and returns its ``Run``.
+    """HUD-hosted placement: runs the rollout remotely and returns its ``Run``.
 
     The *client-elsewhere* placement. Where a :class:`Provider` yields a channel
-    this process drives, ``HostedRuntime`` runs the whole rollout off-box: the
-    platform leases an instance, brings the env's container up on it, and runs
-    the agent right next to it (the instance-side driver is just
-    :func:`hud.eval.run.rollout` over a ``DockerRuntime`` — co-location all the
-    way down). This process only submits the rollout and polls the trace to
-    completion, folding the result into a :class:`~hud.eval.run.Run`. Because
-    the agent runs remotely, its identity travels via :func:`_agent_spec`.
+    this process drives, ``HostedRuntime`` runs the whole rollout remotely: the
+    agent runs alongside the task environment. This process only submits the
+    rollout and polls the trace to completion, folding the result into a
+    :class:`~hud.eval.run.Run`. Because the agent runs remotely, its identity
+    travels via :func:`_agent_spec`.
 
-    ``run_timeout`` bounds one rollout end to end, including instance
-    provisioning (a cold EC2 boot plus image pull), queueing, and the agent
-    run itself. A local cancel (Ctrl-C) requests a platform-side cancel before
-    propagating, so abandoned rollouts do not hold instances open.
+    ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
+    A local cancel (Ctrl-C) requests remote cancellation before propagating.
     """
 
     def __init__(
         self,
         *,
         poll_interval: float = 5.0,
-        run_timeout: float = 3600.0,
+        run_timeout: float | None = None,
     ) -> None:
+        if run_timeout is not None:
+            warnings.warn(
+                "HostedRuntime(run_timeout=...) is deprecated; pass "
+                "rollout_timeout=... to Task.run or Taskset.run",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
         self._cancellations: set[asyncio.Task[None]] = set()
@@ -56,17 +60,26 @@ class HostedRuntime:
         job_id: str,
         group_id: str | None = None,
         trace_id: str | None = None,
+        rollout_timeout: float | None = None,
     ) -> Run:
         """Submit one rollout, await its terminal trace, and fold it into a ``Run``.
 
-        The platform owns the trace lifecycle (the instance-side driver reports
-        enter/exit and streams telemetry), so this never double-reports.
+        The trace lifecycle is reported remotely, so this never double-reports.
         Failures isolating one rollout from its batch (submit rejected, the
         env/model unresolved) surface as :meth:`Run.failed`; a timeout or a
-        local cancel propagate, having first asked the platform to release the
-        lease.
+        local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex
+        timeout = self.run_timeout if rollout_timeout is None else rollout_timeout
+        validate_rollout_timeouts(
+            task,
+            agent,
+            timeout,
+            actor_runtime_config=task.runtime_config,
+            verifier_runtime_config=(
+                task.verifier.runtime_config if task.verifier is not None else None
+            ),
+        )
         try:
             if task.verifier is not None and (
                 task.verifier.env != task.env or task.verifier.runtime_config is not None
@@ -75,16 +88,22 @@ class HostedRuntime:
                     "hosted verifier tasks must reuse the actor runtime: verifier.env must "
                     "match task.env and verifier.runtime_config must be omitted"
                 )
-            async with asyncio.timeout(self.run_timeout):
+            if timeout is None:
                 state = await self._submit_and_await(
                     task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
                 )
+            else:
+                async with asyncio.timeout(timeout):
+                    state = await self._submit_and_await(
+                        task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
+                    )
         except asyncio.CancelledError:
             self._cancel_later(trace_id)
             raise
         except TimeoutError:
+            assert timeout is not None
             self._cancel_later(trace_id)
-            detail = f"hosted rollout {trace_id} did not finish within {self.run_timeout:g}s"
+            detail = f"hosted rollout {trace_id} did not finish within {timeout:g}s"
             logger.warning(detail)
             run = Run.failed(detail)
             run.trace.stop_reason = "timeout"

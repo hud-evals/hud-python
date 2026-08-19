@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+import warnings
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
@@ -36,7 +37,19 @@ class HUDRuntime:
     atom drive it from this process.
     """
 
-    def __init__(self, *, run_timeout: float = 3600.0, runtime_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        run_timeout: float | None = None,
+        runtime_url: str | None = None,
+    ) -> None:
+        if run_timeout is not None:
+            warnings.warn(
+                "HUDRuntime(run_timeout=...) is deprecated; pass "
+                "rollout_timeout=... to Task.run or Taskset.run",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
         self._warned_unsupported_config = False
@@ -49,6 +62,7 @@ class HUDRuntime:
         job_id: str,
         group_id: str | None = None,
         trace_id: str | None = None,
+        rollout_timeout: float | None = None,
     ) -> Run:
         return await rollout(
             task,
@@ -57,7 +71,7 @@ class HUDRuntime:
             trace_id=trace_id,
             job_id=job_id,
             group_id=group_id,
-            rollout_timeout=self.run_timeout,
+            rollout_timeout=(self.run_timeout if rollout_timeout is None else rollout_timeout),
         )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
@@ -126,7 +140,7 @@ class HUDRuntime:
                 params={
                     "session_id": session_id,
                     "gateway_url": runtime_url,
-                    "ready_timeout": min(self.run_timeout, _RUNTIME_READY_TIMEOUT),
+                    "ready_timeout": _RUNTIME_READY_TIMEOUT,
                 },
             )
         finally:

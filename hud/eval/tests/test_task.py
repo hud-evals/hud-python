@@ -330,7 +330,7 @@ async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.Monk
     (run,) = job.runs
     assert run.trace.status == "completed"
     assert isinstance(seen["runtime"], HUDRuntime)
-    assert seen["rollout_timeout"] == 3600.0
+    assert seen["rollout_timeout"] is None
 
 
 # ─── taskset collection ────────────────────────────────────────────────

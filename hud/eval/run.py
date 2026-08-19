@@ -8,9 +8,8 @@ grades, and tears down, filling a :class:`Run` along the way::
     run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
 
 It is the *client-here* path: the agent loop runs in this process against a
-:class:`~hud.eval.runtime.Provider`'s channel. The same driver runs on the
-daemon (the leased box's agent loop is just ``rollout`` over a
-``DockerRuntime``), in ``Chat`` per turn, and in ``AgentTool`` per invocation.
+:class:`~hud.eval.runtime.Provider`'s channel. The same driver handles hosted
+execution once delegated, each ``Chat`` turn, and each ``AgentTool`` invocation.
 Delegated hosted execution is a different act — see
 :class:`hud.eval.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
 chooses between them; the atom itself never branches on placement.
@@ -47,10 +46,62 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
 
     from .runtime import Provider
-    from .runtime.core import RuntimeSession
+    from .runtime.core import RuntimeConfig, RuntimeSession
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
+
+
+def validate_rollout_timeouts(
+    task: Task,
+    agent: Agent,
+    rollout_timeout: float | None,
+    *,
+    actor_runtime_config: RuntimeConfig | None,
+    verifier_runtime_config: RuntimeConfig | None,
+) -> float | None:
+    """Validate configured phase limits and return the effective agent timeout."""
+    from hud.agents.tool_agent import ToolAgent
+
+    agent_timeout = agent.config.timeout_seconds if isinstance(agent, ToolAgent) else None
+    if task.agent_config is not None:
+        agent_timeout = task.agent_config.get("timeout_seconds", agent_timeout)
+
+    actor_limits = actor_runtime_config.limits if actor_runtime_config is not None else None
+    actor_run_timeout = actor_limits.run_timeout_s if actor_limits is not None else None
+    if (
+        agent_timeout is not None
+        and actor_run_timeout is not None
+        and agent_timeout >= actor_run_timeout
+    ):
+        raise ValueError(
+            f"agent timeout ({agent_timeout:g}s) must be less than "
+            f"runtime_config.limits.run_timeout_s ({actor_run_timeout}s)"
+        )
+
+    if rollout_timeout is None:
+        return agent_timeout
+    if rollout_timeout <= 0:
+        raise ValueError("rollout_timeout must be greater than 0")
+
+    if agent_timeout is not None and agent_timeout >= rollout_timeout:
+        raise ValueError(
+            f"agent timeout ({agent_timeout:g}s) must be less than "
+            f"rollout_timeout ({rollout_timeout:g}s)"
+        )
+
+    configs = (("actor", actor_runtime_config), ("verifier", verifier_runtime_config))
+    for phase, config in configs:
+        if config is None or config.limits is None:
+            continue
+        for limit_name in ("startup_timeout_s", "run_timeout_s"):
+            value = getattr(config.limits, limit_name)
+            if value is not None and value >= rollout_timeout:
+                raise ValueError(
+                    f"{phase} runtime_config.limits.{limit_name} ({value}s) must be less than "
+                    f"rollout_timeout ({rollout_timeout:g}s)"
+                )
+    return agent_timeout
 
 
 def _prompt_message(item: Any) -> mcp_types.PromptMessage:
@@ -418,10 +469,21 @@ async def rollout(
     ``cleanup``) so
     callers can tell where the failure landed without reading the trace.
 
-    ``rollout_timeout`` bounds the entire lifecycle, including grading and
-    provider cleanup. A timeout aborts the control transport, lets provider
-    teardown finish in the background, and returns an errored run immediately.
+    ``rollout_timeout`` bounds execution through grading. A timeout aborts the
+    control transport, lets provider teardown finish in the background, and
+    returns an errored run immediately.
     """
+    from .runtime.core import resolve_runtime_config
+
+    agent_timeout = validate_rollout_timeouts(
+        task,
+        agent,
+        rollout_timeout,
+        actor_runtime_config=resolve_runtime_config(runtime, task),
+        verifier_runtime_config=(
+            resolve_runtime_config(runtime, task.verifier) if task.verifier is not None else None
+        ),
+    )
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
@@ -433,9 +495,6 @@ async def rollout(
     from hud.agents.tool_agent import ToolAgent
 
     agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
-    agent_timeout = agent.config.timeout_seconds if isinstance(agent, ToolAgent) else None
-    if task.agent_config is not None:
-        agent_timeout = task.agent_config.get("timeout_seconds", agent_timeout)
     with set_trace_context(trace_id):
         await trace_enter(
             trace_id,
