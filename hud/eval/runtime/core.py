@@ -9,7 +9,14 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    field_serializer,
+    model_validator,
+)
 
 from .compose import ComposeProject
 
@@ -89,6 +96,21 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+
+    @field_serializer("resources", "limits", when_used="json")
+    def _serialize_options(
+        self,
+        value: RuntimeResources | RuntimeLimits | None,
+        info: SerializationInfo,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return value.model_dump(
+            mode=info.mode,
+            exclude_none=True,
+            exclude_unset=True,
+            context=info.context,
+        )
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:
