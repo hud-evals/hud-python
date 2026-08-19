@@ -72,23 +72,24 @@ def _jsonable(value: Any) -> Any:
 
 
 def _coerce_args(sig: inspect.Signature, args: dict[str, Any]) -> dict[str, Any]:
-    """Coerce string wire args into the task fn's annotated param types.
-
-    JSON-RPC sends args as JSON scalars/strings; a param annotated with a richer
-    type (Pydantic model, list, etc.) is validated via a ``TypeAdapter``. Values
-    that already match (or fail to validate) are passed through unchanged.
-    """
     coerced: dict[str, Any] = {}
     for name, value in args.items():
         param = sig.parameters.get(name)
         annotation = param.annotation if param is not None else inspect.Parameter.empty
-        if annotation in (inspect.Parameter.empty, str, Any) or not isinstance(value, str):
+        if annotation in (inspect.Parameter.empty, Any):
             coerced[name] = value
             continue
+        adapter = TypeAdapter(annotation)
         try:
-            coerced[name] = TypeAdapter(annotation).validate_json(value)
+            coerced[name] = adapter.validate_python(value)
         except ValidationError:
-            coerced[name] = value
+            if not isinstance(value, str):
+                coerced[name] = value
+                continue
+            try:
+                coerced[name] = adapter.validate_json(value)
+            except ValidationError:
+                coerced[name] = value
     return coerced
 
 
