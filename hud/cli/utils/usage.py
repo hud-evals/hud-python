@@ -70,14 +70,15 @@ def _registered_commands() -> dict[str, frozenset[str]]:
     subcommands, so their positional arguments never match.
     """
     try:
-        import click
         import typer
 
         from hud.cli import app
 
         group = typer.main.get_group(app)
+        # Duck-typed on ``commands``: isinstance(click.Group) breaks when
+        # tests mock or reload click.
         return {
-            name: frozenset(command.commands) if isinstance(command, click.Group) else frozenset()
+            name: frozenset(getattr(command, "commands", {}))
             for name, command in group.commands.items()
         }
     except Exception:  # conservative: unknown registry records nothing specific

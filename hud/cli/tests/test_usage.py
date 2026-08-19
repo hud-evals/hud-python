@@ -5,15 +5,20 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from hud.cli.utils import usage
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
-
 
 class TestCommandTokens:
+    @pytest.fixture(autouse=True)
+    def _fresh_registry(self) -> None:
+        """Rebuild the cached registry so earlier tests cannot poison it."""
+        usage._registered_commands.cache_clear()
+
     def test_arguments_are_never_captured(self) -> None:
         """The second token of a plain command is user input and must not be sent."""
         assert usage._command_tokens(["hud", "eval", "tasks.py", "claude"]) == ("eval", None)
@@ -91,9 +96,7 @@ class TestRecordInvocation:
         monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "0")
 
         assert (
-            usage.record_invocation(
-                ["hud", "eval"], exit_code=0, error_class=None, duration_ms=10
-            )
+            usage.record_invocation(["hud", "eval"], exit_code=0, error_class=None, duration_ms=10)
             is None
         )
 
