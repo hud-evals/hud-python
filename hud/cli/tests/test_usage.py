@@ -106,7 +106,7 @@ class TestRecordInvocation:
         """The sent payload holds command facts only — no argv, paths, or messages."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "1")
-        monkeypatch.setenv("HUD_API_URL", "https://api.example.test")
+        monkeypatch.setenv("HUD_TELEMETRY_URL", "https://t.example.test/v3/api")
         sent: list[tuple[str, dict[str, Any]]] = []
         monkeypatch.setattr(usage, "_post", lambda url, payload: sent.append((url, payload)))
 
@@ -120,7 +120,7 @@ class TestRecordInvocation:
         assert thread is not None
         thread.join(timeout=5)
         (url, payload) = sent[0]
-        assert url == "https://api.example.test/v2/sdk-events/cli"
+        assert url == "https://t.example.test/v3/api/v2/sdk-events/cli"
         (event,) = payload["events"]
         assert event["command"] == "serve"
         assert event["subcommand"] is None  # my_env.py must not appear

@@ -159,7 +159,7 @@ def record_invocation(
                 }
             ]
         }
-        url = f"{settings.hud_api_url.rstrip('/')}/v2/sdk-events/cli"
+        url = f"{settings.hud_telemetry_url.rstrip('/')}/v2/sdk-events/cli"
         thread = threading.Thread(target=_post, args=(url, payload), daemon=True)
         thread.start()
     except Exception:  # telemetry must never break a command
