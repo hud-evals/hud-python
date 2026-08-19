@@ -162,11 +162,15 @@ job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurren
 | `group` | `int \| None` | Repeats each task N times for GRPO. |
 | `max_concurrent` | `int \| None` | Caps how many rollouts run in parallel. |
 | `job` | `Job \| None` | An open [`Job`](/v6/reference/types#job) to accumulate into; defaults to a fresh job per call. |
-| `rollout_timeout` | `float \| None` | Hard deadline (seconds) for the full local rollout lifecycle; a breach returns a failed run. |
+| `rollout_timeout` | `float \| None` | Optional hard deadline (seconds) for the full rollout lifecycle in every placement; omitted means no SDK-wide deadline. |
 
 `agent_config.timeout_seconds` bounds only the agent phase. If it expires, the
 run is marked as timed out but grading still runs against any completed work.
-`rollout_timeout` instead bounds startup, the agent, grading, and cleanup together.
+`rollout_timeout` instead bounds startup, the agent, and grading together; runtime cleanup may
+finish in the background after a timeout. When both are set, the agent timeout must be less than
+the rollout timeout and any explicit actor `run_timeout_s`. Limits imposed by the selected runtime
+still apply when `rollout_timeout` is omitted. Grader-specific limits, such as
+`BashGrader.timeout_seconds`, remain local to that grader.
 
 A crashed rollout comes back as a failed [`Run`](/v6/reference/types#run) inside the job rather than
 raising, so one bad rollout never collapses a batch. For the end-to-end workflow see

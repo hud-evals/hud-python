@@ -7,7 +7,7 @@ import contextlib
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -120,6 +120,11 @@ class Provider(Protocol):
     """
 
     def __call__(self, task: Task, /) -> AbstractAsyncContextManager[Runtime]: ...
+
+
+@runtime_checkable
+class _ConfiguredProvider(Protocol):
+    runtime_config: RuntimeConfig | None
 
 
 @dataclass(frozen=True)
@@ -240,3 +245,16 @@ class Shared:
                     self._addresses[key] = await self._stack.enter_async_context(self.inner(task))
                 addr = self._addresses[key]
             yield addr
+
+
+def resolve_runtime_config(provider: Provider, task: Task) -> RuntimeConfig | None:
+    """Return the runtime configuration a provider will apply to a task."""
+    if isinstance(provider, Shared):
+        return resolve_runtime_config(provider.inner, task)
+    if isinstance(provider, Runtime):
+        return provider.config if provider.config is not None else task.runtime_config
+    if isinstance(provider, _ConfiguredProvider) and provider.runtime_config is not None:
+        base = provider.runtime_config
+        config = base.with_overrides(task.runtime_config)
+        return config if config.model_dump(exclude_none=True) else None
+    return task.runtime_config

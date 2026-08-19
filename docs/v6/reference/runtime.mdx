@@ -26,7 +26,7 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `Runtime("tcp://host:8765")` | A substrate you already started | Attaching to a long-lived container or sandbox you own |
 | `Shared(provider, width=N)` | One substrate from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
-| `HostedRuntime()` | The whole rollout on a HUD-leased box | Agent and env run together off your machine |
+| `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
 Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
 HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
@@ -83,6 +83,14 @@ enough whole GiB, while providers without disk sizing proceed with their default
 Daytona accepts a list of GPU alternatives; Modal accepts one GPU type. Docker ignores `limits`;
 Daytona rejects `run_timeout_s` and resource overrides when booting from an already-built snapshot.
 `LocalRuntime` rejects a per-task `runtime_config`.
+
+`run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
+The optional `rollout_timeout` passed to `Task.run` or `Taskset.run` bounds submission, queueing,
+provisioning, the agent, and grading together. When both are set, `run_timeout_s` and other known
+phase limits must be less than `rollout_timeout`; an agent timeout must also be less than the
+actor environment's `run_timeout_s`. Contradictory values fail before execution. When
+`rollout_timeout` is omitted, the SDK adds no overall deadline; configured phase limits and limits
+imposed by the selected runtime still apply.
 
 ## Runtime directory
 
@@ -178,11 +186,11 @@ Compose authoring conventions are documented in
 ### `HUDRuntime`
 
 ```python
-HUDRuntime(*, run_timeout=3600.0, runtime_url=None)
+HUDRuntime(*, run_timeout=None, runtime_url=None)
 ```
 
-- **`run_timeout`** - hard deadline for the full rollout lifecycle. A timeout
-  returns an errored `Run` with `stop_reason="timeout"` while teardown completes.
+- **`run_timeout`** - deprecated alias for the `rollout_timeout` passed to `Task.run` or
+  `Taskset.run`.
 - **`runtime_url`** - override the runtime endpoint the tunnel connects to.
 
 The SDK leases your deployed env by name and tunnels to its control channel; the agent loop runs local.
@@ -190,17 +198,21 @@ The SDK leases your deployed env by name and tunnels to its control channel; the
 ### `HostedRuntime`
 
 ```python
-HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
+HostedRuntime(*, poll_interval=5.0, run_timeout=None)
 ```
 
 - **`poll_interval`** - seconds between trace-status polls while the rollout runs remotely.
-- **`run_timeout`** - hard deadline including submission, provisioning, queueing,
-  and execution. A timeout requests cancellation and returns an errored `Run`.
+- **`run_timeout`** - deprecated alias for the `rollout_timeout` passed to `Task.run` or
+  `Taskset.run`.
+
+For example, a task with `RuntimeLimits(run_timeout_s=18_000)` can omit `rollout_timeout` to avoid
+adding an SDK-wide cap. To add one, pass a larger value such as
+`task.run(agent, runtime=HostedRuntime(), rollout_timeout=18_600)`, leaving time for queueing and
+provisioning.
 
 Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
-**whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and
-runs the agent right next to it. This process only submits the rollout and polls its trace to
-completion. It supports gateway agents from
+**whole rollout** remotely, with the agent running alongside the task environment. This process
+only submits the rollout and polls its trace to completion. It supports gateway agents from
 [`create_agent`](/v6/reference/agents#create-agent); agents with a custom `model_client` must use
 `HUDRuntime` or `LocalRuntime`.
 
