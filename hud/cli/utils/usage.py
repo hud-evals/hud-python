@@ -134,8 +134,9 @@ def record_invocation(
     Returns ``None`` (and sends nothing) when telemetry is disabled.
     """
     try:
-        from hud.settings import settings
+        from hud.settings import Settings
 
+        settings = Settings()
         if not settings.telemetry_enabled:
             return None
         from hud import __version__

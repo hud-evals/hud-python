@@ -81,10 +81,14 @@ class TestInstallId:
 
 
 class TestRecordInvocation:
-    def test_disabled_sends_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_opt_out_applies_immediately(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The opt-out is re-read at send time, so it applies to the very
+        invocation that set it — even though the import-time settings
+        singleton still says enabled."""
         from hud.settings import settings
 
-        monkeypatch.setattr(settings, "telemetry_enabled", False)
+        monkeypatch.setattr(settings, "telemetry_enabled", True)
+        monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "0")
 
         assert (
             usage.record_invocation(
@@ -98,10 +102,8 @@ class TestRecordInvocation:
     ) -> None:
         """The sent payload holds command facts only — no argv, paths, or messages."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        from hud.settings import settings
-
-        monkeypatch.setattr(settings, "telemetry_enabled", True)
-        monkeypatch.setattr(settings, "hud_api_url", "https://api.example.test")
+        monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "1")
+        monkeypatch.setenv("HUD_API_URL", "https://api.example.test")
         sent: list[tuple[str, dict[str, Any]]] = []
         monkeypatch.setattr(usage, "_post", lambda url, payload: sent.append((url, payload)))
 
