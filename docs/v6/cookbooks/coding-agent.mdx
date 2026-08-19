@@ -43,7 +43,7 @@ and attach to its control channel:
 ```bash
 docker build -f Dockerfile.hud -t my-coding-env .
 docker run -d --name my-coding-env -p 8765:8765 my-coding-env
-hud eval tasks.py claude --task-ids flask-4992 flask-5063 --runtime tcp://127.0.0.1:8765 -y
+hud eval tasks.py claude --task-ids flask-4992 flask-5063 --runtime tcp://127.0.0.1:8765 --max-concurrent 1 -y
 docker rm -f my-coding-env
 ```
 
