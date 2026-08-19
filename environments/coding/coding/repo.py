@@ -1,7 +1,7 @@
 """Git-history vaulting and diff-based grading primitives.
 
-The repo's real ``.git`` may contain the answer key — solution branches, the
-fix commit, and the hidden tests. The environment uses this lifecycle:
+The repo's real ``.git`` may contain answer keys such as solution branches and
+fix commits. The environment uses this lifecycle:
 
 - setup (:func:`vault_history`): snapshot the pre-agent worktree into the
   real history, move ``.git`` into a vault outside the workspace, and leave a
@@ -11,8 +11,8 @@ fix commit, and the hidden tests. The environment uses this lifecycle:
   :func:`reset_worktree` → :func:`apply_diff`): discard the agent's ``.git``
   (hooks and history included), restore the vaulted history, capture the
   agent's changes as a diff against the setup snapshot, reset the worktree to
-  that snapshot, and re-apply the diff. Hidden tests come from vaulted refs
-  and land after the agent's diff.
+  that snapshot, and re-apply the diff. Task-authored tests land after the
+  agent's diff.
 
 The snapshot covers the whole worktree, so installed dependencies and build
 artifacts survive into grading.
@@ -33,7 +33,7 @@ async def run(
     cwd: Path,
     timeout: float = 600.0,
     check: bool = True,
-) -> tuple[int, str, str]:
+) -> tuple[int, bytes, bytes]:
     """Run a command, returning ``(returncode, stdout, stderr)``. Kills on timeout."""
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -47,15 +47,18 @@ async def run(
         proc.kill()
         await proc.wait()
         raise TimeoutError(f"{' '.join(argv[:4])} timed out after {timeout:.0f}s") from None
-    out = out_bytes.decode("utf-8", "replace")
-    err = err_bytes.decode("utf-8", "replace")
     if check and proc.returncode != 0:
-        detail = (err.strip() or out.strip())[:2000]
+        detail = (err_bytes.strip() or out_bytes.strip())[:2000].decode("utf-8", "replace")
         raise RuntimeError(f"{' '.join(argv)} failed ({proc.returncode}): {detail}")
-    return proc.returncode if proc.returncode is not None else 1, out, err
+    return proc.returncode if proc.returncode is not None else 1, out_bytes, err_bytes
 
 
-async def git(repo: Path, *args: str, timeout: float = 600.0, check: bool = True) -> tuple[int, str, str]:
+async def git(
+    repo: Path,
+    *args: str,
+    timeout: float = 600.0,
+    check: bool = True,
+) -> tuple[int, bytes, bytes]:
     return await run("git", *_GIT_ID, *args, cwd=repo, timeout=timeout, check=check)
 
 
@@ -78,7 +81,7 @@ async def vault_history(repo: Path, vault: Path) -> None:
     _, sha, _ = await git(repo, "rev-parse", "HEAD")
 
     vault.mkdir(parents=True, exist_ok=True)
-    (vault / _SETUP_COMMIT).write_text(sha.strip(), "utf-8")
+    (vault / _SETUP_COMMIT).write_text(sha.decode().strip(), "utf-8")
     shutil.move(str(repo / ".git"), str(vault / "git"))
 
     await git(repo, "init", "-q", ".")
@@ -99,7 +102,7 @@ async def restore_history(repo: Path, vault: Path) -> str:
     return (vault / _SETUP_COMMIT).read_text("utf-8").strip()
 
 
-async def capture_agent_diff(repo: Path, setup_commit: str) -> str:
+async def capture_agent_diff(repo: Path, setup_commit: str) -> bytes:
     """The agent's changes: setup snapshot -> final worktree state.
 
     Runs on the restored real history: the final worktree (including files the
@@ -108,10 +111,10 @@ async def capture_agent_diff(repo: Path, setup_commit: str) -> str:
     await git(repo, "add", "-A")
     await git(repo, "commit", "-q", "--allow-empty", "-m", "hud: final snapshot")
     _, final, _ = await git(repo, "rev-parse", "HEAD")
-    return await diff_refs(repo, setup_commit, final.strip())
+    return await diff_refs(repo, setup_commit, final.decode().strip())
 
 
-async def diff_refs(repo: Path, before: str, after: str) -> str:
+async def diff_refs(repo: Path, before: str, after: str) -> bytes:
     """Return an applyable patch between two refs, including binary changes."""
     _, diff, _ = await git(repo, "diff", "--binary", before, after, timeout=1200.0)
     return diff
@@ -122,13 +125,32 @@ async def reset_worktree(repo: Path, setup_commit: str) -> None:
     await git(repo, "clean", "-fd")
 
 
-async def apply_diff(repo: Path, diff: str, patch_path: Path) -> str | None:
+async def restore_paths(repo: Path, ref: str, paths: list[str]) -> None:
+    """Restore authored test paths from *ref*, removing paths absent there."""
+    for value in dict.fromkeys(paths):
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError(f"test path must stay inside the repository: {value!r}")
+
+        target = repo / path
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
+
+        code, _, _ = await git(repo, "cat-file", "-e", f"{ref}:{path.as_posix()}", check=False)
+        if code == 0:
+            await git(repo, "checkout", ref, "--", path.as_posix())
+
+
+async def apply_diff(repo: Path, diff: str | bytes, patch_path: Path) -> str | None:
     """Apply *diff* to the worktree; returns git's error output on failure."""
-    if not diff.strip():
+    data = diff.encode() if isinstance(diff, str) else diff
+    if not data.strip():
         return None
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    patch_path.write_text(diff, "utf-8")
+    patch_path.write_bytes(data)
     code, out, err = await git(repo, "apply", "-v", str(patch_path), check=False)
     if code != 0:
-        return (err.strip() or out.strip())[-4000:]
+        return (err.strip() or out.strip())[-4000:].decode("utf-8", "replace")
     return None

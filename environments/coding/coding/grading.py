@@ -63,7 +63,16 @@ def score_tests(
         raise ValueError("JUnit test case IDs must be unique")
 
     passed = {case.nodeid for case in cases if case.passed}
-    passed_count = sum(nodeid in passed for nodeid in expected)
+
+    def expected_test_passed(nodeid: str) -> bool:
+        if nodeid in reported:
+            return nodeid in passed
+        if nodeid.count("[") <= nodeid.count("]"):
+            return False
+        matches = [case_id for case_id in reported if case_id.startswith(nodeid)]
+        return bool(matches) and all(case_id in passed for case_id in matches)
+
+    passed_count = sum(expected_test_passed(nodeid) for nodeid in expected)
     partial_score = passed_count / len(expected) if expected else 0.0
     reward = float(partial_score == 1.0) if use_binary_score else partial_score
 
@@ -74,8 +83,8 @@ def score_tests(
         "all_testcases": [asdict(case) for case in cases],
     }
     if selected:
-        f2p_passed = sum(nodeid in passed for nodeid in f2p)
-        p2p_passed = sum(nodeid in passed for nodeid in p2p)
+        f2p_passed = sum(expected_test_passed(nodeid) for nodeid in f2p)
+        p2p_passed = sum(expected_test_passed(nodeid) for nodeid in p2p)
         subscores.extend(
             [
                 SubScore(

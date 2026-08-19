@@ -25,19 +25,28 @@ uv sync
 cp .env.example .env          # HUD_API_KEY
 ```
 
-Build the image, start its HUD server, and attach the agent over `tcp://`:
+Deploy the image so each rollout receives a fresh desktop:
+
+```bash
+hud deploy
+hud eval tasks.py claude --model claude-opus-4-7 --runtime hud --max-steps 100 -y
+```
+
+The multi-step task wants headroom (`--max-steps 100`). `hud eval` runs the first task only; add
+`--full` for all three or `--task-ids <slug>`.
+
+For a single local smoke rollout, build and attach to one container, then remove it:
 
 ```bash
 docker build -f Dockerfile.hud -t hud-cua:dev .
-docker run -d --env-file .env -p 8765:8765 hud-cua:dev
+docker run -d --name hud-cua --env-file .env -p 8765:8765 hud-cua:dev
+hud eval tasks.py claude --task-ids open-website-example \
+  --model claude-opus-4-7 --runtime tcp://127.0.0.1:8765 -y
+docker rm -f hud-cua
 ```
 
-Point a computer-use agent at the served env. The multi-step task wants headroom (`--max-steps 100`);
-`hud eval` runs the first task only — add `--full` for all three or `--task-ids <slug>`:
-
-```bash
-hud eval tasks.py claude --model claude-opus-4-7 --runtime tcp://127.0.0.1:8765 --max-steps 100 -y
-```
+One desktop cannot isolate concurrent or sequential rollouts, so the environment accepts one task
+per container. Start a fresh runtime for every task instead of sharing a `tcp://` substrate.
 
 ## Tasks & grading
 

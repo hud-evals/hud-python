@@ -4,5 +4,5 @@
 !uv.lock
 !env.py
 !coding
-!flask-4992.bundle
+!flask.bundle
 **/__pycache__

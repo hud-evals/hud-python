@@ -261,6 +261,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "python-dotenv" },
     { name = "werkzeug" },
 ]
 
@@ -278,6 +279,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.0" },
     { name = "pytest", specifier = ">=8.0,<9" },
     { name = "pytest-asyncio", specifier = ">=0.24,<2" },
+    { name = "python-dotenv", specifier = ">=1.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.11.2" },
     { name = "werkzeug", specifier = ">=2.2.2,<3" },
 ]
