@@ -32,7 +32,7 @@ else:
     LOGS_DIR = _LOCAL_ROOT / "logs"
     _LOCAL = True
 
-REPO_SOURCE = os.environ.get("REPO_URL") or str(Path(__file__).with_name("flask-4992.bundle"))
+REPO_SOURCE = os.environ.get("REPO_URL") or str(Path(__file__).with_name("flask.bundle"))
 TEST_TIMEOUT = float(os.environ.get("GRADING_TIMEOUT", "3600"))
 AGENT_UID = 1000
 AGENT_HOME = Path("/tmp/agent-home")  # noqa: S108 - container-local
@@ -119,7 +119,7 @@ async def _run_tests(
     command = test_script.replace("{test_files}", shlex.join(test_files)).replace(
         "{junit_path}", shlex.quote(str(junit_path))
     )
-    exit_code, stdout, stderr = await repo_lib.run(
+    exit_code, stdout_bytes, stderr_bytes = await repo_lib.run(
         "bash",
         "-c",
         command,
@@ -127,6 +127,8 @@ async def _run_tests(
         timeout=TEST_TIMEOUT,
         check=False,
     )
+    stdout = stdout_bytes.decode("utf-8", "replace")
+    stderr = stderr_bytes.decode("utf-8", "replace")
     (LOGS_DIR / "stdout.log").write_text(stdout, encoding="utf-8")
     (LOGS_DIR / "stderr.log").write_text(stderr, encoding="utf-8")
     info = {"exit_code": exit_code, "stdout": stdout, "stderr": stderr}
@@ -158,22 +160,14 @@ async def _run_tests(
 
 async def _grade(
     test_script: str,
-    base_ref: str | None,
-    test_ref: str | None,
+    test_patch: str,
     test_files: list[str],
-    golden_ref: str | None,
     f2p_test_nodeids: list[str] | None,
     p2p_test_nodeids: list[str] | None,
     use_binary_score: bool,
-    validate_mode: str | None,
 ) -> EvaluationResult:
     setup_commit = await repo_lib.restore_history(REPO_DIR, VAULT_DIR)
-    if validate_mode == "golden":
-        if golden_ref is None:
-            raise ValueError('validate_mode="golden" requires golden_ref')
-        agent_diff = await repo_lib.diff_refs(REPO_DIR, base_ref or setup_commit, golden_ref)
-    else:
-        agent_diff = await repo_lib.capture_agent_diff(REPO_DIR, setup_commit)
+    agent_diff = await repo_lib.capture_agent_diff(REPO_DIR, setup_commit)
 
     await repo_lib.reset_worktree(REPO_DIR, setup_commit)
     apply_error = await repo_lib.apply_diff(REPO_DIR, agent_diff, LOGS_DIR / "agent.patch")
@@ -183,8 +177,15 @@ async def _grade(
             content="changes failed to apply",
             info={"git_apply": apply_error},
         )
-    if test_ref:
-        await repo_lib.git(REPO_DIR, "checkout", test_ref, "--", *test_files)
+    await repo_lib.restore_paths(REPO_DIR, setup_commit, test_files)
+    test_apply_error = await repo_lib.apply_diff(REPO_DIR, test_patch, LOGS_DIR / "tests.patch")
+    if test_apply_error is not None:
+        return EvaluationResult(
+            reward=0.0,
+            content="hidden tests failed to apply",
+            info={"git_apply": test_apply_error},
+            isError=True,
+        )
 
     return await _run_tests(
         test_script,
@@ -199,31 +200,25 @@ async def _grade(
 async def coding_task(
     description: str,
     test_script: str,
+    test_patch: str,
+    test_files: list[str],
     base_ref: str | None = None,
-    test_ref: str | None = None,
-    test_files: list[str] | None = None,
-    golden_ref: str | None = None,
     f2p_test_nodeids: list[str] | None = None,
     p2p_test_nodeids: list[str] | None = None,
     use_binary_score: bool = False,
-    validate_mode: str | None = None,
 ):
-    if validate_mode not in (None, "golden"):
-        raise ValueError(f"unknown validate_mode: {validate_mode!r}")
     if "{junit_path}" not in test_script:
         raise ValueError("test_script must write JUnit XML using the {junit_path} placeholder")
+    if not test_files:
+        raise ValueError("test_files must list every path changed by test_patch")
 
-    files = test_files or ["."]
     await _setup(base_ref)
     _ = yield description.strip()
     yield await _grade(
         test_script,
-        base_ref,
-        test_ref,
-        files,
-        golden_ref,
+        test_patch,
+        test_files,
         f2p_test_nodeids,
         p2p_test_nodeids,
         use_binary_score,
-        validate_mode,
     )

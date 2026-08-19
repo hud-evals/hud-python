@@ -1,104 +1,117 @@
 ---
-title: "Coding agent"
-description: "Run a coding agent inside a HUD shell-and-files environment, with tests as the grader, source code in the SDK repo, and a step-by-step walkthrough."
+title: "Coding environment"
+description: "Start from HUD's coding environment, run a real SWE-bench task, and adapt its isolated workspace and hidden-test grading to your repository."
 icon: "code"
 ---
 
-A coding task gives the agent a shell and some files, asks for a change, and grades the result by running it. This example does exactly that: an environment with a sandboxed shell, a task that asks the agent to make a failing test pass, and a `BashGrader` that scores by running the test suite.
+HUD's coding example is a complete repository environment: the agent works in a sandboxed `ssh`
+workspace while the environment keeps the original Git history and grading logs outside that
+workspace, then applies the authored tests after the agent finishes. `hud init --template coding`
+copies the project as a starting point.
 
-## The environment
-
-The agent works in a **workspace**: a sandboxed shell and file system it reaches over the `ssh` capability, which the env publishes when it serves. In `@env.initialize` we seed a buggy module and a test, then declare the task. Its grader runs `pytest` and scores by exit code.
-
-The grader runs an **authoritative copy of the test that lives outside the agent's workspace**. The agent gets its own copy to read and run, but if the grader re-ran that editable copy, the cheapest path to a passing `pytest` would be to weaken or delete the test - classic reward hacking. Keeping the scoring copy out of reach closes that path.
-
-```python env.py
-from pathlib import Path
-
-from hud.environment import Environment
-from hud.graders import BashGrader
-
-ROOT = Path("workspace").resolve()     # the agent's directory
-CHECKS = Path("checks").resolve()      # grader-only, outside the workspace
-
-TEST = "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n"
-
-env = Environment(name="coder")
-env.workspace(ROOT)
-
-@env.initialize
-async def _seed():
-    (ROOT / "calc.py").write_text("def add(a, b):\n    return a - b\n")   # bug
-    (ROOT / "test_calc.py").write_text(TEST)          # the agent's copy
-    CHECKS.mkdir(exist_ok=True)
-    (CHECKS / "test_calc.py").write_text(TEST)        # the authoritative copy
-
-@env.template()
-async def fix_add(target: str = "test_calc.py"):
-    yield f"There's a failing test in {target} in your workspace. Find and fix the bug so the test passes."
-    result = await BashGrader.grade(
-        weight=1.0,
-        command=f"python -m pytest {CHECKS / target} -q",
-        cwd=str(ROOT),
-    )
-    yield result.value
-
-tasks = [fix_add()]
-```
-
-This task has no `answer = yield` - the deliverable is the **state of the workspace**, not a text answer.
-
-<Note>
-To start from an existing repo instead of seeding files inline, write it into the workspace root in `@env.initialize`, or pass `mounts=` (see [Capabilities](/v6/reference/capabilities)).
-</Note>
-
-## Run it
-
-Point a coding agent at the environment. `claude` opens the `ssh` capability, edits `calc.py`, and the grader re-runs the test:
+## Create the environment
 
 ```bash
-hud eval env.py claude
+hud init my-coding-env --template coding
+cd my-coding-env
+uv sync
 ```
 
-For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSDKAgent` in code:
+The generated project contains:
 
-```python run.py
-import asyncio
-from hud.agents import ClaudeSDKAgent
-from hud.agents.types import ClaudeSDKConfig
-from env import fix_add
+| Path | Purpose |
+|------|---------|
+| `env.py` | Repository setup, workspace lifecycle, and the `coding-task` template. |
+| `tasks.py` | Concrete task rows, test patches, commands, and expected results. |
+| `coding/repo.py` | Trusted Git setup, history isolation, diff capture, and restoration. |
+| `coding/grading.py` | JUnit parsing and fail-to-pass/pass-to-pass scoring. |
+| `flask.bundle` | Prepared repository baselines and reference fixes for the example tasks. |
+| `Dockerfile.hud` | Reproducible dependencies and the packaged repository workspace. |
 
-async def main():
-    agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
-    job = await fix_add().run(agent)
-    print("reward:", job.reward)
+The included `flask-4992` and `flask-5063` tasks are from
+[SWE-bench Lite](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Lite). Run them with any
+coding agent that opens the environment's shell capability:
 
-asyncio.run(main())
+```bash
+hud set HUD_API_KEY=your-key-here
+hud eval tasks.py claude --task-ids flask-4992 flask-5063 --runtime local -y
 ```
 
-## Read the trace
+Local non-root runs require usable Linux `bwrap` isolation. Otherwise, build the packaged environment
+and attach to its control channel:
 
-Every step - the shell commands, the edit, the test run - is on the trace at [hud.ai](https://hud.ai). A reward of `1.0` means `pytest` exited `0`; `0.0` means the test still fails.
+```bash
+docker build -f Dockerfile.hud -t my-coding-env .
+docker run -d --name my-coding-env -p 8765:8765 my-coding-env
+hud eval tasks.py claude --task-ids flask-4992 flask-5063 --runtime tcp://127.0.0.1:8765 -y
+docker rm -f my-coding-env
+```
 
-## Make it a dataset
+## How the grading boundary works
 
-Parameterize the task definition and create concrete tasks for a spread of bugs:
+1. Task setup checks out the baseline and moves the original Git history into the environment-owned
+   vault.
+2. The agent receives a single-commit repository through the `ssh` workspace. The original history
+   and reference-fix refs are not reachable from that workspace.
+3. Grading discards agent-controlled Git metadata, restores the trusted history, and captures only the
+   worktree diff against the setup snapshot.
+4. The environment reapplies that diff, restores the paths changed by `test_patch` to the baseline,
+   applies the patch, and runs the authored `test_script`.
+5. The JUnit report is scored against the configured fail-to-pass and pass-to-pass test IDs.
+
+This keeps the deliverable as repository state rather than a text answer, while preventing the agent
+from weakening the grader or reading the reference fix.
+
+## Define a task
+
+Call `coding_task` once per repository issue and give the resulting task a stable slug:
 
 ```python tasks.py
-from env import fix_add
+from env import coding_task
 
-tasks = [fix_add(target=t) for t in ("test_calc.py", "test_utils.py", "test_io.py")]
+_fix_parser = coding_task(
+    description="Fix the parser without breaking existing inputs.",
+    test_script="python -m pytest -q {test_files} --junitxml={junit_path}",
+    test_patch="""diff --git a/test_parser.py b/test_parser.py
+--- a/test_parser.py
++++ b/test_parser.py
+@@ -1,3 +1,6 @@
+ def test_existing_input():
+     assert parse("old")
++
++def test_new_input():
++    assert parse("new")
+""",
+    base_ref="origin/parser_baseline",
+    test_files=["test_parser.py"],
+    f2p_test_nodeids=["test_parser.TestParser.test_new_input"],
+    p2p_test_nodeids=["test_parser.TestParser.test_existing_input"],
+)
+_fix_parser.slug = "fix-parser"
+
+tasks = [_fix_parser]
 ```
 
-<Note>
-`BashGrader` needs bash, so on native Windows it scores `0.0` - grade from macOS/Linux, WSL, or a built image.
-</Note>
+`test_script` must write JUnit XML to `{junit_path}`. JUnit IDs use `classname.name`, not pytest's
+slash-and-`::` collection syntax. Set `use_binary_score=True` when every selected test must pass;
+otherwise the reward is the fraction of selected tests that pass.
+
+## Adapt it to another repository
+
+- Replace `flask.bundle` with a bundle containing the prepared baselines for your tasks.
+- Update `REPO_SOURCE` in `env.py`, or set `REPO_URL` for a local run.
+- Install repository dependencies in `Dockerfile.hud` so grading does not depend on runtime downloads.
+- Keep reference fixes outside the baseline history exposed to the agent; put hidden test patches in
+  the task rows.
+- Add task rows in `tasks.py`; changing rows does not require changing the environment template.
+
+The complete source lives in
+[`environments/coding`](https://github.com/hud-evals/hud-python/tree/main/environments/coding).
 
 ## See also
 
 <CardGroup cols={2}>
-<Card title="Environment reference" icon="cube" href="/v6/reference/environment" />
+<Card title="Capabilities" icon="plug" href="/v6/reference/capabilities" />
 <Card title="Graders" icon="scale-balanced" href="/v6/reference/graders" />
 <Card title="Designing tasks for signal" icon="signal" href="/v6/reference/advice" />
-<Card title="Ops diagnostics" icon="stethoscope" href="/v6/cookbooks/ops-diagnostics" />
 </CardGroup>

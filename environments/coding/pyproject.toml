@@ -11,6 +11,7 @@ dependencies = [
     "jinja2>=3.0",
     "pytest>=8.0,<9",
     "pytest-asyncio>=0.24,<2",
+    "python-dotenv>=1.1",
     "werkzeug>=2.2.2,<3",
 ]
 

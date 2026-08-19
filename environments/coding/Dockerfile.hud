@@ -6,11 +6,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /hud
-COPY pyproject.toml uv.lock env.py flask-4992.bundle ./
+COPY pyproject.toml uv.lock env.py flask.bundle ./
 COPY coding coding
 
 RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
-  && git -c init.defaultBranch=main clone -q flask-4992.bundle /app \
+  && git -c init.defaultBranch=main clone -q flask.bundle /app \
   && uv pip install --python /usr/local/venv/bin/python --no-deps -e /app \
   && chown -R 1000:1000 /app \
   && chmod -R a+rX /usr/local/venv \

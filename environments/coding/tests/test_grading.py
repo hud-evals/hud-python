@@ -62,6 +62,23 @@ def test_missing_selected_junit_test_counts_as_failure():
     assert result.info["f2p_passed"] == 0
 
 
+def test_truncated_parameter_id_matches_unambiguous_junit_cases():
+    result = score_tests(
+        [
+            JUnitCase(
+                'tests.test_cli.test_locate_app[cliapp.factory-create_app2("foo", "bar")]',
+                passed=True,
+                skipped=False,
+            )
+        ],
+        ['tests.test_cli.test_locate_app[cliapp.factory-create_app2("foo",'],
+        [],
+        use_binary_score=True,
+    )
+
+    assert result.reward == 1.0
+
+
 def test_junit_scoring_rejects_empty_or_duplicate_ids():
     case = JUnitCase("tests.test_widget.test_duplicate", passed=True, skipped=False)
 
@@ -80,22 +97,28 @@ def test_parse_junit_rejects_malformed_report(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_binary_agent_changes_survive_diff_round_trip(tmp_path: Path):
+async def test_binary_and_non_utf8_changes_survive_diff_round_trip(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     await repo_lib.git(repo, "init", "-q", "-b", "main")
     binary = repo / "asset.bin"
     binary.write_bytes(b"\x00before\xff")
+    legacy_text = repo / "legacy.txt"
+    legacy_text.write_bytes(b"caf\xe9 before\n")
     await repo_lib.git(repo, "add", "-A")
     await repo_lib.git(repo, "commit", "-qm", "baseline")
-    _, setup_commit, _ = await repo_lib.git(repo, "rev-parse", "HEAD")
+    _, setup_commit_bytes, _ = await repo_lib.git(repo, "rev-parse", "HEAD")
+    setup_commit = setup_commit_bytes.decode().strip()
 
     binary.write_bytes(b"\x00after\xfe")
-    diff = await repo_lib.capture_agent_diff(repo, setup_commit.strip())
+    legacy_text.write_bytes(b"caf\xe9 after\n")
+    diff = await repo_lib.capture_agent_diff(repo, setup_commit)
 
-    assert "GIT binary patch" in diff
-    await repo_lib.reset_worktree(repo, setup_commit.strip())
+    assert b"GIT binary patch" in diff
+    assert b"caf\xe9" in diff
+    await repo_lib.reset_worktree(repo, setup_commit)
     error = await repo_lib.apply_diff(repo, diff, tmp_path / "agent.diff")
 
     assert error is None
     assert binary.read_bytes() == b"\x00after\xfe"
+    assert legacy_text.read_bytes() == b"caf\xe9 after\n"

@@ -4,16 +4,14 @@
 # param crashes the sync/deploy manifest path (TypeAdapter on a string forward-ref). Keep
 # annotations as real objects.
 import asyncio
-import logging
 
 from hud import Environment
 from hud.capabilities import Capability
 from hud.graders import BashGrader, LLMJudgeGrader, SubScore, combine
 from hud.settings import settings
 
-logger = logging.getLogger(__name__)
-
 env = Environment(name="cua")  # literal name - `hud deploy` static-parses it
+_task_started = False
 
 _HOST = "127.0.0.1"
 _VNC_PORT = 5900
@@ -61,11 +59,18 @@ async def cua_task(
         bash_checks: Optional list of {"name", "command", "weight"} for shell-based grading.
         grading_criteria: Optional rubric strings for the LLM judge (needs HUD_API_KEY).
     """
-    answer = yield make_prompt(prompt)
+    global _task_started
 
     bash_total = sum(c.get("weight", 1.0) for c in (bash_checks or []))
     if bash_checks and bash_total <= 0:
         raise ValueError("bash check weights must sum to a positive value")
+    if grading_criteria and not settings.api_key:
+        raise RuntimeError("HUD_API_KEY is required for CUA tasks with grading_criteria")
+    if _task_started:
+        raise RuntimeError("CUA supports one task per substrate; start a fresh runtime")
+    _task_started = True
+
+    answer = yield make_prompt(prompt)
     bash_share = 0.5 if grading_criteria else 1.0
 
     graders: list = []
@@ -81,21 +86,15 @@ async def cua_task(
 
     if grading_criteria:
         judge_weight = 0.5 if bash_checks else 1.0
-        if settings.api_key:
-            graders.append(
-                LLMJudgeGrader.grade(
-                    weight=judge_weight,
-                    name="llm_judge",
-                    answer=str(answer),
-                    question=prompt,
-                    criteria=[(c, 1.0) for c in grading_criteria],
-                )
+        graders.append(
+            LLMJudgeGrader.grade(
+                weight=judge_weight,
+                name="llm_judge",
+                answer=str(answer),
+                question=prompt,
+                criteria=[(c, 1.0) for c in grading_criteria],
             )
-        else:
-            # No key (e.g. a keyless deploy): the judge can't run, so it scores 0 at its real
-            # weight instead of erroring the trace. Never re-weight the bash checks.
-            logger.warning("No HUD_API_KEY: LLM judge skipped; it scores 0 at its weight.")
-            graders.append(SubScore(name="llm_judge", weight=judge_weight, value=0.0))
+        )
 
     if not graders:
         graders.append(SubScore(name="desktop_running", value=1.0, weight=1.0))

@@ -40,7 +40,7 @@ _create_document = cua_task(
         {"name": "file_exists", "command": "test -f /home/ubuntu/Desktop/hello.txt", "weight": 0.4},
         {
             "name": "content_correct",
-            "command": "grep -q 'Hello from HUD!' /home/ubuntu/Desktop/hello.txt",
+            "command": "cmp -s /home/ubuntu/Desktop/hello.txt <(printf 'Hello from HUD!\\n')",
             "weight": 0.6,
         },
     ],
