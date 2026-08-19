@@ -676,6 +676,7 @@ def adapt(
         (payload / "packages").mkdir(parents=True)
         if compose is not None:
             (payload / "peer-image-configs").mkdir()
+            (payload / "peer-image-configs" / ".keep").touch()
         shutil.copy2(ASSETS / "install.sh", payload / "install.sh")
         if compose is not None:
             shutil.copy2(ASSETS / "Dockerfile", payload / "Dockerfile")

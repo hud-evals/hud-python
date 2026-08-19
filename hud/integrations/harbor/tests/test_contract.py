@@ -1307,5 +1307,6 @@ def test_completed_compose_dependencies_are_not_routed_as_peers(tmp_path: Path) 
     manifest = _environment_config(context)
     assert manifest["peers"] == []
     assert manifest["peer_image_configs"] == {}
+    assert (context / "compose-project" / "main" / "peer-image-configs" / ".keep").is_file()
     script = (context / "compose-project" / "build.sh").read_text("utf-8")
     assert script.count("inspect_peer") == 1
