@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import tarfile
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -671,7 +672,7 @@ def test_runtime_config_source_override_is_mutually_exclusive(tmp_path: Path) ->
     ) == RuntimeConfig(compose=ComposeProject(document=replacement))
 
 
-async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
+async def test_runtime_config_rejects_typed_docker_gpu() -> None:
     with pytest.raises(ValueError, match="GPU"):
         async with DockerRuntime()(
             Task(
@@ -680,19 +681,6 @@ async def test_runtime_config_rejects_unsupported_docker_fields() -> None:
                 runtime_config=RuntimeConfig(
                     image="img",
                     resources=RuntimeResources(gpu=RuntimeGPU(type="L40S")),
-                ),
-            )
-        ):
-            pass
-
-    with pytest.raises(ValueError, match="limits"):
-        async with DockerRuntime()(
-            Task(
-                env="any-env",
-                id="t",
-                runtime_config=RuntimeConfig(
-                    image="img",
-                    limits=RuntimeLimits(run_timeout_s=60),
                 ),
             )
         ):
@@ -1732,15 +1720,24 @@ async def test_docker_honors_startup_timeout(
     assert calls[0][1]["deadline"] == 300
 
 
-async def test_docker_rejects_run_timeout(
+async def test_docker_honors_run_timeout(
     tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
     config = RuntimeConfig(image="img:tag", limits=RuntimeLimits(run_timeout_s=300))
+    timeouts: list[float | None] = []
 
-    with pytest.raises(ValueError, match=r"runtime_config\.limits\.run_timeout_s"):
-        async with DockerRuntime(runtime_config=config)(_row()):
-            pass
+    @asynccontextmanager
+    async def timeout(delay: float | None):
+        timeouts.append(delay)
+        yield
+
+    monkeypatch.setattr(runtime_module.asyncio, "timeout", timeout)
+
+    async with DockerRuntime(runtime_config=config)(_row()):
+        pass
+
+    assert timeouts == [300]
 
 
 async def test_daytona_names_a_sandbox_it_could_not_delete(

@@ -81,12 +81,10 @@ class HostedRuntime:
             ),
         )
         try:
-            if task.verifier is not None and (
-                task.verifier.env != task.env or task.verifier.runtime_config is not None
-            ):
+            if task.verifier is not None and task.verifier.env != task.env:
                 raise ValueError(
-                    "hosted verifier tasks must reuse the actor runtime: verifier.env must "
-                    "match task.env and verifier.runtime_config must be omitted"
+                    "hosted verifier tasks must use the actor environment: verifier.env must "
+                    "match task.env"
                 )
             if timeout is None:
                 state = await self._submit_and_await(

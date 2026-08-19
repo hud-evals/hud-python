@@ -110,9 +110,8 @@ class DockerRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
-        if config.limits is not None and config.limits.run_timeout_s is not None:
-            raise ValueError("DockerRuntime does not support runtime_config.limits.run_timeout_s")
         startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
+        run_timeout = config.limits.run_timeout_s if config.limits is not None else None
         params = {"ready_timeout": startup_timeout} if startup_timeout is not None else {}
         resources = config.resources
         if resources is not None:
@@ -210,12 +209,13 @@ class DockerRuntime:
                         )
                     host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
                     container, _ = await _docker(*command, "ps", "--quiet", "main")
-                    yield _DockerEndpoint(
-                        f"tcp://127.0.0.1:{host_port}",
-                        params=params,
-                        config=config if config.model_dump(exclude_none=True) else None,
-                        container=container.strip(),
-                    )
+                    async with asyncio.timeout(run_timeout):
+                        yield _DockerEndpoint(
+                            f"tcp://127.0.0.1:{host_port}",
+                            params=params,
+                            config=config if config.model_dump(exclude_none=True) else None,
+                            container=container.strip(),
+                        )
                 finally:
                     await _docker(
                         *command,
@@ -275,12 +275,13 @@ class DockerRuntime:
                     f"{self.port}:\n{(logs_err or logs_out).strip()}",
                 )
             host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-            yield _DockerEndpoint(
-                f"tcp://127.0.0.1:{host_port}",
-                params=params,
-                config=config,
-                container=container,
-            )
+            async with asyncio.timeout(run_timeout):
+                yield _DockerEndpoint(
+                    f"tcp://127.0.0.1:{host_port}",
+                    params=params,
+                    config=config,
+                    container=container,
+                )
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.
