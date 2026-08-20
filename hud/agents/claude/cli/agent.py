@@ -20,8 +20,10 @@ from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.types import ClaudeCLIConfig, ToolStep
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
-from hud.types import MCPToolCall, MCPToolResult, Step
+from hud.types import MCPToolCall, MCPToolResult
 from hud.utils.time import now_iso
+
+from . import computer_mcp
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-WINDOWS_SHELLS = ("cmd", "powershell")
+_WINDOWS_SHELLS = ("cmd", "powershell")
 _PROMPT_PATH = ".hud_prompt.txt"
 _MCP_CONFIG_PATH = ".hud_mcp_config.json"
 _RUN_SCRIPT_PATH = ".hud_run.bat"
@@ -44,7 +46,6 @@ class _ClaudeStreamParser:
         self._agent_started_at = started_at
         self._pending_calls: dict[str, tuple[MCPToolCall, str]] = {}
         self._last_agent_content = ""
-        self.message_count = 0
         self._saw_result = False
         self._result_error: str | None = None
 
@@ -55,7 +56,6 @@ class _ClaudeStreamParser:
         message = json.loads(line)
         if not isinstance(message, dict):
             raise ValueError("Claude stream event must be an object")
-        self.message_count += 1
         received_at = now_iso()
         match message.get("type"):
             case "system" if message.get("subtype") == "init":
@@ -81,21 +81,13 @@ class _ClaudeStreamParser:
 
         if not trace.content and self._last_agent_content:
             trace.content = self._last_agent_content
-        if error is None:
-            return
-        trace.status = "error"
-        if stderr:
+        if error is not None and stderr:
             trace.extra["stderr"] = stderr
-        timestamp = now_iso()
-        self._run.record(
-            Step(source="system", error=error, started_at=timestamp, ended_at=timestamp)
-        )
+        if error is not None:
+            raise RuntimeError(error)
 
     def _record_assistant(self, event: dict[str, Any], received_at: str) -> None:
-        raw_message = event.get("message")
-        if not isinstance(raw_message, dict):
-            raise ValueError("Claude assistant event is missing its message payload")
-        message = BetaMessage.model_validate(raw_message)
+        message = BetaMessage.model_validate(event["message"])
         step = ClaudeAgent._message_to_agent_step(message)
         step.started_at = self._agent_started_at
         step.ended_at = received_at
@@ -117,8 +109,7 @@ class _ClaudeStreamParser:
         for raw_block in content:
             if not isinstance(raw_block, dict) or raw_block.get("type") != "tool_result":
                 continue
-            block = raw_block
-            call_id = block.get("tool_use_id")
+            call_id = raw_block.get("tool_use_id")
             if not isinstance(call_id, str):
                 raise ValueError("Claude tool result is missing tool_use_id")
             try:
@@ -128,7 +119,7 @@ class _ClaudeStreamParser:
                     f"Claude returned a result for unknown tool call {call_id!r}"
                 ) from None
 
-            raw_result = block.get("content")
+            raw_result = raw_block.get("content")
             raw_items = raw_result if isinstance(raw_result, list) else [raw_result]
             result_content: list[mcp_types.ContentBlock] = []
             for item in raw_items:
@@ -155,7 +146,7 @@ class _ClaudeStreamParser:
                     result=MCPToolResult(
                         call_id=call_id,
                         content=result_content,
-                        isError=block.get("is_error") is True,
+                        isError=raw_block.get("is_error") is True,
                     ),
                     started_at=started_at,
                     ended_at=received_at,
@@ -169,9 +160,7 @@ class _ClaudeStreamParser:
         trace = self._run.trace
         result = event.get("result")
         trace.content = result if isinstance(result, str) else self._last_agent_content
-        is_error = event.get("is_error") is True
-        trace.status = "error" if is_error else "completed"
-        if is_error:
+        if event.get("is_error") is True:
             self._result_error = trace.content or "claude CLI reported an error"
         for key in (
             "subtype",
@@ -211,13 +200,10 @@ class ClaudeCLIAgent(Agent):
 
     async def __call__(self, run: Run) -> None:
         mcp_servers: dict[str, dict[str, Any]] = {}
-        manifest = run.client.manifest
-        bindings = manifest.bindings if manifest is not None else []
-        families = {c.protocol.split("/", 1)[0] for c in bindings}
-
-        if "ssh" not in families:
-            raise RuntimeError("ClaudeCLIAgent requires an SSH capability")
         ssh = cast("SSHClient", await run.client.open("ssh"))
+        manifest = run.client.manifest
+        assert manifest is not None
+        bindings = manifest.bindings
         shell = ssh.capability.params.get("shell", "bash")
 
         rfb_bindings = [cap for cap in bindings if cap.protocol.split("/", 1)[0] == "rfb"]
@@ -234,8 +220,6 @@ class ClaudeCLIAgent(Agent):
                         raise RuntimeError(f"duplicate MCP server name {cap.name!r}")
                     mcp_servers[cap.name] = server_config
                 elif family == "rfb":
-                    from hud.agents.claude.cli.computer_mcp import bridge_computer_mcp
-
                     server_name = (
                         "computer-use" if len(rfb_bindings) == 1 else f"computer-use-{cap.name}"
                     )
@@ -243,7 +227,7 @@ class ClaudeCLIAgent(Agent):
                         raise RuntimeError(f"duplicate MCP server name {server_name!r}")
                     routed = run.client.binding(cap.name)
                     mcp_servers[server_name] = await resources.enter_async_context(
-                        bridge_computer_mcp(
+                        computer_mcp.bridge_computer_mcp(
                             ssh,
                             routed,
                             self.config.screenshot_encoding,
@@ -269,11 +253,10 @@ class ClaudeCLIAgent(Agent):
         prompt: str,
     ) -> None:
         files: dict[str, str] = {}
-        mcp_config_path = None
+        mcp_config_path = _MCP_CONFIG_PATH if mcp_servers else None
         if mcp_servers:
-            mcp_config_path = _MCP_CONFIG_PATH
-            files[mcp_config_path] = json.dumps({"mcpServers": mcp_servers}, indent=2)
-        if shell in WINDOWS_SHELLS:
+            files[_MCP_CONFIG_PATH] = json.dumps({"mcpServers": mcp_servers}, indent=2)
+        if shell in _WINDOWS_SHELLS:
             files[_PROMPT_PATH] = prompt
 
         command = self._build_command(
@@ -281,7 +264,7 @@ class ClaudeCLIAgent(Agent):
             prompt=prompt,
             mcp_config_path=mcp_config_path,
         )
-        if shell in WINDOWS_SHELLS:
+        if shell in _WINDOWS_SHELLS:
             files[_RUN_SCRIPT_PATH] = f"@echo off\r\n{command}\r\n"
             command = f"cmd /c {_RUN_SCRIPT_PATH}"
 
@@ -292,7 +275,7 @@ class ClaudeCLIAgent(Agent):
             await self._stream_cli(run, ssh, command)
         finally:
             if files:
-                if shell in WINDOWS_SHELLS:
+                if shell in _WINDOWS_SHELLS:
                     cleanup = f"cmd /c del /f /q {' '.join(files)} 2>nul"
                 else:
                     cleanup = "rm -f -- " + " ".join(shlex.quote(path) for path in files)
@@ -324,12 +307,7 @@ class ClaudeCLIAgent(Agent):
         returncode = process.returncode
         if returncode is None:
             raise RuntimeError("claude CLI process closed without an exit status")
-        logger.info(
-            "exit=%s events=%d stderr=%d",
-            returncode,
-            parser.message_count,
-            len(stderr),
-        )
+        logger.info("exit=%s stderr=%d", returncode, len(stderr))
         parser.finish(returncode=returncode, stderr=stderr)
 
     def _build_command(
@@ -360,10 +338,13 @@ class ClaudeCLIAgent(Agent):
         # When using a custom base URL, alias all model tiers to the same model
         # so the CLI doesn't try to reach Anthropic for background requests.
         if "ANTHROPIC_BASE_URL" in env:
-            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
-            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
-            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
-            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
+            for name in (
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                "CLAUDE_CODE_SUBAGENT_MODEL",
+            ):
+                env[name] = self.config.model
 
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["IS_SANDBOX"] = "1"
@@ -384,7 +365,7 @@ class ClaudeCLIAgent(Agent):
         if mcp_config_path:
             base_args.extend(["--mcp-config", mcp_config_path])
 
-        if shell in WINDOWS_SHELLS:
+        if shell in _WINDOWS_SHELLS:
             script = ";".join(
                 [
                     *(f"$env:{key}={_powershell_quote(value)}" for key, value in env.items()),
