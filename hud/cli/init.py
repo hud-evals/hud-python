@@ -15,40 +15,39 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 
 from .presets import (
-    DEFAULT_PRESET,
+    DEFAULT_PRESET_ID,
     ENVIRONMENT_PRESETS,
-    PRESETS_BY_ID,
-    EnvironmentPreset,
     materialize_preset,
 )
 
 
-def _resolve_preset(preset: str | None, hud_console: HUDConsole) -> EnvironmentPreset | None:
+def _resolve_preset(
+    preset: str | None,
+    name: str | None,
+    hud_console: HUDConsole,
+) -> str:
     """Resolve an explicit example environment or ask interactively when possible."""
     if preset is not None:
-        chosen = PRESETS_BY_ID.get(preset)
-        if chosen is None:
-            available = ", ".join(PRESETS_BY_ID)
+        if preset not in ENVIRONMENT_PRESETS:
+            available = ", ".join(ENVIRONMENT_PRESETS)
             hud_console.error(f"Unknown example environment {preset!r}. Available: {available}")
             raise typer.Exit(1)
-        return chosen
+        return preset
 
-    # A named non-interactive run uses the default environment in init_command.
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return None
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        choices: list[str | dict[str, Any]] = [
+            {"name": f"{example.name} — {example.description}", "value": example_id}
+            for example_id, example in ENVIRONMENT_PRESETS.items()
+        ]
+        return hud_console.select("Choose an example environment", choices, default=0, spaced=True)
 
-    choices: list[str | dict[str, Any]] = [
-        {"name": f"{p.name} — {p.description}", "value": p.id} for p in ENVIRONMENT_PRESETS
-    ]
-    selected = hud_console.select("Choose an example environment", choices, default=0, spaced=True)
-    return PRESETS_BY_ID[selected]
-
-
-def _ensure_writable(target: Path, force: bool, hud_console: HUDConsole) -> None:
-    """Refuse to scaffold into a non-empty directory unless ``--force``."""
-    if target.exists() and any(target.iterdir()) and not force:
-        hud_console.error(f"{target} already exists and is not empty (use --force)")
-        raise typer.Exit(1)
+    if name is not None:
+        return DEFAULT_PRESET_ID
+    hud_console.error(
+        "Nothing to create. Pass a name (hud init my-env), a --template, "
+        "or run in an interactive terminal to choose an example environment."
+    )
+    raise typer.Exit(1)
 
 
 def init_command(
@@ -75,36 +74,25 @@ def init_command(
 
     Examples:
         hud init                              # choose an example interactively
-        hud init my-env                       # coding → ./my-env
+        hud init my-env                       # choose an example → ./my-env
         hud init my-env --template cua        # computer use → ./my-env
         hud init my-env --template blank      # minimal scaffold → ./my-env[/not dim]
     """
     hud_console = HUDConsole()
 
-    # Fail fast if an explicitly named target is occupied, before any prompt/download.
-    explicit_target = Path(directory) / name if name is not None else None
-    if explicit_target is not None:
-        _ensure_writable(explicit_target, force, hud_console)
-
-    chosen = _resolve_preset(preset, hud_console)
-    if chosen is None and explicit_target is None:
-        hud_console.error(
-            "Nothing to create. Pass a name (hud init my-env), a --template, "
-            "or run in an interactive terminal to choose an example environment."
-        )
+    preset_id = _resolve_preset(preset, name, hud_console)
+    chosen = ENVIRONMENT_PRESETS[preset_id]
+    target = Path(directory) / (name if name is not None else preset_id)
+    if target.exists() and any(target.iterdir()) and not force:
+        hud_console.error(f"{target} already exists and is not empty (use --force)")
         raise typer.Exit(1)
-    chosen = chosen or DEFAULT_PRESET
-
-    target = explicit_target or Path(directory) / chosen.id
-    if explicit_target is None:
-        _ensure_writable(target, force, hud_console)
 
     hud_console.header(f"HUD Init: {target.name}")
     hud_console.info(f"Preparing the {chosen.name} example from the HUD SDK …")
     created = not target.exists()
     try:
-        materialize_preset(chosen, target)
-        source_name = normalize_environment_name(chosen.id)
+        materialize_preset(preset_id, target)
+        source_name = normalize_environment_name(preset_id)
         target_name = normalize_environment_name(target.name)
         if source_name != target_name:
             env_path = target / "env.py"
@@ -122,9 +110,9 @@ def init_command(
         # this run created (never a dir the user already had).
         if created and target.exists():
             shutil.rmtree(target, ignore_errors=True)
-        hud_console.error(f"Failed to prepare example environment {chosen.id!r}: {exc}")
+        hud_console.error(f"Failed to prepare example environment {preset_id!r}: {exc}")
         raise typer.Exit(1) from exc
-    hud_console.status_item(f"environments/{chosen.id}", "✓")
+    hud_console.status_item(f"environments/{preset_id}", "✓")
 
     hud_console.section_title("Next Steps")
     hud_console.info("")
