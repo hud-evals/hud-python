@@ -79,12 +79,14 @@ def materialize_preset(
     target.mkdir(parents=True, exist_ok=True)
     target_root = target.resolve()
     source_parts = ("environments", preset_id)
+    found = False
 
     with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
         for member in archive.getmembers():
             archive_parts = PurePosixPath(member.name).parts[1:]
             if archive_parts[: len(source_parts)] != source_parts:
                 continue
+            found = True
             relative_parts = archive_parts[len(source_parts) :]
             if not relative_parts:
                 continue
@@ -104,3 +106,9 @@ def materialize_preset(
                     destination.write_bytes(source_file.read())
                     if member.mode & 0o111:
                         destination.chmod(destination.stat().st_mode | (member.mode & 0o111))
+
+    if not found:
+        raise ValueError(
+            f"example environment {preset_id!r} was not found at environments/{preset_id} "
+            f"in HUD SDK tag {ref}"
+        )
