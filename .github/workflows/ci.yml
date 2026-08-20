@@ -46,8 +46,12 @@ jobs:
       - name: Install example with the SDK from this checkout
         working-directory: ${{ runner.temp }}/${{ matrix.template }}
         run: |
+          uv build --wheel --no-create-gitignore --out-dir .hud-sdk "$GITHUB_WORKSPACE"
+          uv add --no-sync .hud-sdk/hud-*.whl
           uv sync --all-extras
-          uv pip install -e "$GITHUB_WORKSPACE"
+          sed -i '/^RUN .*uv sync/i COPY .hud-sdk .hud-sdk' Dockerfile.hud
+          echo '!.hud-sdk/' >> .dockerignore
+          echo '!.hud-sdk/**' >> .dockerignore
 
       - name: Run example checks
         working-directory: ${{ runner.temp }}/${{ matrix.template }}
