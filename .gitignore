@@ -63,6 +63,7 @@ hud/rl/checkpoints_test/
 docs/internal
 
 environments/*
+!environments/blank/
 !environments/coding/
 !environments/cua/
 

@@ -56,18 +56,12 @@ def test_init_uses_coding_example_by_default(
     assert 'Environment(name="my-cool-env")' in (target / "env.py").read_text()
 
 
-def test_init_blank_writes_runnable_scaffold_without_materializing_example(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fail(*args: object, **kwargs: object) -> None:
-        raise AssertionError("materialize_preset should not be called for blank")
-
-    monkeypatch.setattr(init_module, "materialize_preset", fail)
-
+def test_init_blank_materializes_runnable_example(tmp_path: Path) -> None:
     init_command(name="berry", directory=str(tmp_path), force=False, preset="blank")
 
     target = tmp_path / "berry"
     assert {path.name for path in target.iterdir()} == {
+        "README.md",
         "pyproject.toml",
         "env.py",
         "tasks.py",
@@ -80,12 +74,12 @@ def test_init_blank_writes_runnable_scaffold_without_materializing_example(
     assert ".venv" in (target / ".dockerignore").read_text()
 
 
-def test_init_blank_uses_normalized_project_name(tmp_path: Path) -> None:
+def test_init_blank_uses_normalized_environment_name(tmp_path: Path) -> None:
     init_command(name="My Cool_Env", directory=str(tmp_path), force=False, preset="blank")
 
     target = tmp_path / "My Cool_Env"
     assert 'Environment(name="my-cool-env")' in (target / "env.py").read_text()
-    assert 'name = "my-cool-env"' in (target / "pyproject.toml").read_text()
+    assert 'name = "blank-env"' in (target / "pyproject.toml").read_text()
 
 
 def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
@@ -109,7 +103,7 @@ def test_init_force_overwrites_existing_blank_files(tmp_path: Path) -> None:
     assert "Environment" in (target / "env.py").read_text()
 
 
-def test_init_without_name_uses_example_source_as_directory(
+def test_init_without_name_uses_example_id_as_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record: dict[str, object] = {}

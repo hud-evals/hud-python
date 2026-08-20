@@ -20,7 +20,6 @@ class EnvironmentPreset:
     id: str
     name: str
     description: str
-    source: str | None
 
 
 ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
@@ -28,19 +27,16 @@ ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
         "coding",
         "Coding",
         "A repository workspace with a SWE-bench task and hidden-test grading.",
-        "coding",
     ),
     EnvironmentPreset(
         "cua",
         "Computer Use",
         "A virtual Linux desktop with deterministic and model-judged grading.",
-        "cua",
     ),
     EnvironmentPreset(
         "blank",
         "Blank",
         "A minimal letter-counting task for building an environment from scratch.",
-        None,
     ),
 )
 
@@ -53,13 +49,10 @@ def materialize_preset(
     target: Path,
 ) -> None:
     """Copy an example environment from this checkout or the installed SDK's release tag."""
-    if preset.source is None:
-        raise ValueError(f"example environment {preset.id!r} is generated locally")
-
     repository = Path(__file__).resolve().parents[2]
     source_root = repository / "environments" if (repository / "pyproject.toml").is_file() else None
 
-    local_source = source_root / preset.source if source_root is not None else None
+    local_source = source_root / preset.id if source_root is not None else None
     if local_source is not None and local_source.is_dir():
         shutil.copytree(
             local_source,
@@ -99,7 +92,7 @@ def materialize_preset(
 
     target.mkdir(parents=True, exist_ok=True)
     target_root = target.resolve()
-    source_parts = ("environments", *PurePosixPath(preset.source).parts)
+    source_parts = ("environments", *PurePosixPath(preset.id).parts)
     found = False
 
     with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
@@ -130,6 +123,6 @@ def materialize_preset(
 
     if not found:
         raise ValueError(
-            f"example environment {preset.id!r} was not found at environments/{preset.source} "
+            f"example environment {preset.id!r} was not found at environments/{preset.id} "
             f"in HUD SDK tag {ref}"
         )
