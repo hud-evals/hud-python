@@ -29,7 +29,7 @@ class HostedRuntime:
     agent runs alongside the task environment. This process only submits the
     rollout and polls the trace to completion, folding the result into a
     :class:`~hud.eval.run.Run`. Because the agent runs remotely, its identity
-    travels via :func:`_agent_spec`.
+    travels via :func:`hud.agents.dump_agent`.
 
     ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
     A local cancel (Ctrl-C) requests remote cancellation before propagating.
@@ -119,14 +119,9 @@ class HostedRuntime:
         group_id: str | None,
         trace_id: str,
     ) -> dict[str, Any]:
-        from hud.agents.tool_agent import ToolAgent
+        from hud.agents.registry import dump_agent
 
-        if not isinstance(agent, ToolAgent):
-            raise ValueError(
-                f"hosted execution requires a gateway agent that can serialize its "
-                f"identity (Claude/OpenAI/Gemini/OpenAIChat); got {type(agent).__name__}"
-            )
-        spec = agent.hosted_spec()
+        spec = dump_agent(agent)
         if task.agent_config:
             spec = {
                 **spec,

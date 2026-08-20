@@ -44,15 +44,23 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.agents.claude import ClaudeAgent
+    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
-    from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+    from hud.agents.types import (
+        ClaudeCLIConfig,
+        ClaudeConfig,
+        GeminiConfig,
+        OpenAIChatConfig,
+        OpenAIConfig,
+    )
 
-    AgentClass: TypeAlias = type[ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent]
+    AgentClass: TypeAlias = type[
+        ClaudeAgent | ClaudeCLIAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
+    ]
     AgentConfigClass: TypeAlias = type[
-        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
+        ClaudeConfig | ClaudeCLIConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
     ]
 
 T = TypeVar("T")
@@ -60,9 +68,14 @@ T = TypeVar("T")
 
 class AgentType(StrEnum):
     CLAUDE = "claude"
+    CLAUDE_CLI = "claude_cli"
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
+
+    @property
+    def is_cli(self) -> bool:
+        return self is AgentType.CLAUDE_CLI
 
     @property
     def cls(self) -> AgentClass:
@@ -71,6 +84,10 @@ class AgentType(StrEnum):
                 from hud.agents import ClaudeAgent
 
                 return ClaudeAgent
+            case AgentType.CLAUDE_CLI:
+                from hud.agents import ClaudeCLIAgent
+
+                return ClaudeCLIAgent
             case AgentType.OPENAI:
                 from hud.agents import OpenAIAgent
 
@@ -87,11 +104,19 @@ class AgentType(StrEnum):
     @property
     def config_cls(self) -> AgentConfigClass:
         """Get config class without importing agent (avoids SDK dependency)."""
-        from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+        from hud.agents.types import (
+            ClaudeCLIConfig,
+            ClaudeConfig,
+            GeminiConfig,
+            OpenAIChatConfig,
+            OpenAIConfig,
+        )
 
         match self:
             case AgentType.CLAUDE:
                 return ClaudeConfig
+            case AgentType.CLAUDE_CLI:
+                return ClaudeCLIConfig
             case AgentType.OPENAI:
                 return OpenAIConfig
             case AgentType.GEMINI:
@@ -105,6 +130,8 @@ class AgentType(StrEnum):
         match self:
             case AgentType.CLAUDE:
                 return "anthropic"
+            case AgentType.CLAUDE_CLI:
+                return "anthropic"
             case AgentType.OPENAI:
                 return "openai"
             case AgentType.GEMINI:
@@ -114,15 +141,15 @@ class AgentType(StrEnum):
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
-        """The gateway agent type *agent* is an instance of, or ``None``.
+        """The registered agent type *agent* is an instance of, or ``None``.
 
-        Reverse of :attr:`cls`. Provider extras (anthropic, google-genai, ...)
+        Reverse of :attr:`cls`. Agent extras (anthropic, google-genai, ...)
         may be uninstalled, so importing a type's agent class can fail; that
-        simply means *agent* is not that type. ``None`` for a custom ``Agent``
-        subclass that is not one of the gateway shortcuts.
+        simply means *agent* is not that type. ``None`` means the ``Agent``
+        implementation is not registered for reconstruction.
         """
         for agent_type in cls:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(ImportError):
                 if isinstance(agent, agent_type.cls):
                     return agent_type
         return None

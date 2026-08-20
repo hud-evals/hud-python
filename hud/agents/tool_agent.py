@@ -34,7 +34,7 @@ from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient, RFBClient
 from hud.capabilities.ssh import SSHConnectionError
-from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
+from hud.types import MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -91,31 +91,6 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             for t in cls.tool_catalog:
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
-
-    def hosted_spec(self) -> dict[str, Any]:
-        """HUD-hosted execution runs the agent remotely, so it is
-        reconstructed there from this identity (type, model, step budget, system
-        prompt, provider kwargs) with the model resolved through the HUD gateway.
-        """
-        if self.config.model_client is not None:
-            raise ValueError(
-                "hosted execution cannot serialize a custom model_client; "
-                "use create_agent(model, ...) so the hosted runner rebuilds the "
-                "gateway client, or run the agent loop locally with HUDRuntime() "
-                "/ LocalRuntime (recommended for TrainingClient workflows that "
-                "attach a BYOK client)"
-            )
-        agent_type = AgentType.of(self)
-        if agent_type is None:
-            raise ValueError(
-                f"hosted execution supports the gateway agent types "
-                f"({', '.join(at.value for at in AgentType)}); got {type(self).__name__}"
-            )
-        config = self.config.model_dump(
-            mode="json",
-            exclude={"model_client", "api_key", "base_url", "hosted_tools"},
-        )
-        return {"type": agent_type.value, "config": config}
 
     async def __call__(self, run: Run) -> None:
         """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.

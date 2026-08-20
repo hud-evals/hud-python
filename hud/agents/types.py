@@ -141,19 +141,20 @@ class OpenAIChatConfig(AgentConfig):
 
 
 # -----------------------------------------------------------------------------
-# Claude Code (CLI over SSH)
+# Claude CLI (over SSH)
 # -----------------------------------------------------------------------------
 
 
-class ClaudeSDKConfig(AgentConfig):
-    """Configuration for ClaudeSDKAgent (runs the ``claude`` CLI over SSH).
+class ClaudeCLIConfig(AgentConfig):
+    """Configuration for ClaudeCLIAgent (runs the ``claude`` CLI over SSH).
 
     ``system_prompt`` is inherited from ``AgentConfig``. ``max_steps`` maps to the
     CLI's ``--max-turns``; values <= 0 leave the turn budget to the CLI (unlimited).
     """
 
-    model_name: str = "Claude Code"
-    model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
+    model_name: str = "Claude CLI"
+    model: str = Field(default="claude-sonnet-5", validation_alias=_model_alias)
+    use_hud_gateway: bool | None = None
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
