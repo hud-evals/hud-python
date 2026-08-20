@@ -46,7 +46,11 @@ hud serve env.py -p 9000
 
 Build **and** publish to HUD infra in one step. The environment's name comes
 from the `Environment(...)` declaration in code; deploying the same name again
-rebuilds that environment.
+targets that environment. The CLI creates one canonical manifest for the exact
+files placed in the build-context archive, and the platform verifies the
+uploaded archive against it. An identical in-flight deploy joins the existing
+build; an identical completed deploy reuses its artifact while every immutable
+component still exists. The upload currently happens before this reuse check.
 
 ```bash
 hud deploy
@@ -57,6 +61,7 @@ hud deploy
 | `--all`, `-a` | Deploy all environments in the directory. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
 | `--env-file` | Path to a `.env` file. |
+| `--no-cache` | Force a new build version and bypass both whole-build reuse and persistent build cache inputs. |
 
 ## Evaluate
 

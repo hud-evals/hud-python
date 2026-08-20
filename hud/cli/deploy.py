@@ -9,7 +9,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import typer
@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
-from hud.cli.utils.context import create_build_context_tarball, format_size
+from hud.cli.utils.context import BuildContextArchive, create_build_context_tarball, format_size
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
 from hud.eval.runtime import ComposeProject, RuntimeConfig
@@ -26,6 +26,9 @@ from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
+
+if TYPE_CHECKING:
+    from hud.build_context import BuildContextManifest
 
 LOGGER = logging.getLogger(__name__)
 _VALID_RUNTIMES = {"hud", "modal"}
@@ -349,10 +352,15 @@ def _collect_build_secrets(
     return secrets
 
 
-def _create_tarball(env_dir: Path, *, verbose: bool, console: HUDConsole) -> Path:
+def _create_tarball(
+    env_dir: Path,
+    *,
+    verbose: bool,
+    console: HUDConsole,
+) -> BuildContextArchive:
     console.progress_message("Creating build context tarball...")
     try:
-        tarball_path, tarball_size, file_count, tarball_duration = create_build_context_tarball(
+        archive = create_build_context_tarball(
             env_dir,
             verbose=verbose,
         )
@@ -361,10 +369,10 @@ def _create_tarball(env_dir: Path, *, verbose: bool, console: HUDConsole) -> Pat
         raise typer.Exit(1) from e
 
     console.success(
-        f"Created tarball: {format_size(tarball_size)} ({file_count} files) "
-        f"[{tarball_duration:.1f}s]"
+        f"Created tarball: {format_size(archive.size_bytes)} ({archive.file_count} files) "
+        f"[{archive.duration_seconds:.1f}s]"
     )
-    return tarball_path
+    return archive
 
 
 def _prepare_deploy_plan(
@@ -499,11 +507,12 @@ def deploy_environment(
         platform=platform,
         console=hud_console,
     )
-    tarball_path = _create_tarball(env_dir, verbose=verbose, console=hud_console)
+    archive = _create_tarball(env_dir, verbose=verbose, console=hud_console)
     try:
         result = asyncio.run(
             _deploy_async(
-                tarball_path=tarball_path,
+                tarball_path=archive.path,
+                context_manifest=archive.manifest,
                 no_cache=no_cache,
                 plan=plan,
                 platform=platform,
@@ -512,7 +521,7 @@ def deploy_environment(
             )
         )
     finally:
-        tarball_path.unlink(missing_ok=True)
+        archive.path.unlink(missing_ok=True)
 
     if not result.success:
         raise typer.Exit(1)
@@ -541,6 +550,7 @@ async def _trigger_build(
     platform: PlatformClient,
     *,
     build_id: str,
+    context_manifest: BuildContextManifest,
     plan: _DeployPlan,
     no_cache: bool,
 ) -> tuple[str, str]:
@@ -549,6 +559,7 @@ async def _trigger_build(
         "build_id": build_id,
         "name": plan.name,
         "no_cache": no_cache,
+        "context_manifest": context_manifest.model_dump(mode="json"),
     }
     payload.update(
         {
@@ -575,6 +586,7 @@ async def _trigger_build(
 
 async def _deploy_async(
     tarball_path: Path,
+    context_manifest: BuildContextManifest,
     no_cache: bool,
     plan: _DeployPlan,
     platform: PlatformClient,
@@ -619,6 +631,7 @@ async def _deploy_async(
         build_id, registry_id = await _trigger_build(
             platform,
             build_id=reserved_id,
+            context_manifest=context_manifest,
             plan=plan,
             no_cache=no_cache,
         )

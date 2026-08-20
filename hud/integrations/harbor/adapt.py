@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
 import shlex
 import shutil
@@ -17,6 +16,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from hud.build_context import BuildContextManifest
 from hud.capabilities import Capability
 from hud.environment.egress import BRIDGE_PORT, VISITOR_PORT
 from hud.eval import Task, Taskset
@@ -245,15 +245,8 @@ class HarborTask:
     resources: RuntimeResources | None
 
 
-def _tree_hash(root: Path) -> str:
-    digest = hashlib.sha256()
-    for entry in sorted(root.rglob("*")):
-        relative_path = entry.relative_to(root).as_posix().encode()
-        if entry.is_symlink():
-            digest.update(relative_path + b"\0symlink\0" + os.readlink(entry).encode())
-        elif entry.is_file():
-            digest.update(relative_path + b"\0" + entry.read_bytes())
-    return digest.hexdigest()[:16]
+def _context_digest(root: Path) -> str:
+    return BuildContextManifest.from_directory(root).digest()
 
 
 def _runtime_resources(environment: EnvironmentConfig) -> RuntimeResources | None:
@@ -443,7 +436,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                             "Compose main build escapes environment",
                         )
             if dockerfile.is_file():
-                base_image = f"hud-harbor-base:{_tree_hash(environment_dir)}"
+                base_image = f"hud-harbor-base:{_context_digest(environment_dir)}"
             elif build is not None:
                 add(
                     "harbor.invalid.missing_compose_main_dockerfile",
@@ -455,7 +448,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                     "Compose main has neither image nor build",
                 )
         elif dockerfile.is_file():
-            base_image = f"hud-harbor-base:{_tree_hash(environment_dir)}"
+            base_image = f"hud-harbor-base:{_context_digest(environment_dir)}"
         elif base_image is None:
             add(
                 "harbor.invalid.environment_recipe",
@@ -541,7 +534,9 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
             path=task_dir,
             config=config,
             instruction=instruction.read_text("utf-8"),
-            environment_hash=_tree_hash(environment_dir) if environment_dir.exists() else "missing",
+            environment_hash=(
+                _context_digest(environment_dir) if environment_dir.exists() else "missing"
+            ),
             compose=compose,
             dockerfile=dockerfile,
             base_image=base_image,
@@ -608,7 +603,7 @@ def adapt(
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
     for group_key, group in sorted(grouped.items()):
-        digest = hashlib.sha256("\0".join(group_key).encode()).hexdigest()[:12]
+        digest = hashlib.sha256("\0".join(group_key).encode()).hexdigest()
         name = f"{base_name}-{digest}"
         source = group[0]
         environment = source.config.environment
@@ -621,7 +616,7 @@ def adapt(
                 if service_name != "main" and service.build is not None and service.image is None:
                     sidecar_tag = hashlib.sha256(
                         f"{source.environment_hash}\0{service_name}".encode()
-                    ).hexdigest()[:16]
+                    ).hexdigest()
                     compose_project.services[service_name] = service.model_copy(
                         update={"image": f"hud-harbor-sidecar:{sidecar_tag}"}
                     )
@@ -634,7 +629,7 @@ def adapt(
         verifier_image = base_image
         if separate:
             verifier_dockerfile = source.path / "tests" / "Dockerfile"
-            verifier_image = f"hud-harbor-verifier:{name}-{_tree_hash(verifier_dockerfile.parent)}"
+            verifier_image = f"hud-harbor-verifier:{_context_digest(verifier_dockerfile.parent)}"
 
         peers = []
         healthy_services = []
@@ -758,8 +753,9 @@ def adapt(
             shutil.copy2(wheel, payload / "packages" / wheel.name)
             requirement = f"{HUD_ROOT}/packages/{wheel.name}"
 
-        tag = _tree_hash(payload)
-        image = f"hud-harbor:{name}-{tag}"
+        payload_digest = _context_digest(payload)
+        tag = hashlib.sha256(f"{name}\0{payload_digest}".encode()).hexdigest()
+        image = f"hud-harbor:{tag}"
         group_service_access = bool(healthy_services) or any(
             item.service != "main"
             for task in group
