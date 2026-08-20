@@ -316,7 +316,7 @@ TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 #: Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
 
-#: The configurable subset of stop reasons (``AgentConfig.stop_on``): policy
+#: The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 #: conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 

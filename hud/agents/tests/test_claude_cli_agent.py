@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 from unittest.mock import AsyncMock, Mock
 
+import fastmcp
 import pytest
 from mcp.types import ImageContent, TextContent
 
@@ -29,6 +30,7 @@ from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
+from hud.types import MCPToolResult
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -195,7 +197,7 @@ class _FakeConn:
 
 
 def _fake_run() -> Any:
-    trace = SimpleNamespace(status="", content="", extra={})
+    trace = SimpleNamespace(status=None, content="", extra={})
     steps: list[Any] = []
     return SimpleNamespace(trace=trace, record=steps.append, steps=steps)
 
@@ -244,7 +246,7 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     assert conn.written[".hud_prompt.txt"] == b"build it"
     assert sink == {}
     assert set(conn.deleted) == {".hud_prompt.txt", ".hud_run.bat"}
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
     assert run.trace.content == "done"
     assert "messages" not in run.trace.extra
 
@@ -263,7 +265,7 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     assert conn.deleted == []
     assert len(conn.ran) == 1
     assert "claude" in conn.ran[0]
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
     assert run.trace.content == "done"
     assert "messages" not in run.trace.extra
 
@@ -323,7 +325,7 @@ async def test_exec_records_steps_before_process_exit() -> None:
     assert image.data == "aW1hZ2U="
     final = cast("AgentStep", run.steps[2])
     assert final.started_at == tool.ended_at
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
     assert run.trace.content == "done"
 
 
@@ -381,18 +383,17 @@ async def test_exec_closes_streaming_process_when_cancelled() -> None:
     assert process.closed
 
 
-async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
+async def test_exec_nonzero_exit_with_no_stdout_raises() -> None:
     sink: dict[str, bytes] = {}
     conn = _FakeConn(sink, _FakeStreamProcess("", stderr="boom", exit_status=1))
     agent = ClaudeCLIAgent()
     ssh = _ssh_with_conn("cmd", conn)
 
     run = _fake_run()
-    await agent._run_cli(run, ssh=ssh, shell="cmd", mcp_servers={}, prompt="x")
+    with pytest.raises(RuntimeError, match="boom"):
+        await agent._run_cli(run, ssh=ssh, shell="cmd", mcp_servers={}, prompt="x")
 
-    assert run.trace.status == "error"
     assert run.trace.extra["returncode"] == 1
-    assert run.steps[0].error == "boom"
 
 
 async def test_exec_signal_exit_records_the_returncode() -> None:
@@ -405,11 +406,10 @@ async def test_exec_signal_exit_records_the_returncode() -> None:
     ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
-    await agent._run_cli(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x")
+    with pytest.raises(RuntimeError, match="return code -15"):
+        await agent._run_cli(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x")
 
-    assert run.trace.status == "error"
     assert run.trace.extra["returncode"] == -15
-    assert run.steps[0].error == "claude CLI exited with return code -15"
 
 
 async def test_exec_nonzero_exit_with_result_stream_remains_an_error() -> None:
@@ -422,14 +422,13 @@ async def test_exec_nonzero_exit_with_result_stream_remains_an_error() -> None:
     ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
-    await agent._run_cli(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x")
+    with pytest.raises(RuntimeError, match="transport failed"):
+        await agent._run_cli(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x")
 
-    assert run.trace.status == "error"
     assert run.trace.content == "done"
     assert run.trace.extra["returncode"] == 1
     assert run.trace.extra["stderr"] == "transport failed"
     assert "messages" not in run.trace.extra
-    assert run.steps[-1].error == "transport failed"
 
 
 async def test_exec_zero_exit_without_result_event_is_an_error() -> None:
@@ -440,11 +439,10 @@ async def test_exec_zero_exit_without_result_event_is_an_error() -> None:
     ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
-    await agent._run_cli(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x")
+    with pytest.raises(RuntimeError, match="without a result event"):
+        await agent._run_cli(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x")
 
-    assert run.trace.status == "error"
     assert run.trace.content == "done"
-    assert run.steps[-1].error == "claude CLI exited without a result event"
 
 
 @pytest.mark.parametrize(
@@ -666,6 +664,26 @@ async def test_computer_mcp_stdio_owns_rfb_lifetime(
     create.assert_called_once_with(rfb, encoding)
     server.run_async.assert_awaited_once_with(transport="stdio", show_banner=False)
     rfb.close.assert_awaited_once()
+
+
+async def test_computer_mcp_preserves_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = MCPToolResult(
+        content=[TextContent(type="text", text="failed")],
+        isError=True,
+    )
+    execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(computer_mcp.ClaudeComputerTool, "execute", execute)
+    server = computer_mcp.create_computer_mcp(cast("Any", object()))
+
+    async with fastmcp.Client(server) as client:
+        received = await client.call_tool_mcp(
+            "computer",
+            {"action": "left_click", "coordinate": [10, 20]},
+        )
+
+    execute.assert_awaited_once_with({"action": "left_click", "coordinate": [10, 20]})
+    assert received.isError is True
+    assert received.content == result.content
 
 
 class _ByteWriter:
