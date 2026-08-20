@@ -67,4 +67,7 @@ environments/
 experiments/
 .memories/
 
-.codex/
+.codex/*
+!.codex/environments/
+.codex/environments/*
+!.codex/environments/environment.toml
