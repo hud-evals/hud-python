@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from hud.agents.types import AgentConfig
+from hud.agents.types import AgentConfig, ToolAgentConfig
 from hud.types import AgentType
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ def dump_agent(agent: Agent) -> dict[str, Any]:
             f"({', '.join(member.value for member in AgentType)}); "
             f"got {type(agent).__name__}"
         )
-    if config.model_client is not None:
+    if isinstance(config, ToolAgentConfig) and config.model_client is not None:
         raise ValueError(
             "agents with a custom model_client cannot run remotely; use HUDRuntime or LocalRuntime"
         )

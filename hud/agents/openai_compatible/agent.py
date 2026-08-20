@@ -149,23 +149,16 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         if return_token_ids:
             request_kwargs.setdefault("logprobs", True)
 
-        try:
-            response: ChatCompletion = await self.oai.chat.completions.create(
-                model=self.config.model,
-                messages=(
-                    [{"role": "system", "content": system_prompt}, *messages]
-                    if system_prompt is not None
-                    else messages
-                ),
-                stream=False,
-                **request_kwargs,
-            )
-        except Exception as e:
-            error_content = f"Error getting response {e}"
-            if "Invalid JSON" in str(e):
-                error_content = "Invalid JSON, response was truncated"
-            logger.warning(error_content)
-            return AgentStep(error=error_content, done=True)
+        response: ChatCompletion = await self.oai.chat.completions.create(
+            model=self.config.model,
+            messages=(
+                [{"role": "system", "content": system_prompt}, *messages]
+                if system_prompt is not None
+                else messages
+            ),
+            stream=False,
+            **request_kwargs,
+        )
 
         choice = response.choices[0]
         message = choice.message
