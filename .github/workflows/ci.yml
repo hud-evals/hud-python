@@ -81,6 +81,13 @@ jobs:
           docker logs hud-example
           exit 1
 
+      - name: Run blank task lifecycle
+        if: matrix.template == 'blank'
+        working-directory: ${{ runner.temp }}/${{ matrix.template }}
+        run: |
+          uv run --no-sync hud task start 0 --source tasks.py --url tcp://127.0.0.1:8765
+          test "$(uv run --no-sync hud task grade 0 --source tasks.py --url tcp://127.0.0.1:8765 --answer 4)" = "1.0"
+
       - name: Stop example image
         if: always()
         run: docker rm --force hud-example || true
