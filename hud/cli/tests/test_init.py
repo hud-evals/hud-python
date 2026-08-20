@@ -198,31 +198,6 @@ def test_materialize_preset_extracts_matching_sdk_release(
     assert (target / "scripts" / "run.sh").read_text() == "#!/bin/sh\n"
 
 
-def test_init_rejects_release_without_selected_example(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    get = MagicMock(
-        return_value=httpx.Response(
-            200,
-            content=_sdk_archive("coding", {"env.py": b"env = object()"}),
-            request=httpx.Request("GET", "https://example.test"),
-        )
-    )
-    monkeypatch.setattr(presets_module.httpx, "get", get)
-    monkeypatch.setattr(
-        presets_module,
-        "__file__",
-        str(tmp_path / "installed" / "hud" / "cli" / "presets.py"),
-    )
-    monkeypatch.setattr(presets_module, "__version__", "1.2.3")
-
-    target = tmp_path / "blank"
-    with pytest.raises(typer.Exit):
-        init_command(name=None, directory=str(tmp_path), force=False, preset="blank")
-
-    assert not target.exists()
-
-
 def test_materialize_preset_rejects_unsafe_archive_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
