@@ -1,4 +1,4 @@
-"""ClaudeSDKAgent remote-command construction over the workspace SSH.
+"""ClaudeCLIAgent remote-command construction over the workspace SSH.
 
 The agent runs the ``claude`` CLI on the remote workspace. These cover how the
 command is assembled per login shell — especially the Windows path, where the
@@ -19,16 +19,44 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 from unittest.mock import AsyncMock, Mock
 
+import mcp.types as mcp_types
 import pytest
 
-from hud.agents.claude.sdk import computer_mcp
-from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
-from hud.agents.types import ClaudeSDKConfig
+from hud.agents.claude.cli import computer_mcp
+from hud.agents.claude.cli.agent import (
+    ClaudeCLIAgent,
+    _tool_result_content,
+    build_remote_invocation,
+)
+from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
+from hud.settings import settings
+from hud.telemetry.context import set_trace_context
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture(autouse=True)
+def _clear_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "api_key", None)
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+
+
+def test_env_vars_follow_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    monkeypatch.setattr(settings, "anthropic_api_key", "anthropic-key")
+
+    gateway = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=True))._build_env_vars()
+    provider = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=False))._build_env_vars()
+
+    assert gateway["ANTHROPIC_BASE_URL"] == settings.hud_gateway_url
+    assert gateway["ANTHROPIC_API_KEY"] == "hud-key"
+    assert provider["ANTHROPIC_API_KEY"] == "anthropic-key"
+    assert "ANTHROPIC_BASE_URL" not in provider
+    assert provider["ANTHROPIC_MODEL"] == "claude-sonnet-5"
+
 
 # ─── build_remote_invocation (pure) ───────────────────────────────────
 
@@ -43,68 +71,116 @@ def test_windows_shell_runs_batch_file_via_cmd(shell: str) -> None:
     assert inv.script_body == "@echo off\r\nclaude --print -- hi\r\n"
 
 
-def test_posix_shell_runs_inline_with_install_check() -> None:
+def test_posix_shell_runs_inline() -> None:
     inv = build_remote_invocation("bash", "claude --print -- hi")
 
     assert inv.script_name is None
     assert inv.script_body is None
-    assert "install.sh" in inv.command  # one-shot bootstrap prefix
-    assert inv.command.endswith(" && claude --print -- hi")
+    assert inv.command == "claude --print -- hi"
+
+
+def test_windows_command_encodes_environment_and_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "api_key", "hud&key's")
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=True))
+
+    command = agent._build_cli_command(
+        shell="powershell",
+        prompt="not embedded",
+        max_steps=3,
+        system_prompt="don't $expand",
+    )
+
+    encoded = command.rsplit(" ", 1)[1]
+    script = base64.b64decode(encoded).decode("utf-16-le")
+    assert "$env:ANTHROPIC_API_KEY='hud&key''s'" in script
+    assert "'--system-prompt' 'don''t $expand'" in script
+    assert "Get-Content -Raw -Encoding UTF8 '.hud_prompt.txt' | & claude" in script
+    assert "not embedded" not in script
+    assert "python" not in script
+
+
+def test_tool_result_content_preserves_images() -> None:
+    content = _tool_result_content(
+        [
+            {"type": "text", "text": "before"},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "aW1hZ2U=",
+                },
+            },
+        ]
+    )
+
+    assert content[0].type == "text"
+    assert isinstance(content[1], mcp_types.ImageContent)
+    assert content[1].mimeType == "image/png"
+    assert content[1].data == "aW1hZ2U="
 
 
 # ─── _exec end-to-end over a fake SSH workspace ────────────────────────
 
 
-class _FakeConn:
-    def __init__(self, sink: dict[str, bytes], result: Any) -> None:
-        self._sink = sink
-        self._result = result
-        self.ran: list[str] = []
-        self.write_commands: list[str] = []
+class _FakeReader:
+    def __init__(self, value: str, *, pause_after: int | None = None) -> None:
+        self._raw = value.encode()
+        self._lines = self._raw.splitlines(keepends=True)
+        self._pause_after = pause_after
+        self._index = 0
+        self.blocked = asyncio.Event()
+        self.release = asyncio.Event()
 
-    def is_closed(self) -> bool:
-        return False
+    async def readline(self) -> bytes:
+        if self._pause_after == self._index:
+            self.blocked.set()
+            await self.release.wait()
+            self._pause_after = None
+        if self._index == len(self._lines):
+            return b""
+        line = self._lines[self._index]
+        self._index += 1
+        return line
 
-    async def run(
+    async def read(self) -> bytes:
+        return self._raw
+
+
+class _FakeStreamProcess:
+    def __init__(
         self,
-        cmd: str,
+        stdout: str,
         *,
-        input: str | None = None,
-        check: bool = True,
-        encoding: str | None = "utf-8",
-    ) -> Any:
-        if input is not None or cmd.startswith("powershell "):
-            self.write_commands.append(cmd)
-            script = cmd
-            if match := re.search(r"-EncodedCommand (\S+)", cmd):
-                script = base64.b64decode(match.group(1)).decode("utf-16-le")
-            name = next(
-                path
-                for path in (".hud_prompt.txt", ".hud_run.bat", ".hud_mcp_config.json")
-                if path in script
-            )
-            if input is not None:
-                self._sink[name] = input.encode()
-            elif match := re.search(r"FromBase64String\('([^']+)'\)", script):
-                self._sink[name] += base64.b64decode(match.group(1))
-            else:
-                self._sink[name] = b""
-            return SimpleNamespace(stdout="", stderr="", exit_status=0, returncode=0)
-        self.ran.append(cmd)
-        return self._result
+        stderr: str = "",
+        exit_status: int | None = 0,
+        returncode: int | None = None,
+        pause_after: int | None = None,
+    ) -> None:
+        self.stdout = _FakeReader(stdout, pause_after=pause_after)
+        self.stderr = _FakeReader(stderr)
+        self.exit_status = exit_status
+        self.returncode = exit_status if returncode is None else returncode
+        self.closed = False
+        self.terminated = False
 
-    async def create_process(self, cmd: str, **kwargs: Any) -> _FakeProcess:
-        return _FakeProcess(await self.run(cmd, **kwargs))
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        pass
 
 
-class _FakeProcess:
-    def __init__(self, result: Any) -> None:
-        self._result = result
-
+class _FakeCompletedProcess:
     async def wait(self, *, check: bool, **kwargs: Any) -> Any:
         del check
         assert kwargs == {"timeout": None}
-        return self._result
+        return SimpleNamespace(stdout=b"", stderr=b"", exit_status=0, returncode=0)
 
     def terminate(self) -> None:
         pass
@@ -116,6 +192,49 @@ class _FakeProcess:
         pass
 
 
+class _FakeConn:
+    def __init__(self, sink: dict[str, bytes], process: _FakeStreamProcess) -> None:
+        self._sink = sink
+        self._process = process
+        self.ran: list[str] = []
+        self.write_commands: list[str] = []
+        self.written: dict[str, bytes] = {}
+        self.deleted: list[str] = []
+
+    def is_closed(self) -> bool:
+        return False
+
+    async def create_process(self, cmd: str, **kwargs: Any) -> Any:
+        input_value = kwargs.get("input")
+        if cmd.startswith(("rm -f -- ", "cmd /c del /f /q ")):
+            paths = [path for path in self._sink if path in cmd]
+            for path in paths:
+                self._sink.pop(path)
+            self.deleted.extend(paths)
+            return _FakeCompletedProcess()
+        if input_value is not None or cmd.startswith("powershell "):
+            self.write_commands.append(cmd)
+            script = cmd
+            if match := re.search(r"-EncodedCommand (\S+)", cmd):
+                script = base64.b64decode(match.group(1)).decode("utf-16-le")
+            name = next(
+                path
+                for path in (".hud_prompt.txt", ".hud_run.bat", ".hud_mcp_config.json")
+                if path in script
+            )
+            if input_value is not None:
+                self._sink[name] = str(input_value).encode()
+            elif match := re.search(r"FromBase64String\('([^']+)'\)", script):
+                self._sink[name] += base64.b64decode(match.group(1))
+            else:
+                self._sink[name] = b""
+            self.written[name] = self._sink[name]
+            return _FakeCompletedProcess()
+        assert kwargs == {"encoding": None}
+        self.ran.append(cmd)
+        return self._process
+
+
 def _fake_run() -> Any:
     trace = SimpleNamespace(status="", content="", extra={})
     steps: list[Any] = []
@@ -123,7 +242,17 @@ def _fake_run() -> Any:
 
 
 _STREAM_JSON = (
-    '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n'
+    '{"type":"assistant","message":{"id":"msg-1","type":"message",'
+    '"role":"assistant","model":"claude-test","content":[{"type":"text",'
+    '"text":"editing"},{"type":"tool_use","id":"tool-1","name":"Write","input":{}}],'
+    '"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":11,'
+    '"output_tokens":7,"cache_read_input_tokens":3}}}\n'
+    '{"type":"user","message":{"content":[{"type":"tool_result",'
+    '"tool_use_id":"tool-1","content":"wrote a.txt","is_error":false}]}}\n'
+    '{"type":"assistant","message":{"id":"msg-2","type":"message",'
+    '"role":"assistant","model":"claude-test","content":[{"type":"text",'
+    '"text":"done"}],"stop_reason":"end_turn","stop_sequence":null,'
+    '"usage":{"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":3}}}\n'
     '{"type":"result","is_error":false,"result":"done","session_id":"s",'
     '"duration_ms":5,"num_turns":2,"total_cost_usd":0.01}\n'
 )
@@ -141,11 +270,8 @@ def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(
-        sink,
-        SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0, returncode=0),
-    )
-    agent = ClaudeSDKAgent()
+    conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON))
+    agent = ClaudeCLIAgent()
     ssh = _ssh_with_conn("cmd", conn)
 
     run = _fake_run()
@@ -153,39 +279,147 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
 
     assert conn.ran == ["cmd /c .hud_run.bat"]
     assert all(command.startswith("powershell ") for command in conn.write_commands)
-    assert sink[".hud_run.bat"].startswith(b"@echo off\r\n")
-    assert sink[".hud_prompt.txt"] == b"build it"
+    assert conn.written[".hud_run.bat"].startswith(b"@echo off\r\n")
+    assert conn.written[".hud_prompt.txt"] == b"build it"
+    assert sink == {}
+    assert set(conn.deleted) == {".hud_prompt.txt", ".hud_run.bat"}
     assert run.trace.status == "completed"
-    assert "done" in run.trace.content
+    assert run.trace.content == "done"
+    assert "messages" not in run.trace.extra
 
 
 async def test_exec_on_bash_runs_inline_without_batch() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(
-        sink,
-        SimpleNamespace(stdout=_STREAM_JSON, stderr="", exit_status=0, returncode=0),
-    )
-    agent = ClaudeSDKAgent()
+    conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON))
+    agent = ClaudeCLIAgent()
     ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
     await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="build it", max_steps=5)
 
-    assert ".hud_run.bat" not in sink
-    assert conn.write_commands == ["cat > .hud_prompt.txt"]
+    assert sink == {}
+    assert conn.write_commands == []
+    assert conn.deleted == []
     assert len(conn.ran) == 1
-    assert "install.sh" in conn.ran[0]
     assert "claude" in conn.ran[0]
     assert run.trace.status == "completed"
+    assert run.trace.content == "done"
+    assert "messages" not in run.trace.extra
+
+
+async def test_exec_removes_mcp_config_after_run() -> None:
+    sink: dict[str, bytes] = {}
+    conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON))
+    agent = ClaudeCLIAgent()
+
+    await agent._exec(
+        _fake_run(),
+        ssh=_ssh_with_conn("bash", conn),
+        shell="bash",
+        mcp_servers={"database": {"type": "http", "url": "http://db/mcp"}},
+        prompt="build it",
+        max_steps=5,
+    )
+
+    config = json.loads(conn.written[".hud_mcp_config.json"])
+    assert config == {"mcpServers": {"database": {"type": "http", "url": "http://db/mcp"}}}
+    assert sink == {}
+    assert conn.deleted == [".hud_mcp_config.json"]
+    assert "--mcp-config .hud_mcp_config.json" in conn.ran[0]
+
+
+async def test_exec_records_steps_before_process_exit() -> None:
+    process = _FakeStreamProcess(_STREAM_JSON, pause_after=1)
+    conn = _FakeConn({}, process)
+    agent = ClaudeCLIAgent()
+    ssh = _ssh_with_conn("bash", conn)
+    run = _fake_run()
+
+    execution = asyncio.create_task(
+        agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="edit it", max_steps=5)
+    )
+    await process.stdout.blocked.wait()
+
+    assert not execution.done()
+    assert len(run.steps) == 1
+    first = run.steps[0]
+    assert isinstance(first, AgentStep)
+    assert first.content == "editing"
+    assert first.tool_calls[0].id == "tool-1"
+
+    process.stdout.release.set()
+    await execution
+
+    assert [type(step) for step in run.steps] == [AgentStep, ToolStep, AgentStep]
+    tool = cast("ToolStep", run.steps[1])
+    assert tool.started_at == first.ended_at
+    final = cast("AgentStep", run.steps[2])
+    assert final.started_at == tool.ended_at
+    assert run.trace.status == "completed"
+    assert run.trace.content == "done"
+
+
+async def test_exec_forwards_trace_id_only_to_hud_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    monkeypatch.setattr(settings, "anthropic_api_key", "anthropic-key")
+
+    gateway_conn = _FakeConn({}, _FakeStreamProcess(_STREAM_JSON))
+    gateway = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=True))
+    with set_trace_context("trace-123"):
+        await gateway._exec(
+            _fake_run(),
+            ssh=_ssh_with_conn("bash", gateway_conn),
+            shell="bash",
+            mcp_servers={},
+            prompt="build it",
+            max_steps=5,
+        )
+    assert "ANTHROPIC_CUSTOM_HEADERS='Trace-Id: trace-123'" in gateway_conn.ran[0]
+
+    provider_conn = _FakeConn({}, _FakeStreamProcess(_STREAM_JSON))
+    provider = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=False))
+    with set_trace_context("trace-123"):
+        await provider._exec(
+            _fake_run(),
+            ssh=_ssh_with_conn("bash", provider_conn),
+            shell="bash",
+            mcp_servers={},
+            prompt="build it",
+            max_steps=5,
+        )
+    assert "ANTHROPIC_CUSTOM_HEADERS" not in provider_conn.ran[0]
+
+
+async def test_exec_closes_streaming_process_when_cancelled() -> None:
+    process = _FakeStreamProcess(_STREAM_JSON, pause_after=0)
+    conn = _FakeConn({}, process)
+    agent = ClaudeCLIAgent()
+
+    execution = asyncio.create_task(
+        agent._exec(
+            _fake_run(),
+            ssh=_ssh_with_conn("bash", conn),
+            shell="bash",
+            mcp_servers={},
+            prompt="build it",
+            max_steps=5,
+        )
+    )
+    await process.stdout.blocked.wait()
+    execution.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+
+    assert process.terminated
 
 
 async def test_exec_nonzero_exit_with_no_stdout_records_system_error() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(
-        sink,
-        SimpleNamespace(stdout="", stderr="boom", exit_status=1, returncode=1),
-    )
-    agent = ClaudeSDKAgent()
+    conn = _FakeConn(sink, _FakeStreamProcess("", stderr="boom", exit_status=1))
+    agent = ClaudeCLIAgent()
     ssh = _ssh_with_conn("cmd", conn)
 
     run = _fake_run()
@@ -200,9 +434,9 @@ async def test_exec_signal_exit_records_the_returncode() -> None:
     sink: dict[str, bytes] = {}
     conn = _FakeConn(
         sink,
-        SimpleNamespace(stdout="", stderr="", exit_status=None, returncode=-15),
+        _FakeStreamProcess("", exit_status=None, returncode=-15),
     )
-    agent = ClaudeSDKAgent()
+    agent = ClaudeCLIAgent()
     ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
@@ -211,6 +445,41 @@ async def test_exec_signal_exit_records_the_returncode() -> None:
     assert run.trace.status == "error"
     assert run.trace.extra["returncode"] == -15
     assert run.steps[0].error == "claude CLI exited with return code -15"
+
+
+async def test_exec_nonzero_exit_with_result_stream_remains_an_error() -> None:
+    sink: dict[str, bytes] = {}
+    conn = _FakeConn(
+        sink,
+        _FakeStreamProcess(_STREAM_JSON, stderr="transport failed", exit_status=1),
+    )
+    agent = ClaudeCLIAgent()
+    ssh = _ssh_with_conn("bash", conn)
+
+    run = _fake_run()
+    await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x", max_steps=1)
+
+    assert run.trace.status == "error"
+    assert run.trace.content == "done"
+    assert run.trace.extra["returncode"] == 1
+    assert run.trace.extra["stderr"] == "transport failed"
+    assert "messages" not in run.trace.extra
+    assert run.steps[-1].error == "transport failed"
+
+
+async def test_exec_zero_exit_without_result_event_is_an_error() -> None:
+    sink: dict[str, bytes] = {}
+    stdout = _STREAM_JSON.rsplit('{"type":"result"', 1)[0]
+    conn = _FakeConn(sink, _FakeStreamProcess(stdout))
+    agent = ClaudeCLIAgent()
+    ssh = _ssh_with_conn("bash", conn)
+
+    run = _fake_run()
+    await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="x", max_steps=1)
+
+    assert run.trace.status == "error"
+    assert run.trace.content == "done"
+    assert run.steps[-1].error == "claude CLI exited without a result event"
 
 
 @pytest.mark.parametrize(
@@ -242,7 +511,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
             assert ref == "ssh"
             return ssh
 
-    agent = ClaudeSDKAgent()
+    agent = ClaudeCLIAgent()
     execute = AsyncMock()
     monkeypatch.setattr(agent, "_exec", execute)
 
@@ -308,7 +577,7 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
             bridge_active = False
 
     encoding = WebPScreenshotEncoding(quality=42)
-    agent = ClaudeSDKAgent(ClaudeSDKConfig(screenshot_encoding=encoding))
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(screenshot_encoding=encoding))
 
     async def execute(*_args: Any, **_kwargs: Any) -> None:
         assert bridge_active
@@ -400,7 +669,7 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
             },
         }
 
-    agent = ClaudeSDKAgent()
+    agent = ClaudeCLIAgent()
     monkeypatch.setattr(computer_mcp, "bridge_computer_mcp", bridge)
     monkeypatch.setattr(agent, "_exec", execute)
 
@@ -522,7 +791,7 @@ async def test_computer_mcp_bridge_uses_controller_python_and_owns_resources(
     assert spawn_args[:3] == (
         sys.executable,
         "-m",
-        "hud.agents.claude.sdk.computer_mcp",
+        "hud.agents.claude.cli.computer_mcp",
     )
     environ = spawn_call.kwargs["env"]
     assert json.loads(environ[computer_mcp.RFB_CAPABILITY_ENV]) == screen.to_manifest()
@@ -644,7 +913,7 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
             first_entered.set()
             await release_first.wait()
 
-    agent = ClaudeSDKAgent()
+    agent = ClaudeCLIAgent()
     monkeypatch.setattr(agent, "_exec", execute)
     run_a = SimpleNamespace(client=Client(shell_a, ssh_a), prompt_text="first")
     run_b = SimpleNamespace(client=Client(shell_b, ssh_b), prompt_text="second")

@@ -168,7 +168,7 @@ async def bridge_computer_mcp(
 ) -> AsyncIterator[dict[str, Any]]:
     """Bridge a controller-side computer MCP process into a remote POSIX shell."""
     if shell in {"cmd", "powershell"}:
-        raise RuntimeError("ClaudeSDKAgent computer use requires a POSIX workspace")
+        raise RuntimeError("ClaudeCLIAgent computer use requires a POSIX workspace")
 
     token = secrets.token_hex(16)
     request_path = str(_REMOTE_TMP / f"hud-computer-{token}.request")
@@ -190,7 +190,7 @@ async def bridge_computer_mcp(
         local = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "hud.agents.claude.sdk.computer_mcp",
+            "hud.agents.claude.cli.computer_mcp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

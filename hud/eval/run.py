@@ -61,9 +61,10 @@ def validate_rollout_timeouts(
     verifier_runtime_config: RuntimeConfig | None,
 ) -> float | None:
     """Validate configured phase limits and return the effective agent timeout."""
-    from hud.agents.tool_agent import ToolAgent
+    from hud.agents.types import AgentConfig
 
-    agent_timeout = agent.config.timeout_seconds if isinstance(agent, ToolAgent) else None
+    config = getattr(agent, "config", None)
+    agent_timeout = config.timeout_seconds if isinstance(config, AgentConfig) else None
     if task.agent_config is not None:
         agent_timeout = task.agent_config.get("timeout_seconds", agent_timeout)
 
@@ -489,12 +490,12 @@ async def rollout(
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
     # Report the model the agent will sample so the platform attributes the
-    # trace to it on enter. Only LLM tool agents carry an inference-model slug
-    # (``config.model``); robot/other agents have none. Local import avoids an
-    # eval<->agents import cycle.
-    from hud.agents.tool_agent import ToolAgent
+    # trace to it on enter. Registered LLM and CLI agents carry it on their
+    # AgentConfig; robot/custom agents may not.
+    from hud.agents.types import AgentConfig
 
-    agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
+    config = getattr(agent, "config", None)
+    agent_model = config.model if isinstance(config, AgentConfig) else None
     with set_trace_context(trace_id):
         await trace_enter(
             trace_id,

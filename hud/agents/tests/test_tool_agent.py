@@ -24,7 +24,7 @@ from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
-from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
+from hud.agents.types import AgentConfig, AgentStep, ClaudeCLIConfig, ClaudeConfig, ToolStep
 from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
 from hud.capabilities.ssh import SSHConnectionError
@@ -83,7 +83,7 @@ def test_init_subclass_derives_clients_from_catalog() -> None:
 def test_claude_defaults_to_configurable_webp_screenshots() -> None:
     assert AgentConfig().screenshot_encoding == PngScreenshotEncoding()
     assert ClaudeConfig().screenshot_encoding == WebPScreenshotEncoding()
-    assert ClaudeSDKConfig().screenshot_encoding == WebPScreenshotEncoding()
+    assert ClaudeCLIConfig().screenshot_encoding == WebPScreenshotEncoding()
 
     configured = ClaudeConfig.model_validate(
         {"screenshot_encoding": {"mime_type": "image/webp", "quality": 42}},

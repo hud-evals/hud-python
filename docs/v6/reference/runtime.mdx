@@ -217,9 +217,9 @@ provisioning.
 
 Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
 **whole rollout** remotely, with the agent running alongside the task environment. This process
-only submits the rollout and polls its trace to completion. It supports gateway agents from
-[`create_agent`](/v6/reference/agents#create-agent); agents with a custom `model_client` must use
-`HUDRuntime` or `LocalRuntime`.
+only submits the rollout and polls its trace to completion. It supports registered built-in agents;
+[`create_agent`](/v6/reference/agents#create-agent) supplies the gateway-backed ones. Agents with a
+custom `model_client` must use `HUDRuntime` or `LocalRuntime`.
 
 ### `Runtime`
 

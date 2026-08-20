@@ -31,6 +31,12 @@ def test_parse_agent_type_accepts_known_value() -> None:
     assert cfg.agent_type.value == "openai"
 
 
+def test_parse_agent_type_accepts_cli_agent() -> None:
+    cfg = EvalConfig(agent_type="claude_cli")
+    assert cfg.agent_type is not None
+    assert cfg.agent_type.value == "claude_cli"
+
+
 def test_parse_agent_type_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="Invalid agent"):
         EvalConfig(agent_type="not-an-agent")
@@ -119,6 +125,20 @@ def test_validate_api_keys_hud_runtime_keeps_local_gateway(
     cfg = EvalConfig(agent_type="gemini", runtime="hud")
     cfg.validate_api_keys()
     assert cfg.gateway is True
+
+
+def test_validate_api_keys_allows_cli_workspace_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "api_key", None)
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+
+    cfg = EvalConfig(agent_type="claude_cli", runtime="local")
+    cfg.validate_api_keys()
+
+    assert cfg.gateway is False
 
 
 def test_resolve_placement_runtime_hud_uses_tunnel(
@@ -323,6 +343,36 @@ def test_eval_max_steps_lands_in_agent_config() -> None:
     )
     agent = eval_mod._build_agent(cfg)
     assert agent.config.max_steps == 17
+
+
+def test_build_agent_constructs_claude_cli() -> None:
+    from hud.agents.claude import ClaudeCLIAgent
+
+    cfg = EvalConfig(agent_type="claude_cli")
+    agent = eval_mod._build_agent(cfg)
+
+    assert isinstance(agent, ClaudeCLIAgent)
+    assert agent.config.model == "claude-sonnet-5"
+    assert agent.config.use_hud_gateway is False
+
+
+def test_build_agent_routes_hosted_claude_cli_through_gateway() -> None:
+    cfg = EvalConfig(agent_type="claude_cli", remote=True)
+
+    agent = eval_mod._build_agent(cfg)
+
+    assert agent.config.use_hud_gateway is True
+
+
+def test_build_agent_preserves_claude_cli_gateway_config() -> None:
+    cfg = EvalConfig(
+        agent_type="claude_cli",
+        agent_config={"claude_cli": {"use_hud_gateway": True}},
+    )
+
+    agent = eval_mod._build_agent(cfg)
+
+    assert agent.config.use_hud_gateway is True
 
 
 def test_spawn_target_serves_single_file_env(tmp_path: Path) -> None:
