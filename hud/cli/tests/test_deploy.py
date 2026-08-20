@@ -30,6 +30,52 @@ def test_normalize_runtime_rejects_internal_provider_name() -> None:
         _normalize_runtime("ec2", HUDConsole())
 
 
+@pytest.mark.asyncio
+async def test_trigger_sends_canonical_context_manifest() -> None:
+    from hud.build_context import BuildContextEntry, BuildContextManifest
+    from hud.cli.deploy import _DeployPlan, _trigger_build
+
+    manifest = BuildContextManifest(
+        entries=(
+            BuildContextEntry(
+                path="Dockerfile",
+                type="file",
+                mode=0o644,
+                size=12,
+                content_digest="a" * 64,
+            ),
+        ),
+    )
+    plan = _DeployPlan(
+        name="test-env",
+        registry_id=None,
+        runtime=None,
+        runtime_config=None,
+        env_vars={},
+        build_args={},
+        build_secrets={},
+    )
+    platform = PlatformClient("https://api.example", "key")
+
+    with patch.object(
+        PlatformClient,
+        "apost",
+        AsyncMock(return_value={"id": "existing-build", "registry_id": "registry"}),
+    ) as post:
+        result = await _trigger_build(
+            platform,
+            build_id="reserved-upload",
+            context_manifest=manifest,
+            plan=plan,
+            no_cache=False,
+        )
+
+    assert result == ("existing-build", "registry")
+    call = post.await_args
+    assert call is not None
+    assert call.kwargs["json"]["context_manifest"] == manifest.model_dump(mode="json")
+
+
 class TestResolveEnvironmentName:
     """Tests for code-authoritative environment name resolution."""
 
@@ -435,6 +481,7 @@ class TestDeployAsync:
     @pytest.mark.asyncio
     async def test_upload_url_failure(self) -> None:
         """Test handling of upload URL failure."""
+        from hud.build_context import BuildContextManifest
         from hud.cli.deploy import _deploy_async, _DeployPlan
         from hud.utils.exceptions import HudRequestError
         from hud.utils.hud_console import HUDConsole
@@ -446,6 +493,7 @@ class TestDeployAsync:
         with patch("hud.utils.platform.make_request", AsyncMock(side_effect=error)):
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
+                context_manifest=BuildContextManifest(entries=()),
                 no_cache=False,
                 plan=_DeployPlan(
                     name="test-env",
@@ -465,6 +513,7 @@ class TestDeployAsync:
     @pytest.mark.asyncio
     async def test_upload_url_network_error(self) -> None:
         """Test handling of network error during upload URL fetch."""
+        from hud.build_context import BuildContextManifest
         from hud.cli.deploy import _deploy_async, _DeployPlan
         from hud.utils.hud_console import HUDConsole
         from hud.utils.platform import PlatformClient
@@ -477,6 +526,7 @@ class TestDeployAsync:
         ):
             result = await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
+                context_manifest=BuildContextManifest(entries=()),
                 no_cache=False,
                 plan=_DeployPlan(
                     name="test-env",

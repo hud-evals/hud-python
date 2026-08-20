@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import fnmatch
+import gzip
 import os
 import tarfile
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
+from hud.build_context import BuildContextManifest
 from hud.utils.hud_console import HUDConsole
 
 
@@ -25,16 +28,12 @@ def parse_ignore_file(ignore_path: Path) -> list[str]:
     if not ignore_path.exists():
         return patterns
 
-    try:
-        with open(ignore_path) as f:
-            for line in f:
-                # Strip whitespace and skip comments/empty lines
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                patterns.append(line)
-    except Exception:  # noqa: S110
-        pass  # Best effort - ignore parse errors
+    with ignore_path.open(encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            patterns.append(line)
 
     return patterns
 
@@ -165,26 +164,20 @@ DEFAULT_EXCLUDES = [
 ]
 
 
-def create_build_context_tarball(
+@dataclass(frozen=True, slots=True)
+class BuildContextArchive:
+    path: Path
+    manifest: BuildContextManifest
+    size_bytes: int
+    file_count: int
+    duration_seconds: float
+
+
+def _build_context_paths(
     directory: Path,
     dockerignore_path: Path | None = None,
     verbose: bool = False,
-) -> tuple[Path, int, int, float]:
-    """Create a gzipped tarball of the build context.
-
-    Respects .dockerignore and .gitignore patterns, and always excludes
-    common sensitive files like .env and .git directories.
-
-    Args:
-        directory: Directory to create tarball from
-        dockerignore_path: Optional path to .dockerignore file.
-                          If None, looks for .dockerignore in directory.
-        verbose: Whether to print verbose output
-
-    Returns:
-        Tuple of (tarball_path, size_bytes, file_count, duration_seconds)
-    """
-    start_time = time.time()
+) -> list[Path]:
     hud_console = HUDConsole()
     directory = directory.resolve()
 
@@ -210,7 +203,45 @@ def create_build_context_tarball(
     if verbose and loaded_sources:
         hud_console.info(f"Loaded ignore patterns from: {', '.join(loaded_sources)}")
 
-    # Create temporary file for tarball
+    paths: list[Path] = []
+    for root, dirs, files in os.walk(directory):
+        root_path = Path(root)
+        retained_dirs: list[str] = []
+        for name in sorted(dirs):
+            path = root_path / name
+            if should_ignore(path, directory, ignore_patterns):
+                if verbose:
+                    hud_console.debug(f"Skipping: {path.relative_to(directory)}")
+                continue
+            if path.is_symlink():
+                paths.append(path)
+            else:
+                retained_dirs.append(name)
+        dirs[:] = retained_dirs
+
+        for name in sorted(files):
+            path = root_path / name
+            if should_ignore(path, directory, ignore_patterns):
+                if verbose:
+                    hud_console.debug(f"Skipping: {path.relative_to(directory)}")
+                continue
+            paths.append(path)
+
+    return paths
+
+
+def create_build_context_tarball(
+    directory: Path,
+    dockerignore_path: Path | None = None,
+    verbose: bool = False,
+) -> BuildContextArchive:
+    """Create a tarball and canonical manifest from one selected file set."""
+    start_time = time.time()
+    directory = directory.resolve()
+    manifest = BuildContextManifest.from_paths(
+        directory,
+        _build_context_paths(directory, dockerignore_path, verbose),
+    )
     temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
         suffix=".tar.gz",
         delete=False,
@@ -219,37 +250,41 @@ def create_build_context_tarball(
     temp_path = Path(temp_file.name)
     temp_file.close()
 
-    file_count = 0
-
     try:
-        with tarfile.open(temp_path, "w:gz") as tar:
-            for root, dirs, files in os.walk(directory):
-                root_path = Path(root)
-
-                # Filter directories in-place to skip ignored ones
-                dirs[:] = [
-                    d for d in dirs if not should_ignore(root_path / d, directory, ignore_patterns)
-                ]
-
-                for file in files:
-                    file_path = root_path / file
-
-                    if should_ignore(file_path, directory, ignore_patterns):
-                        if verbose:
-                            hud_console.debug(f"Skipping: {file_path.relative_to(directory)}")
-                        continue
-
-                    # Add file to tarball with relative path
-                    arcname = str(file_path.relative_to(directory))
-                    tar.add(file_path, arcname=arcname)
-                    file_count += 1
-
-                    if verbose:
-                        hud_console.debug(f"Added: {arcname}")
+        with (
+            temp_path.open("wb") as raw_archive,
+            gzip.GzipFile(
+                filename="",
+                fileobj=raw_archive,
+                mode="wb",
+                mtime=0,
+            ) as compressed,
+            tarfile.open(fileobj=compressed, mode="w") as tar,
+        ):
+            for entry in manifest.entries:
+                info = tarfile.TarInfo(entry.path)
+                info.mode = entry.mode
+                info.mtime = 0
+                info.uid = 0
+                info.gid = 0
+                if entry.type == "symlink":
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = entry.target or ""
+                    tar.addfile(info)
+                else:
+                    info.size = entry.size or 0
+                    with (directory / entry.path).open("rb") as source:
+                        tar.addfile(info, source)
 
         size_bytes = temp_path.stat().st_size
         duration = time.time() - start_time
-        return temp_path, size_bytes, file_count, duration
+        return BuildContextArchive(
+            path=temp_path,
+            manifest=manifest,
+            size_bytes=size_bytes,
+            file_count=len(manifest.entries),
+            duration_seconds=duration,
+        )
 
     except Exception:
         # Clean up temp file on error

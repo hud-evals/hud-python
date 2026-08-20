@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import logging
 import os
@@ -11,10 +10,7 @@ import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from typing import Any, ClassVar, Self
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,8 +47,6 @@ class EnvironmentSource:
     CONFIG_FILENAME: ClassVar[str] = "config.json"
     LEGACY_CONFIG_FILENAME: ClassVar[str] = "deploy.json"
 
-    SOURCE_INCLUDE_FILES: ClassVar[set[str]] = {"Dockerfile", "Dockerfile.hud", "pyproject.toml"}
-    SOURCE_INCLUDE_DIRS: ClassVar[set[str]] = {"server", "mcp", "controller", "environment"}
     SOURCE_EXCLUDE_DIRS: ClassVar[set[str]] = {
         ".git",
         ".venv",
@@ -64,8 +58,6 @@ class EnvironmentSource:
         ".pytest_cache",
         ".ruff_cache",
     }
-    SOURCE_EXCLUDE_FILES: ClassVar[set[str]] = {"hud.lock.yaml"}
-    SOURCE_EXCLUDE_SUFFIXES: ClassVar[set[str]] = {".pyc", ".log"}
 
     @classmethod
     def open(cls, directory: str | Path = ".") -> Self:
@@ -209,42 +201,6 @@ class EnvironmentSource:
     def taskset_id(self) -> str | None:
         value = self.load_config().get("tasksetId")
         return value if isinstance(value, str) else None
-
-    def iter_source_files(self) -> Iterator[Path]:
-        for name in self.SOURCE_INCLUDE_FILES:
-            path = self.root / name
-            if path.is_file():
-                yield path
-
-        for directory in self.SOURCE_INCLUDE_DIRS:
-            source_dir = self.root / directory
-            if not source_dir.exists():
-                continue
-            for dirpath, dirnames, filenames in os.walk(source_dir):
-                dirnames[:] = [name for name in dirnames if name not in self.SOURCE_EXCLUDE_DIRS]
-                for filename in filenames:
-                    if filename in self.SOURCE_EXCLUDE_FILES:
-                        continue
-                    if any(filename.endswith(suffix) for suffix in self.SOURCE_EXCLUDE_SUFFIXES):
-                        continue
-                    yield Path(dirpath) / filename
-
-    def source_files(self) -> list[Path]:
-        files = list(self.iter_source_files())
-        files.sort(key=self.relative_path)
-        return files
-
-    def source_file_refs(self) -> list[str]:
-        return [self.relative_path(path) for path in self.source_files()]
-
-    def source_hash(self) -> str:
-        hasher = hashlib.sha256()
-        for path in self.source_files():
-            hasher.update(self.relative_path(path).encode("utf-8"))
-            with path.open("rb") as file:
-                for chunk in iter(lambda: file.read(8192), b""):
-                    hasher.update(chunk)
-        return hasher.hexdigest()
 
     def relative_path(self, path: Path) -> str:
         return str(path.resolve().relative_to(self.root)).replace("\\", "/")

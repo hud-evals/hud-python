@@ -59,16 +59,34 @@ def test_create_build_context_tarball_excludes_secrets(tmp_path: Path) -> None:
     git.mkdir()
     (git / "config").write_text("x", encoding="utf-8")
 
-    tarball, size, count, duration = create_build_context_tarball(ctx)
+    archive = create_build_context_tarball(ctx)
     try:
-        assert tarball.exists()
-        assert size > 0
-        assert duration >= 0
-        with tarfile.open(tarball) as tar:
+        assert archive.path.exists()
+        assert archive.size_bytes > 0
+        assert archive.duration_seconds >= 0
+        with tarfile.open(archive.path) as tar:
             names = tar.getnames()
         assert "main.py" in names
         assert ".env" not in names
         assert not any(n.startswith(".git") for n in names)
-        assert count == 1
+        assert archive.file_count == 1
+        assert [entry.path for entry in archive.manifest.entries] == ["main.py"]
     finally:
-        tarball.unlink(missing_ok=True)
+        archive.path.unlink(missing_ok=True)
+
+
+def test_manifest_identity_ignores_archive_metadata(tmp_path: Path) -> None:
+    context = tmp_path / "context"
+    context.mkdir()
+    source = context / "main.py"
+    source.write_text("print('hi')\n", encoding="utf-8")
+
+    first = create_build_context_tarball(context)
+    source.touch()
+    second = create_build_context_tarball(context)
+    try:
+        assert first.manifest.digest() == second.manifest.digest()
+        assert first.path.read_bytes() == second.path.read_bytes()
+    finally:
+        first.path.unlink(missing_ok=True)
+        second.path.unlink(missing_ok=True)
