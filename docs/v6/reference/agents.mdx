@@ -59,10 +59,10 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
 | `OpenAIAgent` | `OpenAIConfig` | `gpt-5.6` |
 | `GeminiAgent` | `GeminiConfig` | `gemini-3-pro-preview` |
 | `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5.4-mini` |
-| `ClaudeSDKAgent` | `ClaudeSDKConfig` | `claude-sonnet-4-6` |
+| `ClaudeCLIAgent` | `ClaudeCLIConfig` | `claude-sonnet-5` |
 
 Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so it
-points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeSDKAgent` runs the `claude`
+points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeCLIAgent` runs the `claude`
 CLI over an `ssh` capability, against the env's filesystem. SSH-only runs support POSIX and Windows
 workspaces; computer use over an `rfb` capability currently requires a POSIX workspace. Every knob
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
@@ -100,8 +100,8 @@ A model id maps to one of four gateway agent types (`AgentType`), each a provide
 | `gemini` | `GeminiAgent` |
 | `openai_compatible` | `OpenAIChatAgent` |
 
-For a provider key instead of the gateway, or for `ClaudeSDKAgent` (not a gateway type), construct the
-provider agent directly.
+For a provider key instead of the gateway, or for `ClaudeCLIAgent` (not a gateway shortcut), construct
+the agent directly.
 
 ## Agent
 

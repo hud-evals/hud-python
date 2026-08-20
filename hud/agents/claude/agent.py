@@ -257,26 +257,36 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         if response is None:
             raise ValueError("Claude response missing after retries")
 
-        result = AgentStep(content="", done=True)
-        result.model = response.model
-        result.usage = Usage(
-            prompt_tokens=response.usage.input_tokens,
-            completion_tokens=response.usage.output_tokens,
-            cached_tokens=response.usage.cache_read_input_tokens,
+        return self._message_to_agent_step(response, citations_enabled=citations_enabled)
+
+    @classmethod
+    def _message_to_agent_step(
+        cls,
+        response: BetaMessage,
+        *,
+        citations_enabled: bool = False,
+    ) -> AgentStep:
+        result = AgentStep(
+            content="",
+            done=True,
+            model=response.model,
+            usage=Usage(
+                prompt_tokens=response.usage.input_tokens,
+                completion_tokens=response.usage.output_tokens,
+                cached_tokens=response.usage.cache_read_input_tokens,
+            ),
         )
         text_parts: list[str] = []
         thinking_parts: list[str] = []
-        citations: list[Citation] = []
 
         for block in response.content:
             match block.type:
                 case "tool_use":
-                    arguments = dict(block.input) if block.input else {}
                     result.tool_calls.append(
                         MCPToolCall(
                             id=block.id,
                             name=block.name,
-                            arguments=arguments,
+                            arguments=dict(block.input) if block.input else {},
                             _meta=mcp_types.RequestParams.Meta.model_validate(
                                 {"citations_enabled": citations_enabled},
                             ),
@@ -284,9 +294,8 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     )
                     result.done = False
                 case "text":
-                    text_block = block
-                    text_parts.append(text_block.text)
-                    citations.extend(self._citation(c) for c in (text_block.citations or []))
+                    text_parts.append(block.text)
+                    result.citations.extend(cls._citation(c) for c in (block.citations or []))
                 case "thinking":
                     if block.thinking:
                         thinking_parts.append(block.thinking)
@@ -294,7 +303,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     pass
 
         result.content = "".join(text_parts)
-        result.citations = citations
         if thinking_parts:
             result.reasoning = "\n".join(thinking_parts)
         result.finish_reason = response.stop_reason

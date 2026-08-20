@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.agents.registry import dump_agent, load_agent
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
@@ -19,7 +20,7 @@ from hud.utils.gateway import (
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from hud.agents.claude import ClaudeAgent, ClaudeSDKAgent, ClaudeSDKConfig
+    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent, ClaudeCLIConfig
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
@@ -51,7 +52,10 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
     requested_model = model
     model = normalize_gateway_model_id(model)
-    agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
+    agent_type = next(
+        (candidate for candidate in AgentType if not candidate.is_cli and candidate.value == model),
+        None,
+    )
     if agent_type is not None:
         model_id = model
     else:
@@ -84,12 +88,14 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
                     agent_type = AgentType(agent_str)
                 except ValueError as exc:
                     raise ValueError(f"Model '{model}' has invalid agent type metadata") from exc
+                if agent_type.is_cli:
+                    raise ValueError(f"Model '{model}' has invalid agent type metadata")
                 model_id = gateway_model.model_name or model
                 break
         else:
             import difflib
 
-            known = [c.value for c in AgentType] + [
+            known = [c.value for c in AgentType if not c.is_cli] + [
                 n
                 for gm in gateway_models
                 for n in (gm.id, gm.name, gm.model_name)
@@ -110,15 +116,14 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
             raise ValueError(f"Model {requested_model!r} not found in {source}.{hint}")
 
     kwargs.setdefault("model", model_id)
-    # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
-    return agent_type.cls(cast("Any", config))
+    return cast("GatewayAgent", agent_type.cls(cast("Any", config)))
 
 
 _LAZY_EXPORTS = {
     "ClaudeAgent": ("hud.agents.claude", "ClaudeAgent"),
-    "ClaudeSDKAgent": ("hud.agents.claude", "ClaudeSDKAgent"),
-    "ClaudeSDKConfig": ("hud.agents.claude", "ClaudeSDKConfig"),
+    "ClaudeCLIAgent": ("hud.agents.claude", "ClaudeCLIAgent"),
+    "ClaudeCLIConfig": ("hud.agents.claude", "ClaudeCLIConfig"),
     "GeminiAgent": ("hud.agents.gemini", "GeminiAgent"),
     "MCPAgent": ("hud.agents.tool_agent", "ToolAgent"),
     "OpenAIAgent": ("hud.agents.openai", "OpenAIAgent"),
@@ -127,13 +132,15 @@ _LAZY_EXPORTS = {
 
 __all__ = [
     "ClaudeAgent",
-    "ClaudeSDKAgent",
-    "ClaudeSDKConfig",
+    "ClaudeCLIAgent",
+    "ClaudeCLIConfig",
     "GeminiAgent",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
     "create_agent",
+    "dump_agent",
+    "load_agent",
 ]
 
 
