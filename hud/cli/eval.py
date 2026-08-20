@@ -695,7 +695,7 @@ def _build_agent(cfg: EvalConfig) -> Any:
 
     config = cfg.agent_type.config_cls(**agent_kwargs)
     # cls/config_cls are matched unions; the pairing is correct by construction.
-    return cast("Any", cfg.agent_type.cls)(config=config)
+    return cfg.agent_type.instantiate(config)
 
 
 def _python_defines_environment(path: Path) -> bool:

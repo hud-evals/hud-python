@@ -117,7 +117,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
     kwargs.setdefault("model", model_id)
     config = agent_type.config_cls(**kwargs)
-    return cast("GatewayAgent", agent_type.cls(cast("Any", config)))
+    return cast("GatewayAgent", agent_type.instantiate(config))
 
 
 _LAZY_EXPORTS = {

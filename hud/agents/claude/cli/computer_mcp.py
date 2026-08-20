@@ -129,23 +129,16 @@ def create_computer_mcp(
     return mcp
 
 
-def _required_env(environ: Mapping[str, str], name: str) -> str:
-    try:
-        return environ[name]
-    except KeyError as exc:
-        raise RuntimeError(f"missing required environment variable {name}") from exc
-
-
 async def run_computer_mcp(environ: Mapping[str, str] = os.environ) -> None:
     """Run computer-use over stdio in a controller-side child process."""
-    raw_manifest = json.loads(_required_env(environ, RFB_CAPABILITY_ENV))
+    raw_manifest = json.loads(environ[RFB_CAPABILITY_ENV])
     if not isinstance(raw_manifest, dict):
         raise ValueError(f"{RFB_CAPABILITY_ENV} must contain a JSON object")
     capability = Capability.from_manifest(raw_manifest)
     if capability.protocol.split("/", 1)[0] != "rfb":
         raise ValueError(f"{RFB_CAPABILITY_ENV} must describe an RFB capability")
     screenshot_encoding = TypeAdapter(ScreenshotEncoding).validate_json(
-        _required_env(environ, SCREENSHOT_ENCODING_ENV)
+        environ[SCREENSHOT_ENCODING_ENV]
     )
 
     rfb = await RFBClient.connect(capability)

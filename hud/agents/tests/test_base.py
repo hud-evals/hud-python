@@ -29,9 +29,6 @@ class _FillingAgent(Agent):
         run.trace.content = "done"
 
 
-# ─── the ABC contract ─────────────────────────────────────────────────
-
-
 def test_agent_requires_call_implementation() -> None:
     with pytest.raises(TypeError):
         Agent()
@@ -43,9 +40,6 @@ async def test_agent_call_fills_trace() -> None:
     run = SimpleNamespace(trace=SimpleNamespace(content=""))
     await _FillingAgent()(run)
     assert run.trace.content == "done"
-
-
-# ─── AgentType resolution ─────────────────────────────────────────────
 
 
 def test_agent_type_maps_value_to_class_and_provider() -> None:
@@ -102,9 +96,6 @@ def test_missing_provider_dependency_points_at_agents_extra(
 
     with pytest.raises(ImportError, match=r"hud\[agents\]"):
         _ = AgentType.CLAUDE.cls
-
-
-# ─── create_agent routing ─────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)

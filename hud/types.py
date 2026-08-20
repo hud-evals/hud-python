@@ -44,24 +44,8 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent
-    from hud.agents.gemini import GeminiAgent
-    from hud.agents.openai import OpenAIAgent
-    from hud.agents.openai_compatible import OpenAIChatAgent
-    from hud.agents.types import (
-        ClaudeCLIConfig,
-        ClaudeConfig,
-        GeminiConfig,
-        OpenAIChatConfig,
-        OpenAIConfig,
-    )
-
-    AgentClass: TypeAlias = type[
-        ClaudeAgent | ClaudeCLIAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
-    ]
-    AgentConfigClass: TypeAlias = type[
-        ClaudeConfig | ClaudeCLIConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
-    ]
+    from hud.agents.base import Agent
+    from hud.agents.types import AgentConfig
 
 T = TypeVar("T")
 
@@ -78,7 +62,7 @@ class AgentType(StrEnum):
         return self is AgentType.CLAUDE_CLI
 
     @property
-    def cls(self) -> AgentClass:
+    def cls(self) -> type[Agent]:
         match self:
             case AgentType.CLAUDE:
                 from hud.agents import ClaudeAgent
@@ -102,7 +86,7 @@ class AgentType(StrEnum):
                 return OpenAIChatAgent
 
     @property
-    def config_cls(self) -> AgentConfigClass:
+    def config_cls(self) -> type[AgentConfig]:
         """Get config class without importing agent (avoids SDK dependency)."""
         from hud.agents.types import (
             ClaudeCLIConfig,
@@ -123,6 +107,9 @@ class AgentType(StrEnum):
                 return GeminiConfig
             case AgentType.OPENAI_COMPATIBLE:
                 return OpenAIChatConfig
+
+    def instantiate(self, config: AgentConfig) -> Agent:
+        return cast("Any", self.cls)(config)
 
     @property
     def gateway_provider(self) -> str:
