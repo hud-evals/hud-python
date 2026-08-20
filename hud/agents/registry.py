@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hud.agents.types import AgentConfig
 from hud.types import AgentType
@@ -47,4 +47,4 @@ def load_agent(data: Mapping[str, Any]) -> Agent:
     if not isinstance(raw_config, Mapping):
         raise ValueError("agent config must be an object")
     config = agent_type.config_cls.model_validate(dict(raw_config))
-    return cast("Agent", agent_type.cls(cast("Any", config)))
+    return agent_type.instantiate(config)
