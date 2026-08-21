@@ -204,7 +204,6 @@ def codex_command(config: CodexCLIConfig, shell: str) -> str:
         "exec",
         "--json",
         "--ephemeral",
-        "--ignore-user-config",
         "--skip-git-repo-check",
         "--color",
         "never",
@@ -244,9 +243,15 @@ def codex_command(config: CodexCLIConfig, shell: str) -> str:
     if shell in WINDOWS_SHELLS:
         script = ";".join(
             [
+                "$codexHome=Join-Path ([System.IO.Path]::GetTempPath()) "
+                "('hud-codex-' + [System.Guid]::NewGuid())",
+                "New-Item -ItemType Directory -Force -Path $codexHome | Out-Null",
+                "$env:CODEX_HOME=$codexHome",
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                f"& codex {' '.join(powershell_quote(arg) for arg in args[1:])}",
-                "exit $LASTEXITCODE",
+                f"try {{ & codex {' '.join(powershell_quote(arg) for arg in args[1:])}; "
+                "$hudExitCode=$LASTEXITCODE } finally { Remove-Item -Recurse -Force "
+                "$codexHome }",
+                "exit $hudExitCode",
             ]
         )
         return powershell(script)
@@ -254,7 +259,15 @@ def codex_command(config: CodexCLIConfig, shell: str) -> str:
     command = " ".join(shlex.quote(arg) for arg in args)
     env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
     invocation = f"{env_prefix} {command}" if env_prefix else command
-    return f'export PATH="$HOME/.local/bin:$PATH"; {invocation}'
+    return "; ".join(
+        [
+            'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
+            "trap 'rm -rf -- \"$codex_home\"' EXIT",
+            'export CODEX_HOME="$codex_home"',
+            'export PATH="$HOME/.local/bin:$PATH"',
+            invocation,
+        ]
+    )
 
 
 async def run_codex(
