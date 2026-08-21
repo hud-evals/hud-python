@@ -4,6 +4,8 @@
 # param crashes the sync/deploy manifest path (TypeAdapter on a string forward-ref). Keep
 # annotations as real objects.
 import asyncio
+from collections.abc import Awaitable
+from typing import Any
 
 from hud import Environment
 from hud.capabilities import Capability
@@ -46,7 +48,7 @@ def make_prompt(description: str) -> str:
 @env.template()
 async def cua_task(
     prompt: str,
-    bash_checks: list[dict] | None = None,
+    bash_checks: list[dict[str, Any]] | None = None,
     grading_criteria: list[str] | None = None,
 ):
     """General CUA task: present the prompt, then grade with any combination of deterministic
@@ -61,6 +63,8 @@ async def cua_task(
     """
     global _task_started
 
+    if any(c.get("weight", 1.0) < 0 for c in (bash_checks or [])):
+        raise ValueError("bash check weights must be nonnegative")
     bash_total = sum(c.get("weight", 1.0) for c in (bash_checks or []))
     if bash_checks and bash_total <= 0:
         raise ValueError("bash check weights must sum to a positive value")
@@ -73,7 +77,7 @@ async def cua_task(
     answer = yield make_prompt(prompt)
     bash_share = 0.5 if grading_criteria else 1.0
 
-    graders: list = []
+    graders: list[SubScore | Awaitable[SubScore]] = []
 
     for check in bash_checks or []:
         graders.append(

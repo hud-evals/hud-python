@@ -39,6 +39,11 @@ class TestGrading:
         await gen.asend(None)
         assert (await gen.asend("a")).reward == 0.0
 
+    async def test_negative_bash_weight_fails_before_prompt(self):
+        gen = GEN(prompt="p", bash_checks=[{"name": "no", "command": "false", "weight": -1.0}])
+        with pytest.raises(ValueError, match="nonnegative"):
+            await gen.asend(None)
+
     async def test_no_key_judge_fails_before_prompt(self, monkeypatch):
         monkeypatch.setattr(M.settings, "api_key", "", raising=False)
         gen = GEN(prompt="p", grading_criteria=["anything"])
