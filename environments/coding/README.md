@@ -65,9 +65,9 @@ selected test. Missing selected tests count as failures.
 
 The image installs bubblewrap and runs agent shells as UID 1000. `/hud` contains the environment
 code and trusted baseline and is readable only by the environment process. The workspace fails
-closed if it cannot create its filesystem, process, and network isolation. Direct Docker runs grant
-`SYS_ADMIN` and use HUD's packaged seccomp profile and system-path settings so bubblewrap can create
-those namespaces without disabling seccomp.
+closed if it cannot create its filesystem, process, and network isolation. Direct Docker runs use
+HUD's packaged seccomp profile and system-path settings on a host that allows unprivileged user
+namespaces.
 
 ## Tests
 

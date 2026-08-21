@@ -42,7 +42,6 @@ and attach to its control channel:
 docker build -f Dockerfile.hud -t my-coding-env .
 HUD_SECCOMP=/path/to/site-packages/hud/eval/docker-seccomp.json
 docker run -d --name my-coding-env -p 8765:8765 \
-  --cap-add SYS_ADMIN \
   --security-opt "seccomp=$HUD_SECCOMP" \
   --security-opt systempaths=unconfined \
   --security-opt apparmor=unconfined \
@@ -52,8 +51,8 @@ docker rm -f my-coding-env
 ```
 
 HUD's seccomp profile and system-path settings allow bubblewrap to create the Workspace namespaces
-inside Docker without disabling seccomp. The environment refuses to start if the runtime blocks
-them.
+inside Docker without disabling seccomp. The host must allow unprivileged user namespaces; the
+environment refuses to start if the runtime blocks them.
 
 ## How the grading boundary works
 
