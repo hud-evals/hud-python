@@ -164,6 +164,31 @@ def test_materialize_preset_copies_local_source(
     assert not (target / "__pycache__").exists()
 
 
+def test_materialize_preset_rejects_destination_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repository"
+    source = repository / "environments" / "coding"
+    source.mkdir(parents=True)
+    (source / "env.py").write_text("new")
+
+    target = tmp_path / "project"
+    target.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("original")
+    (target / "env.py").symlink_to(outside)
+    monkeypatch.setattr(
+        presets_module,
+        "__file__",
+        str(repository / "hud" / "cli" / "presets.py"),
+    )
+
+    with pytest.raises(ValueError, match="symlinks"):
+        materialize_preset("coding", target)
+
+    assert outside.read_text() == "original"
+
+
 def test_materialize_preset_extracts_matching_sdk_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

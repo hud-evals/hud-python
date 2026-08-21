@@ -46,6 +46,8 @@ def materialize_preset(
     repository = Path(__file__).resolve().parents[2]
     local_source = repository / "environments" / preset_id
     if local_source.is_dir():
+        if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
+            raise ValueError(f"cannot copy an example environment over symlinks in {target}")
         shutil.copytree(
             local_source,
             target,
