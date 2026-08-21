@@ -18,9 +18,10 @@ async def test_coding_task_uses_description_as_prompt(monkeypatch):
     monkeypatch.setattr(coding_env, "_setup", AsyncMock())
     task = coding_env.coding_task.func(
         description="\nFix the bug.\n",
-        test_script="pytest --junitxml={junit_path}",
+        test_command="pytest -q --junitxml={junit_path}",
         test_patch="diff --git a/test_bug.py b/test_bug.py\n",
-        test_files=["test_bug.py"],
+        test_path="tests",
+        base_ref="main",
     )
 
     assert await anext(task) == "Fix the bug."

@@ -1,11 +1,10 @@
 """Task-row tests for the bundled coding tasks."""
 
-import shlex
 import subprocess
 from pathlib import Path
 
 import tasks
-from coding.grading import parse_junit, score_tests
+from grader import parse_junit, score_tests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_REFS = {
@@ -22,11 +21,11 @@ def test_rows_parameterize_the_same_coding_task_template():
         assert task.id == "coding-task"
         assert task.args["base_ref"]
         assert task.args["test_patch"]
-        assert task.args["test_files"]
-        assert "{junit_path}" in task.args["test_script"]
-        assert task.args["f2p_test_nodeids"]
-        assert task.args["p2p_test_nodeids"]
-        assert task.args["use_binary_score"] is True
+        assert task.args["test_path"] == "tests"
+        assert "{junit_path}" in task.args["test_command"]
+        assert task.args["fail_to_pass"]
+        assert task.args["pass_to_pass"]
+        assert task.args["binary"] is True
         assert "test_ref" not in task.args
         assert "golden_ref" not in task.args
 
@@ -52,18 +51,17 @@ def test_bundled_task_baselines_fail_and_reference_fixes_pass(tmp_path: Path):
             )
 
             junit_path = tmp_path / f"{repo.name}.xml"
-            command = (
-                task.args["test_script"]
-                .replace("{test_files}", shlex.join(task.args["test_files"]))
-                .replace("{junit_path}", shlex.quote(str(junit_path)))
+            command = task.args["test_command"].replace("{junit_path}", str(junit_path))
+            completed = subprocess.run(
+                ["bash", "-lc", command],
+                cwd=repo,
+                check=False,
             )
-            completed = subprocess.run(["bash", "-lc", command], cwd=repo, check=False)
             assert completed.returncode == expected_exit_code
-
             result = score_tests(
                 parse_junit(junit_path),
-                task.args["f2p_test_nodeids"],
-                task.args["p2p_test_nodeids"],
-                task.args["use_binary_score"],
+                task.args["fail_to_pass"],
+                task.args["pass_to_pass"],
+                task.args["binary"],
             )
-            assert result.reward == expected_reward
+            assert result.value == expected_reward

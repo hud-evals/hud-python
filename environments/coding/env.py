@@ -4,32 +4,28 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from hud.environment import Environment, Workspace
-from hud.graders import EvaluationResult
+from hud.graders import EvaluationResult, combine
 from hud.settings import settings
 
-from coding import repo as repo_lib
-from coding.grading import parse_junit, score_tests
+from grader import JUnitGrader
 
 logger = logging.getLogger(__name__)
 
-_explicit_repo = os.environ.get("REPO_DIR")
-if _explicit_repo:
-    REPO_DIR = Path(_explicit_repo)
-    VAULT_DIR = Path(os.environ.get("VAULT_DIR", "/hud/vault"))
-    LOGS_DIR = Path(os.environ.get("GRADING_LOGS_DIR", "/hud/logs"))
+if repo_dir := os.environ.get("REPO_DIR"):
+    REPO_DIR = Path(repo_dir)
+    BASELINE_DIR = Path(os.environ.get("BASELINE_DIR", "/hud/baseline"))
     _LOCAL = False
 else:
     _LOCAL_ROOT = Path(tempfile.gettempdir()) / "hud-coding" / str(os.getpid())
     REPO_DIR = _LOCAL_ROOT / "workspace"
-    VAULT_DIR = _LOCAL_ROOT / "vault"
-    LOGS_DIR = _LOCAL_ROOT / "logs"
+    BASELINE_DIR = _LOCAL_ROOT / "baseline"
     _LOCAL = True
 
 REPO_SOURCE = os.environ.get("REPO_URL") or str(Path(__file__).with_name("flask.bundle"))
@@ -39,186 +35,173 @@ AGENT_HOME = Path("/tmp/agent-home")  # noqa: S108 - container-local
 AGENT_ENV = {"HOME": str(AGENT_HOME)}
 VENV_ACTIVATE = Path(sys.executable).with_name("activate")
 if VENV_ACTIVATE.is_file():
-    AGENT_ENV["BASH_ENV"] = str(VENV_ACTIVATE)
+    os.environ["BASH_ENV"] = AGENT_ENV["BASH_ENV"] = str(VENV_ACTIVATE)
 
 env = Environment(name="coding")
-_workspace: Workspace | None = None
+workspace: Workspace | None = None
+_GIT = (
+    "git",
+    "-c",
+    f"safe.directory={REPO_DIR}",
+    "-c",
+    "user.name=hud",
+    "-c",
+    "user.email=hud@localhost",
+)
 
 
 @env.initialize
 async def _initialize() -> None:
-    global _workspace
-    if _LOCAL and not (REPO_DIR / ".git").exists():
-        REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
-        logger.info("cloning %s", REPO_SOURCE)
-        await repo_lib.run("git", "clone", "-q", REPO_SOURCE, str(REPO_DIR), cwd=REPO_DIR.parent)
-
-    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
-    _workspace = Workspace(
+    global workspace
+    REPO_DIR.mkdir(parents=True, exist_ok=True)
+    workspace = Workspace(
         REPO_DIR,
         guest_path=str(REPO_DIR),
         network=False,
         env=AGENT_ENV,
         track_files=settings.file_tracking_enabled,
         shell_uid=AGENT_UID,
-        require_isolation=not is_root,
+        require_isolation=True,
     )
-    await _workspace.start()
-    env.add_capability(_workspace.capability("shell"))
-    if _workspace.tracks_files:
-        env.add_capability(_workspace.file_tracking_capability())
+    await workspace.start()
+    env.add_capability(workspace.capability("shell"))
+    if workspace.tracks_files:
+        env.add_capability(workspace.file_tracking_capability())
 
 
 @env.shutdown
 async def _shutdown() -> None:
-    global _workspace
-    if _workspace is not None:
-        await _workspace.stop()
-        _workspace = None
+    global workspace
+    if workspace is not None:
+        await workspace.stop()
+        workspace = None
     if _LOCAL:
         shutil.rmtree(_LOCAL_ROOT, ignore_errors=True)
 
 
-async def _setup(base_ref: str | None) -> None:
-    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
-    if is_root:
-        await repo_lib.run(
-            "git",
-            "config",
-            "--global",
-            "--add",
-            "safe.directory",
-            str(REPO_DIR),
-            cwd=Path("/"),
-        )
-    if base_ref:
-        await repo_lib.git(REPO_DIR, "checkout", "-qf", base_ref)
-    await repo_lib.vault_history(REPO_DIR, VAULT_DIR)
-    if is_root:
+async def _setup(base_ref: str) -> None:
+    shutil.rmtree(BASELINE_DIR, ignore_errors=True)
+    logger.info("preparing %s from %s", base_ref, REPO_SOURCE)
+    subprocess.run(
+        ["git", "clone", "-q", REPO_SOURCE, str(BASELINE_DIR)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run([*_GIT, "checkout", "-qf", base_ref], cwd=BASELINE_DIR, check=True)
+    subprocess.run([*_GIT, "clean", "-fdx"], cwd=BASELINE_DIR, check=True)
+
+    for path in REPO_DIR.iterdir():
+        if path.name == ".hud":
+            continue
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        else:
+            shutil.rmtree(path)
+    shutil.copytree(
+        BASELINE_DIR,
+        REPO_DIR,
+        dirs_exist_ok=True,
+        symlinks=True,
+        ignore=shutil.ignore_patterns(".git"),
+    )
+    subprocess.run([*_GIT, "init", "-q", "."], cwd=REPO_DIR, check=True)
+    (REPO_DIR / ".git" / "info" / "exclude").write_text(".hud/\n", encoding="utf-8")
+    subprocess.run([*_GIT, "add", "-A"], cwd=REPO_DIR, check=True)
+    subprocess.run([*_GIT, "commit", "-qm", "baseline"], cwd=REPO_DIR, check=True)
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
         AGENT_HOME.mkdir(parents=True, exist_ok=True)
-        await repo_lib.run(
-            "chown",
-            "-R",
-            f"{AGENT_UID}:{AGENT_UID}",
-            str(REPO_DIR),
-            str(AGENT_HOME),
-            cwd=Path("/"),
+        agent_paths = [path for path in REPO_DIR.iterdir() if path.name != ".hud"]
+        subprocess.run(
+            ["chown", "-R", f"{AGENT_UID}:{AGENT_UID}", *agent_paths, AGENT_HOME],
+            check=True,
         )
-
-
-async def _run_tests(
-    test_script: str,
-    test_files: list[str],
-    f2p_test_nodeids: list[str] | None,
-    p2p_test_nodeids: list[str] | None,
-    use_binary_score: bool,
-) -> EvaluationResult:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    junit_path = LOGS_DIR / "junit.xml"
-    junit_path.unlink(missing_ok=True)
-    command = test_script.replace("{test_files}", shlex.join(test_files)).replace(
-        "{junit_path}", shlex.quote(str(junit_path))
-    )
-    exit_code, stdout_bytes, stderr_bytes = await repo_lib.run(
-        "bash",
-        "-c",
-        command,
-        cwd=REPO_DIR,
-        timeout=TEST_TIMEOUT,
-        check=False,
-    )
-    stdout = stdout_bytes.decode("utf-8", "replace")
-    stderr = stderr_bytes.decode("utf-8", "replace")
-    (LOGS_DIR / "stdout.log").write_text(stdout, encoding="utf-8")
-    (LOGS_DIR / "stderr.log").write_text(stderr, encoding="utf-8")
-    info = {"exit_code": exit_code, "stdout": stdout, "stderr": stderr}
-    if not junit_path.is_file():
-        return EvaluationResult(
-            reward=0.0,
-            content=f"test script did not write JUnit XML to {junit_path}",
-            info=info,
-            isError=True,
-        )
-
-    try:
-        result = score_tests(
-            parse_junit(junit_path),
-            f2p_test_nodeids,
-            p2p_test_nodeids,
-            use_binary_score,
-        )
-    except (ValueError, OSError) as exc:
-        return EvaluationResult(
-            reward=0.0,
-            content=f"invalid test results: {exc}",
-            info=info,
-            isError=True,
-        )
-    result.info.update(info)
-    return result
 
 
 async def _grade(
-    test_script: str,
+    test_command: str,
     test_patch: str,
-    test_files: list[str],
-    f2p_test_nodeids: list[str] | None,
-    p2p_test_nodeids: list[str] | None,
-    use_binary_score: bool,
+    test_path: str,
+    fail_to_pass: list[str] | None,
+    pass_to_pass: list[str] | None,
+    binary: bool,
 ) -> EvaluationResult:
-    setup_commit = await repo_lib.restore_history(REPO_DIR, VAULT_DIR)
-    agent_diff = await repo_lib.capture_agent_diff(REPO_DIR, setup_commit)
+    assert workspace is not None
+    await workspace.terminate_sessions()
+    try:
+        agent_git = REPO_DIR / ".git"
+        if agent_git.is_symlink() or agent_git.is_file():
+            agent_git.unlink()
+        elif agent_git.is_dir():
+            shutil.rmtree(agent_git)
 
-    await repo_lib.reset_worktree(REPO_DIR, setup_commit)
-    apply_error = await repo_lib.apply_diff(REPO_DIR, agent_diff, LOGS_DIR / "agent.patch")
-    if apply_error is not None:
-        return EvaluationResult(
-            reward=0.0,
-            content="changes failed to apply",
-            info={"git_apply": apply_error},
-        )
-    await repo_lib.restore_paths(REPO_DIR, setup_commit, test_files)
-    test_apply_error = await repo_lib.apply_diff(REPO_DIR, test_patch, LOGS_DIR / "tests.patch")
-    if test_apply_error is not None:
-        return EvaluationResult(
-            reward=0.0,
-            content="hidden tests failed to apply",
-            info={"git_apply": test_apply_error},
-            isError=True,
-        )
+        source = BASELINE_DIR / test_path
+        target = REPO_DIR / test_path
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
+        if source.is_symlink():
+            target.symlink_to(os.readlink(source))
+        elif source.is_file():
+            shutil.copy2(source, target)
+        elif source.is_dir():
+            shutil.copytree(source, target, symlinks=True)
 
-    return await _run_tests(
-        test_script,
-        test_files,
-        f2p_test_nodeids,
-        p2p_test_nodeids,
-        use_binary_score,
-    )
+        subprocess.run([*_GIT, "init", "-q", "."], cwd=REPO_DIR, check=True)
+        applied = subprocess.run(
+            [*_GIT, "apply", "-"],
+            cwd=REPO_DIR,
+            input=test_patch,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if applied.returncode != 0:
+            return EvaluationResult(
+                content="hidden tests failed to apply",
+                info={"git_apply": applied.stderr[-4000:]},
+                isError=True,
+            )
+
+        return await combine(
+            JUnitGrader.grade(
+                weight=1.0,
+                name="tests",
+                command=test_command,
+                cwd=str(REPO_DIR),
+                timeout_seconds=TEST_TIMEOUT,
+                fail_to_pass=fail_to_pass,
+                pass_to_pass=pass_to_pass,
+                binary=binary,
+            )
+        )
+    finally:
+        await workspace.discard_sandbox()
 
 
 @env.template(id="coding-task", description="Modify a repository and grade it with hidden tests.")
 async def coding_task(
     description: str,
-    test_script: str,
+    test_command: str,
     test_patch: str,
-    test_files: list[str],
-    base_ref: str | None = None,
-    f2p_test_nodeids: list[str] | None = None,
-    p2p_test_nodeids: list[str] | None = None,
-    use_binary_score: bool = False,
+    test_path: str,
+    base_ref: str,
+    fail_to_pass: list[str] | None = None,
+    pass_to_pass: list[str] | None = None,
+    binary: bool = False,
 ):
-    if "{junit_path}" not in test_script:
-        raise ValueError("test_script must write JUnit XML using the {junit_path} placeholder")
-    if not test_files:
-        raise ValueError("test_files must list every path changed by test_patch")
+    path = Path(test_path)
+    if path.is_absolute() or len(path.parts) != 1 or path.name in {"", ".", ".."}:
+        raise ValueError("test_path must be a top-level file or directory")
 
     await _setup(base_ref)
-    _ = yield description.strip()
+    yield description.strip()
     yield await _grade(
-        test_script,
+        test_command,
         test_patch,
-        test_files,
-        f2p_test_nodeids,
-        p2p_test_nodeids,
-        use_binary_score,
+        test_path,
+        fail_to_pass,
+        pass_to_pass,
+        binary,
     )

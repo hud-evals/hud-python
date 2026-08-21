@@ -31,7 +31,7 @@ But adding a file mode parameter to `flask.Config.from_file()` would enable the 
 app.config.from_file("config.toml", tomllib.load, mode="b")
 ```
 """,
-    test_script=(
+    test_command=(
         "PYTHONPATH=src python -m pytest -q -W ignore::DeprecationWarning tests/test_config.py --junitxml={junit_path}"
     ),
     test_patch="""diff --git a/tests/static/config.toml b/tests/static/config.toml
@@ -78,10 +78,10 @@ diff --git a/tests/test_config.py b/tests/test_config.py
      monkeypatch.setenv("FLASK_STRING", "value")
      monkeypatch.setenv("FLASK_BOOL", "true")
 """,
-    test_files=["tests/static/config.toml", "tests/test_config.py"],
+    test_path="tests",
     base_ref="origin/flask_4992_baseline",
-    f2p_test_nodeids=["tests.test_config.test_config_from_file_toml"],
-    p2p_test_nodeids=[
+    fail_to_pass=["tests.test_config.test_config_from_file_toml"],
+    pass_to_pass=[
         "tests.test_config.test_config_from_pyfile",
         "tests.test_config.test_config_from_object",
         "tests.test_config.test_config_from_file_json",
@@ -101,7 +101,7 @@ diff --git a/tests/test_config.py b/tests/test_config.py
         "tests.test_config.test_from_pyfile_weird_encoding[iso-8859-15]",
         "tests.test_config.test_from_pyfile_weird_encoding[latin-1]",
     ],
-    use_binary_score=True,
+    binary=True,
 )
 _flask_config_from_file.slug = "flask-4992"
 
@@ -148,7 +148,7 @@ test.local           static                                                GET  
 ...
 ```
 """,
-    test_script=(
+    test_command=(
         "PYTHONPATH=src python -m pytest -q -W ignore::DeprecationWarning tests/test_cli.py --junitxml={junit_path}"
     ),
     test_patch="""diff --git a/tests/test_cli.py b/tests/test_cli.py
@@ -230,13 +230,13 @@ test.local           static                                                GET  
  def dotenv_not_available():
      try:
 """,
-    test_files=["tests/test_cli.py"],
+    test_path="tests",
     base_ref="origin/flask_5063_baseline",
-    f2p_test_nodeids=[
+    fail_to_pass=[
         "tests.test_cli.TestRoutes.test_subdomain",
         "tests.test_cli.TestRoutes.test_host",
     ],
-    p2p_test_nodeids=[
+    pass_to_pass=[
         "tests.test_cli.test_cli_name",
         "tests.test_cli.test_find_best_app",
         "tests.test_cli.test_prepare_import[test-path0-test]",
@@ -292,7 +292,7 @@ test.local           static                                                GET  
         "tests.test_cli.test_cli_blueprints",
         "tests.test_cli.test_cli_empty",
     ],
-    use_binary_score=True,
+    binary=True,
 )
 _flask_routes_domains.slug = "flask-5063"
 

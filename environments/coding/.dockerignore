@@ -3,6 +3,6 @@
 !pyproject.toml
 !uv.lock
 !env.py
-!coding
+!grader.py
 !flask.bundle
 **/__pycache__

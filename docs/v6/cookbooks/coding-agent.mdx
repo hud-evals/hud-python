@@ -5,9 +5,8 @@ icon: "code"
 ---
 
 HUD's coding example is a complete repository environment: the agent works in a sandboxed `ssh`
-workspace while the environment keeps the original Git history and grading logs outside that
-workspace, then applies the authored tests after the agent finishes. `hud init --template coding`
-copies the project as a starting point.
+workspace while the environment keeps a clean baseline outside it, then applies the authored tests
+after the agent finishes. `hud init --template coding` copies the project as a starting point.
 
 ## Create the environment
 
@@ -21,10 +20,9 @@ The generated project contains:
 
 | Path | Purpose |
 |------|---------|
-| `env.py` | Repository setup, workspace lifecycle, and the `coding-task` template. |
+| `env.py` | Repository setup, workspace, and the `coding-task` template. |
 | `tasks.py` | Concrete task rows, test patches, commands, and expected results. |
-| `coding/repo.py` | Trusted Git setup, history isolation, diff capture, and restoration. |
-| `coding/grading.py` | JUnit parsing and fail-to-pass/pass-to-pass scoring. |
+| `grader.py` | Example-local `BashGrader` extension for selected JUnit tests. |
 | `flask.bundle` | Prepared repository baselines and reference fixes for the example tasks. |
 | `Dockerfile.hud` | Reproducible dependencies and the packaged repository workspace. |
 
@@ -34,7 +32,7 @@ coding agent that opens the environment's shell capability:
 
 ```bash
 hud set HUD_API_KEY=your-key-here
-hud eval tasks.py claude --task-ids flask-4992 flask-5063 --runtime local -y
+hud eval tasks.py claude --task-ids flask-4992,flask-5063 --runtime local -y
 ```
 
 Local non-root runs require usable Linux `bwrap` isolation. Otherwise, build the packaged environment
@@ -42,22 +40,23 @@ and attach to its control channel:
 
 ```bash
 docker build -f Dockerfile.hud -t my-coding-env .
-docker run -d --name my-coding-env -p 8765:8765 my-coding-env
-hud eval tasks.py claude --task-ids flask-4992 flask-5063 --runtime tcp://127.0.0.1:8765 --max-concurrent 1 -y
+docker run -d --name my-coding-env --cap-add SYS_ADMIN --security-opt seccomp=unconfined -p 8765:8765 my-coding-env
+hud eval tasks.py claude --task-ids flask-4992,flask-5063 --runtime tcp://127.0.0.1:8765 --max-concurrent 1 -y
 docker rm -f my-coding-env
 ```
 
+The added capability and seccomp setting allow bubblewrap to create the Workspace namespaces inside
+Docker. The environment refuses to start if the runtime blocks them.
+
 ## How the grading boundary works
 
-1. Task setup checks out the baseline and moves the original Git history into the environment-owned
-   vault.
-2. The agent receives a single-commit repository through the `ssh` workspace. The original history
-   and reference-fix refs are not reachable from that workspace.
-3. Grading discards agent-controlled Git metadata, restores the trusted history, and captures only the
-   worktree diff against the setup snapshot.
-4. The environment reapplies that diff, restores the paths changed by `test_patch` to the baseline,
-   applies the patch, and runs the authored `test_script`.
-5. The JUnit report is scored against the configured fail-to-pass and pass-to-pass test IDs.
+1. Task setup clones `base_ref` into an environment-owned baseline outside the workspace.
+2. The clean worktree is copied into the `ssh` workspace and initialized as a one-commit repository,
+   so the source history and reference-fix refs are never exposed to the agent.
+3. Grading terminates the agent's isolated session namespace and discards its Git metadata.
+4. The environment restores `test_path` to the baseline and applies the hidden patch.
+5. The custom `JUnitGrader` runs `test_command` through `BashGrader` and scores the selected
+   fail-to-pass and pass-to-pass test IDs.
 
 This keeps the deliverable as repository state rather than a text answer, while preventing the agent
 from weakening the grader or reading the reference fix.
@@ -71,7 +70,7 @@ from env import coding_task
 
 _fix_parser = coding_task(
     description="Fix the parser without breaking existing inputs.",
-    test_script="python -m pytest -q {test_files} --junitxml={junit_path}",
+    test_command="python -m pytest -q test_parser.py --junitxml={junit_path}",
     test_patch="""diff --git a/test_parser.py b/test_parser.py
 --- a/test_parser.py
 +++ b/test_parser.py
@@ -83,18 +82,17 @@ _fix_parser = coding_task(
 +    assert parse("new")
 """,
     base_ref="origin/parser_baseline",
-    test_files=["test_parser.py"],
-    f2p_test_nodeids=["test_parser.TestParser.test_new_input"],
-    p2p_test_nodeids=["test_parser.TestParser.test_existing_input"],
+    test_path="test_parser.py",
+    fail_to_pass=["test_parser.TestParser.test_new_input"],
+    pass_to_pass=["test_parser.TestParser.test_existing_input"],
 )
 _fix_parser.slug = "fix-parser"
 
 tasks = [_fix_parser]
 ```
 
-`test_script` must write JUnit XML to `{junit_path}`. JUnit IDs use `classname.name`, not pytest's
-slash-and-`::` collection syntax. Set `use_binary_score=True` when every selected test must pass;
-otherwise the reward is the fraction of selected tests that pass.
+`test_command` runs from the repository root and must write JUnit XML to `{junit_path}`. The default
+reward is the fraction of selected tests that pass; set `binary=True` to require every selected test.
 
 ## Adapt it to another repository
 

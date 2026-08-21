@@ -13,31 +13,25 @@ test patches, test commands, and expected results.
 ```bash
 uv sync
 hud set HUD_API_KEY=your-key-here
-hud eval tasks.py claude --task-ids flask-4992 flask-5063 -y --runtime local
+hud eval tasks.py claude --task-ids flask-4992,flask-5063 -y --runtime local
 ```
 
 ## How grading works
 
-1. Setup checks out `base_ref`, snapshots the prepared repository, and moves its original
-   `.git` directory outside the workspace.
-2. The agent receives a fresh repository containing one baseline commit. The original history and
-   reference fixes are not reachable from the workspace.
-3. Grading discards the agent-controlled Git metadata, restores the original history, and captures
-   the final worktree against the setup snapshot.
-4. The submitted diff is reapplied, then `test_files` are restored to the baseline and
-   `test_patch` is applied.
-5. `test_script` writes JUnit XML to `{junit_path}`. Only the configured fail-to-pass and
-   pass-to-pass test IDs contribute to the score.
-
-The default score is the fraction of selected tests that pass. Set `use_binary_score=True` to
-require every selected test. Missing selected tests count as failures.
+1. Setup clones `base_ref` into an environment-owned baseline outside the workspace.
+2. The clean worktree is copied into the workspace and initialized as a one-commit repository, so
+   the source history and reference fixes are never exposed to the agent.
+3. Grading terminates the agent's isolated session namespace and discards its Git metadata.
+4. `test_path` is restored to the baseline, then `test_patch` is applied.
+5. The custom `JUnitGrader` runs `test_command` through `BashGrader` and scores the selected
+   fail-to-pass and pass-to-pass test IDs.
 
 ```python
 from env import coding_task
 
 fix_parser = coding_task(
     description="Fix the parser without breaking existing inputs.",
-    test_script="python -m pytest -q {test_files} --junitxml={junit_path}",
+    test_command="python -m pytest -q test_parser.py --junitxml={junit_path}",
     test_patch="""diff --git a/test_parser.py b/test_parser.py
 --- a/test_parser.py
 +++ b/test_parser.py
@@ -49,15 +43,15 @@ fix_parser = coding_task(
 +    assert parse("new")
 """,
     base_ref="origin/parser_baseline",
-    test_files=["test_parser.py"],
-    f2p_test_nodeids=["test_parser.TestParser.test_new_input"],
-    p2p_test_nodeids=["test_parser.TestParser.test_existing_input"],
+    test_path="test_parser.py",
+    fail_to_pass=["test_parser.TestParser.test_new_input"],
+    pass_to_pass=["test_parser.TestParser.test_existing_input"],
 )
 fix_parser.slug = "fix-parser"
 ```
 
-JUnit IDs are `classname.name`, matching the values written in the report. For pytest, inspect a
-generated report instead of copying pytest's slash-and-`::` collection syntax.
+The default reward is the fraction of selected tests that pass. Set `binary=True` to require every
+selected test. Missing selected tests count as failures.
 
 ## Adapt the environment
 
@@ -66,14 +60,13 @@ generated report instead of copying pytest's slash-and-`::` collection syntax.
 - Replace the bundle and task rows when adapting the environment to another repository or version.
 - Install the repository's dependencies in `Dockerfile.hud` so grading does not depend on runtime
   downloads.
-- Define task rows in `tasks.py`. Keep hidden tests and reference fixes outside the baseline
-  history exposed to the agent.
+- Define task rows in `tasks.py`. Keep hidden tests and reference fixes outside the baseline exposed
+  to the agent.
 
-The image runs agent shells as UID 1000. `/hud` contains the environment code, repository vault,
-and grading logs and is readable only by the environment process. The workspace requests network
-isolation when bubblewrap is available. The provided image does not install bubblewrap, so container
-runtimes must enforce any required egress policy. Non-root local runs require usable bubblewrap and
-fail closed without it.
+The image installs bubblewrap and runs agent shells as UID 1000. `/hud` contains the environment
+code and trusted baseline and is readable only by the environment process. The workspace fails
+closed if it cannot create its filesystem, process, and network isolation. Docker requires
+`--cap-add SYS_ADMIN --security-opt seccomp=unconfined` to allow those namespaces.
 
 ## Tests
 
@@ -81,5 +74,5 @@ fail closed without it.
 uv run pytest tests/ -q
 ```
 
-The suite covers repository isolation, trusted diff capture, prepared dependencies, hidden-test
-application, both bundled reference fixes, and partial and binary JUnit scoring.
+The suite covers repository and session isolation, task reset, hidden-test application, selected
+JUnit scoring, and both bundled reference fixes.

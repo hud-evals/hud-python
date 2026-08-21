@@ -2,17 +2,15 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git util-linux \
+  && apt-get install -y --no-install-recommends bubblewrap git util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /hud
-COPY pyproject.toml uv.lock env.py flask.bundle ./
-COPY coding coding
+COPY pyproject.toml uv.lock env.py grader.py flask.bundle ./
 
 RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
-  && git -c init.defaultBranch=main clone -q flask.bundle /app \
-  && uv pip install --python /usr/local/venv/bin/python --no-deps -e /app \
-  && chown -R 1000:1000 /app \
+  && mkdir /app \
+  && chown 1000:1000 /app \
   && chmod -R a+rX /usr/local/venv \
   && chmod -R go-rwx /hud
 

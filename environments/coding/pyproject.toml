@@ -1,7 +1,7 @@
 [project]
 name = "coding-env"
 version = "0.1.0"
-description = "Coding environment with isolated repository grading and hidden JUnit tests"
+description = "Coding environment with an isolated repository and hidden JUnit tests"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "blinker==1.5",
