@@ -46,8 +46,12 @@ jobs:
       - name: Install example with the SDK from this checkout
         working-directory: ${{ runner.temp }}/${{ matrix.template }}
         run: |
+          uv build --wheel --no-create-gitignore --out-dir .hud-sdk "$GITHUB_WORKSPACE"
+          uv add --no-sync .hud-sdk/hud-*.whl
           uv sync --all-extras
-          uv pip install -e "$GITHUB_WORKSPACE"
+          sed -i '/^RUN .*uv sync/i COPY .hud-sdk .hud-sdk' Dockerfile.hud
+          echo '!.hud-sdk/' >> .dockerignore
+          echo '!.hud-sdk/**' >> .dockerignore
 
       - name: Run example checks
         working-directory: ${{ runner.temp }}/${{ matrix.template }}
@@ -80,6 +84,13 @@ jobs:
           done
           docker logs hud-example
           exit 1
+
+      - name: Run blank task lifecycle
+        if: matrix.template == 'blank'
+        working-directory: ${{ runner.temp }}/${{ matrix.template }}
+        run: |
+          uv run --no-sync hud task start 0 --source tasks.py --url tcp://127.0.0.1:8765
+          test "$(uv run --no-sync hud task grade 0 --source tasks.py --url tcp://127.0.0.1:8765 --answer 4)" = "1.0"
 
       - name: Stop example image
         if: always()
