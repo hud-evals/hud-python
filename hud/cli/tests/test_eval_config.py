@@ -375,6 +375,25 @@ def test_build_agent_preserves_claude_cli_gateway_config() -> None:
     assert agent.config.use_hud_gateway is True
 
 
+def test_build_agent_constructs_codex_cli() -> None:
+    from hud.agents.codex import CodexCLIAgent
+
+    cfg = EvalConfig(agent_type="codex_cli")
+    agent = eval_mod._build_agent(cfg)
+
+    assert isinstance(agent, CodexCLIAgent)
+    assert agent.config.model == "gpt-5.6-sol"
+    assert agent.config.use_hud_gateway is False
+
+
+def test_build_agent_routes_hosted_codex_cli_through_gateway() -> None:
+    cfg = EvalConfig(agent_type="codex_cli", remote=True)
+
+    agent = eval_mod._build_agent(cfg)
+
+    assert agent.config.use_hud_gateway is True
+
+
 def test_spawn_target_serves_single_file_env(tmp_path: Path) -> None:
     env_py = tmp_path / "tasks.py"
     env_py.write_text(

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from typing import TypeAlias
 
     from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent, ClaudeCLIConfig
+    from hud.agents.codex import CodexCLIAgent, CodexCLIConfig
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
@@ -124,6 +125,8 @@ _LAZY_EXPORTS = {
     "ClaudeAgent": ("hud.agents.claude", "ClaudeAgent"),
     "ClaudeCLIAgent": ("hud.agents.claude", "ClaudeCLIAgent"),
     "ClaudeCLIConfig": ("hud.agents.claude", "ClaudeCLIConfig"),
+    "CodexCLIAgent": ("hud.agents.codex", "CodexCLIAgent"),
+    "CodexCLIConfig": ("hud.agents.codex", "CodexCLIConfig"),
     "GeminiAgent": ("hud.agents.gemini", "GeminiAgent"),
     "MCPAgent": ("hud.agents.tool_agent", "ToolAgent"),
     "OpenAIAgent": ("hud.agents.openai", "OpenAIAgent"),
@@ -134,6 +137,8 @@ __all__ = [
     "ClaudeAgent",
     "ClaudeCLIAgent",
     "ClaudeCLIConfig",
+    "CodexCLIAgent",
+    "CodexCLIConfig",
     "GeminiAgent",
     "MCPAgent",
     "OpenAIAgent",
