@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    chromium chromium-sandbox curl dbus-x11 jq supervisor x11vnc xfce4 xfce4-terminal xvfb \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 1000 --user-group ubuntu \
+  && install -d -o ubuntu -g ubuntu /home/ubuntu/Desktop /home/ubuntu/Downloads \
+  && install -d -m 1777 /tmp/.X11-unix /tmp/.ICE-unix
+
+WORKDIR /hud
+COPY pyproject.toml uv.lock env.py supervisord.conf ./
+
+RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
+  && chmod -R a+rX /usr/local/venv \
+  && chmod -R go-rwx /hud
+
+ENV PATH="/usr/local/venv/bin:${PATH}" NO_AT_BRIDGE=1
+EXPOSE 8765
+CMD ["supervisord", "-c", "/hud/supervisord.conf"]

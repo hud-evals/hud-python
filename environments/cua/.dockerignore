@@ -1,0 +1,6 @@
+*
+!Dockerfile.hud
+!pyproject.toml
+!uv.lock
+!env.py
+!supervisord.conf
