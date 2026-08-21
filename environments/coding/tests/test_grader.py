@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from grader import JUnitCase, parse_junit, score_tests
+from grader import JUnitCase, JUnitGrader, parse_junit, score_tests
 
 
 def test_scoring_tracks_fail_to_pass_and_pass_to_pass(tmp_path: Path):
@@ -26,6 +26,7 @@ def test_scoring_tracks_fail_to_pass_and_pass_to_pass(tmp_path: Path):
     )
 
     assert result.value == 0.5
+    assert result.info is not None
     assert result.info["f2p_passed"] == 0
     assert result.info["p2p_passed"] == 1
 
@@ -87,3 +88,9 @@ def test_parse_junit_rejects_malformed_report(tmp_path: Path):
 
     with pytest.raises(ValueError, match="invalid JUnit XML"):
         parse_junit(report)
+
+
+@pytest.mark.asyncio
+async def test_junit_grader_rejects_missing_report(tmp_path: Path):
+    with pytest.raises(RuntimeError, match="did not write JUnit XML"):
+        await JUnitGrader.compute_score(command="true {junit_path}", cwd=str(tmp_path))

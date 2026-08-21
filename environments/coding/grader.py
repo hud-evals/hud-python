@@ -149,19 +149,6 @@ class JUnitGrader(BashGrader):
                 **kwargs,
             )
             if not report.is_file():
-                return bash.model_copy(
-                    update={
-                        "value": 0.0,
-                        "info": {**(bash.info or {}), "error": "test command did not write JUnit XML"},
-                    }
-                )
-            try:
-                result = score_tests(parse_junit(report), fail_to_pass, pass_to_pass, binary)
-            except (OSError, ValueError) as exc:
-                return bash.model_copy(
-                    update={
-                        "value": 0.0,
-                        "info": {**(bash.info or {}), "error": str(exc)},
-                    }
-                )
+                raise RuntimeError("test command did not write JUnit XML")
+            result = score_tests(parse_junit(report), fail_to_pass, pass_to_pass, binary)
             return result.model_copy(update={"info": {**(result.info or {}), **(bash.info or {})}})
