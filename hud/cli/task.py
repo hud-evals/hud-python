@@ -114,8 +114,9 @@ def _resolve(
     if sum(value is not None for value in (source, url, env)) > 1:
         hud_console.error("choose only one placement: --source, --url, or --env")
         raise typer.Exit(1)
+    task_id = _task_id(task)
     if env is not None:
-        selected = Task(env=_environment_name(env), id=_task_id(task), args=args)
+        selected = Task(env=_environment_name(env), id=task_id, args=args)
         return selected.id, selected.args, HUDRuntime()(selected)
 
     attach = url
@@ -123,9 +124,9 @@ def _resolve(
         attach = find_local_env_url()
     if attach is not None:
         endpoint = _resolution_or_exit(lambda: normalize_control_url(attach))
-        return _task_id(task), args, nullcontext(Runtime(endpoint))
+        return task_id, args, nullcontext(Runtime(endpoint))
 
-    selected = _resolution_or_exit(lambda: select_local_task(task, source or ".", args))
+    selected = _resolution_or_exit(lambda: select_local_task(task_id, source or ".", args))
     placement = SubprocessRuntime(spawn_target(source or "."))(selected)
     return selected.id, selected.args, placement
 

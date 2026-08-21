@@ -109,7 +109,7 @@ def test_start_resolves_a_task_only_source_through_its_sibling_env(tmp_path: Pat
 
     result = CliRunner().invoke(
         app,
-        ["task", "start", "solve", "--source", str(tasks)],
+        ["task", "start", "task/solve", "--source", str(tasks)],
     )
 
     assert result.exit_code == 0, result.output
