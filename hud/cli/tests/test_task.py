@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
+import hud.cli.task as task_module
 import hud.clients as hud_clients
 import hud.eval as hud_eval
 from hud.cli import app
@@ -94,6 +95,7 @@ def test_grade_rejects_an_out_of_range_reward(tmp_path: Path) -> None:
 
     assert result.exit_code == 1, result.output
     assert "within [0, 1]" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_dry_run_reports_grader_errors_separately(tmp_path: Path) -> None:
@@ -163,6 +165,30 @@ def test_list_rejects_invalid_control_channel_url(url: str, message: str) -> Non
     assert "Traceback" not in result.output
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["task", "list", "--env", "checks"],
+        ["task", "start", "solve", "--env", "checks"],
+        ["task", "grade", "solve", "--env", "checks"],
+    ],
+)
+def test_deployed_task_commands_require_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+) -> None:
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "api_key", None)
+
+    result = CliRunner().invoke(app, command)
+
+    assert result.exit_code == 1
+    assert "No HUD API key found" in result.output
+    assert "Run: hud login" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_dry_run_times_out_task_start(monkeypatch: pytest.MonkeyPatch) -> None:
     class Placement:
         async def __aenter__(self) -> object:
@@ -198,6 +224,7 @@ def test_dry_run_times_out_task_start(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(hud_eval, "HUDRuntime", Runtime)
     monkeypatch.setattr(hud_clients, "connect", connect)
+    monkeypatch.setattr(task_module, "require_api_key", lambda _: "api-key")
 
     result = CliRunner().invoke(
         app,
@@ -234,6 +261,7 @@ def test_dry_run_times_out_environment_startup(monkeypatch: pytest.MonkeyPatch) 
             return SlowPlacement()
 
     monkeypatch.setattr(hud_eval, "HUDRuntime", SlowRuntime)
+    monkeypatch.setattr(task_module, "require_api_key", lambda _: "api-key")
 
     result = CliRunner().invoke(
         app,

@@ -22,6 +22,7 @@ from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
@@ -178,20 +179,22 @@ def _warn_on_linked_environment_mismatch(
 def _resolve_registry_environment_detail(
     platform: PlatformClient,
     ref: str,
-) -> tuple[RegistryEnvironment | None, str | None]:
+) -> RegistryEnvironment:
+    lookup_ref = ref.removeprefix("environment/").removeprefix("env/")
+    normalized_ref = normalize_environment_name(lookup_ref)
     matches = [
         env
-        for env in resolve_registry_environments(platform, ref)
-        if env.name == ref or env.id == ref
+        for env in resolve_registry_environments(platform, normalized_ref)
+        if env.id == lookup_ref or normalize_environment_name(env.name) == normalized_ref
     ]
     if not matches:
-        return None, f"environment {ref!r} is not deployed"
+        raise ValueError(f"environment {ref!r} is not deployed")
     if len(matches) > 1:
-        return None, f"environment name {ref!r} is ambiguous"
+        raise ValueError(f"environment name {ref!r} is ambiguous")
     registry_env = get_registry_environment(platform, matches[0].id)
     if registry_env is None:
-        return None, f"environment {ref!r} is not deployed"
-    return registry_env, None
+        raise ValueError(f"environment {ref!r} is not deployed")
+    return registry_env
 
 
 def _validate_task_manifests(
@@ -203,14 +206,13 @@ def _validate_task_manifests(
     errors: list[str] = []
     for env_name in sorted(taskset.environment_names()):
         try:
-            registry_env, error = _resolve_registry_environment_detail(platform, env_name)
-        except (HudException, ValueError) as exc:
+            registry_env = _resolve_registry_environment_detail(platform, env_name)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        except HudException as exc:
             errors.append(f"could not validate environment {env_name!r}: {exc}")
             continue
-        if error is not None:
-            errors.append(error)
-            continue
-        assert registry_env is not None
         manifest = registry_env.manifest
         raw_tasks = manifest.get("tasks") if manifest is not None else None
         if not isinstance(raw_tasks, list):

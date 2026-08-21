@@ -1,13 +1,4 @@
-"""``hud task`` — start a task (get its prompt) or grade an answer.
-
-Placement-explicit: the source flow spawns the env source on a local substrate
-(the same ``spawn`` provider ``hud eval`` uses) and speaks the protocol to it;
-``--url`` attaches to an already-served control channel instead.
-
-    hud task list                          # what tasks this source exposes
-    hud task start fix_config              # -> the task's prompt (stdout)
-    hud task grade fix_config --answer "…" # -> the reward (stdout); --out for JSON
-"""
+"""List, start, and grade tasks from local or live environments."""
 
 from __future__ import annotations
 
@@ -30,6 +21,7 @@ from hud.cli.task_runtime import (
     select_local_task,
     spawn_target,
 )
+from hud.cli.utils.api import require_api_key
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -73,12 +65,11 @@ def _parse_args(args: str) -> dict[str, Any]:
 
 
 def _collect(source: str) -> Taskset:
-    """Collect a Taskset from a source (``.py``/dir or JSON/JSONL), like ``hud eval``."""
     return _resolution_or_exit(lambda: collect_taskset(source))
 
 
 def _environment_name(value: str) -> str:
-    return value.removeprefix("env/").removeprefix("environment/")
+    return value.removeprefix("environment/").removeprefix("env/")
 
 
 def _task_id(value: str) -> str:
@@ -92,20 +83,7 @@ def _resolve(
     env: str | None,
     args: dict[str, Any],
 ) -> tuple[str, dict[str, Any], AbstractAsyncContextManager[Runtime]]:
-    """Resolve ``(task_id, args, placement)``, choosing a substrate in priority order:
-
-    1. ``--env`` — boot that deployed environment through the HUD runtime;
-    2. ``--url`` — attach to that control channel;
-    3. no ``--source`` and a local env already serving on :8765 — attach to it
-       (e.g. inside a built image, or alongside ``hud serve``);
-    4. otherwise — introspect local source for the task id/slug, and spawn that
-       source as the substrate.
-
-    The placement decision is made *here*, so this returns the acquisition
-    itself (one substrate, ready to enter), not a provider. ``--args`` (when
-    given) overrides the authored args so any explicit parameterization is
-    runnable.
-    """
+    """Resolve task inputs and the runtime placement that will execute them."""
     from contextlib import nullcontext
 
     from hud.eval import HUDRuntime, Task
@@ -116,6 +94,7 @@ def _resolve(
         raise typer.Exit(1)
     task_id = _task_id(task)
     if env is not None:
+        require_api_key("run tasks on deployed environments")
         selected = Task(env=_environment_name(env), id=task_id, args=args)
         return selected.id, selected.args, HUDRuntime()(selected)
 
@@ -132,7 +111,7 @@ def _resolve(
 
 
 def _emit(result: dict[str, Any], headline: str, out: Path | None) -> None:
-    """Thin output: the full protocol frame to ``--out``, else the headline value to stdout."""
+    """Write the full result to a file or print its requested field."""
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
@@ -141,13 +120,16 @@ def _emit(result: dict[str, Any], headline: str, out: Path | None) -> None:
     typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
 
 
-async def _require_task(client: HudClient, task_id: str) -> None:
-    tasks = await client.list_tasks()
-    available = [
+def _task_ids(tasks: list[dict[str, Any]]) -> set[str]:
+    return {
         task["id"] for task in tasks if isinstance(task, dict) and isinstance(task.get("id"), str)
-    ]
+    }
+
+
+async def _require_task(client: HudClient, task_id: str) -> None:
+    available = _task_ids(await client.list_tasks())
     if task_id not in available:
-        joined = ", ".join(available) or "<none>"
+        joined = ", ".join(sorted(available)) or "<none>"
         raise TaskResolutionError(f"task {task_id!r} is not exposed by the environment ({joined})")
 
 
@@ -181,6 +163,16 @@ def _validate_grade_result(result: dict[str, Any]) -> tuple[float, int]:
     if not 0 <= score <= 1:
         raise ValueError(f"grade score must be finite and within [0, 1], got {score}")
     return score, _count_subscores(grade.raw.get("subscores"))
+
+
+def _validate_grade_or_exit(result: dict[str, Any]) -> None:
+    try:
+        _validate_grade_result(result)
+        return
+    except ValueError as exc:
+        message = str(exc)
+    hud_console.error(message)
+    raise typer.Exit(1)
 
 
 def _render_check(phases: list[CheckPhase]) -> None:
@@ -245,12 +237,7 @@ async def _dry_run_grade(
         manifest = client.manifest
         env_name = manifest.server_info.name if manifest is not None else "environment"
         phases.append(CheckPhase("env", "pass", f"{env_name} ready, {len(tasks)} task(s)"))
-        available = {
-            task["id"]
-            for task in tasks
-            if isinstance(task, dict) and isinstance(task.get("id"), str)
-        }
-        if task_id not in available:
+        if task_id not in _task_ids(tasks):
             phases.extend(
                 [
                     CheckPhase("task", "fail", f"task {task_id!r} is not exposed"),
@@ -350,6 +337,8 @@ def list_command(
     if env is not None or url is not None:
         from hud.eval import HUDRuntime, Runtime, Task
 
+        if env is not None:
+            require_api_key("list tasks from deployed environments")
         env_name = _environment_name(env) if env else "attached"
         task = Task(env=env_name, id="__hud_task_list__")
         provider = (
@@ -483,11 +472,7 @@ def grade_command(
                         await asyncio.wait_for(client.cancel(), 2.0)
 
     result = _resolution_or_exit(lambda: asyncio.run(_run()))
-    try:
-        _validate_grade_result(result)
-    except ValueError as exc:
-        hud_console.error(str(exc))
-        raise typer.Exit(1) from None
+    _validate_grade_or_exit(result)
     _emit(result, "score", out)
 
 

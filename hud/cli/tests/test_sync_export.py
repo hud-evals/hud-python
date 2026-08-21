@@ -97,6 +97,30 @@ def test_task_sync_validates_deployed_manifest_before_upload(
     )
 
 
+def test_task_sync_normalizes_environment_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    taskset = Taskset("checks", [Task(env="Code Name", id="solve")])
+    deployed = RegistryEnvironment(
+        id="env-1",
+        name="code-name",
+        manifest={"tasks": [{"id": "solve"}]},
+    )
+
+    def resolve_registry(_platform: object, ref: str) -> list[RegistryEnvironment]:
+        assert ref == "code-name"
+        return [RegistryEnvironment(id=deployed.id, name=deployed.name)]
+
+    monkeypatch.setattr(sync_module, "resolve_registry_environments", resolve_registry)
+    monkeypatch.setattr(sync_module, "get_registry_environment", lambda *_: deployed)
+
+    sync_module._validate_task_manifests(
+        taskset,
+        PlatformClient("https://api.example", "key"),
+        HUDConsole(),
+    )
+
+
 def test_task_sync_accepts_a_registry_environment_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
