@@ -156,6 +156,8 @@ class JUnitGrader(BashGrader):
                         "info": {**(bash.info or {}), "error": "test command did not write JUnit XML"},
                     }
                 )
+            if binary and bash.value != 1.0:
+                return bash
             try:
                 result = score_tests(parse_junit(report), fail_to_pass, pass_to_pass, binary)
             except (OSError, ValueError) as exc:

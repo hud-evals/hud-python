@@ -98,3 +98,20 @@ async def test_junit_grader_reports_missing_output(tmp_path: Path):
     assert result.info is not None
     assert result.info["error"] == "test command did not write JUnit XML"
     assert result.info["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_binary_junit_grader_rejects_passing_report_from_failed_command(tmp_path: Path):
+    result = await JUnitGrader.compute_score(
+        command=(
+            'printf \'<testsuite><testcase classname="tests.test_widget" '
+            'name="test_fixed" /></testsuite>\' > {junit_path}; false'
+        ),
+        cwd=str(tmp_path),
+        binary=True,
+    )
+
+    assert result.value == 0.0
+    assert result.info is not None
+    assert result.info["exit_code"] == 1
+    assert "all_testcases" not in result.info
