@@ -10,6 +10,13 @@ _open_website = cua_task(
         "Once the page is loaded, find the tagline shown below the Wikipedia logo. "
         "Reply with your answer as plain text."
     ),
+    bash_checks=[
+        {
+            "name": "visited_wikipedia",
+            "command": "grep -aFq 'https://www.wikipedia.org/' /home/ubuntu/.config/chromium/Default/History*",
+            "weight": 1.0,
+        }
+    ],
     grading_criteria=[
         "The agent's answer mentions 'free encyclopedia' in any form - this is part of Wikipedia's tagline",
     ],

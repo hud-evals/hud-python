@@ -96,3 +96,9 @@ class TestGrading:
 def test_create_document_requires_exact_contents():
     command = tasks._create_document.args["bash_checks"][1]["command"]
     assert command == "cmp -s /home/ubuntu/Desktop/hello.txt <(printf 'Hello from HUD!\\n')"
+
+
+def test_open_website_requires_wikipedia_history():
+    check = tasks._open_website.args["bash_checks"][0]
+    assert check["name"] == "visited_wikipedia"
+    assert "www.wikipedia.org" in check["command"]

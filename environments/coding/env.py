@@ -170,7 +170,6 @@ async def _grade(
             cwd=str(REPO_DIR),
             env={
                 "HOME": "/tmp",
-                "PYTHONNOUSERSITE": "1",
                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
             },
         )
