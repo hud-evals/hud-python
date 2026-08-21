@@ -98,10 +98,13 @@ def test_create_document_requires_exact_contents():
     assert command == "cmp -s /home/ubuntu/Desktop/hello.txt <(printf 'Hello from HUD!\\n')"
 
 
-def test_open_website_requires_wikipedia_history():
+def test_open_website_requires_wikipedia_page():
     check = tasks._open_website.args["bash_checks"][0]
     assert check == {
         "name": "visited_wikipedia",
-        "command": "grep -aFq 'https://www.wikipedia.org/' /home/ubuntu/.config/chromium/Default/History*",
+        "command": (
+            "curl -fsS http://127.0.0.1:9222/json/list "
+            "| jq -e 'any(.[]; .url == \"https://www.wikipedia.org/\")' >/dev/null"
+        ),
         "weight": 1.0,
     }

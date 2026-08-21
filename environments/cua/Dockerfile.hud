@@ -3,7 +3,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    chromium chromium-sandbox dbus-x11 supervisor x11vnc xfce4 xfce4-terminal xvfb \
+    chromium chromium-sandbox curl dbus-x11 jq supervisor x11vnc xfce4 xfce4-terminal xvfb \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 1000 --user-group ubuntu \
