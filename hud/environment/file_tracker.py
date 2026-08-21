@@ -48,7 +48,6 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     # HUD CLI state written into env dirs (e.g. deploy's .hud/config.json).
     ".hud/",
     ".tmp/",
-    "go-build*",
     ".gradle/",
     ".tox/",
     ".pytest_cache/",
