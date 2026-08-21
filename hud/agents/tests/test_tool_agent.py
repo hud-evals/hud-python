@@ -397,6 +397,22 @@ async def test_dispatch_marks_exhausted_ssh_reconnect_as_infrastructure_error() 
     assert isinstance(result, SSHInfrastructureErrorResult)
 
 
+async def test_dispatch_reraises_tool_timeout_before_deadline() -> None:
+    ssh = SimpleNamespace(run=AsyncMock(side_effect=TimeoutError("remote timed out")))
+    tool = ClaudeBashTool(
+        spec=ClaudeBashTool.default_spec("claude"),
+        client=cast("Any", ssh),
+    )
+    agent = DictAgent([], tool_timeout_seconds=120)
+    state: RunState[_Msg] = RunState(tools={"bash": tool})
+
+    with pytest.raises(TimeoutError, match="remote timed out"):
+        await agent._dispatch_call(
+            MCPToolCall(name="bash", arguments={"command": "sleep forever"}),
+            state,
+        )
+
+
 async def test_claude_bash_timeout_terminates_process_and_continues_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

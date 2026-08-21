@@ -361,7 +361,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                         isError=True,
                     )
             return await tool.execute(args)
-        except asyncio.CancelledError:
+        except (TimeoutError, asyncio.CancelledError):
             raise
         except SSHConnectionError as exc:
             logger.exception("tool %s lost its SSH connection", call.name)
