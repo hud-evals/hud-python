@@ -53,13 +53,14 @@ T = TypeVar("T")
 class AgentType(StrEnum):
     CLAUDE = "claude"
     CLAUDE_CLI = "claude_cli"
+    CODEX_CLI = "codex_cli"
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
 
     @property
     def is_cli(self) -> bool:
-        return self is AgentType.CLAUDE_CLI
+        return self in (AgentType.CLAUDE_CLI, AgentType.CODEX_CLI)
 
     @property
     def cls(self) -> type[Agent]:
@@ -72,6 +73,10 @@ class AgentType(StrEnum):
                 from hud.agents import ClaudeCLIAgent
 
                 return ClaudeCLIAgent
+            case AgentType.CODEX_CLI:
+                from hud.agents import CodexCLIAgent
+
+                return CodexCLIAgent
             case AgentType.OPENAI:
                 from hud.agents import OpenAIAgent
 
@@ -91,6 +96,7 @@ class AgentType(StrEnum):
         from hud.agents.types import (
             ClaudeCLIConfig,
             ClaudeConfig,
+            CodexCLIConfig,
             GeminiConfig,
             OpenAIChatConfig,
             OpenAIConfig,
@@ -101,6 +107,8 @@ class AgentType(StrEnum):
                 return ClaudeConfig
             case AgentType.CLAUDE_CLI:
                 return ClaudeCLIConfig
+            case AgentType.CODEX_CLI:
+                return CodexCLIConfig
             case AgentType.OPENAI:
                 return OpenAIConfig
             case AgentType.GEMINI:
@@ -119,6 +127,8 @@ class AgentType(StrEnum):
                 return "anthropic"
             case AgentType.CLAUDE_CLI:
                 return "anthropic"
+            case AgentType.CODEX_CLI:
+                return "openai"
             case AgentType.OPENAI:
                 return "openai"
             case AgentType.GEMINI:

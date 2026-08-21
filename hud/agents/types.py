@@ -177,6 +177,20 @@ class ClaudeCLIConfig(AgentConfig):
 
 
 # -----------------------------------------------------------------------------
+# Codex CLI (over SSH)
+# -----------------------------------------------------------------------------
+
+
+class CodexCLIConfig(AgentConfig):
+    """Configuration for CodexCLIAgent (runs ``codex exec`` over SSH)."""
+
+    model_name: str = "Codex CLI"
+    model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)
+    use_hud_gateway: bool | None = None
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+
+
+# -----------------------------------------------------------------------------
 # Browser Use
 # -----------------------------------------------------------------------------
 

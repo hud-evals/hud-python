@@ -13,6 +13,7 @@ import pytest
 
 from hud.agents import (
     ClaudeCLIAgent,
+    CodexCLIAgent,
     OpenAIAgent,
     OpenAIChatAgent,
     create_agent,
@@ -51,6 +52,8 @@ def test_agent_type_maps_value_to_class_and_provider() -> None:
 def test_agent_type_registers_cli_agent() -> None:
     assert AgentType("claude_cli").cls is ClaudeCLIAgent
     assert AgentType.of(ClaudeCLIAgent()) == AgentType.CLAUDE_CLI
+    assert AgentType("codex_cli").cls is CodexCLIAgent
+    assert AgentType.of(CodexCLIAgent()) == AgentType.CODEX_CLI
 
 
 def test_cli_agent_round_trips_through_registered_wire_format() -> None:
@@ -62,6 +65,18 @@ def test_cli_agent_round_trips_through_registered_wire_format() -> None:
     assert spec["type"] == "claude_cli"
     assert spec["config"]["model"] == "claude-sonnet-5"
     assert isinstance(loaded, ClaudeCLIAgent)
+    assert loaded.config == agent.config
+
+
+def test_codex_cli_agent_round_trips_through_registry() -> None:
+    agent = CodexCLIAgent()
+    spec = dump_agent(agent)
+
+    loaded = load_agent(spec)
+
+    assert spec["type"] == "codex_cli"
+    assert spec["config"]["model"] == "gpt-5.6-sol"
+    assert isinstance(loaded, CodexCLIAgent)
     assert loaded.config == agent.config
 
 

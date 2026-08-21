@@ -66,8 +66,14 @@ To run the `claude` CLI over SSH, select the `claude_cli` agent:
 hud eval env.py claude_cli --gateway
 ```
 
-The `claude` executable must already be installed in the host or environment image. Pinning it in
-the image keeps runs reproducible; `ClaudeCLIAgent` does not install or update it. The equivalent
+Codex uses the same environment through the `codex_cli` agent:
+
+```bash
+hud eval env.py codex_cli --gateway
+```
+
+The selected executable must already be installed in the host or environment image. Pinning it in
+the image keeps runs reproducible; CLI agents do not install or update it. The equivalent Claude
 Python API is:
 
 ```python run.py

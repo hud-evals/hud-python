@@ -257,10 +257,10 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         if response is None:
             raise ValueError("Claude response missing after retries")
 
-        return self._message_to_agent_step(response, citations_enabled=citations_enabled)
+        return self.message_to_agent_step(response, citations_enabled=citations_enabled)
 
     @classmethod
-    def _message_to_agent_step(
+    def message_to_agent_step(
         cls,
         response: BetaMessage,
         *,
