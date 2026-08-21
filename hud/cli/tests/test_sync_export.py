@@ -124,14 +124,19 @@ def test_task_sync_normalizes_environment_names(
 def test_task_sync_accepts_a_registry_environment_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registry_id = "11111111-1111-1111-1111-111111111111"
+    registry_id = "{A1111111-1111-1111-1111-111111111111}"
     taskset = Taskset("checks", [Task(env=registry_id, id="solve")])
     deployed = RegistryEnvironment(
         id=registry_id,
         name="demo",
         manifest={"tasks": [{"id": "solve"}]},
     )
-    monkeypatch.setattr(sync_module, "get_registry_environment", lambda *_: deployed)
+
+    def get_registry(_platform: object, ref: str) -> RegistryEnvironment:
+        assert ref == registry_id
+        return deployed
+
+    monkeypatch.setattr(sync_module, "get_registry_environment", get_registry)
 
     sync_module._validate_task_manifests(
         taskset,

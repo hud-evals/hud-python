@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import typer
 
@@ -182,9 +183,14 @@ def _resolve_registry_environment_detail(
 ) -> RegistryEnvironment:
     lookup_ref = ref.removeprefix("environment/").removeprefix("env/")
     normalized_ref = normalize_environment_name(lookup_ref)
+    try:
+        UUID(lookup_ref)
+        resolution_ref = lookup_ref
+    except ValueError:
+        resolution_ref = normalized_ref
     matches = [
         env
-        for env in resolve_registry_environments(platform, normalized_ref)
+        for env in resolve_registry_environments(platform, resolution_ref)
         if env.id == lookup_ref or normalize_environment_name(env.name) == normalized_ref
     ]
     if not matches:
