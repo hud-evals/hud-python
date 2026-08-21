@@ -265,28 +265,6 @@ async def test_run_preserves_timeout_when_the_connection_closes() -> None:
         await client.run("echo never", timeout=1)
 
 
-@pytest.mark.parametrize(
-    ("default_timeout_s", "operation_timeout_s"),
-    [(0.01, None), (300, 0.01)],
-)
-async def test_run_uses_effective_timeout(
-    default_timeout_s: float,
-    operation_timeout_s: float | None,
-) -> None:
-    process = _Process(block=True)
-    connection = _Connection(process=process)
-    client = SSHClient(
-        _capability(),
-        cast("asyncssh.SSHClientConnection", connection),
-        default_timeout_s=default_timeout_s,
-    )
-
-    with pytest.raises(TimeoutError):
-        await client.run("echo never", timeout=operation_timeout_s)
-
-    assert process.terminated is True
-
-
 @pytest.mark.parametrize("command_timeout", [None, 300])
 async def test_run_cancellation_terminates_the_remote_process(
     command_timeout: float | None,

@@ -79,6 +79,7 @@ class AgentConfig(BaseModel):
 class ClaudeConfig(AgentConfig):
     model_name: str = "Claude"
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
+    tool_timeout_seconds: float | None = Field(default=120, gt=0, allow_inf_nan=False)
     max_tokens: int = 16384
     use_computer_beta: bool = True
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)

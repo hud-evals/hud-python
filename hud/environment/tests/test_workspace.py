@@ -182,7 +182,7 @@ async def test_file_operations_use_the_exec_channel(tmp_path: Path) -> None:
     await ws.start()
     try:
         async with await _connect(ws) as conn:
-            client = SSHClient(ws.capability(), conn, default_timeout_s=1)
+            client = SSHClient(ws.capability(), conn)
             await client.write_text("hello world.txt", "héllo\n")
             assert await client.read_text("hello world.txt") == "héllo\n"
             await client.write_text("empty.txt", "")

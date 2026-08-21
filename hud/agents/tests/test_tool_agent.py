@@ -6,19 +6,22 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import fastmcp
 import mcp.types as mcp_types
 import pytest
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
+from hud.agents.claude.agent import ClaudeAgent
+from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
-from hud.agents.tools.base import AgentToolSpec
+from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
 from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
@@ -93,36 +96,14 @@ def test_claude_defaults_to_configurable_webp_screenshots() -> None:
         )
 
 
-async def test_agent_configures_ssh_client_tool_timeout() -> None:
-    capability = Capability.ssh(
-        name="shell",
-        url="ssh://workspace",
-        host_pubkey="key",
-    )
-    ssh = SSHClient(capability, cast("Any", object()))
+def test_only_claude_provider_has_a_default_tool_timeout() -> None:
+    config = ClaudeConfig(timeout_seconds=600)
 
-    class Client:
-        manifest = SimpleNamespace(bindings=[capability])
-
-        async def open(self, ref: str) -> CapabilityClient:
-            assert ref == "shell"
-            return ssh
-
-    class ShellAgent(DictAgent):
-        tool_catalog = (OpenAIShellTool,)
-
-    class LiveRun(_FakeRun):
-        def __init__(self) -> None:
-            super().__init__()
-            self.client = Client()
-            self.prompt_messages: list[Any] = []
-
-    await ShellAgent(
-        [AgentStep(content="done", done=True)],
-        tool_timeout_seconds=1800,
-    )(cast("Any", LiveRun()))
-
-    assert ssh.default_timeout_s == 1800
+    assert config.timeout_seconds == 600
+    assert config.tool_timeout_seconds == 120
+    assert ClaudeConfig(tool_timeout_seconds=None).tool_timeout_seconds is None
+    assert AgentConfig().tool_timeout_seconds is None
+    assert ClaudeSDKConfig().tool_timeout_seconds is None
 
 
 async def test_agent_passes_screenshot_encoding_to_rfb_tools() -> None:
@@ -414,6 +395,105 @@ async def test_dispatch_marks_exhausted_ssh_reconnect_as_infrastructure_error() 
 
     assert result.isError is True
     assert isinstance(result, SSHInfrastructureErrorResult)
+
+
+async def test_claude_bash_timeout_terminates_process_and_continues_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+
+    async def wait(*, check: bool, timeout: None) -> None:  # noqa: ASYNC109
+        del check, timeout
+        started.set()
+        await asyncio.Event().wait()
+
+    process = SimpleNamespace(
+        wait=AsyncMock(side_effect=wait),
+        terminate=Mock(),
+        close=Mock(side_effect=AssertionError("graceful termination should succeed")),
+        wait_closed=AsyncMock(),
+    )
+    connection = SimpleNamespace(
+        is_closed=Mock(return_value=False),
+        create_process=AsyncMock(return_value=process),
+    )
+    ssh = SSHClient(
+        Capability.ssh(url="ssh://workspace", host_pubkey="key"),
+        cast("Any", connection),
+    )
+    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude"), client=ssh)
+    agent = ClaudeAgent(
+        ClaudeConfig(
+            model="claude-test",
+            model_client=cast("Any", object()),
+            tool_timeout_seconds=0.01,
+        )
+    )
+    responses = AsyncMock(
+        side_effect=[
+            AgentStep(
+                content="",
+                done=False,
+                tool_calls=[
+                    MCPToolCall(id="tool-1", name="bash", arguments={"command": "sleep forever"})
+                ],
+            ),
+            AgentStep(content="recovered", done=True),
+        ]
+    )
+    monkeypatch.setattr(agent, "get_response", responses)
+    state = RunState(messages=[], tools={"bash": tool})
+    run = cast("Run", _FakeRun())
+
+    await agent._loop(run, state, max_steps=3)
+
+    assert started.is_set()
+    process.terminate.assert_called_once_with()
+    process.wait_closed.assert_awaited_once_with()
+    assert responses.await_count == 2
+    assert run.trace.status == "completed"
+    assert run.trace.content == "recovered"
+    tool_result = cast("list[Any]", state.messages[0]["content"])[0]
+    error_block = cast("list[Any]", tool_result["content"])[0]
+    assert error_block["text"] == (
+        "Error: bash timed out after 0.01s; retry with a shorter command"
+    )
+
+
+async def test_composite_editor_uses_one_tool_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deadline = Mock(wraps=asyncio.timeout)
+    monkeypatch.setattr(asyncio, "timeout", deadline)
+    ssh = SimpleNamespace(
+        read_text=AsyncMock(return_value="old"),
+        write_text=AsyncMock(),
+    )
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"),
+        client=cast("Any", ssh),
+    )
+    agent = DictAgent([], tool_timeout_seconds=120)
+    state: RunState[_Msg] = RunState(tools={tool.provider_name: tool})
+
+    result = await agent._dispatch_call(
+        MCPToolCall(
+            name=tool.provider_name,
+            arguments={
+                "command": "str_replace",
+                "path": "/file.txt",
+                "old_str": "old",
+                "new_str": "new",
+            },
+        ),
+        state,
+    )
+
+    assert result.isError is False
+    assert result_text(result) == "wrote 3 bytes to /file.txt"
+    deadline.assert_called_once_with(120)
+    ssh.read_text.assert_awaited_once_with("/file.txt")
+    ssh.write_text.assert_awaited_once_with("/file.txt", "new")
 
 
 async def test_loop_finishes_on_done_response() -> None:

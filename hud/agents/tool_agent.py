@@ -30,9 +30,9 @@ from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
-from hud.agents.tools.ssh import SSHInfrastructureErrorResult
+from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
-from hud.capabilities import MCPClient, RFBClient, SSHClient
+from hud.capabilities import MCPClient, RFBClient
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
@@ -138,10 +138,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     continue
                 if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
                     continue
-                client = await run.client.open(cap.name)
-                if isinstance(client, SSHClient):
-                    client.default_timeout_s = self.config.tool_timeout_seconds
-                connections[cap.name] = client
+                connections[cap.name] = await run.client.open(cap.name)
                 opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
@@ -342,8 +339,29 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             )
         args = call.arguments or {}
         try:
+            if isinstance(tool, SSHTool) and self.config.tool_timeout_seconds is not None:
+                timeout = self.config.tool_timeout_seconds
+                deadline = asyncio.timeout(timeout)
+                try:
+                    async with deadline:
+                        return await tool.execute(args)
+                except TimeoutError:
+                    if not deadline.expired():
+                        raise
+                    return MCPToolResult(
+                        content=[
+                            mcp_types.TextContent(
+                                type="text",
+                                text=(
+                                    f"{call.name} timed out after {timeout:g}s; "
+                                    "retry with a shorter command"
+                                ),
+                            )
+                        ],
+                        isError=True,
+                    )
             return await tool.execute(args)
-        except (TimeoutError, asyncio.CancelledError):
+        except asyncio.CancelledError:
             raise
         except SSHConnectionError as exc:
             logger.exception("tool %s lost its SSH connection", call.name)
