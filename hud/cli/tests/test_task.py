@@ -84,6 +84,18 @@ def test_dry_run_rejects_an_out_of_range_reward(tmp_path: Path) -> None:
     assert "result: FAIL" in result.output
 
 
+def test_grade_rejects_an_out_of_range_reward(tmp_path: Path) -> None:
+    tasks = _write_task_source(tmp_path, score=2.0)
+
+    result = CliRunner().invoke(
+        app,
+        ["task", "grade", "task/solve", "--source", str(tasks)],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "within [0, 1]" in result.output
+
+
 def test_dry_run_reports_grader_errors_separately(tmp_path: Path) -> None:
     tasks = _write_task_source(
         tmp_path,

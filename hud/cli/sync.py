@@ -240,15 +240,13 @@ def _validate_task_manifests(
     console.success("Task environment manifests validated")
 
 
-def _validate_source_fixtures(source: str, console: HUDConsole) -> None:
+def _validate_source(source: str, console: HUDConsole) -> None:
     errors = [
-        issue
-        for issue in EnvironmentSource.open(source).validate_fixture_quality()
-        if issue.severity == "error"
+        issue for issue in EnvironmentSource.open(source).validate() if issue.severity == "error"
     ]
     if not errors:
         return
-    console.error("Source fixture validation failed:")
+    console.error("Source validation failed:")
     for issue in errors:
         console.error(f"  {issue.message} ({issue.file})")
     raise typer.Exit(1)
@@ -392,7 +390,7 @@ def sync_tasks_command(
         exclude=exclude,
         console=hud_console,
     )
-    _validate_source_fixtures(source, hud_console)
+    _validate_source(source, hud_console)
     _validate_task_manifests(local_taskset, platform, hud_console)
     _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console)
 

@@ -44,7 +44,8 @@ hud serve env.py -p 9000
 
 ### `hud deploy`
 
-Build **and** publish to HUD infra in one step. The environment's name comes
+Build **and** publish to HUD infra in one step. This is the CLI's environment
+build path. The environment's name comes
 from the `Environment(...)` declaration in code; deploying the same name again
 rebuilds that environment.
 
@@ -136,7 +137,9 @@ hud sync tasks my-taskset      # publish tasks as a named taskset
 hud sync env                   # sync environment metadata
 ```
 
-Before uploading tasks, `hud sync tasks` rejects macOS archive metadata, broken links, and references to deployed environments or task ids that do not exist. `hud deploy` runs the same source-fixture checks before building.
+Before uploading tasks, `hud sync tasks` validates the local source and rejects
+references to deployed environments or task ids that do not exist. `hud deploy`
+runs the same source validation before starting a build.
 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).

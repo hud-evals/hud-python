@@ -60,6 +60,23 @@ def test_sync_env_closed_stdin_aborts_cleanly(
     assert "Aborted." in capsys.readouterr().err
 
 
+def test_task_sync_rejects_invalid_source(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "broken"\nlicense = {file = "LICENSE"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(typer.Exit):
+        sync_module._validate_source(str(tmp_path), HUDConsole())
+
+    output = capsys.readouterr().err
+    assert "Source validation failed" in output
+    assert "License file not found" in output
+
+
 def test_task_sync_validates_deployed_manifest_before_upload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

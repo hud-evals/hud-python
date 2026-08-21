@@ -483,6 +483,11 @@ def grade_command(
                         await asyncio.wait_for(client.cancel(), 2.0)
 
     result = _resolution_or_exit(lambda: asyncio.run(_run()))
+    try:
+        _validate_grade_result(result)
+    except ValueError as exc:
+        hud_console.error(str(exc))
+        raise typer.Exit(1) from None
     _emit(result, "score", out)
 
 
