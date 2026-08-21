@@ -32,7 +32,7 @@ from hud.agents.types import (
     ToolAgentConfig,
     ToolStep,
 )
-from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient
+from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
@@ -99,8 +99,8 @@ def test_only_claude_provider_has_a_default_tool_timeout() -> None:
     assert config.timeout_seconds == 600
     assert config.tool_timeout_seconds == 120
     assert ClaudeConfig(tool_timeout_seconds=None).tool_timeout_seconds is None
-    assert AgentConfig().tool_timeout_seconds is None
-    assert ClaudeSDKConfig().tool_timeout_seconds is None
+    assert ToolAgentConfig().tool_timeout_seconds is None
+    assert "tool_timeout_seconds" not in ClaudeCLIConfig.model_fields
 
 
 async def test_agent_passes_screenshot_encoding_to_rfb_tools() -> None:
@@ -432,6 +432,7 @@ async def test_claude_bash_timeout_terminates_process_and_continues_loop(
         ClaudeConfig(
             model="claude-test",
             model_client=cast("Any", object()),
+            max_steps=3,
             tool_timeout_seconds=0.01,
         )
     )
@@ -451,13 +452,14 @@ async def test_claude_bash_timeout_terminates_process_and_continues_loop(
     state = RunState(messages=[], tools={"bash": tool})
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, state, max_steps=3)
+    await agent._loop(run, state)
 
     assert started.is_set()
     process.terminate.assert_called_once_with()
     process.wait_closed.assert_awaited_once_with()
     assert responses.await_count == 2
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
+    assert run.trace.stop_reason == "done"
     assert run.trace.content == "recovered"
     tool_result = cast("list[Any]", state.messages[0]["content"])[0]
     error_block = cast("list[Any]", tool_result["content"])[0]
