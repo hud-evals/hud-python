@@ -89,8 +89,8 @@ _fix_parser = coding_task(
 """,
     base_ref="origin/parser_baseline",
     test_path="test_parser.py",
-    fail_to_pass=["test_parser.TestParser.test_new_input"],
-    pass_to_pass=["test_parser.TestParser.test_existing_input"],
+    fail_to_pass=["test_parser.test_new_input"],
+    pass_to_pass=["test_parser.test_existing_input"],
 )
 _fix_parser.slug = "fix-parser"
 

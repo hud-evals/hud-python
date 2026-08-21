@@ -48,11 +48,7 @@ _create_document = cua_task(
 _create_document.slug = "create-document-example"
 
 
-# Long multi-step task: research across two Wikipedia pages, then a cross-app terminal write.
-# Exercises address-bar typing, Enter, link clicks, scrolling, multi-hop navigation, and the
-# terminal. The authored bash weights sum to 1.0; env.py adds a 1.0 slot for the judge, so the
-# final grade is a clean 0.5 bash / 0.5 judge that totals exactly 1.0:
-#   file_exists 0.2 | file_has_birth_year 0.15 | file_has_mit 0.15 | llm_judge 0.5
+# Long multi-step task: research across two Wikipedia pages, then a terminal write.
 _shannon_research = cua_task(
     prompt=(
         "A Chromium browser and an XFCE desktop are available. Complete this "
@@ -72,16 +68,26 @@ _shannon_research = cua_task(
         "7. Reply with all three facts as plain text."
     ),
     bash_checks=[
-        {"name": "file_exists", "command": "test -f /home/ubuntu/Desktop/shannon.txt", "weight": 0.4},
         {
             "name": "file_has_birth_year",
-            "command": "grep -q '1916' /home/ubuntu/Desktop/shannon.txt",
-            "weight": 0.3,
+            "command": "grep -qE '^born:[[:space:]]*1916[[:space:]]*$' /home/ubuntu/Desktop/shannon.txt",
+            "weight": 1.0,
         },
         {
             "name": "file_has_mit",
-            "command": "grep -qiE 'MIT|Massachusetts Institute' /home/ubuntu/Desktop/shannon.txt",
-            "weight": 0.3,
+            "command": (
+                "grep -qiE '^phd:[[:space:]]*(MIT|Massachusetts Institute of Technology)"
+                "[[:space:]]*$' /home/ubuntu/Desktop/shannon.txt"
+            ),
+            "weight": 1.0,
+        },
+        {
+            "name": "file_has_city",
+            "command": (
+                "grep -qiE '^city:[[:space:]]*Cambridge,[[:space:]]*Massachusetts"
+                "[[:space:]]*$' /home/ubuntu/Desktop/shannon.txt"
+            ),
+            "weight": 1.0,
         },
     ],
     grading_criteria=[
