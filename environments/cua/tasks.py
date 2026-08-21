@@ -1,17 +1,8 @@
-"""Task definitions for the CUA environment.
-
-`hud eval tasks.py` and `hud sync tasks` collect the public `tasks` list. Add a task by
-calling `cua_task(...)`, setting a `.slug`, and adding it to the list. Verify a CUA env with a
-real `hud eval tasks.py claude --runtime hud` rollout - the rfb desktop cannot run on macOS.
-The multi-step research task wants more steps:
-
-    hud eval tasks.py claude --task-ids shannon-multistep-research -y --max-steps 100
-"""
+"""Example computer-use tasks."""
 
 from env import cua_task
 from env import env as env
 
-# Navigate to Wikipedia and read the tagline - LLM-judge grading
 _open_website = cua_task(
     prompt=(
         "A Chromium browser is open on the desktop. "
@@ -26,7 +17,6 @@ _open_website = cua_task(
 _open_website.slug = "open-website-example"
 
 
-# Write a text file to the Desktop - deterministic bash grading only
 _create_document = cua_task(
     prompt=(
         "A Chromium browser and an XFCE desktop are available.\n\n"
@@ -48,7 +38,6 @@ _create_document = cua_task(
 _create_document.slug = "create-document-example"
 
 
-# Long multi-step task: research across two Wikipedia pages, then a terminal write.
 _shannon_research = cua_task(
     prompt=(
         "A Chromium browser and an XFCE desktop are available. Complete this "

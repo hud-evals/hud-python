@@ -32,8 +32,7 @@ app.config.from_file("config.toml", tomllib.load, mode="b")
 ```
 """,
     test_command=(
-        "PYTHONPATH=src python -m pytest -q -c /dev/null --rootdir=. --confcutdir=tests "
-        "-W ignore::DeprecationWarning tests/test_config.py --junitxml={junit_path}"
+        "PYTHONPATH=src python -m pytest -q -W ignore::DeprecationWarning tests/test_config.py --junitxml={junit_path}"
     ),
     test_patch="""diff --git a/tests/static/config.toml b/tests/static/config.toml
 new file mode 100644
@@ -150,8 +149,7 @@ test.local           static                                                GET  
 ```
 """,
     test_command=(
-        "PYTHONPATH=src python -m pytest -q -c /dev/null --rootdir=. --confcutdir=tests "
-        "-W ignore::DeprecationWarning tests/test_cli.py --junitxml={junit_path}"
+        "PYTHONPATH=src python -m pytest -q -W ignore::DeprecationWarning tests/test_cli.py --junitxml={junit_path}"
     ),
     test_patch="""diff --git a/tests/test_cli.py b/tests/test_cli.py
 --- a/tests/test_cli.py

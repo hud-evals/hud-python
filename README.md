@@ -82,16 +82,6 @@ hud sync tasks my-taskset
 hud eval my-taskset --remote
 ```
 
-For local iteration, the same protocol works against a container on your laptop:
-
-```bash
-docker build -f Dockerfile.hud -t my-env .
-docker run -d --name run1 -p 8765:8765 my-env
-hud task start fix_bug --source tasks.py --url tcp://127.0.0.1:8765
-hud task grade fix_bug --source tasks.py --url tcp://127.0.0.1:8765 --answer "..."
-docker rm -f run1
-```
-
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
 ## Environments & templates

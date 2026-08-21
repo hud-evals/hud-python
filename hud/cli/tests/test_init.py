@@ -189,6 +189,21 @@ def test_materialize_preset_rejects_destination_symlink(
     assert outside.read_text() == "original"
 
 
+def test_materialize_preset_rejects_release_destination_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        presets_module,
+        "__file__",
+        str(tmp_path / "installed" / "hud" / "cli" / "presets.py"),
+    )
+    target = tmp_path / "project"
+    target.symlink_to(tmp_path / "outside", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        materialize_preset("coding", target)
+
+
 def test_materialize_preset_extracts_matching_sdk_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

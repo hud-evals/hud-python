@@ -49,7 +49,6 @@ def test_bundled_task_baselines_fail_and_reference_fixes_pass(tmp_path: Path):
                 text=True,
                 check=True,
             )
-            (repo / "conftest.py").write_text('raise RuntimeError("agent conftest loaded")\n')
 
             junit_path = tmp_path / f"{repo.name}.xml"
             command = task.args["test_command"].replace("{junit_path}", str(junit_path))

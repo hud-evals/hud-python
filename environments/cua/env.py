@@ -40,27 +40,13 @@ async def _up() -> None:
     env.add_capability(Capability.rfb(name="screen", url=f"rfb://{_HOST}", display=0))
 
 
-def make_prompt(description: str) -> str:
-    """Format a task description into an agent prompt."""
-    return f"Use computer use tools to complete the following task:\n\n{description}"
-
-
 @env.template()
 async def cua_task(
     prompt: str,
     bash_checks: list[dict[str, Any]] | None = None,
     grading_criteria: list[str] | None = None,
 ):
-    """General CUA task: present the prompt, then grade with any combination of deterministic
-    bash checks (run server-side in this container) and an LLM rubric judge.
-
-    `combine` normalizes the positive weights to sum to 1.0, so weights are relative.
-
-    Args:
-        prompt: The task instruction shown to the agent.
-        bash_checks: Optional list of {"name", "command", "weight"} for shell-based grading.
-        grading_criteria: Optional rubric strings for the LLM judge (needs HUD_API_KEY).
-    """
+    """Run a computer-use task with shell checks, an LLM judge, or both."""
     global _task_started
 
     if any(c.get("weight", 1.0) < 0 for c in (bash_checks or [])):
@@ -74,7 +60,7 @@ async def cua_task(
         raise RuntimeError("CUA supports one task per substrate; start a fresh runtime")
     _task_started = True
 
-    answer = yield make_prompt(prompt)
+    answer = yield f"Use computer use tools to complete the following task:\n\n{prompt}"
     bash_share = 0.5 if grading_criteria else 1.0
 
     graders: list[SubScore | Awaitable[SubScore]] = []
