@@ -128,56 +128,54 @@ async def _grade(
 ) -> EvaluationResult:
     assert workspace is not None
     await workspace.terminate_sessions()
-    try:
-        agent_git = REPO_DIR / ".git"
-        if agent_git.is_symlink() or agent_git.is_file():
-            agent_git.unlink()
-        elif agent_git.is_dir():
-            shutil.rmtree(agent_git)
+    agent_git = REPO_DIR / ".git"
+    if agent_git.is_symlink() or agent_git.is_file():
+        agent_git.unlink()
+    elif agent_git.is_dir():
+        shutil.rmtree(agent_git)
 
-        source = BASELINE_DIR / test_path
-        target = REPO_DIR / test_path
-        if target.is_symlink() or target.is_file():
-            target.unlink()
-        elif target.is_dir():
-            shutil.rmtree(target)
-        if source.is_symlink():
-            target.symlink_to(os.readlink(source))
-        elif source.is_file():
-            shutil.copy2(source, target)
-        elif source.is_dir():
-            shutil.copytree(source, target, symlinks=True)
+    source = BASELINE_DIR / test_path
+    target = REPO_DIR / test_path
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.is_dir():
+        shutil.rmtree(target)
+    if source.is_symlink():
+        target.symlink_to(os.readlink(source))
+    elif source.is_file():
+        shutil.copy2(source, target)
+    elif source.is_dir():
+        shutil.copytree(source, target, symlinks=True)
 
-        subprocess.run([*_GIT, "init", "-q", "."], cwd=REPO_DIR, check=True)
-        applied = subprocess.run(
-            [*_GIT, "apply", "-"],
-            cwd=REPO_DIR,
-            input=test_patch,
-            text=True,
-            capture_output=True,
-            check=False,
+    subprocess.run([*_GIT, "init", "-q", "."], cwd=REPO_DIR, check=True)
+    applied = subprocess.run(
+        [*_GIT, "apply", "-"],
+        cwd=REPO_DIR,
+        input=test_patch,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if applied.returncode != 0:
+        return EvaluationResult(
+            content="hidden tests failed to apply",
+            info={"git_apply": applied.stderr[-4000:]},
+            isError=True,
         )
-        if applied.returncode != 0:
-            return EvaluationResult(
-                content="hidden tests failed to apply",
-                info={"git_apply": applied.stderr[-4000:]},
-                isError=True,
-            )
 
-        return await combine(
-            JUnitGrader.grade(
-                weight=1.0,
-                name="tests",
-                command=test_command,
-                cwd=str(REPO_DIR),
-                timeout_seconds=TEST_TIMEOUT,
-                fail_to_pass=fail_to_pass,
-                pass_to_pass=pass_to_pass,
-                binary=binary,
-            )
-        )
-    finally:
-        await workspace.discard_sandbox()
+    test_result = await JUnitGrader.grade(
+        weight=1.0,
+        name="tests",
+        command=test_command,
+        cwd=str(REPO_DIR),
+        timeout_seconds=TEST_TIMEOUT,
+        fail_to_pass=fail_to_pass,
+        pass_to_pass=pass_to_pass,
+        binary=binary,
+    )
+    if error := (test_result.info or {}).get("error"):
+        return EvaluationResult(content=str(error), info=test_result.info or {}, isError=True)
+    return await combine(test_result)
 
 
 @env.template(id="coding-task", description="Modify a repository and grade it with hidden tests.")
@@ -196,12 +194,17 @@ async def coding_task(
         raise ValueError("test_path must be a top-level file or directory")
 
     await _setup(base_ref)
-    yield description.strip()
-    yield await _grade(
-        test_command,
-        test_patch,
-        test_path,
-        fail_to_pass,
-        pass_to_pass,
-        binary,
-    )
+    try:
+        yield description.strip()
+        result = await _grade(
+            test_command,
+            test_patch,
+            test_path,
+            fail_to_pass,
+            pass_to_pass,
+            binary,
+        )
+    finally:
+        assert workspace is not None
+        await workspace.discard_sandbox()
+    yield result

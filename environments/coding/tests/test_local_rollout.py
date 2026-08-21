@@ -116,6 +116,37 @@ async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading
     grading_workspace.discard_sandbox.assert_awaited_once_with()
 
 
+async def test_missing_junit_report_is_grading_error(
+    fixture_repo,
+    tmp_path,
+    monkeypatch,
+    grading_workspace,
+):
+    import env as coding_env
+
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "clone", "-q", str(fixture_repo), str(repo)], check=True)
+    monkeypatch.setattr(coding_env, "REPO_DIR", repo)
+    monkeypatch.setattr(coding_env, "BASELINE_DIR", tmp_path / "baseline")
+    monkeypatch.setattr(coding_env, "REPO_SOURCE", str(fixture_repo))
+
+    task = coding_env.coding_task.func(
+        description="Fix the widget.",
+        test_command="true {junit_path}",
+        test_patch=TEST_PATCH,
+        test_path="test_widget.py",
+        base_ref="origin/bug_baseline",
+    )
+    await task.asend(None)
+    result = await task.asend("done")
+
+    assert result.reward == 0.0
+    assert result.isError is True
+    assert result.content == "test command did not write JUnit XML"
+    assert result.info["exit_code"] == 0
+    grading_workspace.discard_sandbox.assert_awaited_once_with()
+
+
 async def test_untouched_baseline_gets_regression_credit(fixture_repo, isolated_workspace):
     assert await _run_task(fixture_repo, _coding_task()) == 0.5
 

@@ -91,6 +91,10 @@ def test_parse_junit_rejects_malformed_report(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_junit_grader_rejects_missing_report(tmp_path: Path):
-    with pytest.raises(RuntimeError, match="did not write JUnit XML"):
-        await JUnitGrader.compute_score(command="true {junit_path}", cwd=str(tmp_path))
+async def test_junit_grader_reports_missing_output(tmp_path: Path):
+    result = await JUnitGrader.compute_score(command="true {junit_path}", cwd=str(tmp_path))
+
+    assert result.value == 0.0
+    assert result.info is not None
+    assert result.info["error"] == "test command did not write JUnit XML"
+    assert result.info["exit_code"] == 0
