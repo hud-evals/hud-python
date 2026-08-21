@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import uuid
 from typing import Any
 
 import typer
@@ -77,7 +78,7 @@ def trace_command(
     _render_events(events)
 
     web = settings.hud_web_url.rstrip("/")
-    console.print(f"\n[dim]View: {web}/trace/{trace_id}[/dim]")
+    console.print(f"\n[dim]View: {web}/trace/{uuid.UUID(otel_id)}[/dim]")
 
 
 # ── local JSONL ────────────────────────────────────────────────────────────────
