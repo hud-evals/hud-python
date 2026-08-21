@@ -68,16 +68,26 @@ jobs:
         run: docker build --file Dockerfile.hud --tag "hud-example:${{ matrix.template }}" .
 
       - name: Start example image
+        env:
+          TEMPLATE: ${{ matrix.template }}
         run: |
-          docker run --detach --name hud-example --publish 8765:8765 --shm-size 2g \
+          docker_args=()
+          if [ "$TEMPLATE" = coding ]; then
+            docker_args+=(
+              --security-opt "seccomp=$GITHUB_WORKSPACE/hud/eval/docker-seccomp.json"
+              --security-opt systempaths=unconfined
+              --security-opt apparmor=unconfined
+            )
+          fi
+          docker run --detach --name hud-example --publish 8765:8765 --shm-size 2g "${docker_args[@]}" \
             "hud-example:${{ matrix.template }}"
 
       - name: Inspect example image
         working-directory: ${{ runner.temp }}/${{ matrix.template }}
         run: |
           for attempt in {1..60}; do
-            if (echo > /dev/tcp/127.0.0.1/8765) 2>/dev/null; then
-              uv run --no-sync hud client info --url tcp://127.0.0.1:8765
+            if (echo > /dev/tcp/127.0.0.1/8765) 2>/dev/null \
+              && uv run --no-sync hud client info --url tcp://127.0.0.1:8765; then
               exit 0
             fi
             sleep 1
