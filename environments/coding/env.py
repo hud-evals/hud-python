@@ -168,7 +168,11 @@ async def _grade(
         workspace.shell_argv(
             test_command,
             cwd=str(REPO_DIR),
-            env={"HOME": "/tmp"},
+            env={
+                "HOME": "/tmp",
+                "PYTHONNOUSERSITE": "1",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            },
         )
     )
     test_result = await JUnitGrader.grade(

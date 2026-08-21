@@ -130,21 +130,18 @@ needed in the template. Cite [Capabilities](/v6/reference/capabilities).
 
 ---
 
-## Start from a template
+## Start from an example environment
 
-`hud init` scaffolds a new environment. Pass `--preset <id>` to start from a
-ready-made template instead of the blank scaffold (omit it for an interactive
-picker):
+`hud init` copies a complete environment project. Pass `--template <id>` to
+choose one, or omit it for the interactive picker:
 
 ```bash
-hud init my-env --preset browser
+hud init my-env --template coding
 ```
 
-Available presets: `blank`, `browser`, `cua` (computer-use desktop),
-`deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`,
-`gdpval`, `worldsim`, `robot`, `videogamebench`, and `arc-agi-3`. Each downloads
-a complete, runnable starting point you adapt — prefer it over hand-writing an
-environment from scratch. Cite [Quickstart](/v6/start/quickstart).
+Available examples: `coding`, `cua` (computer-use desktop), and `blank`. Adapt
+one of these projects instead of hand-writing an environment from scratch. Cite
+[Quickstart](/v6/start/quickstart).
 
 ---
 
