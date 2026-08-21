@@ -72,3 +72,21 @@ def test_create_build_context_tarball_excludes_secrets(tmp_path: Path) -> None:
         assert count == 1
     finally:
         tarball.unlink(missing_ok=True)
+
+
+def test_create_build_context_tarball_preserves_empty_directories(tmp_path: Path) -> None:
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+    (ctx / "packages").mkdir()
+    (ctx / "ignored").mkdir()
+    (ctx / ".dockerignore").write_text("ignored/\n", encoding="utf-8")
+
+    tarball, _size, count, _duration = create_build_context_tarball(ctx)
+    try:
+        with tarfile.open(tarball) as tar:
+            members = {member.name: member for member in tar.getmembers()}
+        assert members["packages"].isdir()
+        assert "ignored" not in members
+        assert count == 1
+    finally:
+        tarball.unlink(missing_ok=True)

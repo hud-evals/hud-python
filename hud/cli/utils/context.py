@@ -231,6 +231,14 @@ def create_build_context_tarball(
                     d for d in dirs if not should_ignore(root_path / d, directory, ignore_patterns)
                 ]
 
+                for child in dirs:
+                    dir_path = root_path / child
+                    tar.add(
+                        dir_path,
+                        arcname=str(dir_path.relative_to(directory)),
+                        recursive=False,
+                    )
+
                 for file in files:
                     file_path = root_path / file
 
