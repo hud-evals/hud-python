@@ -22,6 +22,7 @@ from typing import Any
 from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
+from .arguments import DataFileArg, DataFileRef, DataFilesArg, GradingArg, PromptArg
 from .egress import Peer
 from .env import Answer, Environment
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
@@ -89,10 +90,15 @@ __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
     "Answer",
     "Capability",
+    "DataFileArg",
+    "DataFileRef",
+    "DataFilesArg",
     "Environment",
+    "GradingArg",
     "Mount",
     "MountKind",
     "Peer",
+    "PromptArg",
     "Workspace",
     "load_environment",
 ]
