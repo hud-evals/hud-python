@@ -33,19 +33,26 @@ class SSHClient(CapabilityClient):
 
     protocol: ClassVar[str] = "ssh/2"
 
-    def __init__(self, capability: Capability, conn: asyncssh.SSHClientConnection) -> None:
+    def __init__(
+        self,
+        capability: Capability,
+        conn: asyncssh.SSHClientConnection,
+        *,
+        default_timeout_s: float | None = None,
+    ) -> None:
         self.capability = capability
         self._conn = conn
+        self.default_timeout_s = default_timeout_s
         self._reconnect_lock = asyncio.Lock()
         self._closing = False
 
     @classmethod
-    async def connect(cls, cap: Capability) -> Self:
+    async def connect(cls, cap: Capability, *, default_timeout_s: float | None = None) -> Self:
         try:
             connection = await cls._connect(cap)
         except (ConnectionError, asyncssh.ConnectionLost) as exc:
             raise SSHConnectionError("SSH connection failed during handshake") from exc
-        return cls(cap, connection)
+        return cls(cap, connection, default_timeout_s=default_timeout_s)
 
     @staticmethod
     async def _connect(cap: Capability) -> asyncssh.SSHClientConnection:
@@ -94,7 +101,7 @@ class SSHClient(CapabilityClient):
     async def run(self, *args: object, **kwargs: Any) -> asyncssh.SSHCompletedProcess:
         """Run one command, reconnecting first when the transport is closed."""
         run_kwargs = dict(kwargs)
-        timeout = run_kwargs.pop("timeout", None)
+        timeout = self._effective_timeout(run_kwargs.pop("timeout", None))
         check = bool(run_kwargs.pop("check", False))
         conn: asyncssh.SSHClientConnection | None = None
         process = None
@@ -170,6 +177,7 @@ class SSHClient(CapabilityClient):
 
     async def read_text(self, path: str, *, timeout_s: float | None = None) -> str:
         """Read a UTF-8 text file through the exec channel."""
+        timeout_s = self._effective_timeout(timeout_s)
         if self._is_windows:
             quoted = _powershell_quote(path)
             script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
@@ -193,6 +201,7 @@ class SSHClient(CapabilityClient):
         timeout_s: float | None = None,
     ) -> None:
         """Write UTF-8 text through the exec channel without command interpolation."""
+        timeout_s = self._effective_timeout(timeout_s)
         if self._is_windows:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout_s if timeout_s is not None else None
@@ -214,15 +223,15 @@ class SSHClient(CapabilityClient):
                 )
                 await self.run(_powershell(script), check=True, timeout=remaining_timeout())
             return
-        await self.run(
-            f"cat > {shlex.quote(path)}",
-            input=content,
-            check=True,
-            timeout=timeout_s,
-        )
+        run_kwargs: dict[str, Any] = {"input": content}
+        if not content:
+            # AsyncSSH treats empty input as absent; DEVNULL still delivers EOF.
+            run_kwargs["stdin"] = asyncssh.DEVNULL
+        await self.run(f"cat > {shlex.quote(path)}", check=True, timeout=timeout_s, **run_kwargs)
 
     async def listdir(self, path: str, *, timeout_s: float | None = None) -> list[str]:
         """List direct children through the exec channel."""
+        timeout_s = self._effective_timeout(timeout_s)
         if self._is_windows:
             script = f"Get-ChildItem -Force -Name -LiteralPath {_powershell_quote(path)}"
             result = await self.run(_powershell(script), check=True, timeout=timeout_s)
@@ -232,6 +241,9 @@ class SSHClient(CapabilityClient):
             result = await self.run(command, check=True, encoding=None, timeout=timeout_s)
             listing = _decode(result.stdout)
         return sorted(line for line in listing.splitlines() if line not in (".", ".."))
+
+    def _effective_timeout(self, timeout_s: float | None) -> float | None:
+        return self.default_timeout_s if timeout_s is None else timeout_s
 
     @property
     def _is_windows(self) -> bool:

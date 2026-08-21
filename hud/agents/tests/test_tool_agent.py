@@ -93,6 +93,38 @@ def test_claude_defaults_to_configurable_webp_screenshots() -> None:
         )
 
 
+async def test_agent_configures_ssh_client_tool_timeout() -> None:
+    capability = Capability.ssh(
+        name="shell",
+        url="ssh://workspace",
+        host_pubkey="key",
+    )
+    ssh = SSHClient(capability, cast("Any", object()))
+
+    class Client:
+        manifest = SimpleNamespace(bindings=[capability])
+
+        async def open(self, ref: str) -> CapabilityClient:
+            assert ref == "shell"
+            return ssh
+
+    class ShellAgent(DictAgent):
+        tool_catalog = (OpenAIShellTool,)
+
+    class LiveRun(_FakeRun):
+        def __init__(self) -> None:
+            super().__init__()
+            self.client = Client()
+            self.prompt_messages: list[Any] = []
+
+    await ShellAgent(
+        [AgentStep(content="done", done=True)],
+        tool_timeout_seconds=1800,
+    )(cast("Any", LiveRun()))
+
+    assert ssh.default_timeout_s == 1800
+
+
 async def test_agent_passes_screenshot_encoding_to_rfb_tools() -> None:
     class ScreenTool(RFBTool):
         name = "screen"

@@ -32,7 +32,7 @@ from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
 from hud.agents.types import AgentStep, ToolStep
-from hud.capabilities import MCPClient, RFBClient
+from hud.capabilities import MCPClient, RFBClient, SSHClient
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
@@ -138,7 +138,10 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     continue
                 if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
                     continue
-                connections[cap.name] = await run.client.open(cap.name)
+                client = await run.client.open(cap.name)
+                if isinstance(client, SSHClient):
+                    client.default_timeout_s = self.config.tool_timeout_seconds
+                connections[cap.name] = client
                 opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)

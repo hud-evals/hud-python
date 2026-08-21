@@ -52,6 +52,12 @@ Capability.ssh(*, name="shell", url, user="agent", host_pubkey, client_key=None,
 
 The shell case is built in via [`Workspace`](#workspace), so you rarely call this factory directly. [`env.workspace(root)`](/v6/reference/environment#methods) starts a workspace, publishes its `ssh` capability, and stops it with the env.
 
+`SSHClient.connect(capability, default_timeout_s=None)` leaves operations unbounded by default. Set `default_timeout_s` to apply a client-owned deadline to commands and file operations; a timeout passed to an individual operation takes precedence:
+
+```python
+ssh = await SSHClient.connect(capability, default_timeout_s=30 * 60)
+```
+
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | `str` | Capability name. Default `"shell"`. |
