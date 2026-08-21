@@ -155,6 +155,9 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert "codex exec" in command
         assert "--json" in command
         assert "--ephemeral" in command
+        assert "--ignore-user-config" not in command
+        assert "mktemp -d" in command
+        assert 'export CODEX_HOME="$codex_home"' in command
         assert "--sandbox workspace-write" in command
         assert "--model gpt-5.6-sol" in command
         assert command.endswith(" -")
@@ -169,9 +172,13 @@ def test_windows_command_encodes_environment_and_arguments(
 
     script = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
     assert "$env:CODEX_API_KEY='key&value''s'" in script
+    assert "$env:CODEX_HOME=$codexHome" in script
+    assert "[System.Guid]::NewGuid()" in script
+    assert "Remove-Item -Recurse -Force $codexHome" in script
+    assert "--ignore-user-config" not in script
     assert "'--sandbox' 'danger-full-access'" in script
     assert "& codex 'exec'" in script
-    assert script.endswith(";exit $LASTEXITCODE")
+    assert script.endswith(";exit $hudExitCode")
 
 
 async def test_exec_streams_prompt_and_records_codex_items() -> None:
