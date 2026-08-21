@@ -38,6 +38,7 @@ from .init import init_command  # noqa: E402
 from .jobs import jobs_app  # noqa: E402
 from .login import login_command  # noqa: E402
 from .models import models_app  # noqa: E402
+from .project import project_app  # noqa: E402
 from .qa import qa_app  # noqa: E402
 from .serve import serve_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
@@ -54,6 +55,7 @@ app.add_typer(models_app, name="models")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(trace_app, name="trace")
 app.add_typer(qa_app, name="qa")
+app.add_typer(project_app, name="project")
 
 
 @app.command(name="set")

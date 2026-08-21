@@ -135,6 +135,41 @@ def test_upload_taskset_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
+def test_upload_taskset_places_a_new_taskset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`project_id` reaches the platform so a created taskset lands in that Project."""
+    posted: dict[str, Any] = {}
+
+    def fake_request(method: str, url: str, json: object = None, **kwargs: Any) -> dict[str, Any]:
+        posted.update(json=json)
+        return {}
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
+
+    upload_taskset(
+        PlatformClient("https://api.example", "token"),
+        "demo",
+        [],
+        project_id="project-1",
+    )
+
+    assert posted["json"]["project_id"] == "project-1"
+
+
+def test_upload_taskset_omits_project_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a project the payload is unchanged, so the default Project applies."""
+    posted: dict[str, Any] = {}
+
+    def fake_request(method: str, url: str, json: object = None, **kwargs: Any) -> dict[str, Any]:
+        posted.update(json=json)
+        return {}
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
+
+    upload_taskset(PlatformClient("https://api.example", "token"), "demo", [])
+
+    assert "project_id" not in posted["json"]
+
+
 def test_task_upload_payload_sends_env_and_bare_task_id() -> None:
     payload = task_upload_payload(Task(env="e", id="solve", args={"n": 1}))
 
