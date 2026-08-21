@@ -21,13 +21,10 @@ def fresh_substrate(monkeypatch):
 
 
 class TestGrading:
-    async def test_empty_fallback_scores_one(self):
-        # no bash checks, no criteria -> the desktop_running fallback (reward 1.0)
+    async def test_missing_graders_fails_before_prompt(self):
         gen = GEN(prompt="p")
-        await gen.asend(None)
-        result = await gen.asend("answer")
-        assert result.reward == 1.0
-        assert any(s.name == "desktop_running" for s in result.subscores)
+        with pytest.raises(ValueError, match="at least one grader"):
+            await gen.asend(None)
 
     async def test_bash_check_passes(self):
         gen = GEN(prompt="p", bash_checks=[{"name": "ok", "command": "true", "weight": 1.0}])
@@ -69,10 +66,10 @@ class TestGrading:
         assert weights == {"ok": 0.5, "llm_judge": 0.5}
 
     async def test_second_task_requires_fresh_substrate(self):
-        first = GEN(prompt="first")
+        first = GEN(prompt="first", bash_checks=[{"name": "ok", "command": "true"}])
         await first.asend(None)
 
-        second = GEN(prompt="second")
+        second = GEN(prompt="second", bash_checks=[{"name": "ok", "command": "true"}])
         with pytest.raises(RuntimeError, match="one task per substrate"):
             await second.asend(None)
 
@@ -108,3 +105,27 @@ def test_open_website_requires_wikipedia_page():
         ),
         "weight": 1.0,
     }
+
+
+def test_shannon_research_requires_exact_file_and_open_pages():
+    assert tasks._shannon_research.args["bash_checks"] == [
+        {
+            "name": "file_contents",
+            "command": (
+                "cmp -s /home/ubuntu/Desktop/shannon.txt "
+                "<(printf 'born: 1916\\nphd: Massachusetts Institute of Technology\\n"
+                "city: Cambridge, Massachusetts\\n')"
+            ),
+            "weight": 1.0,
+        },
+        {
+            "name": "research_pages_open",
+            "command": (
+                "curl -fsS http://127.0.0.1:9222/json/list | jq -e "
+                "--arg shannon https://en.wikipedia.org/wiki/Claude_Shannon "
+                "--arg mit https://en.wikipedia.org/wiki/Massachusetts_Institute_of_Technology "
+                "'map(.url) | contains([$shannon, $mit])' >/dev/null"
+            ),
+            "weight": 1.0,
+        },
+    ]

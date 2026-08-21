@@ -56,7 +56,8 @@ _shannon_research = cua_task(
         "and let the page load.\n"
         "2. Find the YEAR Claude Shannon was born.\n"
         "3. Find the university where he earned his PhD.\n"
-        "4. Navigate to that university's own Wikipedia article.\n"
+        "4. Open that university's own Wikipedia article in a new tab and leave "
+        "both articles open.\n"
         "5. Find the CITY and state where that university is located.\n"
         "6. Open a terminal (right-click the desktop and choose 'Open Terminal Here', "
         "or Applications > System) and save your findings to "
@@ -68,23 +69,21 @@ _shannon_research = cua_task(
     ),
     bash_checks=[
         {
-            "name": "file_has_birth_year",
-            "command": "grep -qE '^born:[[:space:]]*1916[[:space:]]*$' /home/ubuntu/Desktop/shannon.txt",
-            "weight": 1.0,
-        },
-        {
-            "name": "file_has_mit",
+            "name": "file_contents",
             "command": (
-                "grep -qiE '^phd:[[:space:]]*(MIT|Massachusetts Institute of Technology)"
-                "[[:space:]]*$' /home/ubuntu/Desktop/shannon.txt"
+                "cmp -s /home/ubuntu/Desktop/shannon.txt "
+                "<(printf 'born: 1916\\nphd: Massachusetts Institute of Technology\\n"
+                "city: Cambridge, Massachusetts\\n')"
             ),
             "weight": 1.0,
         },
         {
-            "name": "file_has_city",
+            "name": "research_pages_open",
             "command": (
-                "grep -qiE '^city:[[:space:]]*Cambridge,[[:space:]]*Massachusetts"
-                "[[:space:]]*$' /home/ubuntu/Desktop/shannon.txt"
+                "curl -fsS http://127.0.0.1:9222/json/list | jq -e "
+                "--arg shannon https://en.wikipedia.org/wiki/Claude_Shannon "
+                "--arg mit https://en.wikipedia.org/wiki/Massachusetts_Institute_of_Technology "
+                "'map(.url) | contains([$shannon, $mit])' >/dev/null"
             ),
             "weight": 1.0,
         },

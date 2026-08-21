@@ -49,6 +49,8 @@ async def cua_task(
     """Run a computer-use task with shell checks, an LLM judge, or both."""
     global _task_started
 
+    if not bash_checks and not grading_criteria:
+        raise ValueError("CUA tasks require at least one grader")
     if any(c.get("weight", 1.0) < 0 for c in (bash_checks or [])):
         raise ValueError("bash check weights must be nonnegative")
     bash_total = sum(c.get("weight", 1.0) for c in (bash_checks or []))
@@ -85,8 +87,5 @@ async def cua_task(
                 criteria=[(c, 1.0) for c in grading_criteria],
             )
         )
-
-    if not graders:
-        graders.append(SubScore(name="desktop_running", value=1.0, weight=1.0))
 
     yield await combine(*graders)
