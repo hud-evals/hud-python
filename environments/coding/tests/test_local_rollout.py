@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hud import LocalRuntime, Run, connect
@@ -45,6 +45,11 @@ def _git(cwd: Path, *args: str) -> None:
 @pytest.fixture
 def isolated_workspace(monkeypatch):
     monkeypatch.setattr(workspace_lib, "usable_bwrap", lambda: "/usr/bin/true")
+    monkeypatch.setattr(
+        workspace_lib.Workspace,
+        "shell_argv",
+        lambda _self, command, **_kwargs: ["bash", "-lc", command],
+    )
 
 
 @pytest.fixture
@@ -52,6 +57,7 @@ def grading_workspace(monkeypatch):
     import env as coding_env
 
     workspace = AsyncMock()
+    workspace.shell_argv = Mock(side_effect=lambda command, **_: ["bash", "-lc", command])
     monkeypatch.setattr(coding_env, "workspace", workspace)
     return workspace
 
@@ -113,6 +119,7 @@ async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading
     assert result.reward == 1.0
     assert (repo / "fix.py").exists()
     grading_workspace.terminate_sessions.assert_awaited_once_with()
+    grading_workspace.shell_argv.assert_called_once()
     grading_workspace.discard_sandbox.assert_awaited_once_with()
 
 

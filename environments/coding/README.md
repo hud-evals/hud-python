@@ -23,8 +23,8 @@ hud eval tasks.py claude --task-ids flask-4992,flask-5063 -y --runtime local
    the source history and reference fixes are never exposed to the agent.
 3. Grading terminates the agent's isolated session namespace and discards its Git metadata.
 4. `test_path` is restored to the baseline, then `test_patch` is applied.
-5. The custom `JUnitGrader` runs `test_command` through `BashGrader` and scores the selected
-   fail-to-pass and pass-to-pass test IDs.
+5. The custom `JUnitGrader` runs `test_command` through `BashGrader` under the workspace's isolated
+   UID, then scores the selected fail-to-pass and pass-to-pass test IDs.
 
 ```python
 from env import coding_task

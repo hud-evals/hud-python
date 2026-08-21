@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -163,10 +164,21 @@ async def _grade(
             isError=True,
         )
 
+    grader_command = shlex.join(
+        workspace.shell_argv(
+            test_command,
+            cwd=str(REPO_DIR),
+            env={
+                "HOME": "/tmp",
+                "PYTHONNOUSERSITE": "1",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            },
+        )
+    )
     test_result = await JUnitGrader.grade(
         weight=1.0,
         name="tests",
-        command=test_command,
+        command=grader_command,
         cwd=str(REPO_DIR),
         timeout_seconds=TEST_TIMEOUT,
         fail_to_pass=fail_to_pass,

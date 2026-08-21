@@ -61,8 +61,8 @@ environment refuses to start if the runtime blocks them.
    so the source history and reference-fix refs are never exposed to the agent.
 3. Grading terminates the agent's isolated session namespace and discards its Git metadata.
 4. The environment restores `test_path` to the baseline and applies the hidden patch.
-5. The custom `JUnitGrader` runs `test_command` through `BashGrader` and scores the selected
-   fail-to-pass and pass-to-pass test IDs.
+5. The custom `JUnitGrader` runs `test_command` through `BashGrader` under the workspace's isolated
+   UID, then scores the selected fail-to-pass and pass-to-pass test IDs.
 
 This keeps the deliverable as repository state rather than a text answer, while preventing the agent
 from weakening the grader or reading the reference fix.

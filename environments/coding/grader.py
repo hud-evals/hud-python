@@ -140,7 +140,8 @@ class JUnitGrader(BashGrader):
         if command is None or "{junit_path}" not in command:
             raise ValueError("JUnitGrader command must contain {junit_path}")
 
-        with tempfile.TemporaryDirectory(prefix="hud-junit-") as directory:
+        with tempfile.TemporaryDirectory(prefix=".hud-junit-", dir=cwd) as directory:
+            Path(directory).chmod(0o733)
             report = Path(directory) / "report.xml"
             bash = await super().compute_score(
                 command=command.replace("{junit_path}", shlex.quote(str(report))),
