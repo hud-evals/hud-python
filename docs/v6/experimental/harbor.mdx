@@ -5,6 +5,9 @@ icon: "ship"
 tag: "Experimental"
 ---
 
+Its behavior is part of the SDK contract; its documentation path, naming, and organization may
+change without a major version.
+
 The **Harbor adapter** (`hud/integrations/harbor/`) translates between Harbor
 task directories and HUD's native `Environment`, `Task`, and `Taskset`
 contracts. `adapt()` packages Harbor tasks without building or publishing
@@ -15,19 +18,29 @@ images. `export()` materializes HUD tasks as self-contained Harbor folders.
 A Harbor source is either one task directory or a dataset directory containing
 task directories. Each task contains `task.toml` and `instruction.md`, plus an
 environment image or build recipe and a `tests/` verifier.
+Multi-container sources use Harbor's `environment/docker-compose.yaml` recipe
+name; other Compose-like filenames remain ordinary environment files.
 
 ```python
 from hud.integrations import harbor
 from hud.eval import DockerRuntime
 
-taskset = harbor.adapt("./terminal-bench")
-job = await taskset.run(agent, runtime=DockerRuntime())
+result = harbor.adapt("./terminal-bench")
+job = await result.taskset.run(agent, runtime=DockerRuntime())
 ```
 
 Each returned row carries its instruction and grading configuration in `args`,
 Harbor metadata in `columns`, resource requirements in `runtime_config`, and,
 when declared, a [`Task.verifier`](/v6/experimental/verifier-environments).
 The row's Compose path points into a generated project under `.hud-adapt/`.
+Tasks that cannot be adapted appear in `result.failures`, with every detectable
+finding classified by a stable code. Other tasks in the dataset are still
+packaged.
+
+`AdaptResult.taskset` contains the successfully adapted rows. `AdaptResult.failures` is a tuple of
+`AdaptFailure(task, path, findings)` records, where each finding is an
+`AdaptFinding(code, kind, message)` and `kind` is `contract` or `invalid`. `adapt()` raises
+`ValueError` when the source contains no Harbor task directories.
 
 ```text
 .hud-adapt/<environment>/
@@ -97,18 +110,24 @@ runtime isolation are described in
 The adapter handles:
 
 - an `environment/Dockerfile`, an `environment.docker_image`, or a Compose
-  project with a `main` service;
-- Compose sidecars with one declared TCP endpoint each;
+  project; when authored Compose omits `main`, the environment recipe supplies
+  that agent service;
+- Compose sidecars with any number of declared TCP endpoints;
 - HTTP MCP servers (`sse` and `streamable-http`), healthchecks, network modes,
-  allowlists, phase users, environment variables, and CPU/memory/GPU requests;
+  allowlists, phase users, environment variables, and placement requirements;
 - inline verifier scripts and separate verifier Dockerfiles;
-- verifier collect hooks and declared artifact paths from `main` or a sidecar.
+- verifier collect hooks and declared artifact paths from `main` or a sidecar,
+  including directory exclusions and host-side destinations.
 
-Unsupported declarations fail during adaptation. These include non-Linux and
-TPU environments, stdio MCP servers, skills directories, multi-step tasks,
-Compose interpolation/include/extends, and sidecars without exactly one usable
-TCP endpoint. A project also fails if its main service has neither an image nor
-a valid build recipe.
+Placement requirements are copied to the task that declares them: the main
+environment configures the actor task, and a separate verifier environment can
+configure its verifier task independently. The selected runtime decides whether
+it can provision those requirements.
+
+Unsupported declarations fail during adaptation. These include stdio MCP
+servers, skills directories, multi-step tasks, Compose variables not bound by
+the project `.env` or document defaults, `include`, and `extends`. A project
+also fails if its main service has neither an image nor a valid build recipe.
 
 ## Export HUD tasks to Harbor
 
@@ -156,7 +175,7 @@ covers that review.
 
 | Function | Contract |
 | --- | --- |
-| `harbor.adapt(path, *, hud_requirement="hud") -> Taskset` | Package one Harbor task or a dataset as generated Compose environments and native task rows. |
+| `harbor.adapt(path, *, hud_requirement="hud") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. Raises `ValueError` when no task directories exist. |
 | `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
 
 <CardGroup cols={2}>

@@ -202,18 +202,23 @@ def bind_addresses(
         ("127.0.0.1", VISITOR_PORT),
         *(("127.0.0.1", port) for port in reserved_ports),
     }
-    addresses: dict[str, str] = {}
+    ports_by_name: dict[str, list[int]] = {}
     for peer in peers:
-        if peer.name in addresses:
-            raise ValueError(f"two peers are called {peer.name!r}")
+        ports = ports_by_name.setdefault(peer.name, [])
+        if peer.port in ports:
+            raise ValueError(f"peer {peer.name!r} declares port {peer.port} twice")
+        ports.append(peer.port)
+
+    addresses: dict[str, str] = {}
+    for name, ports in ports_by_name.items():
         for index in range(1, 256):
             host = f"127.0.0.{index}"
-            if (host, peer.port) not in taken:
+            if all((host, port) not in taken for port in ports):
                 break
         else:
-            raise ValueError(f"too many peers on port {peer.port}")
-        taken.add((host, peer.port))
-        addresses[peer.name] = host
+            raise ValueError(f"no loopback address can route peer {name!r}")
+        taken.update((host, port) for port in ports)
+        addresses[name] = host
     return addresses
 
 
@@ -235,7 +240,7 @@ def hosts_text(
     lines = "".join(
         [
             *(f"127.0.0.1\t{name}\n" for name in local_aliases),
-            *(f"{addresses[peer.name]}\t{peer.name}\n" for peer in peers),
+            *(f"{host}\t{name}\n" for name, host in addresses.items()),
         ]
     )
     return f"{base.rstrip(chr(10))}\n{lines}" if base.strip() else lines
@@ -523,6 +528,7 @@ class _Forward(socketserver.BaseRequestHandler):
 
 class _UnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
+    request_queue_size = socket.SOMAXCONN
 
     def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
         # A unix peer has no address; the handler wants one to log.

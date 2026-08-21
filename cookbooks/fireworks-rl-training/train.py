@@ -140,11 +140,15 @@ def split_taskset(
         )
 
     random.Random(seed).shuffle(tasks)
-    train = Taskset(f"{source.name}-train", tasks[:train_count], origin=source.origin)
+    train = Taskset(
+        f"{source.name}-train",
+        tasks[:train_count],
+        taskset_id=source.taskset_id,
+    )
     evaluation = Taskset(
         f"{source.name}-eval",
         tasks[train_count:required],
-        origin=source.origin,
+        taskset_id=source.taskset_id,
     )
     return train, evaluation
 

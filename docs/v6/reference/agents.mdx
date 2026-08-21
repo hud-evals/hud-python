@@ -65,8 +65,16 @@ Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Cha
 points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeSDKAgent` runs the `claude`
 CLI over an `ssh` capability, against the env's filesystem. SSH-only runs support POSIX and Windows
 workspaces; computer use over an `rfb` capability currently requires a POSIX workspace. Every knob
-(`model`, `max_steps`, `timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
+(`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
+
+`timeout_seconds` bounds the complete agent phase. For provider tool agents, `tool_timeout_seconds` bounds each complete SSH-backed tool call, including multi-operation editor calls. It is unset by default except on `ClaudeConfig`, where it defaults to 120 seconds. A timeout is returned to the model as a tool error so the agent can continue. `ClaudeSDKAgent` does not apply this setting because its SSH process is the complete Claude Code agent, not one tool call.
+
+```python
+agent = OpenAIChatAgent(
+    OpenAIChatConfig(tool_timeout_seconds=30 * 60)
+)
+```
 
 ## create_agent {#create-agent}
 

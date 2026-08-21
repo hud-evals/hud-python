@@ -1,0 +1,74 @@
+---
+title: "Telemetry and analytics"
+description: "What the HUD SDK sends and how to turn it off."
+icon: "satellite-dish"
+---
+
+The SDK sends eval trace telemetry and anonymous CLI usage analytics. They are
+independent and have separate controls.
+
+## Eval trace telemetry
+
+Disable trace uploads with:
+
+```bash
+hud set HUD_TELEMETRY_ENABLED=0
+```
+
+or set `HUD_TELEMETRY_ENABLED=0` in your environment.
+
+When you run evaluations with an API key configured, the SDK uploads trace
+spans to the HUD platform. Depending on the agent, task, instrumentation, and
+workspace configuration, span payloads can include:
+
+- prompts and other structured messages, task arguments, and task setup and grading results;
+- model content and reasoning, tool calls, raw provider data, usage, and token-level samples;
+- complete tool requests and results;
+- serialized arguments and results from instrumented functions, plus exception messages; and
+- workspace setup and agent file diffs and final artifacts when workspace file tracking is active.
+
+Spans also include execution metadata such as step order, timings, status, and errors. Trace
+uploads require your API key and power the trace viewer.
+
+- **No API key (the default):** spans are not uploaded anywhere.
+- **`HUD_TELEMETRY_LOCAL_DIR=./spans`:** emitted spans are also written to local
+  files, including without an API key or with backend telemetry disabled. Local writes are
+  best-effort; filesystem errors do not fail the evaluation.
+- **Fully local trace storage:** `HUD_TELEMETRY_ENABLED=0` plus
+  `HUD_TELEMETRY_LOCAL_DIR=./spans` stops backend trace uploads and writes other emitted spans
+  locally on a best-effort basis. Disabling trace telemetry also stops workspace file-tracking
+  spans. CLI analytics are independent; set `HUD_CLI_ANALYTICS_ENABLED=0` to disable them too.
+
+## Anonymous CLI usage events
+
+Disable CLI usage events with:
+
+```bash
+hud set HUD_CLI_ANALYTICS_ENABLED=0
+```
+
+or set `HUD_CLI_ANALYTICS_ENABLED=0` in your environment.
+
+Except for `hud --version`, each CLI invocation sends one small event recording
+which command ran and how it exited, so HUD can improve the commands people
+actually use and fix the ones that fail. The payload is a fixed allowlist:
+
+| Field | Example |
+| --- | --- |
+| command, subcommand | `eval`, `models list` |
+| exit code and error class | `1`, `HudException` |
+| duration | `1500` (ms) |
+| SDK, Python version, OS | `0.6.13`, `3.12.9`, `darwin` |
+| CI flag | `true` in CI environments |
+| install id | random UUID, stored in `~/.hud/.env` |
+
+Never sent: command arguments, file paths or contents, error messages,
+environment variables, or API keys. A token from the command line is recorded
+only when it names a command registered on the CLI itself — anything else, a
+task file, a trace id, a typo, is recorded as `other` or omitted, so positional
+input is never transmitted. The install id is a random identifier for one
+machine — it is not tied to your account.
+
+Events are sent in the background and abandoned after 1.5 seconds, so a slow
+or failed send cannot break a command and adds at most 1.5 seconds to its exit.
+A one-time notice is printed the first time the install id is created.

@@ -57,13 +57,19 @@ def test_no_changes_yields_empty_diff(tmp_path: Path) -> None:
 def test_exclude_patterns_skip_build_output(tmp_path: Path) -> None:
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "dep.js").write_text("module.exports = 1;\n")
+    go_cache = tmp_path / ".tmp" / "go-build123"
+    go_cache.mkdir(parents=True)
+    (go_cache / "_pkg_.a").write_text("compiled\n")
+    (tmp_path / "go-build.go").write_text("package main\n")
     (tmp_path / "src.py").write_text("x = 1\n")
     tracker = FileTracker(tmp_path)
     tracker.take_baseline()
 
     manifest_paths = {entry["path"] for entry in tracker.current_manifest()}
+    assert "go-build.go" in manifest_paths
     assert "src.py" in manifest_paths
     assert not any(p.startswith("node_modules/") for p in manifest_paths)
+    assert not any(p.startswith(".tmp/") for p in manifest_paths)
 
 
 def test_gitignore_is_honored(tmp_path: Path) -> None:

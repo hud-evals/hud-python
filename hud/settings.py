@@ -134,6 +134,12 @@ class Settings(BaseSettings):
         validation_alias="HUD_TELEMETRY_ENABLED",
     )
 
+    cli_analytics_enabled: bool = Field(
+        default=True,
+        description="Send anonymous HUD CLI usage analytics",
+        validation_alias="HUD_CLI_ANALYTICS_ENABLED",
+    )
+
     telemetry_local_dir: str | None = Field(
         default=None,
         description="If set, also write each telemetry span to <dir>/<trace_id>.jsonl "

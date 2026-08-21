@@ -151,37 +151,21 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
     The platform resolves `(env, task_id)` against the env's latest build
     manifest and validates `args` against the task's schema.
     """
-    payload: dict[str, Any] = {
-        "name": task.slug,
-        "env": {"name": task.env},
-        "task_id": task.id,
-        "args": task.args,
+    row = task.model_dump(mode="json", exclude_none=True)
+    return {
+        "name": row.pop("slug"),
+        "env": {"name": row.pop("env")},
+        "task_id": row.pop("id"),
+        **row,
     }
-    if task.validation is not None:
-        payload["validation"] = task.validation
-    if task.agent_config:
-        payload["agent_config"] = task.agent_config
-    if task.columns:
-        payload["columns"] = task.columns
-    if task.runtime_config is not None:
-        payload["runtime_config"] = task.runtime_config.request_payload()
-    if task.verifier is not None:
-        payload["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
-    return payload
 
 
 def _task_signature(task: Task) -> str:
-    sig_data: dict[str, Any] = {"args": task.args or {}}
-    if task.validation is not None:
-        sig_data["validation"] = task.validation
-    if task.agent_config:
-        sig_data["agent_config"] = task.agent_config
-    if task.columns:
-        sig_data["columns"] = task.columns
-    if task.runtime_config is not None:
-        sig_data["runtime_config"] = task.runtime_config.request_payload()
-    if task.verifier is not None:
-        sig_data["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
+    sig_data = task.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude={"env", "id", "slug"},
+    )
     return f"{task.id}|" + json.dumps(
         sig_data,
         sort_keys=True,

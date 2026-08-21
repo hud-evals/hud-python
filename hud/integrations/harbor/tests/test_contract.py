@@ -10,10 +10,23 @@ from typing import Any
 
 import pytest
 
-from hud.eval import Task
+from hud.eval import RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU, Taskset
 from hud.integrations import harbor
 
 from .conftest import make_harbor_task, make_multi_step_task
+
+
+def _adapt(path: Path, *, hud_requirement: str = "hud") -> Taskset:
+    result = harbor.adapt(path, hud_requirement=hud_requirement)
+    assert result.failures == ()
+    return result.taskset
+
+
+def _failure(path: Path) -> harbor.AdaptFailure:
+    result = harbor.adapt(path)
+    assert list(result.taskset) == []
+    assert len(result.failures) == 1
+    return result.failures[0]
 
 
 def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes | str]]:
@@ -85,7 +98,7 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     task_dir = make_harbor_task(tmp_path, "task-a")
     authored_environment = _tree_snapshot(task_dir / "environment")
 
-    taskset = harbor.adapt(tmp_path)
+    taskset = _adapt(tmp_path)
 
     (task,) = list(taskset)
     assert task.id == "run"
@@ -135,8 +148,9 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert (project_root / "tests" / "task-a" / "test.sh").is_file()
     assert not any(path.name in {"tasks", "tasks.json"} for path in payload.rglob("*"))
     assert not (context / "compose.json").exists()
-    assert task.runtime_config.compose == context / "compose-project" / "compose.json"
-    assert task.runtime_config.compose_project == context
+    assert task.runtime_config.compose is not None
+    assert task.runtime_config.compose.document == context / "compose-project" / "compose.json"
+    assert task.runtime_config.compose.root == context
     compose_path = context / "compose-project" / "compose.json"
     project = _assert_stock_compose_complete(compose_path)
     assert set(project["services"]) == {"main"}
@@ -158,37 +172,78 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
 def test_task_content_changes_do_not_rebuild_the_environment(tmp_path: Path) -> None:
     task_dir = make_harbor_task(tmp_path, "task-a", instruction="First instruction")
 
-    (before,) = list(harbor.adapt(tmp_path))
+    (before,) = list(_adapt(tmp_path))
     assert before.runtime_config is not None
-    assert isinstance(before.runtime_config.compose, Path)
-    before_compose = json.loads(before.runtime_config.compose.read_text("utf-8"))
+    assert before.runtime_config.compose is not None
+    assert isinstance(before.runtime_config.compose.document, Path)
+    before_compose = json.loads(before.runtime_config.compose.document.read_text("utf-8"))
     before_image = before_compose["services"]["main"]["image"]
 
     (task_dir / "instruction.md").write_text("Second instruction", encoding="utf-8")
     (task_dir / "tests" / "test.sh").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    (after,) = list(harbor.adapt(tmp_path))
+    (after,) = list(_adapt(tmp_path))
     assert after.runtime_config is not None
-    assert isinstance(after.runtime_config.compose, Path)
-    after_compose = json.loads(after.runtime_config.compose.read_text("utf-8"))
+    assert after.runtime_config.compose is not None
+    assert isinstance(after.runtime_config.compose.document, Path)
+    after_compose = json.loads(after.runtime_config.compose.document.read_text("utf-8"))
 
     assert after_compose["services"]["main"]["image"] == before_image
     assert after.args["instruction"] == "Second instruction"
-    assert (after.runtime_config.compose.parent / "tests" / "task-a" / "test.sh").read_text(
-        "utf-8"
-    ) == "#!/bin/sh\nexit 1\n"
+    assert (
+        after.runtime_config.compose.document.parent / "tests" / "task-a" / "test.sh"
+    ).read_text("utf-8") == "#!/bin/sh\nexit 1\n"
+
+
+def test_image_task_keeps_non_recipe_compose_names_as_context_files(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    content = '{"api_gateway": {"interval": "30s"}}\n'
+    (task / "environment" / "docker-compose.yml").write_text(content, encoding="utf-8")
+
+    _adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    environment = context / "compose-project" / "environment"
+    assert (environment / "docker-compose.yml").read_text("utf-8") == content
+    project = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
+    assert set(project["services"]) == {"main"}
 
 
 def test_image_task_preserves_a_named_final_stage_verbatim(tmp_path: Path) -> None:
     dockerfile = 'FROM alpine AS build\r\nRUN true\r\nFROM alpine AS final\r\nCMD ["sh"]\r\n'
     make_harbor_task(tmp_path, "task-a", dockerfile=dockerfile)
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     environment = context / "compose-project" / "environment"
     assert (environment / "Dockerfile").read_bytes() == dockerfile.encode("utf-8")
     combined = (environment.parent / "Dockerfile").read_bytes().decode("utf-8")
     assert combined.startswith(dockerfile + "\nFROM final AS hud-runtime\n")
+
+
+def test_image_task_names_an_unnamed_multiline_final_stage(tmp_path: Path) -> None:
+    dockerfile = "FROM --platform=linux/amd64 \\\n  python:3.12-slim\nRUN true\n"
+    make_harbor_task(tmp_path, "task-a", dockerfile=dockerfile)
+
+    _adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    combined = (context / "compose-project" / "Dockerfile").read_text("utf-8")
+    assert combined.startswith(
+        "FROM --platform=linux/amd64 \\\n  python:3.12-slim AS hud-base\n"
+        "RUN true\n\nFROM hud-base AS hud-runtime\n"
+    )
+
+
+@pytest.mark.parametrize("delimiter", ["<<'PY'", "<< 'PY'"])
+def test_image_task_ignores_from_inside_dockerfile_heredoc(tmp_path: Path, delimiter: str) -> None:
+    make_harbor_task(
+        tmp_path,
+        "task-a",
+        dockerfile=f"FROM python:3.12\nRUN python - {delimiter}\nfrom pathlib import Path\nPY\n",
+    )
+
+    _adapt(tmp_path)
 
 
 @pytest.mark.parametrize("stage", ["hud-base", "HUD-RUNTIME"])
@@ -198,8 +253,11 @@ def test_image_task_rejects_reserved_user_stage_names(
 ) -> None:
     make_harbor_task(tmp_path, "task-a", dockerfile=f"FROM alpine AS {stage}\n")
 
-    with pytest.raises(ValueError, match="reserved stage"):
-        harbor.adapt(tmp_path)
+    failure = _failure(tmp_path)
+
+    assert [finding.code for finding in failure.findings] == [
+        "harbor.invalid.reserved_dockerfile_stage"
+    ]
 
 
 def test_image_task_preserves_environment_ignored_paths_verbatim(
@@ -211,7 +269,7 @@ def test_image_task_preserves_environment_ignored_paths_verbatim(
     (environment / "ignored.txt").write_bytes(b"unchanged\x00payload")
     authored = _tree_snapshot(environment)
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     project = context / "compose-project"
@@ -226,7 +284,7 @@ def test_adapt_honors_compose_main_build_settings(
     task = make_harbor_task(tmp_path, "task-a", dockerfile=None)
     environment = task / "environment"
     environment.mkdir()
-    (environment / "compose.yaml").write_text(
+    (environment / "docker-compose.yaml").write_text(
         """\
 services:
   main:
@@ -240,10 +298,11 @@ services:
     )
     (environment / "Containerfile").write_text("FROM python:3.12\n", encoding="utf-8")
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
-    compose_path = row.runtime_config.compose
+    assert row.runtime_config.compose is not None
+    compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = _assert_stock_compose_complete(compose_path)
     base = project["services"]["hud-base"]
@@ -256,7 +315,7 @@ def test_adapt_emits_compose_project_and_peers(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         """\
 services:
   main:
@@ -270,6 +329,10 @@ services:
       start_period: 1s
   redis:
     image: redis:7-alpine
+    depends_on:
+      main:
+        condition: service_healthy
+        restart: true
     command: [redis-server, --save, ""]
     environment: {SIDE: car}
     expose: [6379]
@@ -283,20 +346,23 @@ services:
         encoding="utf-8",
     )
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
     assert row.runtime_config.image is None
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is True
     (context,) = (tmp_path / ".hud-adapt").iterdir()
-    assert row.runtime_config.compose == context / "compose-project" / "compose.json"
-    assert row.runtime_config.compose_project == context
+    assert row.runtime_config.compose.document == context / "compose-project" / "compose.json"
+    assert row.runtime_config.compose.root == context
     assert not (context / "compose.json").exists()
-    compose_path = row.runtime_config.compose
+    compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = _assert_stock_compose_complete(compose_path)
     assert project["services"]["redis"]["image"] == "redis:7-alpine"
     assert "build" not in project["services"]["redis"]
     assert project["services"]["main"]["build"]["context"] == "./main"
+    assert project["services"]["main"]["build"]["target"] == "service-access"
     assert project["services"]["main"]["build"]["additional_contexts"] == {
         "hud-base": "service:hud-base"
     }
@@ -312,6 +378,7 @@ services:
     assert redis["image"] == "redis:7-alpine"
     assert redis["environment"] == {"SIDE": "car"}
     assert redis["command"] == ["redis-server", "--save", ""]
+    assert redis["depends_on"] == {"main": {"condition": "service_started", "restart": True}}
     assert redis["expose"] == ["6379"]
     assert redis["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
     assert "build" not in redis
@@ -329,6 +396,7 @@ services:
     assert manifest["ports"] == [8080]
     assert manifest["capabilities"] == []
     assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+    assert manifest["healthy_services"] == ["redis"]
     assert project["services"]["main"]["command"] == [
         "/media/hud/venv/bin/hud",
         "serve",
@@ -355,7 +423,7 @@ def test_compose_adapt_retains_builds_without_local_docker(
     (database / "Dockerfile").write_text("FROM postgres:16\n", encoding="utf-8")
     (database / "db.env").write_text("POSTGRES_DB=test\n", encoding="utf-8")
     (database / "data").mkdir()
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         """\
 services:
   main:
@@ -376,10 +444,11 @@ services:
     (task / "environment" / "main.env").write_text("MAIN=true\n", encoding="utf-8")
     (task / "environment" / "main-data").mkdir()
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
-    compose_path = row.runtime_config.compose
+    assert row.runtime_config.compose is not None
+    compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = json.loads(compose_path.read_text("utf-8"))
     assert project["services"]["database"]["build"]["context"] == ("./environment/database")
@@ -400,7 +469,7 @@ def test_adapt_moves_compose_main_process_settings_into_the_workspace(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         """\
 services:
   main:
@@ -411,7 +480,7 @@ services:
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -427,7 +496,7 @@ def test_adapt_moves_compose_main_healthcheck_into_the_workspace(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         """\
 services:
   main:
@@ -441,7 +510,7 @@ services:
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -459,12 +528,12 @@ services:
 
 def test_adapt_uses_compose_healthcheck_defaults(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         "services:\n  main:\n    healthcheck:\n      test: [CMD, 'true']\n",
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -478,37 +547,26 @@ def test_adapt_uses_compose_healthcheck_defaults(tmp_path: Path) -> None:
     }
 
 
-def test_adapt_requires_peer_port_in_the_compose_project(
-    tmp_path: Path,
-) -> None:
+def test_adapt_merges_implicit_main_into_authored_compose(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
-        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n",
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  default:\n    image: sidecar:latest\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="declares no TCP port"):
-        harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
-
-def test_adapt_rejects_sidecar_without_a_tcp_port(
-    tmp_path: Path,
-) -> None:
-    task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
-        "services:\n  main: {}\n  worker:\n    image: no-ports:latest\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="declares no TCP port"):
-        harbor.adapt(tmp_path)
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
+    assert {"main", "default"} <= compose["services"].keys()
+    assert _environment_config(context)["peers"] == []
 
 
 def test_network_mcp_servers_become_named_capabilities(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
         encoding="utf-8",
     )
@@ -523,7 +581,7 @@ args = []
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -553,8 +611,10 @@ url = "http://server:8000/mcp"
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match=f"MCP server name {name!r} is reserved"):
-        harbor.adapt(tmp_path)
+    failure = _failure(tmp_path)
+
+    assert [finding.code for finding in failure.findings] == ["harbor.invalid.reserved_mcp_name"]
+    assert name in failure.findings[0].message
 
 
 def test_adapt_groups_identical_images_and_keeps_row_metadata(
@@ -577,7 +637,7 @@ timeout_sec = 30
 """,
         encoding="utf-8",
     )
-    taskset = harbor.adapt(dataset_same_env)
+    taskset = _adapt(dataset_same_env)
 
     assert len(taskset) == 3
     assert len(taskset.environment_names()) == 1
@@ -602,7 +662,7 @@ timeout_sec = 30
 def test_distinct_environments_build_distinct_images(
     dataset_multi_env: Path,
 ) -> None:
-    taskset = harbor.adapt(dataset_multi_env)
+    taskset = _adapt(dataset_multi_env)
 
     assert len(taskset.environment_names()) == 2
     assert all(task.runtime_config is not None for task in taskset)
@@ -619,24 +679,62 @@ difficulty = "hard"
 [environment]
 cpus = 4
 memory_mb = 8192
+storage_mb = 32768
 gpus = 2
 gpu_types = ["H100"]
 """,
         encoding="utf-8",
     )
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.columns == {"difficulty": "hard"}
     assert row.runtime_config is not None
     assert row.runtime_config.image is None
-    assert isinstance(row.runtime_config.compose, Path)
+    assert row.runtime_config.compose is not None
+    assert isinstance(row.runtime_config.compose.document, Path)
     assert row.runtime_config.resources is not None
     assert row.runtime_config.resources.cpu == 4
     assert row.runtime_config.resources.memory_mb == 8192
+    assert row.runtime_config.resources.storage_mb == 32768
     assert row.runtime_config.resources.gpu is not None
     assert row.runtime_config.resources.gpu.count == 2
     assert row.runtime_config.resources.gpu.type == "H100"
+
+
+def test_env_templates_are_persisted_verbatim_not_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Host values must never be baked into the content-hashed image payload
+    or the persisted task rows; ``${VAR}`` templates resolve at runtime."""
+    monkeypatch.setenv("HARBOR_JUDGE_KEY", "sk-live-secret")
+    task = make_harbor_task(tmp_path, "templated")
+    (task / "task.toml").write_text(
+        """
+[environment.env]
+JUDGE_KEY = "${HARBOR_JUDGE_KEY}"
+MODEL = "${HARBOR_JUDGE_MODEL:-gpt-4o}"
+
+[verifier]
+timeout_sec = 60
+
+[verifier.env]
+VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"
+""",
+        encoding="utf-8",
+    )
+
+    harbor.adapt(tmp_path)
+
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    manifest = json.loads((context / "compose-project" / "hud" / "config.json").read_text("utf-8"))
+    assert manifest["environment"]["env"] == {
+        "JUDGE_KEY": "${HARBOR_JUDGE_KEY}",
+        "MODEL": "${HARBOR_JUDGE_MODEL:-gpt-4o}",
+    }
+    assert manifest["verifier"]["env"] == {"VERIFIER_KEY": "${HARBOR_JUDGE_KEY}"}
+    for persisted in sorted(path for path in context.rglob("*") if path.is_file()):
+        assert b"sk-live-secret" not in persisted.read_bytes(), persisted
 
 
 def test_prebuilt_harbor_image_is_inspected_by_the_project_build(
@@ -648,7 +746,7 @@ def test_prebuilt_harbor_image_is_inspected_by_the_project_build(
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     project = context / "compose-project"
@@ -668,7 +766,7 @@ def test_zero_gpus_is_a_valid_harbor_resource_declaration(
     task = make_harbor_task(tmp_path, "cpu-only")
     (task / "task.toml").write_text("[environment]\ngpus = 0\n", encoding="utf-8")
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
     assert row.runtime_config.resources is None
@@ -712,7 +810,7 @@ VERIFIER_ONLY = "yes"
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -756,7 +854,7 @@ CMD ["ignored-by-harbor"]
         encoding="utf-8",
     )
 
-    harbor.adapt(tmp_path)
+    _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -766,32 +864,59 @@ CMD ["ignored-by-harbor"]
     assert "docker image inspect" in script
 
 
-@pytest.mark.parametrize(
-    ("declaration", "expected"),
-    [
-        ('[environment]\nos = "windows"\n', "os="),
-        ('[environment]\ntpu = {type = "v5", topology = "2x2"}\n', "TPUs"),
-        (
-            '[environment]\ngpus = 1\ngpu_types = ["H100", "A100"]\n',
-            "multiple GPU types",
-        ),
-        ('[environment]\ngpu_types = ["H100"]\n', "GPU types without GPUs"),
-        (
-            '[[environment.mcp_servers]]\nname = "db"\ntransport = "stdio"\ncommand = "db-mcp"\n',
-            "stdio MCP servers",
-        ),
-    ],
-)
-def test_unsupported_harbor_behaviour_fails_before_building(
+def test_dataset_adaptation_returns_successes_and_all_detectable_findings(
     tmp_path: Path,
-    declaration: str,
-    expected: str,
 ) -> None:
-    task = make_harbor_task(tmp_path, "task-a")
-    (task / "task.toml").write_text(declaration, encoding="utf-8")
+    make_harbor_task(tmp_path, "supported")
+    unsupported = make_harbor_task(tmp_path, "unsupported")
+    (unsupported / "instruction.md").unlink()
+    (unsupported / "task.toml").write_text(
+        """\
+[environment]
+os = "windows"
+skills_dir = "skills"
 
-    with pytest.raises(NotImplementedError, match=expected):
-        harbor.adapt(tmp_path)
+[[environment.mcp_servers]]
+name = "shell"
+transport = "streamable-http"
+
+[[environment.mcp_servers]]
+name = "db"
+transport = "stdio"
+command = "db-mcp"
+""",
+        encoding="utf-8",
+    )
+
+    result = harbor.adapt(tmp_path)
+
+    assert [task.slug for task in result.taskset] == ["supported"]
+    assert len(result.failures) == 1
+    failure = result.failures[0]
+    assert failure.task == "unsupported"
+    assert {finding.code for finding in failure.findings} == {
+        "harbor.unsupported.skills_dir",
+        "harbor.unsupported.mcp_stdio",
+        "harbor.invalid.reserved_mcp_name",
+        "harbor.invalid.mcp_url",
+        "harbor.invalid.missing_instruction",
+    }
+    assert {finding.kind for finding in failure.findings} == {"contract", "invalid"}
+
+
+def test_unbound_compose_variables_are_deliberate_contract_refusals(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    image: ${MAIN_IMAGE}\n",
+        encoding="utf-8",
+    )
+
+    failure = _failure(tmp_path)
+
+    assert [finding.code for finding in failure.findings] == [
+        "harbor.unsupported.host_compose_variable"
+    ]
+    assert failure.findings[0].kind == "contract"
 
 
 @pytest.mark.parametrize("port", [3128, 3129, 8765])
@@ -800,20 +925,37 @@ def test_adapt_rejects_main_ports_reserved_by_hud(
     port: int,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         f"services:\n  main:\n    expose: [{port}]\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match=f"port {port} conflicts with a HUD reserved port"):
-        harbor.adapt(tmp_path)
+    failure = _failure(tmp_path)
+
+    assert [finding.code for finding in failure.findings] == ["harbor.invalid.reserved_main_port"]
+    assert str(port) in failure.findings[0].message
 
 
-def test_adapt_builds_a_separate_verifier_and_reuses_the_runtime(
+def test_adapt_accepts_explicit_shared_verifier_mode(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "shared")
+    (task / "task.toml").write_text(
+        '[verifier]\nenvironment_mode = "shared"\n',
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+
+    assert row.verifier is None
+    assert row.runtime_config is not None
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is None
+
+
+def test_adapt_builds_a_separate_verifier_with_its_own_placement(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "separate")
-    (task / "environment" / "compose.yaml").write_text(
+    (task / "environment" / "docker-compose.yaml").write_text(
         "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n    expose: [6379]\n",
         encoding="utf-8",
     )
@@ -828,6 +970,11 @@ artifacts = ["/tmp/agent.patch"]
 [environment]
 cpus = 2
 memory_mb = 2048
+build_timeout_sec = 600.5
+gpus = 1
+gpu_types = ["H100", "A100"]
+os = "windows"
+tpu = {type = "v5", topology = "2x2"}
 
 [verifier]
 environment_mode = "separate"
@@ -836,6 +983,9 @@ timeout_sec = 30
 [verifier.environment]
 cpus = 4
 memory_mb = 1024
+build_timeout_sec = 1200
+gpus = 1
+gpu_types = ["T4"]
 workdir = "/judge"
 network_mode = "allowlist"
 allowed_hosts = ["verifier.example"]
@@ -855,21 +1005,32 @@ timeout_sec = 10
         encoding="utf-8",
     )
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.id == "run"
     assert row.slug == "separate"
-    assert row.verifier == Task(
-        env=row.env,
-        id="verify",
-        args={"task": row.args["task"]},
-        slug="separate:verify",
-    )
     assert row.runtime_config is not None
-    assert row.runtime_config.resources is not None
-    assert row.runtime_config.resources.cpu == 4
-    assert row.runtime_config.resources.memory_mb == 2048
-    assert row.runtime_config.compose_service_access is True
+    assert row.runtime_config.resources == RuntimeResources(
+        cpu=2,
+        memory_mb=2048,
+        gpu=RuntimeGPU(type=["H100", "A100"]),
+        os="windows",
+        tpu=RuntimeTPU(type="v5", topology="2x2"),
+    )
+    assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=601)
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is True
+    assert row.verifier is not None
+    assert row.verifier.runtime_config is not None
+    assert row.verifier.runtime_config.compose is not None
+    assert row.verifier.runtime_config.compose.document == row.runtime_config.compose.document
+    assert row.verifier.runtime_config.compose.root == row.runtime_config.compose.root
+    assert row.verifier.runtime_config.resources == RuntimeResources(
+        cpu=4,
+        memory_mb=1024,
+        gpu=RuntimeGPU(type="T4"),
+    )
+    assert row.verifier.runtime_config.limits == RuntimeLimits(startup_timeout_s=1200)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
@@ -911,16 +1072,37 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         encoding="utf-8",
     )
     (task / "task.toml").write_text(
-        '[verifier]\nenvironment_mode = "separate"\n',
+        """
+[environment]
+build_timeout_sec = 300
+cpus = 4
+memory_mb = 14336
+gpus = 1
+gpu_types = ["H100"]
+
+[verifier]
+environment_mode = "separate"
+
+[verifier.environment]
+build_timeout_sec = 300
+cpus = 4
+memory_mb = 14336
+gpus = 1
+gpu_types = ["H100"]
+""",
         encoding="utf-8",
     )
 
-    (row,) = list(harbor.adapt(tmp_path))
+    (row,) = list(_adapt(tmp_path))
 
     assert row.runtime_config is not None
-    assert row.runtime_config.compose_service_access is True
-    assert isinstance(row.runtime_config.compose, Path)
-    project = _assert_stock_compose_complete(row.runtime_config.compose)
+    assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=300)
+    assert row.runtime_config.compose is not None
+    assert row.runtime_config.compose.service_access is None
+    assert row.verifier is not None
+    assert row.verifier.runtime_config is None
+    assert isinstance(row.runtime_config.compose.document, Path)
+    project = _assert_stock_compose_complete(row.runtime_config.compose.document)
     assert set(project["services"]) == {"main", "hud-verifier"}
     assert project["services"]["main"]["build"] == {
         "additional_contexts": {
@@ -931,7 +1113,7 @@ def test_image_task_keeps_only_the_verifier_as_a_build_service(
         "dockerfile": "../Dockerfile",
     }
     assert project["services"]["hud-verifier"]["scale"] == 0
-    combined = (row.runtime_config.compose.parent / "Dockerfile").read_text("utf-8")
+    combined = (row.runtime_config.compose.document.parent / "Dockerfile").read_text("utf-8")
     assert "FROM hud-verifier AS hud-verifier-root" in combined
     assert "COPY --from=hud-verifier-root / /media/hud/verifier" in combined
 
@@ -945,17 +1127,18 @@ def test_separate_verifier_groups_have_distinct_environment_names(
     for name in ("task-a", "task-b"):
         task = make_harbor_task(tmp_path, name)
         (task / "task.toml").write_text(declaration, encoding="utf-8")
-        (task / "environment" / "compose.yaml").write_text(compose, encoding="utf-8")
+        (task / "environment" / "docker-compose.yaml").write_text(compose, encoding="utf-8")
         (task / "tests" / "Dockerfile").write_text(verifier, encoding="utf-8")
 
-    rows = list(harbor.adapt(tmp_path))
+    rows = list(_adapt(tmp_path))
 
     assert len({row.env for row in rows}) == 2
     compose_paths = {
         compose
         for row in rows
         if row.runtime_config is not None
-        and isinstance((compose := row.runtime_config.compose), Path)
+        and row.runtime_config.compose is not None
+        and isinstance((compose := row.runtime_config.compose.document), Path)
     }
     assert len(compose_paths) == 2
     assert all(path.is_file() for path in compose_paths)
@@ -969,30 +1152,57 @@ def test_separate_verifier_groups_have_distinct_environment_names(
 def test_multi_step_tasks_are_refused_directly(tmp_path: Path) -> None:
     make_multi_step_task(tmp_path, "multi")
 
-    with pytest.raises(NotImplementedError, match="multi-step"):
-        harbor.adapt(tmp_path)
+    failure = _failure(tmp_path)
+
+    assert [finding.code for finding in failure.findings] == ["harbor.unsupported.multi_step"]
 
 
-def test_invalid_task_config_is_not_silently_defaulted(
-    tmp_path: Path,
-) -> None:
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        '"/"',
+        '"//"',
+        '"/workspace/../secret"',
+        '{ source = "/output", destination = "/tmp/out" }',
+        '{ source = "/output", destination = "../out" }',
+        '{ source = "/output", destination = "a\\\\b" }',
+        '{ source = "/output", destination = "manifest.json" }',
+    ],
+)
+def test_artifact_paths_stay_beneath_their_roots(tmp_path: Path, artifact: str) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "task.toml").write_text("[environment]\ncpus = 'many'\n", encoding="utf-8")
+    (task / "task.toml").write_text(
+        f"artifacts = [{artifact}]\n",
+        encoding="utf-8",
+    )
 
-    with pytest.raises(ValueError, match="not a valid Harbor task"):
-        harbor.adapt(tmp_path)
+    failure = _failure(tmp_path)
+
+    assert [finding.code for finding in failure.findings] == ["harbor.invalid.task_config"]
 
 
-@pytest.mark.parametrize("source", ["/", "//", "/workspace/../secret"])
-def test_artifacts_must_name_normalized_paths_beneath_root(
-    tmp_path: Path,
-    source: str,
-) -> None:
+def test_artifacts_keep_harbor_destination_and_exclude(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
-    (task / "task.toml").write_text(f'artifacts = ["{source}"]\n', encoding="utf-8")
+    (task / "task.toml").write_text(
+        """\
+[[artifacts]]
+source = "/app/outputs"
+destination = "results/outputs"
+exclude = ["*.tmp", "cache"]
+""",
+        encoding="utf-8",
+    )
 
-    with pytest.raises(ValueError, match="artifact source must name a path beneath /"):
-        harbor.adapt(tmp_path)
+    taskset = _adapt(tmp_path)
+
+    assert taskset["task-a"].args["task"]["artifacts"] == [
+        {
+            "service": "main",
+            "source": "/app/outputs",
+            "destination": "results/outputs",
+            "exclude": ["*.tmp", "cache"],
+        }
+    ]
 
 
 def test_agent_timeout_becomes_per_task_agent_policy(
@@ -1001,7 +1211,7 @@ def test_agent_timeout_becomes_per_task_agent_policy(
     task = make_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text("[agent]\ntimeout_sec = 60\n", encoding="utf-8")
 
-    taskset = harbor.adapt(tmp_path)
+    taskset = _adapt(tmp_path)
 
     (row,) = list(taskset)
     assert row.agent_config == {"timeout_seconds": 60.0}
@@ -1015,7 +1225,7 @@ def test_task_symlinks_are_copied_without_reading_host_files(
     task = make_harbor_task(tmp_path / "dataset", "task-a")
     (task / "tests" / "link").symlink_to(outside)
 
-    harbor.adapt(task.parent)
+    _adapt(task.parent)
 
     (context,) = (task.parent / ".hud-adapt").iterdir()
     copied = context / "compose-project" / "tests" / "task-a" / "link"
@@ -1031,9 +1241,9 @@ def test_adapt_hashes_links_not_their_targets(
     task = make_harbor_task(tmp_path / "dataset", "task-a")
     (task / "environment" / "link").symlink_to(outside)
 
-    (before,) = list(harbor.adapt(task.parent))
+    (before,) = list(_adapt(task.parent))
     outside.write_text("changed", encoding="utf-8")
-    (after,) = list(harbor.adapt(task.parent))
+    (after,) = list(_adapt(task.parent))
 
     assert before.runtime_config == after.runtime_config
 
@@ -1047,6 +1257,7 @@ def test_authored_runtime_assets_are_valid_source() -> None:
     assert 'uv python install "$python_version"' in installer
     assert 'python="$root/bin/python$python_version"' in installer
     assert 'uv venv "$root/venv" --python "$python"' in installer
+    assert "dnf install -y bubblewrap" in installer
     result = subprocess.run(
         ["sh", "-n", integration / "install.sh"],
         check=False,
@@ -1055,5 +1266,64 @@ def test_authored_runtime_assets_are_valid_source() -> None:
     assert result.returncode == 0, result.stderr.decode()
 
 
-def test_public_surface_is_only_the_two_real_operations() -> None:
-    assert harbor.__all__ == ["adapt", "export"]
+def test_public_surface_exposes_results_and_the_two_real_operations() -> None:
+    assert harbor.__all__ == [
+        "AdaptFailure",
+        "AdaptFinding",
+        "AdaptResult",
+        "adapt",
+        "export",
+    ]
+
+
+def test_portless_sidecar_ports_are_resolved_from_its_built_image(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main: {}\n  redis:\n    image: redis:7-alpine\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+    assert row.runtime_config is not None
+    assert row.runtime_config.compose is not None
+    context = row.runtime_config.compose.root
+    assert isinstance(context, Path)
+    manifest = _environment_config(context)
+    assert manifest["peers"] == []
+    assert manifest["peer_image_configs"] == {"redis": "peer-image-configs/redis.json"}
+    script = (context / "compose-project" / "build.sh").read_text("utf-8")
+    assert "pull redis" in script
+    assert "inspect_peer redis:7-alpine redis" in script
+    assert "declares no TCP ports in Compose or its image" in script
+    assert "peer-image-configs/redis.json" in script
+
+
+def test_completed_compose_dependencies_are_not_routed_as_peers(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  main:\n"
+        "    depends_on:\n"
+        "      seed:\n"
+        "        condition: service_completed_successfully\n"
+        "  seed:\n"
+        "    build: ./seed\n",
+        encoding="utf-8",
+    )
+    (task / "environment" / "seed").mkdir()
+    (task / "environment" / "seed" / "Dockerfile").write_text(
+        'FROM busybox:1.37\nCMD ["true"]\n',
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+    assert row.runtime_config is not None
+    assert row.runtime_config.compose is not None
+    context = row.runtime_config.compose.root
+    assert isinstance(context, Path)
+    manifest = _environment_config(context)
+    assert manifest["peers"] == []
+    assert manifest["peer_image_configs"] == {}
+    assert (context / "compose-project" / "main" / "peer-image-configs" / ".keep").is_file()
+    script = (context / "compose-project" / "build.sh").read_text("utf-8")
+    assert script.count("inspect_peer") == 1

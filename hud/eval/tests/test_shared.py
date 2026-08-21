@@ -18,8 +18,8 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.environment import Environment
-from hud.eval import Shared, Task, Taskset
-from hud.eval.runtime import Runtime, _local
+from hud.eval import LocalRuntime, RuntimeConfig, Shared, Task, Taskset
+from hud.eval.runtime import Runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -28,10 +28,10 @@ if TYPE_CHECKING:
 
 
 class _CountingProvider:
-    """Wraps ``_local`` around one env, counting provisions and teardowns."""
+    """Wraps one local env, counting provisions and teardowns."""
 
     def __init__(self, env: Environment) -> None:
-        self.env = env
+        self.runtime = LocalRuntime(env)
         self.provisions = 0
         self.teardowns = 0
 
@@ -39,7 +39,7 @@ class _CountingProvider:
     async def __call__(self, task: TaskRow) -> AsyncIterator[Runtime]:
         self.provisions += 1
         try:
-            async with _local(self.env) as runtime:
+            async with self.runtime(task) as runtime:
                 yield runtime
         finally:
             self.teardowns += 1
@@ -88,6 +88,72 @@ async def test_an_open_scope_keeps_the_substrate_warm_across_calls() -> None:
     assert inner.teardowns == 1
 
 
+async def test_distinct_task_placements_get_distinct_substrates() -> None:
+    provisions: list[str] = []
+    teardowns: list[str] = []
+
+    @asynccontextmanager
+    async def provider(task: Task) -> AsyncIterator[Runtime]:
+        provisions.append(task.env)
+        try:
+            yield Runtime(f"tcp://{task.env}")
+        finally:
+            teardowns.append(task.env)
+
+    async with Shared(provider, width=1) as shared:
+        async with shared(Task(env="actor", id="solve")) as actor:
+            assert actor.url == "tcp://actor"
+        async with shared(Task(env="verifier", id="verify")) as verifier:
+            assert verifier.url == "tcp://verifier"
+
+    assert provisions == ["actor", "verifier"]
+    assert teardowns == ["verifier", "actor"]
+
+
+async def test_width_one_releases_the_actor_lease_before_verifying() -> None:
+    env = Environment("reviewed")
+
+    @env.template()
+    async def solve():
+        answer = yield "answer"
+        yield {"score": 0.0, "answer": answer}
+
+    @env.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["answer"] == "ok" else 0.0
+
+    provisions = 0
+
+    @asynccontextmanager
+    async def provider(task: Task) -> AsyncIterator[Runtime]:
+        nonlocal provisions
+        provisions += 1
+        async with LocalRuntime(env)(task.model_copy(update={"runtime_config": None})) as runtime:
+            yield runtime
+
+    config = RuntimeConfig()
+    task = Task(
+        env="reviewed",
+        id="solve",
+        runtime_config=config,
+        verifier=Task(
+            env="reviewed",
+            id="verify",
+            runtime_config=config,
+        ),
+    )
+
+    job = await task.run(
+        _OkAgent(),
+        runtime=Shared(provider, width=1),
+        rollout_timeout=1,
+    )
+
+    assert job.reward == 1.0
+    assert provisions == 1
+
+
 async def test_width_bounds_occupancy_by_waiting_not_erroring() -> None:
     live = 0
     peak = 0
@@ -119,7 +185,7 @@ async def test_a_failed_boot_fails_one_lease_and_the_next_retries() -> None:
         attempts += 1
         if attempts == 1:
             raise RuntimeError("boot boom")
-        async with _local(env) as runtime:
+        async with LocalRuntime(env)(task) as runtime:
             yield runtime
 
     job = await Taskset("pool", [Task(env="pool", id="echo")]).run(

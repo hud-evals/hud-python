@@ -26,23 +26,19 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `Runtime("tcp://host:8765")` | A substrate you already started | Attaching to a long-lived container or sandbox you own |
 | `Shared(provider, width=N)` | One substrate from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
-| `HostedRuntime()` | The whole rollout on a HUD-leased box | Agent and env run together off your machine |
+| `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
 Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
 HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
 
 <Note>
-**You can usually omit `runtime=`.** A run without one uses what HUD already knows:
+**You can usually omit `runtime=`.** A run without one uses its known placement:
 
-- a taskset loaded from Python source (`Taskset.from_file` / `from_module`) runs against that source
 - a platform taskset (`Taskset.from_api`) runs on the platform
-- otherwise, if the envs your tasks name are defined in files you've imported, each rollout gets a
-  fresh env served from its file — so `my_task().run(agent)` just works in the project that defines
-  the env
+- a task created by `@env.template` runs against that environment
 
 When none of these apply, `run` raises and lists the runtimes you can pass — it never silently picks
-one. If two imported files define an env with the same name, that's also an error; disambiguate by
-passing the instance you mean: `runtime=LocalRuntime(env)`.
+one. For example, a task loaded from JSON needs `runtime=LocalRuntime(env)` or another runtime.
 </Note>
 
 To deploy an environment to the platform and run against it, see
@@ -57,29 +53,48 @@ Compose project, hardware, and timeouts. Set it on the runtime (`runtime_config=
 supports.
 
 ```python
-from hud.eval import RuntimeConfig, RuntimeResources, RuntimeGPU, RuntimeLimits
+from hud.eval import ComposeProject, RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU
 
 RuntimeConfig(
     image="my-env",
-    resources=RuntimeResources(cpu=4, memory_mb=8192, gpu=RuntimeGPU(type="A100", count=1)),
+    resources=RuntimeResources(
+        cpu=4,
+        memory_mb=8192,
+        storage_mb=32768,
+        gpu=RuntimeGPU(type=["H100", "A100"], count=1),
+    ),
     limits=RuntimeLimits(startup_timeout_s=300, run_timeout_s=1800),
 )
 
-RuntimeConfig(compose="./compose.yaml")
+RuntimeConfig(compose=ComposeProject(document="./compose.yaml"))
+RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2")))
 ```
 
 | Field | Description |
 |-------|-------------|
 | `image` | Image to run. |
-| `compose` | Local path to a Compose file, or its serialized `ComposeConfig`. Mutually exclusive with `image`. |
-| `compose_project` | Local project root for upload, or a serialized `ComposeProjectRef`. Requires `compose`. |
-| `compose_service_access` | Mount the runtime's Docker socket into Compose `main` at `/media/hud/docker.sock`. Requires `compose`. |
-| `resources` | `RuntimeResources(cpu, memory_mb, gpu=RuntimeGPU(type, count))`. |
+| `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
+| `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
-Support differs per runtime: `DockerRuntime`, `ModalRuntime`, and `DaytonaRuntime` accept it (Docker
-ignores `limits`; Daytona ignores `run_timeout_s` and resource overrides when booting from a snapshot).
-`LocalRuntime` and `HUDRuntime` reject a per-task `runtime_config`.
+Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
+is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
+enough whole GiB, while providers without disk sizing proceed with their default capacity.
+`HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
+or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
+alternatives; Modal accepts one GPU type. Docker ignores `limits`; Daytona rejects `run_timeout_s`
+and resource overrides when booting from an already-built snapshot. `LocalRuntime` rejects a
+per-task `runtime_config`.
+
+`run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
+The optional `rollout_timeout` passed to `Task.run` or `Taskset.run` is the execution deadline
+through grading, including submission, queueing, and provisioning. It is not an upper bound on
+method-return latency: cancellation and trace reporting still run after expiry, and `Taskset.run`
+then flushes telemetry. When both are set, `run_timeout_s` and other known phase limits must be less
+than `rollout_timeout`; an agent timeout must also be less than the actor environment's
+`run_timeout_s`. Contradictory values fail before execution. When `rollout_timeout` is omitted, the
+SDK adds no overall deadline; configured phase limits and limits imposed by the selected runtime
+still apply.
 
 ## Runtime directory
 
@@ -91,22 +106,19 @@ The constructor for each built-in runtime:
 LocalRuntime(source, *, env=None, ready_timeout=120.0)
 ```
 
-Serves a fresh env per rollout, in this process, over the same control channel as every placement.
-`source` is any pointer to the env:
+Runs an environment in this process. `source` can be:
 
 - **a `.py` file or directory** that declares it, imported fresh per rollout (sibling imports
   resolve). **`env`** pins one name when the source declares several; it defaults to the placed
   task's env.
-- **a live `Environment`** declared at module level - its declaring module's file is the recipe;
-  the instance itself is never served, so every rollout is still fresh.
+- **a live `Environment`** - served directly.
 - **a `(task) -> Environment` constructor** for envs built in code (integrations, parameterized
   envs), called fresh per rollout with the placed row.
 
-`ready_timeout` bounds `@env.initialize` startup. The freshness boundary is the env's own source:
-it is re-imported per rollout, while modules it imports follow normal Python import caching and are
-shared process-wide - state kept in helper modules persists across rollouts. Env hooks run in this
-process and share its event loop - keep envs async, or use `SubprocessRuntime` / `DockerRuntime`
-when rollouts need whole-process isolation.
+`ready_timeout` bounds `@env.initialize` startup. Paths and constructors create a fresh environment
+per rollout. A live `Environment` instance is shared and guarded by a lock, so acquisitions through
+that `LocalRuntime` are serialized. Env hooks share this process and event loop; use
+`SubprocessRuntime` or `DockerRuntime` when rollouts need process isolation.
 
 ### `SubprocessRuntime`
 
@@ -139,18 +151,22 @@ security override are documented in
 ### `ModalRuntime`
 
 ```python
-ModalRuntime(image_name=None, *, image=None, command=None, app_name="hud-envs", workdir=None, port=8765, runtime_config=None, env_vars=None)
+ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None)
 ```
 
 - **`image_name`** - published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
 - **`image`** - an `Image` to build lazily on first use, as an escape hatch.
 - **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint).
 - **`workdir`** - working directory inside the sandbox. Left unset, Modal keeps the image's `WORKDIR`.
-- **`app_name`** / **`port`** / **`env_vars`** - Modal app name, in-sandbox serving port, and extra environment variables.
+- **`app`** - an already-running, caller-owned Modal app. `ModalRuntime` does not manage its lifecycle.
+- **`app_name`** - a Modal app to look up. Defaults to `hud-envs` when `app` is not supplied; `app` and `app_name` are mutually exclusive.
+- **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables.
 
 For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
 sandbox in your Modal account and merges `env_vars` into `main` at acquisition
-time. See [Compose environments](/v6/experimental/compose#runtime-behavior).
+time. GPU requests require a plain or platform-materialized image; Modal Compose
+rejects them because its nested Docker daemon cannot receive the sandbox GPU.
+See [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 Requires the `modal` extra and a configured token.
 
@@ -175,11 +191,11 @@ Compose authoring conventions are documented in
 ### `HUDRuntime`
 
 ```python
-HUDRuntime(*, run_timeout=3600.0, runtime_url=None)
+HUDRuntime(*, run_timeout=None, runtime_url=None)
 ```
 
-- **`run_timeout`** - hard deadline for the full rollout lifecycle. A timeout
-  returns an errored `Run` with `stop_reason="timeout"` while teardown completes.
+- **`run_timeout`** - deprecated alias for the `rollout_timeout` passed to `Task.run` or
+  `Taskset.run`.
 - **`runtime_url`** - override the runtime endpoint the tunnel connects to.
 
 The SDK leases your deployed env by name and tunnels to its control channel; the agent loop runs local.
@@ -187,17 +203,21 @@ The SDK leases your deployed env by name and tunnels to its control channel; the
 ### `HostedRuntime`
 
 ```python
-HostedRuntime(*, poll_interval=5.0, run_timeout=3600.0)
+HostedRuntime(*, poll_interval=5.0, run_timeout=None)
 ```
 
 - **`poll_interval`** - seconds between trace-status polls while the rollout runs remotely.
-- **`run_timeout`** - hard deadline including submission, provisioning, queueing,
-  and execution. A timeout requests cancellation and returns an errored `Run`.
+- **`run_timeout`** - deprecated alias for the `rollout_timeout` passed to `Task.run` or
+  `Taskset.run`.
+
+For example, a task with `RuntimeLimits(run_timeout_s=18_000)` can omit `rollout_timeout` to avoid
+adding an SDK-wide cap. To add one, pass a larger value such as
+`task.run(agent, runtime=HostedRuntime(), rollout_timeout=18_600)`, leaving time for queueing and
+provisioning.
 
 Where `HUDRuntime` runs the agent loop locally against a tunneled env, `HostedRuntime` runs the
-**whole rollout** off-box: the platform leases an instance, brings the env's container up on it, and
-runs the agent right next to it. This process only submits the rollout and polls its trace to
-completion. It supports gateway agents from
+**whole rollout** remotely, with the agent running alongside the task environment. This process
+only submits the rollout and polls its trace to completion. It supports gateway agents from
 [`create_agent`](/v6/reference/agents#create-agent); agents with a custom `model_client` must use
 `HUDRuntime` or `LocalRuntime`.
 

@@ -139,33 +139,36 @@ def main() -> None:
         console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
         return
 
-    try:
-        if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
-            console.print(
-                Panel.fit(
-                    "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
-                    border_style="cyan",
-                )
-            )
-            console.print("\n[yellow]Quick Start:[/yellow]")
-            console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]\n")
+    from .utils.usage import recorded_invocation
 
-        app()
-    except typer.Exit as e:
+    with recorded_invocation(sys.argv):
         try:
-            exit_code = getattr(e, "exit_code", 0)
-        except Exception:
-            exit_code = 1
-        if exit_code != 0:
+            if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
+                console.print(
+                    Panel.fit(
+                        "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
+                        border_style="cyan",
+                    )
+                )
+                console.print("\n[yellow]Quick Start:[/yellow]")
+                console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]\n")
+
+            app()
+        except typer.Exit as e:
+            try:
+                exit_code = getattr(e, "exit_code", 0)
+            except Exception:
+                exit_code = 1
+            if exit_code != 0:
+                from hud.utils.hud_console import hud_console
+
+                hud_console.info(SUPPORT_HINT)
+            raise
+        except HudException as e:
             from hud.utils.hud_console import hud_console
 
-            hud_console.info(SUPPORT_HINT)
-        raise
-    except HudException as e:
-        from hud.utils.hud_console import hud_console
-
-        hud_console.render_exception(e)
-        raise typer.Exit(1) from e
+            hud_console.render_exception(e)
+            raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":

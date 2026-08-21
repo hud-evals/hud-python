@@ -32,6 +32,7 @@ class TestHudInit:
             "RuntimeGPU",
             "RuntimeLimits",
             "RuntimeResources",
+            "RuntimeTPU",
             "LocalRuntime",
             "SubprocessRuntime",
             "SyncPlan",

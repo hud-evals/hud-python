@@ -26,7 +26,9 @@ jobs:
           uv build
           uv publish
 
-      # docs.hud.ai builds the SDK tab from the docs branch.
+      # docs.hud.ai builds the SDK tab from the docs branch. Prereleases stay
+      # off it: the branch tracks the latest stable release.
       - name: Point docs at this release
+        if: ${{ !github.event.release.prerelease }}
         run: |
           git push --force origin "${GITHUB_SHA}:refs/heads/docs"

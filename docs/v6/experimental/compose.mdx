@@ -5,6 +5,9 @@ icon: "cubes"
 tag: "Experimental"
 ---
 
+Its behavior is part of the SDK contract; its documentation path, naming, and organization may
+change without a major version.
+
 An environment is rarely one process. A task worth grading tends to be a small world - a database
 the agent may write, an application it may only reach over the network, services with their own
 lifecycles and users. A **Compose environment** declares that world as a standard Compose project:
@@ -16,8 +19,8 @@ supervised startup order - are the container boundaries and `depends_on` conditi
 | Concept | What it is |
 | --- | --- |
 | **`main`** | The service that runs `hud serve`; the only service whose control port HUD publishes. |
-| **Compose document** | The parsed recipe (`hud/eval/compose.py`); `RuntimeConfig.compose` selects it. |
-| **Project root** | The directory serialized and uploaded when the project leaves the machine; `RuntimeConfig.compose_project` names it. |
+| **Compose document** | The parsed recipe; `RuntimeConfig.compose.document` selects it. |
+| **Project root** | The directory serialized and uploaded when the project leaves the machine; `RuntimeConfig.compose.root` names it. |
 | **Build-only service** | A service with `scale: 0` that exists as a build input, never a container. |
 | **Named context** | A `build.additional_contexts` entry - `service:<name>` for a build-only image, a path for a local payload. |
 
@@ -28,11 +31,12 @@ supervised startup order - are the container boundaries and `depends_on` conditi
 
 <div className="part-label">1 · The document is the contract</div>
 
-A Compose row selects its document with `RuntimeConfig.compose`; `compose_project` names the root
-that travels when the project is serialized and uploaded. Everything the build needs - contexts,
-bind mounts, `env_file`, configs, secrets - must live under that root. Host environment
-interpolation, `include`, and `extends` are not part of the serialized contract: the document that
-uploads is the document that runs.
+A Compose row selects its document and project root with `RuntimeConfig.compose`. The project root
+travels when the project is serialized and uploaded. Everything the build needs - contexts,
+bind mounts, `env_file`, configs, secrets - must live under that root. Interpolation resolves from
+the `.env` beside the Compose file and from defaults in the document; HUD does not read values from
+the process environment, so an unbound variable is rejected. `include` and `extends` are not part
+of the serialized contract: the document that uploads is the document that runs.
 
 Every runnable service has an `image`, a `build`, or both; paths are relative to the project. An
 optional `build.sh` beside the document is a preparation hook - it resolves or builds prerequisite
@@ -46,14 +50,13 @@ images before the runtime starts the project.
 ```python
 from pathlib import Path
 
-from hud import DockerRuntime, RuntimeConfig, Task
+from hud import ComposeProject, DockerRuntime, RuntimeConfig, Task
 
 task = Task(
     env="full-stack",
     id="repair",
     runtime_config=RuntimeConfig(
-        compose=Path("compose.yaml"),
-        compose_project=Path("."),
+        compose=ComposeProject(document=Path("compose.yaml"), root=Path(".")),
     ),
 )
 job = await task.run(agent, runtime=DockerRuntime())
@@ -151,7 +154,7 @@ Two consequences do most of the work:
 
 ## Runtime behavior
 
-**Local `DockerRuntime`** (`hud/eval/runtime.py`) runs `build.sh` when present, stages override
+**Local `DockerRuntime`** (`hud/eval/runtime/docker.py`) runs `build.sh` when present, stages override
 files for `main`'s security options, resources, and an ephemeral host port, starts the project with
 `docker compose up` (`--no-build` after a successful preparation hook, otherwise `--build`),
 returns the published control-channel address, and removes the project and its volumes when the
@@ -161,9 +164,9 @@ rollout ends.
 project root, the platform builds every service privately from it, and hosted rollouts run the
 stack. Declared `RuntimeResources` apply.
 
-`compose_service_access=True` mounts a Docker socket at `/media/hud/docker.sock` in `main`. It is
-an explicit capability for environment code that must inspect or copy from sibling service
-containers, and what it grants differs by placement:
+`RuntimeConfig.compose.service_access=True` mounts a Docker socket at `/media/hud/docker.sock` in
+`main`. It is an explicit capability for environment code that must inspect or copy from sibling
+service containers, and what it grants differs by placement:
 
 <Warning>
 Under local `DockerRuntime`, the mounted socket is the **host's own Docker daemon** (remote Docker

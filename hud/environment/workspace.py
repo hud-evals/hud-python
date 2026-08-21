@@ -599,7 +599,7 @@ class Workspace:
         if await self.sandbox_pid() is None or not self.owns_netns:
             yield {}
             return
-        if allowed is None:
+        if allowed is None or frozenset(allowed) == self.allowed_hosts:
             yield self._egress.environment() if self._egress is not None else {}
             return
         if not allowed:
@@ -696,7 +696,7 @@ class Workspace:
                 os.lchown(self.root, self._shell_uid, gid)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
-        if (self.peers or self.local_aliases) and self.owns_netns and self._bwrap is not None:
+        if self.owns_netns and self._bwrap is not None:
             self._hosts_path = self._write_hosts()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -864,6 +864,7 @@ class Workspace:
         no_new_privs: bool = True,
         max_wait: float | None = None,
         scope: Literal["session", "environment"] = "session",
+        writable_hosts: bool = False,
     ) -> ProcessResult:
         """Run a captured command against this workspace.
 
@@ -875,25 +876,53 @@ class Workspace:
         command's lifetime. ``isolated=True`` gives it a fresh no-network
         namespace instead. ``mounts`` can replace the session's mounts where
         an operation is allowed to see paths hidden from sessions.
+        ``writable_hosts`` gives a trusted command a private, disposable copy
+        of the workspace's hosts file.
         """
         bwrap = self._bwrap
         if bwrap is None:
             raise RuntimeError("workspace commands require bwrap")
+        if isolated and writable_hosts:
+            raise ValueError("writable hosts require the workspace network")
         process_env = dict(env or {})
         if not isolated:
-            async with self.visiting(allowed_hosts) as visitor_env:
-                process_env.update(visitor_env)
-                process = await self.launch(
-                    command,
-                    mounts=mounts,
-                    env=process_env,
-                    cwd=cwd,
-                    identity=identity,
-                    inherit_workspace_env=inherit_workspace_env,
-                    no_new_privs=no_new_privs,
-                    scope=scope,
-                )
-                return await process.complete(max_wait=max_wait)
+            writable_hosts_path: Path | None = None
+            hosts_dir: Path | None = None
+            try:
+                if writable_hosts:
+                    hosts_dir = Path(
+                        tempfile.mkdtemp(
+                            prefix="hosts-",
+                            dir=self._credentials_dir().parent,
+                        )
+                    )
+                    hosts_dir.chmod(0o711)
+                    writable_hosts_path = hosts_dir / "hosts"
+                    shutil.copyfile(self._hosts_path or Path("/etc/hosts"), writable_hosts_path)
+                    writable_hosts_path.chmod(0o644)
+                command_mounts = self.mounts if mounts is None else mounts
+                if writable_hosts_path is not None:
+                    command_mounts = [
+                        *command_mounts,
+                        Mount("rw", src=str(writable_hosts_path), dst="/etc/hosts"),
+                    ]
+                async with self.visiting(allowed_hosts) as visitor_env:
+                    process_env.update(visitor_env)
+                    process = await self.launch(
+                        command,
+                        mounts=command_mounts,
+                        env=process_env,
+                        cwd=cwd,
+                        identity=identity,
+                        inherit_workspace_env=inherit_workspace_env,
+                        no_new_privs=no_new_privs,
+                        scope=scope,
+                    )
+                    return await process.complete(max_wait=max_wait)
+            finally:
+                if hosts_dir is not None:
+                    with contextlib.suppress(FileNotFoundError):
+                        shutil.rmtree(hosts_dir)
 
         if allowed_hosts:
             raise ValueError("an isolated workspace command has no network")
@@ -1088,9 +1117,14 @@ class Workspace:
         for mount in self._system_mounts:
             argv.extend(mount.to_bwrap_args(bind_devices=bind_host_devices))
         argv.extend(["--bind", str(self.root), self._guest_path])
-        for m in self.mounts if mounts is None else mounts:
+        selected_mounts = self.mounts if mounts is None else mounts
+        for m in selected_mounts:
             argv.extend(m.to_bwrap_args(bind_devices=bind_host_devices))
-        if mount_hosts and self._hosts_path is not None:
+        if (
+            mount_hosts
+            and self._hosts_path is not None
+            and not any(mount.dst == "/etc/hosts" for mount in selected_mounts)
+        ):
             # Last, so it survives whatever the caller mounted over /etc: a
             # peer the task can address by port but not by name is not at the
             # address the task expects.
@@ -1490,13 +1524,17 @@ class Workspace:
         process arguments do not disclose that path.
         """
         substrate = Path("/etc/hosts")
+        local_aliases = {*self.local_aliases, socket.gethostname()}
+        peer_names = {peer.name for peer in self.peers}
+        if collision := local_aliases & peer_names:
+            raise ValueError(f"workspace local alias conflicts with peer {sorted(collision)[0]!r}")
         path = self._configured_hosts_path or self._credentials_dir() / "hosts"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             hosts_text(
                 self.peers,
                 substrate.read_text() if substrate.is_file() else "",
-                local_aliases=sorted(self.local_aliases),
+                local_aliases=sorted(local_aliases),
                 reserved_ports=self.ports,
             ),
             encoding="utf-8",

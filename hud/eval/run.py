@@ -8,9 +8,8 @@ grades, and tears down, filling a :class:`Run` along the way::
     run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
 
 It is the *client-here* path: the agent loop runs in this process against a
-:class:`~hud.eval.runtime.Provider`'s channel. The same driver runs on the
-daemon (the leased box's agent loop is just ``rollout`` over a
-``DockerRuntime``), in ``Chat`` per turn, and in ``AgentTool`` per invocation.
+:class:`~hud.eval.runtime.Provider`'s channel. The same driver handles hosted
+execution once delegated, each ``Chat`` turn, and each ``AgentTool`` invocation.
 Delegated hosted execution is a different act — see
 :class:`hud.eval.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
 chooses between them; the atom itself never branches on placement.
@@ -47,9 +46,62 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
 
     from .runtime import Provider
+    from .runtime.core import RuntimeConfig, RuntimeSession
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
+
+
+def validate_rollout_timeouts(
+    task: Task,
+    agent: Agent,
+    rollout_timeout: float | None,
+    *,
+    actor_runtime_config: RuntimeConfig | None,
+    verifier_runtime_config: RuntimeConfig | None,
+) -> float | None:
+    """Validate configured phase limits and return the effective agent timeout."""
+    from hud.agents.tool_agent import ToolAgent
+
+    agent_timeout = agent.config.timeout_seconds if isinstance(agent, ToolAgent) else None
+    if task.agent_config is not None:
+        agent_timeout = task.agent_config.get("timeout_seconds", agent_timeout)
+
+    actor_limits = actor_runtime_config.limits if actor_runtime_config is not None else None
+    actor_run_timeout = actor_limits.run_timeout_s if actor_limits is not None else None
+    if (
+        agent_timeout is not None
+        and actor_run_timeout is not None
+        and agent_timeout >= actor_run_timeout
+    ):
+        raise ValueError(
+            f"agent timeout ({agent_timeout:g}s) must be less than "
+            f"runtime_config.limits.run_timeout_s ({actor_run_timeout}s)"
+        )
+
+    if rollout_timeout is None:
+        return agent_timeout
+    if rollout_timeout <= 0:
+        raise ValueError("rollout_timeout must be greater than 0")
+
+    if agent_timeout is not None and agent_timeout >= rollout_timeout:
+        raise ValueError(
+            f"agent timeout ({agent_timeout:g}s) must be less than "
+            f"rollout_timeout ({rollout_timeout:g}s)"
+        )
+
+    configs = (("actor", actor_runtime_config), ("verifier", verifier_runtime_config))
+    for phase, config in configs:
+        if config is None or config.limits is None:
+            continue
+        for limit_name in ("startup_timeout_s", "run_timeout_s"):
+            value = getattr(config.limits, limit_name)
+            if value is not None and value >= rollout_timeout:
+                raise ValueError(
+                    f"{phase} runtime_config.limits.{limit_name} ({value}s) must be less than "
+                    f"rollout_timeout ({rollout_timeout:g}s)"
+                )
+    return agent_timeout
 
 
 def _prompt_message(item: Any) -> mcp_types.PromptMessage:
@@ -104,6 +156,14 @@ class Grade:
     info: dict[str, Any] = field(default_factory=dict)
     is_error: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
+    evaluation: dict[str, Any] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.evaluation = dict(self.raw)
+        if isinstance(subscores := self.evaluation.get("subscores"), list):
+            self.evaluation["subscores"] = [
+                SubScore.model_validate(subscore).to_summary() for subscore in subscores
+            ]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Grade:
@@ -113,10 +173,6 @@ class Grade:
             raise HudProtocolError(-32603, "tasks.grade: result must include a numeric 'score'")
         raw_info = data.get("info")
         raw = dict(data)
-        if isinstance(subscores := data.get("subscores"), list):
-            raw["subscores"] = [
-                SubScore.model_validate(subscore).to_summary() for subscore in subscores
-            ]
         return cls(
             reward=float(score),
             done=bool(data.get("done", True)),
@@ -194,8 +250,8 @@ class Run:
 
     @property
     def evaluation(self) -> dict[str, Any]:
-        """The persistence-safe evaluation dict (``grade.raw``)."""
-        return self.grade.raw
+        """A persistence-safe view of the task's evaluation result."""
+        return dict(self.grade.evaluation)
 
     @property
     def trace_id(self) -> str | None:
@@ -291,6 +347,16 @@ class Run:
                 raise
             detail = "".join(traceback.format_exception_only(grade_exc)).strip()
             logger.warning("best-effort grade failed: %s", detail)
+            self.grade = Grade(
+                content=detail,
+                is_error=True,
+                raw={
+                    "score": 0.0,
+                    "answer": self.trace.content,
+                    "content": detail,
+                    "isError": True,
+                },
+            )
             self.trace.status = "error"
             self.record(Step(source="system", error=f"[grading] {detail}"))
             return False
@@ -326,7 +392,12 @@ class Run:
         return run
 
 
-async def _verify(run: Run, client: HudClient, task: Task) -> None:
+async def _verify(
+    run: Run,
+    client: HudClient,
+    task: Task,
+    actor_result: dict[str, Any],
+) -> None:
     """Run an agent-less verifier task and make its evaluation authoritative."""
     started_at = now_iso()
     started = await client.start_task(task.id, task.args)
@@ -343,7 +414,7 @@ async def _verify(run: Run, client: HudClient, task: Task) -> None:
         )
     )
 
-    answer = {"answer": run.trace.content}
+    answer = {"answer": actor_result}
     started_at = now_iso()
     evaluation = await client.grade(answer)
     run.grade = Grade.from_dict(evaluation)
@@ -398,10 +469,21 @@ async def rollout(
     ``cleanup``) so
     callers can tell where the failure landed without reading the trace.
 
-    ``rollout_timeout`` bounds the entire lifecycle, including grading and
-    provider cleanup. A timeout aborts the control transport, lets provider
-    teardown finish in the background, and returns an errored run immediately.
+    ``rollout_timeout`` bounds execution through grading. A timeout aborts the
+    control transport, lets provider teardown finish in the background, and
+    returns an errored run immediately.
     """
+    from .runtime.core import resolve_runtime_config
+
+    agent_timeout = validate_rollout_timeouts(
+        task,
+        agent,
+        rollout_timeout,
+        actor_runtime_config=resolve_runtime_config(runtime, task),
+        verifier_runtime_config=(
+            resolve_runtime_config(runtime, task.verifier) if task.verifier is not None else None
+        ),
+    )
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
@@ -413,9 +495,6 @@ async def rollout(
     from hud.agents.tool_agent import ToolAgent
 
     agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
-    agent_timeout = agent.config.timeout_seconds if isinstance(agent, ToolAgent) else None
-    if task.agent_config is not None:
-        agent_timeout = task.agent_config.get("timeout_seconds", agent_timeout)
     with set_trace_context(trace_id):
         await trace_enter(
             trace_id,
@@ -432,7 +511,25 @@ async def rollout(
 
         async def _drive() -> None:
             nonlocal client, run, _phase
-            async with runtime(task) as addr:
+            actor_result: dict[str, Any] = {}
+            actor_session: RuntimeSession | None = None
+            verifier = task.verifier
+            shared_verifier = (
+                verifier is not None
+                and verifier.env == task.env
+                and verifier.runtime_config is None
+            )
+            async with contextlib.AsyncExitStack() as scope:
+                actor = contextlib.AsyncExitStack()
+                await actor.__aenter__()
+
+                async def close_actor() -> None:
+                    cleanup = asyncio.create_task(actor.aclose())
+                    cleanup.add_done_callback(_consume_task_result)
+                    await asyncio.shield(cleanup)
+
+                scope.push_async_callback(close_actor)
+                addr = await actor.enter_async_context(runtime(task))
                 _phase = "starting task"
                 async with connect(addr) as actor_client:
                     client = actor_client
@@ -472,36 +569,48 @@ async def rollout(
                             run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         _phase = "grading"
 
-                    verifier = task.verifier
                     if verifier is not None:
+                        actor_result = live.grade.raw
+                        assert actor_client.manifest is not None
+                        actor_session = addr.session(actor_client.manifest.session_id)
                         # The verifier is authoritative. Once its phase begins,
                         # an actor-side grade must not survive a verifier failure.
                         live.grade = Grade()
-                    if (
-                        verifier is not None
-                        and verifier.env == task.env
-                        and verifier.runtime_config is None
-                    ):
+                    if shared_verifier:
+                        assert verifier is not None
                         _phase = "verifying"
-                        await _verify(live, actor_client, verifier)
+                        await _verify(live, actor_client, verifier, actor_result)
                         _phase = "cleanup"
                         return
 
-                _phase = "actor cleanup"
+                if rollout_expired:
+                    return
+                if verifier is None:
+                    _phase = "actor cleanup"
+                    await actor.aclose()
+                    _phase = "cleanup"
+                    return
 
-            if rollout_expired:
-                return
-            verifier = task.verifier
-            if verifier is not None:
-                _phase = "provisioning verifier"
-                async with (
-                    runtime(verifier) as verifier_addr,
-                    connect(verifier_addr) as verifier_client,
-                ):
+                assert actor_session is not None
+                _phase = "snapshotting actor"
+                async with actor_session.snapshot() as archive:
+                    _phase = "actor cleanup"
+                    await actor.aclose()
+                    client = None
+                    if rollout_expired:
+                        return
+                    _phase = "provisioning verifier"
+                    verifier_addr = await scope.enter_async_context(runtime(verifier))
+                    verifier_client = await scope.enter_async_context(connect(verifier_addr))
+                    if archive is not None:
+                        assert verifier_client.manifest is not None
+                        await verifier_addr.session(verifier_client.manifest.session_id).restore(
+                            archive
+                        )
                     client = verifier_client
                     _phase = "verifying"
-                    await _verify(live, verifier_client, verifier)
-                    _phase = "cleanup"
+                    await _verify(live, verifier_client, verifier, actor_result)
+                _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
         try:

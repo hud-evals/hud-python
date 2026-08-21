@@ -19,6 +19,7 @@ class TestInitModule:
 
         expected = [
             "Chat",
+            "ComposeProject",
             "DockerRuntime",
             "Environment",
             "Grade",
@@ -31,6 +32,7 @@ class TestInitModule:
             "RuntimeGPU",
             "RuntimeLimits",
             "RuntimeResources",
+            "RuntimeTPU",
             "LocalRuntime",
             "SubprocessRuntime",
             "SyncPlan",

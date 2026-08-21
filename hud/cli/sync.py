@@ -94,7 +94,10 @@ def _export_taskset(
         out = Path(output_path)
         if out.suffix.lower() == ".csv":
             out.parent.mkdir(parents=True, exist_ok=True)
-            _write_csv(out, [task.model_dump(exclude_none=True) for task in remote_taskset])
+            _write_csv(
+                out,
+                [task.model_dump(mode="json", exclude_none=True) for task in remote_taskset],
+            )
         else:
             out = remote_taskset.to_file(out)
     except (HudException, ValueError) as e:

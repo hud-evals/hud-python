@@ -48,9 +48,13 @@ class ClaudeBashTool(SSHTool):
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         if arguments.get("restart"):
-            # SSH session lives across calls; "restart" is a no-op for us.
             return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text="(restart acknowledged)")],
+                content=[
+                    mcp_types.TextContent(
+                        type="text",
+                        text="restart is unnecessary; each command runs in a fresh shell session",
+                    )
+                ],
             )
         command = arguments.get("command")
         if not command:

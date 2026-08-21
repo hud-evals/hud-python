@@ -17,8 +17,11 @@ if command -v apt-get >/dev/null 2>&1; then
   rm -rf /var/lib/apt/lists/*
 elif command -v apk >/dev/null 2>&1; then
   apk add --no-cache bash bubblewrap util-linux python3 py3-pip git curl ca-certificates
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y bubblewrap util-linux python3 python3-pip git curl ca-certificates
+  dnf clean all
 else
-  echo "hud: Harbor environments require an apt- or apk-based image" >&2
+  echo "hud: Harbor environments require an apt-, apk-, or dnf-based image" >&2
   exit 1
 fi
 
