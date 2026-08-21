@@ -185,7 +185,9 @@ async def test_file_operations_use_the_exec_channel(tmp_path: Path) -> None:
             client = SSHClient(ws.capability(), conn)
             await client.write_text("hello world.txt", "héllo\n")
             assert await client.read_text("hello world.txt") == "héllo\n"
-            assert await client.listdir(".") == ["hello world.txt"]
+            await client.write_text("empty.txt", "")
+            assert await client.read_text("empty.txt") == ""
+            assert await client.listdir(".") == ["empty.txt", "hello world.txt"]
             # Absolute paths mean what they say in the session's namespace —
             # never re-anchored under the workspace.
             outside = tmp_path / "outside.txt"

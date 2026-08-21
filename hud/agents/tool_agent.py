@@ -30,7 +30,7 @@ from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
-from hud.agents.tools.ssh import SSHInfrastructureErrorResult
+from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient, RFBClient
 from hud.capabilities.ssh import SSHConnectionError
@@ -339,6 +339,27 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             )
         args = call.arguments or {}
         try:
+            if isinstance(tool, SSHTool) and self.config.tool_timeout_seconds is not None:
+                timeout = self.config.tool_timeout_seconds
+                deadline = asyncio.timeout(timeout)
+                try:
+                    async with deadline:
+                        return await tool.execute(args)
+                except TimeoutError:
+                    if not deadline.expired():
+                        raise
+                    return MCPToolResult(
+                        content=[
+                            mcp_types.TextContent(
+                                type="text",
+                                text=(
+                                    f"{call.name} timed out after {timeout:g}s; "
+                                    "retry with a shorter command"
+                                ),
+                            )
+                        ],
+                        isError=True,
+                    )
             return await tool.execute(args)
         except (TimeoutError, asyncio.CancelledError):
             raise

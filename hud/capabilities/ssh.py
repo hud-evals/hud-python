@@ -214,12 +214,11 @@ class SSHClient(CapabilityClient):
                 )
                 await self.run(_powershell(script), check=True, timeout=remaining_timeout())
             return
-        await self.run(
-            f"cat > {shlex.quote(path)}",
-            input=content,
-            check=True,
-            timeout=timeout_s,
-        )
+        run_kwargs: dict[str, Any] = {"input": content}
+        if not content:
+            # AsyncSSH treats empty input as absent; DEVNULL still delivers EOF.
+            run_kwargs["stdin"] = asyncssh.DEVNULL
+        await self.run(f"cat > {shlex.quote(path)}", check=True, timeout=timeout_s, **run_kwargs)
 
     async def listdir(self, path: str, *, timeout_s: float | None = None) -> list[str]:
         """List direct children through the exec channel."""

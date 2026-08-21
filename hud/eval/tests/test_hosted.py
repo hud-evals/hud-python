@@ -95,6 +95,8 @@ def test_hosted_spec_serializes_full_config() -> None:
     agent = _agent()
     agent.config.system_prompt = "be brief"
     agent.config.max_steps = 7
+    agent.config.timeout_seconds = 3600
+    agent.config.tool_timeout_seconds = 1800
 
     spec = agent.hosted_spec()
 
@@ -104,6 +106,8 @@ def test_hosted_spec_serializes_full_config() -> None:
     assert config["model"] == "test-model"
     assert config["max_steps"] == 7
     assert config["system_prompt"] == "be brief"
+    assert config["timeout_seconds"] == 3600
+    assert config["tool_timeout_seconds"] == 1800
     # ...minus what can't or shouldn't cross the wire.
     assert "model_client" not in config
     assert "api_key" not in config

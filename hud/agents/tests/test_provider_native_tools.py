@@ -541,6 +541,9 @@ async def test_claude_bash_restart_is_a_noop() -> None:
     result = await tool.execute({"restart": True})
 
     assert result.isError is False
+    assert result_text(result) == (
+        "restart is unnecessary; each command runs in a fresh shell session"
+    )
     assert _commands(tool) == []  # restart never touches the shell
 
 
