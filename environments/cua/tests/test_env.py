@@ -100,5 +100,8 @@ def test_create_document_requires_exact_contents():
 
 def test_open_website_requires_wikipedia_history():
     check = tasks._open_website.args["bash_checks"][0]
-    assert check["name"] == "visited_wikipedia"
-    assert "www.wikipedia.org" in check["command"]
+    assert check == {
+        "name": "visited_wikipedia",
+        "command": "grep -aFq 'https://www.wikipedia.org/' /home/ubuntu/.config/chromium/Default/History*",
+        "weight": 1.0,
+    }
