@@ -74,6 +74,7 @@ jobs:
           docker_args=()
           if [ "$TEMPLATE" = coding ]; then
             docker_args+=(
+              --cap-add SYS_ADMIN
               --security-opt "seccomp=$GITHUB_WORKSPACE/hud/eval/docker-seccomp.json"
               --security-opt systempaths=unconfined
               --security-opt apparmor=unconfined
