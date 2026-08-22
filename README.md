@@ -156,6 +156,12 @@ A **capability** is a connection the environment exposes; a **harness** attaches
 
 From the [platform UI](https://hud.ai) you can run batches, compare models on the same taskset, and inspect every trace.
 
+Hosted Claude Code and Codex harnesses reach platform inference through an
+environment-owned, workspace-local endpoint. The endpoint is available only to
+`bwrap` workspaces with network isolation; the workspace receives an opaque
+per-session key, while platform credentials and trace attribution stay outside
+its environment and manifest.
+
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
 ## Train on rewards
