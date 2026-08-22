@@ -267,7 +267,7 @@ async def run_claude(
             ssh,
             command,
             events.consume,
-            input_text=None if shell in WINDOWS_SHELLS else prompt,
+            input_text=None if shell in WINDOWS_SHELLS else f"{prompt}\n",
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)

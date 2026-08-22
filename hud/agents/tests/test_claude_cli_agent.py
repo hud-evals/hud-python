@@ -279,7 +279,7 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     assert len(conn.ran) == 1
     assert "claude" in conn.ran[0]
     assert "build it" not in conn.ran[0]
-    assert process.stdin.data == b"build it"
+    assert process.stdin.data == b"build it\n"
     assert process.stdin.eof is True
     assert run.trace.status is None
     assert run.trace.content == "done"
