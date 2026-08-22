@@ -55,8 +55,12 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
 
     assert f"ANTHROPIC_BASE_URL={settings.hud_gateway_url}" in gateway
     assert "ANTHROPIC_API_KEY=hud-key" in gateway
+    assert "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1" in gateway
+    assert "DISABLE_AUTO_COMPACT=1" in gateway
     assert "ANTHROPIC_API_KEY=anthropic-key" in provider
     assert "ANTHROPIC_BASE_URL" not in provider
+    assert "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS" not in provider
+    assert "DISABLE_AUTO_COMPACT" not in provider
     assert "ANTHROPIC_MODEL=claude-sonnet-5" in provider
 
 
@@ -74,6 +78,8 @@ def test_windows_command_encodes_environment_and_arguments(
     encoded = command.rsplit(" ", 1)[1]
     script = base64.b64decode(encoded).decode("utf-16-le")
     assert "$env:ANTHROPIC_API_KEY='hud&key''s'" in script
+    assert "$env:CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS='1'" in script
+    assert "$env:DISABLE_AUTO_COMPACT='1'" in script
     assert "'--system-prompt' 'don''t $expand'" in script
     assert "Get-Content -Raw -Encoding UTF8 '.hud_input.jsonl' | & 'claude'" in script
     assert "'--input-format=stream-json'" in script
