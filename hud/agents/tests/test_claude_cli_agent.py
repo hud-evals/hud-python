@@ -114,6 +114,7 @@ class _FakeStreamProcess:
         returncode: int | None = None,
         pause_after: int | None = None,
     ) -> None:
+        self.stdin = _FakeWriter()
         self.stdout = _FakeReader(stdout, pause_after=pause_after)
         self.stderr = _FakeReader(stderr)
         self.exit_status = exit_status
@@ -129,6 +130,21 @@ class _FakeStreamProcess:
 
     async def wait_closed(self) -> None:
         pass
+
+
+class _FakeWriter:
+    def __init__(self) -> None:
+        self.data = bytearray()
+        self.eof = False
+
+    def write(self, data: bytes) -> None:
+        self.data.extend(data)
+
+    async def drain(self) -> None:
+        pass
+
+    def write_eof(self) -> None:
+        self.eof = True
 
 
 class _FakeCompletedProcess:
@@ -248,7 +264,8 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
 
 async def test_exec_on_bash_runs_inline_without_batch() -> None:
     sink: dict[str, bytes] = {}
-    conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON))
+    process = _FakeStreamProcess(_STREAM_JSON)
+    conn = _FakeConn(sink, process)
     ssh = _ssh_with_conn("bash", conn)
 
     run = _fake_run()
@@ -261,6 +278,9 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     assert conn.deleted == []
     assert len(conn.ran) == 1
     assert "claude" in conn.ran[0]
+    assert "build it" not in conn.ran[0]
+    assert process.stdin.data == b"build it"
+    assert process.stdin.eof is True
     assert run.trace.status is None
     assert run.trace.content == "done"
     assert "messages" not in run.trace.extra
