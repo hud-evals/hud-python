@@ -179,6 +179,8 @@ def claude_command(
             raise ValueError("HUD_API_KEY is required for HUD gateway routing")
         env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
         env["ANTHROPIC_API_KEY"] = settings.api_key
+        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+        env["DISABLE_AUTO_COMPACT"] = "1"
         if trace_id := get_current_trace_id():
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
     elif settings.anthropic_api_key:
