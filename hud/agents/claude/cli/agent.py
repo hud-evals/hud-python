@@ -18,6 +18,7 @@ from hud.agents.cli import (
     WINDOWS_SHELLS,
     powershell,
     powershell_quote,
+    require_platform_isolation,
     resolve_executable,
     run_jsonl,
 )
@@ -31,6 +32,7 @@ from . import computer_mcp
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
+    from hud.environment.platform_inference import InferenceBinding
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
@@ -168,20 +170,27 @@ def claude_command(
     shell: str,
     mcp_config_path: str | None = None,
     executable: str = "claude",
+    inference: InferenceBinding | None = None,
 ) -> str:
     env: dict[str, str] = {}
     use_hud_gateway = config.use_hud_gateway
     if use_hud_gateway is None:
-        use_hud_gateway = settings.api_key is not None
+        use_hud_gateway = inference is not None or settings.api_key is not None
 
     if use_hud_gateway:
-        if not settings.api_key:
+        if inference is not None:
+            base_url = inference.base_url
+            api_key = inference.api_key
+        elif settings.api_key:
+            base_url = settings.hud_gateway_url
+            api_key = settings.api_key
+        else:
             raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-        env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
-        env["ANTHROPIC_API_KEY"] = settings.api_key
+        env["ANTHROPIC_BASE_URL"] = base_url
+        env["ANTHROPIC_API_KEY"] = api_key
         env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
         env["DISABLE_AUTO_COMPACT"] = "1"
-        if trace_id := get_current_trace_id():
+        if inference is None and (trace_id := get_current_trace_id()):
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
     elif settings.anthropic_api_key:
         env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
@@ -247,6 +256,7 @@ async def run_claude(
     mcp_servers: dict[str, dict[str, Any]],
     prompt: str,
     executable: str = "claude",
+    inference: InferenceBinding | None = None,
 ) -> None:
     files: dict[str, str] = {}
     input_text = (
@@ -272,6 +282,7 @@ async def run_claude(
         shell,
         mcp_config_path=mcp_config_path,
         executable=executable,
+        inference=inference,
     )
     if shell in WINDOWS_SHELLS:
         files[RUN_SCRIPT_PATH] = f"@echo off\r\n{command}\r\n"
@@ -313,6 +324,7 @@ class ClaudeCLIAgent(Agent):
     async def __call__(self, run: Run) -> None:
         mcp_servers: dict[str, dict[str, Any]] = {}
         ssh = cast("SSHClient", await run.client.open("ssh"))
+        require_platform_isolation(ssh, run.client.inference)
         manifest = run.client.manifest
         assert manifest is not None
         bindings = manifest.bindings
@@ -361,6 +373,7 @@ class ClaudeCLIAgent(Agent):
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
                 executable=executable,
+                inference=run.client.inference,
             )
 
 

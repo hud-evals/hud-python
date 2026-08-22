@@ -27,6 +27,7 @@ from hud.capabilities import (
     RFBClient,
     SSHClient,
 )
+from hud.environment.platform_inference import InferenceBinding
 from hud.environment.utils import read_frame, send_frame, splice
 
 if TYPE_CHECKING:
@@ -124,6 +125,7 @@ class HudClient:
         self._opened: dict[str, CapabilityClient] = {}
         self._forwarders: list[asyncio.Server] = []
         self._tunnels: set[asyncio.Task[None]] = set()
+        self.inference: InferenceBinding | None = None
 
     # ─── lifecycle ────────────────────────────────────────────────────
 
@@ -322,6 +324,29 @@ class HudClient:
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
 
+    async def bind_inference(
+        self,
+        *,
+        upstream_url: str,
+        token: str,
+        trace_id: str | None = None,
+    ) -> InferenceBinding:
+        """Ask the environment server to expose scoped inference inside its workspace."""
+        result = await self._call(
+            "platform.inference.bind",
+            {
+                "upstream_url": upstream_url,
+                "token": token,
+                "trace_id": trace_id,
+            },
+        )
+        base_url = result.get("base_url")
+        api_key = result.get("api_key")
+        if not isinstance(base_url, str) or not isinstance(api_key, str):
+            raise HudProtocolError(-32603, "platform inference binding was malformed")
+        self.inference = InferenceBinding(base_url=base_url, api_key=api_key)
+        return self.inference
+
     # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
     async def _call(
@@ -447,6 +472,16 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIte
         parts.port or 0,
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
     )
+    try:
+        if runtime.inference is not None:
+            await client.bind_inference(
+                upstream_url=runtime.inference.upstream_url,
+                token=runtime.inference.token,
+                trace_id=runtime.inference.trace_id,
+            )
+    except BaseException:
+        await client.close()
+        raise
     owner = asyncio.current_task()
     assert owner is not None
     heartbeat_error: Exception | None = None
@@ -485,4 +520,11 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIte
         raise
 
 
-__all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo", "connect"]
+__all__ = [
+    "HudClient",
+    "HudProtocolError",
+    "InferenceBinding",
+    "Manifest",
+    "ServerInfo",
+    "connect",
+]
