@@ -30,6 +30,7 @@ from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
+from hud.environment.platform_inference import InferenceBinding
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolResult
@@ -66,6 +67,20 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
     assert "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS" not in provider
     assert "DISABLE_AUTO_COMPACT" not in provider
     assert "ANTHROPIC_MODEL=claude-sonnet-5" in provider
+
+
+def test_command_prefers_environment_inference_binding() -> None:
+    binding = InferenceBinding(
+        base_url="http://127.0.0.1:49123/p/opaque",
+        api_key="workspace-key",
+    )
+
+    gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash", inference=binding)
+
+    assert "ANTHROPIC_BASE_URL=http://127.0.0.1:49123/p/opaque" in gateway
+    assert "ANTHROPIC_API_KEY=workspace-key" in gateway
+    assert "HUD_API_KEY" not in gateway
+    assert "Trace-Id" not in gateway
 
 
 def test_windows_command_encodes_environment_and_arguments(
@@ -458,6 +473,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
     ssh = SSHClient(shell, cast("Any", object()))
 
     class Client:
+        inference = None
         manifest = SimpleNamespace(bindings=[shell, mcp])
 
         async def open(self, ref: str) -> SSHClient:
@@ -499,6 +515,7 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     bridge_active = False
 
     class Client:
+        inference = None
         manifest = SimpleNamespace(bindings=[shell, screen])
 
         async def open(self, ref: str) -> SSHClient:
@@ -583,6 +600,7 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
     bridged: list[str] = []
 
     class Client:
+        inference = None
         manifest = SimpleNamespace(bindings=[shell, *screens])
 
         async def open(self, ref: str) -> SSHClient:
@@ -870,6 +888,7 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
 
     class Client:
         def __init__(self, shell: Capability, ssh: SSHClient) -> None:
+            self.inference = None
             self.manifest = SimpleNamespace(bindings=[shell])
             self.ssh = ssh
 

@@ -18,6 +18,7 @@ from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
+from hud.environment.platform_inference import InferenceBinding
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -102,6 +103,19 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert "--sandbox workspace-write" in command
         assert "--model gpt-5.6-sol" in command
         assert command.endswith(" -")
+
+
+def test_command_prefers_environment_inference_binding() -> None:
+    binding = InferenceBinding(
+        base_url="http://127.0.0.1:49123/p/opaque",
+        api_key="workspace-key",
+    )
+
+    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", inference=binding)
+
+    assert "HUD_API_KEY=workspace-key" in command
+    assert 'model_providers.hud.base_url="http://127.0.0.1:49123/p/opaque"' in command
+    assert "Trace-Id" not in command
 
 
 def test_windows_command_encodes_environment_and_arguments(
@@ -276,6 +290,8 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
     ssh = _FakeSSH(_FakeProcess(_STREAM_JSON), shell="powershell")
 
     class Client:
+        inference = None
+
         async def open(self, ref: str) -> _FakeSSH:
             assert ref == "ssh"
             return ssh
@@ -294,6 +310,7 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
         shell="powershell",
         prompt="Fix it",
         executable="codex",
+        inference=None,
     )
 
 

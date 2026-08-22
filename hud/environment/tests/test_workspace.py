@@ -1136,6 +1136,96 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
         bind_addresses([Peer("db", 5432), Peer("db", 5432)])
 
 
+def test_platform_inference_proxy_replaces_workspace_credentials() -> None:
+    import http.client
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from hud.environment.platform_inference import PlatformInferenceProxy
+
+    received: dict[str, object] = {}
+
+    class Upstream(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            received.update(
+                path=self.path,
+                body=self.rfile.read(length),
+                headers={key.lower(): value for key, value in self.headers.items()},
+            )
+            body = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    upstream = HTTPServer(("127.0.0.1", 0), Upstream)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    proxy = PlatformInferenceProxy()
+    proxy.start()
+    host, port = proxy.address
+    binding = proxy.register(
+        "session",
+        upstream_url=f"http://127.0.0.1:{upstream.server_port}/gateway",
+        token="scoped-runtime-token",
+        trace_id="trace-1",
+        workspace_url=f"http://{host}:{port}",
+    )
+    try:
+        route = urllib.parse.urlsplit(binding.base_url)
+        assert route.hostname is not None
+        connection = http.client.HTTPConnection(route.hostname, route.port, timeout=5)
+        connection.request(
+            "POST",
+            f"{route.path}/v1/messages?beta=1",
+            body=b'{"model":"claude"}',
+            headers={
+                "X-Api-Key": binding.api_key,
+                "Trace-Id": "workspace-chosen",
+                "Content-Type": "application/json",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.read() == b'{"ok":true}'
+        connection.close()
+
+        assert received["path"] == "/gateway/v1/messages?beta=1"
+        assert received["body"] == b'{"model":"claude"}'
+        headers = cast("dict[str, str]", received["headers"])
+        assert headers["hud-runtime-token"] == "scoped-runtime-token"
+        assert headers["trace-id"] == "trace-1"
+        assert headers.get("x-api-key") is None
+
+        denied = http.client.HTTPConnection(route.hostname, route.port, timeout=5)
+        denied.request("POST", f"{route.path}/v1/messages", headers={"X-Api-Key": "wrong"})
+        denied_response = denied.getresponse()
+        assert denied_response.status == 401
+        denied_response.read()
+        denied.close()
+
+        proxy.unregister("session")
+        gone = http.client.HTTPConnection(route.hostname, route.port, timeout=5)
+        gone.request(
+            "POST",
+            f"{route.path}/v1/messages",
+            headers={"X-Api-Key": binding.api_key},
+        )
+        gone_response = gone.getresponse()
+        assert gone_response.status == 404
+        gone_response.read()
+        gone.close()
+    finally:
+        proxy.stop()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(5)
+
+
 def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
     """Dropping the substrate's entries would cost the workspace localhost."""
     from hud.environment.egress import Peer, hosts_text

@@ -633,6 +633,22 @@ class Workspace:
         """
         return not self.network or self.allowed_hosts is not None
 
+    def add_peer(self, peer: Peer, *, first: bool = False) -> None:
+        """Add a substrate service before the workspace accepts sessions."""
+        if self._sandbox is not None:
+            raise RuntimeError("workspace peers must be bound before its sandbox starts")
+        self.peers = (peer, *self.peers) if first else (*self.peers, peer)
+        if self._hosts_path is not None:
+            self._hosts_path = self._write_hosts()
+
+    def remove_peer(self, name: str) -> None:
+        """Remove a substrate service after the workspace has stopped."""
+        if self._sandbox is not None:
+            raise RuntimeError("workspace peers must be unbound after its sandbox stops")
+        self.peers = tuple(peer for peer in self.peers if peer.name != name)
+        if self._hosts_path is not None:
+            self._hosts_path = self._write_hosts()
+
     def _setpriv(self) -> str | None:
         """Absolute path to ``setpriv``, resolved via the *server's* PATH.
 
