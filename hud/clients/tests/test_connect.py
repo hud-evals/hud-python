@@ -20,9 +20,66 @@ import hud.clients.client as client_module
 from hud.capabilities import Capability, CapabilityClient
 from hud.clients import connect
 from hud.environment.utils import read_frame, send_frame
-from hud.eval.runtime import Runtime
+from hud.eval.runtime import Runtime, RuntimeInference
 
 HELLO_RESULT = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
+
+
+async def test_connect_binds_runtime_inference_after_hello() -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            requests.append(hello)
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            bind = await read_frame(reader)
+            assert bind is not None
+            requests.append(bind)
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": bind["id"],
+                    "result": {
+                        "base_url": "http://127.0.0.1:49123/p/opaque",
+                        "api_key": "workspace-key",
+                    },
+                },
+            )
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    runtime = Runtime(
+        f"tcp://127.0.0.1:{port}",
+        inference=RuntimeInference(
+            upstream_url="https://inference.hud.so",
+            token="scoped-runtime-token",
+            trace_id="trace-1",
+        ),
+    )
+    assert "scoped-runtime-token" not in repr(runtime)
+    try:
+        async with connect(runtime) as client:
+            assert client.inference is not None
+            assert client.inference.base_url == "http://127.0.0.1:49123/p/opaque"
+            assert client.inference.api_key == "workspace-key"
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert [request["method"] for request in requests] == ["hello", "platform.inference.bind"]
+    params = requests[1]["params"]
+    assert isinstance(params, dict)
+    assert params == {
+        "upstream_url": "https://inference.hud.so",
+        "token": "scoped-runtime-token",
+        "trace_id": "trace-1",
+    }
 
 
 async def test_open_retries_transient_capability_connection_failures(

@@ -234,7 +234,7 @@ class _ControlChannel:
         self._live: set[str] = set()
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
-        await self.cancel(session_id)
+        await self._cancel_runner(session_id)
         runner = TaskRunner(self.env.tasks[task_id], args)
         self._runners[session_id] = runner
         try:
@@ -255,6 +255,7 @@ class _ControlChannel:
             return await runner.grade(payload)
         finally:
             current_session_id.reset(token)
+            self.env.unbind_platform_inference(claim_sid)
 
     def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
@@ -269,7 +270,7 @@ class _ControlChannel:
         sid = parked[0]
         return sid, self._runners.pop(sid)
 
-    async def cancel(self, session_id: str) -> None:
+    async def _cancel_runner(self, session_id: str) -> None:
         runner = self._runners.pop(session_id, None)
         if runner is None:
             return
@@ -279,6 +280,12 @@ class _ControlChannel:
             await runner.cancel()
         finally:
             current_session_id.reset(token)
+
+    async def cancel(self, session_id: str) -> None:
+        try:
+            await self._cancel_runner(session_id)
+        finally:
+            self.env.unbind_platform_inference(session_id)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
@@ -351,6 +358,35 @@ class _ControlChannel:
                         await reply_to(
                             msg_id,
                             {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
+                        )
+
+                    elif method == "platform.inference.bind":
+                        upstream_url = params.get("upstream_url")
+                        token = params.get("token")
+                        trace_id = params.get("trace_id")
+                        if not isinstance(upstream_url, str) or not isinstance(token, str):
+                            await error_to(
+                                msg_id,
+                                -32602,
+                                "platform.inference.bind: upstream_url and token must be strings",
+                            )
+                            continue
+                        if trace_id is not None and not isinstance(trace_id, str):
+                            await error_to(
+                                msg_id,
+                                -32602,
+                                "platform.inference.bind: trace_id must be a string",
+                            )
+                            continue
+                        binding = env.bind_platform_inference(
+                            session_id,
+                            upstream_url=upstream_url,
+                            token=token,
+                            trace_id=trace_id,
+                        )
+                        await reply_to(
+                            msg_id,
+                            {"base_url": binding.base_url, "api_key": binding.api_key},
                         )
 
                     elif method == "tasks.start":
