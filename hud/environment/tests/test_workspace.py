@@ -200,6 +200,25 @@ async def test_file_operations_use_the_exec_channel(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_upload_streams_binary_into_the_session_namespace(tmp_path: Path) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(bytes(range(256)) * 8192)
+    root = tmp_path / "root"
+    ws = Workspace(root)
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            client = SSHClient(ws.capability(), conn)
+            await client.upload(source, "managed/tool", executable=True)
+    finally:
+        await ws.stop()
+
+    uploaded = root / "managed/tool"
+    assert uploaded.read_bytes() == source.read_bytes()
+    assert uploaded.stat().st_mode & 0o777 == 0o555
+
+
+@pytest.mark.asyncio
 async def test_output_arrives_while_the_command_is_still_running(tmp_path: Path) -> None:
     """Held until exit, a long build tells the agent nothing while it runs and
     a session that never exits says nothing at all."""
