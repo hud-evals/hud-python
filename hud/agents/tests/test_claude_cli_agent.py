@@ -40,6 +40,10 @@ if TYPE_CHECKING:
 def _clear_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "api_key", None)
     monkeypatch.setattr(settings, "anthropic_api_key", None)
+    monkeypatch.setattr(
+        "hud.agents.claude.cli.agent.resolve_executable",
+        AsyncMock(return_value="claude"),
+    )
 
 
 def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,7 +75,7 @@ def test_windows_command_encodes_environment_and_arguments(
     script = base64.b64decode(encoded).decode("utf-16-le")
     assert "$env:ANTHROPIC_API_KEY='hud&key''s'" in script
     assert "'--system-prompt' 'don''t $expand'" in script
-    assert "Get-Content -Raw -Encoding UTF8 '.hud_prompt.txt' | & claude" in script
+    assert "Get-Content -Raw -Encoding UTF8 '.hud_prompt.txt' | & 'claude'" in script
     assert "not embedded" not in script
     assert "python" not in script
 
@@ -475,7 +479,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
     await agent(
         cast(
             "Any",
-            SimpleNamespace(client=Client(), prompt_text="call the tool"),
+            SimpleNamespace(client=Client(), prompt_text="call the tool", runtime_config=None),
         )
     )
 
@@ -546,7 +550,7 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     await agent(
         cast(
             "Any",
-            SimpleNamespace(client=Client(), prompt_text="use the computer"),
+            SimpleNamespace(client=Client(), prompt_text="use the computer", runtime_config=None),
         )
     )
 
@@ -630,7 +634,16 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
     monkeypatch.setattr(computer_mcp, "bridge_computer_mcp", bridge)
     monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute)
 
-    await agent(cast("Any", SimpleNamespace(client=Client(), prompt_text="use both screens")))
+    await agent(
+        cast(
+            "Any",
+            SimpleNamespace(
+                client=Client(),
+                prompt_text="use both screens",
+                runtime_config=None,
+            ),
+        )
+    )
 
     assert bridged == []
 
@@ -893,8 +906,10 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
 
     agent = ClaudeCLIAgent()
     monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute)
-    run_a = SimpleNamespace(client=Client(shell_a, ssh_a), prompt_text="first")
-    run_b = SimpleNamespace(client=Client(shell_b, ssh_b), prompt_text="second")
+    run_a = SimpleNamespace(client=Client(shell_a, ssh_a), prompt_text="first", runtime_config=None)
+    run_b = SimpleNamespace(
+        client=Client(shell_b, ssh_b), prompt_text="second", runtime_config=None
+    )
 
     first = asyncio.create_task(agent(cast("Any", run_a)))
     await first_entered.wait()

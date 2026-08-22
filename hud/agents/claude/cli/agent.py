@@ -14,7 +14,13 @@ from anthropic.types.beta import BetaMessage
 
 from hud.agents.base import Agent
 from hud.agents.claude.agent import ClaudeAgent
-from hud.agents.cli import WINDOWS_SHELLS, powershell, powershell_quote, run_jsonl
+from hud.agents.cli import (
+    WINDOWS_SHELLS,
+    powershell,
+    powershell_quote,
+    resolve_executable,
+    run_jsonl,
+)
 from hud.agents.types import ClaudeCLIConfig, ToolStep
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
@@ -32,6 +38,11 @@ logger = logging.getLogger(__name__)
 PROMPT_PATH = ".hud_prompt.txt"
 MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
+
+_MANAGED_CLAUDE_PATHS = {
+    "linux-x64": "/media/hud/bin/claude/linux-x64/claude",
+    "linux-x64-musl": "/media/hud/bin/claude/linux-x64-musl/claude",
+}
 
 
 class ClaudeEvents:
@@ -157,6 +168,7 @@ def claude_command(
     shell: str,
     prompt: str,
     mcp_config_path: str | None = None,
+    executable: str = "claude",
 ) -> str:
     env: dict[str, str] = {}
     use_hud_gateway = config.use_hud_gateway
@@ -188,10 +200,11 @@ def claude_command(
             env[name] = config.model
 
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    env["DISABLE_AUTOUPDATER"] = "1"
     env["IS_SANDBOX"] = "1"
 
     args: list[str] = [
-        "claude",
+        executable,
         "--verbose",
         "--output-format=stream-json",
         "--print",
@@ -211,7 +224,8 @@ def claude_command(
             [
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
                 f"Get-Content -Raw -Encoding UTF8 {powershell_quote(PROMPT_PATH)}"
-                f" | & claude {' '.join(powershell_quote(arg) for arg in args[1:])}",
+                f" | & {powershell_quote(executable)} "
+                f"{' '.join(powershell_quote(arg) for arg in args[1:])}",
                 "exit $LASTEXITCODE",
             ]
         )
@@ -231,6 +245,7 @@ async def run_claude(
     shell: str,
     mcp_servers: dict[str, dict[str, Any]],
     prompt: str,
+    executable: str = "claude",
 ) -> None:
     files: dict[str, str] = {}
     mcp_config_path = MCP_CONFIG_PATH if mcp_servers else None
@@ -239,7 +254,7 @@ async def run_claude(
     if shell in WINDOWS_SHELLS:
         files[PROMPT_PATH] = prompt
 
-    command = claude_command(config, shell, prompt, mcp_config_path)
+    command = claude_command(config, shell, prompt, mcp_config_path, executable)
     if shell in WINDOWS_SHELLS:
         files[RUN_SCRIPT_PATH] = f"@echo off\r\n{command}\r\n"
         command = f"cmd /c {RUN_SCRIPT_PATH}"
@@ -279,6 +294,12 @@ class ClaudeCLIAgent(Agent):
         assert manifest is not None
         bindings = manifest.bindings
         shell = ssh.capability.params.get("shell", "bash")
+        executable = await resolve_executable(
+            ssh,
+            "claude",
+            _MANAGED_CLAUDE_PATHS,
+            run.runtime_config,
+        )
 
         rfb_bindings = [cap for cap in bindings if cap.protocol.split("/", 1)[0] == "rfb"]
         async with AsyncExitStack() as resources:
@@ -316,6 +337,7 @@ class ClaudeCLIAgent(Agent):
                 shell=shell,
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
+                executable=executable,
             )
 
 

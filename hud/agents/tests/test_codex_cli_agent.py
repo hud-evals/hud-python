@@ -11,10 +11,12 @@ from unittest.mock import AsyncMock
 import pytest
 from mcp.types import TextContent
 
+from hud.agents.cli import resolve_executable
 from hud.agents.codex import CodexCLIAgent
 from hud.agents.codex.agent import codex_command, run_codex
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
+from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 
@@ -23,6 +25,10 @@ from hud.telemetry.context import set_trace_context
 def _clear_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "api_key", None)
     monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(
+        "hud.agents.codex.agent.resolve_executable",
+        AsyncMock(return_value="codex"),
+    )
 
 
 class _FakeReader:
@@ -177,7 +183,7 @@ def test_windows_command_encodes_environment_and_arguments(
     assert "Remove-Item -Recurse -Force $codexHome" in script
     assert "--ignore-user-config" not in script
     assert "'--sandbox' 'danger-full-access'" in script
-    assert "& codex 'exec'" in script
+    assert "& 'codex' 'exec'" in script
     assert script.endswith(";exit $hudExitCode")
 
 
@@ -342,7 +348,7 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
     agent = CodexCLIAgent()
     execute = AsyncMock()
     monkeypatch.setattr("hud.agents.codex.agent.run_codex", execute)
-    run = SimpleNamespace(client=Client(), prompt_text="Fix it")
+    run = SimpleNamespace(client=Client(), prompt_text="Fix it", runtime_config=None)
 
     await agent(cast("Any", run))
 
@@ -352,4 +358,42 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
         ssh=ssh,
         shell="powershell",
         prompt="Fix it",
+        executable="codex",
     )
+
+
+async def test_executable_resolution_prefers_matching_managed_bundle() -> None:
+    ssh = SimpleNamespace(
+        capability=Capability.ssh(url="ssh://localhost:22", host_pubkey="key", shell="bash"),
+        run=AsyncMock(
+            side_effect=[
+                SimpleNamespace(returncode=0, stdout=b"Linux\nx86_64\ngnu\n"),
+                SimpleNamespace(returncode=0, stdout=b""),
+            ]
+        ),
+    )
+
+    executable = await resolve_executable(
+        cast("Any", ssh),
+        "codex",
+        {"linux-x64": "/media/hud/bin/codex/bin/codex"},
+        RuntimeConfig(resources=RuntimeResources(os="linux")),
+    )
+
+    assert executable == "/media/hud/bin/codex/bin/codex"
+    assert ssh.run.await_count == 2
+
+
+async def test_executable_resolution_rejects_runtime_os_mismatch() -> None:
+    ssh = SimpleNamespace(
+        capability=Capability.ssh(url="ssh://localhost:22", host_pubkey="key", shell="bash"),
+        run=AsyncMock(return_value=SimpleNamespace(returncode=0, stdout=b"Linux\nx86_64\ngnu\n")),
+    )
+
+    with pytest.raises(RuntimeError, match=r"requested 'windows'.*reports 'linux'"):
+        await resolve_executable(
+            cast("Any", ssh),
+            "codex",
+            {},
+            RuntimeConfig(resources=RuntimeResources(os="windows")),
+        )

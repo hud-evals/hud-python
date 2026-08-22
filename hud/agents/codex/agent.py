@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING, Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.base import Agent
-from hud.agents.cli import WINDOWS_SHELLS, powershell, powershell_quote, run_jsonl
+from hud.agents.cli import (
+    WINDOWS_SHELLS,
+    powershell,
+    powershell_quote,
+    resolve_executable,
+    run_jsonl,
+)
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
@@ -22,6 +28,11 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
+
+_MANAGED_CODEX_PATHS = {
+    "linux-x64": "/media/hud/bin/codex/bin/codex",
+    "linux-x64-musl": "/media/hud/bin/codex/bin/codex",
+}
 
 
 class CodexEvents:
@@ -197,10 +208,10 @@ class CodexEvents:
         )
 
 
-def codex_command(config: CodexCLIConfig, shell: str) -> str:
+def codex_command(config: CodexCLIConfig, shell: str, executable: str = "codex") -> str:
     env: dict[str, str] = {}
     args = [
-        "codex",
+        executable,
         "exec",
         "--json",
         "--ephemeral",
@@ -248,7 +259,8 @@ def codex_command(config: CodexCLIConfig, shell: str) -> str:
                 "New-Item -ItemType Directory -Force -Path $codexHome | Out-Null",
                 "$env:CODEX_HOME=$codexHome",
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                f"try {{ & codex {' '.join(powershell_quote(arg) for arg in args[1:])}; "
+                f"try {{ & {powershell_quote(executable)} "
+                f"{' '.join(powershell_quote(arg) for arg in args[1:])}; "
                 "$hudExitCode=$LASTEXITCODE } finally { Remove-Item -Recurse -Force "
                 "$codexHome }",
                 "exit $hudExitCode",
@@ -277,8 +289,9 @@ async def run_codex(
     ssh: SSHClient,
     shell: str,
     prompt: str,
+    executable: str = "codex",
 ) -> None:
-    command = codex_command(config, shell)
+    command = codex_command(config, shell, executable)
     logger.info("SSH exec codex CLI (%d chars)", len(command))
     events = CodexEvents(run, model=config.model, started_at=now_iso())
     returncode, stderr = await run_jsonl(ssh, command, events.consume, input_text=prompt)
@@ -296,12 +309,19 @@ class CodexCLIAgent(Agent):
 
     async def __call__(self, run: Run) -> None:
         ssh = cast("SSHClient", await run.client.open("ssh"))
+        executable = await resolve_executable(
+            ssh,
+            "codex",
+            _MANAGED_CODEX_PATHS,
+            run.runtime_config,
+        )
         await run_codex(
             self.config,
             run,
             ssh=ssh,
             shell=ssh.capability.params.get("shell", "bash"),
             prompt=run.prompt_text,
+            executable=executable,
         )
 
 
