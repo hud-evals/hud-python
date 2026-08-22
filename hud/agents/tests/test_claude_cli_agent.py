@@ -50,8 +50,8 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings, "api_key", "hud-key")
     monkeypatch.setattr(settings, "anthropic_api_key", "anthropic-key")
 
-    gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash", "run")
-    provider = claude_command(ClaudeCLIConfig(use_hud_gateway=False), "bash", "run")
+    gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash")
+    provider = claude_command(ClaudeCLIConfig(use_hud_gateway=False), "bash")
 
     assert f"ANTHROPIC_BASE_URL={settings.hud_gateway_url}" in gateway
     assert "ANTHROPIC_API_KEY=hud-key" in gateway
@@ -69,14 +69,14 @@ def test_windows_command_encodes_environment_and_arguments(
         max_steps=3,
         system_prompt="don't $expand",
     )
-    command = claude_command(config, "powershell", "not embedded")
+    command = claude_command(config, "powershell")
 
     encoded = command.rsplit(" ", 1)[1]
     script = base64.b64decode(encoded).decode("utf-16-le")
     assert "$env:ANTHROPIC_API_KEY='hud&key''s'" in script
     assert "'--system-prompt' 'don''t $expand'" in script
-    assert "Get-Content -Raw -Encoding UTF8 '.hud_prompt.txt' | & 'claude'" in script
-    assert "not embedded" not in script
+    assert "Get-Content -Raw -Encoding UTF8 '.hud_input.jsonl' | & 'claude'" in script
+    assert "'--input-format=stream-json'" in script
     assert "python" not in script
 
 
@@ -190,7 +190,7 @@ class _FakeConn:
                 script = base64.b64decode(match.group(1)).decode("utf-16-le")
             name = next(
                 path
-                for path in (".hud_prompt.txt", ".hud_run.bat", ".hud_mcp_config.json")
+                for path in (".hud_input.jsonl", ".hud_run.bat", ".hud_mcp_config.json")
                 if path in script
             )
             if input_value is not None:
@@ -254,9 +254,16 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     assert conn.ran == ["cmd /c .hud_run.bat"]
     assert all(command.startswith("powershell ") for command in conn.write_commands)
     assert conn.written[".hud_run.bat"].startswith(b"@echo off\r\n")
-    assert conn.written[".hud_prompt.txt"] == b"build it"
+    assert conn.written[".hud_input.jsonl"].endswith(b"\n")
+    assert json.loads(conn.written[".hud_input.jsonl"]) == {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": "build it"}],
+        },
+    }
     assert sink == {}
-    assert set(conn.deleted) == {".hud_prompt.txt", ".hud_run.bat"}
+    assert set(conn.deleted) == {".hud_input.jsonl", ".hud_run.bat"}
     assert run.trace.status is None
     assert run.trace.content == "done"
     assert "messages" not in run.trace.extra
@@ -278,8 +285,16 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     assert conn.deleted == []
     assert len(conn.ran) == 1
     assert "claude" in conn.ran[0]
+    assert "--input-format=stream-json" in conn.ran[0]
     assert "build it" not in conn.ran[0]
-    assert process.stdin.data == b"build it\n"
+    assert process.stdin.data.endswith(b"\n")
+    assert json.loads(process.stdin.data) == {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": "build it"}],
+        },
+    }
     assert process.stdin.eof is True
     assert run.trace.status is None
     assert run.trace.content == "done"
