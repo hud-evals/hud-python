@@ -65,8 +65,10 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
 Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so it
 points at any compatible server (vLLM, a local model) via `base_url`. `ClaudeCLIAgent` and
 `CodexCLIAgent` run their respective CLIs over an `ssh` capability against the env's filesystem and
-stream the CLI's structured events into the HUD trace. SSH-only runs support POSIX and Windows
-workspaces; Claude computer use over an `rfb` capability currently requires a POSIX workspace. Every knob
+stream the CLI's structured events into the HUD trace. They prefer a compatible managed runtime
+bundle and fall back to the environment's `PATH`; they never install or update the executable.
+SSH-only runs support POSIX and Windows workspaces; Claude computer use over an `rfb` capability
+currently requires a POSIX workspace. Every knob
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 

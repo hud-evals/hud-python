@@ -199,11 +199,13 @@ class Run:
         args: dict[str, Any],
         *,
         best_effort_grade: bool = False,
+        runtime_config: RuntimeConfig | None = None,
     ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
         self._best_effort_grade = best_effort_grade
+        self.runtime_config = runtime_config
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -476,11 +478,12 @@ async def rollout(
     """
     from .runtime.core import resolve_runtime_config
 
+    actor_runtime_config = resolve_runtime_config(runtime, task)
     agent_timeout = validate_rollout_timeouts(
         task,
         agent,
         rollout_timeout,
-        actor_runtime_config=resolve_runtime_config(runtime, task),
+        actor_runtime_config=actor_runtime_config,
         verifier_runtime_config=(
             resolve_runtime_config(runtime, task.verifier) if task.verifier is not None else None
         ),
@@ -539,6 +542,7 @@ async def rollout(
                         task.id,
                         task.args,
                         best_effort_grade=task.verifier is not None,
+                        runtime_config=addr.config or actor_runtime_config,
                     )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
