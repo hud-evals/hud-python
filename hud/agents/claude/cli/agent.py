@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PROMPT_PATH = ".hud_prompt.txt"
+INPUT_PATH = ".hud_input.jsonl"
 MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
 
@@ -166,7 +166,6 @@ class ClaudeEvents:
 def claude_command(
     config: ClaudeCLIConfig,
     shell: str,
-    prompt: str,
     mcp_config_path: str | None = None,
     executable: str = "claude",
 ) -> str:
@@ -206,6 +205,7 @@ def claude_command(
     args: list[str] = [
         executable,
         "--verbose",
+        "--input-format=stream-json",
         "--output-format=stream-json",
         "--print",
         f"--permission-mode={config.permission_mode}",
@@ -223,7 +223,7 @@ def claude_command(
         script = ";".join(
             [
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                f"Get-Content -Raw -Encoding UTF8 {powershell_quote(PROMPT_PATH)}"
+                f"Get-Content -Raw -Encoding UTF8 {powershell_quote(INPUT_PATH)}"
                 f" | & {powershell_quote(executable)} "
                 f"{' '.join(powershell_quote(arg) for arg in args[1:])}",
                 "exit $LASTEXITCODE",
@@ -247,13 +247,30 @@ async def run_claude(
     executable: str = "claude",
 ) -> None:
     files: dict[str, str] = {}
+    input_text = (
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}],
+                },
+            }
+        )
+        + "\n"
+    )
     mcp_config_path = MCP_CONFIG_PATH if mcp_servers else None
     if mcp_servers:
         files[MCP_CONFIG_PATH] = json.dumps({"mcpServers": mcp_servers}, indent=2)
     if shell in WINDOWS_SHELLS:
-        files[PROMPT_PATH] = prompt
+        files[INPUT_PATH] = input_text
 
-    command = claude_command(config, shell, prompt, mcp_config_path, executable)
+    command = claude_command(
+        config,
+        shell,
+        mcp_config_path=mcp_config_path,
+        executable=executable,
+    )
     if shell in WINDOWS_SHELLS:
         files[RUN_SCRIPT_PATH] = f"@echo off\r\n{command}\r\n"
         command = f"cmd /c {RUN_SCRIPT_PATH}"
@@ -267,7 +284,7 @@ async def run_claude(
             ssh,
             command,
             events.consume,
-            input_text=None if shell in WINDOWS_SHELLS else f"{prompt}\n",
+            input_text=None if shell in WINDOWS_SHELLS else input_text,
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)
