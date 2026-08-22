@@ -231,7 +231,6 @@ def claude_command(
         )
         return powershell(script)
 
-    args.extend(["--", prompt])
     command = " ".join(shlex.quote(arg) for arg in args)
     env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
     return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {command}'
@@ -264,7 +263,12 @@ async def run_claude(
             await ssh.write_text(path, content)
         logger.info("SSH exec claude CLI (%d chars)", len(command))
         events = ClaudeEvents(run, started_at=now_iso())
-        returncode, stderr = await run_jsonl(ssh, command, events.consume)
+        returncode, stderr = await run_jsonl(
+            ssh,
+            command,
+            events.consume,
+            input_text=None if shell in WINDOWS_SHELLS else prompt,
+        )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)
     finally:
