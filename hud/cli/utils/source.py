@@ -258,6 +258,45 @@ class EnvironmentSource:
         issues: list[ValidationIssue] = []
         issues.extend(self.validate_pyproject_references())
         issues.extend(self.validate_dockerfile())
+        issues.extend(self.validate_fixture_quality())
+        return issues
+
+    def validate_fixture_quality(self) -> list[ValidationIssue]:
+        """Reject host-generated junk and broken links from the build context."""
+        issues: list[ValidationIssue] = []
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = sorted(name for name in dirnames if name not in self.SOURCE_EXCLUDE_DIRS)
+            directory = Path(dirpath)
+
+            if "__MACOSX" in dirnames:
+                path = directory / "__MACOSX"
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        message="Remove macOS archive metadata directory",
+                        file=self.relative_path(path),
+                    )
+                )
+                dirnames.remove("__MACOSX")
+
+            for name in sorted(filenames):
+                path = directory / name
+                if name == ".DS_Store":
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            message="Remove macOS Finder metadata file",
+                            file=self.relative_path(path),
+                        )
+                    )
+                elif path.is_symlink() and not path.exists():
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            message="Broken symbolic link",
+                            file=str(path.relative_to(self.root)).replace("\\", "/"),
+                        )
+                    )
         return issues
 
     def validate_pyproject_references(self) -> list[ValidationIssue]:

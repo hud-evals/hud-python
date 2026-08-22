@@ -428,6 +428,21 @@ class TestDeployEnvironment:
 
         assert exc_info.value.exit_code == 1
 
+    def test_source_fixture_errors_exit_before_deploy(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import deploy_environment
+
+        (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12\n", encoding="utf-8")
+        (tmp_path / ".DS_Store").write_text("finder metadata", encoding="utf-8")
+
+        with (
+            patch("hud.settings.settings") as mock_settings,
+            pytest.raises(typer.Exit) as exc_info,
+        ):
+            mock_settings.api_key = "test-key"
+            deploy_environment(directory=str(tmp_path))
+
+        assert exc_info.value.exit_code == 1
+
 
 class TestDeployAsync:
     """Tests for _deploy_async function."""

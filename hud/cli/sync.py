@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import typer
 
@@ -22,6 +23,7 @@ from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
@@ -175,6 +177,89 @@ def _warn_on_linked_environment_mismatch(
         )
 
 
+def _resolve_registry_environment_detail(
+    platform: PlatformClient,
+    ref: str,
+) -> RegistryEnvironment:
+    lookup_ref = ref.removeprefix("environment/").removeprefix("env/")
+    normalized_ref = normalize_environment_name(lookup_ref)
+    try:
+        UUID(lookup_ref)
+        resolution_ref = lookup_ref
+    except ValueError:
+        resolution_ref = normalized_ref
+    matches = [
+        env
+        for env in resolve_registry_environments(platform, resolution_ref)
+        if env.id == lookup_ref or normalize_environment_name(env.name) == normalized_ref
+    ]
+    if not matches:
+        raise ValueError(f"environment {ref!r} is not deployed")
+    if len(matches) > 1:
+        raise ValueError(f"environment name {ref!r} is ambiguous")
+    registry_env = get_registry_environment(platform, matches[0].id)
+    if registry_env is None:
+        raise ValueError(f"environment {ref!r} is not deployed")
+    return registry_env
+
+
+def _validate_task_manifests(
+    taskset: Taskset,
+    platform: PlatformClient,
+    console: HUDConsole,
+) -> None:
+    """Fail before upload when a deployed environment cannot expose a task."""
+    errors: list[str] = []
+    for env_name in sorted(taskset.environment_names()):
+        try:
+            registry_env = _resolve_registry_environment_detail(platform, env_name)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        except HudException as exc:
+            errors.append(f"could not validate environment {env_name!r}: {exc}")
+            continue
+        manifest = registry_env.manifest
+        raw_tasks = manifest.get("tasks") if manifest is not None else None
+        if not isinstance(raw_tasks, list):
+            errors.append(f"environment {env_name!r} has no successful build manifest")
+            continue
+        exposed = {
+            task["id"]
+            for task in raw_tasks
+            if isinstance(task, dict) and isinstance(task.get("id"), str)
+        }
+        required = {task.id for task in taskset if task.env == env_name}
+        required.update(
+            task.verifier.id
+            for task in taskset
+            if task.verifier is not None and task.verifier.env == env_name
+        )
+        missing = sorted(required - exposed)
+        if missing:
+            errors.append(f"environment {env_name!r} does not expose task(s): {', '.join(missing)}")
+
+    if errors:
+        console.error("Task validation failed:")
+        for error in errors:
+            console.error(f"  {error}")
+        console.hint("Deploy the environment or fix the task ids before syncing.")
+        raise typer.Exit(1)
+    console.success("Task environment manifests validated")
+
+
+def _validate_source(source: str, console: HUDConsole) -> None:
+    errors = [
+        issue for issue in EnvironmentSource.open(source).validate() if issue.severity == "error"
+    ]
+    if not errors:
+        return
+    console.error("Source validation failed:")
+    for issue in errors:
+        console.error(f"  {issue.message} ({issue.file})")
+    raise typer.Exit(1)
+
+
 def _fetch_remote_taskset(
     platform: PlatformClient,
     target_ref: str,
@@ -313,6 +398,8 @@ def sync_tasks_command(
         exclude=exclude,
         console=hud_console,
     )
+    _validate_source(source, hud_console)
+    _validate_task_manifests(local_taskset, platform, hud_console)
     _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console)
 
     # Creating a new taskset is only allowed when targeting an explicit name

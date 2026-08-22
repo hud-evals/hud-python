@@ -17,6 +17,7 @@ class RegistryEnvironment:
     id: str
     name: str
     version: str = ""
+    manifest: dict[str, Any] | None = None
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> RegistryEnvironment:
@@ -26,10 +27,12 @@ class RegistryEnvironment:
             raise ValueError("registry environment record needs an id")
         latest_build = data.get("latest_build")
         version = latest_build.get("version") if isinstance(latest_build, dict) else None
+        manifest = latest_build.get("manifest") if isinstance(latest_build, dict) else None
         return cls(
             id=env_id,
             name=str(data.get("name") or "unnamed"),
             version=str(version) if version is not None else "",
+            manifest=manifest if isinstance(manifest, dict) else None,
         )
 
     @property
