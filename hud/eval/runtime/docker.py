@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from hud.utils.docker import docker as _docker
-from hud.utils.process import create_process_group_exec, stream_output
+from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import ComposeConfig
 from .core import Runtime, RuntimeConfig, validate_session_id
@@ -117,7 +117,7 @@ async def _docker_output(*args: str) -> AsyncIterator[None]:
         yield
     finally:
         await process.terminate()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await finish_output(*tasks)
 
 
 class DockerRuntime:

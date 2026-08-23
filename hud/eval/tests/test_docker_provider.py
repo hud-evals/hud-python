@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 import hud.eval.runtime.docker as runtime_module
+import hud.utils.process as process_module
 from hud.eval.runtime import (
     DaytonaRuntime,
     DockerRuntime,
@@ -173,6 +174,9 @@ class _FakeModalStream:
         output = cast("str", self._calls.get(self._key, ""))
         if output:
             yield output
+        wait = self._calls.get(f"{self._key}_wait")
+        if isinstance(wait, asyncio.Event):
+            await wait.wait()
 
 
 class _FakeModalSandbox:
@@ -377,6 +381,9 @@ class _FakeDaytonaProcess:
         self._calls["stream_logs"] = (session, cmd_id)
         on_stdout(cast("str", self._calls.get("daytona_stdout", "")))
         on_stderr(cast("str", self._calls.get("daytona_stderr", "")))
+        wait = self._calls.get("daytona_log_wait")
+        if isinstance(wait, asyncio.Event):
+            await wait.wait()
 
     async def exec(self, command: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("process_execs", [])
@@ -1331,6 +1338,22 @@ async def test_modal_runtime_streams_sandbox_output_to_terminal(
     assert captured.err == "grader warning\n"
 
 
+async def test_modal_runtime_bounds_output_teardown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    calls["sandbox_stdout_wait"] = asyncio.Event()
+    calls["sandbox_stderr_wait"] = asyncio.Event()
+    monkeypatch.setattr(process_module, "OUTPUT_DRAIN_TIMEOUT", 0.01)
+
+    async def run() -> None:
+        async with ModalRuntime(runtime_config=RuntimeConfig(image="img:tag"))(_row()):
+            pass
+
+    await asyncio.wait_for(run(), timeout=1)
+    assert calls["terminated"] is True
+
+
 async def test_modal_runtime_attaches_secrets_to_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1433,6 +1456,21 @@ async def test_daytona_runtime_streams_sandbox_output_to_terminal(
     assert captured.out == "server ready\n"
     assert captured.err == "grader warning\n"
     assert calls["stream_logs"] == ("hud-serve", "cmd-1")
+
+
+async def test_daytona_runtime_bounds_output_teardown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_daytona(monkeypatch).calls
+    calls["daytona_log_wait"] = asyncio.Event()
+    monkeypatch.setattr(process_module, "OUTPUT_DRAIN_TIMEOUT", 0.01)
+
+    async def run() -> None:
+        async with DaytonaRuntime("snapshot")(_row()):
+            pass
+
+    await asyncio.wait_for(run(), timeout=1)
+    assert calls["delete"] == "sandbox-1"
 
 
 async def test_daytona_runtime_rejects_compose(

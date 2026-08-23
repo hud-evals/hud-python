@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from hud.utils.process import (
     create_process_group_exec,
+    finish_output,
     stream_output,
     write_output,
 )
@@ -213,4 +214,4 @@ class SubprocessRuntime:
         finally:
             await proc.terminate()
             if drain is not None:
-                await asyncio.gather(drain, return_exceptions=True)
+                await finish_output(drain)

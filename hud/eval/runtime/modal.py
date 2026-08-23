@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from hud.utils.process import stream_output
+from hud.utils.process import finish_output, stream_output
 
 from .compose import ComposeConfig
 from .core import Runtime, RuntimeConfig, validate_session_id
@@ -394,9 +394,6 @@ class ModalRuntime:
                         timeout=30,
                     )
                     await process.wait.aio()
-            try:
+            with contextlib.suppress(Exception):
                 await sb.terminate.aio()
-            except Exception:
-                for relay in output_tasks:
-                    relay.cancel()
-            await asyncio.gather(*output_tasks, return_exceptions=True)
+            await finish_output(*output_tasks)

@@ -8,7 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from hud.utils.process import write_output
+from hud.utils.process import finish_output, write_output
 
 from .core import Runtime, RuntimeConfig
 
@@ -302,10 +302,8 @@ class DaytonaRuntime:
                             )
                         raise
             finally:
-                deleted = False
                 try:
                     await daytona.delete(sandbox)
-                    deleted = True
                 except Exception:
                     # Swallowing this is how a billable sandbox outlives its process.
                     logger.warning(
@@ -314,6 +312,4 @@ class DaytonaRuntime:
                         exc_info=True,
                     )
                 if output_task is not None:
-                    if not deleted:
-                        output_task.cancel()
-                    await asyncio.gather(output_task, return_exceptions=True)
+                    await finish_output(output_task)

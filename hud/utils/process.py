@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
+OUTPUT_DRAIN_TIMEOUT = 1.0
 
 
 def write_output(output: TextIO, chunk: str | bytes) -> None:
@@ -27,6 +28,15 @@ async def stream_output(
 ) -> None:
     async for chunk in source:
         write_output(output, chunk)
+
+
+async def finish_output(*tasks: asyncio.Task[None]) -> None:
+    if not tasks:
+        return
+    _, pending = await asyncio.wait(tasks, timeout=OUTPUT_DRAIN_TIMEOUT)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @dataclass(frozen=True, slots=True)
