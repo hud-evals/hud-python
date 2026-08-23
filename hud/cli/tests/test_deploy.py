@@ -207,6 +207,37 @@ class TestCollectEnvironmentVariables:
         assert "INVALID_FORMAT" not in result
 
 
+@pytest.mark.asyncio
+async def test_trigger_build_sends_project_id() -> None:
+    from hud.cli.deploy import _DeployPlan, _trigger_build
+
+    platform = AsyncMock(spec=PlatformClient)
+    platform.apost.return_value = {"id": "build-1", "registry_id": "registry-1"}
+    plan = _DeployPlan(
+        name="project-env",
+        registry_id=None,
+        runtime=None,
+        runtime_config=None,
+        env_vars={},
+        build_args={},
+        build_secrets={},
+        project_id="project-1",
+    )
+
+    await _trigger_build(platform, build_id="build-1", plan=plan, no_cache=False)
+
+    platform.apost.assert_awaited_once_with(
+        "/builds/trigger",
+        json={
+            "source": "direct",
+            "build_id": "build-1",
+            "name": "project-env",
+            "no_cache": False,
+            "project_id": "project-1",
+        },
+    )
+
+
 class TestRuntimeConfigFile:
     @pytest.mark.parametrize("filename", ["compose.yaml", "compose.yml", "docker-compose.json"])
     def test_prepare_deploy_uses_context_recipe(

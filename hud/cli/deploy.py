@@ -46,6 +46,7 @@ class _DeployPlan:
     env_vars: dict[str, str]
     build_args: dict[str, str]
     build_secrets: dict[str, str]
+    project_id: str | None = None
 
 
 def _peek_env_keys(env_path: Path) -> list[str]:
@@ -382,6 +383,7 @@ def _prepare_deploy_plan(
     verbose: bool,
     platform: PlatformClient,
     console: HUDConsole,
+    project_id: str | None = None,
 ) -> _DeployPlan:
     source_config = env_source.load_config()
     resolved_name = _resolve_environment_name(
@@ -437,6 +439,7 @@ def _prepare_deploy_plan(
     return _DeployPlan(
         name=resolved_name,
         registry_id=registry_id,
+        project_id=project_id,
         runtime=normalized_runtime,
         runtime_config=loaded_runtime_config,
         env_vars=env_vars,
@@ -453,6 +456,7 @@ def deploy_environment(
     no_cache: bool = False,
     verbose: bool = False,
     registry_id: str | None = None,
+    project_id: str | None = None,
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
@@ -491,6 +495,7 @@ def deploy_environment(
         env_file=env_file,
         no_env=no_env,
         registry_id=registry_id,
+        project_id=project_id,
         build_args=build_args,
         build_secrets=build_secrets,
         runtime=runtime,
@@ -555,6 +560,7 @@ async def _trigger_build(
             key: value
             for key, value in (
                 ("registry_id", plan.registry_id),
+                ("project_id", plan.project_id),
                 ("runtime_provider", plan.runtime),
                 (
                     "runtime_config",
@@ -719,6 +725,7 @@ def deploy_all(
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
     runtime_config: str | None = None,
+    project_id: str | None = None,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -755,6 +762,7 @@ def deploy_all(
                 no_cache=no_cache,
                 verbose=verbose,
                 registry_id=None,
+                project_id=project_id,
                 build_args=build_args,
                 build_secrets=build_secrets,
                 runtime=runtime,
@@ -833,6 +841,12 @@ def deploy_command(
         help="Existing registry ID for rebuilds (advanced)",
         hidden=True,
     ),
+    project_id: str | None = typer.Option(
+        None,
+        "--project-id",
+        help="Create the environment in this Project",
+        hidden=True,
+    ),
     runtime: str | None = typer.Option(
         None,
         "--runtime",
@@ -863,6 +877,7 @@ def deploy_command(
             build_secrets=secrets,
             runtime=runtime,
             runtime_config=runtime_config,
+            project_id=project_id,
         )
         return
 
@@ -874,6 +889,7 @@ def deploy_command(
         no_cache=no_cache,
         verbose=verbose,
         registry_id=registry_id,
+        project_id=project_id,
         build_args=build_args,
         build_secrets=secrets,
         runtime=runtime,
