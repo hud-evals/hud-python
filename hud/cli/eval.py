@@ -813,22 +813,20 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
 
     if cfg.task_ids:
         wanted = set(cfg.task_ids)
-        taskset = Taskset(
-            taskset.name,
-            (
-                task
-                for index, (slug, task) in enumerate(taskset.items())
-                if slug in wanted or task.id in wanted or str(index) in wanted
-            ),
-        )
+        selected_slugs = [
+            slug
+            for index, (slug, task) in enumerate(taskset.items())
+            if slug in wanted or task.id in wanted or str(index) in wanted
+        ]
+        taskset = taskset.filter(selected_slugs)
         if not taskset:
             hud_console.error(f"No tasks matching: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
         hud_console.info(f"Filtered to {len(taskset)} task(s)")
     elif not cfg.all:
-        tasks = list(taskset)
-        total = len(tasks)
-        taskset = Taskset(taskset.name, [tasks[0]])
+        total = len(taskset)
+        first_slug, _ = next(taskset.items())
+        taskset = taskset.filter([first_slug])
         if total > 1:
             hud_console.warning(
                 f"Running only 1 of {total} tasks (the first). "

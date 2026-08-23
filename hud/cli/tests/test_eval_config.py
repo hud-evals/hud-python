@@ -291,6 +291,54 @@ async def test_python_task_source_loads_on_main_thread(
     assert marker.read_text(encoding="utf-8") == "True"
 
 
+@pytest.mark.parametrize(
+    ("task_ids", "expected_slug"),
+    [
+        (None, "first"),
+        (["second"], "second"),
+    ],
+)
+async def test_platform_task_selection_preserves_taskset_link(
+    monkeypatch: pytest.MonkeyPatch,
+    task_ids: list[str] | None,
+    expected_slug: str,
+) -> None:
+    from hud.eval import Job, Task, Taskset
+
+    platform_taskset = Taskset(
+        "Demo",
+        [
+            Task(env="demo", id="run", slug="first"),
+            Task(env="demo", id="run", slug="second"),
+        ],
+        taskset_id="taskset-123",
+    )
+    selected: Taskset | None = None
+
+    async def capture_run(self: Taskset, *_args: object, **_kwargs: object) -> Job:
+        nonlocal selected
+        selected = self
+        return Job(id="job-123", name=self.name)
+
+    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda _cls, _name: platform_taskset))
+    monkeypatch.setattr(Taskset, "run", capture_run)
+    monkeypatch.setattr(eval_mod, "_build_agent", lambda _cfg: object())
+    monkeypatch.setattr(eval_mod, "_resolve_placement", lambda *_args: object())
+
+    await eval_mod._run_evaluation(
+        EvalConfig(
+            source="Demo",
+            agent_type="openai",
+            task_ids=task_ids,
+            remote=True,
+        )
+    )
+
+    assert selected is not None
+    assert selected.taskset_id == "taskset-123"
+    assert list(selected.tasks) == [expected_slug]
+
+
 def test_resolve_runtime_slug_defaults_to_remote() -> None:
     cfg = EvalConfig(source="My Tasks").resolve_runtime()
     assert cfg.runtime is None
