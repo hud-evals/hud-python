@@ -593,9 +593,6 @@ async def rollout(
 
                 assert actor_session_id is not None
                 _phase = "snapshotting actor"
-                from .runtime.core import validate_session_id
-
-                validate_session_id(actor_session_id)
                 async with addr.snapshot_session(actor_session_id) as archive:
                     _phase = "actor cleanup"
                     await actor.aclose()
@@ -607,7 +604,6 @@ async def rollout(
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
                     if archive is not None:
                         assert verifier_client.manifest is not None
-                        validate_session_id(verifier_client.manifest.session_id)
                         await verifier_addr.restore_session(
                             verifier_client.manifest.session_id,
                             archive,

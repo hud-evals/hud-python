@@ -34,7 +34,6 @@ from hud.agents.types import OpenAIChatConfig
 from hud.environment import Answer, Environment
 from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
-from hud.eval.runtime.core import validate_session_id
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -269,19 +268,10 @@ async def test_malformed_subscores_fail_inside_the_rollout_boundary(
     assert reported == [{}]
 
 
-async def test_independent_verifier_receives_runtime_session_files(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_independent_verifier_receives_runtime_session_files(tmp_path: Path) -> None:
     actor_env = Environment("actor")
     verifier_env = Environment("judge")
     transfers: list[tuple[str, str]] = []
-
-    def record_validation(session_id: str) -> None:
-        validate_session_id(session_id)
-        transfers.append(("validate", session_id))
-
-    monkeypatch.setattr("hud.eval.runtime.core.validate_session_id", record_validation)
 
     @actor_env.template()
     async def solve():
@@ -323,17 +313,10 @@ async def test_independent_verifier_receives_runtime_session_files(
     run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
 
     assert run.reward == 1.0
-    assert [runtime for runtime, _ in transfers] == [
-        "validate",
-        "actor",
-        "validate",
-        "verifier",
-    ]
-    assert transfers[0][1] == transfers[1][1]
-    assert transfers[2][1] == transfers[3][1]
+    assert [runtime for runtime, _ in transfers] == ["actor", "verifier"]
     assert transfers[0][1].startswith("sess-")
-    assert transfers[2][1].startswith("sess-")
-    assert transfers[0][1] != transfers[2][1]
+    assert transfers[1][1].startswith("sess-")
+    assert transfers[0][1] != transfers[1][1]
 
 
 async def test_runtime_session_transfer_rejects_invalid_ids(tmp_path: Path) -> None:
