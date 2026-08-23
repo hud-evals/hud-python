@@ -168,12 +168,23 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         qualify_mcp_names = len(mcp_clients) > 1
 
         for tool_cls in type(self).tool_catalog:
+            matching_connections = [
+                (connection_name, client)
+                for connection_name, client in connections.items()
+                if isinstance(client, tool_cls.client_type)
+            ]
+            if not matching_connections:
+                continue
             spec = tool_cls.default_spec(model)
             if spec is None:
+                logger.warning(
+                    "Skipping tool %r for model %r because the model does not support it; "
+                    "the rollout will continue without the matching environment capability",
+                    tool_cls.name,
+                    model,
+                )
                 continue
-            for connection_name, client in connections.items():
-                if not isinstance(client, tool_cls.client_type):
-                    continue
+            for connection_name, client in matching_connections:
                 if issubclass(tool_cls, MCPTool):
                     assert isinstance(client, MCPClient)
                     for mt in mcp_by_client[client]:

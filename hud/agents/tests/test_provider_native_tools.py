@@ -7,6 +7,7 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
+import logging
 import shlex
 from types import SimpleNamespace
 from typing import Any, cast
@@ -25,7 +26,7 @@ from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
 from hud.agents.tools.ssh import bound_shell_output
 from hud.agents.types import OpenAIChatConfig, OpenAIConfig
-from hud.capabilities import Capability, RFBClient, SSHClient
+from hud.capabilities import Capability, CapabilityClient, RFBClient, SSHClient
 from hud.types import MCPToolCall
 
 
@@ -176,10 +177,9 @@ class _OpenAIChatAgentForTest(OpenAIChatAgent):
 class _OpenAIAgentForTest(OpenAIAgent):
     async def build_native_tools_for_test(
         self,
-        ssh: SSHClient,
-        rfb: RFBClient,
+        connections: dict[str, CapabilityClient],
     ) -> tuple[dict[str, Any], list[Any]]:
-        return await self._build_tools({"shell": ssh, "computer": rfb})
+        return await self._build_tools(connections)
 
 
 # ─── OpenAI shell ─────────────────────────────────────────────────────
@@ -202,12 +202,54 @@ async def test_openai_native_tools_are_registered_only_for_supported_models(
     agent = _OpenAIAgentForTest(OpenAIConfig(model=model, model_client=cast("Any", object())))
 
     tools, params = await agent.build_native_tools_for_test(
-        _ssh(),
-        object.__new__(RFBClient),
+        {
+            "shell": _ssh(),
+            "computer": object.__new__(RFBClient),
+        }
     )
 
     assert list(tools) == expected_types
     assert [param["type"] for param in params] == expected_types
+
+
+async def test_unsupported_native_tool_warns_when_environment_exposes_capability(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    agent = _OpenAIAgentForTest(
+        OpenAIConfig(model="gpt-4o-mini", model_client=cast("Any", object()))
+    )
+    caplog.set_level(logging.WARNING, logger="hud.agents.tool_agent")
+
+    await agent.build_native_tools_for_test({"shell": _ssh()})
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "Skipping tool 'shell' for model 'gpt-4o-mini' because the model does not support it; "
+        "the rollout will continue without the matching environment capability"
+    ]
+
+
+async def test_unsupported_native_tool_does_not_warn_without_matching_capability(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    agent = _OpenAIAgentForTest(
+        OpenAIConfig(model="gpt-4o-mini", model_client=cast("Any", object()))
+    )
+    caplog.set_level(logging.WARNING, logger="hud.agents.tool_agent")
+
+    await agent.build_native_tools_for_test({})
+
+    assert caplog.records == []
+
+
+async def test_supported_native_tool_does_not_warn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    agent = _OpenAIAgentForTest(OpenAIConfig(model="gpt-5.6", model_client=cast("Any", object())))
+    caplog.set_level(logging.WARNING, logger="hud.agents.tool_agent")
+
+    await agent.build_native_tools_for_test({"shell": _ssh()})
+
+    assert caplog.records == []
 
 
 @pytest.mark.parametrize(
