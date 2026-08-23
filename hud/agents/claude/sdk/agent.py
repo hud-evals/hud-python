@@ -45,8 +45,8 @@ MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
 
 _MANAGED_CLAUDE_PATHS = {
-    "linux-x64": "/media/hud/bin/claude/linux-x64/claude",
-    "linux-x64-musl": "/media/hud/bin/claude/linux-x64-musl/claude",
+    "linux-x64": "/usr/local/lib/agents/claude/linux-x64/claude",
+    "linux-x64-musl": "/usr/local/lib/agents/claude/linux-x64-musl/claude",
 }
 
 

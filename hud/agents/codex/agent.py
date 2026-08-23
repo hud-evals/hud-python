@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MANAGED_CODEX_PATHS = {
-    "linux-x64": "/media/hud/bin/codex/bin/codex",
-    "linux-x64-musl": "/media/hud/bin/codex/bin/codex",
+    "linux-x64": "/usr/local/lib/agents/codex/bin/codex",
+    "linux-x64-musl": "/usr/local/lib/agents/codex/bin/codex",
 }
 
 
