@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.eval.runtime")
 
+_SESSION_ROOT = "/runtime/sessions"
+_LEGACY_SESSION_ROOT = "/media/hud/sessions"
+
 #: DockerRuntime always serves HUD environments, so this is part of the
 #: provider contract rather than a per-image option. This is intentionally a
 #: default-allow compatibility profile: Workspace's bwrap sessions need the
@@ -266,21 +269,28 @@ class DockerRuntime:
         env_args: list[str] = []
         for key, value in self.env_vars.items():
             env_args.extend(("--env", f"{key}={value}"))
-        out, _ = await _docker(
-            "run",
-            "--detach",
-            *self.run_args,
-            *env_args,
-            *resource_args,
-            *_DOCKER_SECURITY_ARGS,
-            "--publish",
-            f"127.0.0.1::{self.port}",
-            config.image,
-            deadline=startup_timeout,
-        )
-        container = out.strip()
-        teardown = ("rm", "--force", container)
+        session_volume = f"hud-runtime-sessions-{uuid.uuid4().hex}"
+        container = ""
         try:
+            await _docker("volume", "create", session_volume, deadline=startup_timeout)
+            out, _ = await _docker(
+                "run",
+                "--detach",
+                *self.run_args,
+                *env_args,
+                *resource_args,
+                *_DOCKER_SECURITY_ARGS,
+                "--mount",
+                f"type=volume,source={session_volume},target={_SESSION_ROOT}",
+                "--mount",
+                f"type=volume,source={session_volume},target={_LEGACY_SESSION_ROOT}",
+                "--publish",
+                f"127.0.0.1::{self.port}",
+                config.image,
+                deadline=startup_timeout,
+            )
+            container = out.strip()
+            teardown = ("rm", "--force", container)
             if resources is not None and resources.storage_mb is not None:
                 free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
                 _require_free_disk(free_disk, resources.storage_mb)
@@ -302,7 +312,9 @@ class DockerRuntime:
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.
-            await _docker(*teardown, check=False)
+            if container:
+                await _docker("rm", "--force", container, check=False)
+            await _docker("volume", "rm", "--force", session_volume, check=False)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -321,7 +333,7 @@ class _DockerSession(RuntimeSession):
     async def snapshot(self) -> AsyncIterator[Path | None]:
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            root = f"/media/hud/sessions/{self.session_id}"
+            root = f"{_SESSION_ROOT}/{self.session_id}"
             exists, _ = await _docker(
                 "exec",
                 self.container,
@@ -334,7 +346,7 @@ class _DockerSession(RuntimeSession):
             if not exists:
                 yield None
                 return
-            archive = f"/media/hud/session-export-{uuid.uuid4().hex}.tar.gz"
+            archive = f"/runtime/session-export-{uuid.uuid4().hex}.tar.gz"
             script = """
 import sys
 import tarfile
@@ -370,7 +382,7 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
             yield destination
 
     async def restore(self, source: Path) -> None:
-        target = f"/media/hud/sessions/{self.session_id}"
+        target = f"{_SESSION_ROOT}/{self.session_id}"
         with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
             root = Path(directory)
             _extract_session_archive(source, root)

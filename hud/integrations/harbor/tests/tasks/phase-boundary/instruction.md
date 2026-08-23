@@ -8,6 +8,6 @@ Write `/app/probe.txt` with these keys, one per line:
 - `channel`: whether anything answers on `127.0.0.1:8765`
 - `tests`: whether `/tests/test.sh` is `present` or `absent`
 - `verdict`: whether `/logs/verifier/reward.txt` is `present` or `absent`
-- `harness`: whether `/media/hud` is `present` or `absent`
+- `harness`: whether any controller, runtime, mount-staging, or verifier root is `present`
 
 Use `reachable` or `unreachable` for `channel`.

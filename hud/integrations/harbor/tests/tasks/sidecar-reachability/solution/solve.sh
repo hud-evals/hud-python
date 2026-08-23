@@ -16,7 +16,7 @@ case ",${NO_PROXY:-}," in
   *) echo "main is absent from NO_PROXY" >&2; exit 1 ;;
 esac
 curl -fsS --max-time 10 http://main:8080/ > /app/main.html
-protected=/media/hud/session-"keys"
+protected=/runtime/session-"keys"
 [ ! -e "$protected" ]
 (while :; do sleep 1; done) >/tmp/actor-background.log 2>&1 &
 printf '%s\n' "$!" > /app/actor.pid

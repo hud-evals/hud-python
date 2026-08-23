@@ -5,11 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
-import grp
 import json
 import math
 import os
-import pwd
 import re
 import shlex
 import shutil
@@ -29,21 +27,23 @@ from hud.utils.process import ProcessResult, create_process_group_exec
 if TYPE_CHECKING:
     from hud.environment.namespace import NamespaceProcess
 
-ROOT = Path("/media/hud")
+CONTROLLER_ROOT = Path("/controller")
 TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
-SESSIONS = ROOT / "sessions"
 SESSION_ANSWER = "agent-answer.txt"
 SESSION_ERROR = "error.txt"
-DOCKER_SOCKET = ROOT / "docker.sock"
-DOCKER = ROOT / "bin" / "docker"
-CONFIG = json.loads((ROOT / "config.json").read_text("utf-8"))
+DOCKER = CONTROLLER_ROOT / "bin" / "docker"
+CONFIG = json.loads((CONTROLLER_ROOT / "config.json").read_text("utf-8"))
+TASK_ROOT = Path("/rootfs")
+RUNTIME_ROOT = Path("/runtime")
+SESSIONS = RUNTIME_ROOT / "sessions"
+DOCKER_SOCKET = Path("/var/run/docker.sock")
 
 
 def load_image_config(name: str) -> dict[str, Any]:
-    value = json.loads((ROOT / name).read_text("utf-8"))
+    value = json.loads((CONTROLLER_ROOT / name).read_text("utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{name} must contain an OCI image config object")
     return value
@@ -133,8 +133,11 @@ def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
 for policy in (CONFIG["environment"], CONFIG["agent"], CONFIG["verifier"]):
     policy["env"] = resolve_env_templates(policy["env"])
 os.environ.update(CONFIG["environment"]["env"])
+TASK_ENV = {**CONFIG["image_env"], **CONFIG["environment"]["env"]}
 WORKDIR = Path(CONFIG["workdir"])
-os.chdir(WORKDIR)
+if not WORKDIR.is_absolute():
+    raise ValueError(f"Harbor workdir must be absolute: {WORKDIR}")
+TASK_WORKDIR = TASK_ROOT / WORKDIR.relative_to("/")
 
 
 def network(phase: dict[str, Any] | None) -> tuple[bool, frozenset[str]]:
@@ -155,49 +158,35 @@ def identity(
     phase: dict[str, Any] | None,
     *,
     image_user: str | int | None,
-    root: Path | None = None,
+    root: Path,
 ) -> tuple[int, int] | None:
     declared = phase["user"] if phase is not None else None
     user = str(declared if declared is not None else image_user or "")
     if not user:
         return None
     user_name, separator, group_name = user.partition(":")
-    if root is None:
-        account = None
-        if user_name.isdigit():
-            user_id = int(user_name)
-            with contextlib.suppress(KeyError):
-                account = pwd.getpwuid(user_id)
-        else:
-            try:
-                account = pwd.getpwnam(user_name)
-            except KeyError as error:
-                raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
-            user_id = account.pw_uid
-        primary_group = account.pw_gid if account is not None else 0
+    passwd = root / "etc/passwd"
+    accounts = {
+        fields[0]: (int(fields[2]), int(fields[3]))
+        for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
+        if len(fields := line.split(":")) >= 4
+    }
+    if user_name.isdigit():
+        user_id = int(user_name)
+        primary_group = next(
+            (group_id for uid, group_id in accounts.values() if uid == user_id),
+            0,
+        )
     else:
-        passwd = root / "etc/passwd"
-        accounts = {
-            fields[0]: (int(fields[2]), int(fields[3]))
-            for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
-            if len(fields := line.split(":")) >= 4
-        }
-        if user_name.isdigit():
-            user_id = int(user_name)
-            primary_group = next(
-                (group_id for uid, group_id in accounts.values() if uid == user_id),
-                0,
-            )
-        else:
-            try:
-                user_id, primary_group = accounts[user_name]
-            except KeyError as error:
-                raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
+        try:
+            user_id, primary_group = accounts[user_name]
+        except KeyError as error:
+            raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
 
     if separator:
         if group_name.isdigit():
             group_id = int(group_name)
-        elif root is not None:
+        else:
             group = root / "etc/group"
             groups = {
                 fields[0]: int(fields[2])
@@ -210,13 +199,6 @@ def identity(
                 raise ValueError(
                     f"Harbor group {group_name!r} does not exist in this image"
                 ) from error
-        else:
-            try:
-                group_id = grp.getgrnam(group_name).gr_gid
-            except KeyError as error:
-                raise ValueError(
-                    f"Harbor group {group_name!r} does not exist in this image"
-                ) from error
     else:
         # Docker resolves a known account's primary group; a bare numeric uid
         # with no passwd entry keeps the container default group (root).
@@ -224,45 +206,45 @@ def identity(
     return None if (user_id, group_id) == (0, 0) else (user_id, group_id)
 
 
-def home(user_id: int | None, *, root: Path | None = None) -> str | None:
+def home(user_id: int | None, *, root: Path) -> str | None:
     if user_id is None:
         return None
-    if root is not None:
-        passwd = root / "etc/passwd"
-        return next(
-            (
-                fields[5]
-                for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
-                if len(fields := line.split(":")) >= 6 and int(fields[2]) == user_id
-            ),
-            None,
-        )
-    with contextlib.suppress(KeyError):
-        return pwd.getpwuid(user_id).pw_dir
-    return None
+    passwd = root / "etc/passwd"
+    return next(
+        (
+            fields[5]
+            for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
+            if len(fields := line.split(":")) >= 6 and int(fields[2]) == user_id
+        ),
+        None,
+    )
 
 
 agent = CONFIG["agent"]
-image_identity = identity(None, image_user=CONFIG["image_user"])
-agent_identity = identity(agent, image_user=CONFIG["image_user"])
+image_identity = identity(None, image_user=CONFIG["image_user"], root=TASK_ROOT)
+agent_identity = identity(agent, image_user=CONFIG["image_user"], root=TASK_ROOT)
 agent_uid = agent_identity[0] if agent_identity is not None else None
 agent_network, agent_hosts = network(agent)
 environment_hosts = network(None)[1]
 rooted_at_filesystem = len(WORKDIR.parts) == 1
-harness_parent = ROOT.parent
-harness_mounts = (
-    Mount("tmpfs", dst=str(harness_parent)),
-    *(
-        Mount("rw", src=str(path), dst=str(path))
-        for path in sorted(harness_parent.iterdir())
-        if path != ROOT
-    ),
+task_mounts = tuple(
+    Mount(
+        "ro" if mount["read_only"] else "rw",
+        src=mount["source"],
+        dst=mount["target"],
+    )
+    for mount in CONFIG["mounts"]
 )
 agent_mounts = (
-    *harness_mounts,
+    *task_mounts,
     Mount("tmpfs", dst=str(TESTS)),
     Mount("tmpfs", dst=str(VERIFIER_LOGS)),
     Mount("ro", src="/dev/null", dst=str(AGENT_ANSWER)),
+)
+verifier_mounts = (
+    *task_mounts,
+    Mount("rw", src=str(TESTS), dst=str(TESTS)),
+    Mount("rw", src=str(LOGS), dst=str(LOGS)),
 )
 
 env = Environment(CONFIG["name"])
@@ -270,25 +252,24 @@ verifier_lock = asyncio.Lock()
 for capability in CONFIG["capabilities"]:
     env.add_capability(Capability.from_manifest(capability))
 workspace = env.workspace(
-    WORKDIR,
+    TASK_WORKDIR,
     guest_path=WORKDIR.as_posix(),
     system_mounts=(
-        Mount("rw", src="/", dst="/"),
+        Mount("rw", src=str(TASK_ROOT), dst="/"),
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
     ),
     mounts=agent_mounts,
-    credentials_dir=ROOT / "session-keys",
-    hosts_path=ROOT / "hosts",
+    credentials_dir=RUNTIME_ROOT / "session-keys",
+    hosts_path=RUNTIME_ROOT / "hosts",
     shell_uid=agent_uid,
     shell_gid=agent_identity[1] if agent_identity is not None else None,
     hand_over_root=False,
     track_files=False if rooted_at_filesystem else None,
     env={
-        **CONFIG["image_env"],
-        **CONFIG["environment"]["env"],
+        **TASK_ENV,
         **agent["env"],
-        **({"HOME": agent_home} if (agent_home := home(agent_uid)) else {}),
+        **({"HOME": agent_home} if (agent_home := home(agent_uid, root=TASK_ROOT)) else {}),
     },
     network=agent_network,
     allowed_hosts=agent_hosts,
@@ -311,7 +292,7 @@ async def start_entrypoint() -> NamespaceProcess | None:
         raise RuntimeError("Harbor entrypoints require an isolated workspace")
     process = await workspace.launch(
         [*entrypoint, "sh", "-c", "sleep infinity"],
-        env=CONFIG["environment"]["env"],
+        env=TASK_ENV,
         identity=image_identity,
         inherit_workspace_env=False,
         no_new_privs=False,
@@ -343,7 +324,7 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
                 )
             result = await workspace.run(
                 ["sh", "-c", healthcheck["command"]],
-                env=CONFIG["environment"]["env"],
+                env=TASK_ENV,
                 identity=image_identity,
                 inherit_workspace_env=False,
                 allowed_hosts=None if environment_hosts == agent_hosts else environment_hosts,
@@ -417,7 +398,7 @@ async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> Proc
 
 
 async def compose_containers() -> dict[str, str]:
-    if not DOCKER_SOCKET.exists():
+    if not await asyncio.to_thread(DOCKER_SOCKET.exists):
         raise RuntimeError("Compose service access is unavailable in this runtime")
     project = await docker(
         "inspect",
@@ -514,7 +495,8 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
         else:
             execution = await workspace.run(
                 ["sh", "-c", hook["command"]],
-                mounts=harness_mounts,
+                mounts=task_mounts,
+                env=TASK_ENV,
                 identity=image_identity,
                 inherit_workspace_env=False,
                 allowed_hosts=None,
@@ -549,7 +531,7 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
                 continue
             exclude_artifact_paths(target, exclude)
         else:
-            copy_artifact(Path(source), target, exclude)
+            copy_artifact(TASK_ROOT / source.lstrip("/"), target, exclude)
         if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
             raise RuntimeError(f"artifact {source} contains a symbolic link")
 
@@ -660,7 +642,7 @@ def verifier_command(script: Path, path: str | None = None) -> list[str]:
 
 async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResult:
     clear(TESTS)
-    shutil.copytree(ROOT / "tests" / task_id, TESTS, symlinks=True, dirs_exist_ok=True)
+    shutil.copytree(CONTROLLER_ROOT / "tests" / task_id, TESTS, symlinks=True, dirs_exist_ok=True)
     test_script = TESTS / "test.sh"
     test_script.chmod(test_script.stat().st_mode | 0o111)
 
@@ -668,21 +650,25 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
     AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
 
     verifier = CONFIG["verifier"]
-    verifier_identity = identity(verifier, image_user=CONFIG["image_user"])
+    verifier_identity = identity(
+        verifier,
+        image_user=CONFIG["image_user"],
+        root=TASK_ROOT,
+    )
     verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-    verifier_env = {**CONFIG["environment"]["env"], **verifier["env"]}
+    verifier_env = {**TASK_ENV, **verifier["env"]}
     if verifier_uid is not None:
         assert verifier_identity is not None
         for root in (TESTS, VERIFIER_LOGS):
             for path in (root, *root.rglob("*")):
                 os.lchown(path, *verifier_identity)
-        if verifier_home := home(verifier_uid):
+        if verifier_home := home(verifier_uid, root=TASK_ROOT):
             verifier_env["HOME"] = verifier_home
 
     verifier_hosts = network(verifier)[1]
     execution = await workspace.run(
         verifier_command(test_script),
-        mounts=harness_mounts,
+        mounts=verifier_mounts,
         env=verifier_env,
         identity=verifier_identity,
         inherit_workspace_env=False,
@@ -745,7 +731,7 @@ def materialized_artifacts(
         Mount("rw", src=str(LOGS), dst="/logs"),
         *(Mount("ro", src=str(path), dst=str(path)) for path in sorted(driver_files)),
     ]
-    with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=ROOT) as directory:
+    with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=RUNTIME_ROOT) as directory:
         backup_root = Path(directory)
         replacements: list[tuple[Path, Path | None]] = []
         modes: dict[Path, int] = {}
@@ -861,7 +847,7 @@ async def grade_separate(
                     env=verifier_env,
                     network=verifier_network,
                     allowed_hosts=verifier_access,
-                    credentials_dir=ROOT / "verifier-keys",
+                    credentials_dir=RUNTIME_ROOT / "verifier-keys",
                     hand_over_root=False,
                     require_isolation=True,
                 )

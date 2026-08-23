@@ -130,8 +130,8 @@ services:
 ```
 
 ```dockerfile
-COPY --from=hud env.py install.sh config.json /media/hud/
-COPY --from=hud packages /media/hud/packages
+COPY --from=hud env.py install.sh config.json /controller/
+COPY --from=hud packages /controller/packages
 ```
 
 </div>
@@ -164,9 +164,10 @@ rollout ends.
 project root, the platform builds every service privately from it, and hosted rollouts run the
 stack. Declared `RuntimeResources` apply.
 
-`RuntimeConfig.compose.service_access=True` mounts a Docker socket at `/media/hud/docker.sock` in
-`main`. It is an explicit capability for environment code that must inspect or copy from sibling
-service containers, and what it grants differs by placement:
+`RuntimeConfig.compose.service_access=True` mounts a Docker socket at `/var/run/docker.sock` in
+`main` (plus the legacy `/media/hud/docker.sock` target for older images). It is an explicit
+capability for environment code that must inspect or copy from sibling service containers, and
+what it grants differs by placement:
 
 <Warning>
 Under local `DockerRuntime`, the mounted socket is the **host's own Docker daemon** (remote Docker

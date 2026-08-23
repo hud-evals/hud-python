@@ -144,6 +144,13 @@ def _docker_security_args() -> str:
     return " ".join(runtime_module._DOCKER_SECURITY_ARGS)
 
 
+def _session_mount_args(volume: str) -> str:
+    return (
+        f"--mount type=volume,source={volume},target=/runtime/sessions "
+        f"--mount type=volume,source={volume},target=/media/hud/sessions"
+    )
+
+
 @dataclass(frozen=True)
 class _ModalImageRef:
     kind: str
@@ -541,12 +548,18 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
     async with provider(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:43210"
         calls = await _docker_calls(docker_log)
-        assert calls[0] == (
-            f"run --detach -e X=1 {_docker_security_args()} --publish 127.0.0.1::8765 img:tag"
+        volume = calls[0].removeprefix("volume create ")
+        assert volume.startswith("hud-runtime-sessions-")
+        assert calls[1] == (
+            f"run --detach -e X=1 {_docker_security_args()} {_session_mount_args(volume)} "
+            "--publish 127.0.0.1::8765 img:tag"
         )
-        assert calls[1] == "port cid-42 8765"
+        assert calls[2] == "port cid-42 8765"
 
-    assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
+    assert (await _docker_calls(docker_log))[-2:] == [
+        "rm --force cid-42",
+        f"volume rm --force {volume}",
+    ]
 
 
 async def test_docker_session_archives_inside_the_container(
@@ -571,7 +584,7 @@ async def test_docker_session_archives_inside_the_container(
     assert probe[0][:3] == ("exec", "cid-42", "sh")
     assert export[0][:6] == ("exec", "--user", "0", "cid-42", "python3", "-c")
     assert "runtime session contains a symbolic link" in export[0][6]
-    assert export[0][7] == "/media/hud/sessions/sess-actor"
+    assert export[0][7] == "/runtime/sessions/sess-actor"
     archive = export[0][8]
     assert copy == (("cp", f"cid-42:{archive}", str(destination)), True)
     assert cleanup == (
@@ -599,9 +612,10 @@ async def test_runtime_config_supplies_image_and_resources(
         assert runtime.config == task.runtime_config
 
     calls = await _docker_calls(docker_log)
-    assert calls[0] == (
+    volume = calls[0].removeprefix("volume create ")
+    assert calls[1] == (
         f"run --detach --cpus 2 --memory 4096m --gpus 1 {_docker_security_args()} "
-        "--publish 127.0.0.1::8765 img:firefox"
+        f"{_session_mount_args(volume)} --publish 127.0.0.1::8765 img:firefox"
     )
 
 
@@ -623,9 +637,11 @@ async def test_task_runtime_config_overrides_default_image(
             resources=RuntimeResources(cpu=2, memory_mb=4096),
         )
 
-    assert (await _docker_calls(docker_log))[0] == (
+    calls = await _docker_calls(docker_log)
+    volume = calls[0].removeprefix("volume create ")
+    assert calls[1] == (
         f"run --detach --cpus 2 --memory 4096m {_docker_security_args()} "
-        "--publish 127.0.0.1::8765 img:task"
+        f"{_session_mount_args(volume)} --publish 127.0.0.1::8765 img:task"
     )
 
 
@@ -748,12 +764,28 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         "mem_limit": "4096m",
         "volumes": [
             {
+                "type": "volume",
+                "source": "hud-runtime-sessions",
+                "target": "/runtime/sessions",
+            },
+            {
+                "type": "volume",
+                "source": "hud-runtime-sessions",
+                "target": "/media/hud/sessions",
+            },
+            {
+                "type": "bind",
+                "source": "/Users/test/.docker/run/docker.sock",
+                "target": "/var/run/docker.sock",
+            },
+            {
                 "type": "bind",
                 "source": "/Users/test/.docker/run/docker.sock",
                 "target": "/media/hud/docker.sock",
-            }
+            },
         ],
     }
+    assert rendered["volumes"] == {"hud-runtime-sessions": {}}
     assert 'ports: !override ["127.0.0.1::8765"]' in port_override
     up = next(
         call for call in calls if call[-4:] == ("up", "--detach", "--no-build", "--remove-orphans")
@@ -773,9 +805,10 @@ async def test_docker_runtime_passes_env_vars_to_docker_run(
         assert runtime.url == "tcp://127.0.0.1:43210"
 
     calls = await _docker_calls(docker_log)
-    assert calls[0] == (
+    volume = calls[0].removeprefix("volume create ")
+    assert calls[1] == (
         f"run --detach --env OPENAI_API_KEY=sk-test {_docker_security_args()} "
-        "--publish 127.0.0.1::8765 img:tag"
+        f"{_session_mount_args(volume)} --publish 127.0.0.1::8765 img:tag"
     )
 
 
@@ -934,10 +967,25 @@ async def test_docker_runtime_mounts_the_daemon_visible_socket(
 
     assert rendered["services"]["main"]["volumes"] == [
         {
+            "type": "volume",
+            "source": "hud-runtime-sessions",
+            "target": "/runtime/sessions",
+        },
+        {
+            "type": "volume",
+            "source": "hud-runtime-sessions",
+            "target": "/media/hud/sessions",
+        },
+        {
+            "type": "bind",
+            "source": "/vm/run/docker.sock",
+            "target": "/var/run/docker.sock",
+        },
+        {
             "type": "bind",
             "source": "/vm/run/docker.sock",
             "target": "/media/hud/docker.sock",
-        }
+        },
     ]
 
 
@@ -997,7 +1045,10 @@ async def test_modal_runtime_config_flows_into_modal_sdk(
 
     assert calls["registry_image"] == "img:tag"
     assert calls["app_lookup"] == ("hud-envs", True)
-    assert calls["sandbox_args"] == provider.command
+    sandbox_args = calls["sandbox_args"]
+    assert sandbox_args[:2] == ("sh", "-c")
+    assert "ln -s /runtime/sessions /media/hud/sessions" in sandbox_args[2]
+    assert sandbox_args[-len(provider.command) :] == provider.command
     assert calls["sandbox_kwargs"] == {
         "app": "app",
         "image": _ModalImageRef("registry", "img:tag"),
@@ -1088,17 +1139,33 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
         ("override.json", "/hud/override.json"),
         ("ports.yaml", "/hud/ports.yaml"),
         ("docker-seccomp.json", "/hud/docker-seccomp.json"),
-        ("session.tar.gz", "/media/hud/session.tar.gz"),
+        ("session.tar.gz", "/runtime/session.tar.gz"),
     ]
     override = calls["compose_override"]
     assert isinstance(override, dict)
     assert override["services"]["main"]["volumes"] == [
         {
+            "type": "volume",
+            "source": "hud-runtime-sessions",
+            "target": "/runtime/sessions",
+        },
+        {
+            "type": "volume",
+            "source": "hud-runtime-sessions",
+            "target": "/media/hud/sessions",
+        },
+        {
+            "type": "bind",
+            "source": "/var/run/docker.sock",
+            "target": "/var/run/docker.sock",
+        },
+        {
             "type": "bind",
             "source": "/var/run/docker.sock",
             "target": "/media/hud/docker.sock",
-        }
+        },
     ]
+    assert override["volumes"] == {"hud-runtime-sessions": {}}
     assert override["services"]["main"]["environment"] == {"HUD_API_KEY": "secret"}
     execs = calls["execs"]
     assert isinstance(execs, list)
@@ -1125,7 +1192,7 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert teardown[teardown.index("--file") + 1] == ("/hud/project/compose-project/compose.yaml")
     assert "down" in teardown
     assert execs[0][1]["timeout"] == 600
-    assert calls["downloads"] == [("/media/hud/session.tar.gz", "session.tar.gz")]
+    assert calls["downloads"] == [("/runtime/session.tar.gz", "session.tar.gz")]
 
 
 async def test_modal_runtime_bounds_compose_startup(
@@ -1717,7 +1784,8 @@ async def test_docker_honors_startup_timeout(
     async with DockerRuntime(runtime_config=config)(_row()) as runtime:
         assert runtime.params == {"ready_timeout": 300}
 
-    assert calls[0][1]["deadline"] == 300
+    run = next(call for call in calls if call[0][0] == "run")
+    assert run[1]["deadline"] == 300
 
 
 @pytest.mark.parametrize("compose", [False, True])
@@ -1860,7 +1928,8 @@ async def test_container_that_dies_before_serving_fails_with_its_logs(
     assert "ImportError: boom" in str(err.value)
     calls = await _docker_calls(docker_log)
     assert "logs --tail 40 cid-42" in calls
-    assert calls[-1] == "rm --force cid-42"  # cleanup still runs on failure
+    assert calls[-2] == "rm --force cid-42"
+    assert calls[-1].startswith("volume rm --force hud-runtime-sessions-")
 
 
 def test_docker_profile_allows_workspace_namespace_syscalls() -> None:
@@ -1896,10 +1965,11 @@ async def test_docker_runtime_always_prepares_for_workspace_isolation(
         pass
 
     calls = await _docker_calls(docker_log)
-    assert f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}" in calls[0]
-    assert "seccomp=unconfined" not in calls[0]
-    assert "systempaths=unconfined" in calls[0]
-    assert "apparmor=unconfined" in calls[0]
+    run = next(call for call in calls if call.startswith("run "))
+    assert f"seccomp={runtime_module._DOCKER_SECCOMP_PROFILE}" in run
+    assert "seccomp=unconfined" not in run
+    assert "systempaths=unconfined" in run
+    assert "apparmor=unconfined" in run
 
 
 def test_compose_network_owner_follows_service_chains_and_stages_its_port(
@@ -2029,4 +2099,4 @@ async def test_docker_rejects_insufficient_free_disk(
         async with DockerRuntime(runtime_config=config)(_row()):
             pass
 
-    assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
+    assert (await _docker_calls(docker_log))[-2] == "rm --force cid-42"
