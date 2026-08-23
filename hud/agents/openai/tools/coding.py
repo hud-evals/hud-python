@@ -16,6 +16,14 @@ from .base import OpenAIToolSpec
 OPENAI_SHELL_SPEC = OpenAIToolSpec(
     api_type="shell",
     api_name="shell",
+    supported_models=(
+        "gpt-5.4",
+        "gpt-5.4-*",
+        "gpt-5.5",
+        "gpt-5.5-*",
+        "gpt-5.6",
+        "gpt-5.6-*",
+    ),
 )
 
 
@@ -23,9 +31,8 @@ class OpenAIShellTool(SSHTool):
     name = "shell"
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec:
-        del model
-        return OPENAI_SHELL_SPEC
+    def default_spec(cls, model: str) -> OpenAIToolSpec | None:
+        return OPENAI_SHELL_SPEC if OPENAI_SHELL_SPEC.supports_model(model) else None
 
     def to_params(self) -> Any:
         # openai.types.responses.FunctionShellToolParam, as a plain dict (TypedDicts

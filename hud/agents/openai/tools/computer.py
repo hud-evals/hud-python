@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
     api_type="computer",
     api_name="computer",
+    supported_models=(
+        "gpt-5.4",
+        "gpt-5.4-*",
+        "gpt-5.5",
+        "gpt-5.5-*",
+        "gpt-5.6",
+        "gpt-5.6-*",
+    ),
 )
 
 
@@ -81,9 +89,8 @@ class OpenAIComputerTool(RFBTool):
     name = "computer"
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec:
-        del model
-        return OPENAI_COMPUTER_SPEC
+    def default_spec(cls, model: str) -> OpenAIToolSpec | None:
+        return OPENAI_COMPUTER_SPEC if OPENAI_COMPUTER_SPEC.supports_model(model) else None
 
     def to_params(self) -> Any:
         return {"type": "computer"}

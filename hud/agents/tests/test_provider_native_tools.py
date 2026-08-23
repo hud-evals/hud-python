@@ -17,14 +17,15 @@ import pytest
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
-from hud.agents.openai.tools.coding import OpenAIShellTool
+from hud.agents.openai.agent import OpenAIAgent
+from hud.agents.openai.tools.coding import OPENAI_SHELL_SPEC, OpenAIShellTool
 from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
 from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
 from hud.agents.tools.ssh import bound_shell_output
-from hud.agents.types import OpenAIChatConfig
-from hud.capabilities import Capability, SSHClient
+from hud.agents.types import OpenAIChatConfig, OpenAIConfig
+from hud.capabilities import Capability, RFBClient, SSHClient
 from hud.types import MCPToolCall
 
 
@@ -172,7 +173,41 @@ class _OpenAIChatAgentForTest(OpenAIChatAgent):
         return await self._build_tools({"ssh": ssh})
 
 
+class _OpenAIAgentForTest(OpenAIAgent):
+    async def build_native_tools_for_test(
+        self,
+        ssh: SSHClient,
+        rfb: RFBClient,
+    ) -> tuple[dict[str, Any], list[Any]]:
+        return await self._build_tools({"shell": ssh, "computer": rfb})
+
+
 # ─── OpenAI shell ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_types"),
+    [
+        ("gpt-4o-mini", []),
+        ("gpt-5.4-mini", ["shell", "computer"]),
+        ("gpt-5.5", ["shell", "computer"]),
+        ("gpt-5.6", ["shell", "computer"]),
+        ("gpt-5.6-2026-08-07", ["shell", "computer"]),
+    ],
+)
+async def test_openai_native_tools_are_registered_only_for_supported_models(
+    model: str,
+    expected_types: list[str],
+) -> None:
+    agent = _OpenAIAgentForTest(OpenAIConfig(model=model, model_client=cast("Any", object())))
+
+    tools, params = await agent.build_native_tools_for_test(
+        _ssh(),
+        object.__new__(RFBClient),
+    )
+
+    assert list(tools) == expected_types
+    assert [param["type"] for param in params] == expected_types
 
 
 @pytest.mark.parametrize(
@@ -192,7 +227,7 @@ async def test_openai_shell_applies_requested_timeout_to_entire_command(
     timeout_ms: int,
     expected: str,
 ) -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
 
     result = await tool.execute({"commands": [command], "timeout_ms": timeout_ms})
 
@@ -204,7 +239,7 @@ async def test_openai_shell_applies_requested_timeout_to_entire_command(
 
 
 async def test_openai_shell_runs_each_command_without_timeout() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
 
     await tool.execute({"commands": ["echo a", "echo b"]})
 
@@ -214,7 +249,7 @@ async def test_openai_shell_runs_each_command_without_timeout() -> None:
 async def test_openai_shell_has_no_hidden_timeout_across_command_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
     calls: list[dict[str, Any]] = []
 
     async def run(*args: object, **kwargs: Any) -> _Completed:
@@ -239,7 +274,7 @@ async def test_openai_shell_has_no_hidden_timeout_across_command_batch(
 async def test_openai_shell_applies_limit_independently_to_each_command() -> None:
     limit = 80
     tool = OpenAIShellTool(
-        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        spec=OPENAI_SHELL_SPEC,
         client=_ssh(stdout="stdout-start-" + "a" * 100, stderr="b" * 100 + "-stderr-end"),
     )
 
@@ -274,7 +309,7 @@ def test_shared_output_bound_handles_limits_smaller_than_marker(
 async def test_openai_shell_rejects_invalid_output_limits_without_running(
     max_output_length: Any,
 ) -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
 
     result = await tool.execute(
         {"commands": ["echo should-not-run"], "max_output_length": max_output_length}
@@ -289,7 +324,7 @@ async def test_openai_shell_rejects_invalid_output_limits_without_running(
 
 @pytest.mark.parametrize("max_output_length", [None, 20 * 1024 * 1024])
 async def test_openai_shell_uses_safe_effective_limit(max_output_length: int | None) -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
     arguments: dict[str, Any] = {"commands": ["echo ok"]}
     if max_output_length is not None:
         arguments["max_output_length"] = max_output_length
@@ -301,7 +336,7 @@ async def test_openai_shell_uses_safe_effective_limit(max_output_length: int | N
 
 
 async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
 
     result = await tool.execute({"commands": 123})
 
@@ -310,7 +345,7 @@ async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
 
 
 def test_openai_shell_to_params_is_shell_type() -> None:
-    tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
+    tool = OpenAIShellTool(spec=OPENAI_SHELL_SPEC, client=_ssh())
     assert tool.to_params()["type"] == "shell"
 
 
