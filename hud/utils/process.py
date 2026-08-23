@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import contextlib
+import io
 import os
 import signal
 from dataclasses import dataclass
@@ -18,6 +20,11 @@ OUTPUT_DRAIN_TIMEOUT = 1.0
 
 
 def write_output(output: TextIO, chunk: str | bytes) -> None:
+    if isinstance(chunk, bytes) and isinstance(output, io.TextIOWrapper):
+        output.flush()
+        output.buffer.write(chunk)
+        output.buffer.flush()
+        return
     output.write(chunk.decode("utf-8", "replace") if isinstance(chunk, bytes) else chunk)
     output.flush()
 
@@ -26,12 +33,28 @@ async def stream_output(
     source: AsyncIterable[str] | AsyncIterable[bytes],
     output: TextIO,
 ) -> None:
+    decoder = (
+        None
+        if isinstance(output, io.TextIOWrapper)
+        else codecs.getincrementaldecoder("utf-8")(errors="replace")
+    )
+
+    def relay(chunk: str | bytes) -> None:
+        if isinstance(chunk, bytes) and decoder is not None:
+            text = decoder.decode(chunk)
+            if text:
+                write_output(output, text)
+            return
+        write_output(output, chunk)
+
     if isinstance(source, asyncio.StreamReader):
         while chunk := await source.read(65536):
-            write_output(output, chunk)
-        return
-    async for chunk in source:
-        write_output(output, chunk)
+            relay(chunk)
+    else:
+        async for chunk in source:
+            relay(chunk)
+    if decoder is not None and (text := decoder.decode(b"", final=True)):
+        write_output(output, text)
 
 
 async def finish_output(*tasks: asyncio.Task[None]) -> None:

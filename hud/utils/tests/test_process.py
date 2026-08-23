@@ -71,6 +71,18 @@ async def test_stream_output_drains_lines_larger_than_the_reader_limit() -> None
     assert output.getvalue() == "x" * 100_000
 
 
+async def test_stream_output_preserves_utf8_split_across_chunks() -> None:
+    async def chunks():
+        yield b"price: \xe2"
+        yield b"\x82\xac10"
+
+    output = StringIO()
+
+    await stream_output(chunks(), output)
+
+    assert output.getvalue() == "price: €10"
+
+
 async def test_a_child_outside_the_group_cannot_hold_completion_open() -> None:
     child = shlex.quote(sys.executable)
     result = await asyncio.wait_for(
